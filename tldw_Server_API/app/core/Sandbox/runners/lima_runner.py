@@ -124,8 +124,8 @@ def _generate_lima_config(
                 "writable": True,
             }
         ],
-        # Network isolation: empty networks list = no network by default (deny_all)
-        # For allowlist, we'd need to configure network access differently
+        # Empty extra networks do not disable Lima's shared/slirp networking;
+        # strict policy admission rejects this backend before real execution.
         "networks": [] if network_policy == "deny_all" else None,
         "provision": [
             {
@@ -210,44 +210,40 @@ class LimaRunner:
         return lima_version()
 
     @classmethod
-    def cancel_run(cls, run_id: str) -> bool:
-        """Stop and delete the Lima VM for a run."""
+    def cancel_run(cls, run_id: str, *, backend_id: str | None = None) -> bool:
+        """Confirm a stopped VM before deleting its owned resources."""
         with cls._active_lock:
-            vm_name = cls._active_vm.get(run_id)
+            vm_name = cls._active_vm.get(run_id) or backend_id
             run_dir = cls._active_run_dir.get(run_id)
-
         if not vm_name:
             return False
-
         try:
-            # Stop the VM
+            stopped = subprocess.run(
+                ["limactl", "stop", vm_name], check=False, timeout=30, capture_output=True,
+            )
+            if stopped.returncode != 0:
+                return False
+            # Owned VM identifier passed as argv; no shell interpolation.
+            state = subprocess.run(  # nosec B603, B607
+                ["limactl", "list", vm_name, "--json"], check=True,
+                timeout=5, capture_output=True, text=True,
+            )
+            if str(json.loads(state.stdout).get("status", "")).lower() != "stopped":
+                return False
+            deleted = subprocess.run(
+                ["limactl", "delete", vm_name, "-f"], check=False, timeout=30, capture_output=True,
+            )
+            if deleted.returncode != 0:
+                return False
+        except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
+            return False
+        if run_dir:
             with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.run(
-                    ["limactl", "stop", vm_name],
-                    check=False,
-                    timeout=30,
-                    capture_output=True,
-                )
-
-            # Delete the VM
-            with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.run(
-                    ["limactl", "delete", vm_name, "-f"],
-                    check=False,
-                    timeout=30,
-                    capture_output=True,
-                )
-
-            # Cleanup run directory
-            if run_dir:
-                with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
-                    shutil.rmtree(run_dir, ignore_errors=True)
-
-            return True
-        finally:
-            with cls._active_lock:
-                cls._active_vm.pop(run_id, None)
-                cls._active_run_dir.pop(run_id, None)
+                shutil.rmtree(run_dir, ignore_errors=True)
+        with cls._active_lock:
+            cls._active_vm.pop(run_id, None)
+            cls._active_run_dir.pop(run_id, None)
+        return True
 
     def start_run(
         self, run_id: str, spec: RunSpec, session_workspace: str | None = None
@@ -421,6 +417,8 @@ class LimaRunner:
         artifacts_map: dict[str, bytes] = {}
         artifact_counters: dict[str, int] = {}
         message = "Lima execution"
+        stop_flag = {"stop": False}
+        log_thread: threading.Thread | None = None
 
         try:
             # Create the VM
@@ -458,7 +456,6 @@ class LimaRunner:
             timeout_sec = int(spec.timeout_sec or 300)
 
             # Start log streaming thread
-            stop_flag = {"stop": False}
             log_path = os.path.join(workspace, "run.log")
             log_thread = threading.Thread(
                 target=self._tail_log,
@@ -482,16 +479,6 @@ class LimaRunner:
             stop_flag["stop"] = True
             with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
                 log_thread.join(timeout=2)
-
-            # Publish remaining logs
-            if os.path.exists(log_path):
-                try:
-                    with open(log_path, "rb") as f:
-                        log_data = f.read()
-                    if log_data:
-                        hub.publish_stdout(run_id, log_data, max_log_bytes)
-                except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
-                    pass
 
             # Collect artifacts
             artifact_result = collect_runner_artifacts(
@@ -527,6 +514,10 @@ class LimaRunner:
             phase = RunPhase.failed
             message = f"Lima execution error: {str(e)}"
         finally:
+            stop_flag["stop"] = True
+            if log_thread is not None:
+                with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
+                    log_thread.join(timeout=2)
             # Cleanup: stop and delete VM
             with contextlib.suppress(_LIMA_RUNNER_NONCRITICAL_EXCEPTIONS):
                 subprocess.run(
@@ -611,6 +602,7 @@ class LimaRunner:
         log_path = "/workspace/run.log"
         status_path = "/workspace/.sandbox_status.json"
         user_cmd = " ".join(shlex.quote(x) for x in command)
+        stored_log_bytes = LimaRunner._max_log_bytes() + 1
 
         script = f"""#!/bin/sh
 set -e
@@ -619,10 +611,17 @@ if [ -f /workspace/.env ]; then
 fi
 start_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 start_ms=$(date +%s%3N 2>/dev/null || date +%s)
-# Run command, capture stdout/stderr
+# Retain one extra byte so the host can report truncation; drain the rest.
+log_dir=$(mktemp -d)
+log_pipe="$log_dir/output"
+mkfifo "$log_pipe"
+{{ head -c {stored_log_bytes}; cat >/dev/null; }} < "$log_pipe" > {log_path} &
+log_pid=$!
 set +e
-/bin/sh -lc "{user_cmd}" > {log_path} 2>&1
+/bin/sh -lc {shlex.quote(user_cmd)} > "$log_pipe" 2>&1
 exit_code=$?
+wait "$log_pid"
+rm -rf "$log_dir"
 set -e
 end_ts=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 end_ms=$(date +%s%3N 2>/dev/null || date +%s)
@@ -672,12 +671,14 @@ exit $exit_code
 
         try:
             with open(log_path, "rb") as fh:
-                while not stop_flag.get("stop"):
-                    line = fh.readline()
-                    if not line:
+                while True:
+                    chunk = fh.read(64 * 1024)
+                    if not chunk:
+                        if stop_flag.get("stop"):
+                            break
                         time.sleep(0.05)
                         continue
-                    hub.publish_stdout(run_id, line, max_log)
+                    hub.publish_stdout(run_id, chunk, max_log)
         except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
             return
 
@@ -685,7 +686,8 @@ exit $exit_code
     def _max_log_bytes() -> int:
         """Return the configured Lima stream log cap in bytes."""
         try:
-            return int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
+            cap = int(os.getenv("SANDBOX_MAX_LOG_BYTES", "10485760"))
+            return cap if cap > 0 else 10 * 1024 * 1024
         except _LIMA_RUNNER_NONCRITICAL_EXCEPTIONS:
             return 10 * 1024 * 1024
 

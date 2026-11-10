@@ -15,14 +15,19 @@ from loguru import logger
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.testing import is_truthy
 
-from ..models import RunPhase, RunSpec, RunStatus
+from ..models import RunPhase, RunSpec, RunStatus, RuntimeType
 from ..network_policy import (
     apply_egress_rules_atomic,
     delete_rules_by_label,
     expand_allowlist_to_targets,
 )
 from ..streams import get_hub
-from .resource_limits import collect_runner_artifacts, log_limit_counters
+from .resource_limits import (
+    collect_runner_artifacts,
+    docker_resource_limits,
+    drain_process_output,
+    log_limit_counters,
+)
 
 _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -183,53 +188,61 @@ class DockerRunner:
 
     @classmethod
     def cancel_run(cls, run_id: str) -> bool:
+        """Confirm termination and container removal, retaining uncertain ownership."""
         with cls._active_lock:
             cid = cls._active_cid.get(run_id)
         with cls._egress_lock:
             net = cls._egress_net.get(run_id)
             label = cls._egress_label.get(run_id, f"tldw-run-{run_id[:12]}")
         if not cid:
-            return False
-        # TERM -> grace -> KILL semantics
-        try:
             try:
-                grace = int(getattr(app_settings, "SANDBOX_CANCEL_GRACE_SECONDS", 3))
+                # Owned deterministic name and argv-only invocation; no shell interpretation.
+                records = json.loads(subprocess.check_output(  # nosec B603 B607
+                    ["docker", "inspect", f"tldw-sbx-{run_id}"], text=True,
+                    stderr=subprocess.DEVNULL, timeout=5,
+                ))
+                record = records[0]
+                if record.get("Config", {}).get("Labels", {}).get("tldw.run_id") != run_id:
+                    return False
+                cid = record["Id"]
+                expected_net = f"tldw_sbx_{run_id[:12]}"
+                if expected_net in record.get("NetworkSettings", {}).get("Networks", {}):
+                    net = expected_net
             except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-                grace = 3
-
-            # Send SIGTERM first
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.run(["docker", "kill", "--signal", "TERM", cid], check=False)
-
-            # Wait up to grace seconds for container to stop
-            deadline = time.time() + max(0, grace)
-            while time.time() < deadline:
+                return False
+        try:
+            grace = max(0, int(getattr(app_settings, "SANDBOX_CANCEL_GRACE_SECONDS", 3)))
+            subprocess.run(["docker", "kill", "--signal", "TERM", cid], check=False, timeout=5)
+            deadline = time.monotonic() + grace
+            while time.monotonic() < deadline:
                 if not cls._is_container_running(cid):
                     break
                 time.sleep(0.1)
-
-            # If still running, send SIGKILL
             if cls._is_container_running(cid):
-                with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                    subprocess.run(["docker", "kill", cid], check=False)
-
-            # Remove container
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.run(["docker", "rm", "-f", cid], check=False)
-        finally:
-            cls._clear_run_tracking(run_id)
-        # Cleanup egress rules and network if present
+                subprocess.run(["docker", "kill", cid], check=False, timeout=5)
+            if cls._is_container_running(cid):
+                return False
+            removed = subprocess.run(["docker", "rm", "-f", cid], check=False, timeout=5)
+            if removed.returncode != 0:
+                return False
+        except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+            logger.debug("Docker cancellation unconfirmed for {}: {}", run_id, exc)
+            return False
+        cls._clear_run_tracking(run_id)
         cls._cleanup_egress_resources(net, label)
-        # Do not publish WS end here; service layer will publish to avoid duplicates
         return True
 
     @staticmethod
     def _is_container_running(cid: str) -> bool:
         try:
-            out = subprocess.check_output(["docker", "inspect", "-f", "{{.State.Running}}", cid], text=True, stderr=subprocess.DEVNULL).strip().lower()
-            return out == "true"
+            out = subprocess.check_output(
+                ["docker", "inspect", "-f", "{{.State.Running}}", cid], text=True,
+                stderr=subprocess.DEVNULL, timeout=5,
+            ).strip().lower()
+            return out != "false"
         except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-            return False
+            # Unreachable daemon or missing inspect response cannot prove termination.
+            return True
 
     def start_run(self, run_id: str, spec: RunSpec, session_workspace: str | None = None) -> RunStatus:
         env_keys = sorted(str(key) for key in (spec.env or {}))
@@ -275,6 +288,13 @@ class DockerRunner:
         if not docker_available():
             raise RuntimeError("Docker is not available on host")
 
+        bind_workspace = self._truthy(
+            os.getenv("SANDBOX_DOCKER_BIND_WORKSPACE")
+            or str(getattr(app_settings, "SANDBOX_DOCKER_BIND_WORKSPACE", ""))
+        )
+        if bind_workspace and session_workspace and os.path.isdir(session_workspace):
+            raise RuntimeError("workspace_bind_quota_unsupported")
+
         # Startup timeout budget
         try:
             startup_budget = int(spec.startup_timeout_sec) if spec.startup_timeout_sec else int(getattr(app_settings, "SANDBOX_DEFAULT_STARTUP_TIMEOUT_SEC", 20))
@@ -283,7 +303,7 @@ class DockerRunner:
         deadline = datetime.utcnow() + timedelta(seconds=max(1, startup_budget))
 
         # Step 1: docker create
-        cmd: list[str] = ["docker", "create"]
+        cmd: list[str] = ["docker", "create", "--name", f"tldw-sbx-{run_id}", "--label", f"tldw.run_id={run_id}"]
         # Keep STDIN open for interactive runs
         try:
             interactive = bool(getattr(spec, "interactive", None))
@@ -301,13 +321,13 @@ class DockerRunner:
             cmd += ["--network", "none"]
         elif net_policy == "allowlist":
             if enforced and granular:
-                # Create a per-run user network (best-effort) to improve isolation
+                # A dedicated IPv4 bridge is part of the allowlist enforcement contract.
                 try:
                     egress_net_name = f"tldw_sbx_{run_id[:12]}"
-                    subprocess.run(["docker", "network", "create", egress_net_name], check=False)
+                    subprocess.run(["docker", "network", "create", "--ipv6=false", egress_net_name], check=True, timeout=max(1, int((deadline - datetime.utcnow()).total_seconds())))
                     cmd += ["--network", egress_net_name]
                 except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
-                    logger.debug(f"egress allowlist: network create failed, falling back to default bridge: {e}")
+                    raise RuntimeError("egress allowlist requires a dedicated IPv4 network") from e
             elif enforced and not granular:
                 logger.info("Sandbox Docker egress allowlist (coarse): applying network=none")
                 cmd += ["--network", "none"]
@@ -317,10 +337,7 @@ class DockerRunner:
         elif net_policy == "allow_all":
             pass
         # Resources
-        try:
-            pids_limit = int(getattr(app_settings, "SANDBOX_PIDS_LIMIT", 256))
-        except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-            pids_limit = 256
+        pids_limit, ws_cap, ul_nofile = docker_resource_limits(spec)
         cmd += ["--pids-limit", str(pids_limit)]
         if spec.cpu:
             cmd += ["--cpus", str(spec.cpu)]
@@ -362,10 +379,6 @@ class DockerRunner:
 
         # Ulimits (soft=hard)
         try:
-            ul_nofile = int(getattr(app_settings, "SANDBOX_ULIMIT_NOFILE", 1024))
-        except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-            ul_nofile = 1024
-        try:
             ul_nproc = int(getattr(app_settings, "SANDBOX_ULIMIT_NPROC", 512))
         except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
             ul_nproc = 512
@@ -402,10 +415,7 @@ class DockerRunner:
             uid = 0
             gid = 0
 
-        bind_workspace = self._truthy(
-            os.getenv("SANDBOX_DOCKER_BIND_WORKSPACE")
-            or str(getattr(app_settings, "SANDBOX_DOCKER_BIND_WORKSPACE", ""))
-        )
+
 
         staged_input_tmpdir: tempfile.TemporaryDirectory[str] | None = None
         staged_input_dir: str | None = None
@@ -528,7 +538,6 @@ class DockerRunner:
                 _write_inline_files(staged_input_dir)
 
         # tmpfs workdir and tmp (skip workspace tmpfs when bind-mounting)
-        ws_cap = int(getattr(app_settings, "SANDBOX_WORKSPACE_CAP_MB", 256))
         if container_workspace_is_bind and session_workspace_dir:
             cmd += ["--mount", f"type=bind,src={session_workspace_dir},dst=/workspace"]
         else:
@@ -599,14 +608,16 @@ class DockerRunner:
         shell_str = f"mkdir -p /workspace && {staged_input_prefix}{egress_gate_prefix}exec {user_cmd}"
         cmd += ["sh", "-lc", shell_str]
 
-        logger.info(f"Starting docker run: {' '.join(self._redact_docker_command(cmd))}")
-        started = datetime.utcnow()
-        hub = get_hub()
-        max_log = None
         try:
             max_log = int(getattr(app_settings, "SANDBOX_MAX_LOG_BYTES", 10 * 1024 * 1024))
         except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
             max_log = 10 * 1024 * 1024
+        if max_log <= 0:
+            max_log = 10 * 1024 * 1024
+        cmd[2:2] = ["--log-driver", "local", "--log-opt", f"max-size={max_log}", "--log-opt", "max-file=1"]
+        logger.info(f"Starting docker run: {' '.join(self._redact_docker_command(cmd))}")
+        started = datetime.utcnow()
+        hub = get_hub()
 
         try:
             remaining = max(1, int((deadline - datetime.utcnow()).total_seconds()))
@@ -659,15 +670,36 @@ class DockerRunner:
         except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
             pass
 
+        def _remove_container(*, cleanup_rules: bool = True) -> bool:
+            """Release owned resources only after Docker confirms forced removal."""
+            try:
+                # The owned container ID is a separate argv argument; no shell is used.
+                subprocess.check_call(["docker", "rm", "-f", cid], timeout=5)  # nosec B603 B607
+            except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+                logger.warning("Docker removal unconfirmed for {}: {}", run_id, exc)
+                return False
+            self._cleanup_tracked_egress_resources(
+                run_id, cleanup_rules=cleanup_rules and net_policy == "allowlist" and enforced and granular,
+            )
+            self._clear_run_tracking(run_id)
+            _cleanup_staged_inputs()
+            return True
+
+        def _unconfirmed_backend_status(usage: dict | None = None) -> RunStatus:
+            """Keep uncertain execution active for a later cancellation attempt."""
+            return RunStatus(
+                id="", runtime=RuntimeType.docker, phase=RunPhase.running,
+                started_at=started, message="backend_termination_unconfirmed",
+                backend_id=cid, resource_usage=usage,
+            )
+
         # Step 2: start container and stream logs. Input files are mounted from a
         # read-only staging dir and copied into the /workspace tmpfs by shell_str.
         try:
             remaining = max(1, int((deadline - datetime.utcnow()).total_seconds()))
             subprocess.check_call(["docker", "start", cid], timeout=remaining)
         except subprocess.TimeoutExpired:
-            _cleanup_staged_inputs()
             finished = datetime.utcnow()
-            hub.publish_event(run_id, "end", {"exit_code": None, "reason": "startup_timeout"})
             # Even if start timed out, try to read any cgroup CPU used (should be minimal)
             try:
                 cpu_sec = self._read_cgroup_cpu_time_sec_by_cid(cid)
@@ -680,11 +712,9 @@ class DockerRunner:
                 "log_bytes": int(get_hub().get_log_bytes(run_id)),
                 "artifact_bytes": 0,
             }
-            # Remove after collecting stats
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
-            self._clear_run_tracking(run_id)
+            if not _remove_container(cleanup_rules=False):
+                return _unconfirmed_backend_status(usage)
+            hub.publish_event(run_id, "end", {"exit_code": None, "reason": "startup_timeout"})
             return RunStatus(
                 id="",
                 phase=RunPhase.timed_out,
@@ -694,20 +724,14 @@ class DockerRunner:
                 message="startup_timeout",
                 resource_usage=usage,
             )
-        except subprocess.CalledProcessError as e:
-            _cleanup_staged_inputs()
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=False)
-            self._clear_run_tracking(run_id)
+        except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
+            if not _remove_container(cleanup_rules=False):
+                return _unconfirmed_backend_status()
             raise RuntimeError(f"docker start failed: {e}") from e
 
-        def _abort_egress_setup(message: str, exc: BaseException | None = None) -> None:
-            _cleanup_staged_inputs()
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id, cleanup_rules=True)
-            self._clear_run_tracking(run_id)
+        def _abort_egress_setup(message: str, exc: BaseException | None = None) -> RunStatus:
+            if not _remove_container():
+                return _unconfirmed_backend_status()
             if exc is not None:
                 raise RuntimeError(message) from exc
             raise RuntimeError(message)
@@ -718,19 +742,16 @@ class DockerRunner:
             try:
                 info = subprocess.check_output(["docker", "inspect", cid, "--format", "{{json .NetworkSettings.Networks}}"], text=True, timeout=3)
                 networks = json.loads(info or "{}")
-                if egress_net_name and egress_net_name in networks:
-                    container_ip = (networks.get(egress_net_name) or {}).get("IPAddress")
-                if not container_ip:
-                    # fallback: any network IP
-                    for v in (networks or {}).values():
-                        if v and v.get("IPAddress"):
-                            container_ip = v.get("IPAddress")
-                            break
+                if any(v.get("GlobalIPv6Address") for v in networks.values() if v):
+                    raise RuntimeError("IPv6 allowlist enforcement is unsupported")
+                if len(networks) != 1 or egress_net_name not in networks:
+                    raise RuntimeError("allowlist requires exactly the dedicated network")
+                container_ip = (networks.get(egress_net_name) or {}).get("IPAddress")
             except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"egress allowlist: docker inspect for IP failed: {e}")
-                _abort_egress_setup(f"egress allowlist setup failed: docker inspect failed: {e}", e)
+                return _abort_egress_setup(f"egress allowlist setup failed: docker inspect failed: {e}", e)
             if not container_ip:
-                _abort_egress_setup("egress allowlist setup failed: no container IP found")
+                return _abort_egress_setup("egress allowlist setup failed: no container IP found")
             # Resolve allowlist with wildcard/suffix support and apply atomically
             try:
                 raw = os.getenv("SANDBOX_EGRESS_ALLOWLIST") or getattr(app_settings, "SANDBOX_EGRESS_ALLOWLIST", "")
@@ -739,11 +760,11 @@ class DockerRunner:
             allow_targets: list[str] = expand_allowlist_to_targets(raw)
             try:
                 rules = apply_egress_rules_atomic(container_ip, allow_targets, egress_label)
-                if not rules:
-                    _abort_egress_setup("egress allowlist setup failed: no rules were installed")
             except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"egress allowlist: iptables apply failed: {e}")
-                _abort_egress_setup(f"egress allowlist setup failed: {e}", e)
+                return _abort_egress_setup(f"egress allowlist setup failed: {e}", e)
+            if not rules:
+                return _abort_egress_setup("egress allowlist setup failed: no rules were installed")
             try:
                 # argv-only Docker exec; cid is from docker create, command is constant.
                 subprocess.check_call(  # nosec B603 B607
@@ -752,7 +773,7 @@ class DockerRunner:
                 )
             except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"egress allowlist: readiness gate release failed: {e}")
-                _abort_egress_setup(f"egress allowlist setup failed: readiness gate release failed: {e}", e)
+                return _abort_egress_setup(f"egress allowlist setup failed: readiness gate release failed: {e}", e)
 
         # Publish start event
         with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
@@ -774,22 +795,15 @@ class DockerRunner:
         # Stream logs via docker logs -f
         log_bytes_local = 0
         def _pump_logs():
+            nonlocal log_bytes_local
             try:
                 p = subprocess.Popen(["docker", "logs", "-f", cid], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                while True:
-                    if p.stdout is not None:
-                        data = p.stdout.readline()
-                        if data:
-                            hub.publish_stdout(run_id, data, max_log)
-                            nonlocal log_bytes_local
-                            log_bytes_local += len(data)
-                    if p.stderr is not None:
-                        data2 = p.stderr.readline()
-                        if data2:
-                            hub.publish_stderr(run_id, data2, max_log)
-                            log_bytes_local += len(data2)
-                    if p.poll() is not None and not (p.stdout and p.stdout.peek() or p.stderr and p.stderr.peek()):
-                        break
+                log_bytes_local = drain_process_output(
+                    p,
+                    lambda chunk: hub.publish_stdout(run_id, chunk, max_log),
+                    lambda chunk: hub.publish_stderr(run_id, chunk, max_log),
+                )
+                p.wait(timeout=5)
             except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as _:
                 return
 
@@ -869,9 +883,9 @@ class DockerRunner:
         try:
             waited = subprocess.run(["docker", "wait", cid], capture_output=True, text=True, timeout=timeout_sec)
             try:
-                exit_code = int(waited.stdout.strip()) if waited.stdout.strip() else 1
+                exit_code = int(waited.stdout.strip()) if waited.returncode == 0 and waited.stdout.strip() else 1
             except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS:
-                exit_code = waited.returncode if waited.returncode is not None else 1
+                exit_code = 1
         except subprocess.TimeoutExpired:
             # Take a last CPU snapshot while the container is still running, before SIGKILL
             prekill_cpu: int | None = None
@@ -888,7 +902,6 @@ class DockerRunner:
                 subprocess.check_call(["docker", "kill", cid])
             exit_code = None
             finished = datetime.utcnow()
-            hub.publish_event(run_id, "end", {"exit_code": exit_code, "reason": "execution_timeout"})
             # CPU time: prefer cgroup delta if baseline captured; use pre-kill snapshot first
             final_cpu: int | None = prekill_cpu
             if final_cpu is None:
@@ -911,11 +924,9 @@ class DockerRunner:
                 "artifact_bytes": 0,
             }
             usage.update(log_limit_counters(hub, run_id, int(max_log or 10 * 1024 * 1024)))
-            with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-                subprocess.check_call(["docker", "rm", "-f", cid])
-            self._cleanup_tracked_egress_resources(run_id)
-            self._clear_run_tracking(run_id)
-            _cleanup_staged_inputs()
+            if not _remove_container():
+                return _unconfirmed_backend_status(usage)
+            hub.publish_event(run_id, "end", {"exit_code": exit_code, "reason": "execution_timeout"})
             return RunStatus(
                 id="",
                 phase=RunPhase.timed_out,
@@ -925,6 +936,10 @@ class DockerRunner:
                 message="execution_timeout",
                 resource_usage=usage,
             )
+        except _DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
+            if not _remove_container():
+                return _unconfirmed_backend_status()
+            raise RuntimeError(f"docker wait failed: {exc}") from exc
 
         # Join logs thread
         with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
@@ -967,7 +982,6 @@ class DockerRunner:
 
         phase = RunPhase.completed if exit_code == 0 else RunPhase.failed
         msg = "Docker execution finished" if exit_code == 0 else f"Docker execution failed (exit={exit_code})"
-        hub.publish_event(run_id, "end", {"exit_code": exit_code})
         # Compute resource usage (best-effort) before removing container
         try:
             total_log = int(get_hub().get_log_bytes(run_id))
@@ -1004,14 +1018,9 @@ class DockerRunner:
         }
         usage.update(log_limit_counters(hub, run_id, int(max_log or 10 * 1024 * 1024)))
         usage.update(artifact_counters)
-        # Remove container after collecting stats
-        with contextlib.suppress(_DOCKER_RUNNER_NONCRITICAL_EXCEPTIONS):
-            subprocess.check_call(["docker", "rm", "-f", cid])
-        # Cleanup per-run network and iptables rules
-        if net_policy == "allowlist" and enforced and granular:
-            self._cleanup_tracked_egress_resources(run_id)
-        self._clear_run_tracking(run_id)
-        _cleanup_staged_inputs()
+        if not _remove_container():
+            return _unconfirmed_backend_status(usage)
+        hub.publish_event(run_id, "end", {"exit_code": exit_code})
         return RunStatus(
             id="",
             phase=phase,

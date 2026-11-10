@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping, get_args
+from typing import Any, Literal, get_args
 
 from loguru import logger
 
@@ -184,7 +185,7 @@ RUNTIME_ISOLATION_METADATA: Mapping[RuntimeType, RuntimeIsolationMetadata] = {
     RuntimeType.docker: RuntimeIsolationMetadata(
         boundary_class="container",
         vm_grade_isolation=False,
-        untrusted_eligible=True,
+        untrusted_eligible=False,
     ),
     RuntimeType.firecracker: RuntimeIsolationMetadata(
         boundary_class="vm_grade",
@@ -305,9 +306,9 @@ RUNTIME_NETWORK_POLICY_METADATA: Mapping[
     ),
     RuntimeType.lima: RuntimeNetworkPolicyMetadata(
         deny_all=RuntimeNetworkPolicyModeMetadata(
-            support_state="host_gated",
-            strict_enforcement=True,
-            readiness_source="runtime_preflight",
+            support_state="unsupported",
+            strict_enforcement=False,
+            readiness_source="not_applicable",
         ),
         allowlist=RuntimeNetworkPolicyModeMetadata(
             support_state="unsupported",
@@ -559,6 +560,7 @@ _RUNTIME_REASON_CODE_MAP: Mapping[str, RuntimeReasonCode] = {
     "apple_silicon_required": "unsupported_arch",
     "docker_unavailable": "runtime_unavailable",
     "firecracker_binary_missing": "host_prerequisite_missing",
+    "firecracker_host_containment_not_implemented": "feature_not_implemented",
     "firecracker_unavailable": "runtime_unavailable",
     "git_too_old_or_missing": "host_prerequisite_missing",
     "image_store_root_missing": "image_store_unavailable",
@@ -798,6 +800,15 @@ class RuntimePreflightResult:
         default_factory=lambda: {"deny_all": False, "allowlist": False}
     )
 
+    def __post_init__(self) -> None:
+        """Keep advertised trust support within the runtime isolation boundary."""
+        isolation = runtime_isolation_metadata(self.runtime)
+        if not (isolation.vm_grade_isolation and isolation.untrusted_eligible):
+            self.supported_trust_levels = [
+                level for level in self.supported_trust_levels
+                if str(level).strip().lower() != "untrusted"
+            ]
+
 
 def collect_runtime_preflights(
     *,
@@ -806,7 +817,13 @@ def collect_runtime_preflights(
     """Collect a shared runtime preflight snapshot for policy admission."""
 
     from .runners.docker_runner import docker_available
-    from .runners.firecracker_runner import firecracker_available
+    from .runners.firecracker_runner import (
+        _preflight_errors as firecracker_preflight_errors,
+    )
+    from .runners.firecracker_runner import (
+        firecracker_available,
+        firecracker_real_enabled,
+    )
     from .runners.lima_runner import LimaRunner
     from .runners.seatbelt_runner import SeatbeltRunner
     from .runners.vz_linux_runner import VZLinuxRunner
@@ -817,6 +834,15 @@ def collect_runtime_preflights(
 
     docker_ok = bool(docker_available())
     firecracker_ok = bool(firecracker_available())
+    firecracker_reasons: list[str] = []
+    firecracker_real = firecracker_real_enabled() and not is_truthy(
+        os.getenv("TLDW_SANDBOX_FIRECRACKER_FAKE_EXEC")
+    )
+    if firecracker_real:
+        firecracker_reasons = firecracker_preflight_errors()
+        firecracker_ok = firecracker_ok and not firecracker_reasons
+    if not firecracker_ok and not firecracker_reasons:
+        firecracker_reasons = ["firecracker_unavailable"]
 
     return {
         RuntimeType.docker: RuntimePreflightResult(
@@ -828,7 +854,10 @@ def collect_runtime_preflights(
         RuntimeType.firecracker: RuntimePreflightResult(
             runtime=RuntimeType.firecracker,
             available=firecracker_ok,
-            reasons=[] if firecracker_ok else ["firecracker_unavailable"],
+            reasons=firecracker_reasons,
+            execution_mode=(
+                ("real" if firecracker_real else "fake") if firecracker_ok else "none"
+            ),
             enforcement_ready={"deny_all": firecracker_ok, "allowlist": False},
         ),
         RuntimeType.lima: LimaRunner().preflight(network_policy=requested_policy),

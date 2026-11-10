@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import os
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Sandbox.models import RuntimeType
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
+from tldw_Server_API.app.core.Sandbox.service import SandboxService
 from tldw_Server_API.app.main import app
 
 
@@ -14,6 +16,13 @@ def _client(monkeypatch) -> TestClient:
     # Force Firecracker to appear available while real mode is enabled
     monkeypatch.setenv("SANDBOX_FIRECRACKER_ENABLE_REAL", "1")
     monkeypatch.setenv("TLDW_SANDBOX_FIRECRACKER_AVAILABLE", "1")
+    # Isolate asset validation from the separately tested containment admission gate.
+    monkeypatch.setattr(SandboxService, "_collect_runtime_preflights", lambda self, **_: {
+        RuntimeType.firecracker: RuntimePreflightResult(
+            runtime=RuntimeType.firecracker, available=True,
+            enforcement_ready={"deny_all": True, "allowlist": False},
+        ),
+    })
     # Ensure no kernel/rootfs configured
     monkeypatch.delenv("SANDBOX_FC_KERNEL_PATH", raising=False)
     monkeypatch.delenv("SANDBOX_FC_ROOTFS_PATH", raising=False)

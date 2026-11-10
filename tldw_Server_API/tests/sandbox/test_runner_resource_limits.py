@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,6 +9,67 @@ import pytest
 from tldw_Server_API.app.core.Sandbox.policy import SandboxPolicyConfig
 from tldw_Server_API.app.core.Sandbox.runners import resource_limits as resource_limits_module
 from tldw_Server_API.app.core.Sandbox.runners.resource_limits import collect_runner_artifacts
+
+
+def test_process_logs_drain_both_streams_in_bounded_chunks() -> None:
+    """A silent stdout cannot block a large newline-free stderr pipe."""
+    count = 3 * 1024 * 1024
+    process = subprocess.Popen(
+        [sys.executable, "-c", f"import os; os.write(2, b'e' * {count}); os.write(1, b'o' * {count})"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    sizes: dict[str, list[int]] = {"stdout": [], "stderr": []}
+    try:
+        total = resource_limits_module.drain_process_output(
+            process,
+            lambda data: sizes["stdout"].append(len(data)),
+            lambda data: sizes["stderr"].append(len(data)),
+        )
+        assert process.wait(timeout=5) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+
+    assert total == 2 * count
+    assert sum(sizes["stdout"]) == count
+    assert sum(sizes["stderr"]) == count
+    assert max(sizes["stdout"] + sizes["stderr"]) <= 64 * 1024
+
+
+def test_process_logs_publish_short_output_before_child_exit() -> None:
+    """An interactive child must receive its log-driven reply before EOF."""
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import os, select, sys; os.write(1, b'ready'); "
+            "sys.exit(0 if select.select([0], [], [], 2)[0] else 2)",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    def reply(data: bytes) -> None:
+        assert data == b"ready"
+        assert process.stdin is not None
+        try:
+            process.stdin.write(b"x")
+            process.stdin.flush()
+        except BrokenPipeError:
+            pass
+
+    try:
+        resource_limits_module.drain_process_output(process, reply, lambda data: None)
+        assert process.wait(timeout=5) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+        if process.stdin is not None:
+            process.stdin.close()
 
 
 def test_collect_runner_artifacts_excludes_internal_files_before_quota(

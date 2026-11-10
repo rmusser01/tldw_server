@@ -67,7 +67,8 @@ def test_feature_discovery_reports_structured_isolation_metadata(
 
     assert discovery["docker"]["boundary_class"] == "container"
     assert discovery["docker"]["vm_grade_isolation"] is False
-    assert discovery["docker"]["untrusted_eligible"] is True
+    assert discovery["docker"]["untrusted_eligible"] is False
+    assert "untrusted" not in discovery["docker"]["supported_trust_levels"]
 
     for vm_runtime in ("firecracker", "lima", "vz_linux"):
         assert discovery[vm_runtime]["boundary_class"] == "vm_grade"
@@ -401,7 +402,7 @@ def test_runtime_diagnostics_summary_projects_feature_discovery_rows(
                 "normalized_reasons": [],
                 "boundary_class": "container",
                 "vm_grade_isolation": False,
-                "untrusted_eligible": True,
+                "untrusted_eligible": False,
                 "isolation_warnings": [],
                 "strict_deny_all_supported": True,
                 "strict_allowlist_supported": False,

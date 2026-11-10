@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-import contextlib
+import hashlib
 import ipaddress
+import re
+import shlex
 import socket
 import subprocess
+import tempfile
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Callable
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Infrastructure.distributed_lock import FileLock
 from tldw_Server_API.app.core.testing import is_truthy
 
 _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS = (
@@ -22,6 +27,7 @@ _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS = (
     subprocess.SubprocessError,
 )
 _IPTABLES_CLEANUP_TIMEOUT_SEC = 5
+_EGRESS_LOCK_PATH = Path(tempfile.gettempdir()) / "tldw-sandbox-netfilter.lock"
 
 
 def _truthy(v: str | None) -> bool:
@@ -204,148 +210,175 @@ def refresh_egress_rules(
     resolver: Callable[[str], list[str]] = default_resolver,
     wildcard_subdomains: Sequence[str] | None = ("", "www", "api"),
 ) -> list[str]:
-    """Revoke existing rules by label and apply pinned rules for the current allowlist.
+    """Atomically replace pinned destinations without first removing enforcement.
 
-    Performs a best-effort deletion via delete_rules_by_label(), then applies
-    new rules computed from the current DNS resolution of hostnames.
+    If atomic replacement is unavailable, an existing policy remains installed
+    and the iterative installer fails rather than opening an enforcement gap.
     """
-    with contextlib.suppress(_SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS):
-        delete_rules_by_label(label)
     targets = expand_allowlist_to_targets(raw_allowlist, resolver=resolver, wildcard_subdomains=wildcard_subdomains)
     return apply_egress_rules_atomic(container_ip, targets, label)
 
 
+def _policy_chain(label: str) -> str:
+    """Derive a bounded chain name from a safe ownership label."""
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", label):
+        raise ValueError("invalid iptables policy label")
+    return "TLDW_SBX_" + hashlib.sha256(label.encode()).hexdigest()[:16]
+
+
+def _policy_rule_specs(container_ip: str, targets: Iterable[str], label: str) -> list[list[str]]:
+    """Validate IPv4 inputs and build canonical attachment and policy specs."""
+    chain = _policy_chain(label)
+    source = str(ipaddress.IPv4Address(container_ip)) + "/32"
+    comment = ["-m", "comment", "--comment", label]
+    rules = [
+        [entry, "-s", source, *comment, "-j", chain]
+        for entry in ("FORWARD", "INPUT")
+    ]
+    for target in targets:
+        network = ipaddress.IPv4Network(target, strict=False)
+        destination = ["-d", str(network)] if network.prefixlen else []
+        rules.append([chain, *destination, *comment, "-j", "ACCEPT"])
+    rules.append([chain, *comment, "-j", "DROP"])
+    return rules
+
+
 def _build_restore_blob(container_ip: str, targets: Iterable[str], label: str) -> str:
-    """Build an iptables-restore filter table blob that appends ACCEPT rules for targets
-    and a final DROP for the container IP, labeled for later cleanup.
-    """
-    lines: list[str] = ["*filter"]
-    for tgt in targets:
-        dspec = tgt if "/" in tgt else f"{tgt}/32"
-        lines.append(
-            f"-A DOCKER-USER -s {container_ip} -d {dspec} -j ACCEPT -m comment --comment {label}"
-        )
-    lines.append(
-        f"-A DOCKER-USER -s {container_ip} -j DROP -m comment --comment {label}"
+    """Build an atomic private policy and jumps ahead of existing filter rules."""
+    rules = _policy_rule_specs(container_ip, targets, label)
+    lines = ["*filter", f":{_policy_chain(label)} - [0:0]"]
+    lines.extend(shlex.join(["-A", *rule]) for rule in rules[2:])
+    lines.extend(shlex.join(["-I", rule[0], "1", *rule[1:]]) for rule in rules[:2])
+    return "\n".join([*lines, "COMMIT", ""])
+
+
+def _read_rules() -> list[list[str]]:
+    """Read filter rules with bounded execution and shell-compatible quoting."""
+    output = subprocess.check_output(  # nosec B603, B607
+        ["iptables", "-S"], text=True, timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
     )
-    lines.append("COMMIT\n")
-    return "\n".join(lines)
+    return [shlex.split(line) for line in output.splitlines() if line.strip()]
+
+
+def _verify_policy(rule_specs: list[list[str]], label: str) -> None:
+    """Require head jumps and the complete ordered policy, including final DROP."""
+    installed = [parts[1:] for parts in _read_rules() if parts[0] == "-A"]
+    for rule in rule_specs[:2]:
+        first = next((item for item in installed if item[0] == rule[0]), None)
+        if first != rule:
+            raise RuntimeError(f"iptables egress verification failed: {rule[0]} attachment is not first")
+    chain = _policy_chain(label)
+    if [rule for rule in installed if rule[0] == chain] != rule_specs[2:]:
+        raise RuntimeError("iptables egress verification failed: private policy differs")
 
 
 def apply_egress_rules_atomic(container_ip: str, targets: Sequence[str], label: str) -> list[str]:
-    """Apply iptables rules via iptables-restore --noflush for atomicity.
+    """Install and verify a source-scoped IPv4 destination allowlist.
 
-    Returns a list of rule specs (as in `iptables -S` without the initial action) for deletion fallback.
-    On failure, attempts iterative application with `iptables` commands.
+    Permitted IPs/CIDRs allow every port and protocol, including other domains
+    sharing an address; this is not HTTP host, TLS SNI, or DNS authorization.
+    Hostnames must already be resolved/pinned by expand_allowlist_to_targets.
+    The caller must use an IPv4-only isolated bridge and keep execution gated
+    until this returns. Both forwarded and host-bound packets enter a private
+    chain before existing rules. No unrelated chains are flushed.
+
+    Returns installed rule specs. Iterative fallback constructs the complete
+    policy before attaching it; any error raises without releasing execution.
+    Writers and cleanup share a cross-process host lock. An uncertain refresh
+    retains its deny chain rather than deleting enforcement for a running job.
     """
-    rule_specs: list[str] = []
+    _policy_rule_specs(container_ip, targets, label)
+    chain = _policy_chain(label)
+    with FileLock(_EGRESS_LOCK_PATH, timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC):
+        try:
+            existing_policy = any(parts[:2] in (["-N", chain], ["-A", chain]) for parts in _read_rules())
+        except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
+            raise RuntimeError(f"iptables egress verification failed before installation: {e}") from e
+        return _apply_egress_rules_locked(container_ip, targets, label, existing_policy=existing_policy)
+
+
+def _apply_egress_rules_locked(
+    container_ip: str, targets: Sequence[str], label: str, *, existing_policy: bool,
+) -> list[str]:
+    """Install under the host lock, preserving pre-existing enforcement on error."""
+    rule_specs = _policy_rule_specs(container_ip, targets, label)
+    chain = _policy_chain(label)
+    installed = False
     try:
         blob = _build_restore_blob(container_ip, targets, label)
-        proc = subprocess.run(["iptables-restore", "--noflush"], input=blob.encode("utf-8"), check=False)
-        if proc.returncode == 0:
-            for tgt in targets:
-                dspec = tgt if "/" in tgt else f"{tgt}/32"
-                rule_specs.append(f"DOCKER-USER -s {container_ip} -d {dspec} -j ACCEPT -m comment --comment {label}")
-            rule_specs.append(f"DOCKER-USER -s {container_ip} -j DROP -m comment --comment {label}")
-            return rule_specs
-        else:
-            logger.debug("iptables-restore failed; falling back to iterative iptables invocations")
+        proc = subprocess.run(  # nosec B603, B607
+            ["iptables-restore", "--noflush"], input=blob.encode(), check=False,
+            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+        )
+        installed = proc.returncode == 0
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug(f"iptables-restore invocation failed: {e}")
-    # Fallback path: iterative `iptables` calls. This path must still fail
-    # closed; reporting rules as installed when iptables returned non-zero
-    # leaves allowlist containers with unrestricted egress.
-    failures: list[str] = []
-    for tgt in targets:
-        dspec = tgt if "/" in tgt else f"{tgt}/32"
-        try:
-            proc = subprocess.run([
-                "iptables", "-I", "DOCKER-USER", "1",
-                "-s", container_ip, "-d", dspec, "-j", "ACCEPT",
-                "-m", "comment", "--comment", label,
-            ], check=False)
-            if proc.returncode == 0:
-                rule_specs.append(f"DOCKER-USER -s {container_ip} -d {dspec} -j ACCEPT -m comment --comment {label}")
-            else:
-                failures.append(f"ACCEPT {dspec} returned {proc.returncode}")
-        except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
-            logger.debug("network policy: iptables ACCEPT rule failed for {} -> {}: {}", container_ip, dspec, e)
-            failures.append(f"ACCEPT {dspec} raised {e}")
+        logger.debug("iptables-restore invocation failed: {}", e)
+    created = False
     try:
-        proc = subprocess.run([
-            "iptables", "-A", "DOCKER-USER",
-            "-s", container_ip, "-j", "DROP",
-            "-m", "comment", "--comment", label,
-        ], check=False)
-        if proc.returncode == 0:
-            rule_specs.append(f"DOCKER-USER -s {container_ip} -j DROP -m comment --comment {label}")
-        else:
-            failures.append(f"DROP returned {proc.returncode}")
-    except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug("network policy: iptables DROP rule failed for {}: {}", container_ip, e)
-        failures.append(f"DROP raised {e}")
-    if failures:
+        if not installed:
+            commands = [["iptables", "-N", chain]]
+            commands.extend(["iptables", "-A", *rule] for rule in rule_specs[2:])
+            commands.extend(["iptables", "-I", rule[0], "1", *rule[1:]] for rule in rule_specs[:2])
+            for command in commands:
+                proc = subprocess.run(  # nosec B603
+                    command, check=False, timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+                )
+                if proc.returncode:
+                    raise RuntimeError(f"iptables egress rule application failed: {command[1]} returned {proc.returncode}")
+                created = True
         try:
-            delete_rules_by_label(label)
-        except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as cleanup_exc:
-            logger.debug(
-                "network policy: failed to clean partial egress rules label={} error={}",
-                label,
-                cleanup_exc,
-            )
-        raise RuntimeError(f"iptables egress rule application failed: {'; '.join(failures)}")
-    return rule_specs
+            _verify_policy(rule_specs, label)
+        except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
+            raise RuntimeError(f"iptables egress verification failed: {e}") from e
+    except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
+        if (installed or created) and not existing_policy:
+            _delete_rules_by_label_locked(label)
+        raise RuntimeError(f"iptables egress rule application failed: {e}") from e
+    return [shlex.join(rule) for rule in rule_specs]
 
 
 def delete_rules_by_label(label: str) -> None:
-    """Delete all rules in DOCKER-USER containing the label comment.
+    """Best-effort removal of exact owned jumps and private chain.
 
-    Attempts precise deletion using rule numbers; falls back to translating `iptables -S` specs.
+    Delete by rule spec so concurrent insertions cannot shift a rule number.
+    Keep the deny chain intact if any reference cannot safely be removed.
     """
-    # Try deletion by line numbers (descending)
+    _policy_chain(label)
     try:
-        out = subprocess.check_output(
-            ["iptables", "-L", "DOCKER-USER", "--line-numbers", "-n", "-v"],
-            text=True,
-            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
-        )
-        lines = out.splitlines()
-        # Skip header lines, find those with the comment
-        numbered: list[int] = []
-        for ln in lines:
-            if label in ln:
-                try:
-                    num = int(ln.split()[0])
-                    numbered.append(num)
-                except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS:
-                    continue
-        for num in sorted(numbered, reverse=True):
-            with contextlib.suppress(_SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS):
-                subprocess.run(
-                    ["iptables", "-D", "DOCKER-USER", str(num)],
-                    check=False,
+        with FileLock(_EGRESS_LOCK_PATH, timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC):
+            _delete_rules_by_label_locked(label)
+    except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
+        logger.warning("network policy: cleanup lock unavailable for {}: {}", label, e)
+
+
+def _delete_rules_by_label_locked(label: str) -> None:
+    """Remove owned resources while the caller holds the shared host lock."""
+    chain = _policy_chain(label)
+    try:
+        rules = _read_rules()
+        foreign_reference = False
+        for parts in rules:
+            if not parts or parts[0] != "-A" or parts[1] == chain:
+                continue
+            target = parts[parts.index("-j") + 1] if "-j" in parts else None
+            comment = parts[parts.index("--comment") + 1] if "--comment" in parts else None
+            if target == chain and comment != label:
+                foreign_reference = True
+                continue
+            legacy = parts[1] == "DOCKER-USER" and target in {"ACCEPT", "DROP"}
+            if comment == label and (target == chain or legacy):
+                subprocess.run(  # nosec B603, B607
+                    ["iptables", "-D", *parts[1:]], check=True,
                     timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
                 )
-        return
+        if foreign_reference:
+            logger.warning("network policy: retaining chain {} with an unowned reference", chain)
+            return
+        if any(parts[:2] in (["-N", chain], ["-A", chain]) for parts in rules):
+            for action in ("-F", "-X"):
+                subprocess.run(  # nosec B603, B607
+                    ["iptables", action, chain], check=True,
+                    timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
+                )
     except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug("network policy: delete_rules_by_label line-number path failed for {}: {}", label, e)
-    # Fallback: translate `iptables -S` specs into deletions
-    try:
-        out2 = subprocess.check_output(
-            ["iptables", "-S", "DOCKER-USER"],
-            text=True,
-            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
-        )
-        for line in out2.splitlines():
-            if label in line:
-                parts = line.strip().split()
-                if parts and parts[0] in {"-A", "-I"}:
-                    parts[0] = "-D"
-                    with contextlib.suppress(_SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS):
-                        subprocess.run(
-                            ["iptables"] + parts,
-                            check=False,
-                            timeout=_IPTABLES_CLEANUP_TIMEOUT_SEC,
-                        )
-    except _SANDBOX_NET_POLICY_NONCRITICAL_EXCEPTIONS as e:
-        logger.debug("network policy: delete_rules_by_label -S fallback failed for {}: {}", label, e)
+        logger.warning("network policy: cleanup incomplete for {}: {}", label, e)

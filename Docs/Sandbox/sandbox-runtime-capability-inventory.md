@@ -100,9 +100,9 @@ healthy on the current host.
 
 | Runtime | `boundary_class` | `vm_grade_isolation` | `untrusted_eligible` | Notes |
 | --- | --- | --- | --- | --- |
-| `docker` | `container` | `false` | `true` | Compatibility path; not VM-grade. |
-| `firecracker` | `vm_grade` | `true` | `true` | Linux/KVM host-gated VM runtime. |
-| `lima` | `vm_grade` | `true` | `true` | macOS/Linux VM runtime when host preflight passes. |
+| `docker` | `container` | `false` | `false` | Trusted/standard container path; not VM-grade. |
+| `firecracker` | `vm_grade` | `true` | `true` | VM identity; real execution blocked pending host containment. |
+| `lima` | `vm_grade` | `true` | `true` | VM identity; strict networking is unsupported. |
 | `vz_linux` | `vm_grade` | `true` | `true` | Primary Apple silicon Linux VM path. |
 | `vz_macos` | `vm_grade_scaffold` | `false` | `false` | Runtime identity exists, but real execution is scaffolded. |
 | `seatbelt` | `host_local` | `false` | `false` | Host-local macOS process isolation only. |
@@ -168,7 +168,7 @@ separate persisted state machine.
 | `runtime_unavailable` | A runtime prerequisite was unavailable or missing. |
 | `startup_timeout` | Provisioning/startup timed out before execution completed. |
 | `execution_timeout` | Command execution exceeded the configured timeout. |
-| `canceled_by_user` | A cancellation request moved the run to killed state. |
+| `canceled_by_user` | Queued dispatch was atomically fenced or backend termination was confirmed. |
 | `killed` | The run was killed without a more specific cancellation reason. |
 | `queue_ttl_expired` | The run expired while queued. |
 | `runtime_error` | The runtime failed without a more specific normalized reason. |
@@ -189,11 +189,11 @@ additional persisted run state.
 
 | Runtime | `trusted` | `standard` | `untrusted` | Notes |
 | --- | --- | --- | --- | --- |
-| `docker` | `supported` | `supported` | `supported` | Broad default runtime, but policy must not claim VM-grade isolation where that is required. |
-| `firecracker` | `supported` | `supported` | `supported` | VM-grade path when host prerequisites and real execution are available. |
-| `lima` | `supported` | `supported` | `supported` | VM isolation path with strict host preflight requirements. |
+| `docker` | `supported` | `supported` | `unsupported` | Ordinary containers do not satisfy the VM requirement. |
+| `firecracker` | `supported` | `supported` | `supported` | Trust-eligible VM; real execution blocked pending host containment. |
+| `lima` | `supported` | `supported` | `supported` | Trust-eligible VM; strict networking currently blocks execution. |
 | `vz_linux` | `supported` | `supported` | `supported` | Primary Apple silicon Linux VM path. |
-| `vz_macos` | `scaffold` | `scaffold` | `scaffold` | Trust levels are advertised through preflight, but real execution is not implemented. |
+| `vz_macos` | `scaffold` | `scaffold` | `unsupported` | Real execution and VM eligibility are not implemented. |
 | `seatbelt` | `supported` | `host_gated` | `unsupported` | `standard` requires `TLDW_SANDBOX_SEATBELT_STANDARD_ENABLED=1`; never VM-grade. |
 | `worktree` | `supported` | `supported` | `unsupported` | Host-local VCS isolation only; never VM-grade. |
 
@@ -216,7 +216,7 @@ sets experimental flags.
 | --- | --- | --- | --- |
 | `docker` | `supported` | `host_gated` | Deny-all can use container network isolation. Allowlist is effective only when egress enforcement and granular enforcement are both configured; the `network=none` fallback is treated as deny-all, not allowlist. |
 | `firecracker` | `host_gated` | `scaffold` | Real mode requires a prepared Linux/KVM host. Allowlist remains planned and is not advertised as effective support. |
-| `lima` | `host_gated` | `unsupported` | Deny-all depends on the Lima enforcer preflight. Service discovery intentionally forces allowlist false for execution. |
+| `lima` | `unsupported` | `unsupported` | Default Lima networking remains enabled; no concrete strict policy enforcer exists. |
 | `vz_linux` | `host_gated` | `unsupported` | Real helper path accepts `deny_all` only and attaches no guest network device. |
 | `vz_macos` | `scaffold` | `unsupported` | No real execution yet. |
 | `seatbelt` | `unsupported` | `unsupported` | Deny-all is best effort and must not be reported as strict enforcement. |
@@ -226,7 +226,7 @@ sets experimental flags.
 | --- | --- | --- | --- | --- |
 | `docker` | `true` | `config` | `true` | `config` |
 | `firecracker` | `true` | `runtime_preflight` | `false` | `runtime_preflight` |
-| `lima` | `true` | `runtime_preflight` | `false` | `not_applicable` |
+| `lima` | `false` | `not_applicable` | `false` | `not_applicable` |
 | `vz_linux` | `true` | `runtime_preflight` | `false` | `not_applicable` |
 | `vz_macos` | `false` | `runtime_preflight` | `false` | `not_applicable` |
 | `seatbelt` | `false` | `not_applicable` | `false` | `not_applicable` |

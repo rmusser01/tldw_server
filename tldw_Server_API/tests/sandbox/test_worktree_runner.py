@@ -355,6 +355,16 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
     run_id = "run-worktree-timeout-cleanup"
     destroy_calls: list[tuple[str, str]] = []
     killpg_calls: list[tuple[int, int]] = []
+    group_running = True
+
+    def _killpg(pid: int, sig: int) -> None:
+        nonlocal group_running
+        if sig == 0:
+            if not group_running:
+                raise ProcessLookupError()
+            return
+        killpg_calls.append((pid, sig))
+        group_running = False
 
     def _mkdtemp(prefix: str) -> str:
         if prefix != "tldw_wt_run_":
@@ -418,7 +428,7 @@ def test_start_run_timeout_cleans_worktree_run_dir_and_active_tracking(
     monkeypatch.setattr(
         worktree_module.os,
         "killpg",
-        lambda pid, sig: killpg_calls.append((pid, sig)),
+        _killpg,
         raising=False,
     )
 
@@ -693,12 +703,23 @@ def test_cancel_run_kills_active_process_group_and_removes_run_dir(
         WorktreeRunner._active_run_dir[rid] = str(run_dir)  # type: ignore[attr-defined]
 
     killpg_calls: list[tuple[int, int]] = []
+    group_running = True
+
+    def _killpg(pid: int, sig: int) -> None:
+        nonlocal group_running
+        if sig == 0:
+            if not group_running:
+                raise ProcessLookupError()
+            return
+        killpg_calls.append((pid, sig))
+        group_running = False
+
     has_killpg = hasattr(worktree_module.os, "killpg")
     if has_killpg:
         monkeypatch.setattr(
             worktree_module.os,
             "killpg",
-            lambda pid, sig: killpg_calls.append((pid, sig)),
+            _killpg,
         )
     monkeypatch.setattr(WorktreeRunner, "_cancel_grace_seconds", classmethod(lambda cls: 0))
 

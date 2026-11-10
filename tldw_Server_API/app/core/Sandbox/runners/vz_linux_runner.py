@@ -385,12 +385,17 @@ class VZLinuxRunner(VZBaseRunner):
         }, store
 
     @classmethod
-    def cancel_run(cls, run_id: str) -> bool:
-        vm_id, run_dir = cls._clear_active_run(run_id)
+    def cancel_run(cls, run_id: str, *, backend_id: str | None = None) -> bool:
+        with cls._active_lock:
+            vm_id = cls._active_vm.get(run_id) or backend_id
         if not vm_id:
             return False
-        with contextlib.suppress(_VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS):
-            cls.helper_client_cls().terminate_vm(vm_id)
+        try:
+            if not cls.helper_client_cls().terminate_vm(vm_id):
+                return False
+        except _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS:
+            return False
+        _vm_id, run_dir = cls._clear_active_run(run_id)
         if run_dir:
             with contextlib.suppress(_VZ_NONCRITICAL_EXCEPTIONS):
                 shutil.rmtree(run_dir, ignore_errors=True)
@@ -425,6 +430,7 @@ class VZLinuxRunner(VZBaseRunner):
         template_ref: str | None = None
         session_mode = bool(str(spec.session_id or "").strip())
         should_terminate_vm = True
+        guest_execution_confirmed = False
         max_log_bytes = self._max_log_bytes()
         max_artifact_file_bytes = self._max_artifact_file_bytes()
         max_artifact_total_bytes = self._max_artifact_total_bytes()
@@ -463,10 +469,7 @@ class VZLinuxRunner(VZBaseRunner):
                 and str(session_control.get("vm_id") or "").strip()
             ):
                 candidate_vm_id = str(session_control.get("vm_id") or "").strip()
-                try:
-                    status = helper.get_vm_status(candidate_vm_id)
-                except (MacOSVirtualizationHelperUnavailable, MacOSVirtualizationHelperProtocolError):
-                    raise
+                status = helper.get_vm_status(candidate_vm_id)
                 if status is not None and self._session_status_reusable(
                     status=status,
                     session_control=session_control,
@@ -475,6 +478,9 @@ class VZLinuxRunner(VZBaseRunner):
                     vm_id = candidate_vm_id
                     template_ref = str(session_control.get("template_id") or "").strip() or spec.base_image
                     should_terminate_vm = False
+                    self._register_active_run(run_id, vm_id, workspace if created_workspace else None)
+                    if spec.on_backend_started is not None:
+                        spec.on_backend_started(vm_id)
                 else:
                     self._delete_session_control(spec.session_id)
             if not vm_id:
@@ -533,6 +539,9 @@ class VZLinuxRunner(VZBaseRunner):
                     }
                 )
                 vm_id = vm.vm_id
+                self._register_active_run(run_id, vm_id, workspace if created_workspace else None)
+                if spec.on_backend_started is not None:
+                    spec.on_backend_started(vm_id)
                 guest_agent = classify_vz_linux_guest_agent(vm.details) if vm.details else None
                 if guest_agent and guest_agent.get("compatibility") == "mismatch":
                     should_terminate_vm = True
@@ -554,8 +563,6 @@ class VZLinuxRunner(VZBaseRunner):
                         helper_instance_id=vm.details.get("helper_instance_id") if isinstance(vm.details, dict) else None,
                         helper_started_at=vm.details.get("helper_started_at") if isinstance(vm.details, dict) else None,
                     )
-            self._register_active_run(run_id, vm_id, workspace if created_workspace else None)
-
             reply = helper.exec_guest(
                 vm_id=vm_id,
                 request={
@@ -576,6 +583,7 @@ class VZLinuxRunner(VZBaseRunner):
                 hub.publish_stderr(run_id, stderr_data, max_log_bytes=max_log_bytes)
 
             exit_code = int(reply.exit_code)
+            guest_execution_confirmed = True
             phase = RunPhase.completed if exit_code == 0 else RunPhase.failed
             message = (
                 "vz_linux execution finished"
@@ -591,20 +599,29 @@ class VZLinuxRunner(VZBaseRunner):
         except _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS as exc:
             logger.error("vz_linux execution error for run {}: {}", run_id, exc)
             message = f"vz_linux execution error: {exc}"
+            if not guest_execution_confirmed:
+                should_terminate_vm = True
         finally:
+            terminated = True
             if vm_id and should_terminate_vm:
-                with contextlib.suppress(_VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS):
-                    self.helper_client_cls().terminate_vm(vm_id)
-            _active_vm_id, run_dir = self._clear_active_run(run_id)
-            del _active_vm_id
-            cleanup_dir = run_dir if run_dir else (workspace if created_workspace else None)
-            if cleanup_dir:
-                with contextlib.suppress(_VZ_NONCRITICAL_EXCEPTIONS):
-                    shutil.rmtree(cleanup_dir, ignore_errors=True)
+                try:
+                    terminated = bool(self.helper_client_cls().terminate_vm(vm_id))
+                except _VZ_LINUX_RUNNER_NONCRITICAL_EXCEPTIONS:
+                    terminated = False
+            if terminated:
+                _active_vm_id, run_dir = self._clear_active_run(run_id)
+                cleanup_dir = run_dir if run_dir else (workspace if created_workspace else None)
+                if cleanup_dir:
+                    with contextlib.suppress(_VZ_NONCRITICAL_EXCEPTIONS):
+                        shutil.rmtree(cleanup_dir, ignore_errors=True)
+            else:
+                phase = RunPhase.running
+                message = "backend_termination_unconfirmed"
             finished = datetime.utcnow()
 
-        with contextlib.suppress(_VZ_NONCRITICAL_EXCEPTIONS):
-            hub.publish_event(run_id, "end", {"exit_code": exit_code})
+        if phase != RunPhase.running:
+            with contextlib.suppress(_VZ_NONCRITICAL_EXCEPTIONS):
+                hub.publish_event(run_id, "end", {"exit_code": exit_code})
 
         try:
             total_log_bytes = int(hub.get_log_bytes(run_id))
@@ -629,8 +646,8 @@ class VZLinuxRunner(VZBaseRunner):
             runtime_version=self._version(),
             base_image=spec.base_image,
             started_at=started,
-            finished_at=finished,
-            exit_code=exit_code,
+            finished_at=None if phase == RunPhase.running else finished,
+            exit_code=None if phase == RunPhase.running else exit_code,
             message=message,
             resource_usage=usage,
             artifacts=artifacts_map or None,

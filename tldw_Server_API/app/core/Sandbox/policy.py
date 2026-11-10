@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Mapping
 
 from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.testing import is_truthy
@@ -12,6 +12,7 @@ from .exceptions import SANDBOX_CONFIG_NONCRITICAL_EXCEPTIONS
 from .models import RunSpec, RuntimeType, SessionSpec, TrustLevel
 from .runtime_capabilities import (
     RuntimePreflightResult,
+    runtime_isolation_metadata,
     runtime_network_policy_effective_support,
     runtime_network_policy_metadata,
 )
@@ -47,10 +48,6 @@ TRUST_PROFILES: dict[TrustLevel, dict] = {
         "ulimit_nofile": 256,
     },
 }
-
-_HOST_LOCAL_RUNTIMES: frozenset[RuntimeType] = frozenset(
-    {RuntimeType.seatbelt, RuntimeType.worktree}
-)
 
 
 @dataclass
@@ -201,7 +198,10 @@ class SandboxPolicy:
         *,
         runtime_preflights: Mapping[RuntimeType, RuntimePreflightResult] | None = None,
     ) -> None:
-        if runtime in _HOST_LOCAL_RUNTIMES and trust == TrustLevel.untrusted:
+        isolation = runtime_isolation_metadata(runtime)
+        if trust == TrustLevel.untrusted and not (
+            isolation.vm_grade_isolation and isolation.untrusted_eligible
+        ):
             raise SandboxPolicy.PolicyUnsupported(
                 runtime,
                 requirement="untrusted_requires_vm_runtime",

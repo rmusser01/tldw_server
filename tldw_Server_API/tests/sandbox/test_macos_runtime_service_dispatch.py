@@ -17,7 +17,7 @@ def test_execute_single_runtime_scaffold_marks_policy_failures(monkeypatch) -> N
 
     monkeypatch.setattr(svc, "_admit_run_starting", lambda run_id: admitted)
     monkeypatch.setattr(svc, "_apply_admitted_status", _fake_apply)
-    monkeypatch.setattr(svc, "_run_with_claim_lease", lambda run_id, fn: fn())
+    monkeypatch.setattr(svc, "_run_with_claim_lease", lambda run_id, fn, **kwargs: fn())
     monkeypatch.setattr(svc._orch, "update_run", lambda run_id, state: updates.append((run_id, state)))
 
     def _raise_policy(run_id: str, spec: RunSpec, workspace_path: str | None):

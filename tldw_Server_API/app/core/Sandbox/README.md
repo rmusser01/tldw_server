@@ -23,8 +23,8 @@
 ## Runtime Model
 
 - `docker`: general-purpose default runtime with existing interactive support.
-- `firecracker`: VM-oriented Linux isolation path.
-- `lima`: strict macOS-host VM path with explicit deny-all readiness checks.
+- `firecracker`: VM-oriented Linux scaffold; real execution is blocked until host containment is implemented.
+- `lima`: VM path with strict networking unavailable; empty additional networks do not disable Lima’s default network.
 - `vz_linux`: Apple `Virtualization.framework` Linux guest runtime on prepared Apple silicon macOS hosts, with real helper-backed boot, guest command execution, and session VM reuse when helper/template readiness passes.
 - `vz_macos`: Apple `Virtualization.framework` macOS guest scaffold on Apple silicon macOS hosts.
 - `seatbelt`: host-local process isolation runtime for conservative trusted macOS workflows, compatibility-gated by deprecated `sandbox-exec`.
@@ -33,12 +33,44 @@
 Trust-level rules:
 
 - `untrusted` requires a VM runtime.
-- `seatbelt` is rejected for `untrusted`.
+- `docker`, `seatbelt`, `worktree`, and the `vz_macos` scaffold reject `untrusted`, even if a preflight advertises it.
 - `seatbelt` defaults to `trusted` only; `standard` requires `TLDW_SANDBOX_SEATBELT_STANDARD_ENABLED=1`.
 - `worktree` supports `trusted` and `standard`, not `untrusted`.
-- `vz_linux` and `vz_macos` advertise `trusted`, `standard`, and `untrusted`.
+- `vz_linux` can admit `untrusted` when its effective preflight passes; `vz_macos` is not eligible.
 
 ## Technical Notes
+
+Security correction (TASK-15411): real Firecracker preflight reports
+`firecracker_host_containment_not_implemented`; configuring a binary or wrapper
+does not prove jailer-equivalent containment. Lima strict denial is unsupported:
+[`networks: []` does not disable its default user-mode network](https://lima-vm.io/docs/config/network/user/).
+Both runtimes remain unavailable for real strict execution until their missing
+enforcement is implemented and tested on prepared hosts.
+
+Docker allowlists authorize IPv4 destination addresses, across ports/protocols.
+Resolving a hostname pins addresses; it does not authorize an HTTP Host or TLS
+identity, and other services on a shared address remain reachable. An owned
+chain with a terminal DROP attaches ahead of existing INPUT/FORWARD rules and
+is read back before releasing the workload startup gate. IPv6 and extra
+container networks are rejected. Live firewall changes by another host
+administrator still require operational coordination.
+
+Docker collects stdout/stderr concurrently in bounded chunks and uses bounded
+daemon log rotation. Lima drains guest output to a capped log. Publication
+truncates at the shared output budget; collection continues draining to avoid
+pipe deadlocks. Docker PID, workspace, and descriptor limits use the stricter
+trust/admin profile. Writable host bind mounts are rejected because this runner
+cannot enforce their workspace quota.
+
+Cancellation returns `true` only after queued dispatch is fenced or backend
+termination is confirmed. An unconfirmed request retains its active phase and
+capacity, and sends no terminal WebSocket event. Backend identifiers and host
+ownership survive in the store; Docker can recover a container by its owned
+name/label, and VZ can terminate a persisted VM identifier on the same host.
+Host process cancellation still requires its owning worker; persisted PIDs
+are diagnostic identities, not authorization to signal a potentially reused
+PID. Expired dispatch leases do not release admitted workload capacity.
+Unconfirmed cleanup requires retry or operator reconciliation.
 
 - `SandboxOrchestrator` owns session/run lifecycle, queueing, idempotency, and artifact storage.
 - `SandboxService` is the integration point for policy admission, runtime preflights, execution dispatch, and runtime discovery.

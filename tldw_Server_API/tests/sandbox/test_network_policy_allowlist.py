@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import subprocess
-from typing import List
 
 import pytest
 
 from tldw_Server_API.app.core.Sandbox.network_policy import (
     _build_restore_blob,
+    _policy_chain,
     delete_rules_by_label,
     expand_allowlist_to_targets,
 )
@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.Sandbox.network_policy import (
 def test_expand_allowlist_hostname_and_wildcard_with_fake_resolver():
 
 
-    def fake_resolver(host: str) -> List[str]:
+    def fake_resolver(host: str) -> list[str]:
         mapping = {
             "example.com": ["1.1.1.1", "1.1.1.2"],
             "www.example.com": ["1.1.1.3"],
@@ -39,12 +39,13 @@ def test_build_restore_blob_shapes_rules_with_label():
 
 
     blob = _build_restore_blob("172.18.0.2", ["1.2.3.0/24", "9.9.9.9/32"], label="tldw-run-abc")
-    # Contains DOCKER-USER chain modifications and a final COMMIT
+    # Populate the private chain before attaching it ahead of existing rules.
     assert "*filter" in blob and "COMMIT" in blob
-    # Contains ACCEPT rules for targets and a final DROP for container IP
-    assert "-A DOCKER-USER -s 172.18.0.2 -d 1.2.3.0/24 -j ACCEPT" in blob
-    assert "-A DOCKER-USER -s 172.18.0.2 -d 9.9.9.9/32 -j ACCEPT" in blob
-    assert "-A DOCKER-USER -s 172.18.0.2 -j DROP" in blob
+    chain = _policy_chain("tldw-run-abc")
+    assert f"-A {chain} -d 1.2.3.0/24 -m comment --comment tldw-run-abc -j ACCEPT" in blob
+    assert f"-A {chain} -d 9.9.9.9/32 -m comment --comment tldw-run-abc -j ACCEPT" in blob
+    assert blob.index(f"-A {chain} -m comment --comment tldw-run-abc -j DROP") < blob.index("-I FORWARD 1")
+    assert "-I INPUT 1 -s 172.18.0.2/32" in blob
 
 
 def test_delete_rules_by_label_uses_bounded_iptables_probes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,6 +61,5 @@ def test_delete_rules_by_label_uses_bounded_iptables_probes(monkeypatch: pytest.
     delete_rules_by_label("tldw-run-timeout-test")
 
     assert calls == [
-        (["iptables", "-L", "DOCKER-USER", "--line-numbers", "-n", "-v"], 5),
-        (["iptables", "-S", "DOCKER-USER"], 5),
+        (["iptables", "-S"], 5),
     ]

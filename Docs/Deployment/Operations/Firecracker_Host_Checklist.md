@@ -1,7 +1,11 @@
 # Firecracker Host Checklist (Sandbox Runner)
 
-This checklist is for bringing the Sandbox Firecracker runner to production-ready
-on a Linux host. It reflects the current implementation in:
+Real Firecracker execution is currently blocked by
+`firecracker_host_containment_not_implemented`. The runner does not establish
+jailer-equivalent namespaces, privilege reduction, or host resource controls.
+A configured binary or wrapper is not verified containment evidence. This is a
+preparation checklist for future implementation and prepared-host validation,
+not a way to enable the current real runner. It refers to:
 `tldw_Server_API/app/core/Sandbox/runners/firecracker_runner.py`.
 
 ## Host Prerequisites

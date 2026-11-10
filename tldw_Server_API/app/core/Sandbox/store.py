@@ -7,6 +7,7 @@ import re
 import sqlite3
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -246,6 +247,10 @@ class SandboxStore:
         raise NotImplementedError
 
     # Durable claim fencing helpers for run execution dispatch.
+    def cancel_queued_run(self, run_id: str) -> bool:
+        """Cancel only if execution has not atomically left the queue."""
+        raise NotImplementedError
+
     def try_claim_run(self, run_id: str, *, worker_id: str, lease_seconds: int = 30) -> RunStatus | None:
         raise NotImplementedError
 
@@ -601,19 +606,40 @@ class InMemoryStore(SandboxStore):
 
     def put_run(self, user_id: Any, st: RunStatus) -> None:
         with self._lock:
-            self._runs[st.id] = st
+            self._runs[st.id] = replace(st)
             self._owners[st.id] = self._user_key(user_id)
 
     def get_run(self, run_id: str) -> RunStatus | None:
         with self._lock:
-            return self._runs.get(run_id)
+            status = self._runs.get(run_id)
+            return replace(status) if status is not None else None
 
     def update_run(self, st: RunStatus) -> None:
+        st = replace(st)
         if st.phase in (RunPhase.completed, RunPhase.failed, RunPhase.killed, RunPhase.timed_out):
             st.claim_owner = None
             st.claim_expires_at = None
         with self._lock:
+            current = self._runs.get(st.id)
+            if current is not None:
+                if current.phase == RunPhase.killed and st.phase != RunPhase.killed:
+                    return
+                st.backend_id = st.backend_id or current.backend_id
+                st.backend_owner = st.backend_owner or current.backend_owner
             self._runs[st.id] = st
+
+    def cancel_queued_run(self, run_id: str) -> bool:
+        """Cancel only if execution has not atomically left the queue."""
+        with self._lock:
+            status = self._runs.get(str(run_id))
+            if status is None or status.phase != RunPhase.queued:
+                return False
+            status.phase = RunPhase.killed
+            status.message = "canceled_by_user"
+            status.finished_at = datetime.utcnow()
+            status.claim_owner = None
+            status.claim_expires_at = None
+            return True
 
     def try_claim_run(self, run_id: str, *, worker_id: str, lease_seconds: int = 30) -> RunStatus | None:
         wid = str(worker_id or "").strip()
@@ -633,7 +659,7 @@ class InMemoryStore(SandboxStore):
             st.claim_owner = wid
             st.claim_expires_at = expires
             self._runs[st.id] = st
-            return st
+            return replace(st)
 
     def renew_run_claim(self, run_id: str, *, worker_id: str, lease_seconds: int = 30) -> bool:
         wid = str(worker_id or "").strip()
@@ -709,23 +735,10 @@ class InMemoryStore(SandboxStore):
             active_workspace = 0
             active_workspace_group = 0
             for rs in self._runs.values():
-                is_active = False
-                if rs.phase == RunPhase.running:
-                    is_active = True
-                elif rs.phase == RunPhase.starting and getattr(rs, "started_at", None) is not None:
-                    is_active = True
+                is_active = rs.phase == RunPhase.running or (
+                    rs.phase == RunPhase.starting and rs.started_at is not None
+                )
                 if not is_active:
-                    continue
-                if not str(getattr(rs, "claim_owner", "") or "").strip():
-                    continue
-                active_exp = getattr(rs, "claim_expires_at", None)
-                if isinstance(active_exp, str):
-                    active_exp = _parse_optional_iso_datetime(active_exp)
-                if not isinstance(active_exp, datetime):
-                    continue
-                if active_exp.tzinfo is None:
-                    active_exp = active_exp.replace(tzinfo=timezone.utc)
-                if active_exp <= now:
                     continue
                 active += 1
                 if target_user and self._owners.get(rs.id) == target_user:
@@ -752,7 +765,7 @@ class InMemoryStore(SandboxStore):
             st.exit_code = None
             st.claim_expires_at = now + timedelta(seconds=ttl)
             self._runs[st.id] = st
-            return st
+            return replace(st)
 
     def get_run_owner(self, run_id: str) -> str | None:
         with self._lock:
@@ -1331,6 +1344,8 @@ class SQLiteStore(SandboxStore):
                     scope_snapshot_id TEXT,
                     claim_owner TEXT,
                     claim_expires_at TEXT,
+                    backend_id TEXT,
+                    backend_owner TEXT,
                     phase TEXT,
                     exit_code INTEGER,
                     started_at TEXT,
@@ -1463,6 +1478,8 @@ class SQLiteStore(SandboxStore):
             _ensure_sqlite_column("sandbox_runs", "workspace_id", "TEXT")
             _ensure_sqlite_column("sandbox_runs", "workspace_group_id", "TEXT")
             _ensure_sqlite_column("sandbox_runs", "scope_snapshot_id", "TEXT")
+            _ensure_sqlite_column("sandbox_runs", "backend_id", "TEXT")
+            _ensure_sqlite_column("sandbox_runs", "backend_owner", "TEXT")
             _ensure_sqlite_column("sandbox_runs", "claim_owner", "TEXT")
             _ensure_sqlite_column("sandbox_runs", "claim_expires_at", "TEXT")
             _ensure_sqlite_column("sandbox_sessions", "cpu_limit", "REAL")
@@ -1605,9 +1622,9 @@ class SQLiteStore(SandboxStore):
                     "REPLACE INTO sandbox_runs("
                     "id,user_id,spec_version,runtime,runtime_version,base_image,"
                     "session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,"
-                    "claim_owner,claim_expires_at,"
+                    "claim_owner,claim_expires_at,backend_id,backend_owner,"
                     "phase,exit_code,started_at,finished_at,message,image_digest,policy_hash,resource_usage"
-                    ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                    ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
                 ),
                 (
                     st.id,
@@ -1623,6 +1640,8 @@ class SQLiteStore(SandboxStore):
                     (str(st.scope_snapshot_id) if getattr(st, "scope_snapshot_id", None) is not None else None),
                     (str(st.claim_owner) if getattr(st, "claim_owner", None) is not None else None),
                     _coerce_optional_iso_datetime(getattr(st, "claim_expires_at", None)),
+                    st.backend_id,
+                    st.backend_owner,
                     st.phase.value,
                     st.exit_code,
                     (st.started_at.isoformat() if st.started_at else None),
@@ -1674,6 +1693,8 @@ class SQLiteStore(SandboxStore):
                     workspace_id=row_dict.get("workspace_id"),
                     workspace_group_id=row_dict.get("workspace_group_id"),
                     scope_snapshot_id=row_dict.get("scope_snapshot_id"),
+                    backend_id=row_dict.get("backend_id"),
+                    backend_owner=row_dict.get("backend_owner"),
                     claim_owner=row_dict.get("claim_owner"),
                     claim_expires_at=_parse_optional_iso_datetime(row_dict.get("claim_expires_at")),
                 )
@@ -1693,9 +1714,9 @@ class SQLiteStore(SandboxStore):
                     "UPDATE sandbox_runs SET "
                     "spec_version=?, runtime=?, runtime_version=?, base_image=?, phase=?, exit_code=?, "
                     "session_id=?, persona_id=?, workspace_id=?, workspace_group_id=?, scope_snapshot_id=?, "
-                    "claim_owner=?, claim_expires_at=?, "
+                    "claim_owner=?, claim_expires_at=?, backend_id=COALESCE(?,backend_id), backend_owner=COALESCE(?,backend_owner), "
                     "started_at=?, finished_at=?, message=?, image_digest=?, policy_hash=?, resource_usage=? "
-                    "WHERE id=?"
+                    "WHERE id=? AND (phase <> 'killed' OR ? = 'killed')"
                 ),
                 (
                     st.spec_version,
@@ -1711,6 +1732,8 @@ class SQLiteStore(SandboxStore):
                     (str(st.scope_snapshot_id) if getattr(st, "scope_snapshot_id", None) is not None else None),
                     claim_owner,
                     claim_expires_at,
+                    st.backend_id,
+                    st.backend_owner,
                     (st.started_at.isoformat() if st.started_at else None),
                     (st.finished_at.isoformat() if st.finished_at else None),
                     st.message,
@@ -1718,6 +1741,7 @@ class SQLiteStore(SandboxStore):
                     st.policy_hash,
                     (json.dumps(st.resource_usage) if isinstance(st.resource_usage, dict) else None),
                     st.id,
+                    st.phase.value,
                 ),
             )
             try:
@@ -1726,6 +1750,16 @@ class SQLiteStore(SandboxStore):
                 updated = 0
             if updated <= 0:
                 logger.debug("SQLiteStore.update_run skipped missing run_id={}", st.id)
+
+    def cancel_queued_run(self, run_id: str) -> bool:
+        """Cancel only if execution has not atomically left the queue."""
+        with self._lock, self._conn() as con:
+            cur = con.execute(
+                "UPDATE sandbox_runs SET phase='killed', message='canceled_by_user', "
+                "finished_at=?, claim_owner=NULL, claim_expires_at=NULL WHERE id=? AND phase='queued'",
+                (datetime.utcnow().isoformat(), str(run_id)),
+            )
+            return cur.rowcount == 1
 
     def try_claim_run(self, run_id: str, *, worker_id: str, lease_seconds: int = 30) -> RunStatus | None:
         wid = str(worker_id or "").strip()
@@ -1837,11 +1871,9 @@ class SQLiteStore(SandboxStore):
                 cur_active = con.execute(
                     (
                         "SELECT COUNT(*) AS c FROM sandbox_runs "
-                        "WHERE (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                        "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                        "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
+                        "WHERE (phase=? OR (phase=? AND started_at IS NOT NULL))"
                     ),
-                    (RunPhase.running.value, RunPhase.starting.value, now_iso),
+                    (RunPhase.running.value, RunPhase.starting.value),
                 )
                 row = cur_active.fetchone()
                 active = int(row["c"]) if row and row["c"] is not None else 0
@@ -1856,11 +1888,9 @@ class SQLiteStore(SandboxStore):
                     cur_user = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE user_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                            "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
+                            "WHERE user_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
                         ),
-                        (target_user, RunPhase.running.value, RunPhase.starting.value, now_iso),
+                        (target_user, RunPhase.running.value, RunPhase.starting.value),
                     )
                     row_user = cur_user.fetchone()
                     active_user = int(row_user["c"]) if row_user and row_user["c"] is not None else 0
@@ -1871,11 +1901,9 @@ class SQLiteStore(SandboxStore):
                     cur_persona = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE persona_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                            "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
+                            "WHERE persona_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
                         ),
-                        (target_persona, RunPhase.running.value, RunPhase.starting.value, now_iso),
+                        (target_persona, RunPhase.running.value, RunPhase.starting.value),
                     )
                     row_persona = cur_persona.fetchone()
                     active_persona = int(row_persona["c"]) if row_persona and row_persona["c"] is not None else 0
@@ -1886,11 +1914,9 @@ class SQLiteStore(SandboxStore):
                     cur_workspace = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                            "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
+                            "WHERE workspace_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
                         ),
-                        (target_workspace, RunPhase.running.value, RunPhase.starting.value, now_iso),
+                        (target_workspace, RunPhase.running.value, RunPhase.starting.value),
                     )
                     row_workspace = cur_workspace.fetchone()
                     active_workspace = int(row_workspace["c"]) if row_workspace and row_workspace["c"] is not None else 0
@@ -1901,11 +1927,9 @@ class SQLiteStore(SandboxStore):
                     cur_workspace_group = con.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_group_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL)) "
-                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                            "AND claim_expires_at IS NOT NULL AND claim_expires_at > ?"
+                            "WHERE workspace_group_id=? AND (phase=? OR (phase=? AND started_at IS NOT NULL))"
                         ),
-                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value, now_iso),
+                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value),
                     )
                     row_workspace_group = cur_workspace_group.fetchone()
                     active_workspace_group = int(row_workspace_group["c"]) if row_workspace_group and row_workspace_group["c"] is not None else 0
@@ -2824,6 +2848,8 @@ class PostgresStore(SandboxStore):
                         scope_snapshot_id TEXT,
                         claim_owner TEXT,
                         claim_expires_at TEXT,
+                        backend_id TEXT,
+                        backend_owner TEXT,
                         phase TEXT,
                         exit_code INTEGER,
                         started_at TEXT,
@@ -2952,10 +2978,8 @@ class PostgresStore(SandboxStore):
             )
             cur.execute("DROP INDEX IF EXISTS idx_workspace_volumes_idempotency")
             cur.execute(
-                (
-                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_volumes_idempotency "
-                    "ON workspace_volumes(workspace_id, user_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
-                )
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_volumes_idempotency "
+                "ON workspace_volumes(workspace_id, user_id, idempotency_key) WHERE idempotency_key IS NOT NULL"
             )
             # Migrations: ensure new columns exist
             def _ensure_column(table: str, col: str, coltype: str) -> None:
@@ -2983,6 +3007,8 @@ class PostgresStore(SandboxStore):
             _ensure_column("sandbox_runs", "workspace_id", "TEXT")
             _ensure_column("sandbox_runs", "workspace_group_id", "TEXT")
             _ensure_column("sandbox_runs", "scope_snapshot_id", "TEXT")
+            _ensure_column("sandbox_runs", "backend_id", "TEXT")
+            _ensure_column("sandbox_runs", "backend_owner", "TEXT")
             _ensure_column("sandbox_runs", "claim_owner", "TEXT")
             _ensure_column("sandbox_runs", "claim_expires_at", "TEXT")
             _ensure_column("sandbox_sessions", "cpu_limit", "DOUBLE PRECISION")
@@ -3100,10 +3126,10 @@ class PostgresStore(SandboxStore):
                     INSERT INTO sandbox_runs (
                         id,user_id,spec_version,runtime,runtime_version,base_image,
                         session_id,persona_id,workspace_id,workspace_group_id,scope_snapshot_id,
-                        claim_owner,claim_expires_at,
+                        claim_owner,claim_expires_at,backend_id,backend_owner,
                         phase,exit_code,started_at,finished_at,message,image_digest,policy_hash,resource_usage
                     )
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON CONFLICT (id) DO UPDATE SET
                         user_id=EXCLUDED.user_id,
                         spec_version=EXCLUDED.spec_version,
@@ -3117,6 +3143,8 @@ class PostgresStore(SandboxStore):
                         scope_snapshot_id=EXCLUDED.scope_snapshot_id,
                         claim_owner=EXCLUDED.claim_owner,
                         claim_expires_at=EXCLUDED.claim_expires_at,
+                        backend_id=EXCLUDED.backend_id,
+                        backend_owner=EXCLUDED.backend_owner,
                         phase=EXCLUDED.phase,
                         exit_code=EXCLUDED.exit_code,
                         started_at=EXCLUDED.started_at,
@@ -3140,6 +3168,8 @@ class PostgresStore(SandboxStore):
                         (str(st.scope_snapshot_id) if getattr(st, "scope_snapshot_id", None) is not None else None),
                         (str(st.claim_owner) if getattr(st, "claim_owner", None) is not None else None),
                         _coerce_optional_iso_datetime(getattr(st, "claim_expires_at", None)),
+                        st.backend_id,
+                        st.backend_owner,
                         st.phase.value,
                         st.exit_code,
                         (st.started_at.isoformat() if st.started_at else None),
@@ -3182,6 +3212,8 @@ class PostgresStore(SandboxStore):
                     workspace_id=row.get("workspace_id"),
                     workspace_group_id=row.get("workspace_group_id"),
                     scope_snapshot_id=row.get("scope_snapshot_id"),
+                    backend_id=row.get("backend_id"),
+                    backend_owner=row.get("backend_owner"),
                     claim_owner=row.get("claim_owner"),
                     claim_expires_at=_parse_optional_iso_datetime(row.get("claim_expires_at")),
                 )
@@ -3214,6 +3246,8 @@ class PostgresStore(SandboxStore):
                         scope_snapshot_id=%s,
                         claim_owner=%s,
                         claim_expires_at=%s,
+                        backend_id=COALESCE(%s,backend_id),
+                        backend_owner=COALESCE(%s,backend_owner),
                         phase=%s,
                         exit_code=%s,
                         started_at=%s,
@@ -3222,7 +3256,7 @@ class PostgresStore(SandboxStore):
                         image_digest=%s,
                         policy_hash=%s,
                         resource_usage=%s
-                    WHERE id=%s
+                    WHERE id=%s AND (phase <> 'killed' OR %s = 'killed')
                     """,
                     (
                         st.spec_version,
@@ -3236,6 +3270,8 @@ class PostgresStore(SandboxStore):
                         (str(st.scope_snapshot_id) if getattr(st, "scope_snapshot_id", None) is not None else None),
                         claim_owner,
                         claim_expires_at,
+                        st.backend_id,
+                        st.backend_owner,
                         st.phase.value,
                         st.exit_code,
                         (st.started_at.isoformat() if st.started_at else None),
@@ -3245,6 +3281,7 @@ class PostgresStore(SandboxStore):
                         st.policy_hash,
                         (json.dumps(st.resource_usage) if isinstance(st.resource_usage, dict) else None),
                         st.id,
+                        st.phase.value,
                     ),
                 )
                 try:
@@ -3253,6 +3290,16 @@ class PostgresStore(SandboxStore):
                     updated = 0
                 if updated <= 0:
                     logger.debug("PostgresStore.update_run skipped missing run_id={}", st.id)
+
+    def cancel_queued_run(self, run_id: str) -> bool:
+        """Cancel only if execution has not atomically left the queue."""
+        with self._lock, self._conn() as con, con.cursor() as cur:
+            cur.execute(
+                "UPDATE sandbox_runs SET phase='killed', message='canceled_by_user', "
+                "finished_at=%s, claim_owner=NULL, claim_expires_at=NULL WHERE id=%s AND phase='queued'",
+                (datetime.utcnow().isoformat(), str(run_id)),
+            )
+            return cur.rowcount == 1
 
     def try_claim_run(self, run_id: str, *, worker_id: str, lease_seconds: int = 30) -> RunStatus | None:
         wid = str(worker_id or "").strip()
@@ -3368,12 +3415,9 @@ class PostgresStore(SandboxStore):
                 cur.execute(
                     (
                         "SELECT COUNT(*) AS c FROM sandbox_runs "
-                        "WHERE (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                        "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                        "AND claim_expires_at IS NOT NULL "
-                        "AND claim_expires_at::timestamptz > %s::timestamptz"
+                        "WHERE (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
                     ),
-                    (RunPhase.running.value, RunPhase.starting.value, now_iso),
+                    (RunPhase.running.value, RunPhase.starting.value),
                 )
                 row = cur.fetchone() or {}
                 active = int(row.get("c") or 0)
@@ -3388,12 +3432,9 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE user_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                            "AND claim_expires_at IS NOT NULL "
-                            "AND claim_expires_at::timestamptz > %s::timestamptz"
+                            "WHERE user_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
                         ),
-                        (target_user, RunPhase.running.value, RunPhase.starting.value, now_iso),
+                        (target_user, RunPhase.running.value, RunPhase.starting.value),
                     )
                     row_user = cur.fetchone() or {}
                     active_user = int(row_user.get("c") or 0)
@@ -3404,12 +3445,9 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE persona_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                            "AND claim_expires_at IS NOT NULL "
-                            "AND claim_expires_at::timestamptz > %s::timestamptz"
+                            "WHERE persona_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
                         ),
-                        (target_persona, RunPhase.running.value, RunPhase.starting.value, now_iso),
+                        (target_persona, RunPhase.running.value, RunPhase.starting.value),
                     )
                     row_persona = cur.fetchone() or {}
                     active_persona = int(row_persona.get("c") or 0)
@@ -3420,12 +3458,9 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                            "AND claim_expires_at IS NOT NULL "
-                            "AND claim_expires_at::timestamptz > %s::timestamptz"
+                            "WHERE workspace_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
                         ),
-                        (target_workspace, RunPhase.running.value, RunPhase.starting.value, now_iso),
+                        (target_workspace, RunPhase.running.value, RunPhase.starting.value),
                     )
                     row_workspace = cur.fetchone() or {}
                     active_workspace = int(row_workspace.get("c") or 0)
@@ -3436,12 +3471,9 @@ class PostgresStore(SandboxStore):
                     cur.execute(
                         (
                             "SELECT COUNT(*) AS c FROM sandbox_runs "
-                            "WHERE workspace_group_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL)) "
-                            "AND claim_owner IS NOT NULL AND claim_owner <> '' "
-                            "AND claim_expires_at IS NOT NULL "
-                            "AND claim_expires_at::timestamptz > %s::timestamptz"
+                            "WHERE workspace_group_id=%s AND (phase=%s OR (phase=%s AND started_at IS NOT NULL))"
                         ),
-                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value, now_iso),
+                        (target_workspace_group, RunPhase.running.value, RunPhase.starting.value),
                     )
                     row_workspace_group = cur.fetchone() or {}
                     active_workspace_group = int(row_workspace_group.get("c") or 0)
