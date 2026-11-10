@@ -26,6 +26,7 @@ Found by TASK-13953's reviews (plan V4; final review, declined-to-judge items). 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Re-verified by TASK-15427 on cb70f0c5d1 (2026-11-07). Endpoint: a copy of test_streaming_oauth_retry_records_one_usage_row_for_the_successful_attempt with a recording MemoryResourceGovernor on app.state recorded reserve 309, commit(tokens=0) on the live handle (the failed attempt's rg_refund_cb, endpoints/chat.py:5676-5685, from _finalize_stream's nothing-received branch, Chat/chat_service.py:5583-5585), then commit(tokens=19) on the finalized handle (the retry's _build_streaming_commit_cb, chat.py:6575): a no-op (governor.py:790-792). The Redis governor behaves the same: RedisResourceGovernor.commit returns when the handle record is gone (governor_redis.py:2263-2271) and deletes it at the end of the first commit (:2404-2407). Measured on both governors (Redis through the in-memory stub client): reserve 500 tokens, commit 0, commit 300, and a 701-token reserve in the same minute is still allowed (refused without the first commit). The chat handle reserves tokens only (chat.py:4242-4247), so no stream lease is involved. AC #1's test should run against both governors (the Redis one through the in-memory stub client).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

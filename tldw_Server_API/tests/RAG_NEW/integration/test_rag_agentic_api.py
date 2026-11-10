@@ -286,8 +286,15 @@ def _over_the_limit_with_own_keys(monkeypatch, own: set[str]) -> tuple[list[str]
         ({"enable_structured_response": True, "enable_query_decomposition": True, "enable_intent_routing": True,
           "enable_dynamic_granularity": True, "enable_image_search": True, "enable_video_search": True},
          {"openai"}, ["openai"]),
+        ({"enable_abstention": True, "enable_knowledge_strips": True, "enable_web_fallback": True,
+          "enable_query_rewriting_loop": True, "adaptive_rerun_on_low_confidence": True,
+          "adaptive_advanced_rewrites": True},
+         {"openai"}, ["openai"]),
+        ({"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "OAI"},
+         {"openai"}, ["openai"]),
     ],
-    ids=["answer-only", "reformulated-history", "switches-without-an-llm-call"],
+    ids=["answer-only", "reformulated-history", "switches-without-an-llm-call", "stages-without-an-llm-call",
+         "reformulated-on-an-alias-of-the-answers-provider"],
 )
 def test_rag_search_admits_an_over_limit_user_whose_llm_calls_run_on_their_own_keys(
     client_with_agentic_overrides, monkeypatch, extra, own, looked_up
@@ -298,37 +305,95 @@ def test_rag_search_admits_an_over_limit_user_whose_llm_calls_run_on_their_own_k
         "/api/v1/rag/search",
         json={"query": "q", "enable_generation": True, "generation_provider": "openai", **extra},
     )
+    assert asked == looked_up
     assert resp.status_code != 402, resp.text
     assert marked == [False]
-    assert asked == looked_up
 
 
 @pytest.mark.parametrize(
-    "extra",
+    ("extra", "looked_up"),
     [
-        {"enable_claims": True},
-        {"enable_document_grading": True, "grading_provider": "openai"},
-        {"enable_reranking": True, "reranking_strategy": "llm_scoring"},
-        {"search_depth_mode": "quality"},
-        {"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "groq"},
-        {"enable_evidence_accumulation": True},
-        {"enable_evidence_chains": True},
+        ({"enable_claims": True}, []),
+        ({"enable_document_grading": True, "grading_provider": "openai"}, []),
+        ({"enable_reranking": True, "reranking_strategy": "llm_scoring"}, []),
+        ({"search_depth_mode": "quality"}, []),
+        ({"chat_history": [{"role": "user", "content": "Earlier"}], "classifier_provider": "groq"},
+         ["openai", "groq"]),
+        ({"enable_evidence_accumulation": True}, []),
+        ({"enable_evidence_chains": True}, []),
     ],
     ids=["claims", "grading", "llm-rerank", "quality-depth", "history-on-a-server-key", "evidence-accumulation",
          "evidence-chains"],
 )
-def test_rag_search_still_refuses_an_own_key_answer_with_another_llm_stage(client_with_agentic_overrides, monkeypatch, extra):
-    """An LLM stage the boundary cannot place on the user's own key keeps the 402 before any retrieval (TASK-13956)."""
+def test_rag_search_still_refuses_an_own_key_answer_with_another_llm_stage(
+    client_with_agentic_overrides, monkeypatch, extra, looked_up
+):
+    """An LLM stage the boundary cannot place on the user's own key keeps the 402 before any retrieval (TASK-13956).
+
+    A stage on an unnamed provider is refused without a lookup; a named one on a server key, after it (TASK-15427).
+    """
     from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
 
-    _asked, marked = _over_the_limit_with_own_keys(monkeypatch, {"openai"})
+    asked, marked = _over_the_limit_with_own_keys(monkeypatch, {"openai"})
     resp = client_with_agentic_overrides.post(
         "/api/v1/rag/search",
         json={"query": "q", "enable_generation": True, "generation_provider": "openai", **extra},
     )
     assert_llm_quota_402(resp)
     assert marked == []
+    assert asked == looked_up
 
+
+# Every boolean switch of the RAG request schemas makes an LLM call besides the answer and the reformulation
+# (rag_unified._RAG_OTHER_LLM_STAGES) or is declared here (TASK-15427).
+_NO_OTHER_LLM_CALL = frozenset({
+    # Their call is one _rag_llm_providers names: the answer, the reformulation, LLM reranking (by its strategy).
+    "enable_generation", "enable_query_reformulation", "enable_reranking",
+    # Read only by the agentic strategy, which _rag_llm_providers refuses as a non-standard strategy.
+    "agentic_adaptive_budgets", "agentic_debug_trace", "agentic_enable_metrics", "agentic_enable_query_decomposition",
+    "agentic_enable_section_index", "agentic_enable_semantic_within", "agentic_enable_table_support",
+    "agentic_enable_tools", "agentic_enable_vlm_late_chunking", "agentic_extractive_only",
+    "agentic_prefer_structural_anchors", "agentic_quote_spans", "agentic_use_llm_planner",
+    "agentic_use_provider_embeddings_within", "agentic_vlm_detect_tables_only", "explain_only",
+    # Read only inside a listed stage: the research loop, document grading, claims, post-verification.
+    "enable_image_search", "enable_video_search", "enable_research_action_dedup", "enable_research_progress",
+    "search_url_scraping", "grading_fallback_to_score", "enable_query_rewriting_loop", "doc_only_verification",
+    "generate_verification_report", "adaptive_advanced_rewrites", "adaptive_rerun_on_low_confidence",
+    "adaptive_rerun_bypass_cache", "adaptive_rerun_include_generation",
+    # No LLM call: rule-based, retrieval, filtering, formatting, telemetry, or the answer's own generator again.
+    "enable_structured_response", "enable_query_decomposition", "enable_intent_routing",
+    "enable_dynamic_granularity", "enable_abstention", "enable_knowledge_strips", "enable_web_fallback",
+    "enable_pre_retrieval_clarification", "enable_numeric_fidelity", "strict_extractive", "require_hard_citations",
+    "expand_query", "spell_check", "enable_discussion_search", "enable_multi_vector_passages", "mv_flatten_to_spans",
+    "enable_text_late_chunking", "enable_enhanced_chunking", "enable_vlm_late_chunking", "vlm_detect_tables_only",
+    "enable_table_processing", "enable_numeric_table_boost", "enable_parent_expansion", "include_parent_document",
+    "include_sibling_chunks", "enable_citations", "enable_chunk_citations", "include_page_numbers",
+    "enable_security_filter", "detect_pii", "redact_pii", "content_filter", "enable_content_policy_filter",
+    "enable_injection_filter", "enable_html_sanitizer", "enable_cache", "adaptive_cache", "use_embedding_cache",
+    "use_connection_pool", "enable_resilience", "circuit_breaker", "enable_batch", "enable_checkpoint",
+    "collect_feedback", "apply_feedback_boost", "highlight_results", "highlight_query_terms",
+    "include_rerank_debug_documents", "debug_mode", "track_cost", "enable_analytics", "enable_monitoring",
+    "enable_observability", "enable_performance_analysis",
+})
+
+
+def test_every_rag_request_switch_says_whether_it_makes_another_llm_call():
+    """A new switch of the RAG request schemas must join _RAG_OTHER_LLM_STAGES or _NO_OTHER_LLM_CALL (TASK-15427)."""
+    from typing import Optional
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedBatchRequest, UnifiedRAGRequest
+
+    switches = {
+        name
+        for model in (UnifiedRAGRequest, UnifiedBatchRequest)
+        for name, field in model.model_fields.items()
+        if field.annotation in (bool, Optional[bool])
+    }
+    listed = set(rag_ep._RAG_OTHER_LLM_STAGES)
+    assert switches - listed - _NO_OTHER_LLM_CALL == set(), "add each to _RAG_OTHER_LLM_STAGES or _NO_OTHER_LLM_CALL"
+    assert listed & _NO_OTHER_LLM_CALL == set()
+    assert (listed | _NO_OTHER_LLM_CALL) - switches == set()
 
 @pytest.mark.parametrize(
     ("default_on", "admitted"),
