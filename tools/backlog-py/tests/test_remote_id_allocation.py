@@ -7,10 +7,12 @@ import shutil
 from pathlib import Path
 
 import pytest
+from backlog_py.cli.main import main
 from backlog_py.core import remote_ids
 from backlog_py.core import repository as repository_module
 from backlog_py.core.remote_ids import RemoteIdState, collect_remote_ids
 from backlog_py.core.repository import MutableRepository, TaskMutationError
+from click.testing import CliRunner
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
 
@@ -215,3 +217,34 @@ def test_child_id_skips_the_remote_lookup(tmp_path, monkeypatch):
     created = MutableRepository.from_path(repo).create_task(title="Child", task_id="TASK-1.1")
     assert created.id == "TASK-1.1"
     assert calls == []
+
+
+TASK_1 = Path("backlog/tasks/task-1 - Example-task.md")
+
+
+def test_renumber_refuses_a_top_level_id_held_remotely_with_the_create_message(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    monkeypatch.setattr(
+        repository_module, "collect_remote_ids", lambda _root: _state({"open pull requests": {1, 15000}})
+    )
+    with pytest.raises(TaskMutationError) as created:
+        MutableRepository.from_path(repo).create_task(title="New", task_id="TASK-15000")
+
+    args = ["--cwd", str(repo), "task", "renumber", str(TASK_1), "--id", "task-15000"]
+    result = CliRunner().invoke(main, args)
+
+    assert str(result.exception) == str(created.value)
+    assert "open pull requests: TASK-15000" in str(created.value)
+    assert (repo / TASK_1).is_file()
+    # Remote sources list top-level ids only, so a subtask id is checked locally, as in create.
+    assert MutableRepository.from_path(repo).renumber_task(TASK_1, "TASK-1.1").id == "TASK-1.1"
+
+
+def test_renumber_skips_the_remote_check_when_told_to(tmp_path, monkeypatch):
+    repo = _copy_fixture(tmp_path)
+    monkeypatch.setattr(
+        repository_module, "collect_remote_ids", lambda _root: _state({"open pull requests": {15000}})
+    )
+    # The generator's apply passes check_remote=False: its own open PR lists the block it writes.
+    moved = MutableRepository.from_path(repo).renumber_task(TASK_1, "TASK-15000", check_remote=False)
+    assert moved.id == "TASK-15000"

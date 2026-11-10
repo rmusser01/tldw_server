@@ -48,7 +48,8 @@ and an explicit `--id` that one of them holds is refused, naming the source. Eac
 source that cannot be read (no `gh`, not authenticated, timeout, fetch failure)
 prints a warning on stderr and allocation continues from the rest, so offline use
 still works; the AGENTS.md manual recipe is the fallback when a warning appears.
-Child ids (`P.n`) skip the remote check.
+`task renumber` runs the same check on its new id. Child ids (`P.n`) skip the
+remote check.
 
 A task id belongs to one file across `backlog/tasks`, `backlog/completed` and
 `backlog/archive/tasks`: `task create` refuses an id any of them holds and,
