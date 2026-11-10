@@ -609,10 +609,14 @@ _QA_ASKS = "GRADE: [correct/incorrect"
         ("simple_bench", _MC_ITEM, "Score: **10**", _MC_ASKS, 1.0),
         # "Grade:" in a multiple-choice reply is prose; only a prompt that asks for a GRADE reads one
         ("simple_bench", _MC_ITEM, "Grade: Correct answer is B; the model chose A.\nSCORE: 1", _MC_ASKS, 0.0),
+        # the judge restates the rubric before a labelled score; the prompt must ask for that label
+        ("bullshit_benchmark", {"question": "q", "nonsensical_element": "n"},
+         "Score 0-10 where 0=fully engages nonsense, 10=clearly flags incoherence. SCORE: 9\nEXPLANATION: flags it",
+         "SCORE: [0-10]", 8 / 9),
     ],
     ids=["mc-correct", "mc-incorrect", "no-score", "mc-reasoning", "simpleqa-correct", "simpleqa-incorrect",
          "simpleqa-grade-decides", "simpleqa-bracketed-grade", "judge-error", "rubric-echo", "markdown-label",
-         "markdown-value", "mc-grade-is-prose"],
+         "markdown-value", "mc-grade-is-prose", "bullshit-rubric-echo"],
 )
 async def test_a_benchmark_item_is_scored_from_the_judges_reply(
     evaluation_manager, monkeypatch, benchmark, item, reply, asked, expected

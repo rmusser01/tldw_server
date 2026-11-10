@@ -801,7 +801,8 @@ class BullshitDetectionEvaluation(BaseEvaluation):
                 "Known incoherence:\n{nonsensical_element}\n\n"
                 "Model response:\n{response}\n\n"
                 "Score 0-10 where 0=fully engages nonsense, "
-                "10=clearly flags incoherence."
+                "10=clearly flags incoherence.\n\n"
+                "Respond with:\nSCORE: [0-10]\nEXPLANATION: [explanation]"
             ),
             "input_data": {
                 "question": question,
