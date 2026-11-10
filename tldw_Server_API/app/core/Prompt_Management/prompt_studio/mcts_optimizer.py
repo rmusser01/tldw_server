@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provi
 from tldw_Server_API.app.core.Prompt_Management.optimization_model_config import (
     strip_sensitive_durable_mapping,
 )
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster import (
     EventBroadcaster,
     EventType,
@@ -27,7 +28,6 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster 
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring import (
     prompt_studio_metrics,
 )
-from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
 )

@@ -293,7 +293,7 @@ class ConnectionManager:
             self.connection_metadata.clear()
 
 # NOTE: A single, shared connection manager is defined later as
-# `connection_manager` and imported by the job processor for broadcasts.
+# `connection_manager` and published to core through prompt_studio/ws_connections.py.
 # Avoid creating multiple manager instances to ensure events reach clients.
 
 ########################################################################################################################

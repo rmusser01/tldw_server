@@ -280,7 +280,7 @@ async def get_workspace_sandbox_diagnostics(
     user_id = str(current_user.id)
     rows, total = await asyncio.gather(
         asyncio.to_thread(
-            _sandbox_default.sandbox_service._orch.list_runs,  # type: ignore[attr-defined]
+            _sandbox_default.sandbox_service._orch.list_runs,
             user_id=user_id,
             workspace_id=workspace_id,
             limit=limit,
@@ -288,7 +288,7 @@ async def get_workspace_sandbox_diagnostics(
             sort_desc=True,
         ),
         asyncio.to_thread(
-            _sandbox_default.sandbox_service._orch.count_runs,  # type: ignore[attr-defined]
+            _sandbox_default.sandbox_service._orch.count_runs,
             user_id=user_id,
             workspace_id=workspace_id,
         ),

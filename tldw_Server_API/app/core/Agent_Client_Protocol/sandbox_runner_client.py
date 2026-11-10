@@ -141,7 +141,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
 
     def _get_sandbox_store(self) -> Any | None:
         try:
-            sandbox_service = _sandbox_default.sandbox_service  # type: ignore[attr-defined]
+            sandbox_service = _sandbox_default.sandbox_service
             orch = getattr(sandbox_service, "_orch", None)
             return getattr(orch, "_store", None)
         except _ACP_SANDBOX_NONCRITICAL_EXCEPTIONS:
@@ -513,7 +513,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
         runtime = self._configured_runtime()
         self._validate_runtime_requirements(runtime)
 
-        sandbox_service = _sandbox_default.sandbox_service  # type: ignore[attr-defined]
+        sandbox_service = _sandbox_default.sandbox_service
 
         sandbox_session = None
         status = None
@@ -851,12 +851,12 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
             ssh_port = None
         try:
             if run_id:
-                _sandbox_default.sandbox_service.cancel_run(run_id)  # type: ignore[attr-defined]
+                _sandbox_default.sandbox_service.cancel_run(run_id)
         except _ACP_SANDBOX_NONCRITICAL_EXCEPTIONS:
             pass
         try:
             if sandbox_session_id:
-                _sandbox_default.sandbox_service.destroy_session(sandbox_session_id)  # type: ignore[attr-defined]
+                _sandbox_default.sandbox_service.destroy_session(sandbox_session_id)
         except _ACP_SANDBOX_NONCRITICAL_EXCEPTIONS:
             pass
         if ssh_port:

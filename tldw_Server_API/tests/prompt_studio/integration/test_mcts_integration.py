@@ -6,6 +6,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.mcts_optimizer imp
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_engine import MetricType
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_runner import TestRunner
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster import EventBroadcaster, EventType
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 
 
 @pytest.fixture
@@ -92,6 +93,7 @@ async def test_end_to_end_improves_and_ws_events(monkeypatch, temp_ps_db):
         events.append((EventType.OPTIMIZATION_ITERATION, kwargs))
     monkeypatch.setattr(EventBroadcaster, "broadcast_event", fake_broadcast_event)
     monkeypatch.setattr(EventBroadcaster, "broadcast_optimization_iteration", fake_broadcast_iter)
+    monkeypatch.setattr(ws_connections, "current", lambda: object())  # a WebSocket transport is loaded
 
     optimization_id = _create_mcts_optimization(
         temp_ps_db,

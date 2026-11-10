@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sys
 
 import pytest
 
@@ -281,11 +280,6 @@ def test_mcts_without_optional_transport_still_persists_results(
 
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_MCTS", "true")
     monkeypatch.setattr(ws_connections, "current", lambda: None)
-    monkeypatch.setitem(
-        sys.modules,
-        "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket",
-        None,
-    )
     _label, db = prompt_studio_dual_backend_db
     project, prompt, case = _seed_minimal_prompt_and_case(db)
     opt = db.create_optimization(
