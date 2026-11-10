@@ -54,10 +54,13 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
     throttle_every,
     deferred_transport,
 ):
-    if deferred_transport:
-        from tldw_Server_API.app.core.Prompt_Management.prompt_studio import mcts_optimizer
+    from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_websocket
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 
-        monkeypatch.setattr(mcts_optimizer, "ws_connection_manager", None)
+    manager = prompt_studio_websocket.connection_manager  # the endpoint published it when it loaded
+    if deferred_transport:  # one published after MCTS loaded is found too: MCTS reads the slot at call time
+        manager = object()
+        monkeypatch.setattr(ws_connections, "current", lambda: manager)
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_MCTS", "true")
 
     _label, db = prompt_studio_dual_backend_db
@@ -98,8 +101,10 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
     lifecycle_events = []
     completion_statuses = []
     iteration_payloads = []
+    managers = []
 
     async def _capture_event(self, event_type, data, client_ids=None, project_id=None):
+        managers.append(self.connection_manager)
         et = event_type.value if hasattr(event_type, "value") else str(event_type)
         if et == EventType.OPTIMIZATION_ITERATION.value:
             iteration_payloads.append(dict(data))
@@ -123,6 +128,7 @@ def test_mcts_ws_schema_and_persistence_match_throttle_cadence(
     assert lifecycle_events.count(EventType.OPTIMIZATION_STARTED.value) == 1
     assert lifecycle_events.count(EventType.OPTIMIZATION_COMPLETED.value) == 1
     assert completion_statuses == ["completed"]
+    assert managers and all(m is manager for m in managers)
 
     expected_iterations = _expected_throttled_iterations(n_sims, throttle_every)
     seen_iterations = [int(p["iteration"]) for p in iteration_payloads]
@@ -271,10 +277,10 @@ def test_mcts_without_optional_transport_still_persists_results(
     prompt_studio_dual_backend_db, monkeypatch
 ):
     """An unavailable optional WebSocket endpoint must not prevent optimization."""
-    from tldw_Server_API.app.core.Prompt_Management.prompt_studio import mcts_optimizer
+    from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 
     monkeypatch.setenv("PROMPT_STUDIO_ENABLE_MCTS", "true")
-    monkeypatch.setattr(mcts_optimizer, "ws_connection_manager", None)
+    monkeypatch.setattr(ws_connections, "current", lambda: None)
     monkeypatch.setitem(
         sys.modules,
         "tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket",

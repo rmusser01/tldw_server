@@ -73,6 +73,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster 
     prompt_studio_connection_scope,
 )
 from tldw_Server_API.app.core.LLM_Calls.sse import sse_data
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import env_flag_enabled
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work, is_lifecycle_draining
@@ -456,6 +457,7 @@ async def sse_endpoint_route(
 
 # Initialize connection manager
 connection_manager = ConnectionManager()
+ws_connections.publish(connection_manager)
 register_shutdown_transport_family(
     "prompt_studio.websocket",
     active_count=connection_manager.get_connection_count,

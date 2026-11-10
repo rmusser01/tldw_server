@@ -13,6 +13,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.core.Logging.log_context import log_context
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
 )
@@ -1075,7 +1076,7 @@ class OptimizationEngine:
                 optimization_id,
             )
             return
-        connection_manager = mcts_optimizer_module.ws_connection_manager
+        connection_manager = ws_connections.current()
         if connection_manager is None:
             return
         latest = self._get_optimization(optimization_id) or {}

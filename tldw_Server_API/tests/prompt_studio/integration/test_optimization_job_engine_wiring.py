@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
     test_runner as test_runner_mod,
 )
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.job_processor import JobProcessor
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.mcts_optimizer import MCTSOptimizer
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.optimization_engine import (
@@ -189,12 +190,7 @@ def optimization_runtime_boundary(monkeypatch: pytest.MonkeyPatch) -> dict[str, 
         _CompletionBroadcaster,
         raising=True,
     )
-    monkeypatch.setattr(
-        mcts_optimizer_mod,
-        "ws_connection_manager",
-        object(),
-        raising=True,
-    )
+    monkeypatch.setattr(ws_connections, "current", lambda: object())
     return state
 
 
@@ -942,7 +938,7 @@ async def test_worker_path_respects_cancelled_optimization_for_queued_and_runnin
     monkeypatch.setattr(MCTSOptimizer, "_rephrase_segment", fake_rephrase_segment, raising=True)
     monkeypatch.setattr(jobs_worker, "_get_processor", lambda _user_id: JobProcessor(db), raising=True)
     monkeypatch.setattr(mcts_optimizer_mod, "EventBroadcaster", _RecordingBroadcaster, raising=True)
-    monkeypatch.setattr(mcts_optimizer_mod, "ws_connection_manager", object(), raising=True)
+    monkeypatch.setattr(ws_connections, "current", lambda: object())
 
     # Queued cancellation: cancelling before worker handling should keep optimization cancelled.
     queued_opt_id, queued_job_id, _queued_body = await _create_optimization_via_endpoint(

@@ -131,7 +131,6 @@
   "core/Personalization/companion_activity.py": {"globals": 1, "reason": null},
   "core/PrivilegeMaps/cache.py": {"globals": 2, "reason": null},
   "core/Prompt_Management/Prompts_Interop.py": {"globals": 2, "reason": null},
-  "core/Prompt_Management/prompt_studio/mcts_optimizer.py": {"globals": 1, "reason": null},
   "core/Prototype_Workspaces/jobs.py": {"globals": 2, "reason": null},
   "core/Provider_Credentials/llm_provider_overrides.py": {"globals": 34, "reason": "moved from core/AuthNZ/llm_provider_overrides.py (TASK-13950.17)"},
   "core/RAG/rag_custom_metrics.py": {"globals": 1, "reason": null},

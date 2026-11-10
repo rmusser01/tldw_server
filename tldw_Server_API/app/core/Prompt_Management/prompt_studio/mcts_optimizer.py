@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster 
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.monitoring import (
     prompt_studio_metrics,
 )
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     ProviderCallCredentials,
 )
@@ -52,13 +53,6 @@ _MCTS_NONCRITICAL_EXCEPTIONS = (
     DatabaseError,
 )
 
-try:
-    # Optional: shared WS connection manager if WS endpoints loaded
-    from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket import (
-        connection_manager as ws_connection_manager,
-    )
-except _MCTS_IMPORT_EXCEPTIONS:  # pragma: no cover - optional in minimal builds
-    ws_connection_manager = None
 import contextlib
 
 from tldw_Server_API.app.core.testing import is_truthy
@@ -244,20 +238,10 @@ class MCTSOptimizer:
         # Collect top scored candidates per depth when debugging
         self._debug_top_by_depth: dict[int, list[dict[str, Any]]] = {} if debug_decisions else None
 
-        # Endpoint imports can be cyclic during startup. Retry once work begins,
-        # when the optional transport may have finished loading.
-        global ws_connection_manager
-        if ws_connection_manager is None and optimization_id is not None:
-            try:
-                from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_websocket import (
-                    connection_manager as ws_connection_manager,
-                )
-            except _MCTS_IMPORT_EXCEPTIONS:
-                logger.debug("MCTS optional WebSocket transport remains unavailable")
-
         broadcaster = None
-        if ws_connection_manager is not None and optimization_id is not None:
-            broadcaster = EventBroadcaster(ws_connection_manager, self.db)
+        manager = ws_connections.current()
+        if manager is not None and optimization_id is not None:
+            broadcaster = EventBroadcaster(manager, self.db)
             with contextlib.suppress(_MCTS_NONCRITICAL_EXCEPTIONS):
                 await broadcaster.broadcast_event(
                     event_type=EventType.OPTIMIZATION_STARTED,
