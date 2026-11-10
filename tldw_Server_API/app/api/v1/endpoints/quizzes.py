@@ -11,7 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import require_llm_quota
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantContextResponse,
     StudyAssistantRespondRequest,

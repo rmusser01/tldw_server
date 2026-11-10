@@ -45,6 +45,10 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
+from tldw_Server_API.tests.lint import _moved_endpoint_code
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 ENDPOINTS_ROOT = REPO_ROOT / "tldw_Server_API" / "app" / "api" / "v1" / "endpoints"
 
@@ -111,16 +115,27 @@ def _executed_sql_count(tree: ast.AST) -> int:
     return count
 
 
+def _scan_files() -> list[Path]:
+    return _moved_endpoint_code.scan_files(ENDPOINTS_ROOT)
+
+
+def _key(path: Path) -> str:
+    """An endpoint file keeps its endpoints-relative key; a moved file is keyed by its display path."""
+    if path.is_relative_to(ENDPOINTS_ROOT):
+        return str(path.relative_to(ENDPOINTS_ROOT))
+    return _moved_endpoint_code.display(path)
+
+
 def _measure() -> dict[str, int]:
     found: dict[str, int] = {}
-    for path in sorted(ENDPOINTS_ROOT.rglob("*.py")):
+    for path in _scan_files():
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
         except SyntaxError:  # pragma: no cover - a broken file fails elsewhere
             continue
         count = _executed_sql_count(tree)
         if count:
-            found[str(path.relative_to(ENDPOINTS_ROOT))] = count
+            found[_key(path)] = count
     return found
 
 
@@ -185,7 +200,7 @@ _DB_INTERNALS = frozenset({"_connect", "_pg_cursor", "_execute", "_coerce_bool_f
 
 def test_no_endpoint_reaches_database_internals() -> None:
     offenders = []
-    for path in sorted(ENDPOINTS_ROOT.rglob("*.py")):
+    for path in _scan_files():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             name = None
@@ -196,5 +211,15 @@ def test_no_endpoint_reaches_database_internals() -> None:
             elif isinstance(node, ast.ImportFrom) and (node.module or "").startswith("tldw_Server_API.app.core"):
                 name = next((a.name for a in node.names if a.name in _DB_INTERNALS), None)
             if name:
-                offenders.append(f"{path.relative_to(ENDPOINTS_ROOT)}:{node.lineno} {name}")
+                offenders.append(f"{_key(path)}:{node.lineno} {name}")
     assert not offenders, offenders
+
+
+def test_raw_sql_ratchet_flags_a_violation_in_code_moved_out_of_endpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seeded = tmp_path / "api" / "v1" / "utils" / "chatops" / "seeded.py"
+    seeded.parent.mkdir(parents=True)
+    seeded.write_text("def f(db):\n    db.execute('SELECT 1')\n", encoding="utf-8")
+    monkeypatch.setattr(_moved_endpoint_code, "moved_files", lambda *_args: [seeded])
+    assert _measure().get(str(seeded)) == 1  # nosec B101
