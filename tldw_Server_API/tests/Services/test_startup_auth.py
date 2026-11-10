@@ -43,7 +43,6 @@ def _owner_pg_pool() -> SimpleNamespace:
 
 
 def _import_startup_auth() -> ModuleType:
-    sys.modules.pop("tldw_Server_API.app.services.startup_auth", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_auth")
 
 
@@ -775,7 +774,6 @@ async def test_replacement_pool_failure_aborts_auth_runtime_startup(
         set_llm_provider_overrides_cache_for_tests=_noop_reset_llm_provider_overrides_cache,
     )
     startup_auth = _import_startup_auth()
-    monkeypatch.delitem(sys.modules, "tldw_Server_API.app.services.startup_auth_runtime", raising=False)
     auth_runtime = importlib.import_module("tldw_Server_API.app.services.startup_auth_runtime")
     expected_error = (
         "AUTHNZ_DB_POOL_STARTUP_FAILED"
