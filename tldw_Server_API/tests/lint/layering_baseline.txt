@@ -56,7 +56,6 @@ core.Audit -> core.DB_Management: 4
 core.Audit -> core.RAG: 2
 core.AuthNZ -> api.v1.API_Deps: 3
 core.AuthNZ -> services: 1
-core.Chat -> api.v1.endpoints.llm_providers: 1
 core.Claims_Extraction -> api.v1.utils: 1
 core.CodeGraph -> services: 1
 core.Collections -> services: 1
