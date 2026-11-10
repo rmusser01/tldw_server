@@ -343,3 +343,55 @@ async def test_users_own_key_serves_reads_the_users_stored_key(
     # The vendor's default host, whatever base URL this machine's config.txt or environment sets.
     monkeypatch.setattr(byok_helpers, "load_server_config_snapshot", dict)
     assert await usage_quota_deps.users_own_key_serves(user_id, "openai") is (lost is None)
+
+
+async def test_the_users_own_key_credentials_are_a_runtime_handle_for_that_key_only(monkeypatch) -> None:
+    """A handle for the user's own key, recorded as theirs; None for any other provider and for none (TASK-15426)."""
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+        is_runtime_issued_provider_call_credentials,
+    )
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    asked = users_own_key(monkeypatch, "openai")
+    handle = await usage_quota_deps.users_own_key_credentials(1, "openai")
+    assert is_runtime_issued_provider_call_credentials(handle, provider="openai")
+    assert (handle.api_key, handle.credential_source) == ("sk-users-own-key", "user")
+    assert await usage_quota_deps.users_own_key_credentials(1, "anthropic") is None
+    assert await usage_quota_deps.users_own_key_credentials(1, None) is None
+    assert asked == ["openai", "anthropic"]
+
+
+async def test_a_failed_resolution_keeps_the_servers_key(monkeypatch) -> None:
+    """The lookup said yes but the credential store fails: no handle, the server's key (TASK-15426)."""
+    from tldw_Server_API.app.core.Provider_Credentials import provider_credential_runtime as runtime_module
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    users_own_key(monkeypatch, "openai")
+
+    async def _down(name: str, **_kwargs: object) -> object:
+        """The credential store is unavailable."""
+        raise ByokResolutionError("credential_store_unavailable", name)
+
+    monkeypatch.setattr(runtime_module, "resolve_byok_credentials", _down)
+    assert await usage_quota_deps.users_own_key_credentials(1, "openai") is None
+
+
+async def test_enforce_on_own_key_asks_once_and_admits_only_with_a_handle(monkeypatch) -> None:
+    """Over the limit, the handle for the user's own key admits it unmarked; no handle is the 402 (TASK-15426)."""
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work, users_own_key
+
+    refuse_llm_work(monkeypatch)
+    asked = users_own_key(monkeypatch, "openai")
+
+    async def _enforce() -> tuple[object, bool]:
+        handle = await usage_quota_deps.enforce_llm_quota_on_own_key(1, "openai")
+        return handle, current_llm_call_context().prechecked
+
+    handle, prechecked = await asyncio.create_task(_enforce())
+    assert handle.api_key == "sk-users-own-key"
+    assert prechecked is False
+    for provider in ("anthropic", None):
+        with pytest.raises(LLMQuotaExceededError):
+            await usage_quota_deps.enforce_llm_quota_on_own_key(1, provider)
+    assert asked == ["openai", "anthropic"]
