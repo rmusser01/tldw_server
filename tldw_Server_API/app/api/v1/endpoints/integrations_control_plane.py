@@ -7,8 +7,8 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, User, get_auth_principal, get_request_user
-from tldw_Server_API.app.api.v1.endpoints.discord_oauth_admin import discord_oauth_start_impl
-from tldw_Server_API.app.api.v1.endpoints.discord_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.discord_oauth_admin import discord_oauth_start_impl
+from tldw_Server_API.app.api.v1.utils.chatops.discord_support import (
     _decrypt_discord_payload,
     _discord_policy_for_guild,
     _encrypt_discord_payload,
@@ -22,8 +22,8 @@ from tldw_Server_API.app.api.v1.endpoints.discord_support import (
     _oauth_state_ttl_seconds as _discord_oauth_state_ttl_seconds,
     _set_discord_policy,
 )
-from tldw_Server_API.app.api.v1.endpoints.slack_oauth_admin import slack_oauth_start_impl
-from tldw_Server_API.app.api.v1.endpoints.slack_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.slack_oauth_admin import slack_oauth_start_impl
+from tldw_Server_API.app.api.v1.utils.chatops.slack_support import (
     _coerce_nonempty_string,
     _decrypt_slack_payload,
     _encrypt_slack_payload,
@@ -37,7 +37,7 @@ from tldw_Server_API.app.api.v1.endpoints.slack_support import (
     _set_slack_policy,
     _slack_policy_for_workspace,
 )
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import (
     TelegramScope,
     _resolve_shared_scope,
     telegram_admin_get_bot_impl,

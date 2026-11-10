@@ -15,7 +15,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import try_get_watch
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.endpoints import workspace_memberships as workspace_memberships_endpoint
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,

@@ -35,11 +35,11 @@ from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_f
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
-from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
+from tldw_Server_API.app.api.v1.utils.media_deprecation_signals import (
     apply_media_legacy_headers,
     build_media_legacy_signal,
 )
-from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
+from tldw_Server_API.app.api.v1.utils.media_input_contracts import (
     normalize_urls_field,
     validate_media_inputs,
 )

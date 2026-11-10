@@ -6,7 +6,7 @@ import pytest
 from fastapi import Request
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import (
     TelegramCommand,
     TelegramScope,
     _handle_telegram_link_command,

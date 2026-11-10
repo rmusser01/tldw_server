@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tldw_Server_API.app.api.v1.endpoints import storage_helpers
+from tldw_Server_API.app.api.v1.utils import storage_helpers
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import FILE_CATEGORY_VOICE_CLONE
 

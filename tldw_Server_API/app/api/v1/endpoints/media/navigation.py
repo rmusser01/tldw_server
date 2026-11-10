@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.endpoints.media.document_outline import (
     _check_pymupdf_available,
     _extract_pdf_outline,
 )
-from tldw_Server_API.app.api.v1.endpoints.media_navigation_policy import (
+from tldw_Server_API.app.api.v1.utils.media_navigation_policy import (
     MEDIA_NAVIGATION_ROUTE_POLICY,
 )
 from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (

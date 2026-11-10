@@ -40,7 +40,7 @@ from tldw_Server_API.app.api.v1.API_Deps.kanban_deps import (
     handle_kanban_db_error,
     kanban_rate_limit,
 )
-from tldw_Server_API.app.api.v1.endpoints.kanban._kanban_utils import resolve_limit_offset
+from tldw_Server_API.app.api.v1.utils.kanban import resolve_limit_offset
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.api.v1.schemas.kanban_schemas import (
     PaginationInfo,

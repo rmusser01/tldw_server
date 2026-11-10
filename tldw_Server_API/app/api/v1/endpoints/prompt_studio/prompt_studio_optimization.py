@@ -40,7 +40,7 @@ from tldw_Server_API.app.api.v1.utils.pagination import (
     build_page_pagination_meta,
     resolve_page_pagination_metadata,
 )
-from tldw_Server_API.app.api.v1.endpoints.prompt_studio.resource_binding import (
+from tldw_Server_API.app.api.v1.utils.prompt_studio_resource_binding import (
     authoritative_prompt_project,
     require_test_cases_in_project,
 )

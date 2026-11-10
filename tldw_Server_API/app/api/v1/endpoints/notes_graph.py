@@ -21,7 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     rbac_rate_limit,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import notes_sync_http_error
+from tldw_Server_API.app.api.v1.utils.notes_sync_errors import notes_sync_http_error
 from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     EdgeType,
     GraphFormat,

@@ -1018,7 +1018,7 @@ def test_request_body_over_the_import_size_limit_is_413_before_parsing(
 
 
 def test_body_size_limit_prefers_the_environment_and_ignores_unusable_values(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tldw_Server_API.app.api.v1.endpoints.chat_import_transport import (
+    from tldw_Server_API.app.api.v1.utils.chat_import_transport import (
         DEFAULT_CHAT_IMPORT_MAX_BODY_BYTES,
         chat_import_max_body_bytes,
     )

@@ -63,7 +63,7 @@ from typing import NamedTuple
 import pytest
 
 from tldw_Server_API.tests.lint import _ceilings
-from tldw_Server_API.tests.lint._ast_cache import REPO_ROOT
+from tldw_Server_API.tests.lint._ast_cache import APP_ROOT, REPO_ROOT, parse_tree
 
 pytestmark = pytest.mark.unit
 
@@ -443,6 +443,62 @@ def test_endpoint_patches_do_not_grow() -> None:
 def test_raised_endpoint_patch_ceilings_carry_a_new_reason() -> None:
     problems = _ceilings.reasonless_bumps(PATCHES, _measured())
     assert problems == [], "\n".join(problems)
+
+
+# --- The route-less pin: endpoints/ holds only modules that register routes ---------------------
+
+ROUTE_LESS_ALLOWED: dict[str, str] = {
+    "api/v1/endpoints/control_plane.py": "route handlers main.py registers with add_api_route",
+    "api/v1/endpoints/evaluations/evaluations_auth.py": "TASK-13950.74 moves it onto the AuthNZ dependencies",
+}
+_ROUTE_VERBS = frozenset(
+    {"get", "post", "put", "patch", "delete", "head", "options", "api_route", "websocket", "websocket_route", "route"}
+)
+_ROUTE_REGISTRARS = frozenset({"add_api_route", "add_api_websocket_route", "include_router"})
+
+
+def _registers_routes(tree: ast.Module) -> bool:
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for deco in node.decorator_list:
+                call = deco.func if isinstance(deco, ast.Call) else None
+                if isinstance(call, ast.Attribute) and call.attr in _ROUTE_VERBS:
+                    return True
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if node.func.attr in _ROUTE_REGISTRARS:
+                return True
+    return False
+
+
+def route_less_endpoint_modules(root: Path = APP_ROOT) -> list[str]:
+    """Sorted app-relative keys of ``api/<v>/endpoints`` modules that register no route."""
+    found = []
+    for path, tree in parse_tree(root).items():
+        parts = path.relative_to(root.resolve()).parts
+        if len(parts) > 3 and parts[0] == "api" and parts[2] == "endpoints" and path.name != "__init__.py":
+            if not _registers_routes(tree):
+                found.append("/".join(parts))
+    return sorted(found)
+
+
+def test_route_less_modules_are_found(tmp_path: Path) -> None:
+    root = _seed(
+        tmp_path,
+        {
+            "app/api/v1/endpoints/a.py": "from fastapi import APIRouter\nr = APIRouter()\n@r.get('/a')\ndef a():\n    return 1\n",
+            "app/api/v1/endpoints/b.py": "def helper():\n    return 1\n",
+            "app/api/v1/endpoints/c/__init__.py": "",
+            "app/api/v1/endpoints/c/agg.py": "from fastapi import APIRouter\nr = APIRouter()\nr.include_router(object())\n",
+            "app/api/v1/utils/u.py": "def helper():\n    return 1\n",
+        },
+    )
+    assert route_less_endpoint_modules(root / "app") == ["api/v1/endpoints/b.py"]
+
+
+def test_no_route_less_endpoint_modules() -> None:
+    found = set(route_less_endpoint_modules())
+    assert sorted(found - set(ROUTE_LESS_ALLOWED)) == []
+    assert sorted(set(ROUTE_LESS_ALLOWED) - found) == []  # an allowed module that grew routes is stale
 
 
 if __name__ == "__main__":

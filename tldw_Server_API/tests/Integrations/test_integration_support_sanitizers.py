@@ -24,7 +24,7 @@ class _LoggerStub:
 
 
 def test_emit_discord_support_counter_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import discord_support
+    from tldw_Server_API.app.api.v1.utils.chatops import discord_support
 
     def _raise_log_counter(*_args, **_kwargs):
         raise RuntimeError("discord support metrics exploded at /private/discord-support.db")
@@ -46,7 +46,7 @@ def test_emit_discord_support_counter_failure_log_is_sanitized(monkeypatch):
 
 
 def test_emit_slack_support_counter_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import slack_support
+    from tldw_Server_API.app.api.v1.utils.chatops import slack_support
 
     def _raise_log_counter(*_args, **_kwargs):
         raise RuntimeError("slack support metrics exploded at /private/slack-support.db")
@@ -68,7 +68,7 @@ def test_emit_slack_support_counter_failure_log_is_sanitized(monkeypatch):
 
 
 def test_decrypt_discord_payload_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import discord_support
+    from tldw_Server_API.app.api.v1.utils.chatops import discord_support
 
     def _raise_loads_envelope(_encrypted_blob: str):
         raise RuntimeError("discord decrypt failed at /private/discord-secrets.db")
@@ -87,7 +87,7 @@ def test_decrypt_discord_payload_failure_log_is_sanitized(monkeypatch):
 
 
 def test_decrypt_slack_payload_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import slack_support
+    from tldw_Server_API.app.api.v1.utils.chatops import slack_support
 
     def _raise_loads_envelope(_encrypted_blob: str):
         raise RuntimeError("slack decrypt failed at /private/slack-secrets.db")
@@ -106,7 +106,7 @@ def test_decrypt_slack_payload_failure_log_is_sanitized(monkeypatch):
 
 
 def test_decrypt_telegram_payload_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import telegram_support
+    from tldw_Server_API.app.api.v1.utils.chatops import telegram_support
 
     def _raise_loads_envelope(_encrypted_blob: str):
         raise RuntimeError("telegram decrypt failed at /private/telegram-secrets.db")
@@ -126,7 +126,7 @@ def test_decrypt_telegram_payload_failure_log_is_sanitized(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_telegram_webhook_scope_list_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import telegram_support
+    from tldw_Server_API.app.api.v1.utils.chatops import telegram_support
 
     class _Repo:
         async def list_secrets(self, *, provider: str):
@@ -150,7 +150,7 @@ async def test_telegram_webhook_scope_list_failure_log_is_sanitized(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_telegram_webhook_scope_fetch_failure_log_is_sanitized(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import telegram_support
+    from tldw_Server_API.app.api.v1.utils.chatops import telegram_support
 
     class _Repo:
         async def list_secrets(self, *, provider: str):

@@ -30,7 +30,7 @@ Storage defines shared storage abstractions and local filesystem helpers used by
 ## How It Connects
 
 - Storage endpoint modules in `app/api/v1/endpoints/storage.py`, `storage_user_files.py`, `storage_user_folders.py`, `storage_download.py`, `storage_usage.py`, and `storage_trash.py` expose user-facing storage operations.
-- `app/api/v1/endpoints/storage_helpers.py` contains shared conversion and authorization helpers used by storage endpoints.
+- `app/api/v1/utils/storage_helpers.py` contains shared conversion and authorization helpers used by storage endpoints.
 - `app/api/v1/endpoints/storage_admin_quotas.py` and `app/api/v1/endpoints/admin/admin_storage_quotas.py` expose storage quota administration.
 - AuthNZ quota repositories provide quota state used by `quota_enforcement.py`.
 - `app/core/File_Artifacts/`, `app/core/Image_Generation/`, `app/core/TTS/`, `app/core/VoiceAssistant/`, and `app/core/VN_Assets/` use storage helpers for file persistence and cleanup.
