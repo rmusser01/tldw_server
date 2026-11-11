@@ -112,7 +112,7 @@ jobs:
 
   frontend-unit-tests:
     name: frontend-unit-tests (${{ matrix.shard }}/8)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
@@ -570,7 +570,7 @@ jobs:
       always() && !cancelled() &&
       needs.changes.result == 'success' &&
       needs.changes.outputs.tldw_frontend_changed == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -619,7 +619,7 @@ jobs:
       always() && !cancelled() &&
       needs.changes.result == 'success' &&
       needs.shared-ui-coverage.result == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       # Each native blob includes uncovered source; allow room for all thirty-two maps.
