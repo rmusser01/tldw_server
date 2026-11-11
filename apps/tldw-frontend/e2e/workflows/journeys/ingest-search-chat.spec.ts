@@ -49,7 +49,8 @@ test.describe('Ingest -> Search -> Chat journey', () => {
     expect(serverInfo.available, 'Owned backend is required; unavailable is not a pass').toBe(true);
     // Remove the legacy title-settings fixture fulfillment before navigation.
     await page.unrouteAll({ behavior: 'wait' });
-    const runId = `uat390-${randomUUID()}`;
+    // Hyphenated numeric UUID groups can trigger the real phone-number redactor.
+    const runId = `uat390-${randomUUID().replaceAll('-', '_')}`;
     const evidence: Record<string, unknown> = {
       runId,
       mode,
