@@ -4,7 +4,7 @@ import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/ch
 import { formatSelectedHistory } from "@/db/dexie/helpers"
 import React, { lazy, Suspense, useContext, useState } from "react"
 
-import { Drawer, Tooltip } from "antd"
+import { Drawer, Tooltip, message } from "antd"
 import { EraserIcon, XIcon } from "lucide-react"
 import { IconButton } from "../Common/IconButton"
 import { useLocation, useNavigate } from "react-router-dom"
@@ -526,7 +526,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                           if (clearChat({ discardTemporaryConfirmed: true }) === false) return
 
                           const db = new PageAssistDatabase()
-                          await db.deleteAllChatHistory()
+                          try {
+                            await db.deleteAllChatHistory()
+                          } catch {
+                            message.error(t("common:deleteHistoriesError"))
+                            return
+                          }
                           await queryClient.invalidateQueries({
                             queryKey: ["fetchChatHistory"]
                           })

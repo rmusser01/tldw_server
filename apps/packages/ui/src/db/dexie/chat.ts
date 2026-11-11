@@ -31,6 +31,7 @@ import Dexie, { type ObservabilitySet, type UpdateSpec } from "dexie"
 import { db } from './schema';
 import { getAllModelNicknames, invalidateModelNicknameCache } from "./nickname";
 import { indexMessageSearchTokens, indexMessagesSearchTokens, searchTokenHistoryIds } from "./search-tokens";
+import { eraseLegacyChatSource, withLegacyChatErasure } from "./legacy-chat-storage";
 const PAGE_SIZE = 30;
 
 export { isOnDeviceHistory, isReadableOnDeviceHistory, isOwnedCachedServerHistory, type OnDeviceHistoryScope, type OnDeviceHistoryReadOptions, type VisibleServerChats } from "./history-selection";
@@ -448,20 +449,34 @@ export class PageAssistDatabase {
   }
 
   async deleteChatHistory(id: string) {
-    await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
-      assertNoPendingLocalSettingsWrite(await db.chatHistories.get(id));
-      await db.chatHistories.delete(id);
-      await db.messages.where('history_id').equals(id).delete();
-      await db.compareStates.delete(id);
+    await withLegacyChatErasure(async (legacy, waitForErase) => {
+      await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates, db.sessionFiles, db.searchTokens], async () => {
+        const history = await db.chatHistories.get(id);
+        assertNoPendingLocalSettingsWrite(history);
+        // Keep the row and its provenance until the legacy erase has succeeded.
+        if (legacy && history?.tldw_history_legacy_source) {
+          await waitForErase(eraseLegacyChatSource(legacy, history));
+        }
+        await db.chatHistories.delete(id);
+        await db.messages.where('history_id').equals(id).delete();
+        await db.searchTokens.filter((row) => row.history_id === id).delete();
+        await db.compareStates.delete(id);
+        if (history) await db.sessionFiles.delete(id);
+      });
     });
   }
 
   async deleteAllChatHistory() {
-    await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
-      (await db.chatHistories.toArray()).forEach(assertNoPendingLocalSettingsWrite);
-      await db.chatHistories.clear();
-      await db.messages.clear();
-      await db.compareStates.clear();
+    await withLegacyChatErasure(async (legacy, waitForErase) => {
+      await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates, db.sessionFiles, db.searchTokens], async () => {
+        (await db.chatHistories.toArray()).forEach(assertNoPendingLocalSettingsWrite);
+        if (legacy) await waitForErase(legacy.deleteAllChatHistory());
+        await db.chatHistories.clear();
+        await db.messages.clear();
+        await db.searchTokens.clear();
+        await db.compareStates.clear();
+        await db.sessionFiles.clear();
+      });
     });
   }
 
@@ -945,6 +960,8 @@ export class PageAssistDatabase {
         const destination = await db.chatHistories.get(history.id);
         if (destination?.local_settings_guard)
           history.local_settings_guard = destination.local_settings_guard;
+        if (destination?.tldw_history_legacy_source)
+          history.tldw_history_legacy_source = destination.tldw_history_legacy_source;
         if (destination && (destination.local_owner_key != null || destination.server_scope_key != null || destination.server_chat_id != null || destination.message_source === "server")) {
           // Restoring public data cannot clear or redirect an existing trusted owner.
           Object.assign(history, {
