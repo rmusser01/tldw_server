@@ -23,7 +23,7 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 
 | Path | Line | Import |
 | --- | ---: | --- |
-| `tldw_Server_API/app/core/Watchlists/fetchers.py` | 387 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.is_content_page` |
+| `tldw_Server_API/app/core/Watchlists/fetchers.py` | 383 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.is_content_page` |
 | `tldw_Server_API/app/services/enhanced_web_scraping_service.py` | 37 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.is_content_page` |
 | `tldw_Server_API/app/services/web_scraping_service.py` | 21 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib.scrape_from_sitemap` |
 | `tldw_Server_API/tests/DB_Management/test_media_db_api_imports.py` | 96 | `tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib` |
@@ -162,7 +162,7 @@ Machine-readable inventory: `Docs/Design/web_scraping_refactor_import_inventory.
 
 | Path | Line | Import |
 | --- | ---: | --- |
-| `tldw_Server_API/app/core/Watchlists/fetchers.py` | 388 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping.EnhancedWebScraper` |
+| `tldw_Server_API/app/core/Watchlists/fetchers.py` | 384 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping.EnhancedWebScraper` |
 | `tldw_Server_API/app/core/Web_Scraping/Article_Extractor_Lib.py` | 64 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping.RateLimiter` |
 | `tldw_Server_API/app/services/enhanced_web_scraping_service.py` | 41 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping.EnhancedWebScraper` |
 | `tldw_Server_API/app/services/enhanced_web_scraping_service.py` | 41 | `tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping.JobPriority` |
