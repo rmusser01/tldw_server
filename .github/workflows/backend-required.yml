@@ -384,7 +384,7 @@ jobs:
           PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
           TLDW_TEST_POSTGRES_REQUIRED: '1'
           TLDW_TEST_NO_DOCKER: '1'
-          TEST_DATABASE_URL: "postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports[5432] }}/tldw_test"
+          TEST_DATABASE_URL: "postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_test"
         run: |
           set -euo pipefail
           report="$RUNNER_TEMP/auth-postgres-teardown.xml"

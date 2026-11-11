@@ -24,6 +24,7 @@ Plan: 1. Bind the existing fixture and verify a deterministic red/green control.
 Local proof: ran the exact workflow command against existing PostgreSQL 18 and the real isolated Auth fixture. A real session connects immediately before the drop. The historical split terminate/drop raised ObjectInUseError (26.43 s outer); the merged atomic drop passed with one executed case and no skips (20.03 s outer). Historical source restored byte-for-byte. The observer verifies the database is absent and only recovers the same fixture database if the check fails. No runtime Auth code changed.
 
 The existing backend-required job runs this focused test before compile and the other backend tests. Its conditional PostgreSQL service is selected only after successful backend change detection. Missing PostgreSQL, pytest failure, and missing or skipped JUnit execution are blocking. The existing gate name, license admission and backend no-op contract are preserved. Scoped Bandit baseline/candidate 61/61, zero new findings; Ruff clean.
+PR #3443 follow-up: GitHub ran the PostgreSQL teardown test successfully on cce4068471. The separate actionlint job flagged the numeric port key. Confirmed the original error with actionlint 1.7.12, changed the key to a string, and verified the full workflow lint locally. Hosted checks on the new commit are pending.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
