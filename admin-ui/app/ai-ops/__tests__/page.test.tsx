@@ -171,7 +171,7 @@ describe('AIOpsPage', () => {
 
     expect(await screen.findByText('Top Agents by Cost')).toBeInTheDocument();
     // research-assistant appears in both agents and sessions tables
-    const agentBadges = screen.getAllByText('research-assistant');
+    const agentBadges = await screen.findAllByText('research-assistant');
     expect(agentBadges.length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText('code-reviewer').length).toBeGreaterThanOrEqual(1);
     // research-assistant cost: $12.50
