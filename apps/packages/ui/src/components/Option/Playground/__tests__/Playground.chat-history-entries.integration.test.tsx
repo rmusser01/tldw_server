@@ -23,6 +23,9 @@ import { useLocation, useNavigate } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 
+/** Lets a test lose the next navigation, as a cancelled one is lost. */
+const router = vi.hoisted(() => ({ dropNext: false }))
+
 vi.mock("react-router-dom", async (importOriginal) => {
   const actual = await importOriginal<typeof import("react-router-dom")>()
   const React = await import("react")
@@ -39,6 +42,10 @@ vi.mock("react-router-dom", async (importOriginal) => {
           }
           // A new navigation cancels the one still on its way, as Next.js does.
           if (inFlight !== null) clearTimeout(inFlight)
+          if (router.dropNext) {
+            router.dropNext = false
+            return
+          }
           inFlight = setTimeout(() => {
             inFlight = null
             navigate(to, options)
@@ -74,6 +81,14 @@ const seedChat = () => {
       { role: "assistant", content: "Alpha answer" }
     ]
   })
+  server.seedChat({
+    id: "chat-b",
+    title: "Beta topic",
+    turns: [
+      { role: "user", content: "Beta question" },
+      { role: "assistant", content: "Beta answer" }
+    ]
+  })
   return server
 }
 
@@ -82,11 +97,13 @@ const chrome = (
     <BrowserChrome />
     <HeaderNewChatButton />
     <SidebarServerChatButton chatId="chat-a" title="Alpha topic" />
+    <SidebarServerChatButton chatId="chat-b" title="Beta topic" />
   </>
 )
 
 describe("Playground chat history entries under a slow router (#3119)", { timeout: 60_000 }, () => {
   beforeEach(async () => {
+    router.dropNext = false
     await resetPlaygroundHarness()
   })
 
@@ -106,5 +123,17 @@ describe("Playground chat history entries under a slow router (#3119)", { timeou
       expect(useStoreMessageOption.getState().serverChatId).toBe("chat-a")
       expect(screen.getByText("Alpha answer")).toBeInTheDocument()
     }, HARNESS_WAIT)
+  })
+
+  it("a planned chat navigation that never lands does not hold the address for good", async () => {
+    const view = await renderPlayground({ server: seedChat(), extras: chrome })
+    await openSavedServerChat(view, { title: "Alpha topic", lastMessage: "Alpha answer" })
+    await waitFor(() => expect(address()).toBe("/chat?chat=chat-a"), HARNESS_WAIT)
+
+    // Opening Beta plans a navigation to its address; the router loses it.
+    router.dropNext = true
+    await openSavedServerChat(view, { title: "Beta topic", lastMessage: "Beta answer" })
+
+    await waitFor(() => expect(address()).toBe("/chat?chat=chat-b"), HARNESS_WAIT)
   })
 })

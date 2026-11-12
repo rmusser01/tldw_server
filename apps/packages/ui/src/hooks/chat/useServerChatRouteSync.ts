@@ -10,6 +10,7 @@ import {
   isServerChatNavigationPending,
   readServerChatRouteId,
   reportMountedChatRoute,
+  serverChatNavigationWaitMs,
   settleServerChatNavigation,
   withoutConsumedParams,
   withServerChatRouteId
@@ -37,6 +38,8 @@ export const useServerChatRouteSync = () => {
   const routeChatId = readServerChatRouteId(search)
   const characterRoute = isCharacterChatRouteSearch(search)
   const handledLocationKey = React.useRef<string | null>(null)
+  // Bumped when a planned navigation is given up, to write the address then.
+  const [plannedNavigationExpiry, setPlannedNavigationExpiry] = React.useState(0)
 
   React.useEffect(() => {
     reportMountedChatRoute({ namesChat: characterRoute || routeChatId !== null })
@@ -48,7 +51,7 @@ export const useServerChatRouteSync = () => {
     handledLocationKey.current = location.key
     if (characterRoute) return
     const state = useStoreMessageOption.getState()
-    if (locationChanged) settleServerChatNavigation(routeChatId)
+    if (locationChanged) settleServerChatNavigation()
     if (locationChanged && routeChatId) {
       if (routeChatId === state.serverChatId) return
       const opened = selectServerChat(
@@ -65,8 +68,15 @@ export const useServerChatRouteSync = () => {
     const activeChatId =
       openChatId && isAddressableServerChatId(openChatId) ? openChatId : null
     if (activeChatId === routeChatId) return
-    // A navigation that names this chat is on its way; let it land.
-    if (isServerChatNavigationPending(activeChatId)) return
+    // A navigation that names this chat is on its way; let it land, and look
+    // again if it never does.
+    if (isServerChatNavigationPending(activeChatId)) {
+      const timer = setTimeout(
+        () => setPlannedNavigationExpiry((count) => count + 1),
+        serverChatNavigationWaitMs()
+      )
+      return () => clearTimeout(timer)
+    }
     // A history handoff link is consumed by the Playground first; writing the
     // address meanwhile would drop it. Once it and any Settings or research
     // return parameters are consumed, writing from the router's stale query
@@ -87,6 +97,7 @@ export const useServerChatRouteSync = () => {
     location.key,
     location.pathname,
     navigate,
+    plannedNavigationExpiry,
     routeChatId,
     search,
     selectServerChat,

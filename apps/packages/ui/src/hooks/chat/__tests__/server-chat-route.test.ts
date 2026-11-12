@@ -1,14 +1,16 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   buildServerChatPath,
   historyHandoffState,
   isAddressableServerChatId,
   isCharacterChatRouteSearch,
   isServerChatNavigationPending,
+  PLANNED_CHAT_NAVIGATION_TIMEOUT_MS,
   planServerChatNavigation,
   readServerChatRouteId,
   reportMountedChatRoute,
   resetServerChatRouteState,
+  serverChatNavigationWaitMs,
   settleServerChatNavigation,
   withoutConsumedParams,
   withServerChatRouteId
@@ -58,7 +60,7 @@ describe("chat page addresses (XP-05)", () => {
     reportMountedChatRoute({ namesChat: true })
     expect(planServerChatNavigation(null)).toEqual({ to: "/chat", replace: false })
     expect(isServerChatNavigationPending(null)).toBe(true)
-    settleServerChatNavigation(null)
+    settleServerChatNavigation()
     expect(isServerChatNavigationPending(null)).toBe(false)
   })
 
@@ -66,8 +68,49 @@ describe("chat page addresses (XP-05)", () => {
     planServerChatNavigation("chat-b")
     expect(isServerChatNavigationPending("chat-b")).toBe(true)
     expect(isServerChatNavigationPending("chat-a")).toBe(false)
-    settleServerChatNavigation("chat-b")
+    settleServerChatNavigation()
     expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+})
+
+// #3119: a planned navigation that never lands (cancelled, or the page left
+// before it arrived) must not block the address for that chat for the rest
+// of the session.
+describe("a planned chat navigation that never lands", () => {
+  afterEach(() => {
+    resetServerChatRouteState()
+    vi.useRealTimers()
+  })
+
+  it("is forgotten when the chat page unmounts", () => {
+    reportMountedChatRoute({ namesChat: true })
+    planServerChatNavigation("chat-b")
+    reportMountedChatRoute(null)
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+
+  it("is forgotten when a location that does not name its chat arrives", () => {
+    planServerChatNavigation("chat-b")
+    settleServerChatNavigation()
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+
+  it("is replaced when another chat is planned", () => {
+    planServerChatNavigation("chat-b")
+    planServerChatNavigation("chat-c")
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+    expect(isServerChatNavigationPending("chat-c")).toBe(true)
+  })
+
+  it("is given up after a short wait", () => {
+    vi.useFakeTimers()
+    planServerChatNavigation("chat-b")
+    expect(serverChatNavigationWaitMs()).toBe(PLANNED_CHAT_NAVIGATION_TIMEOUT_MS)
+    vi.advanceTimersByTime(PLANNED_CHAT_NAVIGATION_TIMEOUT_MS - 1)
+    expect(isServerChatNavigationPending("chat-b")).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+    expect(serverChatNavigationWaitMs()).toBe(0)
   })
 })
 

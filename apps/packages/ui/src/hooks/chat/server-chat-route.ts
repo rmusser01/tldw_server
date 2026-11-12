@@ -136,11 +136,23 @@ type MountedChatRoute = { namesChat: boolean }
 
 let mountedChatRoute: MountedChatRoute | null = null
 /** The chat a planned navigation opens; `chatId: null` is New chat's bare chat page. */
-let pendingRoute: { chatId: string | null } | null = null
+let pendingRoute: { chatId: string | null; plannedAt: number } | null = null
 
-/** The chat page reports the chat its current address names while it is mounted. */
+/**
+ * How long the address sync waits for a planned navigation. A same-page
+ * navigation lands well within this; one that never lands (cancelled by a
+ * leave-page prompt, say) must not hold the address for good (#3119).
+ */
+export const PLANNED_CHAT_NAVIGATION_TIMEOUT_MS = 3_000
+
+/**
+ * The chat page reports the chat its current address names while it is
+ * mounted, and null when it unmounts. A navigation it planned can no longer
+ * land on it then, so the plan is dropped.
+ */
 export const reportMountedChatRoute = (route: MountedChatRoute | null) => {
   mountedChatRoute = route
+  if (route === null) pendingRoute = null
 }
 
 /**
@@ -148,13 +160,13 @@ export const reportMountedChatRoute = (route: MountedChatRoute | null) => {
  * page for New chat (`null`). The chat page's address sync leaves the URL
  * alone until this navigation lands, so a slow router (Next.js) does not
  * record the chat twice, and its in-place rewrite cannot cancel New chat's
- * history entry.
+ * history entry. A later plan replaces this one.
  */
 export const planServerChatNavigation = (
   chatId: string | null,
   chatPath = "/chat"
 ): { to: string; replace: boolean } => {
-  pendingRoute = { chatId }
+  pendingRoute = { chatId, plannedAt: Date.now() }
   return {
     to: chatId === null ? chatPath : buildServerChatPath(chatId, chatPath),
     // From a chat page with no chat in its address there is nothing to go Back to.
@@ -162,13 +174,25 @@ export const planServerChatNavigation = (
   }
 }
 
+/** Milliseconds the address sync may still wait for the planned navigation, or 0. */
+export const serverChatNavigationWaitMs = (): number => {
+  if (pendingRoute === null) return 0
+  const left = pendingRoute.plannedAt + PLANNED_CHAT_NAVIGATION_TIMEOUT_MS - Date.now()
+  if (left > 0) return left
+  pendingRoute = null
+  return 0
+}
+
 /** True while a navigation to `chatId` (null: the bare chat page) planned above has not landed yet. */
 export const isServerChatNavigationPending = (chatId: string | null): boolean =>
-  pendingRoute !== null && pendingRoute.chatId === chatId
+  serverChatNavigationWaitMs() > 0 && pendingRoute?.chatId === chatId
 
-/** A location naming `routeChatId` (null: no chat) arrived. */
-export const settleServerChatNavigation = (routeChatId: string | null) => {
-  if (pendingRoute !== null && pendingRoute.chatId === routeChatId) pendingRoute = null
+/**
+ * A new location arrived: the planned navigation landed, or something else
+ * replaced it and it will not. Either way the address sync stops waiting.
+ */
+export const settleServerChatNavigation = () => {
+  pendingRoute = null
 }
 
 /** Test seam: forget module state between tests. */
