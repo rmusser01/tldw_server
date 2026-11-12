@@ -2131,6 +2131,14 @@ class NoteStore:
             return []
 
         keyword_table = self._db._map_table_for_backend("keywords")
+        # Match by keyword identity, as the notes tag filter does: LOWER() misses
+        # non-ASCII case on SQLite and ß/SS on Postgres.
+        keyword_ids = self._active_keyword_ids_by_identity([normalized_tag], keyword_table).get(
+            normalize_keyword_identity(normalized_tag), []
+        )
+        if not keyword_ids:
+            return []
+        id_placeholders = ", ".join(["?"] * len(keyword_ids))
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
         related_clause, related_params = self._db._selected_owner_filter(self._db.client_id, "k")
         if include_deleted:
@@ -2139,21 +2147,21 @@ class NoteStore:
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
                 f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
-                "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? "
+                f"WHERE nk.keyword_id IN ({id_placeholders}) AND k.deleted = ? "
                 f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
-            params: list[Any] = [normalized_tag, self._deleted_value(False), limit]
+            params: list[Any] = [*keyword_ids, self._deleted_value(False), limit]
         else:
             query = (
                 "SELECT DISTINCT n.id, n.last_modified "
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
                 f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
-                "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? "
+                f"WHERE nk.keyword_id IN ({id_placeholders}) AND k.deleted = ? AND n.deleted = ? "
                 f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
             params = [
-                normalized_tag,
+                *keyword_ids,
                 self._deleted_value(False),
                 self._deleted_value(False),
                 limit,
