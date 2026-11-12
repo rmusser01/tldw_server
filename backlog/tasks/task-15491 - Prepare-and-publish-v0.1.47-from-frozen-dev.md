@@ -17,8 +17,8 @@ Promote reviewed dev through PR #3443 to main, preserving main-only updates and 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Release candidate preserves the frozen main and dev histories and passes release metadata checks.
-- [ ] #2 Changelog summarizes notable shipped changes and upgrade requirements.
+- [x] #1 Release candidate preserves the frozen main and dev histories and passes release metadata checks.
+- [x] #2 Changelog summarizes notable shipped changes and upgrade requirements.
 - [ ] #3 The release PR passes required checks and receives human Change summary and license date approval before merge.
 - [ ] #4 The reviewed main merge is tagged and published, server artifacts are verified, and main is synchronized back to dev.
 <!-- AC:END -->
@@ -27,6 +27,7 @@ Promote reviewed dev through PR #3443 to main, preserving main-only updates and 
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR required: no. This promotion follows the existing release and licensing process without changing policy or architecture. Candidate cutoff: dev 04905e02eafc34f3b8d82d30e013a81c660028d0; main 25dbf5e7b26b973ae78ac302350589e720eb7980.
+Draft promotion PR: https://github.com/rmusser01/tldw_server/pull/3454. The final local candidate passed 285 focused tests including strict MkDocs and protected-source equality (8,300 files); the main-base task format ratchet and backlog ID check passed separately. The FastAPI entry point compiles on Python 3.12 and scoped Bandit reports zero findings. Proposed release date 2026-11-12 and Countdown start 2028-11-12T12:00:00Z remain pending human approval, as does the human Change summary. Full runtime/UAT and final-head CI are not claimed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

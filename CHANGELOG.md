@@ -9,6 +9,29 @@ and this project adheres to Some kind of Versioning
 
 ### Added
 
+
+### Changed
+
+
+### Fixed
+
+
+### Removed
+
+## [0.1.47] - 2026-11-12
+
+Promotes dev through PR #3443 and includes the changes already on main since
+v0.1.46. See the [full change inventory](Docs/Development/releases/0.1.47-change-inventory.md).
+
+**Before upgrading:** Use Python 3.12 or later. Back up persistent data and stop
+API and worker writers before starting the upgrade. Production installs should
+check authentication secrets, PostgreSQL settings and outbound allowlists.
+Review the WebSocket credential changes and the keyword/tag migration notes
+below. Clients using deprecated query credentials should move to a supported
+header or the bearer subprotocol.
+
+### Added
+
 - **Agent Tasks can execute and track work.** The encrypted message store introduced in 0.1.46 now feeds the executor. Tool calls carry a structured result envelope for inspection (#3042, #3231).
 - **Semantic search for Notes.** Notes can be indexed by meaning for retrieval when embeddings are configured (#2862).
 - **Per-user limits for shared model use.** Administrators can configure concurrency and usage quotas; usage recording now covers more LLM entry points. Personal provider keys are exempt from shared-provider quotas only when the request actually uses the caller's key (#3144, #3222, #3230, #3234, #3271, #3371, #3391, #3427).
@@ -64,7 +87,6 @@ and this project adheres to Some kind of Versioning
 - ACP and Prompt Studio WebSockets no longer accept `Authorization: X-API-KEY <key>` or the `api-key, <key>` subprotocol; no client sent either (TASK-13950.7).
 - The Sandbox run stream WebSocket no longer reads a credential from `?auth_token=` or, with signed URLs off, `?token=`; no client sent either. A signed `log_stream_url`'s `token` and `exp` are unchanged (TASK-13950.7).
 - The Persona stream WebSocket no longer accepts MCP-issued JWTs (from `/api/v1/mcp/auth/token`), which it tried when AuthNZ refused a token and which carry no AuthNZ revocation check; no client sent one. Use an AuthNZ access token or an API key (TASK-13950.7).
-
 ## [0.1.46] - 2026-10-01
 
 Promotes development changes since 0.1.45 through PR #3073. See the
