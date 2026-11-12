@@ -52,3 +52,5 @@ def test_continued_reply_prefix_refuses_replies_without_continuable_text(item):
     with pytest.raises(HistorySelectionError) as excinfo:
         continued_reply_prefix(item)
     assert excinfo.value.code == UNSUPPORTED_CONTINUATION
+    # Only this reply is the problem: Regenerate on its question can still run.
+    assert excinfo.value.details == {"reason": "reply"}

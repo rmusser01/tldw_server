@@ -17,6 +17,7 @@ from tldw_Server_API.tests.Chat_NEW.integration.test_history_branch_admission_ap
     select,
     send,
 )
+from tldw_Server_API.tests.Chat_NEW.integration.test_history_regeneration_api import regenerate
 
 
 def answered(client, cid, headers):
@@ -167,7 +168,33 @@ def test_invalid_continue_never_reaches_provider_or_message_writes(history_api, 
     if boundary in {"missing-authority", "branch-false", "without-selection"}:
         assert response.json()["detail"]["code"] == "unsupported_history_continuation"
         assert response.json()["detail"]["status"] == "unsupported_history_capability"
+        # The reason tells the client which reply actions to withdraw: a
+        # question without an admission refuses Regenerate too; a malformed
+        # request says nothing about the saved question or reply.
+        assert response.json()["detail"]["reason"] == (
+            "question" if boundary == "missing-authority" else "request"
+        )
     assert (db.get_messages_for_conversation(cid), db.get_conversation_by_id(cid)) == before
+
+
+def test_continue_refusal_of_the_reply_alone_keeps_regenerate(history_api):
+    # A reply with no text to extend refuses Continue only; the saved question
+    # can still be regenerated, so the refusal must say the reply was the problem.
+    client, db, cid, headers = history_api
+    answered(client, cid, headers)
+    db.update_message("a1", {"content": "   "}, 1)
+    selection = select(client, cid, headers, after="a1")
+    before = db.get_messages_for_conversation(cid)
+    response = continue_reply(client, cid, headers, selection)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "status": "unsupported_history_capability",
+        "code": "unsupported_history_continuation",
+        "reason": "reply",
+    }
+    assert db.get_messages_for_conversation(cid) == before
+    regenerated = regenerate(client, cid, headers, selection)
+    assert regenerated.status_code == 200, regenerated.text
 
 
 def test_continue_requires_a_valid_reply_id(history_api):
@@ -192,5 +219,6 @@ def test_continue_refuses_tool_definitions(history_api):
     assert response.json()["detail"] == {
         "status": "unsupported_history_capability",
         "code": "unsupported_history_continuation",
+        "reason": "request",
     }
     assert db.get_messages_for_conversation(cid) == before

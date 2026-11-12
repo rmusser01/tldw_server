@@ -906,7 +906,7 @@ export const sendNativeHistoryCharacter = async (
           isSavedReplyActionRefusal(error)) {
         // CM-01: the server refused before admitting or generating anything, so
         // there is nothing to recover; the reply's actions now say why.
-        rememberSavedReplyRefusal(regenerate)
+        rememberSavedReplyRefusal(regenerate, error)
         await dismissHistoryTurnRecovery(scope, view, operationId)
         throw error
       }

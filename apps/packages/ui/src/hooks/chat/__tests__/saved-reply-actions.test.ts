@@ -184,8 +184,12 @@ describe("remembered saved-reply refusals (CM-01)", () => {
     input_message_id: "u1", input_message_revision: "1", isCurrent: () => true, isOriginCurrent: () => true,
     ...(action ? { action } : {})
   })
-  const refusal = (code: string, status = "unsupported_history_capability") =>
-    ({ status: 409, details: { detail: { status, code } } })
+  const refusal = (code: string, status = "unsupported_history_capability", reason?: string) =>
+    ({ status: 409, details: { detail: { status, code, ...(reason ? { reason } : {}) } } })
+  const continueRefusal = (reason?: string) =>
+    refusal("unsupported_history_continuation", undefined, reason)
+  const regenerateRefusal = (reason?: string) =>
+    refusal("unsupported_history_regeneration", undefined, reason)
 
   it.each([
     [refusal("unsupported_history_regeneration"), true],
@@ -198,20 +202,43 @@ describe("remembered saved-reply refusals (CM-01)", () => {
     expect(isSavedReplyActionRefusal(error)).toBe(expected)
   })
 
+  const availability = () => savedReplyActionAvailability({ historySelection: ready(), messages: visible })
+
   it("disables both actions on a reply whose Regenerate was refused", () => {
-    rememberSavedReplyRefusal(intent())
-    expect(savedReplyActionAvailability({ historySelection: ready(), messages: visible }))
-      .toEqual({ regenerate: "unsupported", continue: "unsupported" })
+    rememberSavedReplyRefusal(intent(), regenerateRefusal("question"))
+    expect(availability()).toEqual({ regenerate: "unsupported", continue: "unsupported" })
   })
 
-  it("withdraws only Continue after a refused Continue", () => {
-    rememberSavedReplyRefusal(intent("continue"))
-    expect(savedReplyActionAvailability({ historySelection: ready(), messages: visible }))
-      .toEqual({ regenerate: null, continue: "unsupported" })
+  it("withdraws Regenerate too when Continue is refused because the saved question can't be reused", () => {
+    rememberSavedReplyRefusal(intent("continue"), continueRefusal("question"))
+    expect(availability()).toEqual({ regenerate: "unsupported", continue: "unsupported" })
+  })
+
+  it("keeps Regenerate when only the reply can't be continued", () => {
+    rememberSavedReplyRefusal(intent("continue"), continueRefusal("reply"))
+    expect(availability()).toEqual({ regenerate: null, continue: "unsupported" })
+  })
+
+  it.each([
+    ["continue" as const, { regenerate: null, continue: "unsupported" }],
+    [undefined, { regenerate: "unsupported", continue: null }]
+  ])("withdraws only the refused action (%s) when the request itself was refused", (action, expected) => {
+    rememberSavedReplyRefusal(intent(action), action ? continueRefusal("request") : regenerateRefusal("request"))
+    expect(availability()).toEqual(expected)
+  })
+
+  it.each([
+    ["continue" as const, continueRefusal()],
+    [undefined, regenerateRefusal()]
+  ])("withdraws both actions when a server without reasons refuses %s", (action, error) => {
+    // An older server can't say which part was refused; the client already
+    // checks the reply itself, so the saved question is the likely cause.
+    rememberSavedReplyRefusal(intent(action), error)
+    expect(availability()).toEqual({ regenerate: "unsupported", continue: "unsupported" })
   })
 
   it("does not carry a refusal to another revision of the reply", () => {
-    rememberSavedReplyRefusal({ ...intent(), message_revision: "2" })
+    rememberSavedReplyRefusal({ ...intent(), message_revision: "2" }, regenerateRefusal("question"))
     expect(savedReplyActionAvailability({ historySelection: ready(), messages: visible }))
       .toEqual({ regenerate: null, continue: null })
   })

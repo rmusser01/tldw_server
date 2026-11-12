@@ -17,15 +17,26 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from tldw_Server_API.app.core.Chat.history_selection import (
+    REPLY_ACTION_REFUSED_REPLY,
+    REPLY_ACTION_REFUSED_REQUEST,
+    reply_action_refusal,
+)
+
 CONTINUE_METADATA_KEY = "tldw_continue_from_message_id"
 UNSUPPORTED_CONTINUATION = "unsupported_history_continuation"
 _REPLY_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 
 
 def _unsupported() -> HTTPException:
+    # The request is not a valid Continue; the saved question and reply may be fine.
     return HTTPException(
         status_code=409,
-        detail={"status": "unsupported_history_capability", "code": UNSUPPORTED_CONTINUATION},
+        detail={
+            "status": "unsupported_history_capability",
+            "code": UNSUPPORTED_CONTINUATION,
+            "reason": REPLY_ACTION_REFUSED_REQUEST,
+        },
     )
 
 
@@ -69,10 +80,10 @@ def continued_reply_prefix(item: Mapping[str, Any]) -> str:
     """Return the saved reply text that a continuation extends.
 
     Only plain text replies can be extended: a reply with tool calls, images or
-    a stored content placeholder has no text the model could carry on.
+    a stored content placeholder has no text the model could carry on. That
+    refusal is about this reply alone (``reason: "reply"``), so Regenerate on
+    the same question can still run.
     """
-    from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
-
     extra = item.get("extra_metadata") or {}
     text = item.get("message")
     if (
@@ -84,7 +95,7 @@ def continued_reply_prefix(item: Mapping[str, Any]) -> str:
         or extra.get("tool_call_id") is not None
         or extra.get("content_placeholder_reason") is not None
     ):
-        raise HistorySelectionError(UNSUPPORTED_CONTINUATION)
+        raise reply_action_refusal(UNSUPPORTED_CONTINUATION, REPLY_ACTION_REFUSED_REPLY)
     return text
 
 

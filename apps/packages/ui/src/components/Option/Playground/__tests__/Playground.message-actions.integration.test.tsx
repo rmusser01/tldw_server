@@ -425,6 +425,10 @@ describe("native admitted continuation through the actual Playground", { timeout
       // The refusal is remembered: Continue is no longer offered on this reply.
       await waitForChatIdle()
       expect(screen.queryByText(/New reply unconfirmed|New reply refused/)).toBeNull()
+      // The saved question has no admission, so Regenerate would be refused too.
+      const regenerate = within(savedAssistantRow()).getByRole("button", { name: "Regenerate" })
+      expect(regenerate).toBeDisabled()
+      expect(regenerate).toHaveAttribute("title", expect.stringMatching(/can't be regenerated here/))
       await moreActions(view)
       expect(screen.queryByRole("button", { name: "Continue Response" })).toBeNull()
       expect(view.server.completionRequests()).toHaveLength(1)
