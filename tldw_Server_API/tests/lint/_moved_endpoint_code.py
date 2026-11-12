@@ -31,6 +31,7 @@ MOVED_OUT_OF_ENDPOINTS: tuple[str, ...] = (
     "tldw_Server_API/app/api/v1/utils/storage_helpers.py",
     "tldw_Server_API/app/api/v1/utils/workspace_chat_startup_transport.py",
     "tldw_Server_API/app/api/v1/utils/workspaces_rate_limit_policy.py",
+    "tldw_Server_API/app/core/Embeddings/media_embeddings.py",
     "tldw_Server_API/app/core/Sandbox/default_service.py",
 )
 

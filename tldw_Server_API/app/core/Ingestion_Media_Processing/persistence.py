@@ -2588,7 +2588,7 @@ async def schedule_media_add_embeddings(
                 provenance_payload: dict[str, Any],
             ) -> None:
                 try:
-                    from tldw_Server_API.app.api.v1.endpoints.media_embeddings import (  # type: ignore
+                    from tldw_Server_API.app.core.Embeddings.media_embeddings import (  # type: ignore
                         generate_embeddings_for_media,
                         get_media_content,
                     )

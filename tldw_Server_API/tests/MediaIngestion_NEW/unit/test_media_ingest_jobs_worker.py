@@ -979,7 +979,7 @@ async def test_media_ingest_schedule_embeddings_marks_media_processed(monkeypatc
 
     monkeypatch.setattr(worker, "mark_media_as_processed", _fake_mark_media_as_processed, raising=True)
 
-    import tldw_Server_API.app.api.v1.endpoints.media_embeddings as media_embeddings
+    import tldw_Server_API.app.core.Embeddings.media_embeddings as media_embeddings
 
     monkeypatch.setattr(media_embeddings, "get_media_content", _fake_get_media_content, raising=True)
     monkeypatch.setattr(
@@ -1033,7 +1033,7 @@ async def test_media_ingest_schedule_embeddings_marks_error_on_failure(monkeypat
 
     monkeypatch.setattr(worker, "mark_media_as_processed", _fail_if_processed, raising=True)
 
-    import tldw_Server_API.app.api.v1.endpoints.media_embeddings as media_embeddings
+    import tldw_Server_API.app.core.Embeddings.media_embeddings as media_embeddings
 
     monkeypatch.setattr(media_embeddings, "get_media_content", _fake_get_media_content, raising=True)
     monkeypatch.setattr(
@@ -1093,7 +1093,7 @@ async def test_media_ingest_schedule_embeddings_retries_conflict_without_marking
 
     monkeypatch.setattr(worker, "mark_media_as_processed", _flaky_mark_media_as_processed, raising=True)
 
-    import tldw_Server_API.app.api.v1.endpoints.media_embeddings as media_embeddings
+    import tldw_Server_API.app.core.Embeddings.media_embeddings as media_embeddings
 
     monkeypatch.setattr(media_embeddings, "get_media_content", _fake_get_media_content, raising=True)
     monkeypatch.setattr(
