@@ -173,9 +173,9 @@ def test_main_hashes_loaded_dependencies_even_on_failure(
         """Supply the case boundary; main must require every accepted profile."""
         receipt = args[5]
         profiles = (
-            ("mismatch", "readiness", "protocol")
+            ("mismatch", "readiness", "protocol", "workspace", "missing_agent")
             if outcome == "incomplete"
-            else ("mismatch", "readiness", "protocol", "workspace")
+            else ("mismatch", "readiness", "protocol", "workspace", "missing_agent", "boot_stall")
         )
         receipt["cases"] = {
             profile + suffix: {"ok": True} for profile in profiles for suffix in ("-positive", "-negative")

@@ -43,9 +43,9 @@ Create an implementation plan for the approved llama.cpp server management WebUI
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-15-llamacpp-server-management-webui-implementation-plan.md. Verified it includes concrete backend/frontend/test/docs files, TDD steps, commands, expected outcomes, commit boundaries, and the approved V1 constraints. Ran git diff --check for the plan file and an rg ambiguity scan for TODO/TBD/placeholders/optional planning language; tightened optional panel creation and provider/config override behavior. Subagent review was not dispatched because this session's tool policy only allows spawning agents when explicitly requested by the user; performed the plan-document-reviewer checklist manually instead. Bandit skipped because this task changes only docs and Backlog records.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

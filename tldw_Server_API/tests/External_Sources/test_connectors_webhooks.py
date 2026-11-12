@@ -7,6 +7,7 @@ import aiosqlite
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.External_Sources import connectors_service as svc
 from tldw_Server_API.app.core.External_Sources.sync_adapter import FileSyncWebhookSubscription
 
@@ -23,7 +24,7 @@ def connectors_client() -> Tuple[TestClient, dict]:
     from tldw_Server_API.app.main import app
     from tldw_Server_API.app.api.v1.endpoints import connectors as connectors_router
 
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_served_routes(app.routes)}
     if "/api/v1/connectors/sources" not in paths:
         app.include_router(connectors_router.router, prefix="/api/v1", tags=["connectors"])
 
@@ -568,3 +569,19 @@ async def test_worker_drive_subscription_renewal_round_trips_webhook_metadata(mo
     assert sync_state_updates[-1]["webhook_expires_at"] == "2026-03-10T00:00:00Z"
     assert sync_state_updates[-1]["webhook_metadata"]["resourceId"] == "drive-resource-2"
     assert sync_state_updates[-1]["webhook_metadata"]["pageToken"] == "drive-cursor-2"
+
+
+@pytest.mark.unit
+def test_webhook_get_and_post_have_distinct_operation_ids() -> None:
+    """A two-method route puts one operationId on both methods, which breaks client generation (TASK-13890)."""
+    from fastapi import FastAPI
+
+    from tldw_Server_API.app.api.v1.endpoints import connectors as connectors_router
+
+    app = FastAPI()
+    app.include_router(connectors_router.router, prefix="/api/v1")
+    item = app.openapi()["paths"]["/api/v1/connectors/providers/{provider}/webhook"]
+    assert set(item) == {"get", "post"}
+    assert item["get"]["operationId"] != item["post"]["operationId"]
+    assert item["get"]["operationId"].endswith("_get")
+    assert item["post"]["operationId"].endswith("_post")

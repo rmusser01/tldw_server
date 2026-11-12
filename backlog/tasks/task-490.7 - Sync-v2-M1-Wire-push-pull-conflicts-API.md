@@ -42,7 +42,7 @@ Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md#tas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented push accepted apply outcome reporting, including object revision where known, apply status, and apply error details. Failed projections remain accepted in the envelope log and visible through replay/pull apply status.
 
 Conflict resolution now persists M1 action names, treats `skip` as a dismissed durable decision without mutating historical envelopes, rejects unsupported actions including legacy `dismiss`, and materializes accepted `overwrite`/`duplicate_rename` resolution envelopes.
@@ -58,7 +58,7 @@ Quality re-review follow-up for commit `597842749`: resolution envelopes for `ov
 Second quality re-review follow-up for commit `8f10eb57`: `SyncDatabase.resolve_conflict` now makes the durable conflict transition atomic by updating only unresolved rows and returning already-resolved rows only for exact durable replays. Conflicting second store-level resolutions raise without changing the original resolution metadata. Resolution-envelope replay matching now delegates to the store's full envelope idempotency fingerprint instead of a partial service-side field comparison, so changed payload/routing/base metadata with reused envelope keys is rejected as an already-resolved conflict replay attempt.
 
 Third quality re-review follow-up for commit `ac6848439`: `overwrite`/`duplicate_rename` resolution now claims an unresolved conflict before accepting or materializing the resolution envelope. Conflicting preclaimed resolutions are rejected before projection, matching claims are required for finalization, and failed/conflicting materialization releases the claim so the original conflict remains retryable and unclaimed while the accepted failed/conflict envelope remains replayable.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,0 +1,28 @@
+{
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-zjqe1mng",
+  "sample": {
+    "id": 1,
+    "type": "email",
+    "title": "ArchiveThroughput 0-000",
+    "body": "Unique synthetic archive body batch 0 message 0.",
+    "owner_user_id": 1,
+    "client_id": "1",
+    "deleted": false,
+    "is_trash": false,
+    "vector": "'-000':3 '0':2,9,11 'archiv':6 'archivethroughput':1 'batch':8 'bodi':7 'messag':10 'synthet':5 'uniqu':4"
+  },
+  "owner": 1,
+  "normalized_query": "ArchiveThroughput | archivethroughput",
+  "inventory": {
+    "media_rows": 1700,
+    "emails": 1700,
+    "missing_vectors": 0,
+    "matching_titles": 1700,
+    "matching_vectors": 1700
+  },
+  "legacy_current_parameter_order_count": 0,
+  "sql_parameter_order_count": 1700,
+  "read_only_transactions": true,
+  "outbound": 0,
+  "models": 0
+}

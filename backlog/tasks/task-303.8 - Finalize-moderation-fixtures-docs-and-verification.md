@@ -36,9 +36,9 @@ Stage 8 of the moderation remediation plan. Stabilize the route split and review
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 8 added moderation review E2E fixtures for populated empty permission-denied backend-error partial-data expired-undo and redacted-content states; updated page mapping and smoke inventory for /moderation and /moderation/rules; retained /moderation-playground as legacy redirect coverage; documented review versus content rules, permissions, sanitized data, retention and minimization, review env vars, and known unsupported producer/export states. Verification recorded: backend focused pytest 57 passed with 5 warnings; frontend focused Vitest 25 files and 239 tests passed; Playwright/CDP tier-5 route responsive review and power-user specs 10 passed; apps/extension verify:openapi passed with 265 ClientPath entries verified, 10 exception paths allowed, and 49 schema fallback fields verified; design-state guard ran and failed on existing AgentRegistry/AgentTasks baseline and stale baseline entries with no moderation files implicated; Bandit results empty; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

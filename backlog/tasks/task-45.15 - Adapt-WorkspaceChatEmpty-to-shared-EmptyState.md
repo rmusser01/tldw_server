@@ -43,7 +43,7 @@ Migrate the Workspace Playground chat empty-state wrapper onto the canonical Emp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red checks: removing the WorkspaceChatEmpty baseline entry made bun run verify:design-system-state fail with the expected blocked local-empty-state finding for src/components/Option/WorkspacePlayground/ChatPane/index.tsx. Adding the focused runtime assertion initially failed because the canonical EmptyState marker was absent. Test harnesses in ChatPane stage 2, stage 3, and stage 5 were wrapped in MemoryRouter because direct EmptyState renders the existing Knowledge QA Link path instead of the previous mocked FeatureEmptyState adapter path.
 
 Implementation: WorkspaceChatEmpty now imports and renders the canonical EmptyState directly with size lg and card variant while preserving the existing title, description, source-aware prompt chips, Knowledge QA link, source guidance, add-source CTA, and template actions. Removed the matching local-empty-state baseline entry.
@@ -55,7 +55,7 @@ Broader check on PR branch: bunx vitest run src/components/Option/WorkspacePlayg
 Qodo review follow-up: verified the same broader WorkspacePlayground folder command against origin/dev at afe6990ee before applying PR #1351 changes. The base branch also failed that command, with 8 failed files, 23 failed tests, and 278 passed tests. Base failures included existing ChatPane Link router-context errors that this PR's MemoryRouter test harness update removes, plus WorkspacePlayground failures outside the touched ChatPane slice. This shows the broad folder command is already red on dev and the remaining PR-branch broad-run failures are not introduced by the WorkspaceChatEmpty design-system migration.
 
 Review-fix verification: focused ChatPane plus product-state guard Vitest command passed with 6 files and 79 tests after the Qodo evidence update. bun run verify:design-system-state passed with 520 baseline exceptions. git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

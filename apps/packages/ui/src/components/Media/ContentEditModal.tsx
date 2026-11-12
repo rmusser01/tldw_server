@@ -4,6 +4,8 @@ import { useTranslation } from 'react-i18next'
 import { Copy, Save } from 'lucide-react'
 import { bgRequest } from '@/services/background-proxy'
 import { getTextStats } from '@/utils/text-stats'
+import { useConfirmDanger } from '@/components/Common/confirm-danger'
+import { RouteLeavePrompt } from '@/entries/shared/route-leave-prompt'
 
 interface ContentEditModalProps {
   open: boolean
@@ -29,6 +31,44 @@ export function ContentEditModal({
   const [saving, setSaving] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const triggerRef = useRef<HTMLElement | null>(null)
+  const confirmDanger = useConfirmDanger()
+  const closing = useRef(false)
+  const editorIdentity = useRef({ open, mediaId, text })
+  editorIdentity.current = { open, mediaId, text }
+  const dirty = text !== initialText
+
+  useEffect(() => {
+    editorIdentity.current.open = open
+    return () => { editorIdentity.current.open = false }
+  }, [open])
+
+  useEffect(() => {
+    if (!open || !dirty) return
+    const protectDraft = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', protectDraft)
+    return () => window.removeEventListener('beforeunload', protectDraft)
+  }, [open, dirty])
+
+  const handleClose = async () => {
+    if (saving || closing.current) return
+    closing.current = true
+    try {
+      const discard = !dirty || await confirmDanger({
+        title: t('mediaPage.unsavedContentTitle', 'Discard unsaved content changes?'),
+        content: t('mediaPage.unsavedContentWarning', 'Your edits have not been saved.'),
+        okText: t('common:discardChanges', 'Discard changes'),
+        cancelText: t('common:keepEditing', 'Keep editing')
+      })
+      const current = editorIdentity.current
+      if (discard && current.open && current.mediaId === mediaId && current.text === text) onClose()
+    } finally {
+      closing.current = false
+    }
+  }
+
 
   useEffect(() => {
     if (open) {
@@ -155,7 +195,10 @@ export function ContentEditModal({
     <Modal
       title={t('mediaPage.editContent', 'Edit Content')}
       open={open}
-      onCancel={onClose}
+      onCancel={() => void handleClose()}
+      closable={!saving}
+      maskClosable={!saving}
+      keyboard={!saving}
       afterOpenChange={handleAfterOpenChange}
       width={800}
       footer={
@@ -172,7 +215,8 @@ export function ContentEditModal({
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={onClose}
+              onClick={() => void handleClose()}
+              disabled={saving}
               className="px-3 py-1.5 text-sm text-text-muted hover:bg-surface2 rounded transition-colors"
               title={t('common:cancel', 'Cancel')}
             >
@@ -194,6 +238,7 @@ export function ContentEditModal({
       }
     >
       <div className="space-y-3">
+        {open && dirty && <RouteLeavePrompt when message={t('mediaPage.unsavedContentLeave', 'Leave and discard unsaved content changes?')} />}
         <textarea
           ref={textareaRef}
           value={text}

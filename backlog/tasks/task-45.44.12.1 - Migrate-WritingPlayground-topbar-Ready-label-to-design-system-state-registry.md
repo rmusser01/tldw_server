@@ -44,7 +44,7 @@ Replace the remaining hardcoded WritingPlayground topbar diagnostics Ready produ
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the WritingPlayground topbar Ready-label migration in isolated worktree .worktrees/design-system-next-slice-5. Red/green proof: the new focused topbar design-system test fails against the hardcoded Ready fallback and passes when the topbar uses READY_STATE_LABEL. Removed the matching canonical-state-label baseline entry and refreshed only the shifted WritingPlayground AntD Alert baseline IDs caused by the added import.
 
 Verification: bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingPlayground.topbar-design-system-state.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlaygroundDiagnosticsPanel.design-system-state.test.tsx src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed with 3 files and 54 tests. bun run verify:design-system-state passed with 483 baseline exceptions, 479 AntD product-state imports and 4 canonical-state-label exceptions remaining. JSON parse and git diff --check passed. bunx tsc --noEmit --pretty false still exits 2 on existing repo-wide type debt; touched-path filter found no diagnostics for WritingPlayground.topbar-design-system-state, WritingPlayground/index.tsx, design-system-product-state-baseline, or the task file. Bandit skipped because touched runtime scope is UI TypeScript, JSON baseline, and Backlog metadata only.
@@ -56,7 +56,7 @@ PR review follow-up: CodeRabbit requested scoping the topbar ready-label asserti
 PR review fix implemented: scoped the topbar ready-label test assertion to screen.getByTestId('writing-playground-topbar') and within(topbar).getByText(...), matching CodeRabbit's review thread.
 
 Review-fix verification: bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingPlayground.topbar-design-system-state.test.tsx --reporter=dot passed with 1 test. bunx vitest run src/components/Option/WritingPlayground/__tests__/WritingPlayground.topbar-design-system-state.test.tsx src/components/Option/WritingPlayground/__tests__/WritingPlaygroundDiagnosticsPanel.design-system-state.test.tsx src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed with 54 tests. bun run verify:design-system-state passed with 483 baseline exceptions. git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

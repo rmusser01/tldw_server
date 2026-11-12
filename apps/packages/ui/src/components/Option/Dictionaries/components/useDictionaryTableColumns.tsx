@@ -10,6 +10,7 @@ import {
   formatDictionaryChatReferenceTitle,
   formatDictionaryUsageLabel,
   formatRelativeTimestamp,
+  parseDictionaryTimestamp,
   normalizeDictionaryChatState,
   resolveDictionaryChatReferenceId,
 } from "../listUtils"
@@ -25,7 +26,7 @@ type UseDictionaryTableColumnsParams = {
   useCompactDictionaryActions: boolean
   onToggleActive: (record: any, checked: boolean) => Promise<void> | void
   onValidateDictionary: (dictionaryId: number) => void
-  onOpenChatContext: (chatRef: any) => void
+  onOpenChatContext: (chatRef: unknown, dictionary: unknown) => void
   onOpenEdit: (record: any) => void
   onOpenEntries: (dictionaryId: number) => void
   onOpenQuickAssign: (record: any) => void
@@ -169,7 +170,7 @@ export function useDictionaryTableColumns({
               <button
                 type="button"
                 className="text-xs underline decoration-dotted cursor-pointer"
-                onClick={() => onOpenChatContext(firstChat)}
+                onClick={() => onOpenChatContext(firstChat, record)}
                 aria-label={`Open most recent linked chat for ${record?.name || "dictionary"}`}
               >
                 {label}
@@ -189,7 +190,7 @@ export function useDictionaryTableColumns({
                           onClick={(event) => {
                             event.preventDefault()
                             event.stopPropagation()
-                            onOpenChatContext(chat)
+                            onOpenChatContext(chat, record)
                           }}
                           aria-label={`Open chat ${title} from dictionary usage`}
                         >
@@ -213,13 +214,13 @@ export function useDictionaryTableColumns({
         dataIndex: "updated_at",
         key: "updated_at",
         sorter: (a: any, b: any) => {
-          const valueA = new Date(a?.updated_at || 0).getTime()
-          const valueB = new Date(b?.updated_at || 0).getTime()
+          const valueA = parseDictionaryTimestamp(a?.updated_at)?.getTime() ?? 0
+          const valueB = parseDictionaryTimestamp(b?.updated_at)?.getTime() ?? 0
           return valueA - valueB
         },
         render: (value: string | null | undefined) => {
           const relative = formatRelativeTimestamp(value)
-          const absolute = value ? new Date(value).toLocaleString() : "No updates yet"
+          const absolute = parseDictionaryTimestamp(value)?.toLocaleString() ?? "No updates yet"
           return (
             <Tooltip title={absolute}>
               <span className="text-xs text-text-muted">{relative}</span>

@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.Collections.utils import (
     is_supported_reading_url,
     normalize_reading_status,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 try:
     from tldw_Server_API.app.core.Web_Scraping.url_utils import normalize_for_crawl
@@ -162,6 +163,11 @@ def _split_tags(value: str | None) -> list[str]:
     return [p for p in parts if p]
 
 
+def _sorted_tags(tags: Iterable[Any]) -> list[str]:
+    """Dedupe tags by identity, keeping first-seen casing, in identity order."""
+    return sorted(dedupe_keywords(tags), key=normalize_keyword_identity)
+
+
 def _normalize_tags(value: Any) -> list[str]:
     if not value:
         return []
@@ -174,9 +180,9 @@ def _normalize_tags(value: Any) -> list[str]:
                     tags.append(str(tag))
             elif entry:
                 tags.append(str(entry))
-        return sorted({t.strip().lower() for t in tags if t})
+        return _sorted_tags(tags)
     if isinstance(value, dict):
-        return sorted({str(k).strip().lower() for k in value if k})
+        return _sorted_tags(value)
     if isinstance(value, str):
         return _split_tags(value)
     return []
@@ -278,7 +284,7 @@ def normalize_import_items(items: Iterable[ReadingImportItem]) -> list[ReadingIm
         if not normalized_url:
             continue
 
-        normalized_tags = sorted({str(tag).strip().lower() for tag in (item.tags or []) if str(tag).strip()})
+        normalized_tags = _sorted_tags(item.tags or [])
         normalized_status = _normalize_status(item.status)
         normalized_title = str(item.title).strip() if item.title else None
         if not normalized_title:
@@ -307,7 +313,7 @@ def normalize_import_items(items: Iterable[ReadingImportItem]) -> list[ReadingIm
         merged[key] = ReadingImportItem(
             url=normalized_url,
             title=_merge_title(existing.title, normalized_item.title, normalized_url),
-            tags=sorted({*existing.tags, *normalized_item.tags}),
+            tags=_sorted_tags([*existing.tags, *normalized_item.tags]),
             status=_merge_status(existing.status, normalized_item.status),
             favorite=existing.favorite or normalized_item.favorite,
             notes=existing.notes or normalized_item.notes,

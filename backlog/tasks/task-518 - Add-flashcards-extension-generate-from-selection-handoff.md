@@ -46,7 +46,7 @@ Docs/superpowers/plans/2026-05-27-flashcards-extension-generate-handoff-implemen
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-05-27-flashcards-extension-generate-handoff-implementation-plan.md.
 
 Touched scope: sidepanel Flashcards route/tests, extension/WebUI flashcards docs, master UX fix list, and the implementation plan.
@@ -63,7 +63,7 @@ Verification:
 - PARTIAL: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false still reports only the unrelated CharacterListContent design-system density baseline.
 - PASS: git diff --check.
 - Bandit not applicable: no Python files touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

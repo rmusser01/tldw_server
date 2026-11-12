@@ -40,7 +40,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the no-source Studio state by replacing work-product and output generation controls with source-readiness guidance when no sources are selected.
 
 Wired StudioPane onRequestSources through WorkspacePlayground to focusWorkspacePane('sources'), which opens the Sources pane on desktop and switches to the Sources tab on mobile.
@@ -50,7 +50,7 @@ Focused Vitest: bunx vitest run src/components/Option/WorkspacePlayground/__test
 CDP smoke: /research-studio?tab=studio desktop showed source readiness and zero Executive Brief, More outputs, Slides Settings, or Audio Settings controls; mobile Open Sources tab activated Sources and showed the no-sources empty state.
 
 Bandit skipped because touched implementation is frontend TypeScript/TSX only; documentation update not relevant for this UI behavior slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

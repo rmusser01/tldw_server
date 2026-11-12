@@ -1,4 +1,3 @@
-import { mergeReasoningContent } from "@/libs/reasoning"
 import { extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
 
 export type StreamingChunk =
@@ -172,11 +171,12 @@ export const consumeStreamingChunk = (
   if (reasoningDelta) {
     const reasoningText =
       typeof reasoningDelta === "string" ? reasoningDelta : ""
-    const reasoningContent = mergeReasoningContent(fullText, reasoningText || "")
-    fullText = reasoningContent
-    contentToSave = reasoningContent
+    const reasoningContent = `${apiReasoning ? "" : "<think>"}${reasoningText}`
+    fullText += reasoningContent
+    contentToSave += reasoningContent
     apiReasoning = true
-  } else if (apiReasoning) {
+  }
+  if (apiReasoning && token) {
     fullText += "</think>"
     contentToSave += "</think>"
     apiReasoning = false

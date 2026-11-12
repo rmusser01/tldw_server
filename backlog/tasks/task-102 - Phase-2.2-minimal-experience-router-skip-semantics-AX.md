@@ -39,7 +39,7 @@ Narrow minimal experience router optional skip behavior after PR #1348 merged. T
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline focused selector passed before edits: minimal experience tests 2 passed, confirming current broad skip behavior is covered.
 
 TDD RED after test update failed as intended: experience specs still reported Exception and runtime import failures were skipped. GREEN focused selector passed after removing experience broad skip overrides: 3 passed.
@@ -53,7 +53,7 @@ Opened PR https://github.com/rmusser01/tldw_server/pull/1352 against dev for thi
 PR review follow-up: addressed valid test maintainability comments by asserting concrete optional skip exception classes, replacing exact debug-message equality with semantic log checks, and parameterizing runtime propagation across sharing, personalization, and companion.
 
 Review-fix validation: focused minimal experience selector passed 5 selected tests; full router group contract passed 123 tests; Bandit on minimal.py reported 0 results; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

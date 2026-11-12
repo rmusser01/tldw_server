@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 import json
 import os
 from pathlib import Path
@@ -16,9 +15,9 @@ from typing import Any, cast
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
-from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
+from tldw_Server_API.app.core.config_llm_providers import get_default_provider
+from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs import (
     ResearchWorkspaceOutputArtifactType,
     ResearchWorkspaceOutputSettings,
     ResearchWorkspaceOutputStatus,
@@ -26,7 +25,7 @@ from tldw_Server_API.app.api.v1.schemas.research_workspace_outputs import (
     ResearchWorkspaceOutputSubmitRequest,
     ResearchWorkspaceOutputSubmitResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.workspace_schemas import WorkspaceArtifactResponse
+from tldw_Server_API.app.core.Workspaces.workspace_schemas import WorkspaceArtifactResponse
 from tldw_Server_API.app.core.exceptions import (
     FileArtifactsError,
     FileArtifactsValidationError,
@@ -53,6 +52,7 @@ from tldw_Server_API.app.core.Slides.visual_style_resolver import resolve_builti
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError, is_retryable_error
 from tldw_Server_API.app.core.TTS.tts_request_resolution import resolve_tts_request_defaults
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
+from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utc_now_iso
 
 RESEARCH_WORKSPACE_OUTPUT_JOB_DOMAIN = "research_workspace"
 RESEARCH_WORKSPACE_OUTPUT_JOB_QUEUE = "default"
@@ -708,7 +708,7 @@ async def _process_video_overview_output_payload(
                 generator.generate_from_text,
                 source_text=source_context.text,
                 title_hint=settings.title_hint,
-                provider=settings.provider or DEFAULT_LLM_PROVIDER,
+                provider=settings.provider or get_default_provider(),
                 model=settings.model,
                 api_key=None,
                 temperature=None,
@@ -1415,11 +1415,6 @@ def _mark_workspace_output_artifact_failed(
             },
         },
     )
-
-
-def _utc_now_iso() -> str:
-    """Return the current UTC time as an ISO timestamp."""
-    return datetime.now(UTC).isoformat()
 
 
 def _pending_artifact_payload(

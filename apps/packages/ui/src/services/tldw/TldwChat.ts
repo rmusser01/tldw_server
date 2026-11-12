@@ -1,3 +1,4 @@
+import type { ChatScope } from '@/types/chat-scope';
 import {
   tldwClient,
   ChatMessage,
@@ -15,6 +16,7 @@ import {
 import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 import type { ServicePromptRequestScope } from "./domains/service-prompts"
 import { isRequestConfigScopeChangedError } from "./service-prompt-scope-error"
+import { CHAT_STARTUP_TIMEOUT_DEFAULT_MS, ChatStreamTimeoutError } from "./chat-timeouts"
 
 const normalizeProvider = (value?: string): string =>
   String(value || "").trim().toLowerCase()
@@ -85,8 +87,9 @@ const hasReasoningProgress = (chunk: unknown): boolean => {
   )
 }
 
+// The native Chat display withholds typed reasoning; only answer text is visible.
 const hasVisibleAssistantProgress = (chunk: unknown): boolean =>
-  extractTokenFromChunk(chunk).length > 0 || hasReasoningProgress(chunk)
+  extractTokenFromChunk(chunk).length > 0;
 
 const readErrorMessage = (error: unknown, fallback = "Aborted"): string => {
   const seen = new Set<unknown>()
@@ -129,23 +132,26 @@ const createAbortError = (message = "Aborted"): Error => {
 
 const resolveStreamTimeoutError = (
   reason: "startup" | "idle" | null,
-  sawVisibleProgress: boolean
+  sawVisibleProgress: boolean,
+  startupTimeoutMs: number,
+  idleTimeoutMs: number
 ): Error | null => {
   if (reason === "startup" && !sawVisibleProgress) {
-    return new Error("Chat response timed out before any visible output arrived.")
+    return new ChatStreamTimeoutError("startup", startupTimeoutMs)
   }
   if (reason === "idle") {
-    return new Error("Chat response stalled after visible output began.")
+    return new ChatStreamTimeoutError("idle", idleTimeoutMs)
   }
   return null
 }
 
 const sanitizeUserContent = (
-  content: string | ChatCompletionContentPart[]
+  content: string | ChatCompletionContentPart[],
+  preserveTextWhitespace = false
 ): string | ChatCompletionContentPart[] | null => {
   if (typeof content === "string") {
     const trimmed = content.trim()
-    return trimmed.length > 0 ? trimmed : null
+    return trimmed.length > 0 ? content : null
   }
   if (!Array.isArray(content)) return null
 
@@ -153,8 +159,8 @@ const sanitizeUserContent = (
     .map((part) => {
       if (!part || typeof part !== "object") return null
       if (part.type === "text") {
-        const text = typeof part.text === "string" ? part.text.trim() : ""
-        return text.length > 0 ? { type: "text", text } : null
+        const text = typeof part.text === "string" ? part.text : ""
+        return (preserveTextWhitespace ? text.length : text.trim().length) > 0 ? { type: "text", text } : null
       }
       if (part.type === "image_url") {
         const candidate = part.image_url
@@ -173,7 +179,7 @@ const sanitizeUserContent = (
   return cleaned.length > 0 ? cleaned : null
 }
 
-const sanitizeMessages = (messages: ChatMessage[]): ChatMessage[] => {
+const sanitizeMessages = (messages: ChatMessage[], preserveTextWhitespace = false): ChatMessage[] => {
   return messages
     .map((message) => {
       if (message.role === "system") {
@@ -183,7 +189,7 @@ const sanitizeMessages = (messages: ChatMessage[]): ChatMessage[] => {
       }
 
       if (message.role === "user") {
-        const content = sanitizeUserContent(message.content)
+        const content = sanitizeUserContent(message.content, preserveTextWhitespace)
         if (content == null) return null
         return { ...message, content } as ChatMessage
       }
@@ -223,7 +229,8 @@ const buildRequestMessages = (
   messages: ChatMessage[],
   options: TldwChatOptions
 ): ChatMessage[] => {
-  const sanitizedMessages = sanitizeMessages(messages)
+  const savedReplyAction = Boolean(options.regenerateFromMessageId || options.continueFromMessageId)
+  const sanitizedMessages = sanitizeMessages(messages, savedReplyAction)
   const systemPrompt = normalizeSystemPrompt(options.systemPrompt)
   let withSystemPrompt: ChatMessage[]
   if (systemPrompt) {
@@ -243,12 +250,14 @@ const buildRequestMessages = (
     withSystemPrompt = sanitizedMessages
   }
 
-  if (options.regenerateFromMessageId) {
-    // Saved regeneration uses canonical server history. Sending the local
+  if (savedReplyAction) {
+    // Saved regeneration and continuation use canonical server history. Sending the local
     // prefix again would turn response variants into new persisted turns.
     const originalUser = withSystemPrompt.at(-1)
     if (originalUser?.role !== "user") {
-      throw new Error("Reload the saved user turn before regenerating its reply.")
+      throw new Error(options.continueFromMessageId
+        ? "Reload the saved user turn before continuing its reply."
+        : "Reload the saved user turn before regenerating its reply.")
     }
     withSystemPrompt = [...withSystemPrompt.filter(message => message.role === "system"), originalUser]
   }
@@ -295,6 +304,8 @@ export const prepareChatCompletionRequest = (
         top_p: options.topP,
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
+        topk: options.topK,
+        minp: options.minP,
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {
@@ -303,10 +314,12 @@ export const prepareChatCompletionRequest = (
             }
           : {}),
         save_to_db: options.saveToDb,
-        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
+        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ||
+          options.continueFromMessageId ? { metadata: {
           ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
           ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
-          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
+          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {}),
+          ...(options.continueFromMessageId ? { tldw_continue_from_message_id: options.continueFromMessageId } : {})
         } } : {}),
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
@@ -327,6 +340,7 @@ export const prepareChatCompletionRequest = (
 }
 
 export interface TldwChatOptions {
+  onDispatch?: () => void
   preparedRequest?: ChatCompletionRequest
   model: string
   routing?: ChatCompletionRequest["routing"]
@@ -337,6 +351,9 @@ export interface TldwChatOptions {
   topP?: number
   frequencyPenalty?: number
   presencePenalty?: number
+  /** Sent only when the provider accepts it; see ChatTldw (#3283). */
+  topK?: number
+  minP?: number
   stream?: boolean
   systemPrompt?: string
   reasoningEffort?: "low" | "medium" | "high"
@@ -346,6 +363,8 @@ export interface TldwChatOptions {
   retryFailedTurn?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
+  /** Native Continue (CM-01): extend this saved reply as a new server-settled alternative. */
+  continueFromMessageId?: string
   conversationId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
@@ -363,13 +382,15 @@ export interface TldwChatOptions {
   chatDebugMetadata?: ChatRequestDebugMetadata
   // Caller-owned AbortSignal (e.g. the UI Stop signal). When it fires, the
   // internal per-call controller is aborted so the underlying request stops.
-  signal?: AbortSignal
-  requestScope?: ServicePromptRequestScope
+  signal?: AbortSignal;
+  requestScope?: ServicePromptRequestScope;
+  scope?: ChatScope;
 }
 export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
 
 export interface ChatStreamChunk {
+  additional_kwargs?: { reasoning_content?: string }
   id?: string
   object?: string
   created?: number
@@ -379,6 +400,7 @@ export interface ChatStreamChunk {
     delta: {
       role?: string
       content?: string
+      reasoning_content?: string
       tool_calls?: Array<{
         index?: number
         id?: string
@@ -454,6 +476,8 @@ export class TldwChatService {
         top_p: options.topP,
         frequency_penalty: options.frequencyPenalty,
         presence_penalty: options.presencePenalty,
+        topk: options.topK,
+        minp: options.minP,
         reasoning_effort: options.reasoningEffort,
         ...(normalizedTools
           ? {
@@ -493,9 +517,10 @@ export class TldwChatService {
       const response = await tldwClient.createChatCompletion(request, {
         debugMetadata: options.chatDebugMetadata,
         signal: options.signal,
-        requestScope: options.requestScope
-      })
-      const data = await response.json().catch(() => null)
+        requestScope: options.requestScope,
+        scope: options.scope,
+      });
+      const data = await response.json().catch(() => null);
       if (onResponse) {
         onResponse(data)
       }
@@ -516,11 +541,23 @@ export class TldwChatService {
   /**
    * Send a streaming chat completion request
    */
+  streamMessage(
+    messages: ChatMessage[],
+    options: TldwChatOptions,
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>
+  ): AsyncGenerator<string, void, unknown>
+  streamMessage(
+    messages: ChatMessage[],
+    options: TldwChatOptions,
+    onChunk: ((chunk: ChatStreamChunk) => void | Promise<void>) | undefined,
+    includeReasoning: true
+  ): AsyncGenerator<string | ChatStreamChunk, void, unknown>
   async *streamMessage(
     messages: ChatMessage[],
     options: TldwChatOptions,
-    onChunk?: (chunk: ChatStreamChunk) => void
-  ): AsyncGenerator<string, void, unknown> {
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>,
+    includeReasoning = false
+  ): AsyncGenerator<string | ChatStreamChunk, void, unknown> {
     // Per-call abort controller: concurrent streams must not cancel each other.
     const controller = new AbortController()
     this.activeControllers.add(controller)
@@ -564,18 +601,27 @@ export class TldwChatService {
 
       const startupTimeoutMs = coercePositiveTimeout(
         cfg?.chatStartupTimeoutMs,
-        10_000
+        CHAT_STARTUP_TIMEOUT_DEFAULT_MS
       )
       const streamIdleTimeoutMs = coercePositiveTimeout(
         cfg?.chatStreamIdleTimeoutMs,
         30_000
       )
+      // The timers below enforce the startup limit until the first visible token
+      // and the idle limit between visible chunks. The transport (web fetch and
+      // the extension background port alike) also runs a byte-level idle timer
+      // from the value passed here. That timer already runs while the model is
+      // starting, and it cannot tell metadata frames from tokens, so it must be
+      // at least the startup budget or it cuts off a slow first token (#3107).
+      const transportIdleTimeoutMs = Math.max(startupTimeoutMs, streamIdleTimeoutMs)
       const stream = tldwClient.streamChatCompletion(request, {
+        onDispatch: options.onDispatch,
         signal: controller.signal,
-        streamIdleTimeoutMs,
+        streamIdleTimeoutMs: transportIdleTimeoutMs,
         debugMetadata: options.chatDebugMetadata,
-        requestScope: options.requestScope
-      })
+        requestScope: options.requestScope,
+        scope: options.scope,
+      });
 
       let idleTimer: ReturnType<typeof setTimeout> | null = null
       let startupTimer: ReturnType<typeof setTimeout> | null = null
@@ -632,18 +678,22 @@ export class TldwChatService {
 
             // Call the onChunk callback if provided
             if (onChunk) {
-              onChunk(chunk)
+              await onChunk(chunk);
             }
 
-            const token = extractTokenFromChunk(chunk)
-            if (token) {
-              yield token
+            if (includeReasoning && hasReasoningProgress(chunk)) {
+              yield chunk
+            } else {
+              const token = extractTokenFromChunk(chunk)
+              if (token) yield token
             }
           }
         } catch (error) {
           const timeoutError = resolveStreamTimeoutError(
             timeoutReason,
-            sawVisibleProgress
+            sawVisibleProgress,
+            startupTimeoutMs,
+            streamIdleTimeoutMs
           )
           if (timeoutError) {
             throw timeoutError
@@ -655,7 +705,9 @@ export class TldwChatService {
         }
         const timeoutError = resolveStreamTimeoutError(
           timeoutReason,
-          sawVisibleProgress
+          sawVisibleProgress,
+          startupTimeoutMs,
+          streamIdleTimeoutMs
         )
         if (timeoutError) {
           throw timeoutError
@@ -670,6 +722,7 @@ export class TldwChatService {
     } catch (error) {
       console.warn('Stream completion failed:', readErrorMessage(error))
       if (isRequestConfigScopeChangedError(error)) throw error
+      if (error instanceof ChatStreamTimeoutError) throw error
       if (isAbortLikeError(error)) {
         throw createAbortError(readErrorMessage(error))
       }

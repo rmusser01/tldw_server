@@ -26,7 +26,7 @@ Add discoverable Chatterbox capability metadata for the upstream-aligned control
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented capability metadata in ChatterboxAdapter.get_capabilities() for generation_parameters, speed_factor request fields, chunking aliases, and BF16 config/env modes. Added adapter test coverage that first failed on missing generation_parameters, then passed after implementation. Updated CHATTERBOX_SETUP.md and the upstream parity plan with the discoverability note.
 
 Verification:
@@ -35,7 +35,7 @@ Verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/TTS/adapters/test_chatterbox_adapter_mock.py -v (41 passed)
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/TTS/adapters/chatterbox_adapter.py -f json -o /tmp/bandit_chatterbox_capability_metadata_task544.json (results: [])
 - git diff --check (clean)
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

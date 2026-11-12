@@ -67,7 +67,7 @@ export const SourceFeedback = ({
   const isDisabled = disabled
 
   return (
-    <div className="flex items-center gap-2">
+    <div data-source-feedback className="flex items-center gap-2">
       <MessageSource
         source={source}
         onSourceClick={handleSourceClick}

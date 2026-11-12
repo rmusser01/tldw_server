@@ -41,7 +41,7 @@ Close out the Stage 1 first-class Watchlists implementation after the selector s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 1E verification notes:
 - Added and verified regression coverage for Watchlist-scoped outputs. New outputs now record metadata.watchlist_id, metadata.job_id, and metadata.run_id. GET /api/v1/watchlists/outputs?watchlist_id=<id> scopes through Watchlist job IDs so legacy job-linked outputs remain visible after migration. The job-ID lookup is paged rather than capped at a fixed job count.
 - Backend focused suite: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Watchlists/test_first_class_watchlists_db.py tldw_Server_API/tests/Watchlists/test_first_class_watchlists_api.py tldw_Server_API/tests/Watchlists/test_watchlists_api.py tldw_Server_API/tests/Watchlists/test_runs_list_global.py tldw_Server_API/tests/Watchlists/test_watchlist_clusters_api.py tldw_Server_API/tests/Watchlists/test_preview_endpoint.py -q. Result: 42 passed, 5 warnings in 319.01s.
@@ -51,7 +51,7 @@ Stage 1E verification notes:
 - Diff hygiene: git diff --check passed after final edits.
 - Browser/CDP: no rendered UI changes in Stage 1E. Reused Stage 1D CDP smoke evidence: /watchlists at extension-sized 390x844 with mocked API routes rendered the selector, create flow, mobile tab select, no horizontal overflow, and scoped watchlist_id=42 source request.
 - Remaining post-Stage-1 product work: setup wizard, content-match alerts, triage/change review, defensible report builder, lifecycle semantics, and full constrained-viewport management hardening.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

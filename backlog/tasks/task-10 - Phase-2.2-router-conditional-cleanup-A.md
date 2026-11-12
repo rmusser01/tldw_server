@@ -41,7 +41,7 @@ Conservative Phase 2.2 follow-up tranche for #1116. Characterize sandbox/ACP rou
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification completed:
 - RED: test_append_imported_router_spec_preserves_metadata failed before implementation with missing router_groups.conditional module.
 - GREEN/focused: router_groups_contract -k "append_imported_router_spec or acp or ACP or sandbox" passed 3 selected tests.
@@ -55,7 +55,7 @@ Verification completed:
   - Bandit review-follow-up scope: 0 findings in `/tmp/bandit_pr1242_router_groups.json`.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/1242
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

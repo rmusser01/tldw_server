@@ -175,16 +175,16 @@ export const STUDY_SAFETY_SPECIALIZED_ROUTE_JOBS: SpecializedRouteJob[] = [
   },
   {
     route: "/claims-review",
-    concept: "legacy_alias",
-    classification: "legacy_alias",
+    concept: "review_queue",
+    classification: "review_workflow",
     label: "Claims Review",
-    primaryJob: "Redirect to the canonical content review queue.",
-    primaryActionLabel: "Open Content Review",
-    routeOwner: "next_alias",
-    canonicalComponent: "RouteRedirect:/content-review",
-    modes: [],
+    primaryJob: "Save supported or unsupported Claims decisions and inspect reviewer history.",
+    primaryActionLabel: "Inspect claim",
+    routeOwner: "shared_route",
+    canonicalComponent: "ClaimsReviewShell",
+    modes: ["Queue", "Decisions", "History"],
     findings: ["F2 support", "F18 support"],
-    visibilityDecision: "alias_only"
+    visibilityDecision: "advanced_nav"
   },
   {
     route: "/data-tables",

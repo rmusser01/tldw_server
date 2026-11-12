@@ -171,17 +171,8 @@ _VIDEO_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _egress_block_private_override() -> Optional[bool]:
-    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING"):
-        return False
-    return None
-
-
 def _raise_if_url_blocked(url: str) -> None:
-    policy_result = evaluate_url_policy(
-        url,
-        block_private_override=_egress_block_private_override(),
-    )
+    policy_result = evaluate_url_policy(url)
     if not getattr(policy_result, "allowed", False):
         reason = policy_result.reason or "URL blocked by security policy"
         raise ValueError(f"URL blocked by security policy: {reason}")
@@ -200,7 +191,7 @@ def _validate_downloaded_url_video_file(downloaded_path: Path) -> None:
         processing_filename=downloaded_path.name,
         media_type="video",
         form_data=None,
-        media_mod=None,
+        file_validator=None,
         allowed_extensions=None,
     )
 
@@ -921,8 +912,7 @@ def process_videos(
     Processes multiple videos or local file paths, transcribes, summarizes,
     and optionally stores in the DB (if store_in_db=True).
 
-    This function was adapted from your old `process_videos_with_error_handling()`
-    but with Gradio references removed.
+    This function was adapted from `process_videos_with_error_handling()`.
 
     :param inputs: A list of either URLs or local file paths.
     :param start_time: Start time for partial transcription (e.g. "1:30" or "90").
@@ -1381,10 +1371,7 @@ def process_single_video(
 
         # 1. Get Metadata & Determine LOCAL Processing Path
         if is_remote:
-            block_override: Optional[bool] = None
-            if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("TESTING"):
-                block_override = False
-            policy_result = evaluate_url_policy(video_input, block_private_override=block_override)
+            policy_result = evaluate_url_policy(video_input)
             if not getattr(policy_result, "allowed", False):
                 reason = policy_result.reason or "URL blocked by security policy"
                 err_msg = f"URL blocked by security policy: {reason}"

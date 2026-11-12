@@ -1,9 +1,33 @@
-import { bgRequest } from "@/services/background-proxy"
+import { bgRequest, type BgRequestInit } from "@/services/background-proxy"
 import { buildQuery } from "@/services/resource-client"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import type { LegacyAudiobookProjectMigrationPayload } from "@/db/dexie/audiobook-projects"
+
+import { normalizeTtsProvidersResponse } from "@/services/tldw/audio-providers"
+import { extractVoices } from "@/services/tldw/audio-voices"
+import { normalizeTtsProviderKey } from "@/services/tldw/tts-provider-keys"
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+
+export type AudioStudioRequestOptions = {
+  requestScope?: ServicePromptRequestScope
+  signal?: AbortSignal
+  assertCurrent?: () => void
+  assertCanWrite?: () => void
+}
+
+const request = async <T>(init: BgRequestInit, options?: AudioStudioRequestOptions): Promise<T> => {
+  options?.assertCurrent?.()
+  if (!["GET", "HEAD"].includes(String(init.method ?? "GET").toUpperCase())) options?.assertCanWrite?.()
+  const fields = options?.requestScope ? requestScopeFields(options.requestScope) : {}
+  const result = await bgRequest<T>({ ...init, ...fields,
+    ...((fields.headers || init.headers) ? { headers: { ...fields.headers, ...init.headers } } : {}),
+    ...(options ? { abortSignal: options.signal, timeoutMs: 15000 } : {})
+  })
+  options?.assertCurrent?.()
+  return result
+}
 
 export type AudioStudioWorkflow = "narration" | "podcast" | "briefing" | "music"
 export type AudioStudioProjectStatus = "draft" | "active" | "archived" | string
@@ -41,6 +65,7 @@ export type AudioStudioSection = {
   body_text?: string
   speaker_id?: string
   order: number
+  order_index?: number
   revision_id?: string
   settings?: Record<string, unknown>
 }
@@ -50,6 +75,7 @@ export type AudioStudioTrack = {
   name: string
   kind: AudioStudioTrackKind
   order: number
+  order_index?: number
   muted?: boolean
   solo?: boolean
   revision_id?: string
@@ -121,7 +147,8 @@ export type AudioStudioMediaTicketResponse = {
   ticket_path: string
   ticket_url?: string | null
   expires_at: string
-  purpose: AudioStudioMediaTicketPurpose
+  purpose: AudioStudioMediaTicketPurpose,
+  options?: AudioStudioRequestOptions
   artifact_id: string
 }
 
@@ -246,17 +273,12 @@ export type AudioStudioGenerationCreateRequest = {
   options?: Record<string, unknown>
 }
 
-export type AudioStudioRenderCreateRequest = {
-  idempotency_key: string
-  timeline_revision_id?: string
-  settings?: Record<string, unknown>
-}
-
-export type AudioStudioExportCreateRequest = {
-  idempotency_key: string
-  format: "zip" | "wav" | "mp3" | string
-  render_id?: string
-  settings?: Record<string, unknown>
+type AudioStudioOutputCreateRequest = Pick<AudioStudioGenerationCreateRequest,
+  "idempotency_key" | "target_resource_kind" | "target_resource_id" | "target_revision_id" | "options"> & { settings?: Record<string, unknown> }
+export type AudioStudioRenderCreateRequest = AudioStudioOutputCreateRequest & { render_type: "preview_mix" | "final_mix" }
+export type AudioStudioExportCreateRequest = AudioStudioOutputCreateRequest & {
+  export_type: "single_audio" | "zip_package" | "narration_package" | "package"
+  source_render_id?: string
 }
 
 export type AudioStudioJobResponse = {
@@ -313,38 +335,45 @@ const resourcePath = (projectId: string, resource: string, resourceId: string) =
     `${API_BASE}/projects/${encodeURIComponent(projectId)}/${resource}/${encodeURIComponent(resourceId)}`
   )
 
-export const listAudioStudioWorkflows = async (): Promise<
+export const listAudioStudioWorkflows = async (options?: AudioStudioRequestOptions): Promise<
   AudioStudioWorkflowSummary[]
 > => {
-  const response = await bgRequest<AudioStudioWorkflowListResponse>({
+  const response = await request<AudioStudioWorkflowListResponse>({
     path: apiPath(`${API_BASE}/workflows`),
     method: "GET"
-  })
+  }, options)
   return response.workflows
 }
 
 export const listAudioStudioProjects = async (
-  params: ListAudioStudioProjectsParams = {}
+  params: ListAudioStudioProjectsParams = {},
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioProject[]> => {
   const query = buildQuery({
     workflow: params.workflow,
     include_archived: params.includeArchived
   })
-  const response = await bgRequest<AudioStudioProjectListResponse>({
+  const response = await request<AudioStudioProjectListResponse>({
     path: apiPath(`${API_BASE}/projects${query}`),
     method: "GET"
-  })
+  }, options)
   return response.projects
 }
 
 export const listAudioStudioArtifacts = async (
-  projectId: string
+  projectId: string,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioArtifact[]> => {
-  const response = await bgRequest<AudioStudioArtifactListResponse>({
-    path: apiPath(`${projectPath(projectId)}/artifacts`),
-    method: "GET"
-  })
-  return response.artifacts
+  const artifacts: AudioStudioArtifact[] = []
+  let offset = 0
+  while (true) {
+    const response = await request<AudioStudioArtifactListResponse>({
+      path: apiPath(`${projectPath(projectId)}/artifacts${buildQuery({ limit: 100, offset })}`), method: "GET"
+    }, options)
+    artifacts.push(...response.artifacts)
+    if (response.artifacts.length < 100) return artifacts
+    offset += response.artifacts.length
+  }
 }
 
 export const getAudioStudioArtifactMediaPath = (
@@ -360,12 +389,12 @@ const isAbsoluteHttpUrl = (value: string | null | undefined): value is string =>
   typeof value === "string" && /^https?:\/\//i.test(value)
 
 const resolveAudioStudioTicketBrowserUrl = async (
-  ticket: AudioStudioMediaTicketResponse
+  ticket: AudioStudioMediaTicketResponse, options?: AudioStudioRequestOptions
 ): Promise<string> => {
   if (isAbsoluteHttpUrl(ticket.ticket_url)) {
     return ticket.ticket_url
   }
-  const config = await tldwClient.getConfig().catch(() => null)
+  const config = options?.requestScope?.config ?? await tldwClient.getConfig().catch(() => null)
   return resolveBrowserRequestTransport({
     config,
     path: ticket.ticket_path
@@ -375,27 +404,29 @@ const resolveAudioStudioTicketBrowserUrl = async (
 export const mintAudioStudioArtifactMediaTicket = async (
   projectId: string,
   artifactId: string,
-  purpose: AudioStudioMediaTicketPurpose
+  purpose: AudioStudioMediaTicketPurpose,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioResolvedMediaTicket> => {
-  const response = await bgRequest<AudioStudioMediaTicketResponse>({
+  const response = await request<AudioStudioMediaTicketResponse>({
     path: apiPath(
       `${projectPath(projectId)}/artifacts/${encodeURIComponent(artifactId)}/tickets`
     ),
     method: "POST",
     headers: JSON_HEADERS,
     body: { purpose }
-  })
+  }, options)
   return {
     ...response,
-    ticket_url: await resolveAudioStudioTicketBrowserUrl(response)
+    ticket_url: await resolveAudioStudioTicketBrowserUrl(response, options)
   }
 }
 
 export const fetchAudioStudioArtifactBlob = async (
   projectId: string,
-  artifact: Pick<AudioStudioArtifact, "artifact_id" | "mime_type">
+  artifact: Pick<AudioStudioArtifact, "artifact_id" | "mime_type">,
+  options?: AudioStudioRequestOptions
 ): Promise<Blob> => {
-  const response = await bgRequest<{
+  const response = await request<{
     ok: boolean
     status: number
     data?: ArrayBuffer
@@ -406,7 +437,7 @@ export const fetchAudioStudioArtifactBlob = async (
     method: "GET",
     responseType: "arrayBuffer",
     returnResponse: true
-  })
+  }, options)
   if (!response?.ok) {
     throw new Error(response?.error || `Audio Studio artifact fetch failed: ${response?.status ?? "unknown"}`)
   }
@@ -417,111 +448,176 @@ export const fetchAudioStudioArtifactBlob = async (
 }
 
 export const createAudioStudioProject = async (
-  body: CreateAudioStudioProjectRequest
+  body: CreateAudioStudioProjectRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioProject> =>
-  bgRequest<AudioStudioProject>({
+  request<AudioStudioProject>({
     path: apiPath(`${API_BASE}/projects`),
     method: "POST",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const updateAudioStudioProject = async (
   projectId: string,
-  body: UpdateAudioStudioProjectRequest
+  body: UpdateAudioStudioProjectRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioProject> =>
-  bgRequest<AudioStudioProject>({
+  request<AudioStudioProject>({
     path: projectPath(projectId),
     method: "PATCH",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const upsertAudioStudioSection = async (
   projectId: string,
   sectionId: string,
-  body: AudioStudioSectionUpsertRequest
+  body: AudioStudioSectionUpsertRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioSectionResponse> =>
-  bgRequest<AudioStudioSectionResponse>({
+  request<AudioStudioSectionResponse>({
     path: resourcePath(projectId, "sections", sectionId),
     method: "PUT",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const upsertAudioStudioTrack = async (
   projectId: string,
   trackId: string,
-  body: AudioStudioTrackUpsertRequest
+  body: AudioStudioTrackUpsertRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioTrackResponse> =>
-  bgRequest<AudioStudioTrackResponse>({
+  request<AudioStudioTrackResponse>({
     path: resourcePath(projectId, "tracks", trackId),
     method: "PUT",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const upsertAudioStudioClip = async (
   projectId: string,
   clipId: string,
-  body: AudioStudioClipUpsertRequest
+  body: AudioStudioClipUpsertRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioClipResponse> =>
-  bgRequest<AudioStudioClipResponse>({
+  request<AudioStudioClipResponse>({
     path: resourcePath(projectId, "clips", clipId),
     method: "PUT",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const createAudioStudioGeneration = async (
   projectId: string,
-  body: AudioStudioGenerationCreateRequest
+  body: AudioStudioGenerationCreateRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioJobResponse> =>
-  bgRequest<AudioStudioJobResponse>({
+  request<AudioStudioJobResponse>({
     path: apiPath(`${projectPath(projectId)}/generations`),
     method: "POST",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const createAudioStudioRender = async (
   projectId: string,
-  body: AudioStudioRenderCreateRequest
+  body: AudioStudioRenderCreateRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioJobResponse> =>
-  bgRequest<AudioStudioJobResponse>({
+  request<AudioStudioJobResponse>({
     path: apiPath(`${projectPath(projectId)}/renders`),
     method: "POST",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const createAudioStudioExport = async (
   projectId: string,
-  body: AudioStudioExportCreateRequest
+  body: AudioStudioExportCreateRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudioStudioJobResponse> =>
-  bgRequest<AudioStudioJobResponse>({
+  request<AudioStudioJobResponse>({
     path: apiPath(`${projectPath(projectId)}/exports`),
     method: "POST",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const previewAudiobookMigration = async (
-  body: AudiobookMigrationPreviewRequest
+  body: AudiobookMigrationPreviewRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudiobookMigrationResponse> =>
-  bgRequest<AudiobookMigrationResponse>({
+  request<AudiobookMigrationResponse>({
     path: apiPath(`${API_BASE}/migrations/audiobook/preview`),
     method: "POST",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
 
 export const commitAudiobookMigration = async (
-  body: AudiobookMigrationCommitRequest
+  body: AudiobookMigrationCommitRequest,
+  options?: AudioStudioRequestOptions
 ): Promise<AudiobookMigrationResponse> =>
-  bgRequest<AudiobookMigrationResponse>({
+  request<AudiobookMigrationResponse>({
     path: apiPath(`${API_BASE}/migrations/audiobook/commit`),
     method: "POST",
     headers: JSON_HEADERS,
     body
-  })
+  }, options)
+
+export const getAudioStudioProject = (projectId: string, options?: AudioStudioRequestOptions) =>
+  request<AudioStudioProject>({ path: projectPath(projectId), method: "GET" }, options)
+
+export type AudioStudioJob = AudioStudioJobResponse & {
+  job_type: string
+  target_resource_id: string
+  target_revision_id: string
+  retry_count: number
+  max_retries: number
+  result?: Record<string, unknown> | null
+  error?: string | null
+}
+export const listAudioStudioJobs = async (projectId: string, options?: AudioStudioRequestOptions): Promise<AudioStudioJob[]> => {
+  const jobs: AudioStudioJob[] = []
+  let cursor: { before_id: number; created_before: string } | undefined
+  do {
+    const page = await request<{ jobs: AudioStudioJob[]; next_before_id: number | null; next_created_before: string | null }>({
+      path: apiPath(`${projectPath(projectId)}/jobs${buildQuery({ limit: 100, ...cursor })}`), method: "GET"
+    }, options)
+    jobs.push(...page.jobs)
+    cursor = page.next_before_id != null && page.next_created_before ? { before_id: page.next_before_id, created_before: page.next_created_before } : undefined
+  } while (cursor)
+  return jobs
+}
+export const cancelAudioStudioJob = (projectId: string, jobId: string, options?: AudioStudioRequestOptions) =>
+  request<AudioStudioJob>({ path: apiPath(`${projectPath(projectId)}/jobs/${encodeURIComponent(jobId)}/cancel`), method: "POST" }, options)
+
+export const getAudioStudioSpeechProviders = async (options?: AudioStudioRequestOptions) =>
+  normalizeTtsProvidersResponse(await request<unknown>({ path: "/api/v1/audio/providers", method: "GET" }, options))
+export const getAudioStudioVoices = async (provider: string, model: string, options?: AudioStudioRequestOptions) => {
+  const custom = extractVoices(await request<unknown>({ path: "/api/v1/audio/voices", method: "GET" }, options))
+    .filter((voice) => normalizeTtsProviderKey(voice.provider) === normalizeTtsProviderKey(provider))
+    .flatMap((voice) => {
+      const id = voice.voice_id ?? voice.id
+      return typeof id === "string" && id.trim() ? [{ ...voice, voice_id: id.startsWith("custom:") ? id : `custom:${id}`, name: `Custom: ${voice.name ?? id}` }] : []
+    })
+  try {
+    const builtin = extractVoices(await request<unknown>({ path: apiPath(`/api/v1/audio/voices/catalog${buildQuery({ provider, model })}`), method: "GET" }, options))
+    return [...builtin, ...custom]
+  } catch (error) {
+    // Providers with only user samples have no built-in catalog entry.
+    if (typeof error === "object" && error !== null && "status" in error && error.status === 404) {
+      options?.assertCurrent?.()
+      return custom
+    }
+    throw error
+  }
+}
+export const getAudioStudioProviders = async (options?: AudioStudioRequestOptions) =>
+  request<{ providers: { provider_id: string; supported_kinds: string[] }[] }>({ path: apiPath(`${API_BASE}/providers`), method: "GET" }, options)
+
+export type AudioStudioAdmissionKind = "generation" | "render" | "export"
+export type AudioStudioAdmissionBody = AudioStudioGenerationCreateRequest | AudioStudioRenderCreateRequest | AudioStudioExportCreateRequest
+export type AudioStudioAdmissionIntent = { kind: AudioStudioAdmissionKind; body: AudioStudioAdmissionBody; job_id?: string }

@@ -2443,7 +2443,7 @@ async def test_runtime_egress_tripwires_and_inert_result_urls_receive_zero_reque
     from tldw_Server_API.app.core.Third_Party import Semantic_Scholar
 
     monkeypatch.setattr(socket, "create_connection", forbidden)
-    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket.socket, "__new__", forbidden)
     monkeypatch.setattr(http.client, "HTTPConnection", forbidden)
     monkeypatch.setattr(http.client, "HTTPSConnection", forbidden)
     monkeypatch.setattr(urllib.request, "urlopen", forbidden)

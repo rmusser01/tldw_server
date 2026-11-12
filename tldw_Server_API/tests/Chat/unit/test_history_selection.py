@@ -99,7 +99,7 @@ def test_generated_cycle_and_orphan_reject(length: int) -> None:
 
 
 def test_shared_canonical_vectors() -> None:
-    fixture = json.loads(FIXTURE.read_text())
+    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     for vector in fixture["selection_vectors"]:
         assert canonical_selection_json(vector["selection"]) == vector["canonical_json"]
         assert selection_digest(vector["selection"]) == vector["selection_digest"]
@@ -154,7 +154,7 @@ def test_legacy_projection_rejects_cross_conversation_member() -> None:
 
 
 def test_strict_envelope_rejects_unknown_fields_and_malformed_cursor() -> None:
-    selection = json.loads(FIXTURE.read_text())["selection_vectors"][0]["selection"]
+    selection = json.loads(FIXTURE.read_text(encoding="utf-8"))["selection_vectors"][0]["selection"]
     assert HistorySelectionEnvelopeV1.model_validate({"selection": selection}).selection.selection_digest == ""
     with pytest.raises(ValidationError):
         HistorySelectionEnvelopeV1.model_validate({"selection": {**selection, "unexpected": True}})
@@ -163,14 +163,14 @@ def test_strict_envelope_rejects_unknown_fields_and_malformed_cursor() -> None:
 
 
 def test_comparison_selection_accepts_tagged_vector_and_rejects_extra_fields() -> None:
-    comparison = json.loads(FIXTURE.read_text())["comparison_vector"]["selection"]
+    comparison = json.loads(FIXTURE.read_text(encoding="utf-8"))["comparison_vector"]["selection"]
     assert CompareHistorySelectionV1.model_validate(comparison).model_id == "A"
     with pytest.raises(ValidationError):
         CompareHistorySelectionV1.model_validate({**comparison, "interpretation": {"kind": "parent_graph_v1"}})
 
 
 def test_capture_binds_text_and_multiple_images_to_manifest() -> None:
-    selection = json.loads(FIXTURE.read_text())["selection_vectors"][0]["selection"]
+    selection = json.loads(FIXTURE.read_text(encoding="utf-8"))["selection_vectors"][0]["selection"]
     rows = [
         {"id": "u1", "revision": "1", "parent_id": None, "role": "user", "settled": True},
         {"id": "a1", "revision": "2", "parent_id": "u1", "role": "assistant", "settled": True},
@@ -239,7 +239,7 @@ def test_core_values_copy_and_freeze_nested_inputs() -> None:
 
 
 def test_wire_snapshot_and_comparison_rows_are_strict_and_deeply_immutable() -> None:
-    fixture = json.loads(FIXTURE.read_text())
+    fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
     rows = fixture["comparison_vector"]["source_rows"]
     snapshot = WireHistorySelectionSnapshotV1.model_validate({
         "version": 1, "owner_key": "local:p", "conversation_id": "compare-c",
@@ -312,7 +312,7 @@ def test_versioned_completion_rejects_competing_legacy_continuation_authority():
     from pydantic import ValidationError
 
     from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
-    selection = json.loads(FIXTURE.read_text())["selection_vectors"][0]["selection"]
+    selection = json.loads(FIXTURE.read_text(encoding="utf-8"))["selection_vectors"][0]["selection"]
     with pytest.raises(ValidationError, match="continuation"):
         ChatCompletionRequest(model="test", conversation_id=selection["conversation_id"], save_to_db=True,
             messages=[{"role": "user", "content": "current"}], tldw_history_selection_v1=selection,

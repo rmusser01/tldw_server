@@ -35,13 +35,33 @@ PROTECTED_PACKAGES = [
 
 
 @pytest.mark.unit
-def test_release_candidate_authorities_agree_on_protected_source() -> None:
+@pytest.mark.parametrize(
+    "version,plan,task",
+    [
+        (
+            "0.1.43",
+            "2026-09-20-release-0.1.43-plan.md",
+            "task-13263 - Prepare-the-0.1.43-release-with-all-changes-since-v0.1.42.md",
+        ),
+        (
+            "0.1.44",
+            "2026-09-27-release-0.1.44-plan.md",
+            "task-13264 - Prepare-0.1.44-release-with-all-changes-since-v0.1.43-and-land-prior-closure-records.md",
+        ),
+        (
+            "0.1.45",
+            "2026-09-27-release-0.1.45-plan.md",
+            "task-13388 - Prepare-the-0.1.45-release-with-the-dev-changes-since-0.1.44.md",
+        ),
+    ],
+)
+def test_release_candidate_authorities_agree_on_protected_source(version: str, plan: str, task: str) -> None:
     """Human release instructions must identify the same source as the legal record."""
-    record = json.loads(_read("LICENSES/releases/0.1.43/release.json"))
+    record = json.loads(_read(f"LICENSES/releases/{version}/release.json"))
     authorities = [
-        "Docs/Development/releases/0.1.43-change-inventory.md",
-        "Docs/superpowers/plans/2026-09-20-release-0.1.43-plan.md",
-        "backlog/tasks/task-13263 - Prepare-the-0.1.43-release-with-all-changes-since-v0.1.42.md",
+        f"Docs/Development/releases/{version}-change-inventory.md",
+        f"Docs/superpowers/plans/{plan}",
+        f"backlog/tasks/{task}",
     ]
     for path in authorities:
         text = _read(path)

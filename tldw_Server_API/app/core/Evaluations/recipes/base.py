@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC
 from dataclasses import dataclass
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import RecipeManifest
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import RecipeManifest
 
 
 class RecipeDefinition(ABC):

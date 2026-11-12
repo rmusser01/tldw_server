@@ -34,6 +34,10 @@ Google Drive and Microsoft OneDrive source sync runs are queued through the conn
 - GET `/ingest/jobs/{job_id}` - Get job status (owner or admin)
   - Response includes progress fields (`progress_percent`, `progress_message`), result summary,
     and payload metadata (`media_type`, `source`, `source_kind`, `batch_id`).
+  - A job that asks for analysis while its owner is over an LLM quota still stores the item, without
+    analysis. Its `result` has `status: "Warning"`, the warning
+    `Analysis skipped: LLM quota exceeded (<category>).` and
+    `analysis_error: {"code": "llm_quota_exceeded", "message": ...}`.
 
 - DELETE `/ingest/jobs/{job_id}` - Cancel a job (owner or admin)
   - Response: `{ success, job_id, status, message }`

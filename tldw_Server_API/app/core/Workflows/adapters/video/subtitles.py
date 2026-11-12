@@ -15,7 +15,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 from tldw_Server_API.app.core.Workflows.adapters._common import (
     format_time_srt,
     format_time_vtt,

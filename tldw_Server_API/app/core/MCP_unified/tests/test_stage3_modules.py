@@ -4,7 +4,7 @@ import pytest
 from typing import Dict, Any, List
 
 from tldw_Server_API.app.core.MCP_unified.modules.base import BaseModule, ModuleConfig
-from tldw_Server_API.app.core.MCP_unified.modules.registry import get_module_registry
+from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module import KnowledgeModule
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
@@ -49,8 +49,13 @@ class StubMediaModule(BaseModule):
 
 
 @pytest.mark.asyncio
-async def test_knowledge_aggregates_stub_sources():
-    registry = get_module_registry()
+@pytest.mark.usefixtures("allow_knowledge_source_tools")
+async def test_knowledge_aggregates_stub_sources(monkeypatch):
+    registry = ModuleRegistry()
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.MCP_unified.modules.implementations.knowledge_module.get_module_registry",
+        lambda: registry,
+    )
     await registry.register_module("notes", StubNotesModule, ModuleConfig(name="notes"))
     await registry.register_module("media", StubMediaModule, ModuleConfig(name="media"))
     km = KnowledgeModule(ModuleConfig(name="knowledge"))

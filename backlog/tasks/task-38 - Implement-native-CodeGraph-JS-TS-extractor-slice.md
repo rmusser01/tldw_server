@@ -45,7 +45,7 @@ Implement the next native CodeGraph epic slice after PR #1258: JavaScript/TypeSc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-04-native-codegraph-js-ts-extractor-implementation-plan.md. Baseline focused CodeGraph/MCP tests passed with 53 passed and 5 warnings before Stage 3 work. Current shared venv is missing optional tree-sitter parser packages, so the plan explicitly gates implementation on installing/verifying .[codegraph] parser dependencies.
 
 Installed pinned CodeGraph parser dependency set directly after .[codegraph] resolver conflict blocked full extra installation.
@@ -61,7 +61,7 @@ Task 4 red-green complete: added TypeScript/TSX extractor tests for interface, t
 Task 5 red-green complete: indexer now wires optional JS/TS extractors, registry reports dependency-aware symbol extraction, MCP search finds indexed TSX components, and focused CodeGraph/MCP tests verified 72 passed.
 
 Final verification: focused CodeGraph/MCP regression suite passed with 72 passed and 5 warnings; Ruff passed; Bandit JSON reported errors 0 and results 0; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

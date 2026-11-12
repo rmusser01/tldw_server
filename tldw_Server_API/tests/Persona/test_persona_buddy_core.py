@@ -149,3 +149,28 @@ def test_normalize_persona_buddy_overlay_preferences_casts_to_contract_shape():
         "accessory_id": "7",
         "eye_style": "False",
     }
+
+
+def test_normalize_persona_buddy_overlay_preferences_preserves_ambient_fields_when_casting() -> None:
+    preferences = {
+        "accessory_id": 7,
+        "eye_style": False,
+        "ambient_mode": "roaming",
+        "future_preference": True,
+    }
+
+    normalized = normalize_persona_buddy_overlay_preferences(preferences)
+
+    assert normalized == {
+        **preferences,
+        "accessory_id": "7",
+        "eye_style": "False",
+    }
+
+
+def test_normalize_persona_buddy_overlay_preferences_does_not_mutate_input() -> None:
+    preferences = {"accessory_id": 7, "eye_style": None, "ambient_mode": "off"}
+
+    normalize_persona_buddy_overlay_preferences(preferences)
+
+    assert preferences == {"accessory_id": 7, "eye_style": None, "ambient_mode": "off"}

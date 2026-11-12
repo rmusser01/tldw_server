@@ -8,7 +8,7 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
-from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGRequest
+from tldw_Server_API.app.core.RAG.rag_schemas_unified import UnifiedRAGRequest
 
 
 @dataclass(frozen=True)

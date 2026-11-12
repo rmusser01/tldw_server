@@ -205,11 +205,8 @@ async def _ensure_sqlite_authnz_ready_if_test_mode() -> None:
             # Re-check existence of a core table after acquiring the lock in case
             # another coroutine completed migrations while we waited
             try:
-                async with pool.acquire() as conn:
-                    cur = await conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organizations'")
-                    row = await cur.fetchone()
-                    if row:
-                        return
+                if await pool.sqlite_has_table("organizations"):
+                    return
             except _ADMIN_NONCRITICAL_EXCEPTIONS:
                 # Proceed to ensure migrations (best-effort check)
                 logger.debug("AuthNZ test ensure table check failed")

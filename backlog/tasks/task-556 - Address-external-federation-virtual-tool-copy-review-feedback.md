@@ -24,9 +24,9 @@ Verify and address review feedback about redundant virtual tool copies in the ex
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Both review findings were still valid against current code. Added ExternalServerManager.get_virtual_tool_write_flag() for scalar write classification, removed the extra ExternalFederationModule.get_tools() per-item copy, and updated is_write_tool_call() to use the scalar accessor for ext.* names. Added focused regression coverage. No review findings were skipped.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

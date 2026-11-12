@@ -244,6 +244,11 @@ class PersonalContextRelay:
                     return self._pending(staged)
 
                 receipt = self._receipt_for_row(row)
+                # The deadline only stops a row before its Sync write. A row this
+                # attempt staged is finished past it: left hidden and pending, it
+                # blocks every later Sync projection, and an activation covering
+                # its batch before any retry strands it there for good.
+                fence: PersonalContextRecoveryBudget | None = budget
                 if row.row_state == "pending":
                     if not self._renewed_current(claimed_row, lease, budget):
                         return self._pending(staged)
@@ -261,9 +266,10 @@ class PersonalContextRelay:
                     except Exception:  # noqa: BLE001 - storage/head/adapter failures retry.
                         _log_relay_failure()
                         return self._pending(staged)
+                    fence = None
                     if not self._receipt_matches(claimed_row, receipt):
                         return self._pending(staged)
-                    if not self._renewed_current(claimed_row, lease, budget):
+                    if not self._renewed_current(claimed_row, lease, fence):
                         return self._pending(staged)
                     try:
                         self.publications.record_staged_row(
@@ -286,7 +292,7 @@ class PersonalContextRelay:
 
                 if receipt is None or not self._receipt_matches(claimed_row, receipt):
                     return self._pending(staged)
-                if not self._renewed_current(claimed_row, lease, budget):
+                if not self._renewed_current(claimed_row, lease, fence):
                     return self._pending(staged)
                 try:
                     self.publications.acknowledge_row(
@@ -299,7 +305,7 @@ class PersonalContextRelay:
                     return self._pending(staged)
                 acknowledged_ordinals.add(row.batch_ordinal)
 
-                if not self._renewed_current(claimed_row, lease, budget):
+                if not self._renewed_current(claimed_row, lease, fence):
                     return self._pending(staged)
                 if self.finalize_authority is not None:
                     try:
@@ -320,16 +326,17 @@ class PersonalContextRelay:
         self,
         row: PublicationSourceRow,
         lease: Any,
-        budget: PersonalContextRecoveryBudget,
+        budget: PersonalContextRecoveryBudget | None,
     ) -> bool:
-        """Renew ownership and verify the row remains current within the deadline."""
+        """Renew ownership and verify the row remains current, within any deadline."""
 
-        if not self.publications.renew_lease(lease) or not budget.deadline_open():
+        def deadline_open() -> bool:
+            """Return whether this attempt may continue; no budget means no deadline."""
+            return budget is None or budget.deadline_open()
+
+        if not self.publications.renew_lease(lease) or not deadline_open():
             return False
-        return bool(
-            self.publications.row_is_current(row, lease)
-            and budget.deadline_open()
-        )
+        return bool(self.publications.row_is_current(row, lease) and deadline_open())
 
     @staticmethod
     def _receipt_for_row(row: PublicationSourceRow) -> AuthorityStageReceipt | None:

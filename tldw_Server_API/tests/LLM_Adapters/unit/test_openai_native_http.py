@@ -66,6 +66,9 @@ class _FakeClient:
 def _enable_native_http(monkeypatch):
     monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENAI", "1")
     monkeypatch.setenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    # These take precedence over OPENAI_BASE_URL (OpenAIAdapter._openai_base_url).
+    monkeypatch.delenv("OPENAI_API_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
     yield
 
 
@@ -167,3 +170,68 @@ def test_openai_adapter_merges_extra_body_and_headers(monkeypatch):
     assert headers.get("Content-Type") == "application/json"
     assert headers.get("X-Test") == "1"
     assert "content-type" not in headers
+
+
+def _streamed_payload(monkeypatch, **request_fields: Any) -> dict[str, Any]:
+    """Stream one request through a fake client and return the JSON body the adapter sent."""
+    import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+
+    clients: list[_FakeClient] = []
+
+    def _factory(*args, **kwargs):
+        client = _FakeClient(*args, **kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(openai_mod, "http_client_factory", _factory, raising=True)
+    request = {"messages": [{"role": "user", "content": "hello"}], "model": "gpt-4o-mini", "api_key": "sk-test"}
+    list(openai_mod.OpenAIAdapter().stream({**request, **request_fields}))
+    return clients[0].last_stream["json"]
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["https://api.openai.com/v1", "https://eu.api.openai.com/v1"],
+    ids=["global", "data-residency-region"],
+)
+def test_an_openai_stream_asks_openai_for_its_usage_chunk(monkeypatch, base_url):
+    """OpenAI sends a stream's usage only when asked, so a stream to OpenAI's own hosts asks (TASK-13951)."""
+    monkeypatch.setenv("OPENAI_BASE_URL", base_url)
+
+    payload = _streamed_payload(monkeypatch)
+
+    assert payload["stream_options"] == {"include_usage": True}
+
+
+def test_the_callers_stream_options_win_over_the_usage_request(monkeypatch):
+    payload = _streamed_payload(
+        monkeypatch, extra_body={"stream_options": {"include_usage": False, "include_obfuscation": False}}
+    )
+
+    assert payload["stream_options"] == {"include_usage": False, "include_obfuscation": False}
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["https://llm.example.internal/v1", "https://api.openai.com.example.net/v1"],
+    ids=["other-server", "lookalike-host"],
+)
+def test_an_openai_provider_stream_to_another_server_is_not_asked_for_usage(monkeypatch, base_url):
+    """Another server behind the openai provider may reject stream_options (TASK-13951)."""
+    monkeypatch.setenv("OPENAI_BASE_URL", base_url)
+
+    payload = _streamed_payload(monkeypatch)
+
+    assert "stream_options" not in payload
+
+
+def test_a_malformed_base_url_fails_the_stream_as_a_sanitized_provider_error(monkeypatch):
+    """The usage-request host check does not raise a bare ValueError past the adapter's error handling."""
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://[::1")
+
+    with pytest.raises(ChatAPIError) as excinfo:
+        _streamed_payload(monkeypatch)
+
+    assert excinfo.value.__cause__ is None

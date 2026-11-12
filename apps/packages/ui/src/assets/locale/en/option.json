@@ -1,4 +1,9 @@
 {
+  "assistant": {
+    "trackedPersonaUnavailable": "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.",
+    "usePersonaOverlay": "Use a persona prompt overlay",
+    "trackedModelsLoading": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
+  },
   "newChat": "New Chat",
   "selectAPrompt": "Select a Prompt",
   "githubRepository": "GitHub Repository",
@@ -91,7 +96,7 @@
     }
   },
   "connectionCard": {
-    "headlineMissing": "Connect tldw Assistant to your server",
+    "headlineMissing": "Connect to your server to start chatting",
     "headlineSearching": "Searching for your tldw server…",
     "headlineConnected": "Connected to your tldw server",
     "headlineError": "Can’t reach your tldw server",
@@ -235,7 +240,12 @@
     "quickIngestQueuedAria": "{{label}} — {{count}} items queued — click to review and process",
     "writingPlayground": "Writing Playground",
     "documentWorkspace": "Document Workspace",
-    "modeRepo2txt": "Repo2Txt"
+    "modeRepo2txt": "Repo2Txt",
+    "showPages": "Show pages",
+    "hidePages": "Hide pages",
+    "pageNavigator": "Pages",
+    "browsePages": "Browse pages",
+    "closePageLauncher": "Close page launcher"
   },
   "skills": {
     "activeModeFilter": "Mode: {{value}}",
@@ -602,7 +612,7 @@
     "uploadFailed": "Upload failed",
     "uploadMissingMediaId": "Upload succeeded but no media ID was returned",
     "unsupportedType": "This media type isn’t supported in the document workspace.",
-    "missingFile": "This document's original file was not preserved during ingest. To view it in the workspace, re-upload it using the Upload tab above, or re-ingest it \u2014 newer ingests automatically preserve document files.",
+    "missingFile": "This document's original file was not preserved during ingest. To view it in the workspace, re-upload it using the Upload tab above, or re-ingest it — newer ingests automatically preserve document files.",
     "fileUnauthorized": "You don't have permission to access this document.",
     "openFailed": "Failed to open document",
     "healthWarningTitle": "Document workspace storage unavailable",
@@ -833,7 +843,8 @@
       "agentStatus": "Agent Status",
       "apiKeys": "API Keys",
       "unavailableTitle": "Health check unavailable",
-      "unavailableBody": "Could not reach the ACP health endpoint. Ensure the server is running."
+      "unavailableBody": "Could not reach the ACP health endpoint. Ensure the server is running.",
+      "runnerStatus": "Runner status"
     },
     "executionHealth": {
       "title": "ACP Execution Health",
@@ -929,7 +940,7 @@
   "validationSelectModel": "Please select a model to continue",
   "deleteHistoryConfirmation": "Are you sure you want to delete this history?",
   "editHistoryTitle": "Enter a new title",
-  "temporaryChat": "Temporary chat (not saved)",
+  "temporaryChat": "Temporary chat (on this device)",
   "more": {
     "copy": {
       "group": "Copy",
@@ -971,6 +982,17 @@
     "saveFailed": "Failed to save prompt"
   },
   "quickIngest": {
+    "invalidUrl": "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space.",
+    "configureEligibleCount": "{count, plural, one {# eligible item} other {# eligible items}} in this run",
+    "queueSavedExcluded": "Saved — excluded from this run",
+    "queueSkippedExcluded": "Skipped — excluded from this run",
+    "queueCompletedExcluded": "Completed — excluded from this run",
+    "queueInvalidExcluded": "Invalid — excluded",
+    "queueUnselected": "Not selected — excluded",
+    "queueDuplicateExcluded": "Already queued — excluded",
+    "processAgain": "Process again",
+    "captureRestricted": "This tab cannot be captured. Open an HTTP or HTTPS page, or paste its URL here.",
+    "captureCurrentTab": "Capture current tab",
     "title": "Quick Ingest",
     "tabs": {
       "queue": "Queue",
@@ -1020,7 +1042,7 @@
     "storageServerDescription": "Stored on your tldw server (recommended for RAG and shared workspaces).",
     "storageLocalDescription": "Kept in this browser only; no data written to your server.",
     "storeAfterReview": "Store after review",
-    "reviewBeforeStorage": "Review before saving",
+    "reviewBeforeStorage": "Review extracted content before saving",
     "reviewBeforeStorageHint": "Process now, then edit drafts locally before committing to your server.",
     "reviewEnabled": "Review mode",
     "reviewStorageCap": "Local drafts are capped at {{cap}}.",
@@ -1058,20 +1080,20 @@
     "analysisProvider.loading": "Loading configured providers…",
     "analysisProvider.empty": "No configured providers found. Enter a provider name.",
     "analysisProvider.required": "Choose an analysis provider before running ingest analysis.",
-    "defaultsForNewItems": "Defaults apply only to items added after you change them.",
+    "defaultsForNewItems": "Settings apply to all eligible items in this run. Saved preset defaults are managed in Quick Ingest settings for future runs.",
     "audioOptions": "Audio options",
     "audioLanguage": "Language (e.g., en)",
-    "audioDiarizationHelp": "Turn on to separate speakers in transcripts; applies to new audio items.",
+    "audioDiarizationHelp": "Separate speakers in audio transcripts for this run.",
     "audioDiarizationLabel": "Diarization",
     "documentOcrLabel": "OCR",
     "videoCaptionsLabel": "Captions",
     "transcriptionModelLabel": "Transcription model",
     "transcriptionModelPlaceholder": "Select model",
     "documentOptions": "Document options",
-    "ocrHelp": "OCR helps extract text from scanned PDFs or images; applies to new document/PDF items.",
+    "ocrHelp": "Extract text from scanned PDFs or images for this run.",
     "quickIngest_ocrHelp": "OCR helps extract text from scanned PDFs or images.",
     "videoOptions": "Video options",
-    "captionsHelp": "Include timestamps/captions for new video items; helpful for search and summaries.",
+    "captionsHelp": "Include available timestamps/captions for video items in this run.",
     "cancel": "Cancel",
     "ingest": "Ingest",
     "process": "Process",
@@ -1158,7 +1180,7 @@
     "pasteUrlsTitle": "Paste URLs",
     "pasteUrlsHint": "Separate with commas or new lines",
     "urlsLabel": "URLs to ingest",
-    "urlsPlaceholder": "https://example.com, https://...",
+    "urlsPlaceholder": "https://example.com/article\nhttps://youtube.com/watch?v=...",
     "urlsInputAria": "Paste URLs input",
     "addUrlsAria": "Add URLs to queue",
     "addUrls": "Add URLs",
@@ -1280,11 +1302,37 @@
     "resultStatusIngested": "Ingested",
     "resultStatusSkipped": "Skipped",
     "keywordsPlaceholder": "Keywords (comma-separated)",
-    "keywordsAria": "Keywords for this item"
+    "keywordsAria": "Keywords for this item",
+    "wizard": {
+      "results": {
+        "batchAccounting": "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled",
+        "reviewSaved": "Review {count, plural, one {this # saved item} other {these # saved items}}",
+        "savedState": "Saved",
+        "extractedState": "Extracted content; not saved",
+        "knowledgeUnconfirmed": "Knowledge readiness unconfirmed",
+        "reattach": "Reattach {{name}}",
+        "reattachMismatch": "Choose the original file with the same name and size.",
+        "correct": "Correct settings",
+        "correctItem": "Correct settings for {{name}}",
+        "excludedSection": "Excluded inputs",
+        "invalidExcluded": "Invalid input. Correct it before processing.",
+        "unselectedExcluded": "Not selected for this run.",
+        "savedReviewFailed": "Unable to open saved items. Try again."
+      }
+    },
+    "review.replacementAllowed": "Replacement allowed: matching saved sources may be replaced. Affected saved items have not been confirmed.",
+    "review.replacementDisabled": "Replacement disabled: existing saved sources are preserved."
   },
   "libraryView": "Library View",
   "notes": "Notes",
   "notesSearch": {
+    "toolbarHeading1": "Heading 1",
+    "toolbarHeading2": "Heading 2",
+    "toolbarHeading3": "Heading 3",
+    "toolbarNumberedTooltip": "Numbered list",
+    "toolbarChecklistTooltip": "Checklist",
+    "editingManual": "Editing: Manual",
+    "latestAssistPrefix": "Latest AI assist",
     "placeholder": "Search titles and contents",
     "clear": "Clear search & filters",
     "keywordsPlaceholder": "Filter by tag",
@@ -1321,8 +1369,8 @@
     "exportMenuTrigger": "Export",
     "resultsLabel": "Results",
     "showingRange": "Showing {{start}}-{{end}} of {{total}}",
-    "expandSidebar": "Expand sidebar",
-    "collapseSidebar": "Collapse sidebar",
+    "expandSidebar": "Expand notes sidebar",
+    "collapseSidebar": "Collapse notes sidebar",
     "titlePlaceholder": "Title",
     "keywordsEditorPlaceholder": "Tags",
     "tagsHelp": "Tags help you organize and filter notes. Add tags in the editor, then filter here.",
@@ -1389,7 +1437,8 @@
       "wikilink": "Note links",
       "backlink": "Backlinks",
       "tag_membership": "Tag membership",
-      "source_membership": "Source membership"
+      "source_membership": "Source membership",
+      "semantic": "Similar content"
     },
     "graphSuggestions": "Suggestions",
     "graphDetails": "Details",
@@ -1485,7 +1534,197 @@
       "notes_graph_suggestions_disabled": "Graph suggestions are disabled.",
       "notes_graph_suggestions_worker_unavailable": "The suggestion worker is unavailable.",
       "notes_graph_sync_not_ready": "Suggestion decisions are unavailable for this Notes dataset."
-    }
+    },
+    "controlsMoreBelow": "More filters below",
+    "editorDraftHint": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note.",
+    "moodboardCreateAction": "New collection",
+    "moodboardChoosePrompt": "Choose a collection above to see its notes.",
+    "moodboardFirstPrompt": "A collection is a group of notes you pick by hand. Create one, then add notes to it.",
+    "moodboardEmptyHowToAdd": "Open a note from the List view, then come back here and choose Add open note.",
+    "moodboardAddOpenNote": "Add open note",
+    "moodboardAddOpenNoteNeedsNote": "Open a note first",
+    "moodboardAddOpenNoteAlreadyIn": "The open note is already in this collection",
+    "moodboardAddOpenNoteSuccess": "Added to \"{{name}}\"",
+    "moodboardAddOpenNoteError": "Could not add the note to this collection",
+    "taskChipLabel": "Tasks {{done}}/{{total}}",
+    "taskChipTooltip": "Open the list to check off tasks. Changes update the note text and your task list.",
+    "closeMobileSidebar": "Close notes list",
+    "listRowKeyboardHint": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin.",
+    "tagFilterNoMatch": "No tag named \"{{query}}\"",
+    "tagFilterNoTags": "No tags yet",
+    "headerLoading": "Loading…",
+    "loadErrorUnreachable": "Could not reach the notes server.",
+    "loadErrorDetails": "Details",
+    "serverUnavailableTitle": "Notes server unavailable",
+    "serverUnavailableDescription": "You can keep writing. Your edits are kept on this device and saved when the server is back.",
+    "moveToTrashConfirmTitle": "Move to Trash?",
+    "moveToTrashConfirmOk": "Move to Trash",
+    "moveToTrashConfirmNamed": "Move \"{{title}}\" to Trash? You can restore it from Trash.",
+    "moveToTrashConfirmUnnamed": "Move this note to Trash? You can restore it from Trash.",
+    "moveToTrashLinkedOne": "This note is linked from 1 other note. That link will not work while the note is in Trash.",
+    "moveToTrashLinkedMany": "This note is linked from {{count}} other notes. Those links will not work while the note is in Trash.",
+    "trashHeaderLabel": "Trash",
+    "trashGuidanceTitle": "Trash",
+    "trashGuidanceDescription": "Deleted notes wait here. Choose Restore next to a note to put it back with your notes.",
+    "trashGuidanceShowList": "Show Trash",
+    "trashGuidanceBack": "Back to notes",
+    "assistKeywordsSource": "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add.",
+    "shortcutFocusSearchDescription": "Focus the search input.",
+    "shortcutCommandPaletteDescription": "Open the command palette.",
+    "graphCanvasAria": "Notes relationship graph",
+    "graphEdgeLegend": "Relationship line styles",
+    "graphLegendAuthoritative": "Authoritative",
+    "graphPassageSimilarityShort": "passage similarity",
+    "graphSemanticNeighbors": "Neighbors",
+    "graphSemanticThreshold": "Minimum passage similarity",
+    "graphSemanticReset": "Reset Similar content controls",
+    "graphSemanticFocusRequired": "Focus a Note to load similar content.",
+    "graphPassageSimilarity": "Passage similarity: {{value}}",
+    "graphSimilarityBand": {
+      "low": "Low similarity",
+      "moderate": "Moderate similarity",
+      "high": "High similarity",
+      "very_high": "Very high similarity"
+    },
+    "graphSemanticProvider": "Provider and model",
+    "graphSemanticProviderModel": "{{provider}} / {{model}}",
+    "graphSemanticFreshness": "Content freshness",
+    "graphSemanticVersions": "Source v{{source}}, target v{{target}}",
+    "graphSemanticGenerationLabel": "Generation",
+    "graphSemanticGeneration": "Generation {{generation}}",
+    "graphSemanticIndexVersion": "Index versions",
+    "graphSemanticIndexVersionValue": "Index {{index}}, configuration {{configuration}}",
+    "graphSemanticModelRevision": "Model revision",
+    "graphSemanticNormalizationVersion": "Normalization version",
+    "graphSemanticChunkerVersion": "Chunker version",
+    "graphSemanticVersionUnavailable": "Unavailable",
+    "graphEvidenceOmitted": "Matched excerpts were omitted because the graph response reached its evidence limit.",
+    "graphSemanticTruncated": "Some similar relationships or matched excerpts were omitted because the graph reached a server limit.",
+    "graphCreateManualLink": "Create manual link",
+    "graphManualLinkCreated": "Manual link created.",
+    "graphManualLinkFailed": "The manual link could not be created. Try again.",
+    "graphSimilarContent": "Similar content",
+    "semanticIndex": "Semantic index",
+    "semanticState": {
+      "off": "Off",
+      "preparing": "Preparing",
+      "ready": "Ready",
+      "updating": "Updating",
+      "needs_attention": "Needs attention"
+    },
+    "semanticStatusAnnouncement": "Semantic index {{state}}. {{detail}}",
+    "semanticProvider": "Provider",
+    "semanticModel": "Model",
+    "semanticExecutionBoundary": "Embedding execution",
+    "semanticStorageBoundary": "Vector storage",
+    "semanticBoundary": {
+      "external": "External",
+      "local": "Local",
+      "unavailable": "Unavailable"
+    },
+    "semanticOutboundData": "Data sent for indexing",
+    "semanticOutbound": {
+      "note_content_chunks": "Note body chunks",
+      "note_title": "Note titles"
+    },
+    "semanticActiveNotes": "{{count}} active Notes",
+    "semanticEstimate": "About {{chunks}} chunks across {{runs}} runs",
+    "semanticProgress": "{{indexed}} of {{total}} Notes indexed",
+    "semanticLoading": "Loading semantic index details.",
+    "semanticLoadFailed": "Semantic index details are unavailable.",
+    "semanticUnavailable": "Semantic indexing is unavailable with the current server configuration.",
+    "semanticPermissionReadOnly": "You can view similar content, but you do not have permission to manage the semantic index.",
+    "semanticOffline": "Semantic index management is unavailable while offline.",
+    "semanticShowEdges": "Show similar-content relationships",
+    "semanticEnable": "Enable semantic index",
+    "semanticRebuild": "Rebuild index",
+    "semanticRetry": "Retry failed Notes",
+    "semanticCancel": "Cancel indexing",
+    "semanticDelete": "Disable and delete index",
+    "semanticDetail": {
+      "building": "The first semantic index is being built.",
+      "degraded": "Some Notes could not be indexed. Retry failed Notes or rebuild the index.",
+      "stale_configuration": "The embedding configuration changed. Review the current disclosure and renew consent before rebuilding.",
+      "consent_required": "Indexing requires renewed consent before work can continue.",
+      "cleanup_pending": "Indexed data is being removed.",
+      "cleanup_stalled": "Indexed data cleanup needs attention.",
+      "unavailable": "The configured embedding service is unavailable.",
+      "rebuild_required": "The current semantic index does not match this configuration. Rebuild it before using similar-content relationships.",
+      "generic": "Semantic index details changed. Review the current status."
+    },
+    "semanticConfirm": {
+      "enable": {
+        "title": "Enable semantic indexing?",
+        "body": "Notes will be indexed using the provider and data boundaries shown above.",
+        "confirm": "Enable"
+      },
+      "rebuild": {
+        "title": "Rebuild the semantic index?",
+        "body": "A new generation will replace the currently published index when it is ready.",
+        "confirm": "Rebuild"
+      },
+      "retry": {
+        "title": "Retry failed Notes?",
+        "body": "Only Notes that failed during the current generation will be retried.",
+        "confirm": "Retry"
+      },
+      "cancel": {
+        "title": "Cancel semantic indexing?",
+        "body": "The active run will stop. The last published graph remains available.",
+        "confirm": "Cancel indexing"
+      },
+      "renew": {
+        "title": "Review consent and rebuild?",
+        "body": "Review the current provider, model, data boundaries, and outbound data above before renewing consent.",
+        "confirm": "Renew consent and rebuild"
+      },
+      "deleteIndex": {
+        "title": "Disable and delete the semantic index?",
+        "body": "Published vectors and semantic relationships will be removed. Ordinary graph relationships are not affected. Offline backups may retain derived vectors until normal backup retention expires.",
+        "confirm": "Delete index"
+      }
+    },
+    "semanticEnableStarted": "Semantic indexing started.",
+    "semanticRebuildStarted": "Semantic index rebuild started.",
+    "semanticRetryStarted": "Failed Notes are being retried.",
+    "semanticCancelRequested": "Semantic indexing cancellation requested.",
+    "semanticDeleteStarted": "Semantic index deletion started.",
+    "semanticActionFailed": "The semantic index action failed. Try again.",
+    "semanticDimensionProbeDisclosure": "A fixed non-user probe will resolve dimensions after you consent and before any Note text is read or transferred.",
+    "semanticTechnicalDetails": "Technical details",
+    "semanticVectorBackend": "Vector backend",
+    "semanticDimensions": "Dimensions",
+    "semanticDimensionsPending": "Pending probe",
+    "semanticMetric": "Similarity metric",
+    "semanticMetricValue": {
+      "cosine": "Cosine"
+    },
+    "semanticConfigurationRevision": "Configuration revision",
+    "semanticIndexRevision": "Semantic index revision",
+    "semanticPublishedChunks": "Published chunks",
+    "semanticError": {
+      "permission": "Your semantic-index management permission changed. Refresh; contact an administrator if access is still needed.",
+      "refresh": "Semantic index details changed. Refresh and try again.",
+      "writerConflict": "Another semantic-index operation is active. Wait for it to finish, then try again.",
+      "quota": "The semantic-index quota is reached. Wait for capacity or ask an administrator to review limits.",
+      "backendChangeRequiresDelete": "Vector storage changed. Delete the existing index before setting it up again.",
+      "unavailable": "Semantic indexing is temporarily unavailable. Check the configured provider and worker, then try again."
+    },
+    "semanticRenewConsent": "Review consent and rebuild",
+    "semanticRenewStarted": "Consent renewed and semantic index rebuild started.",
+    "semanticEndpoint": "Endpoint destination",
+    "semanticBackendChangeRequiresDelete": "Vector storage changed. Delete the existing index before setting it up again.",
+    "tagMatchLabel": "Show notes with",
+    "tagMatchAll": "All these tags",
+    "tagMatchAny": "Any of these tags",
+    "resultsRegionLabel": "Notes results",
+    "shortcutGroupList": "Notes list",
+    "shortcutListMoveDescription": "Move between notes in the list.",
+    "shortcutListOpenDescription": "Open the focused note.",
+    "shortcutListSelectDescription": "Select or clear the focused note.",
+    "shortcutListPinDescription": "Pin or unpin the focused note.",
+    "shortcutListAdjacentDescription": "Open the previous or next note.",
+    "shortcutListReturnDescription": "Return to the notes list."
   },
   "tts": {
     "playground": "TTS Playground"
@@ -1534,6 +1773,9 @@
     "filterPrompt": "Prompts",
     "filteringBy": "Filtering by:",
     "searchError": "Search failed. Please try again."
+  },
+  "worldBooks": {
+    "filtersToggle": "Filters"
   },
   "worldBooksEmpty": {
     "demoTitle": "Explore World Books in demo mode",
@@ -1670,7 +1912,9 @@
     "confirmTitle": "Use prompt in chat?",
     "confirmDescription": "Your message already has text. Do you want to overwrite it with this prompt or append the prompt below it?",
     "overwrite": "Overwrite message",
-    "append": "Append"
+    "append": "Append",
+    "reviewDescription": "Your draft remains here. Review this prompt, then overwrite your message, append it, or cancel.",
+    "preview": "Prompt preview"
   },
   "flashcards": {
     "studyPackJobAccepted": "Study pack request accepted. Waiting for a status update.",
@@ -1678,6 +1922,7 @@
     "studyPackJobRunning": "Creating your study pack.",
     "studyPackJobStatusUnavailable": "Unable to check study pack progress. Checking again shortly.",
     "studyPackResultUnavailable": "Study pack completed, but its review deck is unavailable.",
+    "studyPackManualSourceToggle": "Add a source by ID",
     "review": "Review",
     "cards": "Cards",
     "manageCardCount": "{count, plural, one {# card} other {# cards}}",
@@ -2028,7 +2273,12 @@
     "shortcutEsc": "Clear focus",
     "shortcutHelp": "Show shortcuts",
     "global": "Global",
-    "reverseCard": "reverse"
+    "reverseCard": "reverse",
+    "editDeck": "Edit deck",
+    "deckSelectionChanged": "Deck selection changed. Reopen the editor.",
+    "deckName": "Deck name",
+    "deckUpdated": "Deck updated.",
+    "deckUpdateFailed": "Failed to update deck."
   },
   "contentReview": {
     "title": "Content Review",
@@ -2233,7 +2483,7 @@
       "title": "Welcome to Content Rules",
       "description": "Set up content safety rules, blocklists, overrides, and test cases.",
       "guardrailsCta": "Set up Family Guardrails",
-      "dismiss": "Skip \u2014 I\u2019ll explore on my own",
+      "dismiss": "Skip — I’ll explore on my own",
       "tabHint": "Start here: Policy & Settings tab sets your base rules. Then test them in the Test Sandbox.",
       "startHereBadge": "Start here"
     }

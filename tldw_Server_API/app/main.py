@@ -23,16 +23,15 @@ from contextlib import asynccontextmanager, contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from loguru import logger
 from starlette import status as _starlette_status
 from starlette.requests import ClientDisconnect
-from starlette.responses import FileResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.staticfiles import StaticFiles
 
@@ -49,6 +48,7 @@ from tldw_Server_API.app.core.Security.drain_gate_middleware import (
     CORS_EXPOSE_HEADERS_VALUE,
     merge_vary_origin,
 )
+from tldw_Server_API.app.core.Slides.generation_disconnect import SlidesGenerationDisconnectMiddleware
 from tldw_Server_API.app.core.Security.standalone_html_request_guard import (
     StandaloneHtmlRequestGuardMiddleware,
     is_standalone_sensitive_route,
@@ -61,7 +61,6 @@ from tldw_Server_API.app.services.app_lifecycle import (
     mark_lifecycle_startup,  # noqa: F401 - re-exported for lifecycle contract tests.
     get_or_create_lifecycle_state,
 )
-from tldw_Server_API.app.services import readiness_service
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequirePermission
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
 from tldw_Server_API.app.services import shutdown_coordinated_runtime as _shutdown_coordinated_runtime
@@ -81,8 +80,12 @@ from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _shared_is_explicit_pytest_runtime,
 )
 from tldw_Server_API.app.core.testing import (
+    is_production_like_env as _is_production_like_env,
+)
+from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
     ensure_chacha_rls,
     ensure_prompt_studio_rls,
@@ -887,7 +890,7 @@ def _caller_allowed_for_loguru_config() -> bool:
 
 # Ensure any subsequent logger.add calls wrap raw streams with SafeStreamWrapper
 _ROOT_LOGGER = logger
-_original_logger_add = _ROOT_LOGGER.add
+_original_logger_add = _unwrap_logger_add(_ROOT_LOGGER.add)
 _original_unwrapped_logger_add = _unwrap_logger_add(_original_logger_add)
 
 
@@ -947,7 +950,7 @@ _install_stderr_redirect()
 if not hasattr(_ROOT_LOGGER, "_tldw_original_remove"):
     _ROOT_LOGGER._tldw_original_remove = _unwrap_loguru_wrapper(_ROOT_LOGGER.remove)  # type: ignore[attr-defined]
 _original_logger_remove = getattr(_ROOT_LOGGER, "_tldw_original_remove", None)
-_root_configure = getattr(_ROOT_LOGGER, "configure", None)
+_root_configure = _unwrap_loguru_wrapper(getattr(_ROOT_LOGGER, "configure", None))
 if callable(_root_configure) and not hasattr(_ROOT_LOGGER, "_tldw_original_configure"):
     _ROOT_LOGGER._tldw_original_configure = _unwrap_loguru_wrapper(_root_configure)  # type: ignore[attr-defined]
 _original_logger_configure = getattr(_ROOT_LOGGER, "_tldw_original_configure", None)
@@ -1034,6 +1037,8 @@ try:
 except _LOGGING_SETUP_EXCEPTIONS:
     logging.getLogger().handlers = [InterceptHandler()]
     logging.getLogger().setLevel(0)
+# A removed handler's class methods retain its retired main module globals.
+_h = None
 
 for _name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
     _lg = logging.getLogger(_name)
@@ -1177,11 +1182,19 @@ else:
 
 # Metrics and Telemetry - import directly and fail fast on errors
 # Core helpers - import directly (fail fast if missing)
-from tldw_Server_API.app.core.Metrics import (
-    get_metrics_registry,
-    track_metrics,
+# Stable callbacks do not retain an app-owning main module through FastAPI caches.
+from tldw_Server_API.app.api.v1.endpoints.control_plane import (
+    _set_diagnostics_no_store,
+    api_metrics,
+    favicon,
+    health_check,
+    internal_readiness_check,
+    metrics,
+    readiness_alias,
+    readiness_check,
+    root,
+    serve_setup_page,
 )
-from tldw_Server_API.app.core.Setup.setup_manager import needs_setup
 
 # MCP Unified config validation (fail-fast hardening)
 try:
@@ -1235,7 +1248,6 @@ except _IMPORT_EXCEPTIONS as _e:
 
 
 BASE_DIR = Path(__file__).resolve().parent
-FAVICON_PATH = BASE_DIR / "static" / "favicon.ico"
 
 ############################# TEST DB Handling #####################################
 # --- TEST DB Instance ---
@@ -1257,11 +1269,20 @@ async def lifespan(app: FastAPI):
         None: Yields once to allow the application to run; when resumed performs orderly shutdown and resource cleanup.
     """
     _startup_trace("lifespan: entered")
+    from tldw_Server_API.app.core.Usage.llm_accounting import set_accounting_loop
+
+    set_accounting_loop(asyncio.get_running_loop())
+    from tldw_Server_API.app.core.Usage.llm_roots import ensure_llm_state_executor
+
+    ensure_llm_state_executor(asyncio.get_running_loop())
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     from tldw_Server_API.app.services.lifespan_worker_runtime_state import (
         LifespanWorkerRuntimeState,
     )
 
     worker_runtime = LifespanWorkerRuntimeState()
+    services = app_services()
+    app.state.services = services
     # Fail fast if the assembled app contains duplicate method+path route registrations.
     _fail_on_duplicate_route_method_pairs(app, context="lifespan startup")
     from tldw_Server_API.app.services.lifespan_startup_sequence import (
@@ -1278,7 +1299,7 @@ async def lifespan(app: FastAPI):
         route_enabled=route_enabled,
         get_mcp_config=get_mcp_config,
         validate_mcp_config=validate_mcp_config,
-        test_mode=bool(globals().get("_TEST_MODE")) or _runtime_test_mode_active(),
+        test_mode=_shared_is_explicit_pytest_runtime(),
         run_pg_rls_auto_ensure=_run_pg_rls_auto_ensure,
         register_owned_job_poller=_register_owned_job_poller,
         replace_owned_job_poller_inventory=_replace_owned_job_poller_inventory,
@@ -1286,8 +1307,6 @@ async def lifespan(app: FastAPI):
         startup_guard_exceptions=_STARTUP_GUARD_EXCEPTIONS,
         import_exceptions=_IMPORT_EXCEPTIONS,
     )
-    db_pool = startup_sequence_handles.db_pool
-    session_manager = startup_sequence_handles.session_manager
     heavy_startup_handles = startup_sequence_handles.heavy_startup_handles
 
     # Note: Audit service now uses dependency injection
@@ -1297,6 +1316,11 @@ async def lifespan(app: FastAPI):
     _run_startup_config_validation()
 
     try:
+        from tldw_Server_API.app.services.startup_auth import refresh_provider_override_snapshot
+        from tldw_Server_API.app.services.startup_openapi import warm_openapi_schema
+
+        await warm_openapi_schema(app)
+        await refresh_provider_override_snapshot(services.db_pool)
         yield
     finally:
         # Forced ASGI shutdown cancels this suspended lifespan. Owned workers
@@ -1309,8 +1333,8 @@ async def lifespan(app: FastAPI):
             app=app,
             worker_runtime=worker_runtime,
             readiness_state=READINESS_STATE,
-            db_pool=db_pool,
-            session_manager=session_manager,
+            db_pool=services.db_pool,
+            session_manager=services.session_manager,
             heavy_startup_handles=heavy_startup_handles,
             build_legacy_shutdown_context=_build_legacy_shutdown_context,
             apply_shutdown_transition_gate=_apply_shutdown_transition_gate,
@@ -1514,6 +1538,14 @@ OPENAPI_TAGS = [
         "externalDocs": {"description": "Graphing PRD", "url": _ext_url("/docs-static/Design/Graphing-Notes-PRD.md")},
     },
     {
+        "name": "notes-semantic-index",
+        "description": "Manage the opt-in Notes semantic index and its nested runs.",
+        "externalDocs": {
+            "description": "Notes semantic index API",
+            "url": _ext_url("/docs-static/API/Notes_Semantic_Index.md"),
+        },
+    },
+    {
         "name": "prompts",
         "description": "Manage prompt library entries, imports, exports, and metadata.",
         "externalDocs": {"description": "Prompts design", "url": _ext_url("/docs-static/Design/Prompts.md")},
@@ -1707,7 +1739,7 @@ OPENAPI_TAGS = [
 ]
 
 
-_prod_flag = _env_os.getenv("tldw_production", "false").lower() in {"true", "1", "yes", "y", "on"}
+_prod_flag = _is_production_like_env()
 
 APP_DESCRIPTION = """
     Too Long; Didn't Watch Server (tldw_server) - unified research assistant and media analysis platform.
@@ -1764,7 +1796,7 @@ _swagger_ui_params = {
 
 app = FastAPI(
     title="tldw API",
-    version="0.1.43",
+    version="0.1.46",
     description=APP_DESCRIPTION,
     terms_of_service="https://github.com/rmusser01/tldw_server",
     contact={
@@ -1790,19 +1822,21 @@ _startup_trace("FastAPI app created")
 def _iter_route_method_pairs(app: FastAPI) -> list[tuple[str, str, str]]:
     """Return explicit route method/path pairs for duplicate detection."""
     rows: list[tuple[str, str, str]] = []
-    for route in getattr(app, "routes", []):
-        if not isinstance(route, APIRoute):
+    # Served routes: under FastAPI >= 0.137 app.routes holds one _IncludedRouter per
+    # include_router, so a direct walk would check only the top-level routes.
+    for route in iter_served_routes(getattr(app, "routes", [])):
+        if not isinstance(route.route, APIRoute):
             continue
-        path = str(getattr(route, "path", "") or "")
+        path = route.path
         if not path:
             continue
-        methods = set(getattr(route, "methods", set()) or set())
+        methods = set(route.methods)
         for method in sorted(methods):
             method_upper = str(method).upper()
             # Ignore framework-generated methods to keep duplicate checks focused.
             if method_upper in {"HEAD", "OPTIONS"}:
                 continue
-            rows.append((path, method_upper, str(getattr(route, "name", "<unnamed>"))))
+            rows.append((path, method_upper, str(route.name or "<unnamed>")))
     return rows
 
 
@@ -2064,7 +2098,7 @@ try:
     from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag  # noqa: E402
 
     try:
-        _rg_global_enabled = bool(_rg_enabled_flag(False))
+        _rg_global_enabled = bool(_rg_enabled_flag(True))
     except _STARTUP_GUARD_EXCEPTIONS:
         _rg_global_enabled = False
 
@@ -2449,7 +2483,7 @@ from tldw_Server_API.app.core.config import (
 
 # Starlette wraps later middleware around earlier middleware. Register LLM
 # budget first so receive-time admission runs before its JSON body parsing.
-from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+from tldw_Server_API.app.core.Usage.llm_budget_middleware import LLMBudgetMiddleware
 
 try:
     app.add_middleware(LLMBudgetMiddleware)
@@ -2592,182 +2626,73 @@ from tldw_Server_API.app.core.Security.middleware import SecurityHeadersMiddlewa
 from tldw_Server_API.app.core.Security.request_id_middleware import RequestIDMiddleware
 from tldw_Server_API.app.core.Security.setup_access_guard import SetupAccessGuardMiddleware
 from tldw_Server_API.app.core.Security.setup_csp import SetupCSPMiddleware
-from tldw_Server_API.app.core.testing import (
-    env_flag_enabled as _test_env_flag_enabled,
+
+_enable_sec_headers_env = _env_os.getenv("ENABLE_SECURITY_HEADERS")
+_enable_sec_headers = (
+    True
+    if (_prod_flag and _enable_sec_headers_env is None)
+    else ((_enable_sec_headers_env or "true").lower() in {"true", "1", "yes", "y", "on"})
 )
-from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-)
-from tldw_Server_API.app.core.testing import (
-    is_test_mode as _shared_is_test_mode,
-)
+# Apply Setup CSP nonce injection before security headers
+try:
+    app.add_middleware(SetupCSPMiddleware)
+except _STARTUP_GUARD_EXCEPTIONS as _e:
+    logger.debug(f"Skipping SetupCSPMiddleware: {_e}")
+# Enforce Setup remote access policy
+try:
+    app.add_middleware(SetupAccessGuardMiddleware)
+except _STARTUP_GUARD_EXCEPTIONS as _e:
+    logger.debug(f"Skipping SetupAccessGuardMiddleware: {_e}")
 
-_TEST_FLAGS_SET = _shared_is_test_mode() or _test_env_flag_enabled("TESTING")
-_EXPLICIT_PYTEST_RUNTIME = _is_explicit_pytest_runtime()
-_TEST_MODE = _EXPLICIT_PYTEST_RUNTIME and (
-    _TEST_FLAGS_SET or bool(_env_os.getenv("PYTEST_CURRENT_TEST"))
-)
+if _enable_sec_headers:
+    app.add_middleware(SecurityHeadersMiddleware, enabled=True)
 
+# HTTP request metrics middleware (records count and latency per route)
+app.add_middleware(HTTPMetricsMiddleware)
 
-def _runtime_test_mode_active() -> bool:
-    return _is_explicit_pytest_runtime() and (
-        _shared_is_test_mode()
-        or _test_env_flag_enabled("TESTING")
-        or bool(_env_os.getenv("PYTEST_CURRENT_TEST"))
-    )
+# Structured access logs (request_id, method, host, status, duration)
+try:
+    from tldw_Server_API.app.core.Logging.access_log_middleware import AccessLogMiddleware
 
+    app.add_middleware(AccessLogMiddleware)
+except _IMPORT_EXCEPTIONS as _e:
+    logger.debug(f"Skipping AccessLogMiddleware: {_e}")
 
-if _TEST_FLAGS_SET and not _EXPLICIT_PYTEST_RUNTIME:
-    logger.warning(
-        "Test flags are set without explicit pytest runtime; startup guard will reject this configuration."
-    )
+# Sandbox artifact traversal guard (pre-routing)
+try:
+    app.add_middleware(SandboxArtifactTraversalGuardMiddleware)
+except _IMPORT_EXCEPTIONS as _e:
+    logger.debug(f"Skipping SandboxArtifactTraversalGuardMiddleware: {_e}")
 
-if _TEST_MODE:
-    logger.info("TEST_MODE detected: Skipping non-essential middlewares (security headers, metrics, usage logging)")
-    # Apply Setup CSP nonce injection even in tests to keep behavior consistent
+# Per-request usage logging (guarded by settings flag)
+app.add_middleware(UsageLoggingMiddleware)
+
+# Add trace headers middleware: propagate trace context to HTTP responses
+@app.middleware("http")
+async def _trace_headers_middleware(request: Request, call_next):
+    from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager
+
+    tm = get_tracing_manager()
+    # Ensure request_id is in baggage (RequestIDMiddleware already set it)
     try:
-        app.add_middleware(SetupCSPMiddleware)
-    except _STARTUP_GUARD_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SetupCSPMiddleware in tests: {_e}")
-    # Guard Setup remote access in tests too (should evaluate loopback as allowed)
+        req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
+        if req_id:
+            tm.set_baggage("request_id", str(req_id))
+    except _REQUEST_GUARD_EXCEPTIONS:
+        pass
+    response = await call_next(request)
+    # Add trace headers to response
     try:
-        app.add_middleware(SetupAccessGuardMiddleware)
-    except _STARTUP_GUARD_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SetupAccessGuardMiddleware in tests: {_e}")
-
-    # Sandbox artifact traversal guard (pre-routing)
-    try:
-        app.add_middleware(SandboxArtifactTraversalGuardMiddleware)
-    except _IMPORT_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SandboxArtifactTraversalGuardMiddleware in tests: {_e}")
-
-    @app.middleware("http")
-    async def _trace_headers_middleware(request: Request, call_next):
-        from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager
-
-        tm = get_tracing_manager()
-        # Ensure request_id is in baggage (RequestIDMiddleware already set it)
-        try:
-            req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
-            if req_id:
-                tm.set_baggage("request_id", str(req_id))
-        except _REQUEST_GUARD_EXCEPTIONS as _baggage_err:
-            logger.debug(f"Trace headers: failed to set baggage request_id: {_baggage_err}")
-        response = await call_next(request)
-        # Add trace headers to response
-        try:
-            span = tm.get_current_span()
-            if span:
-                ctx = span.get_span_context()
-                if ctx and getattr(ctx, "is_valid", False):
-                    trace_id = f"{ctx.trace_id:032x}"
-                    span_id = f"{ctx.span_id:016x}"
-                    response.headers.setdefault("X-Trace-Id", trace_id)
-                    response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                else:
-                    # No active span; synthesize a valid W3C traceparent for tests
-                    try:
-                        from secrets import token_hex as _th
-
-                        trace_id = _th(16)  # 32 hex chars
-                        span_id = _th(8)  # 16 hex chars
-                        response.headers.setdefault("X-Trace-Id", trace_id)
-                        response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                    except _REQUEST_GUARD_EXCEPTIONS as _synth_err:
-                        logger.debug(f"Trace headers: failed to synthesize traceparent: {_synth_err}")
+        span = tm.get_current_span()
+        if span:
+            ctx = span.get_span_context()
+            if ctx and getattr(ctx, "is_valid", False):
+                trace_id = f"{ctx.trace_id:032x}"
+                span_id = f"{ctx.span_id:016x}"
+                response.headers.setdefault("X-Trace-Id", trace_id)
+                response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
             else:
-                # No span; synthesize trace headers
-                try:
-                    from secrets import token_hex as _th
-
-                    trace_id = _th(16)
-                    span_id = _th(8)
-                    response.headers.setdefault("X-Trace-Id", trace_id)
-                    response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                except _REQUEST_GUARD_EXCEPTIONS as _synth_err2:
-                    logger.debug(f"Trace headers: failed to synthesize trace headers (no-span case): {_synth_err2}")
-        except _REQUEST_GUARD_EXCEPTIONS as _trace_hdr_err:
-            logger.debug(f"Trace headers: middleware error while setting headers: {_trace_hdr_err}")
-        return response
-
-else:
-    _enable_sec_headers_env = _env_os.getenv("ENABLE_SECURITY_HEADERS")
-    _enable_sec_headers = (
-        True
-        if (_prod_flag and _enable_sec_headers_env is None)
-        else ((_enable_sec_headers_env or "true").lower() in {"true", "1", "yes", "y", "on"})
-    )
-    # Apply Setup CSP nonce injection before security headers
-    try:
-        app.add_middleware(SetupCSPMiddleware)
-    except _STARTUP_GUARD_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SetupCSPMiddleware: {_e}")
-    # Enforce Setup remote access policy
-    try:
-        app.add_middleware(SetupAccessGuardMiddleware)
-    except _STARTUP_GUARD_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SetupAccessGuardMiddleware: {_e}")
-
-    if _enable_sec_headers:
-        app.add_middleware(SecurityHeadersMiddleware, enabled=True)
-
-    # HTTP request metrics middleware (records count and latency per route)
-    app.add_middleware(HTTPMetricsMiddleware)
-
-    # Structured access logs (request_id, method, host, status, duration)
-    try:
-        from tldw_Server_API.app.core.Logging.access_log_middleware import AccessLogMiddleware
-
-        app.add_middleware(AccessLogMiddleware)
-    except _IMPORT_EXCEPTIONS as _e:
-        logger.debug(f"Skipping AccessLogMiddleware: {_e}")
-
-    # Sandbox artifact traversal guard (pre-routing)
-    try:
-        app.add_middleware(SandboxArtifactTraversalGuardMiddleware)
-    except _IMPORT_EXCEPTIONS as _e:
-        logger.debug(f"Skipping SandboxArtifactTraversalGuardMiddleware: {_e}")
-
-    # Per-request usage logging (guarded by settings flag)
-    app.add_middleware(UsageLoggingMiddleware)
-
-    # Add trace headers middleware: propagate trace context to HTTP responses
-    @app.middleware("http")
-    async def _trace_headers_middleware(request: Request, call_next):
-        from tldw_Server_API.app.core.Metrics.traces import get_tracing_manager
-
-        tm = get_tracing_manager()
-        # Ensure request_id is in baggage (RequestIDMiddleware already set it)
-        try:
-            req_id = getattr(request.state, "request_id", None) or request.headers.get("X-Request-ID")
-            if req_id:
-                tm.set_baggage("request_id", str(req_id))
-        except _REQUEST_GUARD_EXCEPTIONS:
-            pass
-        response = await call_next(request)
-        # Add trace headers to response
-        try:
-            span = tm.get_current_span()
-            if span:
-                ctx = span.get_span_context()
-                if ctx and getattr(ctx, "is_valid", False):
-                    trace_id = f"{ctx.trace_id:032x}"
-                    span_id = f"{ctx.span_id:016x}"
-                    response.headers.setdefault("X-Trace-Id", trace_id)
-                    response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                else:
-                    # No active span; synthesize a valid W3C traceparent
-                    try:
-                        from secrets import token_hex as _th
-
-                        trace_id = _th(16)
-                        span_id = _th(8)
-                        response.headers.setdefault("X-Trace-Id", trace_id)
-                        response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
-                    except _REQUEST_GUARD_EXCEPTIONS:
-                        pass
-            else:
-                # No span; synthesize trace headers
+                # No active span; synthesize a valid W3C traceparent
                 try:
                     from secrets import token_hex as _th
 
@@ -2777,9 +2702,20 @@ else:
                     response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
                 except _REQUEST_GUARD_EXCEPTIONS:
                     pass
-        except _REQUEST_GUARD_EXCEPTIONS:
-            pass
-        return response
+        else:
+            # No span; synthesize trace headers
+            try:
+                from secrets import token_hex as _th
+
+                trace_id = _th(16)
+                span_id = _th(8)
+                response.headers.setdefault("X-Trace-Id", trace_id)
+                response.headers.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
+            except _REQUEST_GUARD_EXCEPTIONS:
+                pass
+    except _REQUEST_GUARD_EXCEPTIONS:
+        pass
+    return response
 
 
 # Request ID context should be available before the drain gate, and the drain gate
@@ -2787,26 +2723,8 @@ else:
 app.add_middleware(ChaChaOperationMiddleware)
 app.add_middleware(DrainGateMiddleware)
 app.add_middleware(RequestIDMiddleware)
-
-# Keep Setup UI HTML outside the static mounts to avoid bypassing the
-# /setup gating via direct file access.
-SETUP_PAGE_PATH = BASE_DIR / "Setup_UI" / "setup.html"
-
-
-async def serve_setup_page():
-    """Serve the first-time setup UI when required."""
-    try:
-        setup_required = needs_setup()
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="Configuration file missing; cannot render setup UI.") from None
-
-    if not setup_required:
-        return RedirectResponse(url="/api/v1/config/quickstart", status_code=307)
-
-    if not SETUP_PAGE_PATH.exists():
-        raise HTTPException(status_code=404, detail="Setup UI assets missing. Reinstall the setup UI bundle.")
-
-    return FileResponse(SETUP_PAGE_PATH)
+# Observe raw Slides disconnects before BaseHTTPMiddleware adds cancellable receive scopes.
+app.add_middleware(SlidesGenerationDisconnectMiddleware)
 
 
 # Register setup UI route conditionally
@@ -2833,13 +2751,12 @@ else:
 
 
 # Favicon serving
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon():
-    return FileResponse(FAVICON_PATH, media_type="image/x-icon")
+app.get("/favicon.ico", include_in_schema=False)(favicon)
 
 
-@app.get(
+app.get(
     "/",
+    response_model=None,
     openapi_extra={"security": []},
     responses={
         _starlette_status.HTTP_307_TEMPORARY_REDIRECT: {
@@ -2852,42 +2769,7 @@ async def favicon():
             },
         },
     },
-)
-async def root():
-    try:
-        if needs_setup():
-            try:
-                if route_enabled("setup"):
-                    return RedirectResponse(url="/setup", status_code=307)
-            except _REQUEST_GUARD_EXCEPTIONS:
-                pass
-    except FileNotFoundError:
-        logger.warning("config.txt missing while handling root request; serving default message.")
-
-    return {
-        "message": "Welcome to the tldw API; if you're seeing this, the server is running! "
-        "Check out /api/v1/config/quickstart, /docs, or /metrics to get started."
-    }
-
-
-# Metrics endpoint for Prometheus scraping (registered conditionally below)
-async def metrics():
-    from tldw_Server_API.app.api.v1.endpoints.metrics import build_prometheus_metrics_response
-
-    return await build_prometheus_metrics_response()
-
-
-# OpenTelemetry metrics endpoint (if using OTLP) - registered conditionally below
-@track_metrics(labels={"endpoint": "metrics"})
-async def api_metrics():
-    """Get current metrics in JSON format."""
-    registry = get_metrics_registry()
-    return registry.get_all_metrics()
-
-
-async def _set_diagnostics_no_store(response: Response) -> None:
-    """Prevent caching for direct dictionary-based diagnostic aliases."""
-    response.headers["Cache-Control"] = "no-store"
+)(root)
 
 
 # Router for health monitoring endpoints (NEW)
@@ -2951,6 +2833,7 @@ try:
         app.add_api_route(
             f"{API_V1_PREFIX}/metrics",
             api_metrics,
+            response_model=None,
             methods=["GET"],
             tags=["monitoring"],
             dependencies=[
@@ -2971,6 +2854,7 @@ except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
     app.add_api_route(
         f"{API_V1_PREFIX}/metrics",
         api_metrics,
+        response_model=None,
         methods=["GET"],
         tags=["monitoring"],
         dependencies=[
@@ -2985,42 +2869,6 @@ except _STARTUP_GUARD_EXCEPTIONS as _metrics_rt_err:
 # Router for authentication endpoint
 # app.include_router(auth_router, prefix=f"{API_V1_PREFIX}/auth", tags=["auth"])
 # The docs at http://localhost:8000/docs will show an “Authorize” button. You can log in by calling POST /api/v1/auth/login with a form that includes username and password. The docs interface is automatically aware because we used OAuth2PasswordBearer.
-
-
-# Health check (registered conditionally below)
-_NO_STORE_HEADERS = {"Cache-Control": "no-store"}
-
-
-async def health_check() -> JSONResponse:
-    """Return the immutable public liveness contract."""
-    return JSONResponse({"status": "ok"}, headers=_NO_STORE_HEADERS)
-
-
-async def internal_readiness_check(request: Request) -> JSONResponse:
-    """Serve only loopback, detail-free readiness for local orchestrators."""
-    if not readiness_service.is_loopback_peer(request):
-        return JSONResponse({"detail": "Not Found"}, status_code=404, headers=_NO_STORE_HEADERS)
-    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
-    return JSONResponse(
-        readiness_service.internal_readiness_payload(snapshot),
-        status_code=200 if snapshot.ready else 503,
-        headers=_NO_STORE_HEADERS,
-    )
-
-
-async def readiness_check(request: Request) -> JSONResponse:
-    """Return the authenticated operator readiness projection."""
-    snapshot = await readiness_service.collect_readiness_snapshot(request.app)
-    return JSONResponse(
-        readiness_service.operator_readiness_payload(snapshot),
-        status_code=200 if snapshot.ready else 503,
-        headers=_NO_STORE_HEADERS,
-    )
-
-
-# /health/ready alias for some orchestrators (registered conditionally below)
-async def readiness_alias(request: Request) -> JSONResponse:
-    return await readiness_check(request)
 
 
 def _add_public_control_plane_route(path: str, endpoint: Any) -> None:

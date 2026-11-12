@@ -1,0 +1,5 @@
+{
+  "results": [],
+  "errors": [],
+  "qualification": "Bandit supports the touched production Python backend. TSX is not supported; TSX lint/type/runtime checks are reported separately."
+}

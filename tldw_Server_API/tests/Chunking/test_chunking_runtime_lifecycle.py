@@ -22,12 +22,12 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     dumps_envelope,
     encrypt_byok_payload,
 )
-from tldw_Server_API.app.core.Chat import bounded_daemon
 from tldw_Server_API.app.core.Chunking.strategies.rolling_summarize import (
     LLM_USAGE_SUCCEEDED_KEY,
     LLM_USAGE_TRACKER_KEY,
 )
 from tldw_Server_API.app.core.Chunking.templates import TemplateProcessor
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
 
 pytestmark = pytest.mark.unit
 
@@ -224,15 +224,16 @@ async def test_chunking_real_byok_resolution_cannot_mix_config_generations(
             return None
 
     class SharedRepo:
-        async def fetch_secret(
+        async def fetch_authorized_secret_for_user(
             self,
             scope_type,
-            _scope_id,
-            _provider,
-            *,
-            include_revoked=False,
+            scope_id,
+            user_id,
+            provider,
         ):
-            assert include_revoked is True
+            assert scope_id == {"team": 11, "org": 13}[scope_type]
+            assert user_id == 7
+            assert provider == "openai"
             return row if scope_type == source else None
 
     async def get_user_repo():
@@ -452,7 +453,7 @@ async def _invoke_rolling_endpoint(kind: str, text: str):
 
 
 class _RollingTemplateDatabase:
-    def get_chunking_template(self, *, name):
+    def get_chunking_template(self, *, name, owner_user_id):
         assert name == "rolling-template"
         return {
             "name": name,
@@ -1480,7 +1481,7 @@ async def test_non_llm_chunking_ignores_saturated_provider_pool(
         return ["ordinary template chunk"]
 
     class NonLlmTemplateDatabase:
-        def get_chunking_template(self, *, name):
+        def get_chunking_template(self, *, name, owner_user_id):
             assert name == "ordinary-template"
             return {
                 "name": name,

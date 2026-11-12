@@ -228,3 +228,22 @@ async def test_first_chat_verifier_maps_model_not_found_to_model_unavailable(mon
     assert result.failure_category == "model_unavailable"
     assert result.message == "The selected model is unavailable. Switch model or provider."
     assert "gpt-4.1-mini is not available" not in str(result)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["custom-openai-api", "custom-openai-api-2"])
+async def test_first_chat_verifier_reports_a_custom_provider_without_a_base_url_as_configuration(
+    monkeypatch, provider
+):
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
+    from tldw_Server_API.app.core.Setup import first_chat_verifier
+
+    def _no_request(**_kwargs):
+        raise AssertionError("no request is sent without a base URL")
+
+    monkeypatch.setattr(custom_openai_adapter, "resolve_trusted_provider_endpoint", lambda _name: None)
+    monkeypatch.setattr(custom_openai_adapter.CustomOpenAIAdapter, "http_fetcher", staticmethod(_no_request))
+
+    result = await first_chat_verifier.verify_first_chat(provider=provider, model="m")
+
+    assert (result.status, result.failure_category) == ("failed", "configuration_error")

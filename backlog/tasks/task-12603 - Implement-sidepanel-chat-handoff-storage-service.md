@@ -37,9 +37,9 @@ Implement Task 1 from the sidepanel chat WebUI handoff plan: create a fail-close
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented sidepanel-chat-handoff.ts and focused service tests. Spec review passed after serialized Plasmo getAll values were normalized before validation. Code-quality review passed after adding key/body id validation, page metadata/route bounds, route leakage assertions, and timer cleanup. Verification: bun run test src/services/__tests__/sidepanel-chat-handoff.test.ts passed with 11 tests; git diff --check d73fded19a..HEAD passed. Bandit is not applicable to TypeScript-only service/test changes; package-wide TypeScript check previously hit Node heap OOM and remains a known environment limitation for this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

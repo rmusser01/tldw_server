@@ -5,12 +5,16 @@ import threading
 from collections.abc import Iterator
 from contextlib import nullcontext
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteConnectionPool
+
+if TYPE_CHECKING:
+    from loguru import Message
 
 
 @pytest.fixture
@@ -87,7 +91,7 @@ def test_sqlite_pool_detaches_rejected_handle_after_close_failure(
             super().close()
 
     failed = sqlite3.connect(sqlite_pool.db_path, factory=CloseFailureConnection)
-    messages = []
+    messages: list[Message] = []
     sink = logger.add(messages.append, level="WARNING")
     try:
         with monkeypatch.context() as patch:
@@ -109,8 +113,8 @@ def test_sqlite_pool_detaches_rejected_handle_after_close_failure(
             assert len(records) == 1
             assert records[0]["extra"]["connection_id"] == id(failed)
             assert records[0]["extra"]["thread_id"] == threading.get_ident()
-            assert records[0]["exception"].type is close_error
-            assert records[0]["exception"].traceback is not None
+            assert records[0]["extra"]["error_type"] == close_error.__name__
+            assert records[0]["exception"] is None
         else:
             assert records == []
     finally:
@@ -135,3 +139,37 @@ def test_sqlite_pool_prunes_dead_threads(tmp_path):
     stats = pool.get_stats()
     assert stats["total_connections"] == 1
     pool.close_all()
+
+
+def test_sqlite_checkout_retains_same_thread_native_identity(sqlite_pool):
+    connection = sqlite_pool.get_connection()
+    assert sqlite_pool.get_connection() is connection
+    assert sqlite_pool._connections[threading.get_ident()] is connection
+    sqlite_pool.invalidate_connection(connection)
+    assert sqlite_pool.get_connection() is not connection
+
+
+def test_simultaneous_sqlite_threads_keep_distinct_native_handles(sqlite_pool):
+    from concurrent.futures import ThreadPoolExecutor
+
+    ready = threading.Barrier(3, timeout=5)
+    release = threading.Event()
+    connections = []
+
+    def checkout():
+        connection = sqlite_pool.get_connection()
+        connections.append(connection)
+        assert sqlite_pool.get_connection() is connection
+        ready.wait()
+        assert release.wait(timeout=5)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(checkout) for _ in range(2)]
+        try:
+            ready.wait()
+            assert len(connections) == 2
+            assert connections[0] is not connections[1]
+        finally:
+            release.set()
+        for future in futures:
+            future.result(timeout=5)

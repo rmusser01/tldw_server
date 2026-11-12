@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react"
 import { useTranslation } from "react-i18next"
+import { useNavigate } from "react-router-dom"
 import { Button, Card, Spin, Tag, Tooltip, Empty, Badge } from "antd"
 import {
   Bot,
@@ -439,7 +440,7 @@ export const AgentRegistryPage: React.FC = () => {
               {statusIcon(health.runner)}
               <div>
                 <div className="text-xs text-muted-foreground">
-                  {t("option:agentRegistry.health.runnerBinary", "Runner Binary")}
+                  {t("option:agentRegistry.health.runnerStatus", "Runner status")}
                 </div>
                 <Tag color={statusColor(health.runner)}>{health.runner}</Tag>
               </div>
@@ -910,6 +911,7 @@ const AGENT_STATUS_LABELS = Object.fromEntries(
 ) as Record<AgentEntry["status"], string>
 
 const AgentCard: React.FC<{ agent: AgentEntry }> = ({ agent }) => {
+  const navigate = useNavigate()
   const statusColor =
     agent.status === "available"
       ? "success"
@@ -986,7 +988,7 @@ const AgentCard: React.FC<{ agent: AgentEntry }> = ({ agent }) => {
             disabled={agent.status !== "available"}
             onClick={() => {
               // Navigate to ACP playground with this agent pre-selected
-              window.location.hash = `/acp-playground?agent=${agent.type}`
+              navigate(`/acp-playground?agent=${agent.type}`)
             }}
           >
             Launch

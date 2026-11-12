@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "템플릿이 활성일 때 무시"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "미디어 가져오기 충돌"
+  },
+  "mediaHandoff_conflict": {
+    "message": "메시지 입력란에 이미 초안이 있습니다. 미디어 소스를 삽입하거나, 초안을 바꾸거나, 가져오기를 취소하세요."
+  },
+  "mediaHandoff_insert": {
+    "message": "미디어 소스 삽입"
+  },
+  "mediaHandoff_replace": {
+    "message": "현재 초안 바꾸기"
+  },
+  "mediaHandoff_cancel": {
+    "message": "가져오기 취소"
   }
 }

@@ -30,7 +30,11 @@ describe("PlaygroundForm signal surface guard", () => {
       "utf8"
     )
 
-    expect(formSource).toContain("Type a message... (/ commands, @ mentions)")
+    const toolbarSource = fs.readFileSync(path.resolve(__dirname, "../ComposerToolbar.tsx"), "utf8")
+    expect(formSource).toContain("playground:composer.calmPlaceholder")
+    // '@' mentions are named only where they work (CC-11).
+    expect(formSource).toContain("mentionsAvailable={composerMentionsAvailable(tabMentionsEnabled)}")
+    expect(toolbarSource).toContain("composerShortcutHint(t, mentionsAvailable)")
     expect(formSource).toContain("Changed since last send:")
     expect(formSource).toContain("playground:composer.providerDegraded")
     expect(formSource).toContain("playground:composer.presetChanged")
@@ -59,7 +63,7 @@ describe("PlaygroundForm signal surface guard", () => {
     expect(formSource).toContain("onSuccess: (data, _variables, context) =>")
     expect(formSource).toContain("const result = normalizeChatSubmitResult(data);")
     expect(formSource).toContain("isChatSubmitSuccess(result)")
-    expect(formSource).toContain("onError: (error) =>")
+    expect(formSource).toMatch(/onError:\s*\([^)]*context[^)]*\)\s*=>\s*\{\s*if \(context\?\.canFocus\(\)\) textAreaFocus\(\);?\s*\}/)
     expect(formSource).toContain("textAreaFocus()")
     expect(formSource).toContain("tldw:focus-composer")
     expect(formSource).toContain("el.focus()")

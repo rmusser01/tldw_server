@@ -17,6 +17,7 @@ from starlette.responses import Response
 # Keep this module importable even when local/dev env sets ALLOWED_ORIGINS='*'.
 os.environ["ALLOWED_ORIGINS"] = "http://localhost:3000"
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core import config as config_mod
 
 importlib.reload(config_mod)
@@ -659,7 +660,7 @@ def test_main_import_fails_for_explicit_empty_allowed_origins_list_in_production
 def _route_method_count(app: FastAPI, path: str, method: str) -> int:
     method_upper = method.upper()
     count = 0
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         route_path = getattr(route, "path", None)
         route_methods = getattr(route, "methods", set()) or set()
         if route_path == path and method_upper in route_methods:

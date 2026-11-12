@@ -122,6 +122,7 @@ class SyncProfileDatasetStatus:
     notes_organization: dict[str, object] | None = None
     notes_link: dict[str, object] | None = None
     notes_attachment: dict[str, object] | None = None
+    notes_provenance: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -401,6 +402,12 @@ class SyncV2ProfileManager:
                     user_id=user_id,
                     dataset=dataset,
                 )
+        if "notes.provenance" in requested:
+            from .notes_provenance import ensure_notes_provenance_ready
+            materializer = self.service.materializers.get("notes.note")
+            if materializer is None or not hasattr(materializer, "note_db"):
+                raise SyncStoreError("notes_provenance_materializer_missing")
+            dataset = ensure_notes_provenance_ready(service=self.service, note_db=materializer.note_db, user_id=user_id)
         if requested_task_domains:
             if self.service is None:
                 raise SyncStoreError("Notes task bootstrap service is unavailable")
@@ -703,9 +710,20 @@ class SyncV2ProfileManager:
             or existing_state.get("authority_id") != authority_id
         ):
             raise PersonalContextBootstrapError("personal_context_authority_mismatch")
-        if self.service is not None:
-            self.service.prepare_notes_suggestion_authority(user_id=user_id, dataset=dataset)
         selected_store = store or self.store
+        if self.service is not None:
+            # existing_state is the Personal Context binding computed just above. When
+            # it is set this dataset IS the bound authority, which the bootstrap
+            # transaction is allowed to select even when it is not the chatbook
+            # default, so the default markers must not be demanded of it.
+            # selected_store is passed because it carries the bootstrap transaction:
+            # the dataset may exist only inside it, which no other connection can see.
+            self.service.prepare_notes_suggestion_authority(
+                user_id=user_id,
+                dataset=dataset,
+                require_default=existing_state is None,
+                store=selected_store,
+            )
         try:
             return selected_store.bind_personal_context_dataset(
                 dataset_id=dataset.dataset_id,
@@ -1256,6 +1274,7 @@ def _dataset_status(dataset: SyncDataset) -> SyncProfileDatasetStatus:
         notes_organization=_safe_notes_organization_status(dataset),
         notes_link=_safe_notes_link_status(dataset),
         notes_attachment=_safe_notes_attachment_status(dataset),
+        notes_provenance=_safe_notes_provenance_status(dataset),
     )
 
 
@@ -1273,6 +1292,19 @@ def _safe_notes_organization_status(dataset: SyncDataset) -> dict[str, object] |
         "captured_count": _safe_non_negative_int(metadata.get("captured_count")),
         "expected_count": _safe_non_negative_int(metadata.get("expected_count")),
         "error_code": error_code if isinstance(error_code, str) else None,
+    }
+
+
+def _safe_notes_provenance_status(dataset: SyncDataset) -> dict[str, object] | None:
+    metadata = dataset.metadata.get("notes_provenance_v1")
+    if not isinstance(metadata, Mapping):
+        return None
+    state = metadata.get("state")
+    return {
+        "state": state if state in {"initializing", "ready", "failed"} else "failed",
+        "captured_count": _safe_non_negative_int(metadata.get("captured_count")),
+        "expected_count": _safe_non_negative_int(metadata.get("expected_count")),
+        "error_code": metadata.get("error_code") if isinstance(metadata.get("error_code"), str) else None,
     }
 
 

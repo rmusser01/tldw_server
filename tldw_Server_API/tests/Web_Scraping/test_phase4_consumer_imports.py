@@ -1,17 +1,9 @@
 from __future__ import annotations
 
 import ast
-import inspect
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 import pytest
-
-from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-    scrape_and_summarize_multiple as legacy_scrape_and_summarize_multiple,
-)
-from tldw_Server_API.app.services import web_scraping_service as ws_service
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LEGACY_MODULE = "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib"
@@ -67,14 +59,8 @@ CONSUMER_IMPORTS = {
         LEGACY_MODULE: {"is_content_page"},
     },
     "tldw_Server_API/app/services/web_scraping_service.py": {
-        CONTENT_MODULE: {"ContentMetadataHandler"},
         ORCHESTRATION_MODULE: {"scrape_article"},
-        LEGACY_MODULE: {
-            "recursive_scrape",
-            "scrape_and_summarize_multiple",
-            "scrape_by_url_level",
-            "scrape_from_sitemap",
-        },
+        LEGACY_MODULE: {"scrape_from_sitemap"},
     },
 }
 
@@ -82,9 +68,6 @@ REQUIRED_LEGACY_IMPORTS = {
     "tldw_Server_API/app/core/Watchlists/fetchers.py": {"is_content_page"},
     "tldw_Server_API/app/services/enhanced_web_scraping_service.py": {"is_content_page"},
     "tldw_Server_API/app/services/web_scraping_service.py": {
-        "recursive_scrape",
-        "scrape_and_summarize_multiple",
-        "scrape_by_url_level",
         "scrape_from_sitemap",
     },
 }
@@ -140,105 +123,3 @@ def test_phase4_consumers_import_only_canonical_article_owners() -> None:
                 assert actual_names <= expected_names, relative_path
             else:
                 assert expected_names <= actual_names, relative_path
-
-
-@pytest.mark.asyncio
-async def test_legacy_fallback_forwards_system_message_with_real_helper_signature(monkeypatch) -> None:
-    received: dict[str, Any] = {}
-
-    async def strict_scrape_and_summarize_multiple(
-        urls: str,
-        custom_prompt_arg: str | None,
-        api_name: str,
-        api_key: str | None,
-        keywords: str,
-        custom_article_titles: str | None,
-        system_message: str | None = None,
-        summarize_checkbox: bool = False,
-        custom_cookies: list[dict[str, Any]] | None = None,
-        temperature: float = 0.7,
-        allow_llm_extraction: bool = True,
-        summary_prompt_overrides: Mapping[str, str] | None = None,
-    ) -> list[dict[str, Any]]:
-        received.update(
-            {
-                "urls": urls,
-                "custom_prompt_arg": custom_prompt_arg,
-                "api_name": api_name,
-                "api_key": api_key,
-                "keywords": keywords,
-                "custom_article_titles": custom_article_titles,
-                "system_message": system_message,
-                "summarize_checkbox": summarize_checkbox,
-                "custom_cookies": custom_cookies,
-                "temperature": temperature,
-                "allow_llm_extraction": allow_llm_extraction,
-                "summary_prompt_overrides": summary_prompt_overrides,
-            }
-        )
-        return [
-            {
-                "url": "https://example.com/article",
-                "title": "Article",
-                "content": "Body",
-                "extraction_successful": True,
-            }
-        ]
-
-    real_parameters = inspect.signature(legacy_scrape_and_summarize_multiple).parameters
-    strict_parameters = inspect.signature(strict_scrape_and_summarize_multiple).parameters
-    assert [(parameter.name, parameter.kind, parameter.default) for parameter in strict_parameters.values()] == [
-        (parameter.name, parameter.kind, parameter.default) for parameter in real_parameters.values()
-    ]
-
-    monkeypatch.setenv("TLDW_ENABLE_LEGACY_WEB_SCRAPING_FALLBACK", "1")
-    monkeypatch.setattr(
-        ws_service,
-        "get_web_scraping_service",
-        lambda: (_ for _ in ()).throw(RuntimeError("enhanced service unavailable")),
-        raising=True,
-    )
-    monkeypatch.setattr(
-        ws_service,
-        "scrape_and_summarize_multiple",
-        strict_scrape_and_summarize_multiple,
-        raising=True,
-    )
-    monkeypatch.setattr(ws_service.ephemeral_storage, "store_data", lambda _data: "fallback-result")
-
-    result = await ws_service.process_web_scraping_task(
-        scrape_method="Individual URLs",
-        url_input="https://example.com/article",
-        url_level=None,
-        max_pages=2,
-        max_depth=1,
-        summarize_checkbox=True,
-        custom_prompt="Summarize the source.",
-        api_name="test-provider",
-        api_key="test-key",
-        keywords="web scraping",
-        custom_titles="Custom title",
-        system_prompt="Use a neutral editorial voice.",
-        temperature=0.2,
-        custom_cookies=[{"name": "session", "value": "cookie-value"}],
-        mode="ephemeral",
-        user_id=1,
-        perform_chunking=False,
-        summary_prompt_overrides={"system": "Saved system", "user": "Saved summary"},
-    )
-
-    assert result["status"] == "ephemeral-ok"
-    assert received == {
-        "urls": "https://example.com/article",
-        "custom_prompt_arg": "Summarize the source.",
-        "api_name": "test-provider",
-        "api_key": "test-key",
-        "keywords": "web scraping",
-        "custom_article_titles": "Custom title",
-        "system_message": "Use a neutral editorial voice.",
-        "summarize_checkbox": True,
-        "custom_cookies": [{"name": "session", "value": "cookie-value"}],
-        "temperature": 0.2,
-        "allow_llm_extraction": True,
-        "summary_prompt_overrides": {"system": "Saved system", "user": "Saved summary"},
-    }

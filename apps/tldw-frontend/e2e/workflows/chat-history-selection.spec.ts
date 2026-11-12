@@ -1,6 +1,6 @@
 import { qualifySelectionRecordConcurrency, qualifyHistoryStorage, qualifyStorageInterleavings } from '../../../extension/tests/e2e/utils/history-storage'
 import { test, expect } from '@playwright/test'
-import { sendIndependentSourceViews, rejectUnsupportedLocalFork, startHistoryServer, seedWebStorage, seedHistory, historyUrl, choose, readStore, localForkAndSend, legacyBoundaries, abortLocalFork, largeLegacyReview, seedNativeReference, nativeHistoryUrl, nativeForkAndSend, send, unknownNativeFork, editNativeChildSettings, heldNativeForkNavigation, rejectNativeMetadataSettings, heldNativeFirstCreate, firstNativeCharacterSend, uncertainNativeCharacterSend, qualifyChildIsolation, qualifyForeignWorkspaceAndAccountRead } from '../../../extension/tests/e2e/utils/history-selection'
+import { sendIndependentSourceViews, rejectUnsupportedLocalFork, startHistoryServer, seedWebStorage, seedHistory, historyUrl, choose, readStore, localForkAndSend, legacyBoundaries, abortLocalFork, largeLegacyReview, seedNativeReference, nativeHistoryUrl, nativeForkAndSend, send, unknownNativeFork, editNativeChildSettings, heldNativeForkNavigation, rejectNativeMetadataSettings, heldNativeFirstCreate, firstNativeCharacterSend, uncertainNativeCharacterSend, qualifyChildIsolation, qualifyForeignWorkspaceAndAccountRead, switchHistoryFixtureAccount } from '../../../extension/tests/e2e/utils/history-selection'
 
 test('two mounted views share real IndexedDB and keep independent selected variants', async ({ browser }) => {
   test.setTimeout(90_000)
@@ -322,4 +322,18 @@ for (const ack of ['missing', 'wrong'] as const) test('native character ' + ack 
  const server = await startHistoryServer({ characterAck: ack }); const context = await browser.newContext()
  try { const page = await context.newPage(); await seedWebStorage(page, server.url); await page.goto('/chat'); await expect(page.getByTestId('chat-input')).toBeVisible(); await uncertainNativeCharacterSend(page, server) }
  finally { await context.close(); await server.close() }
+})
+
+
+test('history fixture account switching discards unrelated stored account secrets', async ({ page }) => {
+  await page.goto('/chat')
+  await page.evaluate(() => localStorage.setItem('tldwConfig', JSON.stringify({
+    configuredApiKey: 'unexpected-fixture-credential', unrelatedFixtureSetting: true,
+  })))
+  await switchHistoryFixtureAccount(page, 'http://127.0.0.1:18001')
+  const config = await page.evaluate(() => JSON.parse(localStorage.getItem('tldwConfig')!))
+  expect(config).not.toHaveProperty('configuredApiKey')
+  expect(config).not.toHaveProperty('unrelatedFixtureSetting')
+  expect(config.apiKey).toBe('h1-other-account-key')
+  expect(config.serverUrl).toBe('http://127.0.0.1:18001')
 })

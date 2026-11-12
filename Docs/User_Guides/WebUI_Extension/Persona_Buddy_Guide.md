@@ -30,8 +30,9 @@ The two apps have different selection and voice controls.
   configured speech gateway. Local providers need their model assets and
   dependencies; remote providers and gateways need their endpoint and credentials.
 - In **Settings → UI customization**, enable **Enable persona buddy shell**.
-  Use a desktop-width WebUI window: the full WebUI hides the floating shell at
-  narrow widths. The extension sidepanel has its own supported layout.
+  Buddy remains visible when the WebUI pane narrows and keeps its controls
+  inside the viewport. Resizing preserves the connected session and unsent
+  Buddy draft. The extension sidepanel has its own supported layout.
 
 Art selection alone does not start a microphone, configure a provider, or grant
 tool permission. Keep using the authenticated WebUI for protected visual assets;
@@ -62,10 +63,15 @@ catalog, saved names, and active pack can differ.
 
 ## Open, move, and send a text message
 
-Click the floating Buddy to expand or collapse its controls. Use **Drag Buddy**
-to move the floating panel; dragging the image is not the documented drag handle.
+Click the floating Buddy to make it react. Double-click it to open its controls;
+close them with **×** or **Escape**. Drag the image or use **Drag Buddy**
+to move the floating panel.
 The shell keeps position preferences for its surface and constrains placement to
 the viewport. Do not apply Chatbook's terminal resize keys to this browser shell.
+
+Closing the controls with **×** or **Escape** keeps unsent text for the current
+Persona while Buddy stays on the page. Changing Persona, leaving a surface that
+removes Buddy, or reloading the page clears that draft.
 
 | Control or feedback | What it does |
 |---|---|
@@ -171,7 +177,7 @@ that it is the one shown by Buddy.
 
 | Symptom | What to do |
 |---|---|
-| Buddy is absent | Check **Enable persona buddy shell**, desktop width, the selected Persona, active pack, and whether the current surface supports Buddy. |
+| Buddy is absent | Check **Enable persona buddy shell**, the selected Persona, active pack, and whether the current surface supports Buddy. |
 | Starter catalog fails | Use **Retry catalog** after checking connectivity and authentication. A retry does not activate anything. |
 | Image fails while text works | Check the visual diagnostic and authenticated pack loading. Confirm the pack is active. Do not make protected assets public as a workaround. |
 | “Visual pack did not load — rate_limited” | Stop repeated reloads and let the limit window recover, then reconnect. Record the session and reproduction steps if it recurs. Reconnection restored the image in UAT, but the repeated-request trigger remains unresolved (TASK-13211). |
@@ -189,18 +195,21 @@ that it is the one shown by Buddy.
 
 The guide's initial source check used server `dev` **83af7e5dcf** on
 **2026-09-07**; provider-selection instructions also reflect the TASK-13214
-implementation. This guide consolidates current controls and recorded UAT; it
-does not claim a new physical microphone test or all-provider playback test for
-this documentation update.
+implementation. The latest voice UAT used **e74d3df255** on **2026-10-03** with
+Parakeet ONNX recognition, DeepSeek chat, and local Kokoro speech.
 
 - Human UAT verified real provider replies, clear Kokoro output, and stopped
   recording/playback afterward. Exact recognition varied between attempts.
 - PR #2927 repaired decoding responsiveness, whole-turn revisions, and error
   handling; 202 targeted Python tests passed and Qodo's findings were resolved.
-- Full request-correlated floating **listening → thinking → speaking → idle**
-  validation remains open under TASK-13202. Repeated visual-pack/session requests
-  reached rate limits in one observation; TASK-13211 tracks the unresolved trigger.
-  A stable idle image after reconnect is not proof that this defect is fixed.
+- TASK-13202 is complete. The requester confirmed the floating Buddy's listening
+  animation and clear audible reply. Direct browser observation captured
+  **thinking → speaking → idle** with loaded artwork throughout. The notebook
+  phrase was committed once and received the matching reply. See the
+  [recorded acceptance evidence](https://github.com/rmusser01/tldw_server/blob/5de9f73564a7c36a7afd3e71a8610489692189df/Docs/Reviews/assets/buddy-voice-uat-2026-10-03/human-acceptance.json).
+- Effect replay and compact-pane visibility repairs passed 128 targeted frontend
+  tests and actual browser checks. TASK-13211 retains the unresolved attribution
+  of the original September 6 repeated-request trigger.
 
 ## Related documentation
 

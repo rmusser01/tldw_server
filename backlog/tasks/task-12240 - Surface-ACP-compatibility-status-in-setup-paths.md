@@ -38,7 +38,7 @@ Implement #1539 PR3: make downstream-agent compatibility status visible in Agent
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 
 Opened PR #1562: https://github.com/rmusser01/tldw_server/pull/1562.
 
@@ -57,7 +57,7 @@ Verification passing: python -m pytest tldw_Server_API/tests/Agent_Client_Protoc
 Repo-wide UI TypeScript check attempted with ./node_modules/.bin/tsc --noEmit -p tsconfig.json and failed on existing unrelated baseline errors outside this ACP/Agent Registry slice.
 
 Closeout verification: PR #1562 merged into dev on 2026-05-11, and parent issue #1539 is closed with remaining live-agent certification tracked in follow-up issues #1563 and #1564.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

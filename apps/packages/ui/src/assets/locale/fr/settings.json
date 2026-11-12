@@ -1720,5 +1720,35 @@
     "local": {
       "title": "Comportement du panneau latéral"
     }
+  },
+  "chatMacrosSettings": {
+    "title": "Macros de discussion",
+    "description": "Créez des procédures de discussion réutilisables et choisissez la présentation de leurs résultats.",
+    "new": "Nouvelle macro",
+    "importLabel": "Importer une macro",
+    "import": "Importer",
+    "refresh": "Actualiser les macros",
+    "macros": "Macros",
+    "profiles": "Profils de sortie",
+    "catalog": "Catalogue de macros",
+    "loadingMacros": "Chargement des macros",
+    "retryCatalog": "Réessayer le catalogue",
+    "empty": "Aucune macro trouvée.",
+    "importFile": "Importer un fichier YAML de macro",
+    "tabs": "Paramètres des macros de discussion",
+    "cloneName": "Nom de la copie",
+    "cloning": "Copie en cours",
+    "clone": "Copier /{{command}}",
+    "select": "Sélectionner /{{command}}",
+    "toggle": "Activer ou désactiver /{{command}}",
+    "loadingProfiles": "Chargement des profils de sortie",
+    "retrySettings": "Réessayer les paramètres",
+    "enabled": "Activé",
+    "disabled": "Désactivé",
+    "valid": "Valide",
+    "invalid": "Invalide",
+    "unknown": "Inconnu",
+    "builtin": "Intégré",
+    "user": "Utilisateur"
   }
 }

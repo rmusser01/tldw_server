@@ -33,14 +33,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task518-tsc-final.txt`: package `tsc` reported two diagnostics in `src/components/Common/__tests__/system-prompt-utils.test.ts` because mocked `getPromptByIdFn` results returned partial prompt objects missing required Dexie `Prompt` fields.
 - Root cause was incomplete test fixtures only. `GetPromptByIdFn` returns `Promise<Prompt | undefined>`, and `Prompt` requires `title`, `is_system`, and `createdAt` in addition to `id` and `content`.
 - Added the required prompt fields to the two mocked prompt returns while preserving the tested content behavior.
 - Focused verification: `bunx vitest run src/components/Common/__tests__/system-prompt-utils.test.ts` passed: 4 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task519-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 61 in `/tmp/task518-tsc-final.txt` to 59 in `/tmp/task519-tsc-final.txt`; `rg -n 'system-prompt-utils\.test\.ts' /tmp/task519-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

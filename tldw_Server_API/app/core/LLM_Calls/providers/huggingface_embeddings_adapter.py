@@ -6,6 +6,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.http_client import create_client
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    EMBEDDING_REDIRECT_STATUS_CODES,
     encode_huggingface_model_path,
     resolve_runtime_embedding_base_url,
 )
@@ -86,20 +87,22 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
                     "Resolved keyless Hugging Face embeddings require local fallback."
                 )
 
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
             raise ChatConfigurationError(
                 provider=self.name,
                 message="Hugging Face embedding credentials are not configured.",
             )
 
+        credentials_resolved = request.get("credentials_resolved") is True
+
         # Native HTTP path via centralized client (mock-friendly)
-        if self._use_native_http():
+        if request.get("_require_native_http") is True or self._use_native_http():
             base_url = resolve_runtime_embedding_base_url(request, provider=self.name)
             try:
                 model_path = encode_huggingface_model_path(model)
             except ValueError:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+                from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 
                 raise ChatBadRequestError(
                     provider=self.name,
@@ -116,14 +119,19 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
                 multi = False
             provider_error: Exception | None = None
             try:
-                with create_client(timeout=timeout or 60.0) as client:
+                client_options: dict[str, Any] = {"timeout": timeout or 60.0}
+                if credentials_resolved:
+                    client_options["follow_redirects"] = False
+                with create_client(**client_options) as client:
                     resp = client.post(url, headers=headers, json=payload)
+                    if getattr(resp, "status_code", None) in EMBEDDING_REDIRECT_STATUS_CODES:
+                        raise RuntimeError("Embedding provider redirected the request")
                     if hasattr(resp, "raise_for_status"):
                         resp.raise_for_status()
                     data = resp.json()
                 return self._normalize(data, multi=multi)
             except Exception:  # noqa: BLE001 - sanitize arbitrary provider transport failures
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+                from tldw_Server_API.app.core.exceptions import ChatProviderError
 
                 provider_error = ChatProviderError(
                     provider=self.name,

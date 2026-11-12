@@ -31,7 +31,7 @@ Notes:
 
 ## Key Sanity Check (No Secrets Printed)
 ```python
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import get_api_keys
+from tldw_Server_API.app.core.config_llm_providers import get_api_keys
 keys = get_api_keys()
 k = keys.get('openai') or ''
 print({'openai_present': bool(k), 'length': len(k), 'masked': (k[:4]+'...'+k[-4:]) if k else None})

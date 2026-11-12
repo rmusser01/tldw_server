@@ -55,9 +55,9 @@ Reason: ADR-039 already governs canonical task/activity authority, tenancy, comp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Completed TASK-13006.1 through TASK-13006.4 under ADR-039: tenant-scoped task storage and readiness, dormant notes.task and immutable notes.task_activity lifecycles, deterministic compound capture, managed checklist convergence, drift/retention repair, and coupled public activation. The final child added required multi-device SQLite/live-PostgreSQL convergence evidence and resolved every independent review finding.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

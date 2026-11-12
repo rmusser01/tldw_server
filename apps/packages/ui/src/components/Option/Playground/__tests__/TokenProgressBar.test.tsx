@@ -34,6 +34,27 @@ describe("TokenProgressBar", () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
+  // AX-08 (#3124): the focus ring was 50% primary, not the theme focus colour.
+  it.each([
+    ["full", { maxTokens: 4096 }],
+    ["compact", { maxTokens: 4096, compact: true }],
+    ["unknown window", { maxTokens: 0 }]
+  ] as const)("shows a solid focus-colour ring on the %s control", (_name, props) => {
+    render(
+      <TokenProgressBar
+        conversationTokens={1200}
+        draftTokens={80}
+        modelLabel="Test model"
+        onClick={vi.fn()}
+        {...props}
+      />
+    )
+
+    const control = screen.getByRole("button", { name: "Configure context window size" })
+    expect(control).toHaveClass("focus-visible:ring-2", "focus-visible:ring-focus")
+    expect(control.className).not.toMatch(/ring-primary\//)
+  })
+
   it("renders a non-interactive indicator when no click handler is provided", () => {
     render(
       <TokenProgressBar

@@ -151,6 +151,7 @@ const buildOverviewData = (): WatchlistsOverviewData => ({
     total: 1,
     active: 1,
     nextRunAt: "2026-05-21T12:00:00Z",
+    nextActiveJob: null,
     attention: 0
   },
   items: {

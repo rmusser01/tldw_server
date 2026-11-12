@@ -1,4 +1,8 @@
 # Test-only: /workspace is an OFFLINE disposable clone, never the boot disk.
+# Replay the clone's journal before raw writes, so boot cannot undo new inodes.
+status=0
+e2fsck -p /workspace/rootfs.img || status=$?
+case "$status" in 0|1) ;; *) exit "$status" ;; esac
 e2fsck -fn /workspace/rootfs.img
 debugfs -w -R 'rm /usr/local/bin/tldw-agent-guest' /workspace/rootfs.img
 debugfs -w -R 'write /workspace/fault-agent /usr/local/bin/tldw-agent-guest' /workspace/rootfs.img

@@ -39,17 +39,13 @@ Implement Task 3 from the sidepanel chat WebUI handoff plan: make `/chat` read s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented WebUI /chat sidepanel handoff import, imported context banner, draft conflict actions, context-only fallback prompt, queued request messageForModel preservation/replay, compare-mode requestOverrides propagation, and submit-result-gated context clearing.
 
 Verification: bun run test src/components/Option/Playground/__tests__/sidepanel-chat-handoff-import.test.tsx src/components/Chat/composer/__tests__/useComposerSubmit.test.tsx --maxWorkers=1 --no-file-parallelism; NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false; bun run test src/services/__tests__/sidepanel-chat-handoff.test.ts src/components/Sidepanel/Chat/__tests__/ControlRow.chat-handoff.test.tsx src/components/Sidepanel/Chat/__tests__/ControlRow.role-play-handoff.test.tsx src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx src/components/Option/Playground/__tests__/sidepanel-chat-handoff-import.test.tsx src/components/Chat/composer/__tests__/useComposerSubmit.test.tsx --maxWorkers=1 --no-file-parallelism; git diff --check.
 
 Bandit: skipped because this task touched TypeScript/TSX and markdown only; Bandit is Python AST analysis and is not meaningful for this scope. Known skips/blockers: no live browser smoke in Task 3; packaged/live smoke remains Task 4.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -176,12 +176,15 @@ def _assert_pg_rls_policies_present(backend: Any, install_error: BaseException) 
     try:
         result = backend.execute(
             "SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity, "
-            "       COUNT(p.polname) AS policy_count "
+            "       COUNT(p.polname) FILTER (WHERE p.polname = CASE "
+            "WHEN c.relname = 'character_cards' THEN 'chars_tenant_isolation' "
+            "ELSE c.relname || '_tenant_isolation' END) AS policy_count "
             "FROM pg_class c "
             "JOIN pg_namespace n ON n.oid = c.relnamespace "
             "LEFT JOIN pg_policy p ON p.polrelid = c.oid "
             "WHERE n.nspname = current_schema() AND c.relkind = 'r' "
-            "  AND c.relname IN ('notes', 'character_cards') "
+            "  AND c.relname IN ('notes', 'character_cards', 'conversations', "
+            "'messages', 'chacha_keywords', 'keyword_collections', 'sync_log') "
             "GROUP BY c.relname, c.relrowsecurity, c.relforcerowsecurity"
         )
         rows = list(result.rows or []) if result is not None else []
@@ -199,7 +202,12 @@ def _assert_pg_rls_policies_present(backend: Any, install_error: BaseException) 
             "migrations as the table owner before starting the application."
         ) from install_error
 
-    unprotected = [
+    required_tables = {
+        "notes", "character_cards", "conversations", "messages",
+        "chacha_keywords", "keyword_collections", "sync_log",
+    }
+    missing = required_tables - {str(row.get("relname")) for row in rows}
+    unprotected = sorted(missing) + [
         str(row.get("relname"))
         for row in rows
         if not (row.get("relrowsecurity") and row.get("relforcerowsecurity"))

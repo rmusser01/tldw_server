@@ -36,19 +36,17 @@ Implement Task 5 from the MCP effective permission explain implementation plan: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Task 5 implementation under the approved subagent-driven workflow.
 
 Task 5 added remote policy explain/preview POST client methods and CLI commands. Local preview uses `GatewayPolicyExplainService` with local config/profile storage; a standalone CLI runtime catalog helper is not currently available, so local preview relies on the service's profile/policy fallback and may report degraded runtime catalog state.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Controller follow-up addressed code-quality review findings: policy explain CLI remote mode is now explicit via --gateway-url or --remote, ambient MCP_UNIFIED_GATEWAY_URL no longer silently forces remote mode, --admin-key was removed from policy commands, admin keys are read only from MCP_UNIFIED_GATEWAY_ADMIN_KEY, explicit empty --args-json is rejected, and remote error payloads preserve message fields. Added regression coverage for env/local precedence, env-backed remote mode, empty args JSON, local plus gateway-url rejection, admin-key argument rejection, and message preservation.
 
 Reviews: spec follow-up reported no Critical/Important/Minor issues and marked spec ready; code-quality follow-up reported no Critical/Important issues, prior blockers resolved, and ready to merge.
 
 Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/MCP_unified/test_standalone_policy_explain_cli.py -v -> 10 passed, 7 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_remote_runtime_cli.py -v -> 26 passed, 5 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_gateway_cli_package.py -k simulate_policy -v -> 4 passed, 90 deselected, 5 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r mcp_unified/gateway/remote_admin.py mcp_unified/gateway/cli.py tldw_Server_API/tests/MCP_unified/test_standalone_policy_explain_cli.py -s B101 -f json -o /tmp/bandit_task2374.json -> 0 results; git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

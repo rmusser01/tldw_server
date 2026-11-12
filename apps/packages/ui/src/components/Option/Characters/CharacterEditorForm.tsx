@@ -14,6 +14,7 @@ import { CharacterPreview } from "./CharacterPreview"
 import { GenerateFieldButton } from "./GenerateFieldButton"
 import { VisualIdentityPackPanel } from "@/components/Common/VisualIdentity/VisualIdentityPackPanel"
 import { expressionRowsFromExtensions } from "./character-expression-images"
+import { Alert as DesignSystemAlert } from "@/components/ui/primitives/Alert"
 import {
   MAX_NAME_LENGTH,
   SYSTEM_PROMPT_EXAMPLE,
@@ -34,6 +35,8 @@ export type CharacterEditorFormProps = {
   worldBookFieldContext: {
     options: CharacterWorldBookOption[]
     loading: boolean
+    error?: boolean
+    retry?: () => void
     editCharacterNumericId: number | null
   }
   isSubmitting: boolean
@@ -274,6 +277,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
           ]}
         >
           <Input.TextArea
+            className="mb-6"
             autoSize={{ minRows: 3, maxRows: 8 }}
             showCount
             maxLength={2000}
@@ -426,6 +430,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
                       ]}
                     >
                       <Input.TextArea
+                        className="mb-6"
                         autoSize={{ minRows: 2, maxRows: 6 }}
                         showCount
                         maxLength={1000}
@@ -536,6 +541,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
         })}
       >
         <Input.TextArea
+          className="mb-6"
           autoSize={{ minRows: 2, maxRows: 6 }}
           placeholder={t("settings:manageCharacters.form.greeting.placeholder", {
             defaultValue:
@@ -582,7 +588,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
   const renderTagsField = React.useCallback(
     () => (
       <Form.Item
-        name="tags"
+        htmlFor="tags"
         label={
           <span>
             {t("settings:manageCharacters.tags.label", {
@@ -844,6 +850,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
                   })}
                 >
                   <Input.TextArea
+                    className="mb-6"
                     autoSize={{ minRows: 2, maxRows: 6 }}
                     showCount
                     maxLength={2000}
@@ -1011,6 +1018,7 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
                       label: worldBook.name,
                     }))}
                     loading={worldBookOptionsLoading}
+                    disabled={worldBookOptionsLoading || worldBookFieldContext.error}
                   />
                 </Form.Item>
                 {mode === "edit" && worldBookEditCharacterNumericId == null ? (
@@ -1092,9 +1100,36 @@ export const CharacterEditorForm: React.FC<CharacterEditorFormProps> = ({
       onValuesChange={(_, allValues) => {
         onValuesChange(allValues)
       }}
-      onFinish={onFinish}
+      onFinish={(values) => {
+        if (worldBookFieldContext.loading || worldBookFieldContext.error) {
+          const { world_book_ids: _unknownAttachments, ...mainFields } = values
+          onFinish(mainFields)
+        } else {
+          onFinish(values)
+        }
+      }}
       onFinishFailed={handleFinishFailed}
     >
+      {worldBookFieldContext.error ? (
+        <DesignSystemAlert
+          variant="warning"
+          title={t("settings:manageCharacters.worldBooks.loadFailed", {
+            defaultValue: "Failed to load world books",
+          })}
+          action={worldBookFieldContext.retry ? {
+            label: t("settings:manageCharacters.worldBooks.retry", {
+              defaultValue: "Retry world books",
+            }),
+            onClick: worldBookFieldContext.retry,
+            loading: worldBookFieldContext.loading,
+          } : undefined}
+        >
+          {t("settings:manageCharacters.worldBooks.saveWithoutAttachments", {
+            defaultValue:
+              "You can save other changes; world-book attachments will remain unchanged. Retry to edit attachments.",
+          })}
+        </DesignSystemAlert>
+      ) : null}
       {renderNameField()}
       {renderSystemPromptField()}
       {renderGreetingField()}

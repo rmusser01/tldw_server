@@ -518,6 +518,126 @@ def build_core_chat_rls_sql() -> list[str]:
     return stmts
 
 
+def build_notes_provenance_receipts_rls_sql() -> list[str]:
+    """Retain acknowledgments for their authenticated owner, even after later edits."""
+    return [
+        """DO $notes_provenance_receipts_rls$
+        BEGIN
+          IF to_regclass('notes_provenance_receipts') IS NULL THEN RETURN; END IF;
+          ALTER TABLE notes_provenance_receipts ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE notes_provenance_receipts FORCE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS notes_provenance_receipts_owner ON notes_provenance_receipts;
+          CREATE POLICY notes_provenance_receipts_owner ON notes_provenance_receipts
+            USING (owner_user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (owner_user_id = current_setting('app.current_user_id', true));
+        END $notes_provenance_receipts_rls$;"""
+    ]
+
+
+def build_notes_provenance_rls_sql() -> list[str]:
+    """Require the authenticated owner on the sidecar and its retained parent."""
+    predicate = """owner_user_id = current_setting('app.current_user_id', true)
+        AND EXISTS (SELECT 1 FROM notes AS note
+                    WHERE note.id = notes_knowledge_provenance.note_id
+                      AND note.client_id = notes_knowledge_provenance.owner_user_id)"""
+    return [f"""DO $notes_provenance_rls$
+        BEGIN
+          IF to_regclass('notes_knowledge_provenance') IS NULL THEN RETURN; END IF;
+          ALTER TABLE notes_knowledge_provenance ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE notes_knowledge_provenance FORCE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS notes_provenance_owner ON notes_knowledge_provenance;
+          CREATE POLICY notes_provenance_owner ON notes_knowledge_provenance
+            USING ({predicate}) WITH CHECK ({predicate});
+        END $notes_provenance_rls$;"""]
+
+
+def build_workspace_chat_startup_rls_sql() -> list[str]:
+    """Keep orphan receipts owner-visible while denying absent or foreign scope."""
+    return ["""
+        DO $workspace_chat_startup_rls$
+        BEGIN
+          IF to_regclass('workspace_chat_startup_receipts') IS NULL THEN RETURN; END IF;
+          ALTER TABLE workspace_chat_startup_receipts ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE workspace_chat_startup_receipts FORCE ROW LEVEL SECURITY;
+          DROP POLICY IF EXISTS workspace_chat_startup_owner ON workspace_chat_startup_receipts;
+          CREATE POLICY workspace_chat_startup_owner ON workspace_chat_startup_receipts
+            USING (owner_user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (owner_user_id = current_setting('app.current_user_id', true));
+        END
+        $workspace_chat_startup_rls$;
+    """]
+
+
+def build_dictionary_rls_sql() -> list[str]:
+    """Install catalog isolation only once its registered tables exist."""
+    from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import dictionary_owner_predicates
+
+    return [
+        (
+            f"DO $dictionary_rls$ BEGIN IF to_regclass('{table}') IS NOT NULL "  # nosec B608 - fixed table/predicate inventory
+            "AND EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema=current_schema() AND table_name='chat_dictionaries' "
+            "AND column_name='client_id') THEN "
+            f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY; "
+            f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY; "
+            f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}; "
+            f"CREATE POLICY {table}_tenant_isolation ON {table} "
+            f"USING ({predicate}) WITH CHECK ({predicate}); "
+            "END IF; END $dictionary_rls$;"
+        )
+        for table, predicate in dictionary_owner_predicates().items()
+    ]
+
+
+def _build_guarded_chacha_owner_rls_sql() -> list[str]:
+    """Build owner policies safe to replay before study and Media tables exist."""
+    stmts: list[str] = []
+
+    # Version migrations replay this set before post-migration study tables exist.
+    study_owner = "client_id = current_setting('app.current_user_id', true)"
+    for table in (
+        "decks",
+        "flashcards",
+        "flashcard_reviews",
+        "flashcard_review_sessions",
+        "flashcard_assets",
+        "flashcard_templates",
+        "deck_shares",
+        "study_packs",
+        "study_pack_cards",
+        "flashcard_citations",
+    ):
+        stmts.append(f"""
+            DO $study_rls$
+            BEGIN
+              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
+              ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+              ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
+              DROP POLICY IF EXISTS {table}_tenant_isolation ON {table};
+              CREATE POLICY {table}_tenant_isolation ON {table}
+                USING ({study_owner}) WITH CHECK ({study_owner});
+            END
+            $study_rls$;
+        """.strip())
+
+    # Publication metadata stays owner-only, even for app admins, before Media v27.
+    for table in ("claims_cluster_publication_heads", "claims_cluster_publication_receipts"):
+        stmts.append(f"""
+            DO $claims_cluster_publication_rls$
+            BEGIN
+              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
+              ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+              ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
+              DROP POLICY IF EXISTS {table}_owner ON {table};
+              CREATE POLICY {table}_owner ON {table} FOR ALL
+                USING (owner_user_id = NULLIF(current_setting('app.current_user_id', true), ''))
+                WITH CHECK (owner_user_id = NULLIF(current_setting('app.current_user_id', true), ''));
+            END
+            $claims_cluster_publication_rls$;
+        """.strip())
+    return stmts
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -536,6 +656,11 @@ def build_chacha_rls_sql() -> list[str]:
               WITH CHECK ({predicate});
             """
         )
+
+    for table in ("writing_sessions", "writing_templates", "writing_themes"):
+        add_tenant_policy(table, "client_id = current_setting('app.current_user_id', true)")
+
+    stmts.extend(_build_guarded_chacha_owner_rls_sql())
 
     # Notes
     add("ALTER TABLE IF EXISTS notes ENABLE ROW LEVEL SECURITY;")
@@ -924,24 +1049,119 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_source_review_rls_sql())
     stmts.extend(build_workspace_source_saved_view_rls_sql())
     stmts.extend(build_shared_workspace_chat_rls_sql())
-    from ..chacha.native_fork_schema import NATIVE_CHAT_TABLES
-
-    for table in NATIVE_CHAT_TABLES:
-        add(f"""
-            DO $native_chat_rls$
-            BEGIN
-              IF to_regclass('{table}') IS NULL THEN RETURN; END IF;
-              EXECUTE 'ALTER TABLE {table} ENABLE ROW LEVEL SECURITY';
-              EXECUTE 'ALTER TABLE {table} FORCE ROW LEVEL SECURITY';
-              EXECUTE 'DROP POLICY IF EXISTS {table}_owner ON {table}';
-              EXECUTE $policy$
-                CREATE POLICY {table}_owner ON {table}
-                USING (client_id = current_setting('app.current_user_id', true))
-                WITH CHECK (client_id = current_setting('app.current_user_id', true))
-              $policy$;
-            END
-            $native_chat_rls$;
-        """)
+    stmts.extend(build_workspace_chat_startup_rls_sql())
+    stmts.extend(build_notes_provenance_rls_sql())
+    stmts.extend(build_notes_provenance_receipts_rls_sql())
+    stmts.extend(build_dictionary_rls_sql())
+    # Native fork tables. Written out per table rather than looped over
+    # NATIVE_CHAT_TABLES: the RLS coverage ratchet scans source text and cannot
+    # see DDL assembled from a loop variable. Keep this list in step with
+    # chacha/native_fork_schema.py (test_pg_rls_policies_contract checks it).
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_operations') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_operations ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_operations FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_operations_owner ON native_chat_operations';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_operations_owner ON native_chat_operations
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_asset_candidates') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_asset_candidates ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_asset_candidates FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_asset_candidates_owner ON native_chat_asset_candidates';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_asset_candidates_owner ON native_chat_asset_candidates
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_asset_claims') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_asset_claims ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_asset_claims FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_asset_claims_owner ON native_chat_asset_claims';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_asset_claims_owner ON native_chat_asset_claims
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_asset_references') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_asset_references ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_asset_references FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_asset_references_owner ON native_chat_asset_references';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_asset_references_owner ON native_chat_asset_references
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $native_chat_rls$
+        BEGIN
+          IF to_regclass('native_chat_quota_intents') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE native_chat_quota_intents ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE native_chat_quota_intents FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS native_chat_quota_intents_owner ON native_chat_quota_intents';
+          EXECUTE $policy$
+            CREATE POLICY native_chat_quota_intents_owner ON native_chat_quota_intents
+            USING (client_id = current_setting('app.current_user_id', true))
+            WITH CHECK (client_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $native_chat_rls$;
+    """)
+    add("""
+        DO $persona_companion_rls$
+        BEGIN
+          IF to_regclass('persona_buddy_preferences') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE persona_buddy_preferences ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE persona_buddy_preferences FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS persona_buddy_preferences_owner ON persona_buddy_preferences';
+          EXECUTE $policy$
+            CREATE POLICY persona_buddy_preferences_owner ON persona_buddy_preferences
+            USING (user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (user_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $persona_companion_rls$;
+    """)
+    add("""
+        DO $persona_companion_rls$
+        BEGIN
+          IF to_regclass('persona_visual_pack_reviews') IS NULL THEN RETURN; END IF;
+          EXECUTE 'ALTER TABLE persona_visual_pack_reviews ENABLE ROW LEVEL SECURITY';
+          EXECUTE 'ALTER TABLE persona_visual_pack_reviews FORCE ROW LEVEL SECURITY';
+          EXECUTE 'DROP POLICY IF EXISTS persona_visual_pack_reviews_owner ON persona_visual_pack_reviews';
+          EXECUTE $policy$
+            CREATE POLICY persona_visual_pack_reviews_owner ON persona_visual_pack_reviews
+            USING (user_id = current_setting('app.current_user_id', true))
+            WITH CHECK (user_id = current_setting('app.current_user_id', true))
+          $policy$;
+        END
+        $persona_companion_rls$;
+    """)
     add("""
         DO $history_projection_rls$
         BEGIN
@@ -994,11 +1214,26 @@ def _ensure_rls_policy_set(
             raise DatabaseError(f"{name} RLS statement {index} failed: {exc}") from exc
 
 
+def _ensure_prompt_studio_schema(backend: DatabaseBackend) -> None:
+    """Run Prompt Studio migrations before standalone policy installation."""
+    try:
+        is_postgres = backend.backend_type.name == "POSTGRESQL"
+    except AttributeError:
+        return
+    if not is_postgres:
+        return
+    from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
+
+    db = PromptStudioDatabase(":memory:", client_id="pg-rls-bootstrap", backend=backend)
+    db.close()
+
+
 def ensure_prompt_studio_rls(backend: DatabaseBackend) -> bool:
     """Apply Prompt Studio RLS statements if running against PostgreSQL.
 
     Returns True when the full policy set succeeds; False only for explicit no-op cases.
     """
+    _ensure_prompt_studio_schema(backend)
     return _ensure_rls_policy_set(
         backend,
         name="prompt_studio",

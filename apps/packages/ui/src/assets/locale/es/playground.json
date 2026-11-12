@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "Conflicto al transferir medios",
+    "conflict": "Ya hay un borrador en el editor de mensajes. Inserta la fuente multimedia, reemplaza tu borrador o cancela la importación.",
+    "insert": "Insertar fuente multimedia",
+    "replace": "Reemplazar borrador actual",
+    "cancel": "Cancelar importación"
+  },
   "formError": {
     "noModel": "Por favor, selecione un modelo",
     "noEmbeddingModel": "Por favor, defina un modelo de embedding para la página de configuraciones > RAG"

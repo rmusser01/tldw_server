@@ -38,7 +38,7 @@ the boundary.
 - `tldw_Server_API/app/api/v1/schemas/sync_v2_models.py`
 - `tldw_Server_API/app/api/v1/endpoints/sync.py`
 - `tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py`
-- `IMPLEMENTATION_PLAN_personal_context_bootstrap.md`
+- `Docs/Plans/IMPLEMENTATION_PLAN_personal_context_bootstrap.md`
 - `backlog/tasks/task-13148 - Bootstrap-Personal-Context-canonical-profile.md`
 - This report.
 
@@ -104,7 +104,7 @@ Changed files for this correction:
 - `tldw_Server_API/app/core/Sync/v2/profile.py`
 - `tldw_Server_API/app/core/Personalization/personal_context_service.py`
 - `tldw_Server_API/tests/Sync/test_sync_v2_personal_context_bootstrap.py`
-- `IMPLEMENTATION_PLAN_personal_context_bootstrap.md`
+- `Docs/Plans/IMPLEMENTATION_PLAN_personal_context_bootstrap.md`
 - `backlog/tasks/task-13148 - Bootstrap-Personal-Context-canonical-profile.md`
 - This report.
 
@@ -202,7 +202,7 @@ than failing request validation.
 - `tldw_Server_API/tests/Sync/test_sync_v2_personal_context_bootstrap.py`
 - `tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py`
 - `tldw_Server_API/tests/Sync/test_sync_v2_store.py`
-- `IMPLEMENTATION_PLAN_personal_context_bootstrap.md`
+- `Docs/Plans/IMPLEMENTATION_PLAN_personal_context_bootstrap.md`
 - `backlog/tasks/task-13148 - Bootstrap-Personal-Context-canonical-profile.md`
 - This report.
 

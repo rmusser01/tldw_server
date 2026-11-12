@@ -7,14 +7,12 @@ readiness polling, and command redaction for safer logging.
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import Iterable
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from loguru import logger
 
-from tldw_Server_API.app.core.exceptions import NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy,
     adownload,
@@ -23,6 +21,15 @@ from tldw_Server_API.app.core.http_client import (
 )
 from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
+)
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
+
+# Shared transport-exception classification, re-exported under this module's names
+# (handlers call http_utils.get_http_error_text / is_network_error).
+from tldw_Server_API.app.core.Utils.http_status_extraction import (  # noqa: F401
+    get_http_error_text,
+    get_http_status_from_exception,
+    is_network_error,
 )
 
 DEFAULT_TIMEOUT: float = 120.0
@@ -49,57 +56,6 @@ _SECRET_QUERY_KEYS = {
 def _is_httpx_async_client(client: Any) -> bool:
     module = getattr(client.__class__, "__module__", "")
     return module.startswith("httpx") and client.__class__.__name__ == "AsyncClient"
-
-
-def get_http_status_from_exception(exc: Exception) -> int | None:
-    resp = getattr(exc, "response", None)
-    if resp is not None:
-        for attr in ("status_code", "status"):
-            status = getattr(resp, attr, None)
-            if status is not None:
-                try:
-                    return int(status)
-                except (TypeError, ValueError):
-                    pass
-    for attr in ("status_code", "status"):
-        status = getattr(exc, attr, None)
-        if status is not None:
-            try:
-                return int(status)
-            except (TypeError, ValueError):
-                pass
-    if isinstance(exc, NetworkError):
-        match = re.search(r"HTTP\s+(\d{3})", str(exc))
-        if match:
-            try:
-                return int(match.group(1))
-            except ValueError:
-                return None
-    return None
-
-
-def get_http_error_text(exc: Exception) -> str:
-    resp = getattr(exc, "response", None)
-    if resp is not None:
-        text = getattr(resp, "text", None)
-        if text is not None:
-            return str(text)
-    response_text = getattr(exc, "response_text", None)
-    if response_text:
-        return str(response_text)
-    return str(exc)
-
-
-def is_network_error(exc: Exception) -> bool:
-    if isinstance(exc, (NetworkError, RetryExhaustedError)):
-        return True
-    module = getattr(exc.__class__, "__module__", "")
-    name = exc.__class__.__name__
-    if module.startswith("httpx"):
-        return "RequestError" in name or "Timeout" in name or "Connect" in name
-    if module.startswith("requests"):
-        return "RequestException" in name or "Timeout" in name or "ConnectionError" in name
-    return False
 
 
 def redacted_url(url: str) -> str:
@@ -241,13 +197,15 @@ async def wait_for_http_ready(
 
     Returns True if ready within timeout; otherwise False.
     """
+    # Callers supply the owned or server-configured local runtime origin (ADR-030).
+    configured_endpoint = ConfiguredEndpointScope.from_url(base_url)
     async with create_async_client(timeout=5.0) as client:
         deadline = asyncio.get_event_loop().time() + timeout_total
         while asyncio.get_event_loop().time() < deadline:
             for path in paths:
                 url = base_url.rstrip("/") + "/" + path.lstrip("/")
                 try:
-                    resp = await afetch(method="GET", url=url, client=client)
+                    resp = await afetch(method="GET", url=url, client=client, configured_endpoint=configured_endpoint)
                     # Default: only accept 2xx success codes
                     # Legacy mode: accept any non-5xx (for backward compatibility)
                     if accept_any_non_5xx:

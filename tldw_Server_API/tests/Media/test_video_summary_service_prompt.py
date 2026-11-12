@@ -83,7 +83,7 @@ def context(
     monkeypatch.setattr(endpoint, "get_prompts_db_for_user", get_db, raising=False)
     monkeypatch.setattr(video, "perform_transcription", transcribe)
     monkeypatch.setattr(OpenAIAdapter, "chat", adapter)
-    monkeypatch.setattr(summary, "loaded_config_data", {"openai_api": {"model": "test-model"}})
+    monkeypatch.setattr(summary, "load_and_log_configs", lambda: {"openai_api": {"model": "test-model"}})
     yield state
     for database in state.databases.values():
         database.close_connection()

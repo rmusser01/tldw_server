@@ -1,0 +1,23 @@
+{
+  "closedPorts": [
+    19131,
+    19132,
+    19133,
+    19135,
+    19136
+  ],
+  "ownedRecordedProcessesGone": true,
+  "existingLocalModelHTTPStatus": 200,
+  "voiceOverSettingsChanged": false,
+  "primaryDependencyTargetsModified": false,
+  "managedWorktreeRetained": true,
+  "removedOwnedDependencyLinks": 4,
+  "removedOwnedExtensionForestEntries": 80,
+  "generatedOutputsRemoved": [
+    "apps/packages/ui/.vitest.burndown.config.mts",
+    "apps/tldw-frontend/.next-live-tier-knowledge-burndown-20261007",
+    "apps/extension/.output",
+    "apps/extension/.wxt"
+  ],
+  "privateFixtureAndBrowserProfilesRemoved": true
+}

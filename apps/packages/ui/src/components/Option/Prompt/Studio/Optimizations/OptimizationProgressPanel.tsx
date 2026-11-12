@@ -43,7 +43,7 @@ export const OptimizationProgressPanel: React.FC<
   const { t } = useTranslation(["settings", "common"])
 
   // Fetch optimization with auto-refresh for running jobs
-  const { data: optimizationResponse, isLoading: isLoadingOptimization } =
+  const { data: optimizationResponse, isLoading: isLoadingOptimization, isError: isOptimizationError } =
     useQuery({
       queryKey: ["prompt-studio", "optimization", optimizationId],
       queryFn: () => getOptimization(optimizationId!),
@@ -62,7 +62,7 @@ export const OptimizationProgressPanel: React.FC<
     (optimizationResponse as any)?.data?.data
 
   // Fetch iterations
-  const { data: iterationsResponse, isLoading: isLoadingIterations } = useQuery(
+  const { data: iterationsResponse, isLoading: isLoadingIterations, isError: isIterationsError } = useQuery(
     {
       queryKey: ["prompt-studio", "optimization-iterations", optimizationId],
       queryFn: () => getOptimizationIterations(optimizationId!),
@@ -77,7 +77,7 @@ export const OptimizationProgressPanel: React.FC<
   )
 
   const iterations: OptimizationIteration[] =
-    (iterationsResponse as any)?.data?.data ?? []
+    iterationsResponse?.data?.data?.iterations ?? []
 
   const renderStatusBadge = (status?: string) => {
     const statusLower = status?.toLowerCase()
@@ -159,19 +159,18 @@ export const OptimizationProgressPanel: React.FC<
     return "rgb(var(--color-danger))"
   }
 
-  const progressPercent = optimization?.total_iterations
+  const progressPercent = optimization?.status?.toLowerCase() === "completed"
+    ? 100
+    : optimization?.max_iterations
     ? Math.round(
-        ((optimization.current_iteration ?? 0) /
-          optimization.total_iterations) *
+        ((optimization.iterations_completed ?? 0) /
+          optimization.max_iterations) *
           100
       )
     : 0
 
-  // Find best iteration
-  const bestIteration = iterations.length > 0
-    ? iterations.reduce((best, current) =>
-        current.score > best.score ? current : best
-      )
+  const bestScore = typeof optimization?.final_metrics?.score === "number" && Number.isFinite(optimization.final_metrics.score)
+    ? optimization.final_metrics.score
     : null
 
   return (
@@ -190,6 +189,10 @@ export const OptimizationProgressPanel: React.FC<
       destroyOnHidden
     >
       {isLoadingOptimization && <Skeleton paragraph={{ rows: 10 }} />}
+
+      {isOptimizationError && <DsAlert variant="error" title={t("managePrompts.studio.optimizations.detailLoadError", {
+        defaultValue: "Unable to load optimization"
+      })} />}
 
       {!isLoadingOptimization && optimization && (
         <div className="space-y-6">
@@ -233,17 +236,17 @@ export const OptimizationProgressPanel: React.FC<
           )}
 
           {/* Progress */}
-          {optimization.total_iterations && (
+          {optimization.max_iterations > 0 && (
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium">
-                  {t("managePrompts.studio.optimizations.progress", {
+                  {t("managePrompts.studio.optimizations.progress.title", {
                     defaultValue: "Progress"
                   })}
                 </span>
                 <span className="text-sm text-text-muted">
-                  {optimization.current_iteration ?? 0} /{" "}
-                  {optimization.total_iterations} iterations
+                  {optimization.iterations_completed ?? 0} /{" "}
+                  {optimization.max_iterations} iterations
                 </span>
               </div>
               <Progress
@@ -266,15 +269,12 @@ export const OptimizationProgressPanel: React.FC<
                   </span>
                 }
                 value={
-                  optimization.best_score !== undefined &&
-                  optimization.best_score !== null
-                    ? optimization.best_score * 100
-                    : 0
+                  bestScore === null ? t("common:unavailable", { defaultValue: "Unavailable" }) : bestScore * 100
                 }
                 precision={1}
-                suffix="%"
+                suffix={bestScore === null ? undefined : "%"}
                 valueStyle={{
-                  color: metricColor(optimization.best_score ?? 0)
+                  color: bestScore === null ? undefined : metricColor(bestScore)
                 }}
               />
             </div>
@@ -288,8 +288,8 @@ export const OptimizationProgressPanel: React.FC<
                     })}
                   </span>
                 }
-                value={optimization.current_iteration ?? 0}
-                suffix={`/ ${optimization.total_iterations ?? "?"}`}
+                value={optimization.iterations_completed ?? 0}
+                suffix={`/ ${optimization.max_iterations ?? "?"}`}
               />
             </div>
           </div>
@@ -305,14 +305,14 @@ export const OptimizationProgressPanel: React.FC<
           >
             <Descriptions.Item label="Strategy">
               <Badge
-                variant={strategyBadgeVariant(optimization.config?.strategy)}
+                variant={strategyBadgeVariant(optimization.optimizer_type)}
                 size="sm"
               >
-                {getStrategyLabel(optimization.config?.strategy)}
+                {getStrategyLabel(optimization.optimizer_type)}
               </Badge>
             </Descriptions.Item>
             <Descriptions.Item label="Prompt ID">
-              {optimization.prompt_id}
+              {optimization.initial_prompt_id}
             </Descriptions.Item>
             <Descriptions.Item label="Started">
               {formatDate(optimization.started_at)}
@@ -323,7 +323,7 @@ export const OptimizationProgressPanel: React.FC<
           </Descriptions>
 
           {/* Best prompt info */}
-          {optimization.best_prompt_id && (
+          {optimization.optimized_prompt_id && (
             <DsAlert
               variant="success"
               icon={<CheckCircle2 className="size-4" />}
@@ -336,14 +336,21 @@ export const OptimizationProgressPanel: React.FC<
                 {
                   defaultValue:
                     "The optimized prompt has been saved as Prompt #{{promptId}}",
-                  promptId: optimization.best_prompt_id
+                  promptId: optimization.optimized_prompt_id
                 }
               )}
             </DsAlert>
           )}
 
           {/* Iteration timeline */}
-          {iterations.length > 0 && (
+          {isLoadingIterations && <Skeleton paragraph={{ rows: 2 }} />}
+          {isIterationsError && <DsAlert variant="error" title={t("managePrompts.studio.optimizations.iterationsLoadError", {
+            defaultValue: "Unable to load stored iterations"
+          })} />}
+          {!isLoadingIterations && !isIterationsError && iterations.length === 0 && <p className="text-sm text-text-muted">
+            {t("managePrompts.studio.optimizations.noStoredIterations", { defaultValue: "No stored iteration records" })}
+          </p>}
+          {!isLoadingIterations && !isIterationsError && iterations.length > 0 && (
             <div>
               <h4 className="font-medium mb-3">
                 {t("managePrompts.studio.optimizations.iterationHistory", {
@@ -352,50 +359,42 @@ export const OptimizationProgressPanel: React.FC<
               </h4>
               <div className="max-h-[300px] overflow-y-auto">
                 <Timeline
-                  items={iterations
-                    .sort((a, b) => b.iteration - a.iteration)
+                  items={[...iterations]
+                    .sort((a, b) => b.iteration_number - a.iteration_number)
                     .slice(0, 20)
                     .map((iteration) => {
-                      const isBest =
-                        bestIteration &&
-                        iteration.iteration === bestIteration.iteration
+                      const score = typeof iteration.metrics?.score === "number" && Number.isFinite(iteration.metrics.score)
+                        ? iteration.metrics.score : null
                       return {
-                        color: isBest ? "green" : "gray",
-                        dot: isBest ? (
-                          <CheckCircle2 className="size-4 text-success" />
-                        ) : undefined,
+                        color: "gray",
                         children: (
                           <div
-                            className={`p-2 rounded-md border ${
-                              isBest
-                                ? "border-success/30 bg-success/5"
-                                : "border-border bg-surface2/50"
-                            }`}
+                            className="p-2 rounded-md border border-border bg-surface2/50"
                           >
                             <div className="flex items-center justify-between">
                               <span className="font-medium">
-                                Iteration {iteration.iteration}
+                                Iteration {iteration.iteration_number}
                               </span>
                               <span
                                 className={`font-medium ${
-                                  iteration.score >= 0.8
+                                  score !== null && score >= 0.8
                                     ? "text-success"
-                                    : iteration.score >= 0.5
+                                    : score !== null && score >= 0.5
                                     ? "text-warn"
                                     : "text-danger"
                                 }`}
                               >
-                                {(iteration.score * 100).toFixed(1)}%
+                                {score === null ? t("managePrompts.studio.optimizations.scoreUnavailable", { defaultValue: "Score unavailable" }) : `${(score * 100).toFixed(1)}%`}
                               </span>
                             </div>
-                            {iteration.changes && (
+                            {iteration.note && (
                               <p className="text-xs text-text-muted mt-1 line-clamp-2">
-                                {iteration.changes}
+                                {iteration.note}
                               </p>
                             )}
-                            {iteration.timestamp && (
+                            {iteration.created_at && (
                               <p className="text-xs text-text-muted mt-1">
-                                {new Date(iteration.timestamp).toLocaleTimeString()}
+                                {new Date(iteration.created_at).toLocaleTimeString()}
                               </p>
                             )}
                           </div>

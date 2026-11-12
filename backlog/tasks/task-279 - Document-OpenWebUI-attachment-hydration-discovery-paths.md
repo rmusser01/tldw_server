@@ -31,7 +31,7 @@ Add user-discoverable documentation for the merged OpenWebUI attachment hydratio
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Updated README, user guide index, WebUI overview, Chatbook user guide, API overview, published mirrors, and feature status so OpenWebUI attachment hydration is discoverable after import.
 
 Added docs regression assertions in tldw_Server_API/tests/Docs/test_chatbook_openwebui_import_docs.py for the new discovery text.
@@ -41,7 +41,7 @@ Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python 
 Verification: git diff --check passed with no output.
 
 Security: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit tldw_Server_API/tests/Docs/test_chatbook_openwebui_import_docs.py -f json -o /tmp/bandit_openwebui_docs_discovery.json completed with results: [].
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

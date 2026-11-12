@@ -273,3 +273,55 @@ def test_psycopg_error_classified_when_driver_available():
 
     psycopg_error = getattr(postgresql_backend.psycopg, "Error", None)
     assert psycopg_error in postgresql_backend._POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure_type", [RuntimeError, Exception], ids=["classified", "unclassified"])
+def test_vacuum_restoration_preserves_exception_classification_and_owned_close(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_type: type[Exception],
+) -> None:
+    """Restoration follows successful SQL and internal connections close on either outcome."""
+    failure = failure_type("private restoration detail")
+    events: list[object] = []
+
+    class _VacuumConn(DummyConn):
+        def __init__(self) -> None:
+            super().__init__()
+            self._autocommit = False
+
+        @property
+        def autocommit(self) -> bool:
+            return self._autocommit
+
+        @autocommit.setter
+        def autocommit(self, value: bool) -> None:
+            events.append(value)
+            if value is False:
+                raise failure
+            self._autocommit = value
+
+        def cursor(self):
+            class _Cursor:
+                def execute(self, sql: str) -> None:
+                    events.append(sql)
+
+            return _Cursor()
+
+        def close(self) -> None:
+            events.append("close")
+            super().close()
+
+    backend = _pg_backend()
+    connection = _VacuumConn()
+    monkeypatch.setattr(backend, "connect", lambda: connection)
+
+    if failure_type is RuntimeError:
+        backend.vacuum()
+    else:
+        with pytest.raises(Exception) as raised:
+            backend.vacuum()
+        assert raised.value is failure
+
+    assert events == [True, "VACUUM ANALYZE", False, "close"]
+    assert connection.closed is True

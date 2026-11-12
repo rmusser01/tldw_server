@@ -71,7 +71,7 @@ Detailed executable plan: Docs/superpowers/plans/2026-08-10-notes-link-sync-and-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented `notes.link` as the canonical Sync v2 representation for explicit
 manual note-to-note relationships. Schema v58 adds strict portable link lifecycle
 state, owner-scoped PostgreSQL RLS and migration validation, derived graph
@@ -144,7 +144,7 @@ and one optional live-PostgreSQL skip. The freshly fetched `origin/dev` was alre
 the branch ancestor (zero commits behind), so the requested rebase was a no-op.
 Touched-file Ruff, Bandit, byte compilation, and `git diff --check` passed; the
 documented whole-file `ChaChaNotes_DB.py` Ruff baseline remains unchanged.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

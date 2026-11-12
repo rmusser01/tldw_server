@@ -177,7 +177,6 @@ describe("SourcesWorkspacePage", () => {
     renderWorkspace(<SourcesWorkspacePage />)
 
     expect(screen.getByText("Unavailable")).toBeInTheDocument()
-    expect(screen.getByText("Sources are unavailable")).toBeInTheDocument()
     expect(
       screen.getByRole("heading", { name: "Sources are unavailable on this server" })
     ).toBeInTheDocument()
@@ -185,14 +184,14 @@ describe("SourcesWorkspacePage", () => {
       screen.getByText("The connected server does not advertise ingestion source management.")
     ).toBeInTheDocument()
     expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
-      "/api/v1/ingestion-sources"
+      "[server-endpoint]"
     )
     expect(hookMocks.useIngestionSourcesQuery).toHaveBeenCalledWith(undefined, {
       enabled: false
     })
   })
 
-  it("moves raw sources load failures into diagnostics", () => {
+  it("keeps failure status in diagnostics while redacting source endpoints", () => {
     const rawError = Object.assign(
       new Error("Request failed: 404 (GET /api/v1/ingestion-sources)"),
       { status: 404 }
@@ -214,10 +213,11 @@ describe("SourcesWorkspacePage", () => {
     ).toBeInTheDocument()
 
     const diagnostics = screen.getByLabelText("Diagnostics")
-    expect(within(diagnostics).getByText("/api/v1/ingestion-sources")).toBeInTheDocument()
+    expect(diagnostics).not.toHaveTextContent("/api/v1/ingestion-sources")
+    expect(within(diagnostics).getByText("[server-endpoint]")).toBeInTheDocument()
     expect(within(diagnostics).getByText("404")).toBeInTheDocument()
     expect(
-      within(diagnostics).getByText("Request failed: 404 (GET /api/v1/ingestion-sources)")
+      within(diagnostics).getByText("Request failed: 404 (GET [server-endpoint])")
     ).toBeInTheDocument()
   })
 

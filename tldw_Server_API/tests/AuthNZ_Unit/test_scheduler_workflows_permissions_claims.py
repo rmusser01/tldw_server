@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import scheduler_workflows as sched_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import WORKFLOWS_ADMIN
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 def _build_app_with_overrides(principal: AuthPrincipal) -> FastAPI:
@@ -53,7 +54,7 @@ def _build_app_with_overrides(principal: AuthPrincipal) -> FastAPI:
         # per-route token-scope/rate-limit enforcement dependencies.
         return None
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue

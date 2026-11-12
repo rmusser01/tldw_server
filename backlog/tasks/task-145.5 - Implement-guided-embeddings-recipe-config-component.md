@@ -46,7 +46,7 @@ Implement Task 4 from the embeddings RAG recipe implementation plan: create the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx failed before implementation with unresolved ../recipe-configs/EmbeddingsModelSelectionConfig import.
 
 GREEN: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx passed 3 tests after implementation.
@@ -56,7 +56,7 @@ Verification: git diff --check exited 0. Bandit skipped because this task only t
 Review fix RED: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx failed with the new source_id_contract regression because onRunConfigChange emitted the manifest object instead of "media_id".
 
 Review fix GREEN: bunx vitest run src/components/Option/Evaluations/tabs/__tests__/EmbeddingsModelSelectionConfig.test.tsx passed 4 tests after normalizing emitted source_id_contract to "media_id". git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

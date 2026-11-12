@@ -47,6 +47,7 @@ next-env.d.ts
 # PDF.js worker is copied from node_modules during postinstall
 /public/pdf.worker.min.mjs
 
-# OpenAPI codegen artifacts (regenerated via `bun run generate:api-types`);
+# OpenAPI codegen artifacts (regenerated via `bun run generate:api-types`,
+# owned by apps/packages/api-types since ADR-065);
 # only lib/api/openapi.fingerprint.json is committed (see lib/api/README.md)
 /lib/api/generated/

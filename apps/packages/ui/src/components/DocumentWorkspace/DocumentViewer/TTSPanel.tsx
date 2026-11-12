@@ -86,7 +86,8 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ defaultText }) => {
         <Tooltip title={t("common:stop", "Stop")}>
           <button
             onClick={stop}
-            disabled={!state.isPlaying && !state.isPaused}
+            aria-label={t("common:stop", "Stop")}
+            disabled={!state.isLoading && !state.isPlaying && !state.isPaused}
             className="flex h-8 w-8 items-center justify-center rounded-full hover:bg-hover disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Square className="h-4 w-4" />

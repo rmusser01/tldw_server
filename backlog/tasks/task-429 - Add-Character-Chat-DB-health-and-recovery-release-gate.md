@@ -46,7 +46,7 @@ Docs/superpowers/plans/2026-05-19-character-chat-db-health-release-gate-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Extended ChaChaNotes init health with sanitized sqlite_corruption last_failure metadata and recovery docs pointer.
 - Startup warm-up remains fail-open; corrupt DB warm-up records degraded health and does not escape an exception.
 - Release notes traceability: Docs/RELEASE_NOTES.md#unreleased now links TASK-429 and PR #1862 as resolved for the Character Chat GA R11 backend recovery gate.
@@ -54,7 +54,7 @@ Docs/superpowers/plans/2026-05-19-character-chat-db-health-release-gate-plan.md
 - Security: source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/API_Deps/ChaCha_Notes_DB_Deps.py tldw_Server_API/app/services/startup_chacha_warmup.py -f json -o /tmp/bandit_character_chat_db_health.json (reported zero findings).
 - Diff hygiene: git diff --check passed.
 - Known blockers/skips: no known blockers for this backend release gate; no browser/UI test was run because this slice only changes backend health/recovery and documentation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

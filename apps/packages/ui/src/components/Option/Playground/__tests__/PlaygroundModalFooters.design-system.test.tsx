@@ -253,6 +253,9 @@ vi.mock("lucide-react", () => ({
   WandSparkles: () => <span data-testid="wand-icon" />
 }))
 
+// Footer geometry/actions declare a legacy view; protected choices have dedicated real-context controls.
+vi.mock("@/hooks/chat/useHistorySelection", () => ({ useHistorySelectionContext: () => null }))
+
 vi.mock("@/utils/provider-registry", () => ({
   getProviderDisplayName: (provider: string) => provider
 }))
@@ -331,6 +334,15 @@ const baseImageGenProps: PlaygroundImageGenModalProps = {
   t
 }
 
+it("shows a recoverable reference-image read failure without losing the prompt", () => {
+  const retry = vi.fn()
+  render(<PlaygroundImageGenModal {...baseImageGenProps} referenceImageCandidatesFailed onRetryReferenceImages={retry} />)
+  expect(screen.getByRole("alert")).toHaveTextContent("Could not load reference images")
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+  expect(retry).toHaveBeenCalledOnce()
+  expect(screen.getByDisplayValue("A calm landscape")).toHaveValue("A calm landscape")
+})
+
 describe("Playground modal footers design-system migration", () => {
   it("renders startup template destructive, cancel, and apply actions through ModalFooter", () => {
     const onDelete = vi.fn()
@@ -343,6 +355,7 @@ describe("Playground modal footers design-system migration", () => {
           {
             id: "template-1",
             selectedModel: "llama",
+            systemPrompt: "",
             character: { name: "Guide" },
             ragPinnedResults: []
           } as NonNullable<PlaygroundStartupTemplateModalProps["preview"]>

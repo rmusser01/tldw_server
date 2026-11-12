@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 from typing import Any, Dict, List
+from types import SimpleNamespace
 
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import (
     PromptStudioDatabase, DatabaseError, ConflictError, InputError
@@ -122,6 +123,11 @@ def test_unlink_sqlite_temp_db_retries_extended_transient_permission_error(
     db_path.write_text("", encoding="utf-8")
     attempts = 0
     original_unlink = Path.unlink
+    retry_effects = []
+    monkeypatch.setattr(
+        __name__ + ".gc", SimpleNamespace(collect=lambda: retry_effects.append("collect")),
+    )
+    monkeypatch.setattr(__name__ + ".time", SimpleNamespace(sleep=retry_effects.append))
 
     def _flaky_unlink(self: Path, *args: Any, **kwargs: Any) -> None:
         nonlocal attempts
@@ -135,6 +141,7 @@ def test_unlink_sqlite_temp_db_retries_extended_transient_permission_error(
     _unlink_sqlite_temp_db(db_path)
 
     assert attempts == 6
+    assert retry_effects == ["collect", 0.1] * 6
     assert not db_path.exists()
 
 ########################################################################################################################

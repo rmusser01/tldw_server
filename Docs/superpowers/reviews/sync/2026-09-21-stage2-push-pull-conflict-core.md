@@ -49,6 +49,18 @@ watermark, clock/TTL handling on the pull token, and the efficiency of the versi
   `tests/Sync/test_sync_v2_personal_context_recovery_budget.py` (2,588 LOC) — the
   personal-context branches of `pull` and the recovery budget.
 - All of the above are SQLite-only. `tests/Sync/test_sync_v2_service.py` does not mention Postgres.
+- `tests/Sync/test_sync_v2_personal_context_exchange_gate.py:772` and its two
+  `test_mixed_exact_proof_preserves_native_notes_resolution_actions` parametrisations are **red**
+  (reproduced in isolation; see stage 1's validation output and `sync-11`). A mixed
+  notes/personal-context resolution batch comes back with only the notes item in `resolved`.
+  Diagnosability note for whoever triages it: `v2/service.py:resolve_conflicts_batch (6871-6872)`
+  is `except Exception:  # noqa: BLE001 - preserve per-item API outcomes.` followed by
+  `rejected.append(index); continue`, so every failure mode inside
+  `PersonalContextConflictService.resolve_batch_item` — a real regression, a stale fixture, or a
+  `KeyError` from `dataset.metadata["personal_context"]["profile_id"]` at `:6841` — collapses to
+  the same opaque per-item rejection. The per-item outcome contract is right; discarding the cause
+  is not. Log the swallowed exception (or carry a reason code on the rejection) before triaging
+  these three, otherwise the test tells you nothing beyond "something failed".
 
 ## Validation Commands
 

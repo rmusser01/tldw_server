@@ -178,7 +178,7 @@ async def test_new_admin_is_activated_only_after_canonical_membership(monkeypatc
     assert result is True
     assert users_db.created_kwargs[0]["is_active"] is False
     assert users_db.created_kwargs[0]["is_superuser"] is False
-    assert users_db.updated == [(81, {"is_active": True, "is_superuser": True})]
+    assert users_db.updated == [(81, {"is_active": True, "is_superuser": True, "is_verified": True})]
 
 
 @pytest.mark.asyncio

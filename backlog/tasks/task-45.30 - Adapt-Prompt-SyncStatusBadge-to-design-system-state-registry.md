@@ -49,7 +49,7 @@ Migrate the Prompt workspace sync status badge away from local AntD Tag/color st
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the Prompt SyncStatusBadge migration via TDD. The new component tests first failed because getDesignSystemState was not called, then passed after the full-size AntD Tag path was replaced with shared Badge severity variants.
 
 The design-system verifier initially blocked local-status-badge for SyncStatusBadge because the guard only accepted status adapters whose direct return expression was Badge. Added a failing guard regression for compound returned JSX containing Badge plus same-owner state registry mapping, then changed only the status-badge detector to inspect returned JSX trees. LoadingState still uses the stricter direct-return detector.
@@ -61,7 +61,7 @@ PR review pass for #1437: Qodo requested avoiding unused state/variant derivatio
 PR review fixes implemented. Added compact-mode coverage proving compact icon-only badges do not call getDesignSystemState or render Badge. Added guard coverage for returned map() render callbacks and an event-handler false-positive case. Moved state/variant derivation below the compact return and taught returnedExpressionContainsJsxTag to traverse map callbacks only.
 
 Review-fix verification: bunx vitest run src/components/Option/Prompt/__tests__/SyncStatusBadge.test.tsx --reporter=dot passed 12 tests; bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 49 tests; bun run verify:design-system-state exited 0; git diff --check exited 0; bunx tsc --noEmit --pretty false exited 2 with the existing 236-line unrelated UI/test type debt and no matches for SyncStatusBadge, design-system-product-state-rules, or product-state-guard.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

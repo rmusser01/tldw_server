@@ -17,6 +17,18 @@ vi.mock("antd", () => ({
 }))
 
 describe("AttachmentsSummary integration", () => {
+  it("shows the actual image filename as text next to its preview", async () => {
+    const user = userEvent.setup()
+    const filename = '<img src=x onerror="alert(1)">.png'
+    render(<AttachmentsSummary image="data:image/png;base64,fixture"
+      imageFilename={filename} documents={[]} files={[]}
+      onRemoveImage={vi.fn()} onRemoveDocument={vi.fn()} onClearDocuments={vi.fn()}
+      onRemoveFile={vi.fn()} onClearFiles={vi.fn()} />)
+    await user.click(screen.getByRole("button", { name: /Attachments/i }))
+    expect(screen.getByText(filename)).toBeVisible()
+    expect(screen.getAllByRole("img")).toHaveLength(1)
+  })
+
   it("shows large attachment warning with actionable alternatives", async () => {
     const user = userEvent.setup()
     const onOpenKnowledgePanel = vi.fn()

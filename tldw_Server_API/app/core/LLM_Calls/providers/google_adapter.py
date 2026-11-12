@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+from tldw_Server_API.app.core.exceptions import ChatAPIError, ChatBadRequestError
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
 )
@@ -31,7 +31,7 @@ from tldw_Server_API.app.core.LLM_Calls.sse import (
     sse_done,
 )
 from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
-from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Utils.coercion import env_bool
 
 from .base import ChatProvider
 
@@ -72,14 +72,8 @@ def _stream_debug_enabled(provider: str) -> bool:
 
 
 def _env_flag(name: str) -> bool:
-    """Parse boolean-like env flags with explicit false handling."""
-    value = os.getenv(name)
-    if value is None:
-        return False
-    lowered = value.strip().lower()
-    if is_truthy(lowered):
-        return True
-    return lowered not in {"0", "false", "no", "off", ""}
+    """Beta URL/tool flags: off unless explicitly enabled; unrecognised values stay off."""
+    return env_bool(name, default=False)
 
 
 class GoogleAdapter(ChatProvider):
@@ -444,24 +438,59 @@ class GoogleAdapter(ChatProvider):
                     "finish_reason": finish_reason,
                 })
 
-            usage_src = data.get("usageMetadata") or {}
-            usage = {
-                "prompt_tokens": usage_src.get("promptTokenCount"),
-                "completion_tokens": usage_src.get("candidatesTokenCount"),
-                "total_tokens": usage_src.get("totalTokenCount"),
-            }
             return {
                 "id": data.get("id") or data.get("responseId"),
                 "object": "chat.completion",
                 "choices": choices or [{"index": 0, "message": {"role": "assistant", "content": None}, "finish_reason": None}],
-                "usage": usage,
+                "usage": GoogleAdapter._usage_block(data.get("usageMetadata")),
                 "provider_response": data,
             }
         except _GOOGLE_ADAPTER_RUNTIME_EXCEPTIONS:
             return data
 
     @staticmethod
-    def _stream_event_deltas(event: Any, state: dict[str, int] | None = None) -> Iterable[str]:
+    def _usage_block(usage_src: Any) -> dict[str, Any]:
+        """The OpenAI-shaped usage block of one Gemini ``usageMetadata``; the reply's and the stream's (TASK-13952).
+
+        Thinking tokens (``thoughtsTokenCount``) are billed as output and counted apart from the candidates, so they
+        are in ``completion_tokens``; tool-use prompt tokens are outside ``promptTokenCount`` and join ``prompt_tokens``.
+        Both keep their Gemini name too (the row's ``reasoning_tokens``; the audit JSON). ``total_tokens`` is Gemini's
+        ``totalTokenCount``, which sums all four. ``cachedContentTokenCount`` is the cached share of ``prompt_tokens``,
+        costed at the cache-read rate (TASK-13936), and ``service_tier`` the tier the call ran on (``flex``, ``priority``).
+        """
+        src = usage_src if isinstance(usage_src, dict) else {}
+
+        def _count(key: str) -> int | None:
+            value = src.get(key)
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+        usage: dict[str, Any] = {
+            "prompt_tokens": src.get("promptTokenCount"),
+            "completion_tokens": src.get("candidatesTokenCount"),
+            "total_tokens": src.get("totalTokenCount"),
+        }
+        for extra, side in (("thoughtsTokenCount", "completion_tokens"), ("toolUsePromptTokenCount", "prompt_tokens")):
+            count = _count(extra)
+            if count is not None:
+                usage[side] = (_count("promptTokenCount" if side == "prompt_tokens" else "candidatesTokenCount") or 0) + count
+                usage[extra] = count
+        if _count("cachedContentTokenCount") is not None:
+            usage["cachedContentTokenCount"] = src["cachedContentTokenCount"]
+        tier = src.get("serviceTier")
+        if isinstance(tier, str) and tier.strip():
+            usage["service_tier"] = tier.strip().lower().removeprefix("service_tier_")
+        return usage
+
+    @staticmethod
+    def _usage_chunk(state: dict[str, Any]) -> Iterable[str]:
+        """The stream's one usage chunk, from the last ``usageMetadata`` seen: Gemini's counts are cumulative.
+        An empty ``usageMetadata`` (every count ``None``) sends none."""
+        usage = state.pop("usage", None) or {}
+        if any(value is not None for value in usage.values()):
+            yield sse_data({"choices": [], "usage": usage})
+
+    @staticmethod
+    def _stream_event_deltas(event: Any, state: dict[str, Any] | None = None) -> Iterable[str]:
         if state is None:
             state = {}
         if isinstance(event, list):
@@ -470,6 +499,8 @@ class GoogleAdapter(ChatProvider):
             return
         if not isinstance(event, dict):
             return
+        if isinstance(event.get("usageMetadata"), dict):
+            state["usage"] = GoogleAdapter._usage_block(event["usageMetadata"])
         cands = event.get("candidates") or []
         tool_index = int(state.get("tool_index", 0))
         for idx, cand in enumerate(cands):
@@ -536,7 +567,7 @@ class GoogleAdapter(ChatProvider):
             log_http_400_body,
         )
         if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
+            from tldw_Server_API.app.core.exceptions import (
                 ChatAPIError,
                 ChatAuthenticationError,
                 ChatBadRequestError,
@@ -579,7 +610,7 @@ class GoogleAdapter(ChatProvider):
         api_key = request.get("api_key")
         model = request.get("model")
         if not api_key:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Google API Key required.")
         url = f"{self._base_url(request)}/models/{self._model_path(model)}:generateContent"
         headers = self._headers(api_key)
@@ -609,7 +640,7 @@ class GoogleAdapter(ChatProvider):
         api_key = request.get("api_key")
         model = request.get("model")
         if not api_key:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Google API Key required.")
         url = (
             f"{self._base_url(request)}/models/"
@@ -620,15 +651,16 @@ class GoogleAdapter(ChatProvider):
         payload, _cache_intent_diagnostic = apply_billing_prompt_cache_intent(self.name, payload, request)
         payload = merge_extra_body(payload, request)
         headers = merge_extra_headers(headers, request)
+        tool_state: dict[str, Any] = {"tool_index": 0}  # the next tool-call index and the last usage block
         try:
             resolved_timeout = self._resolve_timeout(request, timeout)
             with http_client_factory(timeout=resolved_timeout) as client:
                 with client.stream("POST", url, headers=headers, json=payload) as resp:
                     resp.raise_for_status()
                     debug_stream = _stream_debug_enabled(self.name)
-                    seen_done = False
                     buffer = ""
-                    tool_state = {"tool_index": 0}
+                    # Own loop (TASK-13373): translates Gemini events and JSON arrays into
+                    # OpenAI deltas; the shared SSE helpers only pass lines through.
                     for raw in resp.iter_lines():
                         if not raw:
                             continue
@@ -643,18 +675,13 @@ class GoogleAdapter(ChatProvider):
                             phase="stream_response",
                         )
                         if is_done_line(line):
-                            if not seen_done:
-                                seen_done = True
-                                yield sse_done()
-                            continue
+                            # A proxy's [DONE] ends the stream: the usage chunk, then [DONE], once (TASK-13952).
+                            yield from self._usage_chunk(tool_state)
+                            yield sse_done()
+                            return
                         stripped = line.strip()
                         if stripped.startswith("data:"):
                             payload_text = stripped[len("data:"):].strip()
-                            if payload_text.lower() == "[done]":
-                                if not seen_done:
-                                    seen_done = True
-                                    yield sse_done()
-                                continue
                             try:
                                 event = json.loads(payload_text)
                             except (TypeError, ValueError, json.JSONDecodeError):
@@ -681,9 +708,17 @@ class GoogleAdapter(ChatProvider):
                         normalized = normalize_provider_line(line)
                         if normalized is not None:
                             yield normalized
-                    yield from finalize_stream(response=resp, done_already=seen_done)
+                    # Gemini sends no [DONE]: the usage chunk goes out here, before finalize_stream's (TASK-13952).
+                    yield from self._usage_chunk(tool_state)
+                    yield from finalize_stream(response=resp)
             return
+        except ChatAPIError:
+            # An in-band error event mid-way: the usage seen so far goes out first, so the stream is recorded from
+            # it, thinking tokens included (TASK-13952).
+            yield from self._usage_chunk(tool_state)
+            raise
         except _GOOGLE_ADAPTER_RUNTIME_EXCEPTIONS as e:
+            yield from self._usage_chunk(tool_state)  # a transport error mid-way: likewise
             self._raise_sanitized_provider_failure(e, phase="stream")
 
     async def achat(self, request: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:

@@ -7,23 +7,30 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.federation import oidc_service as oidc_module
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
-from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
-
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 
 pytestmark = pytest.mark.integration
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 @pytest.fixture
 def admin_identity_client(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    tmp_path: Path, fresh_services,
 ):
     db_path = tmp_path / "admin_identity_providers.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    # These tests exercise the identity-provider admin API, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv("CSRF_ENABLED", "false")
     monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_FEDERATION_ENABLED", "true")
@@ -34,7 +41,6 @@ def admin_identity_client(
         raising=False,
     )
 
-    asyncio.run(reset_db_pool())
     reset_settings()
 
     from tldw_Server_API.app.main import app as fastapi_app
@@ -69,7 +75,6 @@ def admin_identity_client(
             yield client
     finally:
         fastapi_app.dependency_overrides.pop(get_auth_principal, None)
-        asyncio.run(reset_db_pool())
         reset_settings()
 
 
@@ -346,10 +351,10 @@ def test_identity_provider_dry_run_previews_safe_revoke_effects_for_existing_pro
         manual_org = await create_organization(name="Manual Dry Run Org", owner_user_id=None)
         manual_team = await create_team(org_id=int(manual_org["id"]), name="Manual Dry Run Team")
 
-        await add_org_member(org_id=int(managed_org["id"]), user_id=user_id, role="member")
-        await add_team_member(team_id=int(managed_team["id"]), user_id=user_id, role="member")
-        await add_org_member(org_id=int(manual_org["id"]), user_id=user_id, role="member")
-        await add_team_member(team_id=int(manual_team["id"]), user_id=user_id, role="member")
+        await add_org_member(org_id=int(managed_org["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_team_member(team_id=int(managed_team["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_org_member(org_id=int(manual_org["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+        await add_team_member(team_id=int(manual_team["id"]), user_id=user_id, role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
         await users_repo.assign_role_if_missing(user_id=user_id, role_name="admin")
 
         await identity_repo.upsert_identity(

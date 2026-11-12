@@ -56,6 +56,7 @@ def test_recurring_scheduler_worker_specs_match_ownership_matrix() -> None:
         "admin_backup_sched_task": "admin_backup_scheduler",
         "companion_reflection_sched_task": "companion_reflection_scheduler",
         "reminders_sched_task": "reminders_scheduler",
+        "automation_definitions_sched_task": "automation_scheduler",
         "scheduled_tasks_recurring_question_sched_task": "scheduled_tasks_recurring_question_scheduler",
         "connectors_sync_sched_task": "connectors_sync_scheduler",
     }

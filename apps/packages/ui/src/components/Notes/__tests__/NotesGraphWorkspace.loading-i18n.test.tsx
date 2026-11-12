@@ -43,6 +43,18 @@ const loadingWorkspace = () => ({
     "source_membership"
   ]),
   toggleEdgeType: vi.fn(),
+  semantic: {
+    enabled: false,
+    setEnabled: vi.fn(),
+    threshold: 0.75,
+    setThreshold: vi.fn(),
+    topK: 10,
+    maxTopK: 50,
+    setTopK: vi.fn(),
+    focusRequired: false,
+    reset: vi.fn()
+  },
+  semanticIndex: undefined,
   allNotes: { activeNoteCount: 1, effectiveNoteCap: 500, eligible: true },
   canExpand: false,
   expand: vi.fn(),

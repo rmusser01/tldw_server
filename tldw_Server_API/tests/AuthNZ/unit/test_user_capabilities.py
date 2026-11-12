@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.endpoints import (
     users,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.unit
 
@@ -72,7 +73,7 @@ def app(monkeypatch):
         monitoring.router,
     ):
         application.include_router(router, prefix="/api/v1")
-    for route in application.routes:
+    for route in iter_served_routes(application.routes):
         for dependency in getattr(route, "dependencies", []):
             if getattr(dependency.dependency, "_tldw_rate_limit_resource", None):
                 application.dependency_overrides[dependency.dependency] = lambda: None

@@ -33,9 +33,9 @@ Docs/superpowers/plans/2026-05-17-webui-operations-integrations-implementation-p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a shared RouteErrorBoundary wrapper to the /watchlists route. Added a compact repeat-user action row below the health bar for Activity, Articles, Reports, and command palette access. Refined WatchlistsHealthBar empty and failed-run states with concrete setup and recovery actions. Extended route, page, health-bar, static guard, and focused E2E coverage. During E2E verification, the default port 8080 initially reused a stale Next dev server from .worktrees/character-chat-phase2-readiness; reran on isolated port 18080 to verify this checkout.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

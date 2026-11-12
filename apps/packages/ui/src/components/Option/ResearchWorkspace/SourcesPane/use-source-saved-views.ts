@@ -1,4 +1,8 @@
 import React from "react";
+import { watchChatAccountChanges } from "@/services/chat-account-boundary";
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
+import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
+import type { ScopedRequestOptions } from "@/services/tldw/TldwApiClient";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import type {
   WorkspaceSourceSavedViewConflictDetail,
@@ -65,6 +69,7 @@ interface ControllerState {
 }
 
 interface OperationToken {
+  requestOptions: ScopedRequestOptions;
   generation: number;
   lifecycle: number;
   epoch: number;
@@ -232,6 +237,9 @@ export const useSourceSavedViews = (
   currentState: SourceListViewState,
   onApplyState: (state: SourceListViewState) => void,
 ) => {
+  const authorityRetireRef = React.useRef<(() => void) | null>(null);
+  const authorityRetryRef = React.useRef<(() => Promise<void>) | null>(null);
+  const authorityRef = React.useRef<ServicePromptSnapshot | null>(null);
   const identityRef = React.useRef(workspaceId);
   const generationRef = React.useRef(0);
   const mountedRef = React.useRef(false);
@@ -240,8 +248,7 @@ export const useSourceSavedViews = (
   const mutationInFlightRef = React.useRef(false);
   const hasAuthoritativeViewsRef = React.useRef(false);
   const identityPending = identityRef.current !== workspaceId;
-  const renderGeneration =
-    generationRef.current + (identityPending ? 1 : 0);
+  const renderGeneration = generationRef.current + (identityPending ? 1 : 0);
 
   const [state, setState] = React.useState<ControllerState>(() =>
     emptyState(renderGeneration),
@@ -251,7 +258,10 @@ export const useSourceSavedViews = (
 
   const isGenerationCurrent = React.useCallback(
     (generation: number) =>
-      mountedRef.current && generationRef.current === generation,
+      mountedRef.current &&
+      generationRef.current === generation &&
+      authorityRef.current !== null &&
+      !authorityRef.current.scopeSignal.aborted,
     [],
   );
 
@@ -260,17 +270,23 @@ export const useSourceSavedViews = (
       mountedRef.current &&
       generationRef.current === token.generation &&
       lifecycleRef.current === token.lifecycle &&
-      operationEpochRef.current === token.epoch,
+      operationEpochRef.current === token.epoch &&
+      !token.requestOptions.signal?.aborted,
     [],
   );
 
   const beginOperation = React.useCallback(
     (generation: number): OperationToken | null => {
-      if (!isGenerationCurrent(generation)) return null;
+      const authority = authorityRef.current;
+      if (!authority || !isGenerationCurrent(generation)) return null;
       operationEpochRef.current += 1;
       versionRetryRef.current = null;
       mutationRetryRef.current = null;
       return {
+        requestOptions: {
+          requestScope: authority.requestScope,
+          signal: authority.scopeSignal,
+        },
         generation,
         lifecycle: lifecycleRef.current,
         epoch: operationEpochRef.current,
@@ -349,8 +365,10 @@ export const useSourceSavedViews = (
         return prepare ? prepare(loadingState) : loadingState;
       });
       try {
-        const response =
-          await tldwClient.listWorkspaceSourceViews(targetWorkspaceId);
+        const response = await tldwClient.listWorkspaceSourceViews(
+          targetWorkspaceId,
+          token.requestOptions,
+        );
         if (!isOperationCurrent(token)) return null;
         hasAuthoritativeViewsRef.current = true;
         commitOperation(token, (current) => ({
@@ -362,6 +380,10 @@ export const useSourceSavedViews = (
         return token;
       } catch (error) {
         if (!isOperationCurrent(token)) return null;
+        if (isRequestConfigScopeChangedError(error)) {
+          authorityRetireRef.current?.();
+          return null;
+        }
         commitOperation(token, (current) => ({
           ...current,
           loading: false,
@@ -383,8 +405,10 @@ export const useSourceSavedViews = (
         listError: null,
       }));
       try {
-        const response =
-          await tldwClient.listWorkspaceSourceViews(targetWorkspaceId);
+        const response = await tldwClient.listWorkspaceSourceViews(
+          targetWorkspaceId,
+          token.requestOptions,
+        );
         if (!isOperationCurrent(token)) return;
         hasAuthoritativeViewsRef.current = true;
         commitOperation(token, (current) => ({
@@ -394,6 +418,11 @@ export const useSourceSavedViews = (
           listError: null,
         }));
       } catch (error) {
+        if (!isOperationCurrent(token)) return;
+        if (isRequestConfigScopeChangedError(error)) {
+          authorityRetireRef.current?.();
+          return;
+        }
         commitOperation(token, (current) => ({
           ...current,
           loading: false,
@@ -432,15 +461,85 @@ export const useSourceSavedViews = (
   }, [workspaceId]);
 
   React.useEffect(() => {
-    if (
-      workspaceId === null ||
-      !workspaceExists ||
-      identityRef.current !== workspaceId ||
-      !mountedRef.current
-    ) {
-      return;
-    }
-    void load(generationRef.current, workspaceId);
+    let active = true;
+    let pending: AbortController | null = null;
+    let unlistenScope: (() => void) | null = null;
+    const release = () => {
+      authorityRetryRef.current = null;
+      unlistenScope?.();
+      unlistenScope = null;
+      pending?.abort();
+      authorityRef.current?.release();
+      authorityRef.current = null;
+    };
+    const retire = () => {
+      release();
+      generationRef.current += 1;
+      operationEpochRef.current += 1;
+      mutationInFlightRef.current = false;
+      hasAuthoritativeViewsRef.current = false;
+      versionRetryRef.current = null;
+      mutationRetryRef.current = null;
+      setState(emptyState(generationRef.current));
+    };
+    const resolve = async () => {
+      if (workspaceId === null || !workspaceExists) return;
+      authorityRetryRef.current = null;
+      pending?.abort();
+      const controller = new AbortController();
+      pending = controller;
+      const generation = generationRef.current;
+      try {
+        const snapshot = await loadServicePromptSnapshot([], {
+          signal: controller.signal,
+        });
+        if (
+          !active ||
+          controller.signal.aborted ||
+          generationRef.current !== generation ||
+          snapshot.scopeSignal.aborted
+        ) {
+          snapshot.release();
+          return;
+        }
+        authorityRef.current = snapshot;
+        snapshot.scopeInvalidatedSignal.addEventListener("abort", retire, {
+          once: true,
+        });
+        unlistenScope = () =>
+          snapshot.scopeInvalidatedSignal.removeEventListener("abort", retire);
+        setState(emptyState(generation));
+        await load(generation, workspaceId);
+      } catch (error) {
+        if (
+          !active ||
+          controller.signal.aborted ||
+          generationRef.current !== generation
+        )
+          return;
+        if (isRequestConfigScopeChangedError(error)) {
+          retire();
+          return;
+        }
+        authorityRetryRef.current = resolve;
+        setState({ ...emptyState(generation), listError: requestError(error) });
+      }
+    };
+    authorityRetireRef.current = retire;
+    const unwatch = watchChatAccountChanges((invalidated, ...currentConfig) => {
+      if (!invalidated) return;
+      retire();
+      // Native storage removal supplies an explicit missing config; principal events do not.
+      if (currentConfig.length > 0 && !currentConfig[0]) return;
+      void resolve();
+    });
+    void resolve();
+    return () => {
+      active = false;
+      authorityRetireRef.current = null;
+      unwatch();
+      release();
+    };
   }, [load, workspaceExists, workspaceId]);
 
   const exposed =
@@ -479,18 +578,17 @@ export const useSourceSavedViews = (
       !workspaceExists ||
       identityRef.current !== workspaceId ||
       mutationInFlightRef.current ||
-      !isGenerationCurrent(renderGeneration)
+      !mountedRef.current ||
+      generationRef.current !== renderGeneration
     ) {
       return;
     }
+    if (authorityRetryRef.current) {
+      await authorityRetryRef.current();
+      return;
+    }
     await load(renderGeneration, workspaceId);
-  }, [
-    isGenerationCurrent,
-    load,
-    renderGeneration,
-    workspaceExists,
-    workspaceId,
-  ]);
+  }, [load, renderGeneration, workspaceExists, workspaceId]);
 
   const applyView = React.useCallback(
     (view: WorkspaceSourceSavedViewResponse) => {
@@ -577,6 +675,7 @@ export const useSourceSavedViews = (
           targetWorkspaceId,
           options.viewId,
           { version: options.version, ...options.body },
+          token.requestOptions,
         );
         if (!isOperationCurrent(token)) return;
         mutationInFlightRef.current = false;
@@ -589,6 +688,10 @@ export const useSourceSavedViews = (
         }
       } catch (error) {
         if (!isOperationCurrent(token)) return;
+        if (isRequestConfigScopeChangedError(error)) {
+          authorityRetireRef.current?.();
+          return;
+        }
         mutationInFlightRef.current = false;
         if (hasStatus(error, 404)) {
           versionRetryRef.current = null;
@@ -710,6 +813,7 @@ export const useSourceSavedViews = (
               schema_version: SOURCE_SAVED_VIEW_SCHEMA_VERSION,
               state: serialized.state,
             },
+            token.requestOptions,
           );
           if (!isOperationCurrent(token)) return;
           mutationInFlightRef.current = false;
@@ -727,6 +831,10 @@ export const useSourceSavedViews = (
           }
         } catch (error) {
           if (!isOperationCurrent(token)) return;
+          if (isRequestConfigScopeChangedError(error)) {
+            authorityRetireRef.current?.();
+            return;
+          }
           mutationInFlightRef.current = false;
           const detail = parseConflictDetail(error);
           if (detail?.code === "source_view_name_exists") {
@@ -973,13 +1081,21 @@ export const useSourceSavedViews = (
           announcement: null,
         }));
         try {
-          await tldwClient.deleteWorkspaceSourceView(workspaceId, view.id);
+          await tldwClient.deleteWorkspaceSourceView(
+            workspaceId,
+            view.id,
+            token.requestOptions,
+          );
           const committed = finishDelete();
           if (committed && needsReconciliation) {
             void reconcileOperation(token, workspaceId);
           }
         } catch (error) {
           if (!isOperationCurrent(token)) return;
+          if (isRequestConfigScopeChangedError(error)) {
+            authorityRetireRef.current?.();
+            return;
+          }
           if (hasStatus(error, 404)) {
             const committed = finishDelete();
             if (committed && needsReconciliation) {
@@ -1047,7 +1163,11 @@ export const useSourceSavedViews = (
     (currentSignature === null || currentSignature !== exposed.activeSignature);
 
   return {
-    available: workspaceId !== null && workspaceExists,
+    available:
+      workspaceId !== null &&
+      workspaceExists &&
+      authorityRef.current !== null &&
+      !authorityRef.current.scopeSignal.aborted,
     generation: renderGeneration,
     views: exposed.views,
     loading: exposed.loading,

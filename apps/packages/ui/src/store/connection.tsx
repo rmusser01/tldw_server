@@ -709,8 +709,9 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
         let serverUrl = quickstartWebUiServerUrl ?? cfg?.serverUrl ?? null
 
         if (
+          cfg &&
           quickstartWebUiServerUrl &&
-          cfg?.serverUrl !== quickstartWebUiServerUrl &&
+          cfg.serverUrl !== quickstartWebUiServerUrl &&
           (cfg?.authSource !== "cookie-session" || hasCookieSessionAuth || hasSingleUserApiKey(cfg))
         ) {
           await (await getTldwClient()).updateConfig({ serverUrl: quickstartWebUiServerUrl })
@@ -729,11 +730,11 @@ export const useConnectionStore = createWithEqualityFn<ConnectionStore>((set, ge
             // fall back to the hard-coded localhost default here.
             const storedUrl = await getStoredTldwServerURL()
             if (storedUrl) {
-              await (await getTldwClient()).updateConfig({
-                serverUrl: storedUrl
-              })
-              if (!isCurrent()) return await get().checkOnce({ force: true })
-              cfg = await (await getTldwClient()).getConfig()
+              if (cfg) {
+                await client.updateConfig({ serverUrl: storedUrl })
+                if (!isCurrent()) return await get().checkOnce({ force: true })
+                cfg = await client.getConfig()
+              }
               serverUrl = cfg?.serverUrl ?? storedUrl
             }
           } catch {

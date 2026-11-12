@@ -763,3 +763,24 @@ class TestExtractionTrigger:
 
         # Clean up
         _extraction_message_counters.pop(key, None)
+
+
+@pytest.mark.unit
+def test_memory_extraction_lets_an_llm_quota_refusal_through(monkeypatch):
+    """A refusal is not reported as "no memories found" (TASK-13638)."""
+    from tldw_Server_API.app.core.Character_Chat.modules.character_memory_extraction import (
+        extract_character_memories,
+    )
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    def _refused(**_kwargs):
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", _refused)
+
+    with pytest.raises(LLMQuotaExceededError):
+        extract_character_memories(
+            [{"sender": "user", "content": "I like green tea."}], "Bob", "Al", [], api_endpoint="openai"
+        )

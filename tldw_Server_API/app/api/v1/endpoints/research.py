@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_reposi
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.Third_Party.Arxiv import convert_xml_to_markdown, fetch_arxiv_xml, search_arxiv_custom_api
 from tldw_Server_API.app.core.Third_Party.Semantic_Scholar import search_papers_semantic_scholar
+from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_state, run_with_llm_call_state
 from tldw_Server_API.app.core.Web_Scraping import WebSearch_APIs
 
 _WEBSEARCH_EXECUTOR: ThreadPoolExecutor | None = None
@@ -418,11 +419,10 @@ async def websearch_endpoint(
         # Run potentially blocking provider calls off the event loop
         # Use an explicit ThreadPoolExecutor for stable thread naming expected by tests
         loop = asyncio.get_running_loop()
+        _llm_state = capture_llm_call_state()
         phase1 = await loop.run_in_executor(
             _get_websearch_executor(),
-            generate_and_search,
-            payload.query,
-            search_params,
+            lambda: run_with_llm_call_state(_llm_state, generate_and_search, payload.query, search_params),
         )
 
         phase1_fatal_error = _get_phase1_fatal_error(phase1)

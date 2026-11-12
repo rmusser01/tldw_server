@@ -6,6 +6,7 @@ import time
 
 import pytest
 
+import tldw_Server_API.app.core.Slides.slides_db as slides_db
 from tldw_Server_API.app.core.Slides.slides_db import (
     ConflictError,
     InputError,
@@ -353,6 +354,14 @@ def test_slides_db_schema_initialization_serializes_column_migrations(tmp_path, 
         "_ensure_marp_theme_column",
         staticmethod(_slow_marp_theme_migration),
     )
+    original_configure = slides_db.configure_sqlite_connection
+    config_barrier = threading.Barrier(2)
+
+    def _configure_together(conn):
+        config_barrier.wait(timeout=5)
+        original_configure(conn)
+
+    monkeypatch.setattr(slides_db, "configure_sqlite_connection", _configure_together)
 
     errors: list[BaseException] = []
 
@@ -367,7 +376,7 @@ def test_slides_db_schema_initialization_serializes_column_migrations(tmp_path, 
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join(timeout=5)
+        thread.join(timeout=10)
 
     assert all(not thread.is_alive() for thread in threads)
     assert errors == []

@@ -35,7 +35,7 @@ See IMPLEMENTATION_PLAN_chat_workflows_review_fixes_2405.md. Stages: tracking/sc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started implementation for Chat Workflows review fixes. No repository code edits made before creating TASK-2405.
 
 Created IMPLEMENTATION_PLAN_chat_workflows_review_fixes_2405.md for this fix set.
@@ -47,7 +47,7 @@ Verification in isolated worktree codex/chat-workflows-review-fixes after rebasi
 PR feedback follow-up: address review comments for missing docstrings/type hints, effective renderer model fallback handling, failed dialogue-round retry behavior, and run-scoped dialogue round idempotency.
 
 PR feedback verification after rebasing onto latest origin/dev: /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -p no:unraisableexception tldw_Server_API/tests/Chat_Workflows -q => 51 passed, 115 warnings in 10.10s. Bandit touched scope => 0 results, 0 errors. git diff --check => clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

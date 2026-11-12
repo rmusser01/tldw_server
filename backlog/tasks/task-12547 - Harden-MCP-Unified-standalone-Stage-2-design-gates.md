@@ -38,11 +38,11 @@ Address the post-review design issues before continuing MCP Unified standalone e
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the post-review design hardening before further MCP Unified standalone extraction. Updated the standalone design spec with explicit Stage 2 sub-stages, structured profile/effective-policy result contracts, workspace-binding requirements for write-capable profiles, split storage responsibilities, packaging/license/minimal-install release gate, and a non-spawning external federation gate before upstream stdio process lifecycle work. Updated the completed Stage 2B profile registry plan with continuation gates and corrected the amended commit hash. Added a Stage 2C structured resolution implementation plan as the next executable slice.
 
 Verification: git diff --check passed. Design self-review confirmed no runtime/code behavior changes, no FastAPI route changes, no MCPProtocol/MCPServer wiring, no SQLite persistence, no external stdio process work, and no gateway entrypoints. Bandit skipped because this task touched Markdown/Backlog design artifacts only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -36,11 +36,11 @@ Implement PR 1 of the post-merge main /chat cockpit maturity roadmap: add a Cont
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started implementation from Docs/superpowers/plans/2026-05-15-chat-cockpit-composition-preview-plan.md. Impeccable context loader found no PRODUCT.md or DESIGN.md in the worktree, so implementation will follow existing /chat components and WebUI design-system conventions as the source of truth.
 
 Implemented the first-slice main /chat Context Stack and Composition Preview using the existing Playground coordinator state. Verification: focused Vitest suite passed 6 files / 40 tests; design-system product-state guard passed with baseline legacy exceptions only; full real-server Playwright spec `e2e/workflows/chat-cockpit.real-server.spec.ts` passed 8/8 against `http://127.0.0.1:8000` with the real API key and no route mocking; `git diff --check` passed. Bandit has no applicable Python touched scope for this TS/TSX/E2E slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

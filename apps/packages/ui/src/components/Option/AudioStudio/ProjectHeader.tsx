@@ -1,6 +1,7 @@
+import { useAudioStudioSession } from "./AudioStudioSession"
 import React from "react"
 import { Button, Input, Typography } from "antd"
-import { Save, Settings } from "lucide-react"
+import { Save } from "lucide-react"
 import { useAudioStudioStore } from "@/store/audio-studio"
 import { useUpdateAudioStudioProject } from "@/hooks/useAudioStudioProjects"
 import { getProjectRevisionId } from "./generationPayload"
@@ -8,6 +9,8 @@ import { getProjectRevisionId } from "./generationPayload"
 const { Text } = Typography
 
 export const ProjectHeader: React.FC = () => {
+  const session = useAudioStudioSession()
+  const pending = useAudioStudioStore((state) => state.activeProjectId ? Boolean(state.jobIntents[state.activeProjectId]) : false)
   const activeProject = useAudioStudioStore((state) => state.activeProject)
   const activeWorkflow = useAudioStudioStore((state) => state.activeWorkflow)
   const updateProjectLocal = useAudioStudioStore((state) => state.updateProjectLocal)
@@ -18,23 +21,25 @@ export const ProjectHeader: React.FC = () => {
   const revisionId = getProjectRevisionId(activeProject)
   const workflowMismatch =
     activeProject !== null && activeProject.workflow !== activeWorkflow
-  const saveDisabledReason = !activeProject
+  const saveDisabledReason = session?.readOnlyReason ?? (!activeProject
     ? "Select a project before saving."
     : workflowMismatch
       ? "Select a project for this workflow before saving."
+    : pending
+      ? "Resolve the pending project job before saving more changes."
     : !revisionId
       ? "Save requires a server-backed project revision."
-      : undefined
+      : undefined)
 
   const saveProject = () => {
-    if (!activeProject || workflowMismatch || !revisionId) return
+    if (!activeProject || saveDisabledReason || !revisionId) return
 
     void updateProjectMutation.mutateAsync({
       title: activeProject.title,
       description: activeProject.description,
       settings: activeProject.settings,
       base_revision_id: revisionId
-    })
+    }).catch(() => {})
   }
 
   return (
@@ -47,6 +52,7 @@ export const ProjectHeader: React.FC = () => {
           </Text>
         </div>
         <Input
+          readOnly={Boolean(session?.readOnlyReason)}
           aria-label="Project title"
           value={title}
           onChange={(event) => {
@@ -60,7 +66,7 @@ export const ProjectHeader: React.FC = () => {
         />
       </div>
       <div className="flex items-center gap-2">
-        <Button icon={<Settings className="h-4 w-4" />}>Settings</Button>
+        {updateProjectMutation.isError ? <p role="alert">Save failed. Your draft is retained; check the connection or reload the conflicting server revision.</p> : null}
         <Button
           type="primary"
           icon={<Save className="h-4 w-4" />}

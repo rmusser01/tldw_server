@@ -8,12 +8,13 @@
 import { Tree, Empty, Spin } from "antd"
 import type { TreeDataNode, TreeProps } from "antd"
 import { Folder, FolderOpen, ChevronRight, ChevronDown } from "lucide-react"
-import { buildFolderTree, useFolderStore, useFolderUIPrefs, type FolderTreeNode } from "@/store/folder"
+import { buildFolderTree, useFolderStore, useFolderUIPrefs, type FolderTreeNode, type FolderOperation } from "@/store/folder"
 import { useTranslation } from "react-i18next"
 import { useMemo, useCallback } from "react"
 import { useShallow } from "zustand/react/shallow"
 
 interface FolderTreeProps {
+  operation?: FolderOperation
   onFolderSelect?: (folderId: number) => void
   onConversationSelect?: (conversationId: string) => void
   selectedFolderId?: number | null
@@ -22,6 +23,7 @@ interface FolderTreeProps {
 }
 
 export const FolderTree = ({
+  operation,
   onFolderSelect,
   onConversationSelect,
   selectedFolderId,
@@ -47,6 +49,13 @@ export const FolderTree = ({
       toggleFolderOpen: s.toggleFolderOpen
     }))
   )
+
+  const canUse = useCallback(() => {
+    if (!operation) return true
+    const state = useFolderStore.getState()
+    return operation.isCurrent() && state.serverDataScope === operation &&
+      !state.isLoading && !state.error && state.folderApiAvailable === true
+  }, [operation])
 
   const folderTree = useMemo(
     () => buildFolderTree(folders, keywords, folderKeywordLinks, conversationKeywordLinks),
@@ -145,14 +154,16 @@ export const FolderTree = ({
 
   // Handle expand/collapse
   const handleExpand: TreeProps['onExpand'] = useCallback((_keys, { node }) => {
+    if (!canUse()) return
     const folderId = typeof node.key === 'number' ? node.key : Number(node.key)
     if (!isNaN(folderId) && !String(node.key).startsWith('conv-')) {
       toggleFolderOpen(folderId)
     }
-  }, [toggleFolderOpen])
+  }, [toggleFolderOpen, canUse])
 
   // Handle selection
   const handleSelect: TreeProps['onSelect'] = useCallback((keys, { node }) => {
+    if (!canUse()) return
     const key = String(node.key)
     if (key.startsWith('conv-')) {
       const conversationId = key.replace('conv-', '')
@@ -163,7 +174,9 @@ export const FolderTree = ({
         onFolderSelect?.(folderId)
       }
     }
-  }, [onFolderSelect, onConversationSelect])
+  }, [onFolderSelect, onConversationSelect, canUse])
+
+  if (operation && !canUse()) return null
 
   if (isLoading) {
     return (

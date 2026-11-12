@@ -13,11 +13,14 @@ and single-node development. It provides:
     global + entity scope
 
 This module does not wire HTTP middleware; that integration happens in the
-API layer. Minutes/day ledger durability is left to a separate DAL; this
-memory governor implements only in-memory counting for the 'minutes' category.
+API layer. Durable daily-cap consumption and downward settlement are delegated
+to the ResourceDailyLedger DAL through best-effort daily-cap helpers.
 """
 
+import asyncio
 import contextlib
+import dataclasses
+import itertools
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -25,8 +28,16 @@ from typing import Any, Callable
 
 from loguru import logger
 
-from .daily_caps import check_daily_cap, consume_daily_cap
+from .daily_caps import check_daily_cap, consume_daily_cap, reconcile_daily_cap
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
+from .policy_eval import (
+    clamp_token_units,
+    effective_policy,
+    lease_limits,
+    log_lookup_failure,
+    requests_window,
+    scope_pairs,
+)
 from .tenant import hash_entity
 
 try:
@@ -37,6 +48,14 @@ except (ImportError, ModuleNotFoundError):  # pragma: no cover - metrics optiona
 
 
 TimeSource = Callable[[], float]
+
+# Idle-bucket eviction. A bucket that has refilled to capacity is indistinguishable
+# from a fresh one, so dropping it is lossless.
+_EVICT_IDLE_SEC = 600.0
+_EVICT_INTERVAL_SEC = 60.0
+_EVICT_BATCH = 5000
+# The idempotency-record purge scans every op; run it at most this often, not per call.
+_OPS_PURGE_INTERVAL_SEC = 5.0
 
 
 @dataclass(frozen=True)
@@ -101,6 +120,7 @@ class _Bucket:
     refill_per_sec: float
     tokens: float
     last_refill: float
+    last_used: float = 0.0
 
     def refill(self, now: float) -> None:
         if now <= self.last_refill:
@@ -114,6 +134,7 @@ class _Bucket:
         return self.tokens
 
     def consume(self, units: float, now: float) -> bool:
+        self.last_used = now
         self.refill(now)
         if self.tokens >= units:
             self.tokens -= units
@@ -143,6 +164,15 @@ class _Lease:
 # --- Reservation handle ---
 
 
+@dataclass(frozen=True)
+class _DailyCapReservation:
+    """Identity and original ceiling of one durable daily charge."""
+
+    op_id: str
+    day_utc: str
+    units: int  # original daily units, before minute-window relief
+
+
 @dataclass
 class _ReservationHandle:
     handle_id: str
@@ -151,7 +181,16 @@ class _ReservationHandle:
     categories: dict[str, int]  # reserved units by category
     created_at: float
     expires_at: float
+    daily_caps: dict[str, _DailyCapReservation] = field(default_factory=dict)
     state: str = "reserved"  # reserved|finalized
+
+
+@dataclass
+class _ReserveOperationLock:
+    """One operation's active owner and queued callers share this lock."""
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
 
 
 class MemoryResourceGovernor(ResourceGovernor):
@@ -192,20 +231,28 @@ class MemoryResourceGovernor(ResourceGovernor):
         # Handles and idempotency
         self._handles: dict[str, _ReservationHandle] = {}
         self._ops: dict[str, dict[str, Any]] = {}  # op_id → {type, handle_id}
+        self._reserve_locks: dict[str, _ReserveOperationLock] = {}
+
+        # Idle-bucket eviction and op-purge bookkeeping
+        self._last_evict = self._time()
+        self._last_ops_purge = self._last_evict
 
         # Metrics
         ensure_rg_metrics_registered()
 
     # --- Policy helpers ---
-    def _get_policy(self, policy_id: str) -> dict[str, Any]:
+    def _lookup_policy(self, policy_id: str) -> dict[str, Any] | None:
         if self._policy_loader is not None:
             try:
                 pol = self._policy_loader.get_policy(policy_id)  # type: ignore[attr-defined]
                 if pol:
                     return pol
             except (AttributeError, RuntimeError, TypeError, ValueError) as e:
-                logger.debug(f"Policy loader failed; falling back to static policies: {e}")
-        return self._policies.get(policy_id, {})
+                log_lookup_failure(policy_id, e)
+        return self._policies.get(policy_id)
+
+    def _get_policy(self, policy_id: str) -> dict[str, Any]:
+        return effective_policy(self._lookup_policy, policy_id)
 
     @staticmethod
     def _parse_entity(entity: str) -> tuple[str, str]:
@@ -222,10 +269,36 @@ class MemoryResourceGovernor(ResourceGovernor):
     def _get_bucket(self, policy_id: str, category: str, scope: str, entity_value: str, *, capacity: float, refill_per_sec: float) -> _Bucket:
         k = self._bucket_key(policy_id, category, scope, entity_value)
         b = self._buckets.get(k)
+        now = self._time()
         if b is None:
-            b = _Bucket(capacity=float(capacity), refill_per_sec=float(refill_per_sec), tokens=float(capacity), last_refill=self._time())
+            b = _Bucket(capacity=float(capacity), refill_per_sec=float(refill_per_sec), tokens=float(capacity), last_refill=now, last_used=now)
             self._buckets[k] = b
+        elif b.capacity != float(capacity) or b.refill_per_sec != float(refill_per_sec):
+            # A policy reload changed the limit: apply it now rather than at restart.
+            # Raising grants the added capacity immediately; lowering clamps.
+            b.refill(now)
+            old_capacity = b.capacity
+            b.capacity = float(capacity)
+            b.refill_per_sec = float(refill_per_sec)
+            b.tokens = min(b.capacity, b.tokens + max(0.0, b.capacity - old_capacity))
         return b
+
+    def _maybe_evict_idle(self, now: float) -> None:
+        """Drop buckets that have refilled and sat idle; bounded work per call."""
+        if now - self._last_evict < _EVICT_INTERVAL_SEC:
+            return
+        self._last_evict = now
+        # Rotate in place: pop the oldest-visited keys and re-insert the survivors at
+        # the end, so successive sweeps cover every key even as evictions shrink the dict.
+        # A batch of at least a tenth of the map keeps a flood from outgrowing the sweeps.
+        for k in list(itertools.islice(self._buckets, max(_EVICT_BATCH, len(self._buckets) // 10))):
+            b = self._buckets.pop(k)
+            if not (now - b.last_used >= _EVICT_IDLE_SEC and b.available(now) >= b.capacity):
+                self._buckets[k] = b
+        for k in list(itertools.islice(self._leases, max(_EVICT_BATCH, len(self._leases) // 10))):
+            m = self._leases.pop(k)
+            if m:
+                self._leases[k] = m
 
     # --- Leases ---
     def _get_lease_map(self, policy_id: str, category: str, scope: str, entity_value: str) -> dict[str, _Lease]:
@@ -247,7 +320,18 @@ class MemoryResourceGovernor(ResourceGovernor):
             with contextlib.suppress(KeyError):
                 del self._handles[hid]
 
+    def _live_op(self, key: str | None, now: float) -> dict[str, Any] | None:
+        """Return the idempotency record for ``key``; an expired one is dropped, never replayed."""
+        rec = self._ops.get(key) if key else None
+        if rec is not None and now - float(rec.get("created_at", now)) > self._op_ttl:
+            del self._ops[key]
+            return None
+        return rec
+
     def _purge_expired_ops(self, now: float) -> None:
+        if now - self._last_ops_purge < _OPS_PURGE_INTERVAL_SEC:
+            return
+        self._last_ops_purge = now
         ttl = self._op_ttl
         expired: list[str] = []
         for op_id, rec in self._ops.items():
@@ -271,12 +355,6 @@ class MemoryResourceGovernor(ResourceGovernor):
     def _category_limits(self, policy: dict[str, Any], category: str) -> dict[str, Any]:
         return dict(policy.get(category, {}))
 
-    def _scopes(self, policy: dict[str, Any]) -> list[str]:
-        s = policy.get("scopes")
-        if isinstance(s, list) and s:
-            return [str(x) for x in s]
-        return ["global", "entity"]
-
     def _compute_headroom_requests_tokens(
         self,
         *,
@@ -295,7 +373,7 @@ class MemoryResourceGovernor(ResourceGovernor):
             burst = float(cfg.get("burst") or 1.0)
             refill_per_sec = rpm / 60.0
             capacity = rpm * max(1.0, burst)
-            effective_limit = int(rpm)
+            effective_limit = requests_window(policy)[0]  # what headers report; never 0
         else:  # tokens
             per_min = float(cfg.get("per_min") or 0)
             burst = float(cfg.get("burst") or 1.0)
@@ -318,12 +396,7 @@ class MemoryResourceGovernor(ResourceGovernor):
             return False, 60, {"limit": 0, "used": 0, "remaining": 0}
 
         # Evaluate strictest across scopes: global + entity scope
-        scopes = self._scopes(policy)
-        scope_keys: list[tuple[str, str]] = []
-        if "global" in scopes:
-            scope_keys.append(("global", "*"))
-        if entity_scope in scopes or "entity" in scopes:
-            scope_keys.append((entity_scope, entity_value))
+        scope_keys = scope_pairs(policy, entity_scope, entity_value)
 
         remainings = []
         retry_after_candidates = []
@@ -358,19 +431,11 @@ class MemoryResourceGovernor(ResourceGovernor):
         entity_value: str,
         units: int,
         now: float,
+        request_cfg: dict[str, Any],
     ) -> tuple[bool, int, dict[str, Any]]:
-        cfg = self._category_limits(policy, category)
-        limit = int(cfg.get("max_concurrent") or 0)
-        ttl_sec = int(cfg.get("ttl_sec") or 60)
+        limit, ttl_sec, scope_keys = lease_limits(policy, category, request_cfg, entity_scope, entity_value)
         if limit <= 0:
-            return False, 1, {"limit": 0, "remaining": 0}
-
-        scopes = self._scopes(policy)
-        scope_keys: list[tuple[str, str]] = []
-        if "global" in scopes:
-            scope_keys.append(("global", "*"))
-        if entity_scope in scopes or "entity" in scopes:
-            scope_keys.append((entity_scope, entity_value))
+            return True, 0, {"limit": 0, "remaining": 10**9, "unbounded": True}
 
         remainings = []
         retry_after_candidates = []
@@ -398,6 +463,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         entity_value: str,
         reserve_op_id: str,
         decision: RGDecision,
+        handle: _ReservationHandle,
     ) -> RGDecision | None:
         try:
             categories = dict((decision.details or {}).get("categories") or {})
@@ -413,13 +479,14 @@ class MemoryResourceGovernor(ResourceGovernor):
                 continue
             if units <= 0 or daily_cap <= 0:
                 continue
+            daily_op_id = f"{policy_id}:{reserve_op_id}:{category}"
             allowed, daily_ra, daily_details = await consume_daily_cap(
                 entity_scope=entity_scope,
                 entity_value=entity_value,
                 category=category,
                 daily_cap=daily_cap,
                 units=units,
-                op_id=f"{policy_id}:{reserve_op_id}:{category}",
+                op_id=daily_op_id,
             )
             retry_after = max(retry_after, int(daily_ra or 0))
             current = dict(categories.get(category) or {})
@@ -428,10 +495,23 @@ class MemoryResourceGovernor(ResourceGovernor):
             if not allowed:
                 current["allowed"] = False
                 categories[category] = current
+                for consumed_category, reservation in handle.daily_caps.items():
+                    await reconcile_daily_cap(
+                        entity_scope=entity_scope,
+                        entity_value=entity_value,
+                        category=consumed_category,
+                        units=0,
+                        op_id=reservation.op_id,
+                        day_utc=reservation.day_utc,
+                    )
                 return RGDecision(
                     allowed=False,
                     retry_after=(retry_after or None),
                     details={"policy_id": policy_id, "categories": categories},
+                )
+            if daily_details.get("daily_inserted") and daily_details.get("daily_day_utc"):
+                handle.daily_caps[category] = _DailyCapReservation(
+                    op_id=daily_op_id, day_utc=daily_details["daily_day_utc"], units=units
                 )
             current.setdefault("allowed", True)
             categories[category] = current
@@ -442,6 +522,8 @@ class MemoryResourceGovernor(ResourceGovernor):
         now = self._time()
         policy_id = req.tags.get("policy_id") or "default"
         pol = self._get_policy(policy_id)
+        daily_req = req  # Daily quotas charge original units; relief applies only to minute windows.
+        req = dataclasses.replace(req, categories=clamp_token_units(pol, req.categories, capacity_includes_burst=True))
         entity_scope, entity_value = self._parse_entity(req.entity)
         backend = self._backend_label
 
@@ -470,6 +552,7 @@ class MemoryResourceGovernor(ResourceGovernor):
                     entity_value=entity_value,
                     units=units,
                     now=now,
+                    request_cfg=cfg,
                 )
             else:
                 # Minutes and other ledgers are not enforced in memory; allow by default here
@@ -487,7 +570,7 @@ class MemoryResourceGovernor(ResourceGovernor):
                     entity_value=entity_value,
                     category=category,
                     daily_cap=daily_cap,
-                    units=units,
+                    units=int(daily_req.categories[category].get("units") or 0),
                 )
                 if not daily_allowed:
                     allowed = False
@@ -546,45 +629,92 @@ class MemoryResourceGovernor(ResourceGovernor):
         return RGDecision(allowed=overall_allowed, retry_after=(retry_after_overall or None), details={"policy_id": policy_id, "categories": per_category})
 
     async def reserve(self, req: RGRequest, op_id: str | None = None) -> tuple[RGDecision, str | None]:
+        """Serialize same-operation admission through cached-result publication."""
+        if not op_id:
+            return await self._reserve_once(req, op_id)
+
+        reserve_key = self._op_key("reserve", op_id)
+        operation = self._reserve_locks.get(reserve_key)
+        if operation is None:
+            operation = _ReserveOperationLock()
+            self._reserve_locks[reserve_key] = operation
+        operation.users += 1
+        try:
+            async with operation.lock:
+                return await self._reserve_once(req, op_id)
+        finally:
+            # Count queued callers too, so a cancelled waiter cannot replace an
+            # owner's lock. The final participant removes the registry entry.
+            operation.users -= 1
+            if operation.users == 0:
+                self._reserve_locks.pop(reserve_key, None)
+
+    async def _reserve_once(self, req: RGRequest, op_id: str | None) -> tuple[RGDecision, str | None]:
+        """Admit and publish with any operation lock already held by the caller."""
         now_purge = self._time()
         self._purge_expired_handles(now_purge)
         self._purge_expired_ops(now_purge)
+        self._maybe_evict_idle(now_purge)
         # Idempotency: return previous outcome for same op_id
         reserve_key = self._op_key("reserve", op_id) if op_id else None
-        if reserve_key and reserve_key in self._ops:
-            rec = self._ops[reserve_key]
-            hid = rec.get("handle_id")
-            return rec.get("decision"), hid  # type: ignore[return-value]
+        rec = self._live_op(reserve_key, now_purge)
+        if rec is not None:
+            return rec.get("decision"), rec.get("handle_id")  # type: ignore[return-value]
 
+        daily_req = req
         dec = await self.check(req)
         if not dec.allowed:
             if reserve_key:
-                self._ops[reserve_key] = {"type": "reserve", "decision": dec, "handle_id": None, "created_at": now_purge}
+                self._ops[reserve_key] = {
+                    "type": "reserve",
+                    "decision": dec,
+                    "handle_id": None,
+                    "created_at": self._time(),
+                }
             return dec, None
 
         # Consume from buckets / acquire leases
         now = self._time()
         policy_id = dec.details.get("policy_id") or req.tags.get("policy_id") or "default"
         pol = self._get_policy(policy_id)
+        req = dataclasses.replace(req, categories=clamp_token_units(pol, req.categories, capacity_includes_burst=True))
         entity_scope, entity_value = self._parse_entity(req.entity)
         handle_id = str(uuid.uuid4())
         ttl = self._default_handle_ttl
-        h = _ReservationHandle(handle_id=handle_id, entity=req.entity, policy_id=policy_id, categories={}, created_at=now, expires_at=now + ttl)
+        h = _ReservationHandle(
+            handle_id=handle_id,
+            entity=req.entity,
+            policy_id=policy_id,
+            categories={},
+            created_at=now,
+            expires_at=now + ttl,
+        )
 
         daily_denial = await self._consume_daily_caps_for_reserve(
-            req=req,
+            req=daily_req,
             policy_id=policy_id,
             policy=pol,
             entity_scope=entity_scope,
             entity_value=entity_value,
             reserve_op_id=op_id or handle_id,
             decision=dec,
+            handle=h,
         )
         if daily_denial is not None:
             if reserve_key:
-                self._ops[reserve_key] = {"type": "reserve", "decision": daily_denial, "handle_id": None, "created_at": now}
+                self._ops[reserve_key] = {
+                    "type": "reserve",
+                    "decision": daily_denial,
+                    "handle_id": None,
+                    "created_at": self._time(),
+                }
             return daily_denial, None
 
+        # Daily I/O may outlast the TTL; start handle/result lifetime only once
+        # admission is ready to publish, using fresh time for buckets and leases.
+        now = self._time()
+        h.created_at = now
+        h.expires_at = now + ttl
         for category, cfg in req.categories.items():
             units = int(cfg.get("units") or 0)
             h.categories[category] = units
@@ -612,22 +742,15 @@ class MemoryResourceGovernor(ResourceGovernor):
                     burst = float(cfg.get("burst") or 1.0)
                     refill_per_sec = per_min / 60.0
                     capacity = per_min * max(1.0, burst)
-                # global
-                if "global" in self._scopes(pol):
-                    b = self._get_bucket(policy_id, category, "global", "*", capacity=capacity, refill_per_sec=refill_per_sec)
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
+                    b = self._get_bucket(policy_id, category, sc, ev, capacity=capacity, refill_per_sec=refill_per_sec)
                     _ = b.consume(units, now)
-                # entity
-                b = self._get_bucket(policy_id, category, entity_scope, entity_value, capacity=capacity, refill_per_sec=refill_per_sec)
-                _ = b.consume(units, now)
 
             elif category in ("streams", "jobs"):
-                cfgc = self._category_limits(pol, category)
-                limit = int(cfgc.get("max_concurrent") or 0)
-                ttl_sec = int(cfgc.get("ttl_sec") or 60)
+                limit, ttl_sec, lease_scopes = lease_limits(pol, category, cfg, entity_scope, entity_value)
                 # Acquire for global and entity scopes (when configured)
-                scopes = self._scopes(pol)
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in scopes and not (sc == entity_scope and "entity" in scopes):
+                for sc, ev in lease_scopes:
+                    if limit <= 0:
                         continue
                     m = self._get_lease_map(policy_id, category, sc, ev)
                     self._purge_expired_leases(m, now)
@@ -661,10 +784,9 @@ class MemoryResourceGovernor(ResourceGovernor):
         self._purge_expired_ops(now_purge)
         # Idempotent per op_id
         commit_key = self._op_key("commit", op_id) if op_id else None
-        if commit_key and commit_key in self._ops:
-            rec = self._ops[commit_key]
-            if rec.get("type") == "commit" and rec.get("handle_id") == handle_id:
-                return
+        rec = self._live_op(commit_key, now_purge)
+        if rec is not None and rec.get("type") == "commit" and rec.get("handle_id") == handle_id:
+            return
         h = self._handles.get(handle_id)
         if not h:
             return
@@ -673,6 +795,10 @@ class MemoryResourceGovernor(ResourceGovernor):
         pol = self._get_policy(h.policy_id)
 
         actuals = actuals or {}
+        daily_actuals = {
+            category: max(0, min(int(actuals.get(category, reservation.units)), reservation.units))
+            for category, reservation in h.daily_caps.items()
+        }
         for category, reserved in list(h.categories.items()):
             actual = int(actuals.get(category, reserved))
             actual = max(0, min(actual, reserved))
@@ -691,15 +817,11 @@ class MemoryResourceGovernor(ResourceGovernor):
                         burst = float(cfg.get("burst") or 1.0)
                         refill_per_sec = per_min / 60.0
                         capacity = per_min * max(1.0, burst)
-                    # global
-                    if "global" in self._scopes(pol):
-                        b = self._get_bucket(h.policy_id, category, "global", "*", capacity=capacity, refill_per_sec=refill_per_sec)
+                    # Refund exactly the buckets reserve() charged.
+                    for sc, ev in scope_pairs(pol, entity_scope, entity_value):
+                        b = self._get_bucket(h.policy_id, category, sc, ev, capacity=capacity, refill_per_sec=refill_per_sec)
                         b.refill(now)
                         b.tokens = min(b.capacity, b.tokens + refund_units)
-                    # entity
-                    b = self._get_bucket(h.policy_id, category, entity_scope, entity_value, capacity=capacity, refill_per_sec=refill_per_sec)
-                    b.refill(now)
-                    b.tokens = min(b.capacity, b.tokens + refund_units)
                     if get_metrics_registry:
                         get_metrics_registry().increment(
                             "rg_refunds_total",
@@ -721,10 +843,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         # Release any concurrency leases
         for category in list(h.categories.keys()):
             if category in ("streams", "jobs"):
-                scopes = self._scopes(pol)
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in scopes and not (sc == entity_scope and "entity" in scopes):
-                        continue
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
                     m = self._get_lease_map(h.policy_id, category, sc, ev)
                     self._purge_expired_leases(m, now)
                     # Remove leases for this handle
@@ -743,16 +862,27 @@ class MemoryResourceGovernor(ResourceGovernor):
         if commit_key:
             self._ops[commit_key] = {"type": "commit", "handle_id": handle_id, "created_at": now}
 
+        # Finalize in memory before the first ledger await: duplicate callbacks
+        # must not refund buckets again while durable settlement is in flight.
+        for category, reservation in h.daily_caps.items():
+            await reconcile_daily_cap(
+                entity_scope=entity_scope,
+                entity_value=entity_value,
+                category=category,
+                units=daily_actuals[category],
+                op_id=reservation.op_id,
+                day_utc=reservation.day_utc,
+            )
+
     async def refund(self, handle_id: str, deltas: dict[str, int] | None = None, op_id: str | None = None) -> None:
         now_purge = self._time()
         self._purge_expired_handles(now_purge)
         self._purge_expired_ops(now_purge)
         # Idempotent per op_id
         refund_key = self._op_key("refund", op_id) if op_id else None
-        if refund_key and refund_key in self._ops:
-            rec = self._ops[refund_key]
-            if rec.get("type") == "refund" and rec.get("handle_id") == handle_id:
-                return
+        rec = self._live_op(refund_key, now_purge)
+        if rec is not None and rec.get("type") == "refund" and rec.get("handle_id") == handle_id:
+            return
         h = self._handles.get(handle_id)
         if not h:
             return
@@ -778,15 +908,11 @@ class MemoryResourceGovernor(ResourceGovernor):
                     burst = float(cfg.get("burst") or 1.0)
                     refill_per_sec = per_min / 60.0
                     capacity = per_min * max(1.0, burst)
-                # global
-                if "global" in self._scopes(pol):
-                    b = self._get_bucket(h.policy_id, category, "global", "*", capacity=capacity, refill_per_sec=refill_per_sec)
+                # Refund exactly the buckets reserve() charged.
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
+                    b = self._get_bucket(h.policy_id, category, sc, ev, capacity=capacity, refill_per_sec=refill_per_sec)
                     b.refill(now)
                     b.tokens = min(b.capacity, b.tokens + refund_units)
-                # entity
-                b = self._get_bucket(h.policy_id, category, entity_scope, entity_value, capacity=capacity, refill_per_sec=refill_per_sec)
-                b.refill(now)
-                b.tokens = min(b.capacity, b.tokens + refund_units)
                 if get_metrics_registry:
                     get_metrics_registry().increment(
                         "rg_refunds_total",
@@ -817,10 +943,7 @@ class MemoryResourceGovernor(ResourceGovernor):
         pol = self._get_policy(h.policy_id)
         for category in list(h.categories.keys()):
             if category in ("streams", "jobs"):
-                scopes = self._scopes(pol)
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in scopes and not (sc == entity_scope and "entity" in scopes):
-                        continue
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
                     m = self._get_lease_map(h.policy_id, category, sc, ev)
                     # Renew leases for this handle
                     for lid, lease in list(m.items()):
@@ -828,8 +951,12 @@ class MemoryResourceGovernor(ResourceGovernor):
                             lease.expires_at = now + max(1, int(ttl_s))
 
     async def release(self, handle_id: str) -> None:
-        # Alias to commit with zero actuals for all categories
-        await self.commit(handle_id, actuals={})
+        """Release all reserved categories explicitly, including daily charges."""
+        handle = self._handles.get(handle_id)
+        if handle is None:
+            return
+        actuals = dict.fromkeys(handle.categories.keys() | handle.daily_caps.keys(), 0)
+        await self.commit(handle_id, actuals=actuals)
 
     async def peek(self, entity: str, categories: list[str]) -> dict[str, Any]:
         now = self._time()
@@ -865,11 +992,8 @@ class MemoryResourceGovernor(ResourceGovernor):
                     burst = float(cfg.get("burst") or 1.0)
                     refill_per_sec = per_min / 60.0
                     capacity = per_min * max(1.0, burst)
-                scopes = self._scopes(pol)
                 remainings = []
-                for sc, ev in (("global", "*"), (entity_scope, entity_value)):
-                    if sc not in scopes and not (sc == entity_scope and "entity" in scopes):
-                        continue
+                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
                     b = self._get_bucket(policy_id, category, sc, ev, capacity=capacity, refill_per_sec=refill_per_sec)
                     remainings.append(int(b.available(now)))
                 out[category] = {"remaining": (min(remainings) if remainings else None), "reset": 0}

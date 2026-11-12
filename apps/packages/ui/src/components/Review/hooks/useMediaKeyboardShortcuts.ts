@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { MediaResultItem } from '@/components/Media/types'
+import { isEditableTarget } from "@/utils/editable-target"
 
 export interface UseMediaKeyboardShortcutsDeps {
   hasNext: boolean
@@ -35,11 +36,7 @@ export function useMediaKeyboardShortcuts(deps: UseMediaKeyboardShortcutsDeps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if typing in input
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        (e.target as HTMLElement)?.isContentEditable
-      ) {
+      if (isEditableTarget(e.target)) {
         return
       }
 

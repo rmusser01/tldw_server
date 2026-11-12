@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
 import { useSetupReadinessSummary } from "@/hooks/useSetupReadinessSummary";
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding";
+import { SetupEntryChoice } from "./SetupEntryChoice";
 import { useConnectionActions } from "@/hooks/useConnectionState";
 import {
   normalizeSelectedModel,
@@ -101,10 +102,16 @@ const providerSelectionFromState = (
   const data = state?.step_data?.providers;
   const provider = data?.default_provider;
   const model = data?.default_model;
+  const baseUrl = data?.default_base_url;
   const credentialConfigured =
     data?.default_provider_credential_configured === true;
   if (typeof provider === "string" && typeof model === "string") {
-    return { provider, model, credential_configured: credentialConfigured };
+    return {
+      provider,
+      model,
+      base_url: typeof baseUrl === "string" ? baseUrl : undefined,
+      credential_configured: credentialConfigured,
+    };
   }
   const firstChatProvider = state?.first_chat?.provider;
   const firstChatModel = state?.first_chat?.model;
@@ -177,6 +184,8 @@ export function UnifiedSetupWizard({
     audioRecommendations,
     loading,
     error,
+    connectionConfigured,
+    connectionChecking,
     refresh,
     loadProviderCatalog,
     loadMcpToolsCatalog,
@@ -203,7 +212,7 @@ export function UnifiedSetupWizard({
     error: setupReadinessError,
     refresh: refreshSetupReadinessStatus,
   } = useSetupReadinessSummary({
-    enabled: Boolean(metadata) && metadata.auth_mode !== "multi_user",
+    enabled: connectionConfigured !== false && Boolean(metadata) && metadata.auth_mode !== "multi_user",
   });
   const [step, setStep] = React.useState<WizardStep>(() =>
     stepFromState(initialState),
@@ -241,6 +250,7 @@ export function UnifiedSetupWizard({
   const activeStep = isMultiUserServer
     ? "multi_user_exit"
     : step === "first_chat" && !providerSelection ? "provider_setup" : step;
+  const handleOpenConnectionSettings = () => navigate("/settings/tldw");
 
   const handleSignIn = async () => {
     setLoginPending(true);
@@ -275,22 +285,22 @@ export function UnifiedSetupWizard({
   }, [state]);
 
   React.useEffect(() => {
-    if (activeStep !== "provider_setup" || providerCatalog.length > 0) return;
+    if (connectionConfigured === false || connectionChecking || activeStep !== "provider_setup" || providerCatalog.length > 0) return;
     void loadProviderCatalog().catch((err) => {
       console.error("Provider catalog could not be loaded", err);
       setStepError("Provider catalog could not be loaded. Try again.");
     });
-  }, [loadProviderCatalog, providerCatalog.length, activeStep]);
+  }, [connectionConfigured, connectionChecking, loadProviderCatalog, providerCatalog.length, activeStep]);
 
   React.useEffect(() => {
-    if (step !== "audio_defaults" || audioRecommendations.length > 0) return;
+    if (connectionConfigured === false || connectionChecking || step !== "audio_defaults" || audioRecommendations.length > 0) return;
     void loadAudioRecommendations().catch((err) => {
       console.error("Audio recommendations could not be loaded", err);
       setStepError(
         "Audio recommendations could not be loaded. You can continue with defaults.",
       );
     });
-  }, [audioRecommendations.length, loadAudioRecommendations, step]);
+  }, [connectionConfigured, connectionChecking, audioRecommendations.length, loadAudioRecommendations, step]);
 
   const persistStep = React.useCallback(
     async (payload: FirstRunStepUpdateRequest) => {
@@ -379,6 +389,7 @@ export function UnifiedSetupWizard({
             acknowledged: true,
             default_provider: selection.provider,
             default_model: selection.model,
+            default_base_url: selection.base_url ?? null,
             default_provider_credential_configured: Boolean(
               selection.credential_configured,
             ),
@@ -581,7 +592,7 @@ export function UnifiedSetupWizard({
   );
 
   const handleSkip = React.useCallback(() => {
-    if (skipPendingRef.current) return;
+    if (!state || skipPendingRef.current) return;
     skipPendingRef.current = true;
     setSkipPending(true);
     setStepError(null);
@@ -598,9 +609,24 @@ export function UnifiedSetupWizard({
         setSkipPending(false);
         void refreshSetupReadiness();
       });
-  }, [onStateChange, refreshSetupReadiness, skip]);
+  }, [onStateChange, refreshSetupReadiness, skip, state]);
 
-  if (loading && !state && !metadata) {
+  if (connectionConfigured === false && !connectionChecking && !error) {
+    return (
+      <div className="mx-auto w-full max-w-4xl px-4 py-8">
+        <SetupEntryChoice
+          state={null}
+          metadata={null}
+          connectionRequired
+          onOpenConnectionSettings={handleOpenConnectionSettings}
+          onStartWebUiSetup={() => setStep("setup_path")}
+          onRefreshSetupState={async () => { await refreshParentState(); }}
+        />
+      </div>
+    );
+  }
+
+  if ((loading || connectionChecking) && !state && !metadata) {
     return (
       <PageAssistLoader
         label="Loading setup..."
@@ -630,16 +656,27 @@ export function UnifiedSetupWizard({
                 : "Configure the minimum needed to reach a successful first chat."}
             </p>
           </div>
-          {!isMultiUserServer ? (
-            <button
-              type="button"
-              onClick={handleSkip}
-              disabled={skipPending}
-              className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
-            >
-              {skipPending ? "Skipping..." : "Skip for now"}
-            </button>
-          ) : null}
+          <div className="flex flex-wrap gap-2">
+            {(!metadata || error) && activeStep !== "multi_user_exit" ? (
+              <button
+                type="button"
+                onClick={handleOpenConnectionSettings}
+                className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2"
+              >
+                Open connection settings
+              </button>
+            ) : null}
+            {!isMultiUserServer && state ? (
+              <button
+                type="button"
+                onClick={handleSkip}
+                disabled={skipPending}
+                className="rounded-md border border-border bg-surface px-3 py-2 text-sm font-medium text-text hover:bg-surface2 disabled:opacity-50"
+              >
+                {skipPending ? "Skipping..." : "Skip for now"}
+              </button>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -689,6 +726,7 @@ export function UnifiedSetupWizard({
             metadata={metadata}
             onBack={isMultiUserServer ? undefined : () => setStep("setup_path")}
             onSignIn={isMultiUserServer ? handleSignIn : undefined}
+            onOpenConnectionSettings={handleOpenConnectionSettings}
             loginPending={loginPending}
           />
         ) : null}

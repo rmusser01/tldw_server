@@ -44,7 +44,7 @@ Implement the clsx cleanup slice from the WebUI dependency audit for issue #1346
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED verification: bunx vitest run __tests__/utils-cn.test.ts initially failed before implementation. The dependency guard failed on package.json clsx. The first draft also revealed that current clsx ignores standalone bigint values, so AC/test expectations were corrected to preserve observed behavior.
 
 Changed-test sweep also surfaced a stale researchers-page CTA assertion unrelated to class joining. Current page renders Download Free / Read the Docs, so the test was updated to match the existing page contract before continuing verification.
@@ -58,7 +58,7 @@ Post-rebase final verification: NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bunx v
 PR #1368 review sweep found Gemini feedback to remove lockfile parsing from the cn helper test because it was brittle against package-manager formatting. Keeping package.json and source import guards instead.
 
 PR #1368 review fix removed bun.lock parsing from the cn helper dependency guard while retaining package.json and utils.ts source guards. Verification after the review fix: bunx vitest run __tests__/utils-cn.test.ts passed 1 file / 3 tests; NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bunx vitest run --changed=origin/dev passed 23 files / 89 tests; bun run lint passed with 0 errors and the existing 127-warning backlog; bunx tsc --noEmit -p tsconfig.json --pretty false passed; NEXT_PUBLIC_API_URL=http://127.0.0.1:8000 bun run compile passed with token sync OK; git diff --check passed. Bandit remains skipped because the review fix touches only WebUI TypeScript tests and Backlog documentation, with no Python files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

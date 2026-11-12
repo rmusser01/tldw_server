@@ -1,0 +1,250 @@
+{
+  "task": "TASK-13377",
+  "date": "2026-09-26",
+  "source_state": {
+    "pre_merge_branch_head": "68e3b583d0",
+    "merged_dev": "f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07",
+    "description": "Resolved merge plus validated selected-organization auth correction; source hashes identify tested production/probe files",
+    "sha256": {
+      "Docs/Operations/probes/email_archive_probe_databases_2026_09_25.py": "1e5235360fe5bb17b7db94c09d91aad154fd923ac17c98143e26c3717878bd88",
+      "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+      "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+      "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+      "Docs/Operations/probes/email_million_search_13376.py": "142c6b67c0a9cf4cd7369ef4d5fd8ac17b62c560740df4bb9f5fee00ea1615f4",
+      "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+      "tldw_Server_API/app/api/v1/API_Deps/billing_deps.py": "a2a05f87647559ce6625fb4508fe53cfa5b86661caa2edb2196d9c956ce76787",
+      "tldw_Server_API/app/api/v1/API_Deps/content_org_deps.py": "9a80dc48e0bcd9784c466a2d3251aa33dbf4aa02f415ee9863b4f50c81565231",
+      "tldw_Server_API/app/api/v1/API_Deps/media_add_deps.py": "ec11bfea6a0aefc1a269beb7a15ed281919085bcc4fe4b6d82715a7fcde8e360",
+      "tldw_Server_API/app/api/v1/API_Deps/media_processing_deps.py": "0038ccfb76e15f9818978ffe95e3ae310442db94202d856bd9f431597d8eaa5f",
+      "tldw_Server_API/app/api/v1/API_Deps/storage_quota_guard.py": "83b8837db81e6e5ade071c404655c248d45b46554d783874ab6f13ba8228defc",
+      "tldw_Server_API/app/api/v1/endpoints/email.py": "c4fba67f4f0a201f745fddd2f1562b15ee21d07e16e6bf89d6cdaac290e0d523",
+      "tldw_Server_API/app/api/v1/endpoints/media/add.py": "142354aa819919d2191eb258ab2b3f971cb6ff53df93ff5d1f5f9d854b1138eb",
+      "tldw_Server_API/app/api/v1/endpoints/media/process_emails.py": "35727c25ff44c8626bff3838642b34501e849db9a16fde64bc0dd2b4cf17c46b",
+      "tldw_Server_API/app/api/v1/schemas/media_request_models.py": "959e4865749594715ac582704c8dc0291f80d29d3309e010a7b63c746e2f71cf",
+      "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py": "472fe5dc6c01311b0c0245f6543c57855ddc3258910dbbc963606307126f92b1",
+      "tldw_Server_API/app/core/AuthNZ/auth_principal_resolver.py": "25a8c65cdc81c8a1e83d621ffbbfd203904c38e74c995a9f02a6b90813e4ff83",
+      "tldw_Server_API/app/core/AuthNZ/pg_migrations_extra.py": "9599e1d1fab568aac424da06d99d6299ea5c6bb04da9fe531612ae3cafff9302",
+      "tldw_Server_API/app/core/DB_Management/Collections_DB.py": "40ce0fb30dd8469bd4f540616cc258113a08d0c8d94c4c73c852f4a8e587b1fa",
+      "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "e35fff4da71e93c6fcac2fc40214ea40c974a76311520a5c017335c0bd7e0e8a",
+      "tldw_Server_API/app/core/DB_Management/backends/query_utils.py": "effbb887843a3ace3be2eac4fca314fe2897ce808ed673a764d3e7738e19d858",
+      "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "8a08c4f6b499406fa6d3057fe64cdf4ee95c9431f237e10b7886cec728a15235",
+      "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/document_versions_repository.py": "328faf405b385848c9357eabdc549f9d7ecca7acd43476a896f82b0b6f413cd0",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/keywords_repository.py": "1dfe4832785a66f36096d050adb1e97e719fb75b297e572c9fe5b8eca5392d91",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "ccf3232e460caec49235ce15645fd2c3c97f0d75d774c16ed404c3bac9f4b7ee",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "5d55aa5d97802142185befc289eb35ea9e52d1b48aa7aa209f75b1f3e37cf1e4",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "cb4f615bffc512779685ec1afdf3651be42a40a5427b0c4ecc87a72a59d77b6e",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py": "fecc3eb7cc60164a3ed82f756bd9b6424d5f8bc5db3d3c0a7c0a395cf3c17664",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "9b3e4385a1f39d76d763361a2b4adb1f4a405adcbfbf4bf44661fdc9207332b3",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/fts_ops.py": "2a5742849a0b1c613c1715290f725d2558b69a01457879cbeeeadffbad63bece",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/sync_utility_ops.py": "4be2d97c934e49a9b2a27ec65a5d426d8b08c5cbf8595ff0f27567a30d07cfdc",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/backends/postgres_helpers.py": "c9febe54f6d2b269937fb3b5580aa468f64bf439c19dd2c86d6ca4b94e72c81b",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "b9ee5e90eacca190af638e7ae82a7bdac8ac5bd8247cf35ca284b0c1b939768f",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py": "7236e2c6dd3957ea48d2c9bf2cb46a21fe155b797ee85324304d299df5516f52",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "d811d62c157c1437f81dd7127372e408a1b1907d50325a9da5822dbb3d31908f",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "e9b023d3ae924fb1385fcf8fd2f5589fe1078bc127f6824e879616c1578c8b56",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Upload_Sink.py": "2375137896d97d2b4156fad22d4a390b40bea9940737448835e97415cec4e232",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/chunking_options.py": "f707de892ca281e42c77db26d807f4f8c8d7c73d32a3a62d3659a8e8aa88461d",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/input_sourcing.py": "3267e1ba5fd729b6dd8e9a9af3ec8bb86aa5090aedb25f571abacf2c1df8a53f",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/logging_safety.py": "1da367ccf35e48c325bb8ed9d2317338cdfa5f08a4673dbee627e0ba890ac874",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "da51825791f2a275a19a0f1799b31d2e0f5acb7609f28d347844e308884fed01",
+      "tldw_Server_API/app/core/Logging/access_log_middleware.py": "bc6aa0ea5072d7dfabe55468b757791c8a6e5c30a8149008f4a47f750be9f0d0",
+      "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4",
+      "tldw_Server_API/app/core/Storage/quota_enforcement.py": "9d78dd8a7a0a2ae67babbfd33b5e564e83f7f1d52eb760514b444e41e46151ca"
+    }
+  },
+  "fixture": {
+    "url": "https://raw.githubusercontent.com/apache/tika/e3c6b6b18537100a7016b55cb8d29fa06cf4233a/tika-parsers/tika-parsers-standard/tika-parsers-standard-modules/tika-parser-microsoft-module/src/test/resources/test-documents/testPST_variousBodyTypes.pst",
+    "upstream_commit": "e3c6b6b18537100a7016b55cb8d29fa06cf4233a",
+    "name": "testPST_variousBodyTypes.pst",
+    "size_bytes": 271360,
+    "sha256": "24c5e6bbb8bf26a817c977283e40e7b69d2661fec0845abbe177f97efcb05fb0",
+    "scope": "Four public fabricated body-format messages in a real PST container; no personal mailbox"
+  },
+  "parser": {
+    "distribution": "libpff-python",
+    "version": "20231205",
+    "import": "pypff",
+    "installation": "Temporary --target directory; shared project venv unchanged"
+  },
+  "guarded_native_run": {
+    "exitstatus": 0,
+    "attempts": {
+      "outbound": 0,
+      "model": 0
+    },
+    "libpff_version": "20231205",
+    "fixture_size": 271360,
+    "fixture_sha256": "24c5e6bbb8bf26a817c977283e40e7b69d2661fec0845abbe177f97efcb05fb0",
+    "outcomes": [
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py::test_process_emails_endpoint_pst_with_pypff_extraction",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_process_emails_endpoint.py::test_process_emails_endpoint_pst_recipients_and_date_strict",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_native_date_precedes_transport_header_date",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[to-bob@example.com]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[date-Thu, 02 Jan 2020 03:04:05 +0000]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[message_id-<synthetic-pst@example.com>]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[cc-carol@example.com]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[bcc-dave@example.com]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_transport_headers_supply_missing_native_metadata[from-alice@example.com]",
+        "phase": "call",
+        "outcome": "passed"
+      },
+      {
+        "nodeid": "tldw_Server_API/tests/Media_Ingestion_Modification/test_pst_metadata_13377.py::test_pst_native_datetime_is_preserved_without_transport_headers",
+        "phase": "call",
+        "outcome": "passed"
+      }
+    ]
+  },
+  "guard_plugin": {
+    "source_sha256": "52276d16251a4d5d6b4d9743880fa8ac709fc682c88088797293fe0109fbb801",
+    "source": "\"\"\"Temporary guards and outcome receipt for the real PST tests.\"\"\"\nimport hashlib\nimport ipaddress\nimport json\nfrom pathlib import Path\nimport socket\n\nimport pytest\n\nattempts = {\"outbound\": 0, \"model\": 0}\noutcomes = []\noriginal_connect = socket.socket.connect\noriginal_connect_ex = socket.socket.connect_ex\noriginal_dns = socket.getaddrinfo\n\n\ndef local(host):\n    if host in (None, \"localhost\"):\n        return True\n    try:\n        return ipaddress.ip_address(str(host)).is_loopback\n    except ValueError:\n        return False\n\n\ndef guard_connection(original):\n    def connect(sock, address):\n        if sock.family != socket.AF_UNIX and not local(address[0]):\n            attempts[\"outbound\"] += 1\n            raise AssertionError(\"PST test blocked outbound connection\")\n        return original(sock, address)\n    return connect\n\n\ndef dns(host, *args, **kwargs):\n    if not local(host):\n        attempts[\"outbound\"] += 1\n        raise AssertionError(\"PST test blocked outbound DNS\")\n    return original_dns(host, *args, **kwargs)\n\n\nsocket.socket.connect = guard_connection(original_connect)\nsocket.socket.connect_ex = guard_connection(original_connect_ex)\nsocket.getaddrinfo = dns\n\n\n@pytest.fixture(scope=\"session\", autouse=True)\ndef prevent_models():\n    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib\n    patch = pytest.MonkeyPatch()\n    def forbidden(*args, **kwargs):\n        attempts[\"model\"] += 1\n        raise AssertionError(\"PST test blocked model analysis\")\n    patch.setattr(Summarization_General_Lib, \"analyze\", forbidden)\n    yield\n    patch.undo()\n    assert not any(attempts.values()), attempts\n\n\ndef pytest_runtest_logreport(report):\n    if report.when == \"call\" or report.failed or report.skipped:\n        outcomes.append({\"nodeid\": report.nodeid, \"phase\": report.when, \"outcome\": report.outcome})\n\n\ndef pytest_sessionfinish(session, exitstatus):\n    import pypff\n    path = Path(\"/tmp/tldw-real-pst-13377-synthetic.pst\")\n    receipt = {\"exitstatus\": int(exitstatus), \"attempts\": attempts,\n               \"libpff_version\": pypff.get_version(), \"fixture_size\": path.stat().st_size,\n               \"fixture_sha256\": hashlib.sha256(path.read_bytes()).hexdigest(), \"outcomes\": outcomes}\n    Path(\"/tmp/email_real_pst_guard_receipt_13377.json\").write_text(json.dumps(receipt, indent=2) + \"\\n\")\n",
+    "scope": "Non-loopback socket connect/connect_ex and DNS blocked; Summarization_General_Lib.analyze blocked; swallowed attempts fail session"
+  },
+  "regressions": {
+    "baseline_native": {
+      "passed": 1,
+      "failed": 1,
+      "cause": "Missing recipients/date in native conversion"
+    },
+    "metadata_red": {
+      "failed": 8
+    },
+    "metadata_and_native_green": {
+      "passed": 10
+    },
+    "corrected_endpoint_suite": {
+      "passed": 24
+    },
+    "postmerge_core": {
+      "passed": 110
+    },
+    "postmerge_postgresql": {
+      "passed": 54,
+      "fixture": "Official isolated PostgreSQL test fixtures"
+    },
+    "postmerge_auth_green": {
+      "passed": 63
+    },
+    "selected_org_unit_red": {
+      "passed": 5,
+      "failed": 2
+    },
+    "final_combined": {
+      "passed": 201,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "warnings": 10,
+      "duration_seconds": 228.07,
+      "scope": "Authenticated upload/access, attachment upload, sensitive logging, offline ingestion, chunk consistency, cursor endpoint, full email processing endpoint, cached authority, org selection, principal resolver and PST metadata"
+    }
+  },
+  "quality": {
+    "compiled_python_files": 90,
+    "ruff_production_probe_files": 47,
+    "ruff_additional_test_files": 4,
+    "ruff_findings": 0,
+    "bandit": {
+      "base_dev": "f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07",
+      "production_probe_files": 47,
+      "findings_total": 8,
+      "baseline_auth_findings": 8,
+      "new_findings": 0,
+      "errors": 0,
+      "comparison": "Exact filename, rule, issue text and flagged code, with numeric line prefixes removed",
+      "inherited_findings": "Eight B105/B106 findings for access/api_key/service token-type labels; no credential literal is introduced"
+    }
+  },
+  "review": "Independent merge, PST metadata and selected-org authority reviews found no blocking findings; reviews were read-only",
+  "limitations": [
+    "Actual OST containers and live Gmail/provider behavior were not tested",
+    "Large-scale benchmark certificates retain their earlier source revisions and were not rerun for this merged source",
+    "Test suites overlap; counts must not be added into a unique-test total"
+  ],
+  "publication": {
+    "url": "https://github.com/rmusser01/tldw_server/pull/3023",
+    "base": "dev",
+    "tested_merge_commit": "650fc72a98822233dd1a6fb53bf8d62bdb0e6cd9",
+    "draft": true,
+    "mergeable_at_creation": true,
+    "human_change_summary": "Pending before merge"
+  },
+  "cleanup": {
+    "owned_resources": [
+      {
+        "path": "/tmp/tldw-real-pst-13376-python",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/tldw-real-pst-13377-synthetic.pst",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/tldw-real-pst-13376-testPST.pst",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/tldw-real-pst-13376-upstream-test.java",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/email_pst_guard_plugin_13377.py",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/email_scope_trace_13377.py",
+        "existed_before": true,
+        "absent_after": true
+      },
+      {
+        "path": "/tmp/email_bandit_dev_baseline_13377",
+        "existed_before": true,
+        "absent_after": true
+      }
+    ],
+    "retained": "Credential-free evidence, guard source and verification summaries",
+    "shared_venv_modified": false,
+    "shared_postgresql_service_removed": false
+  }
+}

@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest"
+import fs from "node:fs"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  extractClientPaths,
   extractFallbackFieldNamesFromFallbackSource,
-  extractFallbackFieldNamesFromSource,
+  extractFallbackFieldNamesFromSource
 } from "../../scripts/verify-openapi-client-paths.mjs"
 
 describe("extractFallbackFieldNamesFromSource", () => {
@@ -19,7 +21,7 @@ describe("extractFallbackFieldNamesFromSource", () => {
 
     expect(extractFallbackFieldNamesFromSource(src)).toEqual([
       "typed-field",
-      "second-field",
+      "second-field"
     ])
   })
 
@@ -36,7 +38,7 @@ describe("extractFallbackFieldNamesFromSource", () => {
 
     expect(extractFallbackFieldNamesFromFallbackSource(src)).toEqual([
       "typed-field",
-      "second-field",
+      "second-field"
     ])
   })
 
@@ -56,7 +58,7 @@ describe("extractFallbackFieldNamesFromSource", () => {
     expect(extractFallbackFieldNamesFromSource(src)).toEqual([
       "field[0]",
       "still-valid",
-      "final-field",
+      "final-field"
     ])
   })
 
@@ -73,7 +75,57 @@ describe("extractFallbackFieldNamesFromSource", () => {
 
     expect(extractFallbackFieldNamesFromSource(src)).toEqual([
       "api_name",
-      "chunk_method",
+      "chunk_method"
     ])
+  })
+})
+
+const derivedGuard =
+  'import type { ApiPath } from "@tldw/api-types"; export type ClientPath = ApiPath'
+const schema = {
+  paths: { "/api/v1/chat/completions": {}, "/api/v1/health": {} }
+}
+const stubDerivedPaths = (generated: string) => {
+  const read = fs.readFileSync
+  vi.spyOn(fs, "readFileSync").mockImplementation((file, ...args) => {
+    if (String(file).endsWith("/openapi-guard.ts")) return derivedGuard
+    if (String(file).endsWith("/api-types/paths.d.ts")) return generated
+    return read(file, ...args)
+  })
+}
+afterEach(() => vi.restoreAllMocks())
+
+describe("generated API path verification", () => {
+  it("compares the actual generated union instead of certifying zero paths", () => {
+    stubDerivedPaths(
+      'export type ApiPath = "/api/v1/chat/completions" | "/api/v1/health"'
+    )
+    expect(extractClientPaths(schema)).toEqual([
+      "/api/v1/chat/completions",
+      "/api/v1/health"
+    ])
+  })
+
+  it("accepts the generated literal for a one-route backend", () => {
+    stubDerivedPaths('export type ApiPath = "/api/v1/health"')
+    expect(extractClientPaths({ paths: { "/api/v1/health": {} } })).toEqual([
+      "/api/v1/health"
+    ])
+  })
+
+  it("refuses a union that omits a current backend route", () => {
+    stubDerivedPaths('export type ApiPath = "/api/v1/health" | "/api/v1/old"')
+    expect(() => extractClientPaths(schema)).toThrow("/api/v1/chat/completions")
+  })
+
+  it.each([
+    "export type ApiPath = never",
+    "export type AnotherPath = string",
+    'export type ApiPath = "/api/v1/chat/completions" | "/api/v1/health" | string'
+  ])("refuses an unreadable or empty generated union: %s", (generated) => {
+    stubDerivedPaths(generated)
+    expect(() => extractClientPaths(schema)).toThrow(
+      "Generated API path union is empty or unreadable"
+    )
   })
 })

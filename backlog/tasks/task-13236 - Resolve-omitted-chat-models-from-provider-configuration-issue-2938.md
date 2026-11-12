@@ -36,9 +36,9 @@ Completed provider-default repair, metrics/execution separation, blank-model and
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Final resolver/default/payload suite: 146 passed. Endpoint omitted, empty, whitespace, configured-default, and explicit-model cases across both streaming modes: 20 passed. Exact LOCAL_LLM_MODEL and Local-API.ollama_model parsing is tested through real configuration helpers. Related suites passed: 209 Messages usage, 111 Messages endpoint/override/default/native-error, 30 character/Notes, and 7 macro tests. Full endpoint file before the whitespace follow-up: 203 passed and 1 existing skip (Streaming tests hang with TestClient); all affected cases were rerun afterward. Independent review found the whitespace bypass and cleared its correction in the resolver, payload builder, Messages, macro context, and tool-policy identity. Compilation, repository guards, and diff checks pass. Bandit on four production files has zero findings. Ruff has no new findings; three existing chat.py import-order findings were reproduced on base 751563a966. Existing whole-file Black drift was retained to avoid unrelated formatting changes. The full backend suite was not run.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -18,18 +18,6 @@ async def test_ws_concurrent_streams_denied(monkeypatch):
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
 
-    async def _deny_stream(_user_id: int):
-        """
-        Simulate that a user already has two active streams.
-
-        Parameters:
-            user_id (int): The user's identifier (unused; present for interface compatibility).
-
-        Returns:
-            int: `2` indicating two active streams.
-        """
-        return 2  # pretend two streams active
-
     async def _can_start_stream(_user_id: int):
         """
         Indicates that a user cannot start a new stream because the concurrent streams quota is exceeded.
@@ -41,8 +29,6 @@ async def test_ws_concurrent_streams_denied(monkeypatch):
 
     # Force can_start_stream denial
     monkeypatch.setattr(audio_ep, "can_start_stream", _can_start_stream)
-    # Also return non-zero active count for the limits endpoint if called
-    monkeypatch.setattr(audio_ep, "active_streams_count", _deny_stream, raising=False)
 
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY

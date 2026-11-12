@@ -402,7 +402,7 @@ describe("LatestBriefing", () => {
               show_name: "برنامج طويل للغاية لمراجعة المصادر الموثوقة والتحديثات اليومية المهمة",
               cast: {
                 speaker_count: 4,
-                speakers: longLabels.map((label) => ({ label }))
+                speakers: longLabels.map((label) => ({ label, synthetic: true }))
               }
             }
           })}

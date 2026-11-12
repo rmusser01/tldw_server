@@ -177,12 +177,9 @@ class EvaluationConfigValidator:
 
     def _validate_rate_limiting(self):
         """Validate rate limiting configuration."""
-        def _is_truthy(raw: str | None) -> bool:
-            if raw is None:
-                return False
-            return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+        from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
 
-        if not _is_truthy(os.getenv("RG_ENABLED")):
+        if not bool(_rg_enabled_flag(True)):
             self.issues.append(ConfigurationIssue(
                 severity="warning",
                 category="performance",

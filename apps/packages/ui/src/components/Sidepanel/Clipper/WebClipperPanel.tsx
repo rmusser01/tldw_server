@@ -1,4 +1,13 @@
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import React from "react"
+import {
+  loadServicePromptSnapshot,
+  type ServicePromptSnapshot
+} from "@/services/service-prompts"
+import {
+  buildKnowledgeNoteScopePath,
+  parseKnowledgeScope
+} from "@/utils/knowledge-scope-handoff"
 import { useTranslation } from "react-i18next"
 import ClipDestinationFields, {
   type FolderPickerOption,
@@ -105,7 +114,10 @@ const normalizeWorkspaceOptions = (
     }))
 }
 
-const createOpenTargetUrl = (response: WebClipperSaveResponse): string | null => {
+const createOpenTargetUrl = (
+  response: WebClipperSaveResponse,
+  askCapturedSource = false
+): string | null => {
   const chromeApi = globalThis.chrome
   if (!chromeApi?.runtime?.getURL) {
     return null
@@ -113,6 +125,13 @@ const createOpenTargetUrl = (response: WebClipperSaveResponse): string | null =>
 
   if (response.status === "failed") {
     return null
+  }
+
+  if (askCapturedSource) {
+    const path = buildKnowledgeNoteScopePath([response.note?.id ?? ""])
+    return parseKnowledgeScope(path.split("?")[1])?.invalid
+      ? null
+      : chromeApi.runtime.getURL(`options.html#${path}`)
   }
 
   if (response.workspace_placement) {
@@ -243,6 +262,9 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
   const [activeAction, setActiveAction] =
     React.useState<SubmitAction | null>(null)
   const [isSaving, setIsSaving] = React.useState(false)
+  const [savedCapture, setSavedCapture] =
+    React.useState<WebClipperSaveResponse | null>(null)
+  const saveOwnerRef = React.useRef<ServicePromptSnapshot | null>(null)
   const tRef = React.useRef(t)
   const hasRequestedFolderOptionsRef = React.useRef(false)
   const hasRequestedWorkspaceOptionsRef = React.useRef(false)
@@ -276,17 +298,22 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     setWorkspaceValidation(null)
     setSubmissionError(null)
     setSaveRuntime(null)
+    setSavedCapture(null)
+    saveOwnerRef.current?.release()
+    saveOwnerRef.current = null
     setEnrichmentResults(null)
     setActiveAction(null)
     setIsSaving(false)
   }, [draft.clipId, draft.pageTitle])
 
-  React.useEffect(
-    () => () => {
+  React.useEffect(() => {
+    isMountedRef.current = true
+    return () => {
       isMountedRef.current = false
-    },
-    []
-  )
+      saveOwnerRef.current?.release()
+      saveOwnerRef.current = null
+    }
+  }, [])
 
   React.useEffect(() => {
     if (destinationMode === "workspace" || hasRequestedFolderOptionsRef.current) {
@@ -459,6 +486,9 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
     const hasInvalidFolderId = Boolean(folderId.trim()) && parsedFolderId == null
 
     setSaveRuntime(null)
+    setSavedCapture(null)
+    saveOwnerRef.current?.release()
+    saveOwnerRef.current = null
     setEnrichmentResults(null)
     setFolderValidation(null)
     setWorkspaceValidation(null)
@@ -537,16 +567,46 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
 
     try {
       await tldwClient.initialize().catch(() => undefined)
-      const response = await tldwClient.saveWebClip(payload)
+      const owner = await loadServicePromptSnapshot([])
       if (
         !isMountedRef.current ||
-        activeClipIdRef.current !== submittedClipId
+        activeClipIdRef.current !== submittedClipId ||
+        owner.scopeSignal.aborted
+      ) {
+        owner.release()
+        return
+      }
+      saveOwnerRef.current = owner
+      owner.scopeInvalidatedSignal.addEventListener(
+        "abort",
+        () => {
+          if (isMountedRef.current && saveOwnerRef.current === owner) {
+            setSavedCapture(null)
+            setSaveRuntime(null)
+            setSubmissionError(
+              "Connection changed. Save the clip again for the current account."
+            )
+            setIsSaving(false)
+          }
+        },
+        { once: true }
+      )
+      const response = await tldwClient.saveWebClip(payload, {
+        requestScope: owner.requestScope,
+        signal: owner.scopeSignal
+      })
+      if (
+        !isMountedRef.current ||
+        activeClipIdRef.current !== submittedClipId ||
+        owner.scopeSignal.aborted ||
+        saveOwnerRef.current !== owner
       ) {
         return
       }
       setSaveRuntime(buildWebClipSaveRuntime(response))
 
       if (hasSavedCanonicalNote(response)) {
+        if (createOpenTargetUrl(response, true)) setSavedCapture(response)
         clearPendingClipDraft(draft.clipId)
       }
 
@@ -600,6 +660,7 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
       if (action === "analyze" && hasSavedCanonicalNote(response) && response.note) {
         writePendingWebClipAnalyzeRequest(
           buildPendingWebClipAnalyzeRequest({
+            ownerKey: serverChatMirrorOwnerKey(owner),
             draft,
             clipId: response.clip_id,
             noteId: response.note.id,
@@ -656,14 +717,10 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
           : t("sidepanel:clipper.saveFailed", "The clip could not be saved.")
       )
     } finally {
-      if (
-        !isMountedRef.current ||
-        activeClipIdRef.current !== submittedClipId
-      ) {
-        return
+      if (isMountedRef.current && activeClipIdRef.current === submittedClipId) {
+        setActiveAction(null);
+        setIsSaving(false);
       }
-      setActiveAction(null)
-      setIsSaving(false)
     }
   }
 
@@ -783,6 +840,27 @@ const WebClipperPanel = ({ draft, onCancel }: WebClipperPanelProps) => {
         >
           <p className="text-sm font-semibold">{saveRuntime.banner.title}</p>
           <p className="mt-1 text-sm">{saveRuntime.banner.message}</p>
+          {savedCapture && (
+            <div className="mt-2">
+              <p className="text-sm">{savedCapture.note?.title}</p>
+              <button
+                type="button"
+                className="mt-1 rounded border border-border px-3 py-1 text-sm"
+                onClick={() => {
+                  if (
+                    !saveOwnerRef.current ||
+                    saveOwnerRef.current.scopeSignal.aborted ||
+                    !isMountedRef.current
+                  )
+                    return
+                  const url = createOpenTargetUrl(savedCapture, true)
+                  if (url) globalThis.chrome?.tabs?.create?.({ url })
+                }}
+              >
+                Ask captured source
+              </button>
+            </div>
+          )}
           {saveRuntime.banner.warnings.length > 0 ? (
             <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
               {saveRuntime.banner.warnings.map((warning) => (

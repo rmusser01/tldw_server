@@ -27,29 +27,28 @@ All tests use mocking to isolate from database dependencies. For integration
 tests with real database, see test_billing_endpoints_integration.py.
 """
 import re
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
+import pytest
+
+from tldw_Server_API.app.core.Billing import enforcement as enforcement_module
 from tldw_Server_API.app.core.Billing.enforcement import (
     BillingEnforcer,
-    LimitCategory,
     EnforcementAction,
+    LimitCategory,
     LimitCheckResult,
     UsageSummary,
-    check_billing_with_rg,
-    get_billing_enforcer,
     billing_enabled,
+    check_billing_with_rg,
     enforcement_enabled,
+    get_billing_enforcer,
 )
-from tldw_Server_API.app.core.Billing import enforcement as enforcement_module
 from tldw_Server_API.app.core.Billing.plan_limits import (
-    PlanTier,
-    PlanLimits,
     DEFAULT_LIMITS,
     VALID_PLAN_NAMES,
-    get_plan_limits,
+    PlanTier,
     check_limit,
-    SOFT_LIMIT_PERCENT,
+    get_plan_limits,
 )
 
 
@@ -384,10 +383,9 @@ class TestBillingEnforcer:
         await enforcer._get_llm_tokens_month(org_id=1)
 
         assert fake_conn.params is not None
-        assert len(fake_conn.params) == 3
-
-        ts_param = fake_conn.params[0]
-        assert isinstance(ts_param, str)
+        timestamp_params = [param for param in fake_conn.params if isinstance(param, str)]
+        assert len(timestamp_params) == 1
+        ts_param = timestamp_params[0]
         assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", ts_param)
 
     @pytest.mark.asyncio
@@ -460,13 +458,12 @@ class TestBillingEnforcer:
         monkeypatch.setattr(enforcement_module.logger, "error", _record_log_message)
         monkeypatch.setattr(enforcement_module.logger, "warning", _record_log_message)
 
-        enforcer = BillingEnforcer()
-        usage = await enforcer.get_org_usage(org_id=77)
+        from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaUnavailableError
 
-        assert usage.org_id == 77
-        assert usage.api_calls_today == 2_147_483_647
-        assert usage.llm_tokens_month == 2_147_483_647
-        assert usage.rag_queries_today == 2_147_483_647
+        enforcer = BillingEnforcer()
+        with pytest.raises(NativeQuotaUnavailableError, match="Native retained storage usage is unavailable"):
+            await enforcer.get_org_usage(org_id=77)
+
         joined = "\n".join(messages)
         assert leaked_secret not in joined
         assert leaked_path not in joined
@@ -591,11 +588,13 @@ class TestModuleFunctions:
         monkeypatch.setenv("BILLING_ENABLED", "true")
         assert billing_enabled() is False
 
-    def test_enforcement_enabled_true_by_default(self, monkeypatch):
+    def test_enforcement_enabled_off_by_default(self, monkeypatch):
 
-        """enforcement_enabled should be True by default."""
+        """enforcement_enabled should be False by default (spec 2 §1: quotas off by default)."""
+        monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
         monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
-        assert enforcement_enabled() is True
+        monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: None)
+        assert enforcement_enabled() is False
 
     def test_enforcement_enabled_false(self, monkeypatch):
 

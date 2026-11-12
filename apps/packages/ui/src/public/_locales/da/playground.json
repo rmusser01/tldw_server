@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignorer når skabeloner er aktive"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Konflikt ved medieoverførsel"
+  },
+  "mediaHandoff_conflict": {
+    "message": "Der er allerede en kladde i beskedfeltet. Indsæt mediekilden, erstat din kladde, eller annuller importen."
+  },
+  "mediaHandoff_insert": {
+    "message": "Indsæt mediekilde"
+  },
+  "mediaHandoff_replace": {
+    "message": "Erstat den aktuelle kladde"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Annuller import"
   }
 }

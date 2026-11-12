@@ -36,13 +36,13 @@ Refresh the Persona Live Visual Packs PRD after PR #1447 merged and the ordered 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after PR #1447 merged and issues #1428/#1429 were closed. Scope is documentation freshness only; no UI/API behavior changes.
 
 Updated Persona Live Visual Packs PRD to reflect merged PR #1412, merged PR #1447, completed issues #1429/#1430/#1431, and closed tracker #1428. Rollout now marks Phase 1 and Phase 2 complete and keeps Phase 3 as optional future library/externalization work. Verification: targeted rg check passed and git diff --check passed. Bandit skipped because this is a Markdown-only docs refresh.
 
 PR opened for review: https://github.com/rmusser01/tldw_server/pull/1448.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -13,7 +13,7 @@ import os
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -21,6 +21,7 @@ from uuid import uuid4
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Utils.backoff import capped_exponential_delay
 
 from .backends.base import (
     BackendType,
@@ -250,6 +251,13 @@ CREATE INDEX IF NOT EXISTS idx_workflow_research_wait_lookup ON workflow_researc
 
 def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+
+def _json_default(value: Any) -> str:
+    """Store a date or datetime as ISO text: PostgreSQL rows carry them where SQLite rows carry text."""
+    if isinstance(value, date):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def _workflows_idempotency_ttl_hours() -> int:
@@ -542,7 +550,8 @@ class WorkflowsDatabase:
 
         self.db_path = str(db_path or DEFAULT_DB_PATH)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # Shared statement caches can return another thread's row (CPython #118172).
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False, cached_statements=0)
         self._conn.row_factory = sqlite3.Row
         self._enable_wal()
         self._create_schema()
@@ -554,7 +563,7 @@ class WorkflowsDatabase:
         self._sqlite_pool: list[sqlite3.Connection] = []
         if pool_size and pool_size > 0:
             for _ in range(max(0, pool_size - 1)):
-                c = sqlite3.connect(self.db_path, check_same_thread=False)
+                c = sqlite3.connect(self.db_path, check_same_thread=False, cached_statements=0)
                 c.row_factory = sqlite3.Row
                 try:
                     configure_sqlite_connection(c)
@@ -675,6 +684,127 @@ class WorkflowsDatabase:
             self._conn.execute("PRAGMA wal_autocheckpoint=1000;")
         except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Failed to enable WAL on workflows DB: {e}")
+
+    def health_probe(self) -> dict[str, int | None]:
+        """Run a trivial query; report schema/expected versions (backend deployments only).
+
+        Raises on connectivity failure. A failure to read the version is not fatal.
+        """
+        if not self._using_backend():
+            self._conn.cursor().execute("SELECT 1").fetchone()
+            return {"schema_version": None, "expected_version": None}
+        with self.backend.transaction() as conn:  # type: ignore[union-attr]
+            self._execute_backend("SELECT 1", None, connection=conn)
+            try:
+                return {
+                    "schema_version": self._read_backend_schema_version(conn),
+                    "expected_version": int(self._CURRENT_SCHEMA_VERSION),
+                }
+            except Exception:  # noqa: BLE001 - version is informational
+                return {"schema_version": None, "expected_version": None}
+
+    def _read_backend_schema_version(self, conn) -> int:
+        """Read the owner-provisioned migration row without creating or updating it."""
+        result = self.backend.execute("SELECT version FROM public.workflow_schema_version LIMIT 2", connection=conn)
+        if len(result.rows) != 1:
+            raise WorkflowsSchemaError("Workflows migration version requires owner initialization")
+        value = result.scalar
+        if type(value) is not int:
+            raise WorkflowsSchemaError("Workflows migration version must be an integer")
+        return value
+
+    def _validate_serving_schema_backend(self, conn) -> None:
+        """Require owner-migrated tables before an ordinary role serves data."""
+        try:
+            if self._read_backend_schema_version(conn) != self._CURRENT_SCHEMA_VERSION:
+                raise WorkflowsSchemaError("Workflows schema requires owner migration")
+            if self.backend.execute(
+                "SELECT has_table_privilege(current_user, 'public.workflow_schema_version', "
+                "'INSERT,UPDATE,DELETE,TRUNCATE') OR "
+                "has_any_column_privilege(current_user,'public.workflow_schema_version','INSERT,UPDATE')",
+                connection=conn,
+            ).scalar:
+                raise WorkflowsSchemaError("Workflows runtime migration-version authority is unsafe")
+            for query in (
+                "SELECT id,tenant_id,name,version,owner_id,visibility,description,tags,definition_json,"
+                "created_at,updated_at,is_active FROM public.workflows LIMIT 0",
+                "SELECT run_id,tenant_id,workflow_id,status,status_reason,user_id,inputs_json,outputs_json,error,"
+                "duration_ms,created_at,started_at,ended_at,definition_version,definition_snapshot_json,"
+                "idempotency_key,session_id,validation_mode,metadata_json,tokens_input,tokens_output,cost_usd,"
+                "cancel_requested FROM public.workflow_runs LIMIT 0",
+                "SELECT step_run_id,tenant_id,run_id,step_id,name,type,status,attempt,started_at,ended_at,"
+                "inputs_json,outputs_json,error,decision,assigned_to,approved_by,approved_at,review_comment,"
+                "locked_by,locked_at,lock_expires_at,heartbeat_at,pid,pgid,workdir,stdout_path,stderr_path "
+                "FROM public.workflow_step_runs LIMIT 0",
+                "SELECT attempt_id,tenant_id,run_id,step_run_id,step_id,attempt_number,status,reason_code_core,"
+                "reason_code_detail,retryable,error_summary,metadata_json,started_at,ended_at "
+                "FROM public.workflow_step_attempts LIMIT 0",
+                "SELECT event_id,tenant_id,run_id,step_run_id,event_seq,event_type,payload_json,created_at "
+                "FROM public.workflow_events LIMIT 0",
+                "SELECT artifact_id,tenant_id,run_id,step_run_id,type,uri,size_bytes,mime_type,checksum_sha256,"
+                "encryption,owned_by,metadata_json,created_at FROM public.workflow_artifacts LIMIT 0",
+                "SELECT wait_id,tenant_id,workflow_run_id,step_id,research_run_id,checkpoint_id,checkpoint_type,"
+                "wait_status,wait_payload_json,active_poll_seconds,created_at,updated_at,resumed_at "
+                "FROM public.workflow_research_waits LIMIT 0",
+                "SELECT run_id,next_seq FROM public.workflow_event_counters LIMIT 0",
+                "SELECT id,tenant_id,run_id,url,body_json,attempts,next_attempt_at,last_error,created_at "
+                "FROM public.workflow_webhook_dlq LIMIT 0",
+            ):
+                self.backend.execute(query, connection=conn)
+            indexes = {
+                row["name"]: row
+                for row in self.backend.execute(
+                    "SELECT i.relname AS name,t.relname AS table_name,x.indisvalid AND x.indisready AS ready,"
+                    "x.indisunique AS is_unique, x.indimmediate AS immediate, pg_get_expr(x.indpred,x.indrelid) AS predicate, "
+                    "pg_get_expr(x.indexprs,x.indrelid) AS expressions, "
+                    "ARRAY(SELECT a.attname FROM unnest(x.indkey) WITH ORDINALITY AS k(number,position) "
+                    "LEFT JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=k.number "
+                    "WHERE k.position<=x.indnkeyatts ORDER BY k.position) AS columns "
+                    "FROM pg_index x JOIN pg_class i ON i.oid=x.indexrelid "
+                    "JOIN pg_class t ON t.oid=x.indrelid JOIN pg_namespace n ON n.oid=t.relnamespace "
+                    "WHERE n.nspname='public'",
+                    connection=conn,
+                ).rows
+            }
+            required = {
+                "idx_workflows_owner": "workflows",
+                "idx_runs_status": "workflow_runs",
+                "idx_runs_idempotency_lookup": "workflow_runs",
+                "idx_step_attempts_run_attempts": "workflow_step_attempts",
+                "idx_step_attempts_run_step_attempts": "workflow_step_attempts",
+                "idx_step_attempts_step_run_attempts": "workflow_step_attempts",
+                "idx_events_run_seq": "workflow_events",
+                "ux_workflow_research_wait_run_step": "workflow_research_waits",
+                "idx_workflow_research_wait_lookup": "workflow_research_waits",
+                "ux_events_run_seq": "workflow_events",
+                "idx_runs_status_running": "workflow_runs",
+                "idx_runs_status_queued": "workflow_runs",
+                "idx_runs_status_succeeded": "workflow_runs",
+                "idx_runs_status_failed": "workflow_runs",
+            }
+            for name, table in required.items():
+                row = indexes.get(name)
+                if (
+                    not row
+                    or not row["ready"]
+                    or row["table_name"] != table
+                    or (name.startswith("ux_") and not row["is_unique"])
+                ):
+                    raise WorkflowsSchemaError("Workflows indexes require owner migration")
+            for name, keys in (
+                ("ux_events_run_seq", ("run_id", "event_seq")),
+                ("ux_workflow_research_wait_run_step", ("workflow_run_id", "step_id")),
+            ):
+                row = indexes[name]
+                if (
+                    not row["immediate"]
+                    or tuple(row["columns"]) != keys
+                    or row["predicate"] is not None
+                    or row["expressions"] is not None
+                ):
+                    raise WorkflowsSchemaError("Workflows uniqueness requires owner migration")
+        except BackendDatabaseError as exc:
+            raise WorkflowsSchemaError("Workflows schema requires owner migration or runtime access") from exc
 
     def _get_backend_schema_version(self, conn) -> int:
         if not self.backend:
@@ -1184,13 +1314,21 @@ class WorkflowsDatabase:
 
         try:
             with backend.transaction() as conn:
+                can_migrate = backend.execute(
+                    "SELECT CASE WHEN to_regclass('public.workflows') IS NULL "
+                    "THEN has_schema_privilege(current_user,'public','CREATE') "
+                    "ELSE pg_has_role(current_user,(SELECT relowner FROM pg_class "
+                    "WHERE oid=to_regclass('public.workflows')),'USAGE') END",
+                    connection=conn,
+                ).scalar
+                if not can_migrate:
+                    self._validate_serving_schema_backend(conn)
+                    return
                 backend.create_tables(WORKFLOWS_POSTGRES_SCHEMA, connection=conn)
                 current_version = self._get_backend_schema_version(conn)
 
                 if current_version > target_version:
-                    raise WorkflowsSchemaError(
-                        "Workflows schema version is newer than supported by this release."
-                    )
+                    raise WorkflowsSchemaError("Workflows schema version is newer than supported by this release.")
 
                 applied_version = current_version
 
@@ -1665,21 +1803,24 @@ class WorkflowsDatabase:
                 return
             except sqlite3.OperationalError as e:
                 if "locked" in str(e).lower() and tries < max_tries - 1:
-                    _time.sleep(0.05 * (2 ** tries))
+                    # Shared schedule; jitter=False preserves existing timing.
+                    _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                     tries += 1
                     continue
                 raise
 
-    def _sqlite_retry_commit(self) -> None:
+    def _sqlite_retry_commit(self, *, max_tries: int = 5) -> None:
         import time as _time
+
         tries = 0
         while True:
             try:
                 self._conn.commit()
                 return
             except sqlite3.OperationalError as e:
-                if "locked" in str(e).lower() and tries < 4:
-                    _time.sleep(0.05 * (2 ** tries))
+                if "locked" in str(e).lower() and tries < max_tries - 1:
+                    # Shared schedule; jitter=False preserves existing timing.
+                    _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                     tries += 1
                     continue
                 raise
@@ -1694,7 +1835,7 @@ class WorkflowsDatabase:
         return self._conn
 
     def _release_sqlite(self, conn: sqlite3.Connection) -> None:
-        if getattr(self, "_sqlite_pool", None) and conn is not self._conn:
+        if conn is not self._conn:
             try:
                 self._sqlite_pool.append(conn)
             except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
@@ -2094,7 +2235,7 @@ class WorkflowsDatabase:
         params = (
             status,
             status_reason,
-            json.dumps(outputs) if outputs is not None else None,
+            json.dumps(outputs, default=_json_default) if outputs is not None else None,
             error,
             started_at,
             ended_at,
@@ -2137,6 +2278,31 @@ class WorkflowsDatabase:
             _logger.debug(f"WorkflowsDB: run {run_id} -> status={status}")
         except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
             pass
+
+    def claim_failed_run_retry(self, run_id: str, ended_at: str) -> bool:
+        """Claim exactly the observed failure; stale or cancelled retries do no work."""
+        query = """
+            UPDATE workflow_runs
+            SET status = 'queued', status_reason = 'retry_requested',
+                ended_at = NULL, outputs_json = NULL, error = NULL
+            WHERE run_id = ? AND status = 'failed' AND ended_at = ?
+                AND NOT cancel_requested
+        """
+        params = (run_id, ended_at)
+        if self._using_backend():
+            with self.backend.transaction() as conn:
+                result = self._execute_backend(query, params, connection=conn)
+            return result.rowcount == 1
+        conn = self._acquire_sqlite()
+        try:
+            cursor = conn.execute(query, params)
+            conn.commit()
+            return cursor.rowcount == 1
+        except sqlite3.Error:
+            conn.rollback()
+            raise
+        finally:
+            self._release_sqlite(conn)
 
     def update_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> None:
         """Replace run metadata and mirror it into the definition snapshot."""
@@ -2199,7 +2365,8 @@ class WorkflowsDatabase:
                     if "locked" in str(retry_error).lower() and tries < 4:
                         with contextlib.suppress(sqlite3.Error):
                             conn.rollback()
-                        _time.sleep(0.05 * (2 ** tries))
+                        # Shared schedule; jitter=False preserves existing timing.
+                        _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                         tries += 1
                         continue
                     with contextlib.suppress(sqlite3.Error):
@@ -2304,7 +2471,8 @@ class WorkflowsDatabase:
                     if "locked" in str(e).lower() and tries < 4:
                         import time as _time
 
-                        _time.sleep(0.05 * (2 ** tries))
+                        # Shared schedule; jitter=False preserves existing timing.
+                        _time.sleep(capped_exponential_delay(tries, base_s=0.05, jitter=False))
                         tries += 1
                         continue
                     raise
@@ -2389,6 +2557,31 @@ class WorkflowsDatabase:
         else:
             conn = self._acquire_sqlite()
             try:
+                # One SQLite/Python transfer avoids concurrent per-row GIL handoffs.
+                packed_sql = (
+                    "SELECT json_group_array(json_object("  # nosec B608 - Internal SQL clauses only; values stay bound.
+                    "'event_id', event_id, 'tenant_id', tenant_id, 'run_id', run_id, "
+                    "'step_run_id', step_run_id, 'event_seq', event_seq, 'event_type', event_type, "
+                    "'payload_json', json(COALESCE(NULLIF(payload_json, ''), '{}')), 'created_at', created_at)), "
+                    "min(payload_json IS NULL OR payload_json = '' OR "
+                    "(typeof(payload_json) = 'text' AND json_valid(payload_json))) FROM (" + sql + ")"
+                )
+                try:
+                    packed, strict_json = conn.cursor().execute(packed_sql, params).fetchone()
+                    if strict_json != 0:
+                        # Aggregate nesting/digit limits must retain per-payload legacy decoding.
+                        with contextlib.suppress(ValueError, RecursionError):
+                            return json.loads(packed)
+                except sqlite3.Error as exc:
+                    # Legacy JSON/BLOBs, optional JSON1 and aggregate size limits retain the original reader.
+                    if getattr(exc, "sqlite_errorcode", None) != sqlite3.SQLITE_TOOBIG and str(exc) not in {
+                        "malformed JSON",
+                        "no such function: json_group_array",
+                        "no such function: json_object",
+                        "no such function: json_valid",
+                        "no such function: json",
+                    }:
+                        raise
                 rows = conn.cursor().execute(sql, params).fetchall()
             finally:
                 self._release_sqlite(conn)
@@ -2460,7 +2653,7 @@ class WorkflowsDatabase:
         params = (
             status,
             _utcnow_iso(),
-            json.dumps(outputs or {}),
+            json.dumps(outputs or {}, default=_json_default),
             error,
             step_run_id,
         )
@@ -3398,7 +3591,9 @@ class WorkflowsDatabase:
             """
             SELECT id, tenant_id, run_id, url, body_json, attempts, next_attempt_at, last_error, created_at
             FROM workflow_webhook_dlq
-            WHERE next_attempt_at IS NULL OR next_attempt_at <= datetime('now')
+            -- datetime() normalises the ISO 'T' form the worker writes; compared as raw text
+            -- 'T' sorts after ' ', so a retry due later today looked not-due until tomorrow.
+            WHERE next_attempt_at IS NULL OR datetime(next_attempt_at) <= datetime('now')
             ORDER BY COALESCE(next_attempt_at, created_at) ASC, id ASC
             LIMIT ?
             """,

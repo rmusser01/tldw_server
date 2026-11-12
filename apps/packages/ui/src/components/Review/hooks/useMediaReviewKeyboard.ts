@@ -9,7 +9,7 @@ export function useMediaReviewKeyboard(
 ): void {
   const {
     t, message,
-    focusedId, previewedId,
+    focusedId, previewedId, readingActive, setHelpModalOpen,
     selectedIds,
     helpModalOpen,
     compareDiffOpen,
@@ -77,7 +77,7 @@ export function useMediaReviewKeyboard(
           // x or Space: toggle selection on previewed/focused item (Gmail-style)
           if (e.key === ' ' && (e.ctrlKey || e.metaKey || e.altKey)) break
           {
-            const targetId = previewedId ?? focusedId
+            const targetId = readingActive ? focusedId : previewedId
             if (targetId != null) {
               e.preventDefault()
               void toggleSelect(targetId)
@@ -86,8 +86,10 @@ export function useMediaReviewKeyboard(
           break
         case 'o':
           e.preventDefault()
-          if (focusedId != null) {
-            const key = String(focusedId)
+          {
+            const targetId = readingActive ? focusedId : previewedId
+            if (targetId == null) break
+            const key = String(targetId)
             setContentExpandedIds(prev => {
               const next = new Set(prev)
               if (next.has(key)) next.delete(key)
@@ -99,7 +101,7 @@ export function useMediaReviewKeyboard(
         case '?':
           if (e.shiftKey) {
             e.preventDefault()
-            s.setHelpModalOpen(true)
+            setHelpModalOpen(true)
           }
           break
         case 'Escape':
@@ -124,6 +126,7 @@ export function useMediaReviewKeyboard(
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [
     goRelative,
+    readingActive, setHelpModalOpen,
     focusedId,
     previewedId,
     selectedIds.length,
@@ -166,7 +169,7 @@ export function useMediaReviewKeyboard(
     else newMode = "all"
 
     if (prevAutoViewModeRef.current !== null && prevAutoViewModeRef.current !== newMode) {
-      const modeNames = { spread: t('mediaPage.spreadMode', 'Compare'), list: t('mediaPage.listMode', 'Focus'), all: t('mediaPage.allMode', 'Stack') }
+      const modeNames = { spread: t('mediaPage.spreadMode', 'Side-by-side'), list: t('mediaPage.listMode', 'Focus'), all: t('mediaPage.allMode', 'Stack') }
       const notice = t('mediaPage.autoViewModeSwitched', 'Auto-switched to {{mode}} view ({{count}} items)', {
         mode: modeNames[newMode],
         count

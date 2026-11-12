@@ -11,6 +11,8 @@ export type SetupEntryChoiceProps = {
   metadata: FirstRunMetadata | null
   configuredServerUrl?: string | null
   currentOrigin?: string | null
+  connectionRequired?: boolean
+  onOpenConnectionSettings?: () => void
   onStartWebUiSetup: () => void
   onRefreshSetupState: () => Promise<void> | void
 }
@@ -43,6 +45,8 @@ export function SetupEntryChoice({
   metadata,
   configuredServerUrl = null,
   currentOrigin,
+  connectionRequired = false,
+  onOpenConnectionSettings,
   onStartWebUiSetup,
   onRefreshSetupState,
 }: SetupEntryChoiceProps) {
@@ -55,17 +59,18 @@ export function SetupEntryChoice({
     configuredServerUrl,
     currentOrigin: resolvedCurrentOrigin,
   })
-  const showRefreshAction = apiSetupOpened || !apiSetupUrl
+  const showRefreshAction = !connectionRequired && (apiSetupOpened || !apiSetupUrl)
 
   return (
     <section className="rounded-md border border-border bg-surface px-4 py-5">
       <div className="space-y-2">
         <h1 className="text-2xl font-semibold text-text">
-          Choose where to set up tldw
+          {connectionRequired ? "Connect your tldw server" : "Choose where to set up tldw"}
         </h1>
         <p className="text-sm text-text-muted">
-          You are in the tldw WebUI setup. Most users can start here to add a
-          chat provider, choose a model, and send a first test chat.
+          {connectionRequired
+            ? "Add your server connection to start guided setup. If you have not installed a server yet, use the API server setup guidance below."
+            : "You are in the tldw WebUI setup. Most users can start here to add a chat provider, choose a model, and send a first test chat."}
         </p>
         <p className="text-sm text-text-muted">
           API server setup opens separately for server settings, recovery, and
@@ -88,11 +93,11 @@ export function SetupEntryChoice({
           ) : null}
           <button
             type="button"
-            onClick={onStartWebUiSetup}
-            disabled={blocked}
+            onClick={connectionRequired ? onOpenConnectionSettings : onStartWebUiSetup}
+            disabled={blocked || (connectionRequired && !onOpenConnectionSettings)}
             className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Set up in WebUI
+            {connectionRequired ? "Open connection settings" : "Set up in WebUI"}
           </button>
         </div>
 

@@ -33,6 +33,8 @@ from tldw_Server_API.app.core.config import get_stt_config
 from tldw_Server_API.app.core.exceptions import (
     BadRequestError,
     CancelCheckError,
+    EgressPolicyError,
+    NetworkError,
     STTExecutionPlanError,
     TranscriptionCancelled,
 )
@@ -618,53 +620,44 @@ def _transcribe_vllm_http(
             if language:
                 data["language"] = language
 
-            # Use sync httpx client with generous timeout for large files
-            if planned:
-                from tldw_Server_API.app.core.http_client import (
-                    RetryPolicy,
-                    create_client,
-                    fetch,
-                    opaque_stt_http_observability,
-                )
-                from tldw_Server_API.app.core.Security.egress import (
-                    ConfiguredEndpointScope,
-                )
+            # One attempt, no redirects, generous timeout for large files. The
+            # planned endpoint and [STT-Settings].qwen3_asr_vllm_base_url are both
+            # operator-configured, so the upload is scoped to that exact origin.
+            from tldw_Server_API.app.core.http_client import (
+                RetryPolicy,
+                create_client,
+                fetch,
+                opaque_stt_http_observability,
+            )
+            from tldw_Server_API.app.core.Security.egress import (
+                ConfiguredEndpointScope,
+            )
 
-                endpoint_id = str(
-                    settings.get("endpoint_id") or ""
-                )
-                with opaque_stt_http_observability(endpoint_id):
-                    with create_client(
-                        timeout=300.0,
-                        trust_env=False,
-                    ) as client:
-                        response = fetch(
-                            method="POST",
-                            url=url,
-                            client=client,
-                            timeout=300.0,
-                            allow_redirects=False,
-                            files=files,
-                            data=data,
-                            retry=RetryPolicy(attempts=1),
-                            configured_endpoint=ConfiguredEndpointScope.from_url(
-                                url
-                            ),
-                        )
-                    response.raise_for_status()
-                    result = response.json()
-            else:
-                with httpx.Client(
+            observability = (
+                opaque_stt_http_observability(str(settings.get("endpoint_id") or ""))
+                if planned
+                else contextlib.nullcontext()
+            )
+            with observability:
+                with create_client(
                     timeout=300.0,
-                    follow_redirects=False,
+                    trust_env=False,
                 ) as client:
-                    response = client.post(
-                        url,
+                    response = fetch(
+                        method="POST",
+                        url=url,
+                        client=client,
+                        timeout=300.0,
+                        allow_redirects=False,
                         files=files,
                         data=data,
+                        retry=RetryPolicy(attempts=1),
+                        configured_endpoint=ConfiguredEndpointScope.from_url(
+                            url
+                        ),
                     )
-                    response.raise_for_status()
-                    result = response.json()
+                response.raise_for_status()
+                result = response.json()
 
     except httpx.HTTPStatusError as exc:
         if planned:
@@ -675,7 +668,7 @@ def _transcribe_vllm_http(
             raise BadRequestError(
                 f"vLLM server returned error: {exc.response.status_code} - {exc.response.text}"
             ) from exc
-    except httpx.RequestError as exc:
+    except (httpx.RequestError, NetworkError, EgressPolicyError) as exc:
         if planned:
             planned_failure = (
                 "Planned Qwen3-ASR server request failed"

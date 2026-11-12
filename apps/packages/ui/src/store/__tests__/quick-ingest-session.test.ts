@@ -69,7 +69,8 @@ describe("quick ingest session store", () => {
     store.getState().clearSession()
 
     expect(store.getState().session).toBeNull()
-    expect(sessionStorage.getItem(STORAGE_KEY)).toBeNull()
+    expect(JSON.parse(sessionStorage.getItem(STORAGE_KEY)!).state.recentImports
+    ).toHaveLength(1)
   })
 
   it("stores queue file stubs without raw File instances", () => {
@@ -165,4 +166,15 @@ describe("quick ingest session store", () => {
 
     expect(store.getState().session?.tracking).toBeUndefined()
   })
+})
+
+
+it("keeps explicit duplicate repetition after owner-fenced persistence", () => {
+  sessionStorage.clear()
+  const store = createQuickIngestSessionStore()
+  store.getState().setAuthority("verified-test-owner")
+  store.getState().createDraftSession({ queueItems: [{ id: "repeat", kind: "url", url: "https://example.com", detectedType: "web", icon: "Globe", fileSize: 0, validation: { valid: true }, processAgain: true }] })
+  const restored = createQuickIngestSessionStore()
+  restored.getState().setAuthority("verified-test-owner")
+  expect(restored.getState().session?.queueItems[0].processAgain).toBe(true)
 })

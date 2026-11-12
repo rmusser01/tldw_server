@@ -92,6 +92,14 @@ async def _close_acp_session_safely(client: Any, session_id: str | None) -> None
             await result
     except Exception:
         logger.warning("Failed to close orchestration ACP session after dispatch failure")
+        return
+    try:
+        from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
+
+        store = await get_acp_session_store()
+        await store.close_session(session_id)
+    except Exception:
+        logger.warning("Failed to retire persisted orchestration ACP session after dispatch failure")
 
 
 _TASK_COMPLETION_SIGNAL_INSTRUCTIONS = """\
@@ -119,6 +127,29 @@ def _build_dispatch_prompt(task: Any) -> str:
         prompt_text += f"\n\nSuccess Criteria: {task.success_criteria}"
     prompt_text += f"\n\n{_TASK_COMPLETION_SIGNAL_INSTRUCTIONS}"
     return prompt_text
+
+
+async def _prompt_with_history(
+    client: Any,
+    session_id: str,
+    prompt: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Retain a settled ACP turn and expose native-only text to validation."""
+    from tldw_Server_API.app.api.v1.endpoints.agent_client_protocol import _record_acp_prompt
+
+    native_text: list[str] = []
+    result = await client.prompt(session_id, prompt, on_native_text=native_text.append)
+    assistant_text = "".join(native_text) or None
+    await _record_acp_prompt(
+        session_id=session_id,
+        prompt=prompt,
+        result=result,
+        assistant_text=assistant_text,
+    )
+    # Preserve legacy/direct result precedence and the original wire response.
+    if assistant_text and not any(result.get(key) for key in ("content", "message", "output", "text")):
+        return {**result, "content": assistant_text}
+    return result
 
 
 def _build_review_prompt(task: Any, completion_summary: str) -> str:
@@ -1940,8 +1971,8 @@ async def dispatch_run(
     # Send initial prompt with task description and required completion contract
     prompt_text = _build_dispatch_prompt(task)
     try:
-        result = await client.prompt(
-            session_id,
+        result = await _prompt_with_history(
+            client, session_id,
             [{"role": "user", "content": prompt_text}],
         )
 
@@ -2042,8 +2073,8 @@ async def dispatch_run(
                 run_id=review_run.id,
                 metadata={"reviewer": task.reviewer_agent_type},
             )
-            review_result = await client.prompt(
-                review_session_id,
+            review_result = await _prompt_with_history(
+                client, review_session_id,
                 [{"role": "user", "content": _build_review_prompt(task, completion_signal.summary)}],
             )
             review_decision = validate_review_decision_signal(review_result)

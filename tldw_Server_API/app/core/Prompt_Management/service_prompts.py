@@ -766,7 +766,7 @@ def resolve_service_prompt_default(definition: ServicePromptDefinition) -> Resol
 
         parts = MappingProxyType({**definition.default_parts, "system": _resolve_default_system_prompt()})
     elif definition.id == "media.web.summarization":
-        from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
+        from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 
         parts = MappingProxyType(
             {
@@ -775,8 +775,8 @@ def resolve_service_prompt_default(definition: ServicePromptDefinition) -> Resol
             }
         )
     elif definition.id == "media.audio.analysis":
+        from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
         from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import _resolve_default_system_prompt
-        from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 
         parts = MappingProxyType(
             {

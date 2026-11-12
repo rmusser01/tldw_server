@@ -191,14 +191,15 @@ describe("recipe request snapshot", () => {
   })
 
   it("uses an authoritative principal for manual bearer ownership", () => {
-    const result = resolveRecipeRequestSnapshot({
-      config: {
+    const untrustedConfig = {
         serverUrl: "https://api.example.test",
         authMode: "multi-user",
         authSource: "manual",
         accessToken: "bearer-token",
         userId: "untrusted-hint"
-      },
+      } as const
+    const result = resolveRecipeRequestSnapshot({
+      config: untrustedConfig,
       path: "/api/v1/prompts/",
       method: "POST",
       authenticatedPrincipalId: "authoritative-user"
@@ -209,14 +210,15 @@ describe("recipe request snapshot", () => {
   })
 
   it("does not infer manual bearer ownership without an authoritative principal", () => {
-    const result = resolveRecipeRequestSnapshot({
-      config: {
+    const untrustedConfig = {
         serverUrl: "https://api.example.test",
         authMode: "multi-user",
         authSource: "manual",
         accessToken: "h.eyJzdWIiOiJ1bnRydXN0ZWQifQ.s",
         userId: "also-untrusted"
-      },
+      } as const
+    const result = resolveRecipeRequestSnapshot({
+      config: untrustedConfig,
       path: "/api/v1/prompts/",
       method: "POST"
     })

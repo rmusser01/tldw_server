@@ -6,20 +6,22 @@ import { ExternalLink } from "lucide-react"
 
 import { Alert as DSAlert } from "@/components/ui/primitives"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { buildACPAuthHeaders } from "@/services/acp/connection"
-import type {
-  ACPSessionListItem,
-  ACPSessionListResponse
-} from "@/services/acp/types"
 import {
-  resolveBrowserRequestTransport,
-  type BrowserRequestTransport
-} from "@/services/tldw/request-core"
+  getWorkspaceTaskDetail,
+  listCanonicalWorkspaceProjects,
+  listCanonicalWorkspaceSessions,
+  listWorkspaceProjectTasks,
+  type WorkspaceHistoryRequestOptions
+} from "@/services/workspace-acp-history"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { formatErrorMessage } from "@/utils/format-error-message"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import type {
+  ACPSessionListItem
+} from "@/services/acp/types"
 
-const AGENT_ORCHESTRATION_BASE_PATH = "/api/v1/agent-orchestration"
-const PROJECTS_PATH = `${AGENT_ORCHESTRATION_BASE_PATH}/projects`
-const ACP_SESSIONS_PATH = "/api/v1/acp/sessions"
-const CANONICAL_WORKSPACE_SOURCE = "research_workspace"
 const AGENT_ORCHESTRATION_UNSUPPORTED_MESSAGE =
   "Agent orchestration is not available on this server."
 const AGENT_ORCHESTRATION_UNSUPPORTED_CODE =
@@ -97,6 +99,9 @@ type WorkspaceACPHistoryError =
   | { kind: "unsupported" }
 
 export type WorkspaceACPRunArtifactSaveInput = {
+  workspaceId: string
+  scope: ServicePromptSnapshot
+  isCurrent: () => boolean
   projectId: number
   projectName: string
   taskId: number
@@ -126,7 +131,7 @@ export interface WorkspaceACPHistoryModalProps {
   workspaceName?: string | null
   onCancel: () => void
   onOpenAgentTasks: () => void
-  onSaveRunArtifact?: (input: WorkspaceACPRunArtifactSaveInput) => void
+  onSaveRunArtifact?: (input: WorkspaceACPRunArtifactSaveInput) => Promise<void>
 }
 
 const normalizeListPayload = <T,>(payload: unknown, key: string): T[] => {
@@ -152,44 +157,6 @@ const getCanonicalWorkspaceId = (
 ): string | null =>
   normalizeWorkspaceId(item.canonical_workspace?.canonical_workspace_id) ||
   normalizeWorkspaceId(item.metadata?.canonical_workspace_id)
-
-const buildCanonicalProjectsPath = (canonicalWorkspaceId: string): string => {
-  const params = new URLSearchParams({
-    canonical_workspace_id: canonicalWorkspaceId,
-    canonical_workspace_source: CANONICAL_WORKSPACE_SOURCE
-  })
-  return `${PROJECTS_PATH}?${params.toString()}`
-}
-
-const buildWorkspaceSessionsPath = (canonicalWorkspaceId: string): string => {
-  const params = new URLSearchParams({
-    workspace_id: canonicalWorkspaceId,
-    limit: String(MAX_RECENT_RUNS)
-  })
-  return `${ACP_SESSIONS_PATH}?${params.toString()}`
-}
-
-const readApiErrorMessage = async (response: Response): Promise<string> => {
-  const payload = await response.json().catch(() => null)
-  const detail =
-    payload && typeof payload === "object"
-      ? (payload as { detail?: unknown }).detail
-      : null
-
-  if (typeof detail === "string" && detail.trim()) {
-    return detail
-  }
-  if (detail && typeof detail === "object") {
-    const detailRecord = detail as Record<string, unknown>
-    if (typeof detailRecord.message === "string" && detailRecord.message.trim()) {
-      return detailRecord.message
-    }
-    if (typeof detailRecord.code === "string" && detailRecord.code.trim()) {
-      return detailRecord.code
-    }
-  }
-  return `HTTP ${response.status}`
-}
 
 const getRunTimestamp = (run: RunItem): number => {
   const candidate = run.completed_at || run.started_at
@@ -271,63 +238,58 @@ export const WorkspaceACPHistoryModal: React.FC<
   const [entries, setEntries] = React.useState<WorkspaceRunHistoryEntry[]>([])
   const [directSessions, setDirectSessions] = React.useState<ACPSessionListItem[]>([])
 
-  const buildRequestTransport = React.useCallback(
-    (path: string): BrowserRequestTransport | null => {
-      if (!connectionConfig) return null
-      return resolveBrowserRequestTransport({
-        config: connectionConfig,
-        path
-      })
-    },
-    [connectionConfig]
-  )
+  const [historyAuthority, setHistoryAuthority] = React.useState<{
+    workspaceId: string; scope: ServicePromptSnapshot; isCurrent: () => boolean
+  } | null>(null)
+  const [savingRun, setSavingRun] = React.useState<number | null>(null)
+  const [saveError, setSaveError] = React.useState<string | null>(null)
+  const saving = React.useRef(false)
 
-  const getHeaders = React.useCallback(
-    (transport: BrowserRequestTransport | null) => {
-      if (transport?.mode === "hosted") {
-        return { "Content-Type": "application/json" }
-      }
-      return buildACPAuthHeaders(connectionConfig)
-    },
-    [connectionConfig]
-  )
-
-  const fetchJson = React.useCallback(
-    async <T,>(path: string, signal?: AbortSignal): Promise<T> => {
-      const transport = buildRequestTransport(path)
-      if (!transport) {
-        throw new Error(
-          connectionConfigLoading
-            ? "Backend connection is still loading."
-            : "Backend connection is not configured."
-        )
-      }
-
-      const response = await fetch(transport.url, {
-        headers: getHeaders(transport),
-        signal
-      })
-      if (!response.ok) {
-        const message = await readApiErrorMessage(response)
-        if (
-          response.status === 404 &&
-          (path === PROJECTS_PATH || path.startsWith(`${PROJECTS_PATH}?`)) &&
-          message === "Not Found"
-        ) {
-          throw createUnsupportedError()
-        }
-        throw new Error(message)
-      }
-      return (await response.json()) as T
-    },
-    [buildRequestTransport, connectionConfigLoading, getHeaders]
-  )
-
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!open) return
 
     let cancelled = false
+    let retired = false
     const abortController = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => { timedOut = true; abortController.abort() }, 15000)
+    const deadline = performance.now() + 15000
+    let scope: ServicePromptSnapshot | null = null
+    const isCurrent = () => !cancelled && !retired && !!scope &&
+      !scope.scopeSignal.aborted && !scope.scopeInvalidatedSignal.aborted
+    const retire = () => {
+      if (cancelled) return
+      setEntries([])
+      setDirectSessions([])
+      setHistoryAuthority(null)
+      setError(null)
+      setLoading(false)
+      setSaveError("The account or server changed. Reopen history before saving.")
+    }
+    const stopAccountWatch = watchChatAccountChanges((invalidated) => {
+      if (invalidated) { retired = true; abortController.abort(); retire() }
+    })
+    const fetchJson = async <T,>(
+      request: (options: WorkspaceHistoryRequestOptions) => Promise<T>,
+      projectsRequest = false
+    ): Promise<T> => {
+      if (!isCurrent()) throw createServicePromptScopeChangedError()
+      try {
+        const payload = await request({
+          ...requestScopeFields(scope!.requestScope),
+          abortSignal: abortController.signal,
+          timeoutMs: Math.max(1, Math.ceil(deadline - performance.now()))
+        })
+        if (!isCurrent()) throw createServicePromptScopeChangedError()
+        return payload
+      } catch (err) {
+        if ((err as { status?: number })?.status === 404 &&
+          projectsRequest &&
+          ((err as { details?: { detail?: unknown } })?.details?.detail === "Not Found" ||
+            (err instanceof Error && err.message === "Not Found"))) throw createUnsupportedError()
+        throw err
+      }
+    }
 
     const loadHistory = async () => {
       const canonicalWorkspaceId = workspaceId?.trim()
@@ -335,6 +297,8 @@ export const WorkspaceACPHistoryModal: React.FC<
       setError(null)
       setEntries([])
       setDirectSessions([])
+      setHistoryAuthority(null)
+      setSaveError(null)
 
       try {
         if (!canonicalWorkspaceId) {
@@ -343,12 +307,17 @@ export const WorkspaceACPHistoryModal: React.FC<
           )
         }
 
+        if (!connectionConfig) throw new Error(connectionConfigLoading
+          ? "Backend connection is still loading." : "Backend connection is not configured.")
+        scope = await loadServicePromptSnapshot([], { signal: abortController.signal })
+        if (!isCurrent()) throw createServicePromptScopeChangedError()
+        scope.scopeInvalidatedSignal.addEventListener("abort", retire, { once: true })
+
         const agentTaskHistoryPromise = (async (): Promise<
           WorkspaceRunHistoryEntry[]
         > => {
           const projectsPayload = await fetchJson<unknown>(
-            buildCanonicalProjectsPath(canonicalWorkspaceId),
-            abortController.signal
+            (options) => listCanonicalWorkspaceProjects(canonicalWorkspaceId, options), true
           )
           const projects = normalizeListPayload<ProjectSummary>(
             projectsPayload,
@@ -362,8 +331,7 @@ export const WorkspaceACPHistoryModal: React.FC<
             await Promise.all(
               matchingProjects.map(async (project) => {
                 const tasksPayload = await fetchJson<unknown>(
-                  `${PROJECTS_PATH}/${project.id}/tasks`,
-                  abortController.signal
+                  (options) => listWorkspaceProjectTasks(project.id, options)
                 )
                 const tasks = normalizeListPayload<TaskSummary>(
                   tasksPayload,
@@ -383,8 +351,7 @@ export const WorkspaceACPHistoryModal: React.FC<
               .slice(0, MAX_TASK_DETAILS)
               .map(async ({ project, task }) => {
                 const detail = await fetchJson<TaskDetail>(
-                  `${AGENT_ORCHESTRATION_BASE_PATH}/tasks/${task.id}`,
-                  abortController.signal
+                  (options) => getWorkspaceTaskDetail<TaskDetail>(task.id, options)
                 )
                 return { project, task: detail }
               })
@@ -405,9 +372,8 @@ export const WorkspaceACPHistoryModal: React.FC<
         })()
 
         const directSessionsPromise = (async (): Promise<ACPSessionListItem[]> => {
-          const sessionsPayload = await fetchJson<ACPSessionListResponse | unknown>(
-            buildWorkspaceSessionsPath(canonicalWorkspaceId),
-            abortController.signal
+          const sessionsPayload = await fetchJson<unknown>(
+            (options) => listCanonicalWorkspaceSessions(canonicalWorkspaceId, MAX_RECENT_RUNS, options)
           )
           return normalizeListPayload<ACPSessionListItem>(
             sessionsPayload,
@@ -426,6 +392,8 @@ export const WorkspaceACPHistoryModal: React.FC<
 
         const [agentTaskHistoryResult, directSessionsResult] =
           await Promise.allSettled([agentTaskHistoryPromise, directSessionsPromise])
+        if (timedOut) throw new Error("Loading history exceeded 15 seconds. Reopen history to retry.")
+        if (!isCurrent()) throw createServicePromptScopeChangedError()
 
         if (
           agentTaskHistoryResult.status === "rejected" &&
@@ -454,7 +422,8 @@ export const WorkspaceACPHistoryModal: React.FC<
           throw directSessionsResult.reason
         }
 
-        if (!cancelled) {
+        if (isCurrent()) {
+          setHistoryAuthority({ workspaceId: canonicalWorkspaceId, scope: scope!, isCurrent })
           setEntries(
             agentTaskHistoryResult.status === "fulfilled"
               ? agentTaskHistoryResult.value
@@ -467,24 +436,26 @@ export const WorkspaceACPHistoryModal: React.FC<
           )
         }
       } catch (err) {
-        if (cancelled || abortController.signal.aborted) {
-          return
-        }
+        if (cancelled || retired || scope?.scopeInvalidatedSignal.aborted) return
         if (!cancelled) {
+          const detail = (err as { details?: { detail?: unknown } })?.details?.detail
+          const value = detail && typeof detail === "object"
+            ? (detail as Record<string, unknown>).message ?? (detail as Record<string, unknown>).code
+            : detail
           setError(
             isUnsupportedError(err)
               ? { kind: "unsupported" }
               : {
                   kind: "message",
                   message:
-                    err instanceof Error
-                      ? err.message
-                      : "Failed to load ACP run history"
+                    timedOut ? "Loading history exceeded 15 seconds. Reopen history to retry." :
+                      formatErrorMessage(value, err instanceof Error ? err.message : "Failed to load ACP run history")
                 }
           )
         }
       } finally {
-        if (!cancelled) {
+        clearTimeout(timer)
+        if (!cancelled && !retired && !scope?.scopeInvalidatedSignal.aborted) {
           setLoading(false)
         }
       }
@@ -494,9 +465,29 @@ export const WorkspaceACPHistoryModal: React.FC<
 
     return () => {
       cancelled = true
+      clearTimeout(timer)
+      stopAccountWatch()
       abortController.abort()
+      scope?.scopeInvalidatedSignal.removeEventListener("abort", retire)
+      scope?.release()
     }
-  }, [fetchJson, open, workspaceId])
+  }, [connectionConfig, connectionConfigLoading, open, workspaceId])
+
+  const saveRun = async (input: Omit<WorkspaceACPRunArtifactSaveInput, "workspaceId" | "scope" | "isCurrent">) => {
+    if (saving.current || !historyAuthority?.isCurrent() || !onSaveRunArtifact) return
+    saving.current = true
+    setSavingRun(input.runId)
+    setSaveError(null)
+    try {
+      await onSaveRunArtifact({ ...input, ...historyAuthority })
+    } catch (err) {
+      if (historyAuthority.isCurrent())
+        setSaveError(err instanceof Error ? err.message : "Could not save. Retry Save to Studio.")
+    } finally {
+      saving.current = false
+      setSavingRun(null)
+    }
+  }
 
   const openSessionRoute = React.useCallback(
     (run: RunItem, view?: string) => {
@@ -568,6 +559,7 @@ export const WorkspaceACPHistoryModal: React.FC<
           </DSAlert>
         )}
 
+        {saveError && <DSAlert variant="error">{saveError}</DSAlert>}
         {!loading && !error && !hasHistory && (
           <Empty
             description={t(
@@ -604,7 +596,7 @@ export const WorkspaceACPHistoryModal: React.FC<
               const canSaveRunArtifact = Boolean(
                 onSaveRunArtifact &&
                   resultPreview?.trim() &&
-                  isCompletedRunStatus(run.status)
+                  isCompletedRunStatus(run.status) && historyAuthority?.isCurrent()
               )
 
               return (
@@ -709,8 +701,10 @@ export const WorkspaceACPHistoryModal: React.FC<
                       {canSaveRunArtifact && (
                         <Button
                           size="small"
-                          onClick={() =>
-                            onSaveRunArtifact?.({
+                          aria-label="Save to Studio"
+                          loading={savingRun === run.id}
+                          disabled={savingRun !== null}
+                          onClick={() => void saveRun({
                               projectId: entry.projectId,
                               projectName: entry.projectName,
                               taskId: entry.taskId,
@@ -724,8 +718,7 @@ export const WorkspaceACPHistoryModal: React.FC<
                               completedAt: run.completed_at,
                               links: run.session?.links,
                               history: run.history
-                            })
-                          }
+                            })}
                         >
                           {t("playground:workspace.saveRunToStudio", "Save to Studio")}
                         </Button>

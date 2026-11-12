@@ -40,6 +40,7 @@ from fastapi import (
     UploadFile,
     WebSocket,
     WebSocketDisconnect,
+    WebSocketException,
     status,
 )
 from fastapi.responses import HTMLResponse, PlainTextResponse, Response
@@ -55,24 +56,18 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
-from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_db_pool
-from tldw_Server_API.app.core.AuthNZ.ip_allowlist import (
-    is_single_user_ip_allowed,
-    resolve_client_ip,
-)
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
+    WS_UNAUTHENTICATED,
+    auth_subprotocol,
+    resolve_ws_principal_or_deprecated_query,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
-from tldw_Server_API.app.core.DB_Management.scope_context import get_scope as _get_scope
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
-from tldw_Server_API.app.core.exceptions import TemplateValidationError
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, TemplateValidationError
 from tldw_Server_API.app.core.Personalization.companion_activity import (
     build_watchlist_source_bulk_import_activity,
     record_companion_activity_events_bulk,
@@ -84,9 +79,9 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
 )
 from tldw_Server_API.app.core.Scheduler import get_existing_global_scheduler, SchedulerError
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
-from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime as _is_explicit_pytest_runtime
 from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.Watchlists import template_store
 from tldw_Server_API.app.core.Watchlists.briefing_contract import (
     BRIEFING_PIPELINE_KEY,
@@ -108,7 +103,7 @@ from tldw_Server_API.app.core.Watchlists.filters import evaluate_filters as _eva
 from tldw_Server_API.app.core.Watchlists.filters import normalize_filters as _normalize_job_filters
 from tldw_Server_API.app.core.Watchlists.opml import generate_opml, parse_opml
 from tldw_Server_API.app.core.Watchlists.output_enrichment_handler import schedule_output_enrichment
-from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
+from tldw_Server_API.app.core.Watchlists.pipeline import org_requires_include_default, run_watchlist_job
 from tldw_Server_API.app.core.Watchlists.report_evidence import (
     build_legacy_live_only_readiness,
     build_report_evidence_snapshot,
@@ -1907,84 +1902,6 @@ def _validate_group_ids(db: WatchlistsDatabase, group_ids: list[int] | None) -> 
     return clean
 
 
-def _looks_like_jwt(token: str | None) -> bool:
-    return isinstance(token, str) and token.count(".") == 2
-
-
-async def _resolve_watchlists_ws_user_id(
-    websocket: WebSocket,
-    *,
-    token: str | None,
-    api_key: str | None,
-) -> int:
-    if not token:
-        auth_hdr = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
-        if auth_hdr and auth_hdr.lower().startswith("bearer "):
-            token = auth_hdr.split(" ", 1)[1].strip()
-    if not api_key:
-        api_key = websocket.headers.get("x-api-key") or websocket.headers.get("X-API-KEY")
-
-    if token and not api_key and not _looks_like_jwt(token):
-        api_key = token
-        token = None
-
-    if token:
-        try:
-            from tldw_Server_API.app.core.AuthNZ.exceptions import InvalidTokenError, TokenExpiredError
-            from tldw_Server_API.app.core.AuthNZ.jwt_service import get_jwt_service
-            from tldw_Server_API.app.core.AuthNZ.session_manager import get_session_manager
-
-            jwt_service = get_jwt_service()
-            payload = await jwt_service.verify_token_async(token, token_type="access")  # nosec B106
-            session_manager = await get_session_manager()
-            if await session_manager.is_token_blacklisted(token, payload.get("jti")):
-                raise HTTPException(status_code=401, detail="invalid_token")
-        except HTTPException:
-            raise
-        except (InvalidTokenError, TokenExpiredError):
-            raise HTTPException(status_code=401, detail="invalid_token") from None
-        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-            raise HTTPException(status_code=401, detail="invalid_token") from None
-
-        sub = payload.get("user_id") or payload.get("sub")
-        if sub is None:
-            raise HTTPException(status_code=401, detail="invalid_token")
-        try:
-            return int(sub)
-        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-            raise HTTPException(status_code=401, detail="invalid_token") from None
-
-    if api_key:
-        settings = get_settings()
-        client_ip = resolve_client_ip(websocket, settings)
-        if getattr(settings, "AUTH_MODE", None) == "single_user":
-            allowed_keys: set[str] = set()
-            primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
-            if primary_key:
-                allowed_keys.add(primary_key)
-            if _is_explicit_pytest_runtime():
-                test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
-                if test_key:
-                    allowed_keys.add(test_key)
-            if api_key in allowed_keys and is_single_user_ip_allowed(client_ip, settings):
-                return int(getattr(settings, "SINGLE_USER_FIXED_ID", 1))
-            raise HTTPException(status_code=401, detail="invalid_api_key")
-
-        api_mgr = await get_api_key_manager()
-        info = await api_mgr.validate_api_key(api_key=api_key, required_scope="read", ip_address=client_ip)
-        if not info:
-            raise HTTPException(status_code=401, detail="invalid_api_key")
-        user_id = info.get("user_id")
-        if user_id is None:
-            raise HTTPException(status_code=401, detail="invalid_api_key")
-        return int(user_id)
-
-    cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    if cookie_identity is not None:
-        return cookie_identity.user_id
-    raise HTTPException(status_code=401, detail="auth_required")
-
-
 def _resolve_watchlist_log_path(*, user_id: int, log_path: str | None) -> Path | None:
     if not log_path:
         return None
@@ -2246,11 +2163,11 @@ async def export_sources_opml(
             rows = []
         # Apply tag filter manually (AND semantics)
         if tag:
-            needed = [t.strip().lower() for t in tag if t and str(t).strip()]
+            needed = {normalize_keyword_identity(t) for t in tag if t and str(t).strip()}
 
             def _has_all_tags(src) -> bool:
-                src_tags = [str(t).strip().lower() for t in (getattr(src, "tags", []) or [])]
-                return all(n in src_tags for n in needed)
+                src_tags = {normalize_keyword_identity(str(t)) for t in (getattr(src, "tags", []) or [])}
+                return needed <= src_tags
 
             rows = [r for r in rows if _has_all_tags(r)]
     else:
@@ -2440,7 +2357,7 @@ async def check_sources_now(
                 try:
                     refreshed = db.get_source(source_id)
                     status_value = str(getattr(refreshed, "status", "") or "").lower()
-                    if status_value in {"error", "deferred", "forum_disabled"}:
+                    if status_value.startswith(("error", "partial:")) or status_value in {"deferred", "forum_disabled"}:
                         active_results[source_id] = SourceCheckNowItem(
                             source_id=source_id,
                             status="error",
@@ -3752,31 +3669,6 @@ async def preview_job(
         raw_filters = {}
     job_filters = _normalize_job_filters(raw_filters)
 
-    async def _org_require_include_default() -> bool:
-        try:
-            scope_ctx = _get_scope()
-            org_id = getattr(scope_ctx, "effective_org_id", None) if scope_ctx else None
-            if org_id is not None:
-                pool = await _get_db_pool()
-                row = await pool.fetchone("SELECT metadata FROM organizations WHERE id = ?", int(org_id))
-                if row is not None:
-                    meta = row.get("metadata")
-                    if isinstance(meta, str):
-                        meta = json.loads(meta)
-                    if isinstance(meta, dict):
-                        watch = meta.get("watchlists") if isinstance(meta.get("watchlists"), dict) else {}
-                        if isinstance(watch, dict) and isinstance(watch.get("require_include_default"), bool):
-                            return bool(watch.get("require_include_default"))
-                        flat = meta.get("watchlists_require_include_default")
-                        if isinstance(flat, bool):
-                            return flat
-        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-            pass
-        try:
-            return _is_truthy(os.getenv("WATCHLISTS_REQUIRE_INCLUDE_DEFAULT", ""))
-        except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
-            return False
-
     include_rules_exist = any((str(f.get("action")) == "include") for f in job_filters)
     job_require_include = None
     if isinstance(raw_filters, dict) and "require_include" in raw_filters:
@@ -3784,7 +3676,7 @@ async def preview_job(
             job_require_include = bool(raw_filters.get("require_include"))
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS:
             job_require_include = None
-    org_default = await _org_require_include_default()
+    org_default = await org_requires_include_default()
     effective_require_include = job_require_include if (job_require_include is not None) else org_default
     include_gating_active = bool(effective_require_include and include_rules_exist)
 
@@ -4979,19 +4871,23 @@ async def get_run_details(
 
 
 @router.websocket("/runs/{run_id}/stream")
-async def stream_run(
-    websocket: WebSocket,
-    run_id: int,
-    token: str | None = Query(None),
-    api_key: str | None = Query(None),
-):
+async def stream_run(websocket: WebSocket, run_id: int):
+    """Stream a run's status, stats and log to its owner.
+
+    Authentication (read scope for API keys): ``Authorization: Bearer``, ``X-API-KEY``, the
+    ``bearer, <token or key>`` subprotocol, or the single-user cookie. Deprecated, for the
+    shipped watchlists-stream client: ``?token=`` / ``?api_key=`` (TASK-13950.7).
+    """
     try:
-        user_id = await _resolve_watchlists_ws_user_id(websocket, token=token, api_key=api_key)
-    except HTTPException:
+        principal = await resolve_ws_principal_or_deprecated_query(websocket, required_scope="read")
+        if principal.user_id is None:  # a service token owns no run
+            raise WebSocketException(code=WS_UNAUTHENTICATED, reason="user_principal_required")
+    except WebSocketException as exc:
         try:
-            await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+            await websocket.close(code=exc.code)
         finally:
             return  # noqa: B012
+    user_id = int(principal.user_id)
     db = WatchlistsDatabase.for_user(user_id)
     try:
         run = db.get_run(int(run_id))
@@ -5001,7 +4897,7 @@ async def stream_run(
         finally:
             return  # noqa: B012
 
-    await websocket.accept()
+    await websocket.accept(subprotocol=auth_subprotocol(websocket))
     stream = WebSocketStream(
         websocket,
         heartbeat_interval_s=0.0,
@@ -7219,13 +7115,14 @@ async def create_output(
                 status_code=400,
                 detail="llm_provider_required: set llm_provider in request or job output_prefs.llm.provider",
             )
+        # Usage quotas (LLM usage accounting spec §4a), before any summary call and before the output is written.
+        await enforce_llm_quota(current_user.id)
         items_for_summary = [
             {
                 "id": getattr(it, "id", None),
                 "title": getattr(it, "title", None),
                 "summary": getattr(it, "summary", None),
                 "content": getattr(it, "summary", None) or getattr(it, "title", ""),
-                "metadata_json": getattr(it, "metadata_json", None),
             }
             for it in items
         ]
@@ -7235,12 +7132,13 @@ async def create_output(
                 api_name=llm_provider,
                 model_override=payload.llm_model,
                 custom_prompt=payload.summarize_prompt,
-                db=db,
             )
             for entry in items_for_summary:
                 item_id = entry.get("id")
                 if item_id is not None and entry.get("llm_summary"):
                     llm_summaries[int(item_id)] = entry["llm_summary"]
+        except LLMQuotaExceededError:
+            raise  # a 402, not a non-critical summarization failure
         except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
             logger.warning(f"Watchlists output summarization failed (non-critical): {exc}")
 

@@ -40,7 +40,7 @@ Address validated review findings in the Sharing module and its API wiring: reso
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task created manually because Backlog MCP was unavailable and the installed Backlog CLI hung on search/list/create operations in this workspace. User approved the temporary manual fallback.
 
 RED verification before implementation:
@@ -85,29 +85,7 @@ Modified files:
 - `tldw_Server_API/tests/Workspaces/test_workspaces_api.py`
 - `IMPLEMENTATION_PLAN_sharing_review_fixes_12001.md`
 - `backlog/tasks/task-12001 - Harden-Sharing-module-review-findings.md`
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Hardened Sharing token creation/import paths, workspace deletion cleanup, clone fidelity/count reporting, and audit failure behavior. Regression tests, compile check, and Bandit touched-scope scan all passed; no skipped blockers remain.
-Second PR review pass rebased onto latest dev and addressed all new CodeRabbit comments: plan markdown formatting, chatbook storage user id ownership checks, production cleanup-hook log context, and sparse chunk clone preservation. Focused and broader regression tests, compile check, diff check, and Bandit all passed; markdownlint-cli2 was unavailable locally.
-Final push state is rebased on the latest fetched `origin/dev` and verified after that rebase: compile passed, 172 targeted/broad regression tests passed, and Bandit reported 0 findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Second PR review follow-up:
 - Latest `origin/dev` advanced by 71 commits; rebased `codex/sharing-review-fixes-12001` cleanly on top of it.
 - New CodeRabbit actionable comments to address: implementation plan markdownlint formatting, chatbook ownership storage user id, workspace deletion hook contextual production failure logging, and sparse unvectorized chunk copying.
@@ -132,3 +110,21 @@ Final post-rebase verification before push:
 - `.venv/bin/python -m pytest tldw_Server_API/tests/Sharing ... tldw_Server_API/tests/MediaDB2/test_unvectorized_chunk_count.py -q` passed after final rebase: 172 passed, 408 warnings.
 - `.venv/bin/python -m bandit -r ... -f json -o /tmp/bandit_sharing_review_fixes_second_followup_final.json` passed after final rebase with 0 findings.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardened Sharing token creation/import paths, workspace deletion cleanup, clone fidelity/count reporting, and audit failure behavior. Regression tests, compile check, and Bandit touched-scope scan all passed; no skipped blockers remain.
+Second PR review pass rebased onto latest dev and addressed all new CodeRabbit comments: plan markdown formatting, chatbook storage user id ownership checks, production cleanup-hook log context, and sparse chunk clone preservation. Focused and broader regression tests, compile check, diff check, and Bandit all passed; markdownlint-cli2 was unavailable locally.
+Final push state is rebased on the latest fetched `origin/dev` and verified after that rebase: compile passed, 172 targeted/broad regression tests passed, and Bandit reported 0 findings.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

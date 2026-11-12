@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_api_key_scope
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.storage_helpers import _normalize_folder_tag, _to_generated_file
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
@@ -59,7 +59,11 @@ async def _load_owned_file_records(
     return file_records
 
 
-@router.get("/files", response_model=GeneratedFilesListResponse)
+@router.get(
+    "/files",
+    response_model=GeneratedFilesListResponse,
+    dependencies=[Depends(require_api_key_scope("read"))],
+)
 async def list_files(
     user: User = Depends(get_request_user),
     offset: int = Query(default=0, ge=0),
@@ -103,7 +107,11 @@ async def list_files(
     )
 
 
-@router.get("/files/least-accessed", response_model=GeneratedFilesListResponse)
+@router.get(
+    "/files/least-accessed",
+    response_model=GeneratedFilesListResponse,
+    dependencies=[Depends(require_api_key_scope("read"))],
+)
 async def list_least_accessed_files(
     user: User = Depends(get_request_user),
     limit: int = Query(default=20, ge=1, le=100),
@@ -136,7 +144,11 @@ async def list_least_accessed_files(
     )
 
 
-@router.post("/files/bulk-delete", response_model=BulkDeleteResponse)
+@router.post(
+    "/files/bulk-delete",
+    response_model=BulkDeleteResponse,
+    dependencies=[Depends(require_api_key_scope("write"))],
+)
 async def bulk_delete_files(
     request: BulkDeleteRequest,
     user: User = Depends(get_request_user),
@@ -157,7 +169,11 @@ async def bulk_delete_files(
     )
 
 
-@router.post("/files/bulk-move", response_model=BulkMoveResponse)
+@router.post(
+    "/files/bulk-move",
+    response_model=BulkMoveResponse,
+    dependencies=[Depends(require_api_key_scope("write"))],
+)
 async def bulk_move_files(
     request: BulkMoveRequest,
     user: User = Depends(get_request_user),
@@ -181,7 +197,11 @@ async def bulk_move_files(
     )
 
 
-@router.get("/files/{file_id}", response_model=GeneratedFileResponse)
+@router.get(
+    "/files/{file_id}",
+    response_model=GeneratedFileResponse,
+    dependencies=[Depends(require_api_key_scope("read"))],
+)
 async def get_file(
     file_id: int,
     user: User = Depends(get_request_user),
@@ -204,7 +224,11 @@ async def get_file(
     return GeneratedFileResponse(file=_to_generated_file(file_record))
 
 
-@router.delete("/files/{file_id}", response_model=StorageDeleteResponse)
+@router.delete(
+    "/files/{file_id}",
+    response_model=StorageDeleteResponse,
+    dependencies=[Depends(require_api_key_scope("write"))],
+)
 async def delete_file(
     file_id: int,
     user: User = Depends(get_request_user),
@@ -235,7 +259,11 @@ async def delete_file(
     return StorageDeleteResponse(success=True, file_id=file_id, hard_delete=hard_delete)
 
 
-@router.patch("/files/{file_id}", response_model=GeneratedFileResponse)
+@router.patch(
+    "/files/{file_id}",
+    response_model=GeneratedFileResponse,
+    dependencies=[Depends(require_api_key_scope("write"))],
+)
 async def update_file(
     file_id: int,
     update: GeneratedFileUpdate,

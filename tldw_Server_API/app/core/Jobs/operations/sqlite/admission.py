@@ -8,6 +8,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import count_recent_job_admissions
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     AdmissionRejectionReason,
     AdmissionResult,
@@ -16,6 +17,11 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     canonical_admin_webhook_row_matches,
     is_admin_webhook_delivery_queue,
 )
+
+from ...resource_contracts import ResourceAdmission, ResourceAdmissionRequest
+from ...resource_policy import reject_resource_required, validate_resource_command
+from ..resource import ResourceCreation, lookup_resource_admission
+from .resource import SQLiteResourceAdmissionStore
 
 _MAX_QUEUED_MESSAGE = "Quota exceeded: max queued per user/domain"
 _SUBMITS_PER_MINUTE_MESSAGE = "Quota exceeded: submits per minute"
@@ -178,11 +184,9 @@ def _quota_rejection(
             )
 
     if submits_per_minute_quota:
-        row = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND created_at >= DATETIME(?, '-60 seconds')",
-            (command.domain, command.owner_user_id, now_sql),
-        ).fetchone()
-        if int(row[0] if row else 0) >= submits_per_minute_quota:
+        if count_recent_job_admissions(
+            conn, backend="sqlite", domain=command.domain, owner_user_id=command.owner_user_id, now=now_sql,
+        ) >= submits_per_minute_quota:
             return AdmissionResult.rejected(
                 AdmissionRejectionReason.QUOTA_EXCEEDED,
                 message=_SUBMITS_PER_MINUTE_MESSAGE,
@@ -200,10 +204,13 @@ def _insert_job(
     now_sql: str,
     available_at_sql: str | None,
     ignore_idempotency_conflict: bool,
+    resource_creation: ResourceCreation | None = None,
 ) -> int | None:
     """Insert a queued job and return its row id when SQLite exposes one."""
 
-    if ignore_idempotency_conflict:
+    if resource_creation is None:
+        reject_resource_required(command.domain, command.job_type)
+    if resource_creation is None and ignore_idempotency_conflict:
         sql = """
         INSERT OR IGNORE INTO jobs (
           uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
@@ -212,7 +219,7 @@ def _insert_job(
           created_at, updated_at, request_id, trace_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
         """
-    else:
+    elif resource_creation is None:
         sql = """
         INSERT INTO jobs (
           uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
@@ -220,6 +227,26 @@ def _insert_job(
           expired_lease_policy, quarantine_threshold, retry_count, available_at,
           created_at, updated_at, request_id, trace_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+        """
+    elif ignore_idempotency_conflict:
+        sql = """
+        INSERT OR IGNORE INTO jobs (
+          uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
+          idempotency_key, payload, result, status, priority, max_retries,
+          expired_lease_policy, quarantine_threshold, retry_count, available_at,
+          created_at, updated_at, request_id, trace_id,
+          resource, resource_authority_uuid, resource_generation, resource_settings_json, resource_settings_fingerprint
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+    else:
+        sql = """
+        INSERT INTO jobs (
+          uuid, domain, queue, job_type, owner_user_id, project_id, batch_group,
+          idempotency_key, payload, result, status, priority, max_retries,
+          expired_lease_policy, quarantine_threshold, retry_count, available_at,
+          created_at, updated_at, request_id, trace_id,
+          resource, resource_authority_uuid, resource_generation, resource_settings_json, resource_settings_fingerprint
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'queued', ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
     before_changes = int(getattr(conn, "total_changes", 0))
     conn.execute(
@@ -243,6 +270,7 @@ def _insert_job(
             now_sql,
             command.request_id,
             command.trace_id,
+            *(resource_creation.values() if resource_creation is not None else ()),
         ),
     )
     if int(getattr(conn, "total_changes", 0)) <= before_changes:
@@ -261,22 +289,43 @@ def create_job_admission(
     submits_per_minute_quota: int,
     counters_enabled: bool,
     begin_immediate: bool = False,
-    pre_admission_lookup: Callable[
-        [sqlite3.Connection], dict[str, Any] | None
-    ] | None = None,
-) -> AdmissionResult:
+    pre_admission_lookup: Callable[[sqlite3.Connection], dict[str, Any] | None] | None = None,
+    resource_request: ResourceAdmissionRequest | None = None,
+    prepare_command: Callable[[CreateJobCommand], CreateJobCommand | AdmissionResult] | None = None,
+) -> AdmissionResult | ResourceAdmission:
     """Create or replay a queued job admission inside a SQLite transaction."""
 
+    if resource_request is None:
+        reject_resource_required(command.domain, command.job_type)
+    else:
+        command, resource_request = validate_resource_command(command, resource_request)
+        if prepare_command is None:
+            raise ValueError("resource admission preparation is required")
+    resource_creation = None
+    store = None
     payload_json = json.dumps(command.payload)
     now_sql = _sqlite_timestamp(now)
     available_at = _future_available_at(command.available_at, now=now)
     available_at_sql = _sqlite_timestamp(available_at) if available_at else None
 
     quota_enabled = bool(command.owner_user_id and (max_queued_quota or submits_per_minute_quota))
-    if quota_enabled or begin_immediate:
+    if quota_enabled or begin_immediate or resource_request is not None:
         conn.execute("BEGIN IMMEDIATE")
 
     with conn:
+        if resource_request is not None:
+            conn.execute("SAVEPOINT jobs_resource_admission")
+            store = SQLiteResourceAdmissionStore(conn)
+            decision = lookup_resource_admission(store, command=command, request=resource_request, now=now)
+            if isinstance(decision, ResourceAdmission):
+                return decision
+            resource_creation = decision
+            prepared = prepare_command(command)
+            if isinstance(prepared, AdmissionResult):
+                store.execute("ROLLBACK TO SAVEPOINT jobs_resource_admission")
+                return ResourceAdmission("rejected", None, prepared)
+            command = prepared
+            payload_json = json.dumps(command.payload)
         if pre_admission_lookup is not None:
             existing = pre_admission_lookup(conn)
             if existing is not None:
@@ -298,6 +347,9 @@ def create_job_admission(
                 submits_per_minute_quota=submits_per_minute_quota,
             )
             if quota_result is not None:
+                if store is not None:
+                    store.execute("ROLLBACK TO SAVEPOINT jobs_resource_admission")
+                    return ResourceAdmission("rejected", None, quota_result)
                 return quota_result
 
         if command.idempotency_key:
@@ -352,6 +404,7 @@ def create_job_admission(
             now_sql=now_sql,
             available_at_sql=available_at_sql,
             ignore_idempotency_conflict=False,
+            **({"resource_creation": resource_creation} if resource_creation is not None else {}),
         )
         row = _row_to_dict(conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone())
         if not row:
@@ -363,6 +416,8 @@ def create_job_admission(
                 "queue": command.queue,
                 "job_type": command.job_type,
             }
+        if store is not None:
+            store.attach_created(resource_request, row, now)
         if counters_enabled:
             _bump_counters(conn, command=command, available_at_sql=available_at_sql)
         event = _insert_created_event(

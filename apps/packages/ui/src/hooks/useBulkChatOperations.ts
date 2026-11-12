@@ -20,20 +20,25 @@ type RunBulkDeleteParams = {
   selectedConversationIds: string[]
   deleteConversation: (conversationId: string) => Promise<void>
   t: TFunction
+  isCurrent?: () => boolean
 }
 
 export const runBulkDelete = async ({
   selectedConversationIds,
   deleteConversation,
-  t
+  t,
+  isCurrent = () => true
 }: RunBulkDeleteParams): Promise<BulkDeleteResult | null> => {
-  if (selectedConversationIds.length === 0) return null
+  if (selectedConversationIds.length === 0 || !isCurrent()) return null
 
   const results = await Promise.allSettled(
     selectedConversationIds.map((conversationId) =>
-      deleteConversation(conversationId)
+      isCurrent()
+        ? deleteConversation(conversationId)
+        : Promise.reject(new Error("server_history_action_expired"))
     )
   )
+  if (!isCurrent()) return null
   const deletedConversationIds = new Set<string>()
   const failedConversationIds = new Set<string>()
   let failures = 0
@@ -49,10 +54,7 @@ export const runBulkDelete = async ({
 
   if (failures === 0) {
     message.success(
-      t(
-        "sidepanel:multiSelect.deleteSuccess",
-        "Chats moved to trash."
-      )
+      t("sidepanel:multiSelect.deleteSuccess", "Chats moved to trash.")
     )
   } else if (failures === selectedConversationIds.length) {
     message.error(
@@ -125,13 +127,17 @@ export const useBulkChatOperations = ({
     setBulkTagPickerOpen(true)
   }, [folderApiAvailable, selectedConversationIds, setBulkTagPickerOpen, t])
 
-  const applyBulkDelete = React.useCallback(async (): Promise<BulkDeleteResult | null> => {
-    return runBulkDelete({
-      selectedConversationIds,
-      deleteConversation,
-      t
-    })
-  }, [deleteConversation, selectedConversationIds, t])
+  const applyBulkDelete = React.useCallback(
+    async (isCurrent?: () => boolean): Promise<BulkDeleteResult | null> => {
+      return runBulkDelete({
+        selectedConversationIds,
+        deleteConversation,
+        t,
+        isCurrent
+      })
+    },
+    [deleteConversation, selectedConversationIds, t]
+  )
 
   return {
     openBulkFolderPicker,

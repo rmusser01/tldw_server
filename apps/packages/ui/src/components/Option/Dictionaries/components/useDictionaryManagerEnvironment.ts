@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { Form } from "antd"
 import React from "react"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import { useTranslation } from "react-i18next"
 import { useConfirmDanger } from "@/components/Common/confirm-danger"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
@@ -32,10 +33,12 @@ export function useDictionaryManagerEnvironment() {
   } = useDictionaryManagerFocusRefs()
   const { capabilities, loading: capsLoading } = useServerCapabilities()
   const confirmDanger = useConfirmDanger()
-  const { openChatContextFromDictionary } = useDictionaryChatContextNavigation()
+  const owner = useChatDraftOwner(React.useCallback(() => undefined, []))
+  const { openChatContextFromDictionary } = useDictionaryChatContextNavigation(owner, notification)
   const useMobileEntriesDrawer = useMobile()
 
   return {
+    owner,
     t,
     isOnline,
     queryClient,

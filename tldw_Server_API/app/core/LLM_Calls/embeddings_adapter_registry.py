@@ -39,6 +39,11 @@ class EmbeddingsProviderRegistry:
             n = str(adapter)
         logger.info(f"Registered Embeddings adapter {n} for provider '{name}'")
 
+    def has_adapter(self, name: str) -> bool:
+        """Return whether an adapter is registered without initializing it."""
+
+        return name in self._adapter_specs
+
     def _resolve_adapter_class(self, spec: Any) -> type[EmbeddingsProvider]:
         if isinstance(spec, str):
             module_path, _, class_name = spec.rpartition(".")

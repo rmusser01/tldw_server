@@ -36,14 +36,14 @@ Implement GitHub issue #1680: add a WebUI consumer for the backend-owned VN scri
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added typed VN authoring graph response/request models and frontend API helpers for saved draft, unsaved preview, and version graph endpoints.
 - Added a read-only Script graph panel to the VN script workbench gated by `features.script_authoring_graph`.
 - The panel renders backend source/hash/revision/semantics metadata, outline rows, limits, graph diagnostics, and validation diagnostics as separate UI concepts.
 - Added version-card Graph actions for published version graph inspection.
 - Frontend only renders server-shaped graph data; it does not compute graph edges or validate script op semantics.
 - PR #1681 review fixes added graph schema metadata rendering, source path selection, stale response guards, loading reset on script switch, duplicate graph-action disabling, and stricter validation diagnostics typing.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 

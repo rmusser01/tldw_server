@@ -13,12 +13,15 @@ WORKDIR /app/apps
 # invalidate this layer.
 COPY apps/package.json /app/apps/package.json
 COPY apps/bun.lock /app/apps/bun.lock
+COPY apps/patches /app/apps/patches
 COPY apps/scripts /app/apps/scripts
 COPY apps/extension/package.json /app/apps/extension/package.json
 COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs
-COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json
+COPY apps/packages/api-types/package.json /app/apps/packages/api-types/package.json
 COPY apps/tldw-frontend /app/apps/tldw-frontend
 COPY apps/packages/ui /app/apps/packages/ui
+COPY apps/packages/api-types/index.d.ts /app/apps/packages/api-types/index.d.ts
+COPY apps/packages/api-types/paths.d.ts /app/apps/packages/api-types/paths.d.ts
 
 # Keep the root workspace graph aligned with bun.lock while skipping extension prepare.
 ENV SKIP_WXT_PREPARE=1
@@ -38,6 +41,10 @@ ENV NEXT_PUBLIC_API_VERSION=${NEXT_PUBLIC_API_VERSION}
 ENV NEXT_PUBLIC_X_API_KEY=${NEXT_PUBLIC_X_API_KEY}
 ENV NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE=${NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE}
 ENV TLDW_INTERNAL_API_ORIGIN=${TLDW_INTERNAL_API_ORIGIN}
+
+# Documentation must exist before Next traces it into the standalone artifact.
+# The optional extension documentation root is absent from this checkout.
+COPY Docs/Published /app/Docs/Published
 
 WORKDIR /app/apps/tldw-frontend
 

@@ -7,6 +7,10 @@ import { isFirefoxTarget } from "@/config/platform";
 import { createComposerPerfTracker } from "@/utils/perf/composer-perf";
 import { createRenderPerfTracker } from "@/utils/perf/render-profiler";
 import type { CollapsedRange } from "@/hooks/playground";
+import { useStoreMessageOption } from "@/store/option";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
+import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address";
 
 // ---------------------------------------------------------------------------
 // Deps interface
@@ -101,8 +105,28 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   // See apps/packages/ui/src/components/Chat/composer/hooks/useComposerText.ts.
   // `form`, `draftSaved`, and `textAreaFocus` live there; auto-resize is
   // wired separately below so we can size against `messageDisplayValue`.
+  const draftAddress = useStoreMessageOption(state => state.chatDraftAddress);
+  const draftRevision = useStoreMessageOption((state) => state.chatDraftRevision);
+  const sourceSelectionRevision = usePlaygroundSessionStore(
+    (state) => state.sourceSelectionRevision
+  );
+  const restoreRevision = usePlaygroundSessionStore(
+    (state) => state.restoreRevision
+  );
+
+  const draftTransition = useStoreMessageOption(state => state.chatDraftTransition);
+  React.useLayoutEffect(() => {
+    if (!useStoreMessageOption.getState().chatDraftAddress) useStoreMessageOption.getState().startNewChatDraft();
+  }, [draftAddress]);
+  const draftKey = draftAddress ? conversationDraftKey("tldw:playgroundChatDraft", draftAddress) : "tldw:playgroundChatDraft";
   const composerText = useComposerText({
-    draftKey: "tldw:playgroundChatDraft",
+    draftKey,
+    draftAddress: draftAddress ?? undefined,
+    recoverySurface: "tldw:playgroundChatDraft",
+    draftEnabled: draftAddress !== null,
+    bindFromDraftKey: draftAddress && draftTransition?.kind === "bind" && draftTransition.sourceAddress &&
+      draftTransition.destinationKey === chatDraftAddressKey(draftAddress)
+      ? conversationDraftKey("tldw:playgroundChatDraft", draftTransition.sourceAddress) : undefined,
     tabScopedDraft: true,
     textareaRef,
     isProMode,
@@ -121,16 +145,23 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   });
   const {
     form,
+    getSetupInputRevision,
     messageRevision,
     promptAssistMutation,
     beginPromptAssistReset,
+    restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
+    captureDraftOwnership,
     textAreaFocus,
+    captureCompletionGuard,
+    captureStopGuard,
     draftSaved,
+    draftReady,
     textareaMaxHeight,
   } = composerText;
 
+  const { getValues, getRevision } = form;
   const setFieldValueRef = React.useRef(form.setFieldValue);
   React.useEffect(() => {
     setFieldValueRef.current = form.setFieldValue;
@@ -216,6 +247,83 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     };
   }, []);
 
+  const caretViewRef = React.useRef({ isMessageCollapsed, collapsedRange });
+  React.useLayoutEffect(() => {
+    caretViewRef.current = { isMessageCollapsed, collapsedRange };
+  }, [isMessageCollapsed, collapsedRange]);
+  const caretFrameRef = React.useRef<number | null>(null);
+  const cancelCaretUpdate = React.useCallback(() => {
+    if (caretFrameRef.current !== null)
+      cancelAnimationFrame(caretFrameRef.current);
+    caretFrameRef.current = null;
+  }, []);
+  React.useLayoutEffect(() => cancelCaretUpdate, [cancelCaretUpdate]);
+
+  const scheduleCaretUpdate = React.useCallback(
+    (
+      message: string,
+      display: string,
+      update: (el: HTMLTextAreaElement) => void
+    ) => {
+      const view = caretViewRef.current;
+      if (
+        view.isMessageCollapsed !== isMessageCollapsed ||
+        view.collapsedRange !== collapsedRange
+      )
+        return;
+      const el = textareaRef.current;
+      if (!el || document.activeElement !== el) return;
+      const current = useStoreMessageOption.getState();
+      const sessionIsCurrent = () => {
+        const session = usePlaygroundSessionStore.getState();
+        return (
+          session.sourceSelectionRevision === sourceSelectionRevision &&
+          session.restoreRevision === restoreRevision
+        );
+      };
+      if (
+        current.chatDraftAddress !== draftAddress ||
+        current.chatDraftRevision !== draftRevision ||
+        !sessionIsCurrent()
+      )
+        return;
+      const inputRevision = getRevision();
+      const { isCurrent } = captureChatDraftSource(
+        () =>
+          sessionIsCurrent() &&
+          getRevision() === inputRevision &&
+          document.activeElement === el
+      );
+      if (!isCurrent() || getValues().message !== message) return;
+      cancelCaretUpdate();
+      const frame = requestAnimationFrame(() => {
+        if (caretFrameRef.current !== frame) return;
+        caretFrameRef.current = null;
+        if (
+          !isCurrent() ||
+          textareaRef.current !== el ||
+          getValues().message !== message ||
+          el.value !== display
+        )
+          return;
+        update(el);
+      });
+      caretFrameRef.current = frame;
+    },
+    [
+      cancelCaretUpdate,
+      getValues,
+      getRevision,
+      textareaRef,
+      isMessageCollapsed,
+      collapsedRange,
+      draftAddress,
+      draftRevision,
+      sourceSelectionRevision,
+      restoreRevision
+    ]
+  );
+
   // --- Message value helpers ---
   const restoreMessageValue = React.useCallback(
     (
@@ -225,10 +333,11 @@ export function useComposerInput(deps: UseComposerInputDeps) {
         collapsedRange?: CollapsedRange | null;
       },
     ) => {
+      cancelCaretUpdate();
       setFieldValueRef.current("message", value);
       restoreCollapseState(value, metadata);
     },
-    [restoreCollapseState],
+    [cancelCaretUpdate, restoreCollapseState],
   );
 
   const setMessageValue = React.useCallback(
@@ -240,6 +349,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
         collapsedRange?: CollapsedRange;
       },
     ) => {
+      cancelCaretUpdate();
       form.setFieldValue("message", nextValue);
       if (options?.collapseLarge) {
         collapseLargeMessage(nextValue, {
@@ -248,7 +358,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
         });
       }
     },
-    [collapseLargeMessage, form.setFieldValue],
+    [cancelCaretUpdate, collapseLargeMessage, form.setFieldValue],
   );
 
   // --- Display value ---
@@ -278,7 +388,11 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   // --- Textarea sizing ---
   // Sized against `messageDisplayValue` (not the raw form value) so the
   // textarea shrinks when the paste-collapse overlay swaps in a short label.
-  useDynamicTextareaSize(textareaRef, messageDisplayValue, textareaMaxHeight);
+  const attachTextarea = useDynamicTextareaSize(
+    textareaRef,
+    messageDisplayValue,
+    textareaMaxHeight
+  );
 
   // --- Collapsed caret sync ---
   const syncCollapsedCaret = React.useCallback(
@@ -294,10 +408,8 @@ export function useComposerInput(deps: UseComposerInputDeps) {
       const range = options?.range ?? pendingState?.range ?? collapsedRange;
       if (!range) return;
       if (!message) return;
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
-        const meta = getCollapsedDisplayMeta(message, range);
+      const meta = getCollapsedDisplayMeta(message, range);
+      scheduleCaretUpdate(message, meta.display, (el) => {
         const selection =
           lastDisplaySelectionRef.current ??
           (el.selectionStart !== null
@@ -357,7 +469,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
       getDisplayCaretFromMessage,
       getCollapsedDisplayMeta,
       isMessageCollapsed,
-      textareaRef,
+      scheduleCaretUpdate,
     ],
   );
 
@@ -400,7 +512,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
         ? { message: nextValue, range, caret: nextCaret }
         : null;
       setMessageValue(nextValue, {
-        collapseLarge: shouldCollapse,
+        collapseLarge: true,
         forceCollapse: shouldCollapse,
         collapsedRange: range ?? undefined,
       });
@@ -408,14 +520,17 @@ export function useComposerInput(deps: UseComposerInputDeps) {
         syncCollapsedCaret({ message: nextValue, range, caret: nextCaret });
         return;
       }
-      requestAnimationFrame(() => {
-        const el = textareaRef.current;
-        if (!el) return;
+      scheduleCaretUpdate(nextValue, nextValue, (el) => {
         el.focus();
         el.setSelectionRange(nextCaret, nextCaret);
       });
     },
-    [normalizeCollapsedRange, setMessageValue, syncCollapsedCaret, textareaRef],
+    [
+      normalizeCollapsedRange,
+      setMessageValue,
+      syncCollapsedCaret,
+      scheduleCaretUpdate,
+    ],
   );
 
   const replaceCollapsedRange = React.useCallback(
@@ -508,6 +623,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
   const handleTextareaSelect = React.useCallback(() => {
     const textarea = textareaRef.current;
     if (textarea) {
+      if (textarea.selectionStart !== textarea.selectionEnd) cancelCaretUpdate();
       lastDisplaySelectionRef.current = {
         start: textarea.selectionStart ?? 0,
         end: textarea.selectionEnd ?? textarea.selectionStart ?? 0,
@@ -537,6 +653,12 @@ export function useComposerInput(deps: UseComposerInputDeps) {
       if (selectionTouchesLabel && fromPointer && caretInsideLabel) {
         pendingCaretRef.current = meta.rangeEnd;
         expandLargeMessage({ force: true });
+        scheduleCaretUpdate(message, message, (el) => {
+          const caret = Math.min(meta.rangeEnd, el.value.length);
+          pendingCaretRef.current = null;
+          el.focus();
+          el.setSelectionRange(caret, caret);
+        });
         return;
       }
       const prefer =
@@ -561,6 +683,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     }
   }, [
     textareaRef,
+    cancelCaretUpdate,
     isMessageCollapsed,
     collapsedRange,
     form.values.message,
@@ -569,24 +692,31 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     expandLargeMessage,
     getMessageCaretFromDisplay,
     syncCollapsedCaret,
+    scheduleCaretUpdate,
     tabMentionsEnabled,
     handleTextChange,
   ]);
 
   return {
     form,
+    getSetupInputRevision,
     messageRevision,
     promptAssistMutation,
     beginPromptAssistReset,
+    restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
+    captureDraftOwnership,
     typing,
     // Message value helpers
     setMessageValue,
     restoreMessageValue,
     messageDisplayValue,
+    attachTextarea,
     collapsedDisplayMeta,
     textAreaFocus,
+    captureCompletionGuard,
+    captureStopGuard,
     // Collapsed editing
     syncCollapsedCaret,
     commitCollapsedEdit,
@@ -604,6 +734,17 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     onComposerRenderProfile,
     wrapComposerProfile,
     // Draft persistence
+    retainCurrentDraft: composerText.retainCurrentDraft,
+    creationRecovery: composerText.creationRecovery,
+    reviewCreatedChat: composerText.reviewCreatedChat,
+    copyCreationText: composerText.copyCreationText,
+    listRetainedDrafts: composerText.listRetainedDrafts,
+    copyRetainedDraft: composerText.copyRetainedDraft,
     draftSaved,
+    draftReady,
+    draftOwnerVerificationState: composerText.draftOwnerVerificationState,
+    retryDraftOwnerVerification: composerText.retryDraftOwnerVerification,
+    draftOwnerKey: composerText.draftOwnerKey,
+    isDraftOwnerCurrent: composerText.isDraftOwnerCurrent,
   };
 }

@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -22,14 +23,20 @@ try:
     from pydantic import model_validator  # type: ignore
 except ImportError:  # pragma: no cover - fallback for older environments
     model_validator = None  # type: ignore
-import contextlib
 
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequirePermission, RequireRole, User
+
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
+    User,
+    get_auth_principal,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
-
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -49,13 +56,14 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_user_tier,
     set_user_tier,
 )
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 
 router = APIRouter()
 
 MAX_CACHED_JOB_MANAGER_INSTANCES = 4
 _job_manager_cache: LRUCache = LRUCache(maxsize=MAX_CACHED_JOB_MANAGER_INSTANCES)
 _job_manager_lock = threading.Lock()
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 _ADMIN_DEPS = [
     Depends(RequireRole("admin")),
@@ -143,9 +151,7 @@ def _decode_audio_jobs_cursor(cursor: str) -> tuple[datetime, int]:
     if not cursor:
         raise ValueError("empty cursor")
     try:
-        padding = "=" * (-len(cursor) % 4)
-        raw = base64.urlsafe_b64decode((cursor + padding).encode("ascii")).decode("utf-8")
-        payload = json.loads(raw)
+        payload = json.loads(decode_opaque_cursor_segment(cursor))
         if int(payload.get("v", 0)) != _AUDIO_JOBS_CURSOR_VERSION:
             raise ValueError("unsupported cursor version")
         created_at = str(payload["created_at"])
@@ -204,8 +210,16 @@ class SubmitAudioJobRequest(BaseModel):
         description="Optional hotwords to guide transcription (CSV/JSON string or list). Primarily used by VibeVoice-ASR.",
     )
     perform_chunking: bool = Field(True, description="Whether to chunk the transcript after STT")
-    perform_analysis: bool = Field(False, description="Whether to run LLM analysis after chunking")
-    api_name: str | None = Field(None, description="LLM provider key for analysis stage")
+    perform_analysis: bool = Field(
+        False, description="Whether to run LLM analysis on the transcript (after chunking, when chunking is on)"
+    )
+    api_name: str | None = Field(
+        None,
+        description=(
+            "Provider for the analysis stage. Without it, analysis is skipped even when perform_analysis is true, "
+            "and the job records analysis_skipped."
+        ),
+    )
 
     if model_validator is not None:
         @model_validator(mode="before")
@@ -292,6 +306,8 @@ async def submit_audio_job(
             job_type=job_type,
             payload=payload,
             owner_user_id=str(current_user.id),
+            # Every stage of this pipeline shares it, so DELETE /jobs/{job_id} can find and cancel them all.
+            batch_group=f"audio-pipeline:{uuid.uuid4().hex}",
             priority=5,
             max_retries=3,
             request_id=rid,
@@ -363,6 +379,65 @@ async def get_audio_job(
             f"Failed to fetch job: job_id={job_id}, user_id={getattr(current_user, 'id', None)}"
         )
         raise HTTPException(status_code=500, detail="Failed to fetch job") from None
+
+
+# The audio pipeline's stages. Other jobs in the audio domain, such as long-form TTS, are not cancelled here.
+_PIPELINE_JOB_TYPES = frozenset(
+    {"audio_download", "audio_convert", "audio_transcribe", "audio_chunk", "audio_analyze", "audio_store"}
+)
+
+
+class CancelAudioJobResponse(BaseModel):
+    job_id: int
+    cancelled: int = Field(..., description="How many queued or running stages were cancelled")
+
+
+@router.delete("/jobs/{job_id}", response_model=CancelAudioJobResponse, summary="Cancel an audio job's pipeline")
+async def cancel_audio_job(
+    job_id: int,
+    current_user: Annotated[User, Depends(get_request_user)],
+    jm: Annotated[JobManager, Depends(get_job_manager)],
+    principal: Annotated[AuthPrincipal, Depends(get_auth_principal)],
+):
+    """
+    Cancel every queued or running stage of the pipeline this job belongs to (owner or admin).
+
+    Pass the id that /jobs/submit returned, or any stage's id. A stage that is running finishes its current
+    step, and nothing after it runs. Other audio jobs, such as long-form TTS, are not handled here (404).
+    """
+    try:
+        job = jm.get_job(int(job_id))
+        if not job or str(job.get("domain") or "") != "audio" or job.get("job_type") not in _PIPELINE_JOB_TYPES:
+            raise HTTPException(status_code=404, detail="Job not found")
+        owner = str(job.get("owner_user_id") or "")
+        if not (_principal_has_admin_claims(principal) or owner == str(current_user.id)):
+            raise HTTPException(status_code=403, detail="Not authorized for this job")
+        group = job.get("batch_group")
+        cancelled = 0
+        # A stage can hand off between a pass's list and its cancels; the next pass finds the stage it queued.
+        # A pipeline has six stages, so six passes are enough.
+        for attempt in range(6):
+            stages = (
+                jm.list_jobs(domain="audio", owner_user_id=owner, batch_group=group, limit=50)
+                if group
+                else [jm.get_job(int(job_id)) or {}]
+            )
+            active = [
+                stage
+                for stage in stages
+                if stage.get("status") in {"queued", "processing"} and stage.get("job_type") in _PIPELINE_JOB_TYPES
+            ]
+            if not active:
+                if attempt == 0:
+                    raise HTTPException(status_code=400, detail="Nothing to cancel: the pipeline has finished")
+                break
+            cancelled += sum(1 for stage in active if jm.cancel_job(int(stage["id"]), reason="pipeline_cancelled"))
+        return CancelAudioJobResponse(job_id=int(job_id), cancelled=cancelled)
+    except HTTPException:
+        raise
+    except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS:
+        logger.exception(f"Failed to cancel job: job_id={job_id}")
+        raise HTTPException(status_code=500, detail="Failed to cancel job") from None
 
 
 @router.get(
@@ -451,10 +526,17 @@ async def stream_audio_job_progress(
                 yield ln
         finally:
             if not prod_task.done():
-                with contextlib.suppress(_AUDIO_JOBS_NONCRITICAL_EXCEPTIONS):
-                    prod_task.cancel()
-                with contextlib.suppress(_AUDIO_JOBS_NONCRITICAL_EXCEPTIONS):
+                prod_task.cancel()
+                try:
                     await prod_task
+                except asyncio.CancelledError:
+                    # The producer's own cancellation is expected; only propagate
+                    # when this generator's task is itself being cancelled.
+                    current = asyncio.current_task()
+                    if current is not None and current.cancelling():
+                        raise
+                except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS:
+                    pass
 
     sse_headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     return StreamingResponse(_gen(), media_type="text/event-stream", headers=sse_headers)
@@ -664,7 +746,8 @@ async def owner_processing_summary(
             limit = None
         else:
             try:
-                limit = int(limits.get("concurrent_jobs") or 0)
+                raw_limit = limits.get("concurrent_jobs")
+                limit = None if raw_limit is None else int(raw_limit)
             except (ValueError, TypeError) as e:
                 get_ps_logger(
                     request_id=rid,
@@ -697,7 +780,8 @@ class SetUserTierRequest(BaseModel):
 @router.get(
     "/jobs/admin/tiers/{user_id}",
     response_model=UserTierResponse,
-    summary="Get user's audio tier (admin)",
+    summary="Get user's audio tier (admin) (deprecated: the tier no longer affects any limit; set limits.audio_* instead)",
+    deprecated=True,
     dependencies=_ADMIN_DEPS,
 )
 async def get_user_tier_admin(user_id: int):
@@ -714,7 +798,8 @@ async def get_user_tier_admin(user_id: int):
 @router.put(
     "/jobs/admin/tiers/{user_id}",
     response_model=UserTierResponse,
-    summary="Set user's audio tier (admin)",
+    summary="Set user's audio tier (admin) (deprecated: the tier no longer affects any limit; set limits.audio_* instead)",
+    deprecated=True,
     dependencies=_ADMIN_DEPS,
 )
 async def set_user_tier_admin(user_id: int, req: SetUserTierRequest):

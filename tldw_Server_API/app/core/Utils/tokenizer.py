@@ -13,6 +13,8 @@ Configuration via settings (dict-like):
 from math import ceil
 from typing import Optional
 
+from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
+
 try:
     # settings is dict-like per project patterns
     from tldw_Server_API.app.core.config import settings  # type: ignore
@@ -46,3 +48,22 @@ def count_tokens(text: Optional[str], strategy: Optional[str] = None) -> int:
 
     # default: whitespace
     return len(text.split())
+
+
+def redact_data_uris(text: str) -> str:
+    """Redact data:image payloads: the chat path's one redactor, for fingerprints and estimates."""
+    return DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)
+
+
+def estimate_segment_tokens(text: str) -> int:
+    """The chat path's one prompt-size estimate: data:image payloads redacted, 4 chars/token rounded up.
+
+    Rate limits, quota and billing reservations, queue admission, the prompt-cost guardrail,
+    the post-call stream estimates and every recorded provider call's estimate row
+    (usage_accounting) all use it (TASK-13843). Rounded up because every one of them is
+    safer over than under.
+    """
+    if not text:
+        return 0
+    sanitized = redact_data_uris(text)
+    return max(0, (len(sanitized) + 3) // 4)

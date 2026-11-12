@@ -232,4 +232,43 @@ describe("useUpdateDeckMutation", () => {
       expected_version: 2
     })
   })
+
+  it("binds scoped deck updates without putting the response into unscoped caches", async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const existing = makeDeck({ name: "Other current account" })
+    client.setQueryData(["flashcards:decks", {}], [existing])
+    const controller = new AbortController()
+    const requestOptions = { signal: controller.signal, requestScope: {
+      config: { serverUrl: "https://source.test", authMode: "multi-user" as const }, userId: 1
+    } }
+    const update = { name: "Private captured name", expected_version: 2 }
+    vi.mocked(updateDeck).mockResolvedValue(makeDeck({ name: update.name, version: 3 }))
+    const { result } = renderHook(() => useUpdateDeckMutation(), { wrapper: buildWrapper(client) })
+    await act(async () => { await result.current.mutateAsync({ deckId: 7, update, requestOptions }) })
+    expect(updateDeck).toHaveBeenCalledWith(7, update, requestOptions)
+    expect(client.getQueryData(["flashcards:decks", {}])).toEqual([existing])
+    client.clear()
+  })
+
+  it("rejects a scoped deck result that retires before its acknowledgement", async () => {
+    const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } })
+    const existing = makeDeck({ name: "Next account" })
+    client.setQueryData(["flashcards:decks", {}], [existing])
+    const controller = new AbortController()
+    vi.mocked(updateDeck).mockImplementation(async () => {
+      controller.abort()
+      return makeDeck({ name: "Retired private result", version: 3 })
+    })
+    const { result } = renderHook(() => useUpdateDeckMutation(), { wrapper: buildWrapper(client) })
+    await act(async () => {
+      await expect(result.current.mutateAsync({
+        deckId: 7, update: { name: "Private name", expected_version: 2 },
+        requestOptions: { signal: controller.signal, requestScope: {
+          config: { serverUrl: "https://source.test", authMode: "multi-user" }, userId: 1
+        } }
+      })).rejects.toMatchObject({ name: "AbortError" })
+    })
+    expect(client.getQueryData(["flashcards:decks", {}])).toEqual([existing])
+    client.clear()
+  })
 })

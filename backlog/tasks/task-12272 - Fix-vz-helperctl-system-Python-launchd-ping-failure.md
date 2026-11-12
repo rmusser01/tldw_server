@@ -34,7 +34,7 @@ The merged launchd-drill operator path works when run with the project Python, b
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-15: Reproduced the host failure during local launchd-drill validation: direct script invocation used macOS system Python 3.9 and helper_status failed with dataclass(slots=...) import incompatibility. Added a failing regression that blocks helper_client import and proves ping_helper_state can still ping a reachable helper socket through the operator CLI path.
 
 Implemented a narrow direct socket ping in vz-helperctl.py for default helper readiness checks. client_factory remains available for tests. Verified focused regression, launchd/ping helperctl slice, full helperctl tests, direct launchd-drill with the documented script invocation, git diff --check, and Bandit. No docs change was needed because direct script invocation now works without requiring project Python.
@@ -44,7 +44,7 @@ Implemented a narrow direct socket ping in vz-helperctl.py for default helper re
 2026-05-15 review fix: Added _request_helper_ping docstring and stable-message regressions for empty response, invalid JSON, and missing helper socket. Normalized direct socket transport failures to macos_virtualization_helper_unavailable, empty responses to macos_virtualization_helper_empty_response, and decode/JSON failures to macos_virtualization_helper_invalid_json.
 
 Review-fix verification: focused review tests passed 3 passed; full helperctl pytest passed 129 passed, 1 skipped; direct launchd-drill --skip-smoke passed bootstrap/status/kickstart/helper_status/protocol/version/bootout; git diff --check passed; Bandit JSON at /tmp/bandit_vz_helperctl_python39_ping_review_fix.json reported errors=0 and results=0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

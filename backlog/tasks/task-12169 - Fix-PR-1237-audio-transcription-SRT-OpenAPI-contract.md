@@ -37,13 +37,13 @@ Resolve the PR #1237 review finding where the audio transcription 200-response d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification before implementation: focused pytest failed because generated OpenAPI lacked application/x-subrip and response_format=srt returned text/plain; charset=utf-8.
 
 Implementation: added application/x-subrip to the shared audio transcript response content map and changed response_format=srt responses to return application/x-subrip. Updated OpenAPI contract constants and SRT runtime test coverage.
 
 Verification: focused red run failed before implementation for missing application/x-subrip and text/plain SRT runtime response. Green checks: 73 related pytest tests passed, apps/packages/ui and apps/extension verify:openapi passed with existing reviewed exceptions, git diff --check passed, Bandit on audio_transcriptions.py reported zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

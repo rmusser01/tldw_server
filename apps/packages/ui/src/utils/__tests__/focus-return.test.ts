@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   focusFirstVisibleElement,
   normalizeFocusSelector,
+  scheduleFocusFirstVisibleElement,
 } from "../focus-return";
 
 describe("focus-return", () => {
@@ -47,3 +48,34 @@ describe("focus-return", () => {
     expect(normalizeFocusSelector(null)).toBeNull();
   });
 });
+
+it.each([true, false])(
+  "scheduled focus respects its original owner (current %s)",
+  (current) => {
+    document.body.innerHTML =
+      "<button data-return-target>Prompt picker</button><input data-new-focus />";
+    let runFrame!: () => void;
+    const frame = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        runFrame = () => callback(0);
+        return 1;
+      });
+    try {
+      const input =
+        document.querySelector<HTMLInputElement>("[data-new-focus]")!;
+      input.focus();
+      scheduleFocusFirstVisibleElement(
+        "[data-return-target]",
+        undefined,
+        () => current,
+      );
+      runFrame();
+      expect(document.activeElement).toBe(
+        current ? document.querySelector("[data-return-target]") : input,
+      );
+    } finally {
+      frame.mockRestore();
+    }
+  },
+);

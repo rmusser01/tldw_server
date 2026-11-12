@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from tldw_Server_API.app.api.v1.schemas.file_artifacts_schemas import FileExportInfo
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
@@ -174,6 +175,12 @@ class DataTableSummary(BaseModel):
     version: int | None = None
     source_count: int | None = None
 
+    @field_validator("created_at", "updated_at", "last_modified", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep native database datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
+
 
 class DataTablesListResponse(BaseModel):
     """Paginated response containing data table summaries."""
@@ -252,6 +259,12 @@ class DataTableJobStatus(BaseModel):
     result: dict[str, Any] | None
     error_message: str | None
     table_uuid: str | None = None
+
+    @field_validator("created_at", "started_at", "completed_at", "cancelled_at", mode="before")
+    @classmethod
+    def _serialize_timestamps(cls, value: Any) -> Any:
+        """Keep native Jobs datetimes compatible with the public string contract."""
+        return value.isoformat() if isinstance(value, datetime) else value
 
 
 class DataTableJobCancelResponse(BaseModel):

@@ -58,9 +58,10 @@ def test_worker_config_uses_safe_completion_timeout_fallback(
 async def test_default_runtime_uses_unified_audit_and_authoritative_share_repo(
     monkeypatch,
 ) -> None:
-    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps, DB_Deps
+    from tldw_Server_API.app.api.v1.API_Deps import DB_Deps
     from tldw_Server_API.app.core.AuthNZ import database
     from tldw_Server_API.app.core.AuthNZ.repos import shared_workspace_repo, users_repo
+    from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 
     pool = MagicMock(name="pool")
     share_repo = MagicMock(name="share_repo")
@@ -82,7 +83,7 @@ async def test_default_runtime_uses_unified_audit_and_authoritative_share_repo(
     )
     monkeypatch.setattr(users_repo, "AuthnzUsersRepo", users_repo_factory)
     monkeypatch.setattr(
-        ChaCha_Notes_DB_Deps,
+        chacha_db_provider,
         "get_chacha_db_for_owner",
         load_chacha,
     )

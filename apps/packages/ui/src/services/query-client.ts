@@ -1,4 +1,5 @@
-import { QueryClient } from "@tanstack/react-query"
+import { notifyManager, QueryClient } from "@tanstack/react-query"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 const RATE_LIMIT_PATTERN = /(429|rate limit|too many requests)/i
 const MAX_QUERY_RETRIES = 1
@@ -26,6 +27,24 @@ const buildQueryClient = (): QueryClient =>
 
 let singleton: QueryClient | null = null
 
+const stopWatchingReadinessAccount = watchChatAccountChanges(invalidated => {
+  if (!invalidated || !singleton) return
+  const client = singleton
+  const queries = client.getQueryCache().findAll({
+    predicate: ({ queryKey }) => queryKey.length === 1 && (
+      queryKey[0] === "playground:providersStatus" ||
+      queryKey[0] === "playground:chatModels"
+    )
+  })
+  // Reset now; start model reads after all account listeners finish.
+  notifyManager.batch(() => { for (const query of queries) query.reset() })
+  queueMicrotask(() => {
+    void client.refetchQueries({ type: "active", predicate: query => queries.includes(query) })
+  })
+})
+const queryClientHot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+queryClientHot?.dispose(stopWatchingReadinessAccount)
+
 export const getQueryClient = (): QueryClient => {
   if (!singleton) {
     singleton = buildQueryClient()
@@ -34,3 +53,14 @@ export const getQueryClient = (): QueryClient => {
 }
 
 export const createQueryClient = (): QueryClient => buildQueryClient()
+
+/** A held first page must retire before a write's finder refresh starts. */
+export const invalidateServerChatHistory = async (
+  queryClient: QueryClient,
+  isCurrent: () => boolean = () => true
+): Promise<void> => {
+  if (!isCurrent()) return;
+  const filters = { queryKey: ['serverChatHistory'] };
+  await queryClient.cancelQueries(filters);
+  if (isCurrent()) await queryClient.invalidateQueries(filters);
+};

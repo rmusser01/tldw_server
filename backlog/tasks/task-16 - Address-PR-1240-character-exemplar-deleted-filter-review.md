@@ -46,7 +46,7 @@ Fix the extracted CharacterStore character exemplar methods to use backend-aware
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added focused PostgreSQL regression coverage for the extracted exemplar read/list helpers in `test_chacha_character_store.py`.
 - Fixed `get_character_exemplar_by_id()` to use `_deleted_literal(False)` when `include_deleted` is false.
 - Fixed `list_character_exemplars()` to bind `_deleted_value(False)` instead of hardcoding SQLite `0`.
@@ -55,7 +55,7 @@ Fix the extracted CharacterStore character exemplar methods to use backend-aware
   - `python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_chacha_character_store.py -q` -> `21 passed`
   - `python -m bandit -r tldw_Server_API/app/core/DB_Management/chacha/character_store.py -f json -o /tmp/bandit_pr1240_character_store.json` -> `0 results, 0 errors`
   - `git diff --check` passed
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

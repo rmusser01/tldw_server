@@ -81,6 +81,24 @@ const JOB_LIMIT_CATEGORY: ErrorCategory = {
   suggestion: "Wait for active jobs to finish or cancel one, then try again.",
 }
 
+const DAILY_UPLOAD_LIMIT_CATEGORY: ErrorCategory = {
+  classification: "server",
+  retryable: true,
+  badgeLabel: "Daily upload limit",
+  badgeColor: JOB_LIMIT_CATEGORY.badgeColor,
+  userMessage: "This upload exceeds your remaining daily upload allowance.",
+  suggestion: "Ask your administrator to raise the limit, or wait for the daily allowance to reset, then retry.",
+}
+
+const RATE_LIMIT_CATEGORY: ErrorCategory = {
+  classification: "server",
+  retryable: false,
+  badgeLabel: "Rate limit",
+  badgeColor: JOB_LIMIT_CATEGORY.badgeColor,
+  userMessage: "The server is limiting requests.",
+  suggestion: "Wait before submitting another request.",
+}
+
 const TIMEOUT_CATEGORY: ErrorCategory = {
   classification: "timeout",
   retryable: true,
@@ -126,8 +144,16 @@ const PATTERN_TABLE: PatternEntry[] = [
     category: TIMEOUT_CATEGORY,
   },
   {
-    patterns: /\b429\b|too many requests|concurrent job limit|max(?:imum)? concurrent/i,
+    patterns: /daily ingestion size budget exceeded/i,
+    category: DAILY_UPLOAD_LIMIT_CATEGORY,
+  },
+  {
+    patterns: /concurrent job limit|max(?:imum)? concurrent/i,
     category: JOB_LIMIT_CATEGORY,
+  },
+  {
+    patterns: /\b429\b|too many requests/i,
+    category: RATE_LIMIT_CATEGORY,
   },
   {
     patterns: /^(?:HTTP 400:\s*)?tldw server not configured\.?$/i,
@@ -188,4 +214,20 @@ export function classifyError(error: string | undefined, data?: unknown): ErrorC
   }
 
   return UNKNOWN_CATEGORY
+}
+
+/**
+ * Sources whose extraction failed, as the server's safe hints (host plus the
+ * end of the path; never the query string), so users can tell which page failed.
+ */
+export function extractionFailureSources(data?: unknown): string[] {
+  const result = data && typeof data === "object" ? data as Record<string, unknown> : null
+  const payload = result?.result && typeof result.result === "object"
+    ? result.result as Record<string, unknown> : result
+  const failures = payload?.extraction_failures
+  if (!Array.isArray(failures)) return []
+  return failures.flatMap(failure => {
+    const source = failure && typeof failure === "object" ? (failure as Record<string, unknown>).source : null
+    return typeof source === "string" && source ? [source] : []
+  })
 }

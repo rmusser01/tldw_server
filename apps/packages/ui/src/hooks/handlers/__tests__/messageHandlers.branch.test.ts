@@ -1,18 +1,30 @@
-import i18n from "i18next"
-import ICUWithInterpolation from "@/i18n/icu-format"
-import enPlayground from "@/assets/locale/en/playground.json"
-import { finishForkOperation } from "@/db/dexie/fork-operations"
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
-const forks = vi.hoisted(() => ({ prepare: vi.fn(), commit: vi.fn() }))
-const nativeForks = vi.hoisted(() => ({prepare: vi.fn(), commit: vi.fn()}))
-vi.mock("@/services/chat-history-selection", () => ({prepareNativeFork: nativeForks.prepare, commitNativeFork: nativeForks.commit}))
-vi.mock("@/db/dexie/fork-operations", () => ({
-  prepareForkOperation: async (request: any, context: any) => ({...request, request, context, state: "prepared"}),
-  claimForkOperation: async (record: any) => ({record}),
-  recordForkCandidate: vi.fn(async () => {}), finishForkOperation: vi.fn(async () => {}), forkOperationResult: (record: any) => record.result
-}))
-const edits = vi.hoisted(() => ({ update: vi.fn() }))
-vi.mock("@/db/dexie/branch", () => ({
+import { QueryObserver } from "@tanstack/react-query"
+import i18n from 'i18next';
+import ICUWithInterpolation from '@/i18n/icu-format';
+import enPlayground from '@/assets/locale/en/playground.json';
+import { finishForkOperation, recordForkCandidate } from '@/db/dexie/fork-operations';
+import { createQueryClient, invalidateServerChatHistory } from '@/services/query-client';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+const forks = vi.hoisted(() => ({ prepare: vi.fn(), commit: vi.fn() }));
+const nativeForks = vi.hoisted(() => ({ prepare: vi.fn(), commit: vi.fn() }));
+vi.mock('@/services/chat-history-selection', () => ({
+  prepareNativeFork: nativeForks.prepare,
+  commitNativeFork: nativeForks.commit,
+}));
+vi.mock('@/db/dexie/fork-operations', () => ({
+  prepareForkOperation: async (request: any, context: any) => ({
+    ...request,
+    request,
+    context,
+    state: 'prepared',
+  }),
+  claimForkOperation: async (record: any) => ({ record }),
+  recordForkCandidate: vi.fn(async () => {}),
+  finishForkOperation: vi.fn(async () => {}),
+  forkOperationResult: (record: any) => record.result,
+}));
+const edits = vi.hoisted(() => ({ update: vi.fn() }));
+vi.mock('@/db/dexie/branch', () => ({
   prepareLocalFork: forks.prepare,
   commitLocalFork: forks.commit
 }))
@@ -49,6 +61,7 @@ const testController = () => {
     loadConversation: vi.fn(async ({ historyId }, _ref, loaded) => {
       state.owner = {
         kind: "local",
+        profile_id: "declared-local-profile",
         owner_key: "local",
         conversation_id: historyId
       }
@@ -209,6 +222,7 @@ it("waits for an exact child load receipt before displaying a committed child", 
     loadConversation: vi.fn(async (_target, _reference, loaded) => {
       state.owner = {
         kind: "local",
+        profile_id: "declared-local-profile",
         owner_key: "local",
         conversation_id: "child"
       }
@@ -220,7 +234,7 @@ it("waits for an exact child load receipt before displaying a committed child", 
   const options = setup({ historySelection: controller })
   await createBranchMessage(options)(request)
   expect(controller.loadConversation).toHaveBeenCalledWith(
-    { historyId: "child" },
+    { historyId: "child", isCurrent: expect.any(Function) },
     undefined,
     expect.any(Function)
   )
@@ -331,7 +345,255 @@ it("keeps same-owner loader failure feedback when the intended handoff retires t
   })
   expect(await createBranchMessage(options)(request)).toEqual(committed)
   expect(options.notification.warning).toHaveBeenCalledWith(
-    expect.objectContaining({ message: "Copy saved; opening failed" })
-  )
-  expect(forks.commit).toHaveBeenCalledOnce()
+    expect.objectContaining({ message: 'Copy saved; opening failed' })
+  );
+  expect(forks.commit).toHaveBeenCalledOnce();
+});
+
+const nativeFinderOptions = () => {
+  const account = new AbortController();
+  const requestScope = {
+    config: { serverUrl: 'https://native-copy.test', authMode: 'single-user' as const },
+    userId: null,
+  };
+  const native = {
+    request_scope: requestScope,
+    kind: 'native' as const,
+    owner_key: 'local',
+    conversation_id: 'source',
+    scope: { type: 'global' as const },
+    validate_lease: () => true,
+  };
+  return {
+    ...setup(),
+    retireAccount: () => account.abort(),
+    serverChatId: 'source',
+    historyId: null,
+    historySelection: {
+      ...testController(),
+      draftAccount: {
+        requestScope,
+        isCurrent: () => !account.signal.aborted,
+        retryVerification: vi.fn(),
+      },
+      getCurrent: () => ({ owner: native }),
+      refreshForkOperations: vi.fn(),
+      loadConversation: vi.fn(async () => true),
+    },
+    onServerChatMutated: vi.fn<(isCurrent: () => boolean) => Promise<void>>(async () => {}),
+  };
+};
+const nativeFinderResult = {
+  state: 'legacy_completed' as const,
+  operation_id: 'op',
+  owner_key: 'local',
+  child_id: 'child',
+};
+const acknowledgeNativeChild = (result = nativeFinderResult) => {
+  nativeForks.prepare.mockResolvedValue({ request });
+  nativeForks.commit.mockImplementation(async (_prepared, candidate) => {
+    await candidate('child');
+    return result;
+  });
+};
+
+describe('native Copy acknowledged finder refresh', () => {
+  it('refreshes the acknowledged child before its fallible recovery write', async () => {
+    const options = nativeFinderOptions();
+    acknowledgeNativeChild();
+    let notificationsAtRecord = -1;
+    vi.mocked(recordForkCandidate).mockImplementationOnce(async () => {
+      notificationsAtRecord = options.onServerChatMutated.mock.calls.length;
+      throw new Error('candidate storage unavailable');
+    });
+    await createBranchMessage(options)(request);
+    expect(notificationsAtRecord).toBe(1);
+    expect(nativeForks.commit).toHaveBeenCalledOnce();
+  });
+
+  it('refreshes copied rows before final recovery storage and preserves saved status on storage failure', async () => {
+    const options = nativeFinderOptions();
+    acknowledgeNativeChild();
+    let notificationsAtRecord = -1;
+    vi.mocked(finishForkOperation).mockImplementationOnce(async () => {
+      notificationsAtRecord = options.onServerChatMutated.mock.calls.length;
+      throw new Error('final storage unavailable');
+    });
+    expect(await createBranchMessage(options)(request)).toEqual(nativeFinderResult);
+    expect(notificationsAtRecord).toBe(2);
+    expect(options.notification.warning).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Copy saved; recovery record update failed' })
+    );
+    expect(options.historySelection.loadConversation).not.toHaveBeenCalled();
+  });
+
+  it('refreshes a known partial child without opening or calling the copy complete', async () => {
+    const options = nativeFinderOptions();
+    const partial = {
+      state: 'partial',
+      operation_id: 'op',
+      owner_key: 'local',
+      candidate_child_id: 'child',
+      code: 'reply acknowledgement lost',
+    };
+    nativeForks.prepare.mockResolvedValue({ request });
+    nativeForks.commit.mockImplementation(async (_prepared, candidate) => {
+      await candidate('child');
+      return partial;
+    });
+    expect(await createBranchMessage(options)(request)).toEqual(partial);
+    expect(options.onServerChatMutated).toHaveBeenCalledTimes(2);
+    expect(options.historySelection.loadConversation).not.toHaveBeenCalled();
+  });
+
+  it.each(['unknown', 'partial', 'legacy_completed'])(
+    'does not infer a mutation from an unobserved %s result',
+    async (state) => {
+      const options = nativeFinderOptions();
+      nativeForks.prepare.mockResolvedValue({ request });
+      nativeForks.commit.mockResolvedValue({
+        state,
+        operation_id: 'op',
+        owner_key: 'local',
+        child_id: 'child',
+        candidate_child_id: 'child',
+      });
+      await createBranchMessage(options)(request);
+      expect(options.onServerChatMutated).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['operation', 'owner', 'child'])(
+    'does not refresh a foreign final %s binding',
+    async (mismatch) => {
+      const options = nativeFinderOptions();
+      acknowledgeNativeChild({
+        ...nativeFinderResult,
+        ...(mismatch === 'operation'
+          ? { operation_id: 'other' }
+          : mismatch === 'owner'
+            ? { owner_key: 'other' }
+            : { child_id: 'other' }),
+      });
+      await createBranchMessage(options)(request);
+      expect(options.onServerChatMutated).toHaveBeenCalledOnce();
+    }
+  );
+
+  it('keeps the original account refresh after the source view is retired', async () => {
+    const options = nativeFinderOptions();
+    let current = true;
+    options.historySelection.getCurrent().owner.validate_lease = () => current;
+    nativeForks.prepare.mockResolvedValue({ request });
+    nativeForks.commit.mockImplementation(async (_prepared, candidate) => {
+      current = false;
+      await candidate('child');
+      return nativeFinderResult;
+    });
+    const pending = createBranchMessage({ ...options, captureViewFence: () => () => current })(
+      request
+    );
+    expect(await pending).toEqual(nativeFinderResult);
+    expect(options.onServerChatMutated).toHaveBeenCalledTimes(2);
+    expect(options.onServerChatMutated.mock.calls.every(([isCurrent]) => isCurrent())).toBe(true);
+    expect(options.historySelection.loadConversation).not.toHaveBeenCalled();
+  });
+
+  it('permanently retires original-account refresh on account ABA before creation acknowledgement', async () => {
+    const options = nativeFinderOptions();
+    nativeForks.prepare.mockResolvedValue({ request });
+    nativeForks.commit.mockImplementation(async (_prepared, candidate) => {
+      const original = options.historySelection.draftAccount;
+      options.retireAccount();
+      options.historySelection.draftAccount = { ...original, isCurrent: () => true };
+      await candidate('child');
+      return nativeFinderResult;
+    });
+    expect(await createBranchMessage(options)(request)).toEqual(nativeFinderResult);
+    expect(options.onServerChatMutated).not.toHaveBeenCalled();
+  });
+
+  it('keeps the original account predicate while the actual cache helper awaits cancellation', async () => {
+    const options = nativeFinderOptions();
+    acknowledgeNativeChild();
+    const client = createQueryClient();
+    const releases: (() => void)[] = [];
+    const cancel = vi.spyOn(client, 'cancelQueries').mockImplementation(() =>
+      new Promise<void>(resolve => { releases.push(resolve); })
+    );
+    const refresh = vi.spyOn(client, 'invalidateQueries');
+    options.onServerChatMutated.mockImplementation((isCurrent) =>
+      invalidateServerChatHistory(client, isCurrent)
+    );
+    const pending = createBranchMessage(options)(request);
+    expect(await pending).toEqual(nativeFinderResult);
+    await vi.waitFor(() => expect(cancel).toHaveBeenCalledTimes(2));
+    options.retireAccount();
+    releases.forEach(release => release());
+    await vi.waitFor(() => expect(options.onServerChatMutated.mock.calls.every(([isCurrent]) => !isCurrent())).toBe(true));
+    expect(refresh).not.toHaveBeenCalled();
+    expect(options.onServerChatMutated).toHaveBeenCalledTimes(2);
+    client.clear();
+  });
+
+  it('never converts a saved copy into failure when finder refresh rejects', async () => {
+    const options = nativeFinderOptions();
+    acknowledgeNativeChild();
+    options.onServerChatMutated.mockRejectedValue(new Error('finder unavailable'));
+    expect(await createBranchMessage(options)(request)).toEqual(nativeFinderResult);
+    expect(recordForkCandidate).toHaveBeenCalledOnce();
+    expect(options.notification.error).not.toHaveBeenCalled();
+    expect(options.notification.warning).not.toHaveBeenCalled();
+  });
+
+  it('does not refresh server finders for a genuine local copy', async () => {
+    const refresh = vi.fn();
+    expect(
+      await createBranchMessage({ ...setup(), onServerChatMutated: refresh })(request)
+    ).toEqual(committed);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+});
+
+it('refuses finder refresh from a different captured draft account', async () => {
+  const options = nativeFinderOptions();
+  options.historySelection.draftAccount.requestScope = {
+    config: { serverUrl: 'https://foreign.test', authMode: 'single-user' },
+    userId: null,
+  };
+  acknowledgeNativeChild();
+  expect(await createBranchMessage(options)(request)).toEqual(nativeFinderResult);
+  expect(options.onServerChatMutated).not.toHaveBeenCalled();
+});
+
+
+it.each(["creation", "completion"])("a held actual finder GET cannot delay Copy %s journaling or completion", async phase => {
+  const options = nativeFinderOptions()
+  acknowledgeNativeChild()
+  const client = createQueryClient()
+  const key = ["serverChatHistory", "copy-owner"]
+  client.setQueryData(key, ["old source"])
+  let release!: () => void
+  let requested = false
+  const observer = new QueryObserver(client, { queryKey: key, staleTime: Infinity,
+    queryFn: async () => { requested = true; await new Promise<void>(resolve => { release = resolve }); return ["source and copied child"] } })
+  const unsubscribe = observer.subscribe(() => {})
+  options.onServerChatMutated.mockImplementation(isCurrent => invalidateServerChatHistory(client, isCurrent))
+  if (phase === "completion") options.onServerChatMutated.mockImplementationOnce(async () => {})
+  let copied: typeof nativeFinderResult | undefined
+  const pending = createBranchMessage(options)(request).then(result => {
+    if (result.state === "legacy_completed") copied = result
+    return result
+  })
+  try {
+    await vi.waitFor(() => expect(requested).toBe(true))
+    await vi.waitFor(() => expect(copied).toEqual(nativeFinderResult))
+    expect(recordForkCandidate).toHaveBeenCalledOnce()
+    expect(finishForkOperation).toHaveBeenCalledOnce()
+  } finally {
+    unsubscribe()
+    release?.()
+    await pending
+    client.clear()
+  }
 })

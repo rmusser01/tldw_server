@@ -11,7 +11,7 @@ import {
   readdirSync,
   rmSync,
   writeFileSync,
-} from "node:fs"
+} from 'node:fs';
 import path from "node:path"
 import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
@@ -23,12 +23,13 @@ import {
   waitForHttpOk,
 } from "../onboarding-uat/processes.mjs"
 import { resolvePythonCommand } from "../onboarding-uat/run.mjs"
+import { buildCollectionCommand } from "../list-release-tests.mjs"
 import { inventoryProjects } from "./inventory-api-mocks.mjs"
 import { buildLiveTierBackendEnv, buildLiveTierProfile } from "./profile.mjs"
 import {
   assertProjectAccounting,
   collectSkippedTests,
-  parseListOutput,
+  collectPlaywrightCases,
   renderMarkdownReport,
   summarizePlaywrightReport,
 } from "./report.mjs"
@@ -36,7 +37,7 @@ import {
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 const frontendRootDefault = path.resolve(moduleDir, "../..")
 const repoRootDefault = path.resolve(frontendRootDefault, "../..")
-const validProjects = new Set(["tier-1", "tier-2", "tier-3"])
+const validProjects = new Set(["tier-1", "tier-2", "tier-3", "ux-regression", "notes-studio"])
 
 function runIdNow() {
   return new Date().toISOString().replace(/[:.]/g, "-")
@@ -78,7 +79,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
   }
 
   if (!options.projects.length || options.projects.some((project) => !validProjects.has(project))) {
-    throw new Error("--projects entries must be tier-1, tier-2, or tier-3")
+    throw new Error("--projects entries must be tier-1, tier-2, tier-3, ux-regression, or notes-studio")
   }
   if (options.runId && !/^[A-Za-z0-9._-]+$/.test(options.runId)) {
     throw new Error("--run-id may contain only letters, numbers, dots, underscores, and hyphens")
@@ -90,7 +91,7 @@ export function formatUsage() {
   return [
     "Usage: bun run uat:live-tiers -- [options]",
     "",
-    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run.",
+    "  --projects=tier-1,tier-2,tier-3  Complete projects to list and run (also: ux-regression, notes-studio).",
     "  --workers=1                       Playwright worker count.",
     "  --list-only                       List and inventory without executing tests.",
     "  --grep=<pattern>                  Non-certifying bounded smoke selection.",
@@ -100,18 +101,10 @@ export function formatUsage() {
   ].join("\n")
 }
 
-export function isCertificationRun(options) {
-  const certificationProjects = ["tier-1", "tier-2", "tier-3"]
-  const selectedProjects = new Set(options.projects ?? [])
-  const hasCompleteProjectSet =
-    selectedProjects.size === certificationProjects.length &&
-    certificationProjects.every((project) => selectedProjects.has(project))
-
-  return !options.listOnly &&
-    !options.grep &&
-    options.failOnSkip &&
-    options.workers === 1 &&
-    hasCompleteProjectSet
+export function isCertificationRun() {
+  // This runner uses Next dev, a mutable checkout, SQLite single-user and
+  // controlled inference. Even a complete run is diagnostic evidence only.
+  return false
 }
 
 function safeEnv(baseEnv, keys) {
@@ -126,6 +119,42 @@ function withPythonPath(env, value) {
 
 function playwrightProjectArgs(projects) {
   return projects.map((project) => `--project=${project}`)
+}
+
+const baseEnvKeys = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "PYTHONPATH", "VIRTUAL_ENV"]
+
+/** Where the ux-regression side-panel specs find the unpacked Chrome extension. */
+export const EXTENSION_DIR_ENV = "TLDW_UXR_EXTENSION_DIR"
+
+/**
+ * The ux-regression project's side-panel specs load the built browser
+ * extension. A run that includes the project builds it first (production
+ * profile, as the extension's own CI does). Setting TLDW_UXR_EXTENSION_DIR to
+ * an existing build skips that step for local iteration; the specs still fail,
+ * never skip, if the directory holds no usable build.
+ *
+ * @returns {{ dir: string, command: { name: string, command: string, args: string[], cwd: string, env: Record<string, string> } | null } | null}
+ */
+export function resolveExtensionBuild({
+  frontendRoot = frontendRootDefault,
+  projects,
+  baseEnv = process.env,
+}) {
+  if (!projects.includes("ux-regression")) return null
+  const extensionRoot = path.resolve(frontendRoot, "../extension")
+  const prebuilt = baseEnv[EXTENSION_DIR_ENV]
+  if (prebuilt) return { dir: path.resolve(prebuilt), command: null }
+  return {
+    dir: path.join(extensionRoot, ".output/chrome-mv3"),
+    command: {
+      name: "extension-build",
+      command: "bun",
+      args: ["run", "build:chrome:prod"],
+      cwd: extensionRoot,
+      // Rollup's production bundle exceeds Node's default heap during rendering.
+      env: { ...safeEnv(baseEnv, baseEnvKeys), NODE_OPTIONS: "--max-old-space-size=6144" },
+    },
+  }
 }
 
 export function buildCommands({
@@ -151,9 +180,11 @@ export function buildCommands({
   }
   const nextDistDir = `.next-live-tier-${runId}`
   const nextDistPath = path.join(frontendRoot, nextDistDir)
-  const baseKeys = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "PYTHONPATH", "VIRTUAL_ENV"]
+  const baseKeys = baseEnvKeys
+  const extension = resolveExtensionBuild({ frontendRoot, projects, baseEnv })
   const sharedFrontendEnv = {
     ...safeEnv(baseEnv, baseKeys),
+    ...(extension ? { [EXTENSION_DIR_ENV]: extension.dir } : {}),
     NEXT_PUBLIC_API_URL: backendUrl,
     NEXT_PUBLIC_API_VERSION: "v1",
     NEXT_PUBLIC_X_API_KEY: apiKey,
@@ -173,8 +204,10 @@ export function buildCommands({
   }
   const projectArgs = playwrightProjectArgs(projects)
   const jsonPath = path.join(artifactRoot, "playwright-results.json")
+  const listJsonPath = path.join(artifactRoot, "playwright-list.json")
   const runArgs = [
     "playwright", "test", ...projectArgs, `--workers=${workers}`, "--retries=0", "--reporter=line,json",
+    `--output=${path.join(artifactRoot, 'playwright-output')}`,
   ]
   const grepArgs = grep ? ["--grep", grep] : []
   runArgs.push(...grepArgs)
@@ -197,15 +230,15 @@ export function buildCommands({
       name: "auth-init",
       command: python,
       args: ["-m", "tldw_Server_API.app.core.AuthNZ.initialize", "--non-interactive"],
-      cwd: repoRoot,
-      env: backendEnv,
+      cwd: profile.runDir,
+      env: withPythonPath(backendEnv, repoRoot),
     },
     backend: {
       name: "backend",
       command: python,
       args: ["-m", "uvicorn", "tldw_Server_API.app.main:app", "--host", "127.0.0.1", "--port", String(ports.backend)],
-      cwd: repoRoot,
-      env: backendEnv,
+      cwd: profile.runDir,
+      env: withPythonPath(backendEnv, repoRoot),
     },
     frontend: {
       name: "frontend",
@@ -217,9 +250,9 @@ export function buildCommands({
     playwrightList: {
       name: "playwright-list",
       command: "bunx",
-      args: ["playwright", "test", "--list", ...projectArgs, ...grepArgs],
+      args: ["playwright", "test", "--list", "--reporter=json", ...projectArgs, ...grepArgs],
       cwd: frontendRoot,
-      env: sharedFrontendEnv,
+      env: { ...sharedFrontendEnv, PLAYWRIGHT_JSON_OUTPUT_NAME: listJsonPath },
     },
     playwrightRun: {
       name: "playwright-run",
@@ -229,6 +262,7 @@ export function buildCommands({
       env: { ...sharedFrontendEnv, PLAYWRIGHT_JSON_OUTPUT_NAME: jsonPath },
     },
     jsonPath,
+    listJsonPath,
     nextDistPath,
   }
 }
@@ -385,6 +419,18 @@ export function readPlaywrightReport(jsonPath, {
   return JSON.parse(read(jsonPath, "utf8"))
 }
 
+/** Retain a flushed partial report after teardown, while preserving the original abort reason. */
+export function readPlaywrightOutcome(jsonPath, { signal } = {}) {
+  let report = null
+  let error = null
+  try {
+    report = readPlaywrightReport(jsonPath)
+  } catch (caught) {
+    error = caught
+  }
+  return { report, error: signal?.aborted ? signal.reason : error }
+}
+
 export function assertServicesStopped(stopped) {
   if (!stopped) {
     throw new Error("One or more spawned live-tier services did not stop")
@@ -480,7 +526,10 @@ export function assertNoMutableRepoDatabasePaths(logText, repoRoot) {
 }
 
 export function assertOnlyLoopbackHttpRequests(logText) {
-  const allowedHosts = new Set(["127.0.0.1", "::1", "localhost"])
+  // sensitive-endpoint.invalid is the unresolvable placeholder the backend logs
+  // in place of a sensitive request's real URL (tldw_Server_API/app/core/http_client.py);
+  // it is never a real outbound request.
+  const allowedHosts = new Set(["127.0.0.1", "::1", "localhost", "sensitive-endpoint.invalid"])
   for (const line of String(logText).split(/\r?\n/)) {
     if (!/(?:url\.full|HTTP Request:)/.test(line)) continue
     for (const match of line.matchAll(/https?:\/\/[^\s"'<>]+/g)) {
@@ -524,11 +573,14 @@ export async function runLiveTierUat({
     return { status: "help" }
   }
 
+  if (options.listOnly) return listLiveTierCases({ options, frontendRoot, baseEnv, signal })
+
   const runId = options.runId ?? runIdNow()
   const artifactRoot = path.join(frontendRoot, "test-results/live-tier-uat", runId)
   const profileRoot = path.join(tmpdir(), `tldw-onboarding-uat-${runId}`)
   const nextDistPath = path.join(frontendRoot, `.next-live-tier-${runId}`)
   const logs = {
+    extensionBuild: path.join(artifactRoot, "extension-build.log"),
     mock: path.join(artifactRoot, "mock-openai.log"),
     backend: path.join(artifactRoot, "backend.log"),
     frontend: path.join(artifactRoot, "frontend.log"),
@@ -540,6 +592,9 @@ export async function runLiveTierUat({
   const inventoryPath = path.join(artifactRoot, "api-interception-inventory.json")
   const processes = []
   const health = { before: false, after: false, stopped: false }
+  const startedCommit = commitHash(repoRoot)
+  let registeredCases = []
+  let playwrightReport = null
   let listed = {}
   let results = {}
   let inventory = []
@@ -555,9 +610,19 @@ export async function runLiveTierUat({
   try {
     assertFreshRunTargets([artifactRoot, profileRoot, nextDistPath])
     ownsGeneratedTargets = true
-    ports = await reservePorts(["backend", "web", "mock"])
     mkdirSync(artifactRoot, { recursive: true })
     ownsArtifactRoot = true
+    // Build before reserving ports, so a slow build cannot outlive the
+    // reservation and a broken one fails before any service starts.
+    const extensionBuild = resolveExtensionBuild({ frontendRoot, projects: options.projects, baseEnv })?.command
+    if (extensionBuild) {
+      const build = await runCommand(extensionBuild, logs.extensionBuild, { signal })
+      signal?.throwIfAborted()
+      if (build.code !== 0) {
+        throw new Error(`Extension build failed with exit code ${build.code}; see ${logs.extensionBuild}`)
+      }
+    }
+    ports = await reservePorts(["backend", "web", "mock"])
     const pythonCommand = resolvePythonCommand({ repoRoot, baseEnv })
     profile = buildLiveTierProfile({
       repoRoot,
@@ -604,7 +669,8 @@ export async function runLiveTierUat({
     const listResult = await runCommand(commands.playwrightList, logs.list, { signal })
     signal?.throwIfAborted()
     if (listResult.code !== 0) throw new Error(`Playwright list failed with exit code ${listResult.code}`)
-    listed = parseListOutput(listResult.output)
+    registeredCases = collectPlaywrightCases(readPlaywrightReport(commands.listJsonPath))
+    listed = countRegisteredCases(registeredCases)
     for (const project of options.projects) {
       if (!listed[project]) throw new Error(`Playwright listed no tests for ${project}`)
     }
@@ -612,28 +678,29 @@ export async function runLiveTierUat({
     inventory = inventoryProjects(frontendRoot, options.projects)
     writeFileSync(inventoryPath, `${JSON.stringify(inventory, null, 2)}\n`, "utf8")
 
-    if (options.listOnly) {
-      status = "listed"
-    } else {
-      const testResult = await runCommand(commands.playwrightRun, logs.run, { signal })
-      signal?.throwIfAborted()
-      const playwrightReport = readPlaywrightReport(commands.jsonPath)
+    const testResult = await runCommand(commands.playwrightRun, logs.run, { signal })
+    const outcome = readPlaywrightOutcome(commands.jsonPath, { signal })
+    playwrightReport = outcome.report
+    if (playwrightReport) {
       results = summarizePlaywrightReport(playwrightReport)
       skippedTests = collectSkippedTests(playwrightReport)
-      assertProjectAccounting({
-        projects: options.projects,
-        listed,
-        results,
-        allowSkips: !options.failOnSkip,
-      })
-      if (testResult.code !== 0) {
-        status = "failed"
-      } else if (options.failOnSkip && skippedTests.length) {
-        status = "failed"
-        runnerError = `Strict live-tier UAT rejected ${skippedTests.length} skipped test(s)`
-      } else {
-        status = "passed"
-      }
+    }
+    if (outcome.error) throw outcome.error
+    assertProjectAccounting({
+      projects: options.projects,
+      listed,
+      results,
+      allowSkips: !options.failOnSkip,
+      registeredCases,
+      report: playwrightReport,
+    })
+    if (testResult.code !== 0) {
+      status = "failed"
+    } else if (options.failOnSkip && skippedTests.length) {
+      status = "failed"
+      runnerError = `Strict live-tier UAT rejected ${skippedTests.length} skipped test(s)`
+    } else {
+      status = "passed"
     }
 
     await waitForHttpOk(`${commands.urls.backend}/api/v1/health`, {
@@ -705,13 +772,14 @@ export async function runLiveTierUat({
       }
       const report = renderMarkdownReport({
         runId,
-        commit: commitHash(repoRoot),
+        commit: startedCommit,
         listed,
         results,
         inventory,
         health,
         artifacts,
-        certification: isCertificationRun(options),
+        certification: isCertificationRun(),
+        report: playwrightReport,
         skippedTests,
         error: runnerError,
       })
@@ -721,6 +789,45 @@ export async function runLiveTierUat({
   }
 
   return { status, runId, ports, listed, results, skippedTests, inventory, health, artifactRoot, reportPath, summaryPath, error: runnerError }
+}
+
+function countRegisteredCases(cases) {
+  const listed = {}
+  for (const entry of cases) listed[entry.project] = (listed[entry.project] ?? 0) + 1
+  return listed
+}
+
+async function listLiveTierCases({ options, frontendRoot, baseEnv, signal }) {
+  const runId = options.runId ?? runIdNow()
+  const artifactRoot = path.join(frontendRoot, "test-results/live-tier-uat", runId)
+  const jsonPath = path.join(artifactRoot, "playwright-list.json")
+  const logPath = path.join(artifactRoot, "playwright-list.log")
+  let listed = {}
+  let status = "failed"
+  let error = null
+  try {
+    assertFreshRunTargets([artifactRoot])
+    mkdirSync(artifactRoot, { recursive: true })
+    const command = buildCollectionCommand({ env: baseEnv })
+    command.cwd = frontendRoot
+    command.args[0] = path.join(frontendRoot, "node_modules/@playwright/test/cli.js")
+    command.args.push(...playwrightProjectArgs(options.projects))
+    if (options.grep) command.args.push("--grep", options.grep)
+    command.env.PLAYWRIGHT_JSON_OUTPUT_NAME = jsonPath
+    const result = await runCommand(command, logPath, { signal })
+    signal?.throwIfAborted()
+    if (result.code !== 0) throw new Error(`Playwright list failed with exit code ${result.code}`)
+    const report = readPlaywrightReport(jsonPath)
+    if (report.errors?.length) throw new Error("Playwright collection reported errors")
+    listed = countRegisteredCases(collectPlaywrightCases(report))
+    for (const project of options.projects) {
+      if (!listed[project]) throw new Error(`Playwright listed no tests for ${project}`)
+    }
+    status = "listed"
+  } catch (caught) {
+    error = caught?.message ?? String(caught)
+  }
+  return { status, runId, listed, ports: {}, artifactRoot, error }
 }
 
 const isEntrypoint = process.argv[1] === fileURLToPath(import.meta.url)

@@ -3,7 +3,8 @@ import {
   directRecipeRequestAuthority,
   hasRecipeExtensionRuntime
 } from "@/services/recipe-persistence-uncertainty"
-import { resolveDirectBrowserConfig as resolveDirectConfig } from "@/services/tldw/direct-browser-config"
+import { createDirectRuntime } from "@/services/background-proxy"
+import { captureDocumentGetSignal } from "./document-get-scope"
 import type {
   AllowedMethodFor,
   PathOrUrl,
@@ -55,7 +56,7 @@ const isSafeFallbackMethod = (method?: string): boolean => {
   )
 }
 
-const inFlightGetRequests = new Map<string, Promise<ApiSendResponse<unknown>>>()
+const inFlightGetRequests = new Map<string, { promise: Promise<ApiSendResponse<unknown>>; documentSignal?: AbortSignal }>()
 
 interface ApiSendOptions {
   coalesce?: boolean
@@ -106,32 +107,41 @@ export async function apiSend<
   // Client-local scheduling policy: never forwarded to a transport or server.
   options: ApiSendOptions = {}
 ): Promise<ApiSendResponse<T>> {
+  const documentSignal = browser?.runtime?.sendMessage && browser?.runtime?.id
+    ? undefined : captureDocumentGetSignal(payload.method)
+  documentSignal?.throwIfAborted()
   const coalescingKey =
     options.coalesce === false || options.readiness ? null : getCoalescingKey(payload)
   if (coalescingKey) {
     const existing = inFlightGetRequests.get(coalescingKey)
-    if (existing) return existing as Promise<ApiSendResponse<T>>
+    if (existing && !existing.documentSignal?.aborted) {
+      try { return await existing.promise as ApiSendResponse<T> }
+      finally { documentSignal?.throwIfAborted() }
+    }
 
-    const pending = apiSendImpl<T, P, M>(payload, options).finally(() => {
-      if (inFlightGetRequests.get(coalescingKey) === pending) {
+    const pending = apiSendImpl<T, P, M>(payload, options, documentSignal).finally(() => {
+      if (inFlightGetRequests.get(coalescingKey)?.promise === pending) {
         inFlightGetRequests.delete(coalescingKey)
       }
     })
     inFlightGetRequests.set(
       coalescingKey,
-      pending as Promise<ApiSendResponse<unknown>>
+      { promise: pending as Promise<ApiSendResponse<unknown>>, documentSignal }
     )
-    return pending
+    try { return await pending }
+    finally { documentSignal?.throwIfAborted() }
   }
 
-  return apiSendImpl(payload, options)
+  const response = await apiSendImpl(payload, options, documentSignal)
+  documentSignal?.throwIfAborted()
+  return response
 }
 
 async function apiSendImpl<
   T = any,
   P extends PathOrUrl = PathOrUrl,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
->(payload: ApiSendPayload<P, M>, options: ApiSendOptions): Promise<ApiSendResponse<T>> {
+>(payload: ApiSendPayload<P, M>, options: ApiSendOptions, documentSignal?: AbortSignal): Promise<ApiSendResponse<T>> {
   const recipeExtension = Boolean(
     payload.recipePersistence && hasRecipeExtensionRuntime()
   )
@@ -219,20 +229,21 @@ async function apiSendImpl<
       },
       set: async <V,>(key: string, value: V) => {
         assertCurrent()
-        await storage.set(key, value)
+        const result = await storage.set(key, value)
         assertCurrent()
+        return result
       },
       remove: async (key: string) => {
         assertCurrent()
-        await storage.remove(key)
+        const result = await storage.remove(key)
         assertCurrent()
+        return result
       }
     }
-    const { createDirectRuntime } = await import("@/services/background-proxy")
     const runtime = createDirectRuntime(guardedStorage, {
       ...readiness.config,
       expectedUserId: deriveScopedUserId(readiness.config).replace(/^user:/, "")
-    })
+    }, undefined, undefined, documentSignal)
     return await tldwRequest(payload, {
       ...runtime,
       getConfig: async () => {
@@ -244,9 +255,9 @@ async function apiSendImpl<
     })
   }
   return await tldwRequest(payload, {
+    ...createDirectRuntime(storage, undefined, undefined, undefined, documentSignal),
     ...directRecipeRequestAuthority,
-    // IMPORTANT: getConfig must fetch fresh config each time it's called
-    // (not pre-fetch once), because the config may change or not be seeded yet.
-    getConfig: () => resolveDirectConfig(storage)
+    // Only the guarded readiness GET above opts into automatic refresh/replay.
+    refreshAuth: undefined
   })
 }

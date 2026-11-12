@@ -11,6 +11,7 @@ pytest_plugins = [
     "tldw_Server_API.tests._plugins.singleton_guard",
     # Opt-in `reset_embeddings_singletons` fixture (not autouse).
     "tldw_Server_API.tests._plugins.singleton_reset_fixtures",
+    "tldw_Server_API.tests._plugins.app_services_fixtures",
 ]
 
 from collections.abc import Callable
@@ -39,6 +40,10 @@ os.environ["MPLBACKEND"] = "Agg"
 # Full-app TestClient fixtures should not trigger CI embedding model preloads.
 # Tests that exercise model downloads can opt in explicitly.
 os.environ.setdefault("AUTO_DOWNLOAD_MODELS", "false")
+# Usage quotas are off by default in production (spec 2). The existing quota suites
+# test enforcement, so keep it on for the test session through the legacy spelling,
+# which tests can still flip with setenv. Stock-default tests clear both variables.
+os.environ.setdefault("LIMIT_ENFORCEMENT_ENABLED", "true")
 # Provide an explicit, deterministic API key for tests that rely on single-user/test-mode shortcuts.
 # Production code no longer assumes a default for SINGLE_USER_TEST_API_KEY.
 os.environ.setdefault("SINGLE_USER_TEST_API_KEY", "test-api-key-12345")
@@ -68,7 +73,7 @@ os.environ.setdefault("WORKFLOWS_WEBHOOK_ALLOWLIST", "*")
 os.environ.setdefault("WORKFLOWS_EGRESS_ALLOWED_PORTS", "*")
 # Disable AuthNZ scheduler functions proactively to avoid background threads
 try:
-    from tldw_Server_API.app.core.AuthNZ import scheduler as _auth_sched
+    from tldw_Server_API.app.services import authnz_scheduler as _auth_sched
     async def _noop():
         return None
     _auth_sched.start_authnz_scheduler = _noop  # type: ignore[assignment]
@@ -204,6 +209,9 @@ def _run_coro_sync_best_effort(coro):
     if loop is not None and not loop.is_closed():
         try:
             if loop.is_running():
+                from loguru import logger
+
+                logger.debug("_run_coro_sync_best_effort: loop is running; cleanup skipped")
                 return None
             return loop.run_until_complete(coro)
         except Exception:
@@ -303,12 +311,67 @@ def _restore_risky_env_and_logging():
         logging.getLogger(__name__).debug("system_log_buffer reset failed: %s", exc)
 
 
+@pytest.fixture(autouse=True)
+def _offline_provider_model_inventory(request, monkeypatch):
+    """Skip the live provider model check (TASK-13460) unless a test opts in.
+
+    Cloud generation now confirms the selected model against the provider's
+    live model list first. Most tests fake only the generation transport, so
+    that check would reach the network and fail closed. Tests of the check
+    itself mark ``provider_inventory`` and stub discovery.
+
+    Each test starts with empty inventory caches. An unmarked test that still
+    reaches discovery (a lazy import, a listing) hits a fetch that raises
+    instead of the network (review M5).
+    """
+    from tldw_Server_API.app.core.LLM_Calls import provider_model_inventory
+
+    provider_model_inventory._CACHE.clear()
+    provider_model_inventory._FAILED.clear()
+    if request.node.get_closest_marker("provider_inventory"):
+        return
+
+    def live_discovery(**_kwargs):
+        raise AssertionError("unmarked test reached live provider discovery")
+
+    monkeypatch.setattr(provider_model_inventory, "_http_fetch", live_discovery)
+    for name in (
+        "tldw_Server_API.app.core.LLM_Calls.gateway",
+        "tldw_Server_API.app.api.v1.endpoints.messages",
+    ):
+        module = sys.modules.get(name)
+        if module is not None and hasattr(module, "_validate_provider_model_selection"):
+            monkeypatch.setattr(module, "_validate_provider_model_selection", lambda _provider, _request, **_kw: None)
+
+
 @pytest.fixture()
 def auth_headers():
     from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 
     settings = get_settings()
     return {"X-API-KEY": settings.SINGLE_USER_API_KEY}
+
+
+@pytest.fixture(autouse=True)
+def _reset_usage_quota_resolver_cache():
+    """Clear the Usage quota resolver's per-user cache before each test.
+
+    `quota_resolver.user_quota` caches each user's effective ``limits.*``
+    values for 60s in a module-level dict (keyed by user id, not by test or
+    event loop). Any earlier test or request that reads a user's profile can
+    prime that cache, which then leaks into a later test still inside the
+    60s window and makes its resolver reads return stale data. This is cheap
+    insurance for every suite; test files that also exercise the resolver
+    directly may still keep their own local reset for clarity.
+    """
+    try:
+        from tldw_Server_API.app.core.Usage import quota_checks, quota_resolver
+
+        quota_resolver.invalidate_all()
+        quota_checks.reset_ledger_cache()
+    except Exception:
+        _ = None
+    yield
 
 
 @pytest.fixture(autouse=True)
@@ -322,14 +385,14 @@ def _restore_auth_env_and_singletons():
     This fixture restores a small set of high-impact environment keys to their
     baseline values and resets key singletons used by the auth/jobs stacks.
     """
+    from tldw_Server_API.app.core.Utils.app_services import app_services
+    from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
+
+    session_before = app_services().session_manager
+
     # Defensive pre-test reset: avoid stale singleton state inherited from
     # collection-time imports or prior tests.
-    try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-
-        reset_jwt_service()
-    except Exception:
-        _ = None
+    app_services().jwt_service = None
 
     yield
 
@@ -339,6 +402,11 @@ def _restore_auth_env_and_singletons():
         else:
             os.environ[key] = baseline_value
 
+    # A manager the test published is shut down; the slot goes back to what the test found.
+    _run_coro_sync_best_effort(close_app_service("session_manager", restore=session_before))
+    # Per-test lock: it never stays bound to a previous test's event loop.
+    app_services().session_manager_lock = asyncio.Lock()
+
     # Ensure subsequent tests rebuild Settings from the restored environment.
     try:
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -346,12 +414,7 @@ def _restore_auth_env_and_singletons():
         reset_settings()
     except Exception:
         _ = None
-    try:
-        from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
-
-        reset_jwt_service()
-    except Exception:
-        _ = None
+    app_services().jwt_service = None
 
     # Avoid leaking the process-wide jobs acquisition gate across tests.
     try:
@@ -388,16 +451,12 @@ def _restore_user_db_env_and_chacha_cache():
     except Exception:
         _ = None
 
-    # Drain ChaCha background tasks/futures before closing DB handles to avoid
-    # races where sqlite connections are closed during active executor queries.
+    # Close the ChaCha runtime (drains background tasks/futures before closing DB
+    # handles) and empty its slot, so the next test gets a fresh runtime.
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-            reset_chacha_shutdown_state,
-            shutdown_chacha_resources,
-        )
+        from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
 
-        _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
-        reset_chacha_shutdown_state()
+        _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
     except Exception:
         _ = None
 
@@ -463,12 +522,21 @@ def _log_lingering_threads():
         _ = None
 
 
+# Threads already reported as lingering. Python refuses to flip ``daemon`` on a
+# running thread, so without this every later test joined each of them again
+# (1s apiece, twice per test via two autouse fixtures); a few idle executor
+# workers turned that into seconds per test and pushed whole CI shards into the
+# job timeout.
+_KNOWN_LINGERING_THREADS: "weakref.WeakSet[threading.Thread]" = weakref.WeakSet()
+
+
 def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -> None:
     """Best-effort cleanup of lingering non-daemon threads during tests.
 
     Performs a first pass join with timeout for non-daemon threads and then logs
     any remaining threads with their stack frames before marking them as daemon
-    to avoid interpreter shutdown hangs.
+    to avoid interpreter shutdown hangs. A thread is joined and reported once;
+    later calls skip it.
     """
     try:
         import sys
@@ -476,7 +544,7 @@ def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -
         current = threading.current_thread()
         # First pass: try to join all non-daemon threads with a timeout
         for t in threading.enumerate():
-            if t is current or t.daemon:
+            if t is current or t.daemon or t in _KNOWN_LINGERING_THREADS:
                 continue
             try:
                 # Cancel timers so they don't keep the interpreter alive
@@ -491,8 +559,9 @@ def _cleanup_lingering_threads(log: logging.Logger, context: str = "teardown") -
 
         # Second pass: log any remaining threads and mark them daemon
         for t in threading.enumerate():
-            if t is current or t.daemon:
+            if t is current or t.daemon or t in _KNOWN_LINGERING_THREADS:
                 continue
+            _KNOWN_LINGERING_THREADS.add(t)
             try:
                 stack = sys._current_frames().get(t.ident)
             except Exception:
@@ -559,7 +628,13 @@ try:
     except Exception:
         _ = None
     # Enable deterministic test behaviors across subsystems
-    os.environ.setdefault("TEST_MODE", "1")
+    # security-required's "Security suites with TEST_MODE unset" step (TASK-13950.19) sets
+    # TLDW_UNSET_TEST_FLAGS=1 to run the suites without any of the three test-mode flags.
+    if os.getenv("TLDW_UNSET_TEST_FLAGS") == "1":
+        for _flag in ("TEST_MODE", "TESTING", "TLDW_TEST_MODE"):
+            os.environ.pop(_flag, None)
+    else:
+        os.environ.setdefault("TEST_MODE", "1")
     os.environ.setdefault("OTEL_SDK_DISABLED", "true")
     # Ensure Postgres helpers see consistent defaults immediately at import time.
     # Many PG tests call get_pg_env() at module import; set test user/password
@@ -731,10 +806,8 @@ def pytest_sessionfinish(session, exitstatus):  # pragma: no cover - diagnostics
         except Exception:
             _ = None
         try:
-            from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-                shutdown_chacha_resources,
-            )
-            _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
+            from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
+            _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
         except Exception:
             _ = None
         try:
@@ -858,15 +931,38 @@ def healthy_no_override_tts_credential_snapshot():
             llm_provider_overrides._OVERRIDE_CACHE_TTL_DISABLED_FOR_TESTS
         )
 
-    llm_provider_overrides.set_llm_provider_overrides_cache_for_tests({})
+    # Bound now: a test may patch this setter, and its monkeypatch can be undone after this teardown.
+    set_overrides_cache = llm_provider_overrides.set_llm_provider_overrides_cache_for_tests
+    set_overrides_cache({})
     try:
         yield
     finally:
-        llm_provider_overrides.set_llm_provider_overrides_cache_for_tests(
+        set_overrides_cache(
             original_overrides,
             healthy=original_healthy,
             ttl_enabled=not original_ttl_disabled,
         )
+
+
+@pytest.fixture(autouse=True)
+def _healthy_empty_llm_provider_override_store(request):
+    """Every test starts with the healthy, empty override store app startup gives production (TASK-13950.13).
+
+    Mark a test ``ambient_llm_provider_override_store`` to see the import-time (unloaded, unhealthy) store instead.
+    """
+    if request.node.get_closest_marker("ambient_llm_provider_override_store") is None:
+        request.getfixturevalue("healthy_no_override_tts_credential_snapshot")
+
+
+@pytest.fixture()
+def billing_repo_wired(monkeypatch):
+    """Simulate the hosted product: a billing repository is wired into SubscriptionService."""
+    from tldw_Server_API.app.core.Billing import subscription_service
+
+    async def _wired() -> bool:
+        return True
+
+    monkeypatch.setattr(subscription_service, "billing_repo_configured", _wired)
 
 
 class _TestUsageLogger:
@@ -885,7 +981,8 @@ def client_with_single_user(monkeypatch):
     Returns a tuple of (client, usage_logger) for tests that also need to inspect usage events.
     """
     # Ensure tests run in non-production behavior
-    os.environ.setdefault("TESTING", "true")
+    if os.getenv("TLDW_UNSET_TEST_FLAGS") != "1":
+        os.environ.setdefault("TESTING", "true")
 
     usage_logger = _TestUsageLogger()
 
@@ -1092,6 +1189,19 @@ def _shutdown_executors_and_evaluations_pool():
 
 
 @pytest.fixture(autouse=True)
+def _clear_reranker_model_cache():
+    """Reranker models are cached per process; tests stub the model classes, so start clean."""
+    def _clear() -> None:
+        mod = sys.modules.get("tldw_Server_API.app.core.RAG.rag_service.advanced_reranking")
+        if mod is not None:
+            mod.clear_reranker_model_cache()
+
+    _clear()
+    yield
+    _clear()
+
+
+@pytest.fixture(autouse=True)
 def _reset_workflow_scheduler():
     """Reset WorkflowScheduler singleton state between tests to avoid stale queues/active counts."""
     try:
@@ -1109,13 +1219,9 @@ def _reset_workflow_scheduler():
     # Ensure ChaCha executor threads are not reported as lingering non-daemon
     # workers by the per-test scheduler reset diagnostics.
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-            reset_chacha_shutdown_state,
-            shutdown_chacha_resources,
-        )
+        from tldw_Server_API.tests._plugins.app_services_fixtures import close_app_service
 
-        _run_coro_sync_best_effort(shutdown_chacha_resources(wait_timeout=5.0))
-        reset_chacha_shutdown_state()
+        _run_coro_sync_best_effort(close_app_service("chacha_runtime"))
     except Exception:
         _ = None
 
@@ -1185,3 +1291,24 @@ def bypass_api_limits(monkeypatch):
                 _ = None
 
     return _bypass
+
+
+_MAX_PARAM_ID_CHARS = 100
+
+
+def pytest_make_parametrize_id(config, val, argname):  # noqa: ANN001, ANN201 - pytest hook
+    """Keep huge string/bytes parameter values out of test ids.
+
+    pytest names a parametrized case after its value, so budget tests with MB
+    payloads produced MB-long test ids. --durations and failure reports print
+    the id, and a multi-megabyte log line stalled the CI runner's log processing
+    until the 60-minute job limit, discarding the log (core-security, 4 runs).
+    Long values get a short stable id; everything else keeps pytest's default.
+    """
+    if isinstance(val, (str, bytes)) and len(val) > _MAX_PARAM_ID_CHARS:
+        import hashlib
+
+        raw = val if isinstance(val, bytes) else val.encode("utf-8", "surrogatepass")
+        kind = "bytes" if isinstance(val, bytes) else "chars"
+        return f"{argname}-{len(val)}{kind}-{hashlib.sha256(raw).hexdigest()[:10]}"
+    return None

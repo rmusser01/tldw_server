@@ -43,13 +43,13 @@ Follow-up task for PR #1862 review feedback: add helper docstrings, avoid numeri
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PR #1862 review fixes in ChaChaNotes health handling. Added helper docstrings, default public redaction for affected_db, current-state health fields (last_init_success and consecutive_failures), stale last_failure clearing on successful init, locked cached-instance counting, and warm_startups exposure in the snapshot. Updated tests and ChaChaNotes recovery docs to reflect redacted public health payloads.
 
 Follow-up PR sweep after commit 9e3b43178 found additional CodeRabbit comments on TASK-429 traceability, helper docstring specificity, test isolation, and test assertion precision. Reopened this review-fix task to address those comments in the same PR.
 
 Second review-fix pass addressed CodeRabbit follow-up comments: added Docs/RELEASE_NOTES.md#unreleased and TASK-429 traceability, recorded reproducible Bandit command text, expanded helper docstrings, restored _CHACHA_HEALTH after the health sanitizer test, validated warm-up path user_id in test monkeypatches, and asserted reason_code/documentation metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -16,7 +16,7 @@ import {
   buildLiveTierBackendEnv,
   buildLiveTierProfile,
 } from "../live-tier-uat/profile.mjs"
-import { inventorySource } from "../live-tier-uat/inventory-api-mocks.mjs"
+import { inventoryProjects, inventorySource } from "../live-tier-uat/inventory-api-mocks.mjs"
 import { shouldInstallTitleSettingsStub } from "../../e2e/utils/helpers"
 import { shouldInstallSmokeApiStubs } from "../../e2e/smoke/smoke.setup"
 import {
@@ -29,12 +29,15 @@ import {
   assertFreshRunTargets,
   assertServicesStopped,
   buildCommands,
+  EXTENSION_DIR_ENV,
+  resolveExtensionBuild,
   assertNoMutableRepoDatabasePaths,
   assertOnlyLoopbackHttpRequests,
   isCertificationRun,
   installTerminationHandlers,
   parseArgs,
   readPlaywrightReport,
+  readPlaywrightOutcome,
   removeGeneratedPath,
   runCommand,
   runLiveTierUat,
@@ -252,8 +255,25 @@ describe("live Tier UAT reporting", () => {
     })
 
     expect(summary).toEqual({
-      "tier-1": { passed: 1, failed: 1, skipped: 0, interrupted: 0, elapsedMs: 23 },
-      "tier-2": { passed: 0, failed: 0, skipped: 1, interrupted: 1, elapsedMs: 3 },
+      "tier-1": { passed: 1, failed: 1, skipped: 0, interrupted: 0, expectedFailures: 0, elapsedMs: 23 },
+      "tier-2": { passed: 0, failed: 0, skipped: 1, interrupted: 1, expectedFailures: 0, elapsedMs: 3 },
+    })
+  })
+
+  it("counts test.fail() expected failures separately and an unexpected pass as a failure", () => {
+    const summary = summarizePlaywrightReport({
+      suites: [{
+        title: "suite",
+        specs: [
+          { title: "known defect", tests: [{ projectName: "ux-regression", status: "expected", expectedStatus: "failed", results: [{ status: "failed", duration: 7 }] }] },
+          { title: "fixed defect", tests: [{ projectName: "ux-regression", status: "unexpected", expectedStatus: "failed", results: [{ status: "passed", duration: 5 }] }] },
+          { title: "harness", tests: [{ projectName: "ux-regression", status: "expected", expectedStatus: "passed", results: [{ status: "passed", duration: 3 }] }] },
+        ],
+      }],
+    })
+
+    expect(summary).toEqual({
+      "ux-regression": { passed: 1, failed: 1, skipped: 0, interrupted: 0, expectedFailures: 1, elapsedMs: 15 },
     })
   })
 
@@ -283,14 +303,14 @@ describe("live Tier UAT reporting", () => {
       runId: "run-1",
       commit: "abc123",
       listed: { "tier-1": 2 },
-      results: { "tier-1": { passed: 2, failed: 0, skipped: 0, interrupted: 0, elapsedMs: 45 } },
+      results: { "tier-1": { passed: 2, failed: 0, skipped: 0, interrupted: 0, expectedFailures: 0, elapsedMs: 45 } },
       inventory: [{ project: "tier-1", kind: "intercepted", file: "one.spec.ts", line: 3, matcher: "**/api/v1/x", test: "mocked" }],
       health: { before: true, after: true },
       artifacts: { root: "/tmp/run-1" },
       skippedTests: [{ project: "tier-2", title: "skipped flow", reason: "no fixture" }],
     })
 
-    expect(markdown).toContain("| tier-1 | 2 | 2 | 0 | 0 | 1 | 1 |")
+    expect(markdown).toContain("| tier-1 | 2 | 2 | 0 | 0 | 0 | 1 | 1 |")
     expect(markdown).toContain("Health before tests: healthy")
     expect(markdown).toContain("`/tmp/run-1`")
     expect(markdown).toContain("skipped flow")
@@ -299,7 +319,7 @@ describe("live Tier UAT reporting", () => {
 })
 
 describe("live Tier UAT runner contract", () => {
-  it("accepts only Tier 1-3 projects and defaults to a serial complete run", () => {
+  it("accepts only supported projects and defaults to a serial complete run", () => {
     expect(parseArgs([])).toMatchObject({
       projects: ["tier-1", "tier-2", "tier-3"],
       workers: 1,
@@ -308,7 +328,8 @@ describe("live Tier UAT runner contract", () => {
       failOnSkip: true,
     })
     expect(parseArgs(["--allow-skips"]).failOnSkip).toBe(false)
-    expect(() => parseArgs(["--projects=tier-4"])).toThrow(/tier-1, tier-2, or tier-3/)
+    expect(() => parseArgs(["--projects=tier-4"])).toThrow(/tier-1, tier-2, tier-3, ux-regression, or notes-studio/)
+    expect(parseArgs(["--projects=ux-regression"]).projects).toEqual(["ux-regression"])
   })
 
   it("builds retry-free Playwright commands with offline fallback disabled", () => {
@@ -336,6 +357,10 @@ describe("live Tier UAT runner contract", () => {
       baseEnv: { NODE_ENV: "test", PATH: process.env.PATH },
     })
 
+    for (const command of [commands.authInit, commands.backend]) {
+      expect(command.cwd).toBe(profile.runDir)
+      expect(command.env.PYTHONPATH.split(path.delimiter)).toContain(repoRoot)
+    }
     expect(commands.playwrightList.args).toEqual(expect.arrayContaining([
       "test", "--list", "--project=tier-1", "--project=tier-2",
     ]))
@@ -371,6 +396,67 @@ describe("live Tier UAT runner contract", () => {
     expect(filteredCommands.playwrightRun.args).toEqual(expect.arrayContaining([
       "--grep", "Sources",
     ]))
+    expect(commands.playwrightRun.env).not.toHaveProperty(EXTENSION_DIR_ENV)
+  })
+
+  it("builds the browser extension only for runs that include ux-regression", () => {
+    const baseEnv = {
+      NODE_ENV: "test" as const, PATH: process.env.PATH, HOME: "/home/runner",
+      NODE_OPTIONS: "--require /tmp/untrusted-preload.js --max-old-space-size=1024",
+    }
+    const extensionRoot = path.resolve(frontendRoot, "../extension")
+    const builtDir = path.join(extensionRoot, ".output/chrome-mv3")
+
+    expect(resolveExtensionBuild({ frontendRoot, projects: ["tier-1", "tier-2"], baseEnv })).toBeNull()
+
+    const build = resolveExtensionBuild({ frontendRoot, projects: ["ux-regression"], baseEnv })
+    expect(build?.dir).toBe(builtDir)
+    expect(build?.command).toMatchObject({
+      name: "extension-build",
+      command: "bun",
+      args: ["run", "build:chrome:prod"],
+      cwd: extensionRoot,
+    })
+    expect(build?.command?.env).toEqual({
+      PATH: process.env.PATH, HOME: "/home/runner",
+      NODE_OPTIONS: "--max-old-space-size=6144",
+    })
+
+    // A prebuilt directory replaces the build step but is still handed to the specs.
+    const prebuilt = resolveExtensionBuild({
+      frontendRoot,
+      projects: ["ux-regression"],
+      baseEnv: { ...baseEnv, [EXTENSION_DIR_ENV]: "/tmp/prebuilt-extension" },
+    })
+    expect(prebuilt).toEqual({ dir: "/tmp/prebuilt-extension", command: null })
+
+    const commands = buildCommands({
+      repoRoot,
+      frontendRoot,
+      ports: { backend: 18180, web: 18181, mock: 18182 },
+      profile: {
+        repoRoot,
+        runDir: "/tmp/live-tier",
+        logsDir: "/tmp/live-tier/logs",
+        reportsDir: "/tmp/live-tier/reports",
+        configPath: "/tmp/live-tier/config.txt",
+        envPath: "/tmp/live-tier/.env",
+        usersDbPath: "/tmp/live-tier/users.db",
+        databaseDir: "/tmp/live-tier/Databases",
+        fixtureRoot: path.join(frontendRoot, "e2e/fixtures/media"),
+        acpWorkspaceRootBase: "/tmp/live-tier/acp-workspaces",
+        databasePaths: { evaluations: "/tmp/live-tier/evaluations.db" },
+      },
+      projects: ["ux-regression"],
+      workers: 1,
+      runId: "run-extension",
+      baseEnv,
+    })
+    expect(commands.playwrightRun.env[EXTENSION_DIR_ENV]).toBe(builtDir)
+    expect(commands.playwrightList.env[EXTENSION_DIR_ENV]).toBe(builtDir)
+    for (const runtime of [commands.frontend, commands.backend, commands.mockOpenai, commands.playwrightList, commands.playwrightRun]) {
+      expect(runtime.env).not.toHaveProperty("NODE_OPTIONS")
+    }
   })
 
   it("stops only registered process groups in reverse startup order", async () => {
@@ -502,6 +588,24 @@ describe("live Tier UAT runner contract", () => {
     }
   })
 
+  it("list-only never initializes an application profile or starts services", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "tldw-list-only-"))
+    const runId = `list-only-${process.pid}-${Date.now()}`
+    try {
+      const result = await runLiveTierUat({
+        options: { ...parseArgs(["--list-only"]), runId }, repoRoot: root,
+        frontendRoot: root, baseEnv: { PATH: process.env.PATH, NODE_ENV: "test" },
+      })
+      // This isolated tree has no Playwright installation; fail at collection,
+      // without attempting auth config, reserving ports or creating a runtime.
+      expect(result.error).toMatch(/Playwright list failed/)
+      expect(result.ports).toEqual({})
+      expect(existsSync(path.join(tmpdir(), `tldw-onboarding-uat-${runId}`))).toBe(false)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it("requires a Playwright JSON report instead of accepting missing evidence", () => {
     expect(() => readPlaywrightReport("/tmp/missing-playwright.json", {
       exists: () => false,
@@ -524,22 +628,18 @@ describe("live Tier UAT runner contract", () => {
         "tier-1": { passed: 0, failed: 1, skipped: 0, interrupted: 0, elapsedMs: 10 },
       },
     })).toThrow(/tier-1.*failed 1/i)
+
+    expect(() => assertProjectAccounting({
+      projects: ["ux-regression"],
+      listed: { "ux-regression": 2 },
+      results: {
+        "ux-regression": { passed: 1, failed: 0, skipped: 0, interrupted: 0, expectedFailures: 1, elapsedMs: 10 },
+      },
+    })).not.toThrow()
   })
 
-  it("labels only strict skip-failing complete runs as certification", () => {
-    const complete = {
-      listOnly: false,
-      grep: null,
-      failOnSkip: true,
-      projects: ["tier-1", "tier-2", "tier-3"],
-      workers: 1,
-    }
-
-    expect(isCertificationRun(complete)).toBe(true)
-    expect(isCertificationRun({ ...complete, failOnSkip: false })).toBe(false)
-    expect(isCertificationRun({ ...complete, grep: "focused" })).toBe(false)
-    expect(isCertificationRun({ ...complete, projects: ["tier-1"] })).toBe(false)
-    expect(isCertificationRun({ ...complete, workers: 2 })).toBe(false)
+  it("never labels development-server diagnostic runs as release certification", () => {
+    expect(isCertificationRun()).toBe(false)
   })
 
   it("rejects certification when any spawned service remains reachable", () => {
@@ -618,6 +718,18 @@ describe("live Tier UAT runner contract", () => {
     )).toThrow(/non-loopback HTTP request.*192\.168\.2\.235/i)
   })
 
+  it("accepts the backend's redacted observability placeholder but no other .invalid host", () => {
+    // tldw_Server_API/app/core/http_client.py logs sensitive requests under this
+    // unresolvable placeholder instead of their real (loopback) URL.
+    expect(() => assertOnlyLoopbackHttpRequests(
+      '"url.full": "https://sensitive-endpoint.invalid"'
+    )).not.toThrow()
+
+    expect(() => assertOnlyLoopbackHttpRequests(
+      '"url.full": "https://exfil.invalid/v1/models"'
+    )).toThrow(/non-loopback HTTP request.*exfil\.invalid/i)
+  })
+
   it("exposes the package command documented by the certification plan", () => {
     const packageJson = JSON.parse(readFileSync(path.join(frontendRoot, "package.json"), "utf8"))
 
@@ -645,3 +757,158 @@ describe("live Tier UAT runner contract", () => {
     expect(nextConfig).toContain("liveTierDistDir")
   })
 })
+
+
+describe("interrupted execution evidence", () => {
+  it.each([true, false])("preserves abort reason and readable partial report=%s", (hasReport) => {
+    const root = mkdtempSync(path.join(tmpdir(), "tldw-partial-result-"))
+    const reportPath = path.join(root, "partial.json")
+    const partial = { errors: [], suites: [], stats: { interrupted: 1 } }
+    const controller = new AbortController()
+    const reason = new Error("SIGTERM received")
+    controller.abort(reason)
+    try {
+      if (hasReport) writeFileSync(reportPath, JSON.stringify(partial))
+      const outcome = readPlaywrightOutcome(reportPath, { signal: controller.signal })
+      expect(outcome.error).toBe(reason)
+      expect(outcome.report).toEqual(hasReport ? partial : null)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('isolated Notes Studio route', () => {
+  it('admits only the fixed additional project without changing defaults', () => {
+    expect(parseArgs(['--projects=notes-studio']).projects).toEqual(['notes-studio']);
+    expect(parseArgs([]).projects).toEqual(['tier-1', 'tier-2', 'tier-3']);
+    for (const project of ['chromium', 'tier-4', 'notes-studio-other']) {
+      expect(() => parseArgs([`--projects=${project}`])).toThrow();
+    }
+    expect(isCertificationRun()).toBe(false);
+  });
+
+  it('inventories only the original derived spec and fails if it is absent', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'notes-studio-inventory-'));
+    try {
+      const workflows = path.join(root, 'e2e/workflows');
+      mkdirSync(workflows, { recursive: true });
+      const source =
+        'test("intercepted", async ({ page }) => { await page.route("**/api/v1/notes", route => route.abort()) })';
+      const target = path.join(workflows, 'notes-studio-derived-note.spec.ts');
+      writeFileSync(target, source);
+      writeFileSync(path.join(workflows, 'neighbor.spec.ts'), source);
+      expect(inventoryProjects(root, ['notes-studio'])).toEqual([
+        expect.objectContaining({
+          project: 'notes-studio',
+          file: 'e2e/workflows/notes-studio-derived-note.spec.ts',
+          test: 'intercepted',
+        }),
+      ]);
+      rmSync(target);
+      expect(() => inventoryProjects(root, ['notes-studio'])).toThrow(/ENOENT/);
+      expect(() => inventoryProjects(root, ['chromium'])).toThrow(/Unknown Tier project/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('builds isolated retry-free commands without the UX extension build', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'notes-studio-commands-'));
+    try {
+      const profile = buildLiveTierProfile({
+        repoRoot,
+        frontendRoot,
+        runId: 'notes-studio-route',
+        mockPort: 18184,
+        baseTmpDir: root,
+        pythonCommand: '/test/venv/bin/python',
+      });
+      const commands = buildCommands({
+        repoRoot,
+        frontendRoot,
+        profile,
+        projects: ['notes-studio'],
+        ports: { backend: 18180, web: 18181, mock: 18184 },
+        workers: 1,
+        runId: 'notes-studio-route',
+        baseEnv: { PATH: process.env.PATH, NODE_ENV: 'test' },
+      });
+      expect(commands.playwrightList.args).toContain('--project=notes-studio');
+      expect(commands.playwrightRun.args).toEqual(
+        expect.arrayContaining(['--project=notes-studio', '--workers=1', '--retries=0'])
+      );
+      expect(commands.playwrightRun.env.TLDW_E2E_ALLOW_OFFLINE).toBe('0');
+      expect(commands.playwrightRun.env.TLDW_WEB_AUTOSTART).toBe('false');
+      expect(commands.playwrightRun.env).not.toHaveProperty(EXTENSION_DIR_ENV);
+      for (const command of [commands.authInit, commands.backend]) {
+        expect(command.cwd).toBe(profile.runDir);
+        expect(command.env.PYTHONPATH.split(path.delimiter)).toContain(repoRoot);
+      }
+      expect(
+        resolveExtensionBuild({
+          frontendRoot,
+          projects: ['notes-studio'],
+          baseEnv: { NODE_ENV: 'test' },
+        })
+      ).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the original browser contract and chromium caller inclusion', async () => {
+    const config = (await import('../../playwright.config')).default;
+    const project = config.projects?.find((item) => item.name === 'notes-studio');
+    expect(project).toMatchObject({
+      testDir: 'e2e/workflows',
+      testMatch: 'notes-studio-derived-note.spec.ts',
+      use: { trace: 'retain-on-failure', defaultBrowserType: 'chromium' },
+    });
+    expect(project?.timeout).toBeUndefined();
+    expect(project?.expect).toBeUndefined();
+    expect(config.timeout).toBe(60_000);
+    expect(config.expect?.timeout).toBe(15_000);
+    const chromium = config.projects?.find((item) => item.name === 'chromium');
+    expect(chromium?.testIgnore).toEqual([
+      '**/workflows/tier-*/**',
+      '**/workflows/journeys/**',
+      '**/ux-regression/**',
+    ]);
+    expect(project?.use?.viewport).toEqual(chromium?.use?.viewport);
+  });
+});
+
+describe('live Tier UAT artifact retention', () => {
+  it('isolates native Playwright cleanup inside the run artifact root', () => {
+    const baseTmpDir = mkdtempSync(path.join(tmpdir(), 'tldw-live-tier-retention-'));
+    try {
+      const profile = buildLiveTierProfile({
+        repoRoot,
+        frontendRoot,
+        runId: 'artifact-retention',
+        mockPort: 18183,
+        baseTmpDir,
+        pythonCommand: '/test/venv/bin/python',
+      });
+      for (const artifactRoot of [profile.reportsDir, path.join(baseTmpDir, 'custom-artifacts')]) {
+        const commands = buildCommands({
+          repoRoot,
+          frontendRoot,
+          ports: { backend: 18180, web: 18181, mock: 18182 },
+          profile,
+          projects: ['tier-1'],
+          workers: 1,
+          runId: 'artifact-retention',
+          ...(artifactRoot === profile.reportsDir ? {} : { artifactRoot }),
+          baseEnv: { NODE_ENV: 'test', PATH: process.env.PATH },
+        });
+        expect(commands.playwrightRun.args.filter((arg) => arg.startsWith('--output='))).toEqual([
+          `--output=${path.join(artifactRoot, 'playwright-output')}`,
+        ]);
+      }
+    } finally {
+      rmSync(baseTmpDir, { recursive: true, force: true });
+    }
+  });
+});

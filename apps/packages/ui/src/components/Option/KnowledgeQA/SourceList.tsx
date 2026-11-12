@@ -30,6 +30,7 @@ import {
   type SourceListItem,
   type SourceSortMode,
 } from "./sourceListUtils"
+import { isEditableTarget } from "@/utils/editable-target"
 
 const PAGE_SIZE = 10
 const SOURCE_LIST_FILTER_STORAGE_PREFIX = "knowledge_qa_source_filters:"
@@ -259,6 +260,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
     focusSource,
     setQuery,
     query = "",
+    resultQuery,
     answer = null,
     searchDetails = null,
     currentThreadId = null,
@@ -266,6 +268,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
     scrollToCitation = () => undefined,
     setPinnedSourceFilters = () => undefined,
   } = useKnowledgeQA()
+  const answeredQuery = resultQuery === undefined ? query : resultQuery ?? ""
   const messageApi = useAntdMessage()
 
   const [sortMode, setSortMode] = React.useState<SourceSortMode>(DEFAULT_SORT_MODE)
@@ -308,13 +311,13 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
   const answerSessionKey = useMemo(
     () =>
       `${currentThreadId ?? "no-thread"}::${latestAssistantMessageId ?? "no-assistant"}::${
-        query.trim() || "no-query"
+        answeredQuery.trim() || "no-query"
       }`,
-    [currentThreadId, latestAssistantMessageId, query]
+    [currentThreadId, latestAssistantMessageId, answeredQuery]
   )
   const highlightTerms = useMemo(
-    () => buildHighlightTerms(query, searchDetails?.expandedQueries || []),
-    [query, searchDetails?.expandedQueries]
+    () => buildHighlightTerms(answeredQuery, searchDetails?.expandedQueries || []),
+    [answeredQuery, searchDetails?.expandedQueries]
   )
   const citationUsageByIndex = useMemo(
     () => buildCitationUsageAnchors(answer),
@@ -535,14 +538,10 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
           'button, a, input, select, textarea, [role="button"], [role="link"], [contenteditable]'
         )
       )
-      const isEditableTarget =
-        target instanceof HTMLElement &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.isContentEditable)
+      const typing = isEditableTarget(target)
 
       if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
-        if (isEditableTarget) return
+        if (typing) return
         event.preventDefault()
         setShortcutsOpen(true)
         return
@@ -556,7 +555,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
         !event.ctrlKey &&
         !event.altKey
       ) {
-        if (isEditableTarget) return
+        if (typing) return
 
         const visiblePosition = Number.parseInt(event.key, 10) - 1
         const selectedItem = visibleItems[visiblePosition]
@@ -663,7 +662,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
         await qaClient.submitSourceFeedback({
           conversation_id: currentThreadId || undefined,
           message_id: latestAssistantMessageId || undefined,
-          query: query.trim() || undefined,
+          query: answeredQuery.trim() || undefined,
           feedback_type: "relevance",
           relevance_score: thumb === "up" ? 5 : 1,
           document_ids: result.id ? [result.id] : undefined,
@@ -715,7 +714,7 @@ export function SourceList({ className, layout = "main" }: SourceListProps) {
       feedbackSessionId,
       latestAssistantMessageId,
       messageApi,
-      query,
+      answeredQuery,
       answerSessionKey,
       isAuthorityCurrent,
       qaClient,

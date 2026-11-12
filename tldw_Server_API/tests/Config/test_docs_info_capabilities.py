@@ -407,3 +407,73 @@ def test_docs_info_persona_capability_stable_across_config_module_reload(
 
     enabled_caps = config_info.load_safe_config()["capabilities"]
     assert enabled_caps["persona"] is True
+
+
+def _resume_docs_request():
+    from fastapi import FastAPI, Request
+
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions, character_messages
+    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
+    app = FastAPI()
+    app.include_router(character_messages.router, prefix="/api/v1")
+    app.include_router(character_chat_sessions.router, prefix="/api/v1/chats")
+    names = {getattr(route.endpoint, "__name__", None) for route in iter_served_routes(app.routes)}
+    assert {"append_roleplay_resume_input", "character_chat_completion"} <= names
+    return Request({"type": "http", "headers": [], "app": app})
+
+
+@pytest.mark.parametrize("kind,owner", [("service", None), ("anonymous", None), ("api_key", None)])
+def test_docs_info_never_attests_resume_without_an_owner(monkeypatch, kind, owner):
+    from fastapi import Response
+
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    async def principal(_request):
+        return AuthPrincipal(kind=kind, user_id=owner)
+
+    monkeypatch.setattr(config_info, "get_auth_principal", principal)
+    request = _resume_docs_request()
+    response = asyncio.run(config_info.get_documentation_config(request=request, response=Response()))
+    assert "roleplay_resume_contract_version" not in response["capabilities"]
+
+
+@pytest.mark.parametrize("status_code", [403, 503])
+def test_docs_info_preserves_canonical_auth_failures(monkeypatch, status_code):
+    from fastapi import HTTPException, Response
+
+    async def principal(_request):
+        raise HTTPException(status_code=status_code, detail="canonical-auth-failure")
+
+    monkeypatch.setattr(config_info, "get_auth_principal", principal)
+    request = _resume_docs_request()
+    with pytest.raises(HTTPException) as failure:
+        asyncio.run(config_info.get_documentation_config(request=request, response=Response()))
+    assert failure.value.status_code == status_code
+
+
+def test_docs_info_does_not_swallow_unexpected_auth_errors(monkeypatch):
+    from fastapi import Response
+
+    async def principal(_request):
+        raise RuntimeError("unexpected-auth-failure")
+
+    monkeypatch.setattr(config_info, "get_auth_principal", principal)
+    request = _resume_docs_request()
+    with pytest.raises(RuntimeError, match="unexpected-auth-failure"):
+        asyncio.run(config_info.get_documentation_config(request=request, response=Response()))
+
+
+def test_docs_info_attests_headerless_authenticated_owner(monkeypatch):
+    from fastapi import Response
+
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    async def principal(_request):
+        return AuthPrincipal(kind="user", user_id=1)
+
+    monkeypatch.setattr(config_info, "get_auth_principal", principal)
+    response = Response()
+    payload = asyncio.run(config_info.get_documentation_config(request=_resume_docs_request(), response=response))
+    assert payload["capabilities"]["roleplay_resume_contract_version"] == 1
+    assert response.headers["cache-control"] == "no-store"

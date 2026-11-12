@@ -51,7 +51,7 @@ Work in /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/persona-visu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py -q --tb=short` failed with expected missing `DatabasePaths.get_user_persona_visuals_dir`, missing visual tables, and missing PersonaStateStore/CharactersRAGDB visual pack methods.
 
 Green run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_persona_visuals_db.py -q --tb=short` passed 7 tests.
@@ -59,7 +59,7 @@ Green run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/ac
 Adjacent regression run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_chacha_persona_state_store.py tldw_Server_API/tests/Persona/test_persona_visuals_core.py -q --tb=short` passed 15 tests.
 
 Whitespace/security checks: `git diff --check` passed; `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/DB_Management/db_path_utils.py tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py -f json -o /tmp/bandit_persona_visuals_persistence.json` exited 0 with no results/errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -42,7 +42,7 @@ This task begins after the approved spec and first setup commit, which are the a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Initialized Backlog.md and added the root AGENTS.md task-tracking policy. Backlog.md auto-commit and hook bypass remain disabled. MCP was registered with Codex after non-interactive init skipped client setup. remote_operations was disabled to keep local task operations from attempting sandbox-blocked fetches.
 
 Verification:
@@ -52,7 +52,7 @@ Verification:
 - git diff --check HEAD~2..HEAD: passed
 - codex mcp list: backlog server registered and enabled
 - Bandit: skipped, docs/config/process-only change
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError, InputError
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 class _LoggerStub:
@@ -104,7 +105,7 @@ def _build_app_with_overrides(
         # per-route token-scope/rate-limit enforcement dependencies.
         return None
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue
@@ -362,19 +363,18 @@ async def test_notes_graph_read_sanitizes_generic_error_log(monkeypatch: pytest.
 
     monkeypatch.setattr(notes_graph_mod.NoteGraphService, "generate_graph", _raise_generic_error)
 
-    with pytest.raises(Exception) as exc_info:
+    with pytest.raises(HTTPException) as exc_info:
         await notes_graph_mod.get_notes_graph(
-            _RequestStub(),  # type: ignore[arg-type]
-            notes_graph_mod.NoteGraphRequest(),
-            SimpleNamespace(id_str="1"),
-            object(),  # type: ignore[arg-type]
-            None,
-            None,
-            None,
+            req=notes_graph_mod.NoteGraphRequest(),
+            current_user=SimpleNamespace(id_str="1"),
+            db=object(),  # type: ignore[arg-type]
+            _=None,
+            principal=_make_principal(permissions=[NOTES_GRAPH_READ]),
+            ___=None,
         )
 
-    assert getattr(exc_info.value, "status_code", None) == 500
-    assert getattr(exc_info.value, "detail", None) == "Graph fetch failed"
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Graph fetch failed"
     _assert_sanitized_error_log(logger_stub, "notes.graph.read failed")
 
 
@@ -462,4 +462,6 @@ async def test_notes_graph_delete_link_maps_db_error_to_500():
         resp = client.delete("/api/v1/notes/links/e:123e4567-e89b-12d3-a456-426614174000")
 
     assert resp.status_code == 500
-    assert resp.json()["detail"] == "Link deletion failed"
+    # ed5da5ffff routed every link lifecycle error through one generic detail.
+    assert resp.json()["detail"] == "Notes link operation failed"
+    assert "delete backend unavailable" not in resp.text

@@ -95,7 +95,7 @@ def _supports_keyword_delete_repository(db_instance: Any) -> bool:
     required_attrs = (
         "client_id",
         "transaction",
-        "_fetchone_with_connection",
+        "_fetchall_with_connection",
         "_execute_with_connection",
         "_get_current_utc_timestamp_str",
         "_log_sync_event",
@@ -110,14 +110,16 @@ def create_media_database(
     db_path: str | None = None,
     backend: Any = None,
     config: Any = None,
+    existing_only: bool = False,
 ) -> MediaDbLike:
-    """Create a MediaDatabase using the shared content runtime defaults."""
+    """Create a MediaDatabase, optionally opening only existing, unmodified schema."""
     return runtime_create_media_database(
         client_id,
         db_path=db_path,
         backend=backend,
         config=config,
         runtime=build_media_runtime_config(),
+        **({"existing_only": True} if existing_only else {}),
     )
 
 
@@ -129,18 +131,20 @@ def managed_media_database(
     backend=None,
     config=None,
     initialize: bool = True,
+    existing_only: bool = False,
     suppress_init_exceptions: tuple[type[BaseException], ...] = (),
     suppress_close_exceptions: tuple[type[BaseException], ...] = (),
 ) -> Iterator[MediaDbLike]:
-    """Create a MediaDatabase, optionally initialize it, and always close it on exit."""
+    """Manage a MediaDatabase; existing-only sessions never bootstrap its schema."""
     db = create_media_database(
         client_id,
         db_path=db_path,
         backend=backend,
         config=config,
+        **({"existing_only": True} if existing_only else {}),
     )
     try:
-        if initialize:
+        if initialize and not existing_only:
             if suppress_init_exceptions:
                 with contextlib.suppress(*suppress_init_exceptions):
                     db.initialize_db()
@@ -688,6 +692,97 @@ def get_paginated_files(
         error_message="db must expose the Media DB list contract.",
     )
     return reader.get_paginated_files(page=page, results_per_page=results_per_page)
+
+
+_TRASHED_MEDIA_WHERE = "WHERE deleted = 0 AND is_trash = 1 AND system_operation_id IS NULL"
+
+
+def list_trashed_media_ids(db: MediaDbLike) -> list[int]:
+    """Ids of every user-visible trashed media item (system-operation rows excluded)."""
+    rows = db.execute_query(f"SELECT id FROM Media {_TRASHED_MEDIA_WHERE}").fetchall()  # nosec B608 - constant
+    return [int(row["id"]) for row in rows or []]
+
+
+def count_trashed_media(db: MediaDbLike) -> int:
+    row = db.execute_query(
+        f"SELECT COUNT(*) AS total_items FROM Media {_TRASHED_MEDIA_WHERE}"  # nosec B608 - constant
+    ).fetchone()
+    return int(row["total_items"]) if row else 0
+
+
+def _false_literal(db: MediaDbLike) -> Any:
+    return False if "postgres" in str(getattr(db, "backend_type", "")).lower() else 0
+
+
+def list_document_structure_headings(db: MediaDbLike, media_id: int) -> list[Any]:
+    """Live section/header rows of a document's structure index, in reading order."""
+    return db.execute_query(
+        """
+        SELECT id, parent_id, level, title, start_char, end_char, order_index, path
+        FROM DocumentStructureIndex
+        WHERE media_id = ? AND deleted = ? AND kind IN ('section', 'header')
+        ORDER BY COALESCE(level, 0) ASC, COALESCE(order_index, 2147483647) ASC, start_char ASC, id ASC
+        """,
+        (media_id, _false_literal(db)),
+    ).fetchall() or []
+
+
+def list_chunk_metadata(db: MediaDbLike, media_id: int) -> list[Any]:
+    """Live unvectorized chunks that carry metadata, in chunk order."""
+    return db.execute_query(
+        """
+        SELECT chunk_index, start_char, end_char, metadata
+        FROM UnvectorizedMediaChunks
+        WHERE media_id = ? AND deleted = ? AND metadata IS NOT NULL
+        ORDER BY chunk_index ASC, id ASC
+        """,
+        (media_id, _false_literal(db)),
+    ).fetchall() or []
+
+
+def get_active_document_version_uuid(db: MediaDbLike, media_id: int, version_number: int) -> str | None:
+    """The uuid of a live version of a live, untrashed media item, or None."""
+    row = db.execute_query(
+        """
+        SELECT dv.uuid
+        FROM DocumentVersions dv
+        JOIN Media m ON dv.media_id = m.id
+        WHERE dv.media_id = ?
+          AND dv.version_number = ?
+          AND dv.deleted = 0
+          AND m.deleted = 0
+          AND m.is_trash = 0
+        """,
+        (media_id, version_number),
+    ).fetchone()
+    return None if not row else (row["uuid"] if hasattr(row, "keys") else row[0])
+
+
+def describe_media_schema(db: MediaDbLike) -> dict[str, Any]:
+    """SQLite schema diagnostics: table names, Media/MediaModifications columns, user media count."""
+    with db.get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = [row[0] for row in cursor.fetchall()]
+
+        def _columns(name: str) -> list[str]:
+            try:
+                cursor.execute(f"PRAGMA table_info({name})")  # nosec B608 - fixed table names below
+                return [col[1] for col in cursor.fetchall()]
+            except Exception as exc:  # noqa: BLE001 - diagnostics degrade per table
+                logger.warning("Failed to introspect columns for table {}: {}", name, type(exc).__name__)
+                return []
+
+        media_columns = _columns("Media")
+        media_mods_columns = _columns("MediaModifications")
+        cursor.execute("SELECT COUNT(*) FROM Media WHERE system_operation_id IS NULL")
+        row = cursor.fetchone()
+    return {
+        "tables": tables,
+        "media_columns": media_columns,
+        "media_mods_columns": media_mods_columns,
+        "media_count": int(row[0]) if row else 0,
+    }
 
 
 def get_paginated_trash_files(

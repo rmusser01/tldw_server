@@ -37,12 +37,15 @@ _TRUE_EPOCH = int(datetime(2026, 9, 21, 20, 0, 15, tzinfo=timezone.utc).timestam
 
 @pytest.fixture
 def la_timezone(monkeypatch: pytest.MonkeyPatch):
-    """Run the body under America/Los_Angeles (UTC-7 on this date)."""
+    """Use Los Angeles where supported; otherwise test the host timezone."""
+    tzset = getattr(time, "tzset", None)
     monkeypatch.setenv("TZ", "America/Los_Angeles")
-    time.tzset()
+    if tzset:
+        tzset()
     yield
     monkeypatch.undo()
-    time.tzset()
+    if tzset:
+        tzset()
 
 
 def _db() -> EvaluationsDatabase:

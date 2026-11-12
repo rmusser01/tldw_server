@@ -2,6 +2,17 @@ import React from "react"
 import { renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+const mirrorProbe=vi.hoisted(()=>({
+  ensure:vi.fn(async()=>null),
+  controller:null as null | {getCurrent:()=>{settingsQualified:boolean;owner:{kind:"native";conversation_id:string;scope:{type:"workspace";workspaceId:string};request_scope:{config:{serverUrl:string;authMode:string};userId:string};validate_lease:()=>boolean}}}
+}))
+vi.mock("@/hooks/chat/useHistorySelection", async original => ({
+  ...await original<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelectionContext:()=>mirrorProbe.controller
+}))
+
+const ownerMeta = vi.hoisted(() => ({ current: undefined as { assistantKey: string; isLoading: boolean; isCurrent: () => boolean } | undefined }))
+
 const {
   storeState,
   chatBaseState,
@@ -170,9 +181,10 @@ const {
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
-    invalidateQueries: vi.fn()
-  })
-}))
+    cancelQueries: vi.fn(),
+    invalidateQueries: vi.fn(),
+  }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -212,7 +224,7 @@ vi.mock("@/hooks/chat/useSelectServerChat", () => ({
 
 vi.mock("@/hooks/chat/useServerChatHistoryId", () => ({
   useServerChatHistoryId: () => ({
-    ensureServerChatHistoryId: vi.fn()
+    ensureServerChatHistoryId: mirrorProbe.ensure
   })
 }))
 
@@ -281,7 +293,7 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [selectedAssistantState.current, setSelectedAssistantSpy]
+  useSelectedAssistant: () => [selectedAssistantState.current, setSelectedAssistantSpy, ownerMeta.current]
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
@@ -299,7 +311,12 @@ vi.mock("@/store/model", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: Object.assign((selector?: (state: Record<string, unknown>) => unknown) =>
-    selector ? selector(storeState) : storeState, { getState: () => storeState })
+    selector ? selector(storeState) : storeState, {
+      getState: () => storeState,
+      setState: (update: Record<string, unknown> | ((state: typeof storeState) => Record<string, unknown>)) => {
+        Object.assign(storeState, typeof update === "function" ? update(storeState) : update)
+      }
+    })
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -449,6 +466,185 @@ describe("useMessageOption assistant overlay changes", () => {
       })
     )
   })
+  const canonicalCard = (suffix = "") => ({
+    kind: "character",
+    id: "42",
+    name: `Helpful AI Assistant${suffix}`,
+    avatar_url: `https://example.test/assistant${suffix}.png`,
+    system_prompt: `Owned prompt${suffix}`,
+    greeting: `Owned greeting${suffix}`,
+    extensions: { reviewOwned: suffix || "initial" }
+  })
+  const seedCanonicalCard = () => {
+    const lease = { current: true }
+    ownerMeta.current = {
+      assistantKey: "owner:alice",
+      isLoading: false,
+      isCurrent: () => lease.current
+    }
+    storeState.serverChatId = "owned-chat"
+    storeState.serverChatAssistantKind = "character"
+    storeState.serverChatCharacterId = 42
+    storeState.serverChatAssistantId = "42"
+    selectedAssistantState.current = canonicalCard()
+    chatSettingsState.current = null
+    setSelectedAssistantSpy.mockClear()
+    return lease
+  }
+  it.each(["cleared", "foreign"])(
+    "keeps full canonical display after %s shared preference",
+    (mirror) => {
+      seedCanonicalCard()
+      const view = renderHook(() => useMessageOption())
+      try {
+        expect(view.result.current.effectiveAssistantState.displayName).toBe(
+          "Helpful AI Assistant"
+        )
+        selectedAssistantState.current =
+          mirror === "cleared"
+            ? null
+            : { kind: "character", id: "99", name: "Foreign card" }
+        view.rerender()
+        expect
+          .soft(view.result.current.effectiveAssistantState.displayName)
+          .toBe("Helpful AI Assistant")
+        expect
+          .soft(view.result.current.selectedAssistant)
+          .toMatchObject(canonicalCard())
+        expect
+          .soft(lastUseChatActionsArgs.value?.selectedAssistant)
+          .toMatchObject(canonicalCard())
+        expect(setSelectedAssistantSpy).not.toHaveBeenCalled()
+      } finally {
+        view.unmount()
+        ownerMeta.current = undefined
+      }
+    }
+  )
+  it("plain transition immediately drops canonical metadata", () => {
+    seedCanonicalCard()
+    const view = renderHook(() => useMessageOption())
+    try {
+      selectedAssistantState.current = null
+      storeState.serverChatId = null
+      storeState.serverChatCharacterId = null
+      storeState.serverChatAssistantKind = null
+      storeState.serverChatAssistantId = null
+      view.rerender()
+      expect(view.result.current.effectiveAssistantState.mode).toBe("plain")
+      expect(view.result.current.selectedAssistant).toBeNull()
+    } finally {
+      view.unmount()
+      ownerMeta.current = undefined
+    }
+  })
+  it.each(["conversation", "canonical-id"])(
+    "%s change and return does not restore stale metadata",
+    (boundary) => {
+      seedCanonicalCard()
+      const view = renderHook(() => useMessageOption())
+      try {
+        selectedAssistantState.current = null
+        if (boundary === "conversation")
+          storeState.serverChatId = "another-chat"
+        else {
+          storeState.serverChatCharacterId = 99
+          storeState.serverChatAssistantId = "99"
+        }
+        view.rerender()
+        expect(
+          view.result.current.effectiveAssistantState.displayName
+        ).not.toBe("Helpful AI Assistant")
+        storeState.serverChatId = "owned-chat"
+        storeState.serverChatCharacterId = 42
+        storeState.serverChatAssistantId = "42"
+        view.rerender()
+        expect(
+          view.result.current.effectiveAssistantState.displayName
+        ).not.toBe("Helpful AI Assistant")
+      } finally {
+        view.unmount()
+        ownerMeta.current = undefined
+      }
+    }
+  )
+  it.each(["revoked", "owner-aba"])(
+    "%s invalidates the captured lease even with the same key",
+    (boundary) => {
+      const lease = seedCanonicalCard()
+      const view = renderHook(() => useMessageOption())
+      try {
+        lease.current = false
+        selectedAssistantState.current = null
+        if (boundary === "owner-aba")
+          ownerMeta.current = {
+            assistantKey: "owner:alice",
+            isLoading: false,
+            isCurrent: () => true
+          }
+        view.rerender()
+        expect(
+          view.result.current.effectiveAssistantState.displayName
+        ).not.toBe("Helpful AI Assistant")
+        expect(setSelectedAssistantSpy).not.toHaveBeenCalled()
+      } finally {
+        view.unmount()
+        ownerMeta.current = undefined
+      }
+    }
+  )
+  it("a matching card update replaces retained full metadata", () => {
+    seedCanonicalCard()
+    const view = renderHook(() => useMessageOption())
+    try {
+      selectedAssistantState.current = canonicalCard(" updated")
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject(
+        canonicalCard(" updated")
+      )
+      selectedAssistantState.current = null
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject(
+        canonicalCard(" updated")
+      )
+    } finally {
+      view.unmount()
+      ownerMeta.current = undefined
+    }
+  })
+
+  it("keeps the retained card when another tab publishes a failed lookup placeholder", () => {
+    seedCanonicalCard()
+    const view = renderHook(() => useMessageOption())
+    try {
+      selectedAssistantState.current = null
+      view.rerender()
+      selectedAssistantState.current = {
+        kind: "character", id: "42", name: "Assistant",
+        avatar_url: null, system_prompt: null, greeting: null, extensions: null
+      }
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject(canonicalCard())
+      selectedAssistantState.current = null
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject(canonicalCard())
+    } finally { view.unmount(); ownerMeta.current = undefined }
+  })
+
+  it("accepts an updated full Character card actually named Assistant", () => {
+    seedCanonicalCard()
+    const view = renderHook(() => useMessageOption())
+    try {
+      selectedAssistantState.current = { ...canonicalCard(" updated"), name: "Assistant" }
+      view.rerender()
+      selectedAssistantState.current = null
+      view.rerender()
+      expect(view.result.current.selectedAssistant).toMatchObject({
+        ...canonicalCard(" updated"), name: "Assistant"
+      })
+    } finally { view.unmount(); ownerMeta.current = undefined }
+  })
+
 })
 
 it("keeps passive consumers from acquiring server hydration ownership", () => {
@@ -460,4 +656,16 @@ it("keeps passive consumers from acquiring server hydration ownership", () => {
   expect(vi.mocked(useServerChatLoader)).toHaveBeenLastCalledWith(
     expect.objectContaining({ enabled: true, scope: { type: "global" } })
   )
+})
+
+
+it("passes the qualified native workspace namespace to the existing mirror binder", () => {
+  mirrorProbe.ensure.mockClear()
+  mirrorProbe.controller={getCurrent:()=>({settingsQualified:true,owner:{kind:"native",conversation_id:"chat-1",scope:{type:"workspace",workspaceId:"W"},
+    request_scope:{config:{serverUrl:"http://chat.test",authMode:"multi-user"},userId:"A"},validate_lease:()=>true}})}
+  storeState.serverChatId="chat-1";storeState.temporaryChat=false
+  const view=renderHook(()=>useMessageOption({scope:{type:"workspace",workspaceId:"W"}}))
+  try {
+    expect(mirrorProbe.ensure).toHaveBeenCalledWith("chat-1",expect.anything(),expect.any(AbortSignal),expect.objectContaining({scope:{type:"workspace",workspaceId:"W"}}))
+  } finally {view.unmount();mirrorProbe.controller=null}
 })

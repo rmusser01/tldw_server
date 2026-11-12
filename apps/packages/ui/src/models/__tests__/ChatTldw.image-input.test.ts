@@ -12,7 +12,10 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock("@/services/tldw", () => ({
   tldwChat: { sendMessage: mocks.sendMessage, streamMessage: mocks.streamMessage },
-  tldwModels: { getModel: mocks.getModel }
+  tldwModels: { getModel: async (model: string) => {
+    const info = await mocks.getModel(model)
+    return info ? { id: model, provider: "openai", ...info } : info
+  } }
 }))
 vi.mock("@/services/model-settings", () => ({
   getAllDefaultModelSettings: async () => ({}),

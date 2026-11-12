@@ -33,9 +33,9 @@ Define the approved source-available licensing design for the WebUI, browser ext
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Consolidates the superseded BSL draft and final Perimeter/Countdown revision after rebasing onto latest dev exposed duplicate historical task IDs. The approved design spec was reviewed before implementation; Bandit is not applicable to Markdown-only design work.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

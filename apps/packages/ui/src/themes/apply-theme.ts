@@ -1,3 +1,4 @@
+import { readableForeground } from "./contrast"
 import type { ThemeColorTokens, ThemeDefinition } from "./types"
 
 // ---------------------------------------------------------------------------
@@ -33,6 +34,8 @@ const TOKEN_TO_CSS_VAR: Record<keyof Pick<ThemeColorTokens,
 const ALL_CSS_VARS: string[] = [
   // Colors
   ...Object.values(TOKEN_TO_CSS_VAR),
+  "--color-primary-foreground",
+  "--color-primary-strong-foreground",
   // Shadows
   "--shadow-sm",
   "--shadow-md",
@@ -96,6 +99,13 @@ export function applyThemeTokens(tokens: ThemeColorTokens, theme: ThemeDefinitio
   // --- Colors (RGB triples) ---
   for (const [key, cssVar] of Object.entries(TOKEN_TO_CSS_VAR)) {
     style.setProperty(cssVar, tokens[key as keyof ThemeColorTokens] as string)
+  }
+
+  for (const [key, cssVar] of [
+    ["primary", "--color-primary-foreground"],
+    ["primaryStrong", "--color-primary-strong-foreground"]
+  ] as const) {
+    style.setProperty(cssVar, readableForeground(tokens[key]))
   }
 
   // --- Shadows (raw CSS values) ---

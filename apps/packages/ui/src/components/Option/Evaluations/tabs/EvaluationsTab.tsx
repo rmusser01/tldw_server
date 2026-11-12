@@ -188,7 +188,8 @@ export const EvaluationsTab: React.FC = () => {
   const handleSubmit = async () => {
     setEvalSpecError(null)
     try {
-      const values = await form.validateFields()
+      await form.validateFields()
+      const values = form.getFieldsValue(true)
       let spec: any
       try {
         spec = JSON.parse(evalSpecText || "{}")
@@ -298,10 +299,6 @@ export const EvaluationsTab: React.FC = () => {
           <EvaluationRecoveryCallout
             title={t("evaluations:loadErrorTitle", {
               defaultValue: "Unable to load evaluations"
-            })}
-            message={t("evaluations:loadErrorDescription", {
-              defaultValue:
-                "Check your tldw server connection and API credentials, then try again."
             })}
             endpoint="/api/v1/evaluations"
             error={evalsErrorValue}

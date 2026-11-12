@@ -337,7 +337,7 @@ async def run_media_ingest_adapter(config: dict[str, Any], context: dict[str, An
                 pass
 
             # Poll with timeout
-            exited = False
+            exit_code: int | None = None
             while time.time() - start_ts < timeout_seconds:
                 # cooperative cancel
                 if callable(context.get("is_cancelled")) and context["is_cancelled"]():
@@ -349,13 +349,23 @@ async def run_media_ingest_adapter(config: dict[str, Any], context: dict[str, An
                         context["heartbeat"]()
                 except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS:
                     pass
-                await asyncio.sleep(0.25)
-                # Check if any file downloaded
-                if any(step_dir.glob("*.*")):
-                    exited = True
+                try:
+                    await asyncio.sleep(0.25)
+                except asyncio.CancelledError:
+                    # A cancelled step (a map or parallel sibling failed, or the step timed out) stops the download.
+                    await asyncio.to_thread(terminate_process, task)
+                    raise
+                # A file appears long before the download ends (yt-dlp's .part): wait for yt-dlp to exit (TASK-13887)
+                exit_code = task.proc.poll() if task.proc is not None else None
+                if exit_code is not None:
                     break
-            if not exited:
-                terminate_process(task)
+            exited = exit_code is not None
+            if exited and callable(context.get("is_cancelled")) and context["is_cancelled"]():
+                return {"__status__": "cancelled"}  # the run's cancel (engine.cancel) killed the download
+            failed = exited and (exit_code != 0 or not any(step_dir.glob("*.*")))
+            if not exited or failed:
+                if not exited:
+                    terminate_process(task)
                 # Attach small tails for debugging
                 stdout_tail = None
                 stderr_tail = None
@@ -375,10 +385,12 @@ async def run_media_ingest_adapter(config: dict[str, Any], context: dict[str, An
                         stderr_tail = data.decode("utf-8", errors="replace")
                 except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS:
                     pass
-                meta_timeout = {
+                meta_timeout: dict[str, Any] = {
                     "source": uri,
-                    "status": "timeout",
+                    "status": "download_failed" if failed else "timeout",
                 }
+                if failed:
+                    meta_timeout["returncode"] = exit_code
                 if stdout_tail:
                     meta_timeout["stdout_tail"] = stdout_tail
                 if stderr_tail:

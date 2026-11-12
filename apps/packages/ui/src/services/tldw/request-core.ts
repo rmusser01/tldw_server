@@ -31,12 +31,39 @@ import {
 } from "@/utils/absolute-url-guard";
 import { isPlaceholderApiKey } from "@/utils/api-key";
 import { formatErrorMessage } from "@/utils/format-error-message";
+import { isExplicitRequestCancellation } from "@/services/request-events";
 
 export {
   isUnsafeMethod,
   resolveBrowserRequestTransport,
   type BrowserRequestTransport,
 } from "@/services/tldw/recipe-request-snapshot";
+
+/** Stop detaches a caller without cancelling an account-owned token rotation. */
+export const waitForAuthRefresh = async (
+  refresh: () => Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> => {
+  signal?.throwIfAborted();
+  await new Promise<void>((resolve, reject) => {
+    const stopped = () => {
+      signal?.removeEventListener("abort", stopped);
+      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", stopped, { once: true });
+    void Promise.resolve().then(() => {
+      signal?.throwIfAborted();
+      return refresh();
+    }).then(() => {
+      signal?.removeEventListener("abort", stopped);
+      resolve();
+    }, error => {
+      signal?.removeEventListener("abort", stopped);
+      reject(error);
+    });
+    if (signal?.aborted) stopped();
+  });
+};
 
 export type TldwRequestPayload = {
   path: PathOrUrl;
@@ -47,20 +74,62 @@ export type TldwRequestPayload = {
   timeoutMs?: number;
   abortSignal?: AbortSignal;
   responseType?: "json" | "text" | "arrayBuffer";
+  maxResponseBytes?: number;
+  /** Fetch credentials mode for raw transport callers (web cookie sessions). */
+  credentials?: RequestCredentials;
+  /**
+   * Stage B2: the caller already resolved this URL (web shell joins its own
+   * baseURL + params). Skips transport re-joining; absolute-URL guards still
+   * apply.
+   */
+  preResolvedUrl?: boolean;
   recipePersistence?: RecipePersistenceRequestPolicy;
 };
 
 type TldwConfigLike = Record<string, any> | null | undefined;
 
+/**
+ * Credential strategy for transport Stage B (ADR-065 / TASK-13526): lets a
+ * runtime (the web shell, in Stage B2) supply its own auth headers instead
+ * of the default tldwConfig-driven resolution. Default (undefined) keeps the
+ * exact current behavior.
+ */
+export type TldwCredentialResolution =
+  | { headers: Record<string, string> }
+  | { error: { status: number; error: string } };
+
+export type TldwCredentialContext = {
+  cfg: TldwConfigLike;
+  method: string;
+  isUnsafeMethod: boolean;
+  cookieSession: boolean;
+  hostedMode: boolean;
+  shouldSkipAuth: boolean;
+  runtimeApiKey: string;
+  existingHeaders: Record<string, string>;
+};
+
 type TldwRequestRuntime = {
   getConfig: () => Promise<TldwConfigLike>;
-  refreshAuth?: () => Promise<void>;
+  refreshAuth?: (signal?: AbortSignal) => Promise<void>;
   fetchFn?: typeof fetch;
   useRuntimeAuthOverride?: boolean;
   getAuthenticatedPrincipal?: (
     snapshot: RecipeRequestTransportSnapshot,
   ) => Promise<string | number | null>;
   dispatchAuthority?: RecipeDispatchAuthority;
+  requestScopeSignal?: AbortSignal;
+  assertRequestCurrent?: () => void;
+  releaseRequest?: () => void;
+  /**
+   * Optional credential strategy (Stage B). When present, the default
+   * auth-header resolution in performTldwRequest is replaced by this
+   * callback's result. The callback owns stripping/replacing the
+   * authorization / x-api-key / x-csrf-token headers it needs to.
+   */
+  resolveCredentials?: (
+    context: TldwCredentialContext,
+  ) => TldwCredentialResolution;
 };
 
 export const readBrowserCookie = (name: string): string | null => {
@@ -166,43 +235,131 @@ export const tldwRequest = async (
   payload: TldwRequestPayload,
   runtime: TldwRequestRuntime,
 ): Promise<ApiSendResponse> => {
-  if (!payload.recipePersistence) {
-    return performTldwRequest(payload, runtime);
-  }
-  const dispatch: {
-    value: RecipePersistenceDispatch;
-    receipt?: RecipeDeliveryReceipt;
-  } = {
-    value: {
-      state: "not_dispatched",
-      actualOwnerId: null,
-    },
-  };
+  const assertCurrent = () => runtime.assertRequestCurrent?.();
+  const dispatch = payload.recipePersistence
+    ? { value: { state: "not_dispatched", actualOwnerId: null } as RecipePersistenceDispatch,
+        receipt: undefined as RecipeDeliveryReceipt | undefined }
+    : undefined;
+  const resultAuthority = () => dispatch ? {
+    recipePersistence: dispatch.value,
+    ...(dispatch.receipt ? { recipeDelivery: dispatch.receipt } : {}),
+  } : {};
   try {
-    return {
-      ...(await performTldwRequest(payload, runtime, dispatch)),
-      recipePersistence: dispatch.value,
-      ...(dispatch.receipt ? { recipeDelivery: dispatch.receipt } : {}),
-    };
+    const response = await performTldwRequest({
+      ...payload,
+      abortSignal: runtime.requestScopeSignal
+        ? payload.abortSignal
+          ? AbortSignal.any([payload.abortSignal, runtime.requestScopeSignal])
+          : runtime.requestScopeSignal
+        : payload.abortSignal,
+    }, {
+      ...runtime,
+      getConfig: async () => {
+        assertCurrent();
+        const config = await runtime.getConfig();
+        assertCurrent();
+        return config;
+      },
+    }, dispatch);
+    assertCurrent();
+    return { ...response, ...resultAuthority() };
   } catch (error) {
+    const failure = runtime.requestScopeSignal?.aborted &&
+      isRequestConfigScopeChangedError(runtime.requestScopeSignal.reason)
+      ? runtime.requestScopeSignal.reason
+      : error;
+    if (!dispatch) throw failure;
     return {
       ok: false,
-      status: 0,
-      error: formatErrorMessage(error, "Request failed"),
-      recipePersistence: dispatch.value,
-      ...(dispatch.receipt ? { recipeDelivery: dispatch.receipt } : {}),
+      status: isRequestConfigScopeChangedError(failure) ? 412 : 0,
+      error: formatErrorMessage(failure, "Request failed"),
+      ...(isRequestConfigScopeChangedError(failure)
+        ? { data: (failure as { details?: unknown }).details }
+        : {}),
+      ...resultAuthority(),
     };
+  } finally {
+    runtime.releaseRequest?.();
   }
 };
 
-const performTldwRequest = async (
+const readBoundedArrayBuffer = async (response: Response, maxBytes: number, signal: AbortSignal): Promise<ArrayBuffer> => {
+  const tooLarge = () => Object.assign(new Error('Response exceeds the size limit.'), { code: 'RESPONSE_TOO_LARGE' });
+  if (Number(response.headers.get('content-length')) > maxBytes) {
+    void response.body?.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
+  if (!response.body) return new ArrayBuffer(0);
+  const reader = response.body.getReader();
+  const cancel = () => { void reader.cancel().catch(() => undefined); };
+  signal.addEventListener('abort', cancel, { once: true });
+  let buffer = new Uint8Array(0);
+  let length = 0;
+  try {
+    if (signal.aborted) cancel();
+    signal.throwIfAborted();
+    while (true) {
+      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      if (done) break;
+      const nextLength = length + value.byteLength;
+      if (nextLength > maxBytes) {
+        cancel();
+        throw tooLarge();
+      }
+      if (nextLength > buffer.length) {
+        const grown = new Uint8Array(Math.min(maxBytes, Math.max(nextLength, buffer.length * 2, 64 * 1024)));
+        grown.set(buffer.subarray(0, length));
+        buffer = grown;
+      }
+      buffer.set(value, length);
+      length = nextLength;
+    }
+    return buffer.buffer.slice(0, length);
+  } finally {
+    signal.removeEventListener('abort', cancel);
+    reader.releaseLock();
+  }
+};
+
+/**
+ * Stage B (ADR-065 / TASK-13526): pure pre-flight resolution shared by
+ * performTldwRequest and (in transport Stage B2) the web shell's raw-response
+ * transport. Returns the resolved URL, seed headers, transport diagnostics,
+ * and the config context the auth/recipe stages need — or the same
+ * guard-failure envelope performTldwRequest has always returned.
+ */
+export const resolveTldwRequestPlan = async (
   payload: TldwRequestPayload,
   runtime: TldwRequestRuntime,
-  dispatch?: {
-    value: RecipePersistenceDispatch;
-    receipt?: RecipeDeliveryReceipt;
-  },
-): Promise<ApiSendResponse> => {
+): Promise<
+  | {
+      ok: true;
+      plan: {
+        method: string;
+        body: TldwRequestPayload["body"];
+        abortSignal?: AbortSignal;
+        responseType?: "json" | "text" | "arrayBuffer";
+        maxResponseBytes?: number;
+        overrideTimeoutMs?: number;
+        noAuth: boolean;
+        cfg: TldwConfigLike;
+        fetchFn: typeof fetch;
+        normalizedPath: string | undefined;
+        isAbsolute: boolean;
+        sameOriginAbsoluteUrl: boolean;
+        samePageOriginRequest: boolean;
+        hostedMode: boolean;
+        cookieSession: boolean;
+        url: string;
+        headers: Record<string, string>;
+        isBinaryBody: (value: unknown) => boolean;
+        pageOrigin: string | null;
+        shouldSkipAuth: boolean;
+      };
+    }
+  | { ok: false; status: number; error: string }
+> => {
   const {
     path,
     method = "GET",
@@ -212,11 +369,15 @@ const performTldwRequest = async (
     timeoutMs: overrideTimeoutMs,
     abortSignal,
     responseType,
+    maxResponseBytes,
   } = payload || {};
   // Extension IPC payloads are runtime input despite the TypeScript signature.
   // Coercing an array/object later would bypass the absolute-URL guard.
   if (typeof path !== "string") {
     return { ok: false, status: 400, error: "Request path must be a string" };
+  }
+  if (maxResponseBytes !== undefined && (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1)) {
+    return { ok: false, status: 400, error: 'Invalid response size limit.' };
   }
   const normalizedPath = normalizeKnownPathQuirks(path);
   const fetchFn = runtime.fetchFn || fetch;
@@ -226,7 +387,9 @@ const performTldwRequest = async (
     typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath);
   const absolutePath = isAbsolute ? String(normalizedPath) : "";
   const transport =
-    !isAbsolute && typeof normalizedPath === "string"
+    !isAbsolute &&
+    typeof normalizedPath === "string" &&
+    !payload.preResolvedUrl
       ? resolveBrowserRequestTransport({
           config: cfg,
           path: String(normalizedPath),
@@ -284,7 +447,9 @@ const performTldwRequest = async (
   }
   let url = isAbsolute
     ? normalizedPath
-    : transport?.url || String(normalizedPath);
+    : payload.preResolvedUrl
+      ? String(normalizedPath)
+      : transport?.url || String(normalizedPath);
   if (!isAbsolute && transport?.kind === "same-origin" && pageOrigin) {
     try {
       // Browsers interpret //host and /\host as cross-origin URLs, even
@@ -326,11 +491,359 @@ const performTldwRequest = async (
   ) {
     h["Content-Type"] = "application/json";
   }
+  return {
+    ok: true,
+    plan: {
+      method,
+      body,
+      abortSignal,
+      responseType,
+      maxResponseBytes,
+      overrideTimeoutMs,
+      noAuth,
+      cfg,
+      fetchFn,
+      normalizedPath,
+      isAbsolute,
+      sameOriginAbsoluteUrl,
+      samePageOriginRequest: (!isAbsolute && transport?.kind === "same-origin") || samePageOriginAbsoluteUrl,
+      hostedMode,
+      cookieSession,
+      url,
+      headers: h,
+      isBinaryBody,
+      pageOrigin,
+      shouldSkipAuth,
+    },
+  };
+};
+
+/**
+ * Stage B2 (ADR-065 / TASK-13526): raw-response transport for callers that
+ * own response policy (the web shell's lib/api.ts). Shares the exact plan
+ * resolution and auth application performTldwRequest uses — including the
+ * optional runtime credential strategy — but hands back the untouched
+ * Response instead of parsing it. Recipe persistence is not supported here
+ * (its dispatch envelope belongs to the parsed tldwRequest path).
+ */
+export type TldwRawRequestFailure = {
+  ok: false
+  kind: "guard" | "timeout" | "aborted" | "network"
+  status?: number
+  error: string
+}
+
+export type TldwRawRequestResult =
+  | {
+      ok: true
+      response: Response
+      context: {
+        url: string
+        method: string
+        headers: Record<string, string>
+        timeoutMs: number
+        requestStartedAt: number
+      }
+    }
+  | TldwRawRequestFailure
+
+/**
+ * Stage B2: shared auth application for performTldwRequest and
+ * tldwRequestRaw. Mutates `h` in place (stripping stale auth headers first)
+ * per the runtime's credential strategy or the default tldwConfig-driven
+ * resolution. Returns a failure envelope when credentials are required but
+ * unavailable.
+ */
+const applyTldwAuthHeaders = (
+  h: Record<string, string>,
+  context: {
+    cfg: TldwConfigLike
+    method: string
+    cookieSession: boolean
+    hostedMode: boolean
+    shouldSkipAuth: boolean
+    runtimeApiKey: string
+  },
+  runtime: TldwRequestRuntime,
+): { status: number; error: string } | null => {
+  const { cfg, method, cookieSession, hostedMode, shouldSkipAuth, runtimeApiKey } =
+    context
+  const stripAuthHeaders = (csrfToo: boolean) => {
+    for (const k of Object.keys(h)) {
+      const kl = k.toLowerCase()
+      if (
+        kl === "x-api-key" ||
+        kl === "authorization" ||
+        (csrfToo && kl === "x-csrf-token")
+      ) {
+        delete h[k]
+      }
+    }
+  }
+
+  if (runtime.resolveCredentials) {
+    const resolution = runtime.resolveCredentials({
+      cfg,
+      method,
+      isUnsafeMethod: isUnsafeMethod(method),
+      cookieSession,
+      hostedMode,
+      shouldSkipAuth,
+      runtimeApiKey,
+      existingHeaders: h,
+    })
+    if ("error" in resolution) {
+      return resolution.error
+    }
+    stripAuthHeaders(true)
+    Object.assign(h, resolution.headers)
+    return null
+  }
+
+  if (cookieSession) {
+    stripAuthHeaders(true)
+    if (!shouldSkipAuth && isUnsafeMethod(method)) {
+      const csrfToken = readBrowserCookie("csrf_token")
+      if (csrfToken) h["X-CSRF-Token"] = csrfToken
+    }
+    return null
+  }
+
+  if (shouldSkipAuth) {
+    return null
+  }
+
+  stripAuthHeaders(false)
+  if (!hostedMode) {
+    if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
+      h["X-API-KEY"] = runtimeApiKey
+    } else if (cfg?.authMode === "single-user") {
+      const key = (cfg?.apiKey || "").trim()
+      if (!key) {
+        return {
+          status: 401,
+          error:
+            "Add or update your API key in Settings -> tldw server, then try again.",
+        }
+      }
+      if (isPlaceholderApiKey(key)) {
+        return {
+          status: 401,
+          error:
+            "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings -> tldw server before continuing.",
+        }
+      }
+      h["X-API-KEY"] = key
+    } else if (cfg?.authMode === "multi-user") {
+      const token = (cfg?.accessToken || "").trim()
+      if (token) h["Authorization"] = `Bearer ${token}`
+      else {
+        return {
+          status: 401,
+          error: "Not authenticated. Please login under Settings > tldw.",
+        }
+      }
+    }
+  }
+  if (cfg?.orgId) {
+    h["X-TLDW-Org-Id"] = String(cfg.orgId)
+  }
+  return null
+}
+
+/**
+ * Resolves the headers (auth, CSRF, content type) a request would be sent
+ * with, without sending it, or null when credentials are unavailable. For
+ * page-unload senders: beforeunload cannot await the async runtime config,
+ * so they prepare headers ahead of time with this.
+ */
+export const resolveTldwRequestHeaders = async (
+  payload: TldwRequestPayload,
+  runtime: TldwRequestRuntime,
+): Promise<Record<string, string> | null> => {
+  const planResult = await resolveTldwRequestPlan(payload, runtime)
+  if (planResult.ok !== true) return null
+  const { plan } = planResult
+  const runtimeApiKey =
+    runtime.useRuntimeAuthOverride === false
+      ? ""
+      : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+  const authFailure = applyTldwAuthHeaders(plan.headers, { ...plan, runtimeApiKey }, runtime)
+  return authFailure ? null : plan.headers
+}
+
+export const tldwRequestRaw = async (
+  payload: TldwRequestPayload,
+  runtime: TldwRequestRuntime,
+): Promise<TldwRawRequestResult> => {
+  if (payload.recipePersistence) {
+    throw new Error(
+      "tldwRequestRaw does not support recipePersistence; use tldwRequest.",
+    )
+  }
+
+  const planResult = await resolveTldwRequestPlan(payload, runtime)
+  if (planResult.ok !== true) {
+    return {
+      ok: false,
+      kind: "guard",
+      status: planResult.status,
+      error: planResult.error,
+    }
+  }
+  const {
+    method,
+    body,
+    abortSignal,
+    overrideTimeoutMs,
+    cfg,
+    fetchFn,
+    normalizedPath,
+    hostedMode,
+    cookieSession,
+    url,
+    headers: h,
+    isBinaryBody,
+    shouldSkipAuth,
+  } = planResult.plan
+
+  const runtimeApiKey =
+    runtime.useRuntimeAuthOverride === false
+      ? ""
+      : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+  const authFailure = applyTldwAuthHeaders(
+    h,
+    { cfg, method, cookieSession, hostedMode, shouldSkipAuth, runtimeApiKey },
+    runtime,
+  )
+  if (authFailure) {
+    return {
+      ok: false,
+      kind: "guard",
+      status: authFailure.status,
+      error: authFailure.error,
+    }
+  }
+
+  const timeoutMs = deriveRequestTimeout(
+    cfg,
+    (normalizedPath ?? "") as Parameters<typeof deriveRequestTimeout>[1],
+    Number(overrideTimeoutMs),
+  )
+  const controller = new AbortController()
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const onAbort = () => {
+    try {
+      controller.abort()
+    } catch {}
+  }
+  try {
+    if (abortSignal?.aborted) {
+      // A pre-aborted caller signal must fail fast: a fetch dispatched with
+      // an already-aborted signal never delivers an abort event to callers
+      // that only listen for it (the web client's contract).
+      return { ok: false, kind: "aborted", error: "Request aborted" }
+    }
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", onAbort, { once: true })
+    }
+
+    const resolvedBody =
+      body == null
+        ? undefined
+        : typeof body === "string" || isBinaryBody(body)
+          ? body
+          : JSON.stringify(body)
+
+    const response = await fetchFn(url, {
+      redirect: "error",
+      method,
+      headers: h,
+      body: resolvedBody,
+      signal: controller.signal,
+      ...(payload.credentials ? { credentials: payload.credentials } : {}),
+    })
+    return {
+      ok: true,
+      response,
+      context: {
+        url,
+        method,
+        headers: { ...h },
+        timeoutMs,
+        requestStartedAt: Date.now(),
+      },
+    }
+  } catch (error) {
+    const timedOut =
+      abortSignal?.aborted !== true &&
+      error instanceof DOMException &&
+      error.name === "AbortError"
+    if (abortSignal?.aborted === true) {
+      return { ok: false, kind: "aborted", error: "Request aborted" }
+    }
+    if (timedOut) {
+      return { ok: false, kind: "timeout", error: "Request timed out" }
+    }
+    return {
+      ok: false,
+      kind: "network",
+      error: formatErrorMessage(error, "Network Error"),
+    }
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId)
+    }
+    abortSignal?.removeEventListener("abort", onAbort)
+  }
+}
+
+const performTldwRequest = async (
+  payload: TldwRequestPayload,
+  runtime: TldwRequestRuntime,
+  dispatch?: {
+    value: RecipePersistenceDispatch;
+    receipt?: RecipeDeliveryReceipt;
+  },
+): Promise<ApiSendResponse> => {
+  const resolvedPlan = await resolveTldwRequestPlan(payload, runtime);
+  if (resolvedPlan.ok !== true) {
+    return {
+      ok: false,
+      status: resolvedPlan.status,
+      error: resolvedPlan.error,
+    };
+  }
+  const {
+    method,
+    body,
+    abortSignal,
+    responseType,
+    maxResponseBytes,
+    overrideTimeoutMs,
+    noAuth,
+    cfg,
+    fetchFn,
+    normalizedPath,
+    sameOriginAbsoluteUrl,
+    samePageOriginRequest,
+    hostedMode,
+    cookieSession,
+    url: resolvedUrl,
+    headers: h,
+    isBinaryBody,
+    pageOrigin,
+    shouldSkipAuth,
+  } = resolvedPlan.plan;
+  let url = resolvedUrl;
+
   const runtimeApiKey =
     runtime.useRuntimeAuthOverride === false
       ? ""
       : String(getRuntimeSingleUserApiKeyOverride() || "").trim();
   let recipeSnapshot: RecipeRequestSnapshotResolution | null = null;
+  let ownerRequestPrincipal: string | number | null = null;
   if (payload.recipePersistence) {
     const snapshotInput = {
       config: cfg,
@@ -354,6 +867,7 @@ const performTldwRequest = async (
       const authenticatedPrincipal = await runtime.getAuthenticatedPrincipal(
         recipeSnapshot.snapshot,
       );
+      ownerRequestPrincipal = authenticatedPrincipal;
       recipeSnapshot = resolveRecipeRequestSnapshot({
         ...snapshotInput,
         authenticatedPrincipalId: authenticatedPrincipal,
@@ -368,6 +882,29 @@ const performTldwRequest = async (
         status: recipeSnapshot.authenticationError.status,
         error: recipeSnapshot.authenticationError.error,
       };
+    }
+
+    // Ordinary prompt copies require captured account ownership without the
+    // recipe-specific delivery reservation. Keep v2's require path intact.
+    if (payload.recipePersistence.mode === "owner") {
+      const expectedOwnerId = payload.recipePersistence.expectedOwnerId;
+      if (
+        !/^recipe-owner:sha256:[0-9a-f]{64}$/.test(expectedOwnerId) ||
+        !recipeSnapshot.view ||
+        recipeSnapshot.view.ownerId !== expectedOwnerId
+      ) {
+        return {
+          ok: false,
+          status: 412,
+          error: "Request prompt owner is unavailable or changed",
+        };
+      }
+      if (ownerRequestPrincipal != null) {
+        for (const key of Object.keys(h)) {
+          if (key.toLowerCase() === "x-tldw-expected-user-id") delete h[key];
+        }
+        h["X-TLDW-Expected-User-ID"] = String(ownerRequestPrincipal);
+      }
     }
 
     if (payload.recipePersistence.mode === "require") {
@@ -394,78 +931,35 @@ const performTldwRequest = async (
         };
       }
     }
-  } else if (cookieSession) {
-    for (const k of Object.keys(h)) {
-      const kl = k.toLowerCase();
-      if (
-        kl === "x-api-key" ||
-        kl === "authorization" ||
-        kl === "x-csrf-token"
-      ) {
-        delete h[k];
-      }
+  } else {
+    const authFailure = applyTldwAuthHeaders(
+      h,
+      { cfg, method, cookieSession, hostedMode, shouldSkipAuth, runtimeApiKey },
+      runtime,
+    );
+    if (authFailure) {
+      return { ok: false, status: authFailure.status, error: authFailure.error };
     }
-    if (!shouldSkipAuth && isUnsafeMethod(method)) {
-      const csrfToken = readBrowserCookie("csrf_token");
-      if (csrfToken) h["X-CSRF-Token"] = csrfToken;
+  }
+
+  if (
+    !recipeSnapshot &&
+    noAuth &&
+    isUnsafeMethod(method) &&
+    samePageOriginRequest
+  ) {
+    for (const key of Object.keys(h)) {
+      if (key.toLowerCase() === "x-csrf-token") delete h[key];
     }
-  } else if (!shouldSkipAuth) {
-    for (const k of Object.keys(h)) {
-      const kl = k.toLowerCase();
-      if (kl === "x-api-key" || kl === "authorization") delete h[k];
-    }
-    if (!hostedMode) {
-      if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
-        h["X-API-KEY"] = runtimeApiKey;
-      } else if (cfg?.authMode === "single-user") {
-        const key = (cfg?.apiKey || "").trim();
-        if (!key) {
-          if (runtimeApiKey && isPlaceholderApiKey(runtimeApiKey)) {
-            return {
-              ok: false,
-              status: 401,
-              error:
-                "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings -> tldw server before continuing.",
-            };
-          }
-          return {
-            ok: false,
-            status: 401,
-            error:
-              "Add or update your API key in Settings -> tldw server, then try again.",
-          };
-        }
-        if (isPlaceholderApiKey(key)) {
-          return {
-            ok: false,
-            status: 401,
-            error:
-              "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings -> tldw server before continuing.",
-          };
-        }
-        h["X-API-KEY"] = key;
-      } else if (cfg?.authMode === "multi-user") {
-        const token = (cfg?.accessToken || "").trim();
-        if (token) h["Authorization"] = `Bearer ${token}`;
-        else {
-          return {
-            ok: false,
-            status: 401,
-            error: "Not authenticated. Please login under Settings > tldw.",
-          };
-        }
-      }
-    }
-    if (cfg?.orgId) {
-      h["X-TLDW-Org-Id"] = String(cfg.orgId);
-    }
+    const csrfToken = readBrowserCookie("csrf_token");
+    if (csrfToken) h["X-CSRF-Token"] = csrfToken;
   }
 
   const controller = new AbortController();
   let retryController: AbortController | null = null;
   const timeoutMs = deriveRequestTimeout(
     cfg,
-    normalizedPath,
+    (normalizedPath ?? "") as Parameters<typeof deriveRequestTimeout>[1],
     Number(overrideTimeoutMs),
   );
   const onAbort = () => {
@@ -495,6 +989,7 @@ const performTldwRequest = async (
           : JSON.stringify(body);
 
     // lgtm[js/request-forgery]: url is same-origin/configured-server transport or an allowlisted absolute URL checked above.
+    controller.signal.throwIfAborted();
     if (dispatch && payload.recipePersistence) {
       const actualOwnerId = recipeSnapshot?.view?.ownerId ?? null;
       if (payload.recipePersistence.mode === "require") {
@@ -506,6 +1001,7 @@ const performTldwRequest = async (
       }
       dispatch.value = { state: "dispatched", actualOwnerId };
     }
+    controller.signal.throwIfAborted();
     let resp = await fetchFn(url, {
       redirect: "error",
       method,
@@ -540,7 +1036,7 @@ const performTldwRequest = async (
         timeoutId = null;
       }
       try {
-        await runtime.refreshAuth();
+        await waitForAuthRefresh(() => runtime.refreshAuth!(abortSignal), abortSignal);
       } catch (refreshError) {
         if (abortSignal?.aborted) throw refreshError;
         if (isRequestConfigScopeChangedError(refreshError)) {
@@ -681,20 +1177,31 @@ const performTldwRequest = async (
     const retryAfterMs = parseRetryAfter(resp.headers?.get?.("retry-after"));
     const contentType = resp.headers.get("content-type") || "";
     let data: any = null;
+    const handleBodyReadError = (error: unknown) => {
+      if (isExplicitRequestCancellation(error)) throw error;
+      return null;
+    };
     const readDefaultBody = async () => {
       if (contentType.includes("application/json")) {
-        return await resp.json().catch(() => null);
+        return await resp.json().catch(handleBodyReadError);
       }
-      return await resp.text().catch(() => null);
+      return await resp.text().catch(handleBodyReadError);
     };
     if (responseType === "arrayBuffer") {
-      data = resp.ok
-        ? await resp.arrayBuffer().catch(() => null)
-        : await readDefaultBody();
+      if (maxResponseBytes !== undefined) {
+        const buffer = await readBoundedArrayBuffer(resp, maxResponseBytes, retryController?.signal ?? controller.signal);
+        if (resp.ok) data = buffer;
+        else {
+          const text = new TextDecoder().decode(buffer);
+          if (contentType.includes('application/json')) {
+            try { data = JSON.parse(text); } catch { data = null; }
+          } else data = text;
+        }
+      } else data = resp.ok ? await resp.arrayBuffer().catch(handleBodyReadError) : await readDefaultBody();
     } else if (responseType === "json") {
-      data = await resp.json().catch(() => null);
+      data = await resp.json().catch(handleBodyReadError);
     } else if (responseType === "text") {
-      data = await resp.text().catch(() => null);
+      data = await resp.text().catch(handleBodyReadError);
     } else {
       data = await readDefaultBody();
     }
@@ -742,6 +1249,9 @@ const performTldwRequest = async (
       retryAfterMs,
     };
   } catch (e: any) {
+    if (e?.code === 'RESPONSE_TOO_LARGE') {
+      return { ok: false, status: 0, error: e.message, code: 'RESPONSE_TOO_LARGE' };
+    }
     // Internal deadlines also raise AbortError; only the caller's signal marks
     // deliberate cancellation that should suppress connection/error feedback.
     if (abortSignal?.aborted) {
@@ -761,6 +1271,9 @@ const performTldwRequest = async (
       };
     }
     if (isRequestConfigScopeChangedError(e)) throw e;
+    if (isExplicitRequestCancellation(e)) {
+      return { ok: false, status: 0, error: formatErrorMessage(e, "Request aborted."), code: "REQUEST_ABORTED" };
+    }
     return {
       ok: false,
       status: 0,

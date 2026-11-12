@@ -34,11 +34,11 @@ Fix PR #2577 review comments in apps/FRONTEND_AUDIT_FOLLOWUP.md. Scope: correct 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed the PR #2577 review comments by expanding the V1 WebSocket auth revert/patch list to fully qualified repo-relative paths and disambiguating the UI background implementation from the extension entrypoint re-export. This is documentation-only work; Bandit is not applicable.
 
 Verification: git diff --check -- apps/FRONTEND_AUDIT_FOLLOWUP.md 'backlog/tasks/task-12122 - Address-PR-2577-frontend-audit-follow-up-review-comments.md' completed with exit code 0. No runtime tests or Bandit were run because this change only updates documentation and the Backlog task record.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

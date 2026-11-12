@@ -859,6 +859,7 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import PolicyDecision, Runtim
 forbidden_exact = {{
     'tldw_Server_API.app.core.Web_Scraping.outbound_policy',
     'tldw_Server_API.app.core.Security.egress',
+    'tldw_Server_API.app.core.Utils.egress',
     'tldw_Server_API.app.core.http_client',
     'tldw_Server_API.app.core.Web_Scraping.preflight.adapters.http',
     'tldw_Server_API.app.core.Web_Scraping.preflight.adapters.browser',
@@ -973,3 +974,42 @@ async def test_evaluate_target_propagates_policy_cancellation() -> None:
             config=None,
             policy_checker=_CancellingPolicyChecker(),
         )
+
+
+@pytest.mark.asyncio
+async def test_public_scope_isolated_concurrent_and_reset_after_failure(monkeypatch):
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1,example.com")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "false")
+    scope = _required_attribute(egress, "public_url_policy_scope")
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def public():
+        try:
+            with scope():
+                entered.set()
+                await release.wait()
+                decision = await _guard_type()().decide("http://127.0.0.1/a", context=RuntimeRequestContext())
+                assert decision.allowed is False
+                assert (
+                    egress.evaluate_url_policy("https://user:secret@example.com/a").reason_code
+                    == "userinfo_not_allowed"
+                )
+                assert (
+                    egress.evaluate_url_policy(
+                        "http://127.0.0.1/a",
+                        block_private_override=False,
+                        configured_endpoint=egress.ConfiguredEndpointScope.from_url("http://127.0.0.1"),
+                    ).allowed
+                    is False
+                )
+                raise RuntimeError("exit")
+        except RuntimeError:
+            pass
+        assert egress.evaluate_url_policy("http://127.0.0.1/a").allowed is True
+
+    task = asyncio.create_task(public())
+    await entered.wait()
+    assert egress.evaluate_url_policy("http://127.0.0.1/a").allowed is True
+    release.set()
+    await task

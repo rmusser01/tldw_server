@@ -45,12 +45,12 @@ Create the implementation plan for GitHub issue #1610 and the reviewed VN script
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Wrote implementation plan at `Docs/superpowers/plans/2026-05-12-vn-script-authoring-catalog.md`.
 - Plan review found issues around service/API sequencing, abuse limits, typed snippet exceptions, capability-first WebUI discovery, service-owned validation boundaries, and compile/import verification.
 - Addressed all review findings and re-ran the plan review; result was APPROVED.
 - Bandit skipped because this task only changes Markdown plan/task documents.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

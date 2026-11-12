@@ -72,7 +72,7 @@ def test_request_override_takes_provenance_precedence() -> None:
 
 
 def test_chat_service_only_accepts_endpoint_owned_private_provenance() -> None:
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     args = {
         "api_provider": "custom-openai-api",
@@ -87,7 +87,7 @@ def test_chat_service_only_accepts_endpoint_owned_private_provenance() -> None:
         "http_streamer": object(),
     }
 
-    _provider, request, internal = chat_service._build_adapter_request_from_chat_args(args)
+    _provider, request, internal = gateway._build_adapter_request_from_chat_args(args)
 
     assert request["_endpoint_provenance"] == "byok"
     assert "endpoint_provenance" not in request
@@ -98,7 +98,7 @@ def test_chat_service_only_accepts_endpoint_owned_private_provenance() -> None:
 
 @pytest.mark.asyncio
 async def test_non_custom_provider_filters_only_private_endpoint_provenance() -> None:
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     async def resolve(provider: str, **_kwargs: Any) -> ResolvedByokCredentials:
         return ResolvedByokCredentials(
@@ -132,7 +132,7 @@ async def test_non_custom_provider_filters_only_private_endpoint_provenance() ->
             "extra_body": {"declared_extension": "kept"},
         }
 
-        provider, request, internal = chat_service._build_adapter_request_from_chat_args(args)
+        provider, request, internal = gateway._build_adapter_request_from_chat_args(args)
     finally:
         await runtime.close()
 
@@ -145,7 +145,7 @@ async def test_non_custom_provider_filters_only_private_endpoint_provenance() ->
 
 
 def test_untrusted_private_provenance_value_is_discarded() -> None:
-    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.LLM_Calls import gateway
 
     args = {
         "api_provider": "custom-openai-api",
@@ -155,7 +155,7 @@ def test_untrusted_private_provenance_value_is_discarded() -> None:
         "_endpoint_provenance": "http://attacker.invalid",
     }
 
-    _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(args)
+    _provider, request, _internal = gateway._build_adapter_request_from_chat_args(args)
 
     assert "_endpoint_provenance" not in request
 

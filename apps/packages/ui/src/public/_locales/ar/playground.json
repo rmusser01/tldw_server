@@ -1573,5 +1573,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "تجاهل عند نشاط القوالب"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "تعارض نقل الوسائط"
+  },
+  "mediaHandoff_conflict": {
+    "message": "لديك مسودة بالفعل في محرر الرسائل. أدرج مصدر الوسائط، أو استبدل مسودتك، أو ألغِ الاستيراد."
+  },
+  "mediaHandoff_insert": {
+    "message": "إدراج مصدر الوسائط"
+  },
+  "mediaHandoff_replace": {
+    "message": "استبدال المسودة الحالية"
+  },
+  "mediaHandoff_cancel": {
+    "message": "إلغاء الاستيراد"
   }
 }

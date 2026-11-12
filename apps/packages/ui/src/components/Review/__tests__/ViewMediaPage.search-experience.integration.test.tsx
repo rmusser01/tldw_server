@@ -1,7 +1,8 @@
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => 'verified-fixture', quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-fixture', requestScope: { config: { serverUrl: 'http://localhost:8000', authMode: 'multi-user' }, userId: 'fixture' }, isCurrent: () => true }) } }))
 import React from 'react'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ViewMediaPage from '../ViewMediaPage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
@@ -174,11 +175,17 @@ vi.mock('@/components/Media/FilterPanel', () => ({
     onMetadataFiltersChange,
     onMediaTypesChange,
     onKeywordsChange,
+    onKeywordSearch,
     onExcludedKeywordsChange,
     onSortByChange,
     onDateRangeChange,
   }: any) => (
     <div data-testid="filter-panel">
+      <input
+        data-testid="keyword-search"
+        aria-label="Search keywords"
+        onChange={(event) => onKeywordSearch?.(event.target.value)}
+      />
       <button
         type="button"
         data-testid="set-metadata-mode"
@@ -339,17 +346,25 @@ vi.mock('@/components/Media/MediaLibraryStatsPanel', () => ({
 const renderMediaPage = (initialEntry: string) => {
   return render(
     <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/" element={<div data-testid="root-route" />} />
-        <Route path="/media" element={<ViewMediaPage />} />
-      </Routes>
-    </MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
+        <Routes>
+          <Route path="/" element={<div data-testid="root-route" />} />
+          <Route path="/media" element={<ViewMediaPage />} />
+        </Routes>
+      </MemoryRouter>
     </QueryClientProvider>
   )
 }
 
 describe('ViewMediaPage metadata search integration', () => {
+  it("keeps recent imports in the primary Inspector without expanding Library tools", async () => {
+    renderMediaPage("/media")
+    expect(
+      await screen.findByTestId("media-ingest-jobs-panel")
+    ).toBeInTheDocument()
+    expect(screen.queryByTestId("media-library-tools-panel")).toBeNull()
+  })
+
   beforeEach(() => {
     mocks.bgRequest.mockReset()
     mocks.metadataPaths.length = 0
@@ -409,6 +424,82 @@ describe('ViewMediaPage metadata search integration', () => {
       }
       return {}
     })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('dispatches the latest keyword input once after the shared 300ms delay', async () => {
+    renderMediaPage('/media')
+    fireEvent.change(screen.getByTestId('search-bar'), {
+      target: { value: 'library' }
+    })
+    await waitFor(() => {
+      expect(mocks.bgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: '/api/v1/media/?page=1&results_per_page=50'
+        })
+      )
+    })
+    await act(async () => {})
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const keywordRequests = () =>
+      mocks.bgRequest.mock.calls.filter(([request]) =>
+        request.path.startsWith('/api/v1/media/keywords?')
+      )
+
+    fireEvent.change(screen.getByTestId('keyword-search'), {
+      target: { value: 'bio' }
+    })
+    fireEvent.change(screen.getByTestId('keyword-search'), {
+      target: { value: 'biology' }
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(299)
+    })
+    expect(keywordRequests()).toHaveLength(0)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    expect(keywordRequests().map(([request]) => request.path)).toEqual([
+      '/api/v1/media/keywords?query=biology'
+    ])
+  })
+
+  it('cancels queued keyword requests when cleared or the page unmounts', async () => {
+    const page = renderMediaPage('/media')
+    fireEvent.change(screen.getByTestId('search-bar'), {
+      target: { value: 'library' }
+    })
+    await waitFor(() => {
+      expect(mocks.bgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: '/api/v1/media/?page=1&results_per_page=50'
+        })
+      )
+    })
+    await act(async () => {})
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const input = screen.getByTestId('keyword-search')
+    fireEvent.change(input, { target: { value: 'biology' } })
+    fireEvent.change(input, { target: { value: '' } })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600)
+    })
+    expect(
+      mocks.bgRequest.mock.calls.filter(([request]) =>
+        request.path.startsWith('/api/v1/media/keywords?')
+      )
+    ).toHaveLength(0)
+    fireEvent.change(input, { target: { value: 'biology' } })
+    page.unmount()
+    await vi.advanceTimersByTimeAsync(600)
+    expect(
+      mocks.bgRequest.mock.calls.filter(([request]) =>
+        request.path.startsWith('/api/v1/media/keywords?')
+      )
+    ).toHaveLength(0)
   })
 
   it('serializes metadata-mode constraints and preserves server-authoritative totals/results', async () => {

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import re
 from time import monotonic
-from typing import Callable
 
 from loguru import logger
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -16,12 +15,24 @@ _AUDIO_STUDIO_MEDIA_TICKET_PATH = re.compile(
 )
 
 
+_SENSITIVE_QUERY_TARGET = re.compile(
+    r"(/api/v1/(?:email(?:/[^?\s\"']*)?|media/search|auth/verify-email)/?)\?[^\s]*"
+)
+
+
 def redact_access_log_path(path: str) -> str:
     return _AUDIO_STUDIO_MEDIA_TICKET_PATH.sub(r"\1[REDACTED]", path)
 
 
 def redact_access_log_message(message: str) -> str:
-    return redact_access_log_path(message)
+    """Redact ticket tokens and sensitive query strings in server request lines.
+
+    Uvicorn includes the query string in its access record even though the
+    structured middleware logs only the path. Drop verification tokens and
+    private search text while retaining the route and status.
+    """
+    redacted = redact_access_log_path(message)
+    return _SENSITIVE_QUERY_TARGET.sub(r"\1?[REDACTED]", redacted)
 
 
 class AccessLogMiddleware(BaseHTTPMiddleware):
@@ -40,7 +51,7 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         start = monotonic()
         req_id = ensure_request_id(request)
         method = request.method

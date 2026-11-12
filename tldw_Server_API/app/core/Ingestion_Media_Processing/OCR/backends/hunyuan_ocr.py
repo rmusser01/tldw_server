@@ -1,19 +1,14 @@
 from __future__ import annotations
 
-import base64
 import contextlib
 import importlib.util
 import io
 import json
 import os
-import tempfile
 import threading
 from typing import Any
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.base import OCRBackend
-from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import (
-    discard_staged_page_image,
-)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     OCRBlock,
     OCRResult,
@@ -21,6 +16,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.types import (
     normalize_ocr_format,
 )
 from tldw_Server_API.app.core.Utils.Utils import logging
+from tldw_Server_API.app.core.Utils.coercion import env_bool
+from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR.runtime_support import image_payload
 
 _TF_MODEL = None
 _TF_PROCESSOR = None
@@ -185,30 +182,7 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
 
     model = os.getenv("HUNYUAN_VLLM_MODEL", "HunyuanOCR")
     timeout = int(os.getenv("HUNYUAN_VLLM_TIMEOUT", "60"))
-    use_data_url = str(os.getenv("HUNYUAN_VLLM_USE_DATA_URL", "true")).lower() in ("1", "true", "yes")
-
-    content_image = None
-    tmp_path = None
-    if use_data_url:
-        b64 = base64.b64encode(image_bytes).decode("ascii")
-        content_image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-    else:
-        # Path-based URL is likely only useful for local file access. delete=False is
-        # required: delete=True unlinks the file when the with-block closes, i.e. before
-        # the request below, and the server is handed a path that no longer exists.
-        # Cleaned up in the finally at the request site.
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-            # Record the path before writing. delete=False means a write that fails on a
-            # full filesystem leaves the file behind, and the cleanup below can only
-            # remove a path it has been given.
-            tmp_path = f.name
-            try:
-                f.write(image_bytes)
-                f.flush()
-            except BaseException:
-                discard_staged_page_image(tmp_path)
-                raise
-        content_image = {"type": "image_url", "image_url": {"url": tmp_path}}
+    use_data_url = env_bool("HUNYUAN_VLLM_USE_DATA_URL", default=True)
 
     def _getf(env: str, cast, default):
         try:
@@ -218,28 +192,26 @@ def _ocr_via_vllm(image_bytes: bytes, prompt: str) -> str:
 
     max_tokens = _getf("HUNYUAN_MAX_NEW_TOKENS", int, 2048)
 
-    data = {
-        "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    content_image,
-                ],
-            }
-        ],
-        "max_new_tokens": max_tokens,
-        "max_tokens": max_tokens,
-        "temperature": _getf("HUNYUAN_TEMPERATURE", float, 0.0),
-    }
+    with image_payload(image_bytes, use_data_url=use_data_url) as content_image:
+        data = {
+            "model": model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        content_image,
+                    ],
+                }
+            ],
+            "max_new_tokens": max_tokens,
+            "max_tokens": max_tokens,
+            "temperature": _getf("HUNYUAN_TEMPERATURE", float, 0.0),
+        }
 
-    from tldw_Server_API.app.core.http_client import fetch_json
+        from tldw_Server_API.app.core.http_client import fetch_json
 
-    try:
         j = fetch_json(method="POST", url=url, json=data, timeout=timeout)
-    finally:
-        discard_staged_page_image(tmp_path)
     return (
         j.get("choices", [{}])[0]
         .get("message", {})
@@ -306,7 +278,7 @@ def _ocr_via_transformers(image_bytes: bytes, prompt: str) -> str:
         inputs = inputs.to(model.device)
 
     max_new_tokens = int(os.getenv("HUNYUAN_MAX_NEW_TOKENS", "2048"))
-    do_sample = str(os.getenv("HUNYUAN_DO_SAMPLE", "false")).lower() in ("1", "true", "yes")
+    do_sample = env_bool("HUNYUAN_DO_SAMPLE", default=False)
 
     generated = model.generate(
         **inputs,
@@ -318,7 +290,7 @@ def _ocr_via_transformers(image_bytes: bytes, prompt: str) -> str:
 
 
 def _should_clean_repeats() -> bool:
-    return str(os.getenv("HUNYUAN_CLEAN_REPEATS", "true")).lower() in ("1", "true", "yes")
+    return env_bool("HUNYUAN_CLEAN_REPEATS", default=True)
 
 
 def _clean_repeated_substrings(text: str) -> str:

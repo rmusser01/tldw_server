@@ -33,6 +33,9 @@ def _runtime_env(tmp_path, database_url, *, backend=None, mode="single_user"):
         "DATABASE_POOL_MIN_SIZE": "1",
         "DATABASE_POOL_MAX_SIZE": "5",
     }
+    system_root = os.environ.get("SystemRoot")
+    if system_root and Path(system_root).is_dir():
+        env["SystemRoot"] = system_root
     if backend is not None:
         env["TLDW_USER_DB_BACKEND"] = backend
     return env
@@ -69,6 +72,20 @@ print('RUNTIME_RESULT=' + json.dumps({
     'fallback': _apply_single_user_fallback(settings.DATABASE_URL, settings.AUTH_MODE) != settings.DATABASE_URL,
 }))
 """
+
+
+@pytest.mark.parametrize("root_exists", [True, False])
+def test_runtime_env_preserves_only_valid_system_root(tmp_path, monkeypatch, root_exists):
+    candidate = tmp_path / "system-root"
+    if root_exists:
+        candidate.mkdir()
+    monkeypatch.setenv("SystemRoot", str(candidate))
+    private = tmp_path / "private"
+    private.mkdir()
+
+    env = _runtime_env(private, "sqlite:///:memory:")
+
+    assert env.get("SystemRoot") == (str(candidate) if root_exists else None)
 
 
 @pytest.mark.parametrize(
@@ -145,6 +162,19 @@ def test_explicit_postgres_bootstraps_in_normal_runtime(pg_temp_db, tmp_path, ba
 @pytest.mark.integration
 def test_sqlite_bootstraps_in_normal_runtime(tmp_path):
     env = _runtime_env(tmp_path, f"sqlite:///{tmp_path / 'auth.db'}", backend="sqlite")
+    assert _run_runtime(tmp_path, env, BOOTSTRAP_SCRIPT) == {
+        "setup": True,
+        "bootstrap": [True, True],
+        "backend": "sqlite",
+        "admin": True,
+        "primary_key": True,
+    }
+
+
+@pytest.mark.integration
+def test_sqlite_bootstrap_accepts_cp1252_output(tmp_path):
+    env = _runtime_env(tmp_path, f"sqlite:///{tmp_path / 'auth.db'}", backend="sqlite")
+    env["PYTHONIOENCODING"] = "cp1252"
     assert _run_runtime(tmp_path, env, BOOTSTRAP_SCRIPT) == {
         "setup": True,
         "bootstrap": [True, True],

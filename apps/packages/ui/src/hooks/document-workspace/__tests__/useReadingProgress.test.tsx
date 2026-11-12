@@ -1,9 +1,10 @@
 import React from "react"
-import { act, renderHook } from "@testing-library/react"
+import { act, cleanup, renderHook } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
+  useUpdateReadingProgress,
   useReadingProgressAutoSave,
   useReadingProgressSaveOnClose,
 } from "@/hooks/document-workspace/useReadingProgress"
@@ -14,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   updateReadingProgress: vi.fn(),
 }))
 
+const owner = {authorityKey:"progress-owner",authorityRevision:1,requestScope:{config:{serverUrl:"https://a.test",authMode:"single-user"},userId:null},signal:new AbortController().signal,isCurrent:()=>true,assertCurrent:()=>{}}
+vi.mock("@/hooks/document-workspace/useDocumentOperation",()=>({useDocumentOperation:()=>owner}))
 vi.mock("@/services/tldw", () => ({
   tldwClient: {
     updateReadingProgress: mocks.updateReadingProgress,
@@ -64,11 +67,29 @@ describe("useReadingProgressAutoSave", () => {
   })
 
   afterEach(() => {
+    cleanup()
     useConnectionStore.setState(initialConnectionStore, true)
     useDocumentWorkspaceStore.setState(initialWorkspaceStore, true)
     vi.runOnlyPendingTimers()
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it("keeps the public non-promise progress mutation bound to its owner",async()=>{
+    mocks.updateReadingProgress.mockResolvedValue({media_id:152,current_page:2,total_pages:10})
+    const hook=renderHook(()=>useUpdateReadingProgress(),{wrapper:buildWrapper()})
+    await act(async()=>{hook.result.current.mutate({mediaId:152,progress:{current_page:2,total_pages:10}});await vi.advanceTimersByTimeAsync(0)})
+    expect(mocks.updateReadingProgress).toHaveBeenCalledWith(152,{current_page:2,total_pages:10},owner)
+    expect(hook.result.current.isError).toBe(false)
+    hook.unmount()
+  })
+
+  it("does not overwrite defaults before the caller's cold read settles",async()=>{
+    mocks.updateReadingProgress.mockResolvedValue(undefined)
+    const hook=renderHook(()=>useReadingProgressAutoSave(152,50,false),{wrapper:buildWrapper()})
+    await act(async()=>{await vi.advanceTimersByTimeAsync(100)})
+    expect(mocks.updateReadingProgress).not.toHaveBeenCalled()
+    hook.unmount()
   })
 
   it("stops autosave retries for a media id after a 404 response", async () => {
@@ -95,6 +116,19 @@ describe("useReadingProgressAutoSave", () => {
     })
 
     expect(mocks.updateReadingProgress).toHaveBeenCalledTimes(1)
+  })
+
+  it("serializes reading writes so an older save cannot finish last", async () => {
+    let finish!:()=>void
+    mocks.updateReadingProgress.mockReturnValueOnce(new Promise<void>(resolve=>{finish=resolve})).mockResolvedValue(undefined)
+    const hook=renderHook(()=>useReadingProgressAutoSave(152,50),{wrapper:buildWrapper()})
+    await act(async()=>{await vi.advanceTimersByTimeAsync(50)})
+    act(()=>useDocumentWorkspaceStore.setState({currentPage:2}))
+    await act(async()=>{await vi.advanceTimersByTimeAsync(50)})
+    expect(mocks.updateReadingProgress).toHaveBeenCalledTimes(1)
+    await act(async()=>{finish();await vi.advanceTimersByTimeAsync(0)})
+    expect(mocks.updateReadingProgress.mock.calls.map(args=>args[1].current_page)).toEqual([1,2])
+    hook.unmount()
   })
 
   it("keeps attempting autosave for non-404 failures", async () => {
@@ -153,6 +187,7 @@ describe("useReadingProgressSaveOnClose", () => {
   })
 
   afterEach(() => {
+    cleanup()
     if (originalDeploymentMode === undefined) {
       delete process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
     } else {
@@ -167,7 +202,7 @@ describe("useReadingProgressSaveOnClose", () => {
     vi.restoreAllMocks()
   })
 
-  it("uses the webui origin for quickstart beacon saves", () => {
+  it("attempts the captured authenticated save without an unauthenticated beacon", async () => {
     const sendBeacon = vi.fn().mockReturnValue(true)
     Object.defineProperty(globalThis, "navigator", {
       value: {
@@ -180,14 +215,11 @@ describe("useReadingProgressSaveOnClose", () => {
     const forceSave = vi.fn()
     renderHook(() => useReadingProgressSaveOnClose(42, forceSave))
 
-    act(() => {
+    await act(async () => {
       window.dispatchEvent(new Event("beforeunload"))
+      await Promise.resolve()
     })
-
-    expect(sendBeacon).toHaveBeenCalledWith(
-      "/api/v1/media/42/progress",
-      expect.any(Blob)
-    )
-    expect(forceSave).not.toHaveBeenCalled()
+    expect(sendBeacon).not.toHaveBeenCalled()
+    expect(forceSave).toHaveBeenCalledTimes(1)
   })
 })

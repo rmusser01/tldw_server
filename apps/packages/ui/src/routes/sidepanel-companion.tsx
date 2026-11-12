@@ -1,8 +1,11 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { Link } from "react-router-dom"
+import { MessageSquare } from "lucide-react"
 
 import { RouteErrorBoundary } from "@/components/Common/RouteErrorBoundary"
 import { CompanionHomeShell } from "@/components/Option/CompanionHome"
+import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { SidepanelHeaderSimple } from "~/components/Sidepanel/Chat/SidepanelHeaderSimple"
 import {
   isCompanionConsentRequiredError,
@@ -18,12 +21,14 @@ import {
 
 const SidepanelCompanion = () => {
   const { t } = useTranslation(["option", "sidepanel"])
+  const { capabilities, loading: capsLoading } = useServerCapabilities()
+  const captureAvailable = !capsLoading && Boolean(capabilities?.hasPersonalization && capabilities?.hasCompanion)
   const [banner, setBanner] = React.useState<string | null>(null)
   const [error, setError] = React.useState<string | null>(null)
   const lastHandledCaptureIdRef = React.useRef<string | null>(null)
 
   const handleCapture = React.useCallback(async (capture: PendingCompanionCapture) => {
-    if (!capture.id || lastHandledCaptureIdRef.current === capture.id) {
+    if (!captureAvailable || !capture.id || lastHandledCaptureIdRef.current === capture.id) {
       return
     }
     lastHandledCaptureIdRef.current = capture.id
@@ -49,14 +54,15 @@ const SidepanelCompanion = () => {
       setError("Failed to save selection to companion.")
       lastHandledCaptureIdRef.current = null
     }
-  }, [])
+  }, [captureAvailable])
 
   const retryPendingCapture = React.useCallback(() => {
+    if (!captureAvailable) return
     const pending = readPendingCompanionCapture()
     if (pending) {
       void handleCapture(pending)
     }
-  }, [handleCapture])
+  }, [captureAvailable, handleCapture])
 
   React.useEffect(() => {
     retryPendingCapture()
@@ -81,6 +87,16 @@ const SidepanelCompanion = () => {
       >
         <SidepanelHeaderSimple activeTitle={t("option:header.companion", "Companion")} />
         <div className="pt-11">
+          {/* Chat stays one tap away above the dashboard (XS-17). */}
+          <div className="px-3 pt-3">
+            <Link
+              to="/?view=chat"
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-lg border border-border bg-bg px-3 text-sm font-medium text-text transition-colors hover:bg-surface-hover"
+            >
+              <MessageSquare className="h-4 w-4" aria-hidden="true" />
+              {t("sidepanel:companion.openChat", "Open chat")}
+            </Link>
+          </div>
           {banner ? (
             <div className="px-3 pt-3">
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">

@@ -82,6 +82,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   markPromptSyncError: (...args: unknown[]) =>
     mocks.markPromptSyncError(...args),
   getAllPrompts: mocks.getAllPrompts,
+  getSharedLocalPrompts: async () => (await mocks.getAllPrompts()).filter((prompt: any) => prompt.ownerId == null && !prompt.serverId && !prompt.studioProjectId && !prompt.studioPromptId && !prompt.serverLibraryId && !prompt.serverLibraryUuid),
   getPromptById: mocks.getPromptById
 }))
 
@@ -98,6 +99,20 @@ vi.mock("@/services/prompt-sync", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/prompt-sync")>()),
   autoSyncPrompt: (...args: unknown[]) => mocks.autoSyncPrompt(...args),
   shouldAutoSyncWorkspacePrompts: () => mocks.shouldAutoSyncWorkspacePrompts()
+}))
+
+// The server prompt library has its own suite
+// (PromptSelect.server-library.test.tsx). Keep its listing off the runtime
+// channel whose messages these modal tests count.
+vi.mock("@/services/server-prompt-library", async (importActual) => ({
+  ...(await importActual<
+    typeof import("@/services/server-prompt-library")
+  >()),
+  listAllServerPrompts: vi.fn(async () => ({
+    prompts: [],
+    totalItems: 0,
+    truncated: false
+  }))
 }))
 
 vi.mock("@/services/prompts-api", async (importActual) => {

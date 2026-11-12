@@ -130,8 +130,20 @@ async def test_character_chat_flow_sessions_messages_worldbooks():
             chat_version = updated_chat["version"]
 
             # 3b) Chat settings read/write
+            # ceaf7dd1c3 snapshots behavior into settings at creation, so a
+            # fresh chat already has a settings row (no greeting flag yet).
             r = await client.get(f"/api/v1/chats/{chat_id}/settings", headers=headers)
-            assert r.status_code == 404
+            assert r.status_code == 200
+            assert "greetingEnabled" not in r.json()["settings"]
+            initial_settings_resp = r.json()
+            assert initial_settings_resp["conversation_id"] == chat_id
+            assert initial_settings_resp["settings"]["participantCharacterIds"] == [character_id]
+            assert initial_settings_resp["settings"]["presetScope"] == "character"
+            assert {
+                "roleplayResumeV1",
+                "roleplayBehaviorV1",
+                "roleplayPendingGreetingV1",
+            }.isdisjoint(initial_settings_resp["settings"])
 
             settings_payload = {
                 "settings": {
@@ -344,6 +356,14 @@ async def test_create_plain_chat_session_without_tracked_identity():
             assert detail["character_id"] is None
             assert detail["persona_memory_mode"] is None
             assert detail["title"] == "Plain overlay-compatible chat"
+
+            settings_resp = await client.get(
+                f"/api/v1/chats/{body['id']}/settings", headers=headers
+            )
+            assert settings_resp.status_code == 200, settings_resp.text
+            settings_body = settings_resp.json()
+            assert settings_body["conversation_id"] == body["id"]
+            assert settings_body["settings"] == {}
     finally:
         try:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -644,8 +664,10 @@ async def test_edit_message_returns_generic_500_for_db_error(monkeypatch):
     os.environ["USER_DB_BASE_DIR"] = tmpdir
 
     try:
-        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+            CharactersRAGDB,
+            CharactersRAGDBError,
+        )
         from tldw_Server_API.app.main import app
 
         settings = get_settings()
@@ -672,13 +694,17 @@ async def test_edit_message_returns_generic_500_for_db_error(monkeypatch):
             assert message_resp.status_code == 201
             message = message_resp.json()
 
-            def fake_edit_message_content(*args, **kwargs):
+            def fake_update_message(
+                self, message_id, update_data, expected_version, *, conn=None
+            ):
                 raise CharactersRAGDBError("message edit backend unavailable")
 
+            # f7e52e82a3 moved the edit onto db.update_message inside the
+            # resume-state transaction; the module-level helper is gone.
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "edit_message_content",
-                fake_edit_message_content,
+                CharactersRAGDB,
+                "update_message",
+                fake_update_message,
             )
 
             response = await client.put(
@@ -703,8 +729,10 @@ async def test_edit_message_maps_conflict_error_to_409(monkeypatch):
     os.environ["USER_DB_BASE_DIR"] = tmpdir
 
     try:
-        from tldw_Server_API.app.api.v1.endpoints import character_messages as character_messages_endpoint
-        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import ConflictError
+        from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+            CharactersRAGDB,
+            ConflictError,
+        )
         from tldw_Server_API.app.main import app
 
         settings = get_settings()
@@ -731,13 +759,17 @@ async def test_edit_message_maps_conflict_error_to_409(monkeypatch):
             assert message_resp.status_code == 201
             message = message_resp.json()
 
-            def fake_edit_message_content(*args, **kwargs):
+            def fake_update_message(
+                self, message_id, update_data, expected_version, *, conn=None
+            ):
                 raise ConflictError("message edit conflict")
 
+            # f7e52e82a3 moved the edit onto db.update_message inside the
+            # resume-state transaction; the module-level helper is gone.
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "edit_message_content",
-                fake_edit_message_content,
+                CharactersRAGDB,
+                "update_message",
+                fake_update_message,
             )
 
             response = await client.put(

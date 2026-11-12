@@ -320,7 +320,8 @@ class TestUnregisterGeneratedFile:
             },
         ]
         mock_repo = AsyncMock()
-        mock_repo.bulk_soft_delete = AsyncMock(return_value=2)
+        mock_repo.bulk_soft_delete = AsyncMock(return_value=[1, 2])
+        mock_repo.get_file_by_id.side_effect = lambda file_id: next(row for row in file_records if row["id"] == file_id)
         service.get_generated_files_repo = AsyncMock(return_value=mock_repo)
         service.update_usage = AsyncMock()
         service.update_org_usage = AsyncMock()
@@ -333,6 +334,69 @@ class TestUnregisterGeneratedFile:
         service.update_usage.assert_awaited_once_with(1, 3072, operation="remove")
         service.update_org_usage.assert_awaited_once_with(7, -3072)
         service.update_team_usage.assert_awaited_once_with(9, -3072)
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_bulk_delete_locks_all_quota_owners_before_mutating_files(self):
+        service = StorageQuotaService(db_pool=MagicMock())
+        service._initialized = True
+        records = [
+            {"id": 2, "user_id": 2, "org_id": 8, "team_id": 10, "file_size_bytes": 1},
+            {"id": 1, "user_id": 1, "org_id": 7, "team_id": 9, "file_size_bytes": 1},
+        ]
+        events = []
+        repo = AsyncMock()
+        repo.get_file_by_id.side_effect = lambda file_id: next(row for row in records if row["id"] == file_id)
+        async def lock(**scope):
+            events.append(scope)
+        async def mutate(file_ids):
+            assert events == [
+                {"user_id": 1, "org_id": None, "team_id": None},
+                {"user_id": 2, "org_id": None, "team_id": None},
+                {"user_id": 1, "org_id": 7, "team_id": None},
+                {"user_id": 1, "org_id": 8, "team_id": None},
+                {"user_id": 1, "org_id": None, "team_id": 9},
+                {"user_id": 1, "org_id": None, "team_id": 10},
+            ]
+            return file_ids
+        repo.lock_quota_scopes.side_effect = lock
+        repo.bulk_soft_delete.side_effect = mutate
+        service.get_generated_files_repo = AsyncMock(return_value=repo)
+        service.update_usage = AsyncMock()
+        service.update_org_usage = AsyncMock()
+        service.update_team_usage = AsyncMock()
+
+        assert await service.unregister_generated_files(records) == 2
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_hard_delete_rereads_deleted_state_after_quota_lock_wait(self):
+        service = StorageQuotaService(db_pool=MagicMock())
+        service._initialized = True
+        active = {"id": 1, "user_id": 1, "is_deleted": False, "file_size_bytes": 1024}
+        repo = AsyncMock()
+        repo.get_file_by_id.side_effect = [active, active, active | {"is_deleted": True}]
+        repo.hard_delete_file.return_value = True
+        service.get_generated_files_repo = AsyncMock(return_value=repo)
+        service.update_usage = AsyncMock()
+
+        assert await service.unregister_generated_file(1, hard_delete=True)
+        service.update_usage.assert_not_awaited()
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_restore_uses_current_state_instead_of_preloaded_deleted_record(self):
+        service = StorageQuotaService(db_pool=MagicMock())
+        service._initialized = True
+        stale = {"id": 1, "user_id": 1, "is_deleted": True, "file_size_bytes": 1024}
+        repo = AsyncMock()
+        repo.get_file_by_id.return_value = stale | {"is_deleted": False}
+        service.get_generated_files_repo = AsyncMock(return_value=repo)
+        service.update_usage = AsyncMock()
+
+        assert await service.restore_generated_file(1, file_record=stale) is None
+        repo.restore_file.assert_not_awaited()
+        service.update_usage.assert_not_awaited()
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -352,7 +416,7 @@ class TestUnregisterGeneratedFile:
         restored_record = deleted_record | {"is_deleted": False}
         mock_repo = AsyncMock()
         mock_repo.restore_file = AsyncMock(return_value=True)
-        mock_repo.get_file_by_id = AsyncMock(return_value=restored_record)
+        mock_repo.get_file_by_id = AsyncMock(side_effect=[deleted_record, deleted_record, restored_record])
         service.get_generated_files_repo = AsyncMock(return_value=mock_repo)
         service.update_usage = AsyncMock()
         service.update_org_usage = AsyncMock()

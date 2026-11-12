@@ -10,6 +10,7 @@ from PIL import Image
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
 from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter import CustomOpenAIAdapter
 from tldw_Server_API.tests.Chat.unit.test_chat_history_and_streaming import DummyChatDB
 
@@ -29,9 +30,11 @@ class SavedDB(DummyChatDB):
     def get_message_metadata(self, message_id):
         return {"extra": {"client_message_id": "retry-turn"}} if message_id == "failed" else {}
 
-    def get_persona_profile(self, _id, *, user_id):
+    def get_persona_profile(self, _id, *, user_id, include_deleted=False):
+        """Supply the owned active profile required before retry generation."""
         assert user_id == "client"
-        return {"id": "persona", "name": "Persona", "system_prompt": "Be helpful."}
+        return {"id": "persona", "user_id": "client", "is_active": True,
+                "name": "Persona", "system_prompt": "Be helpful."}
 
 
 def records_for_retry():
@@ -57,7 +60,7 @@ async def provider_payload(request, records, kind="neutral"):
         request_data=request, target_api_provider="custom-openai-api",
         provider_api_key="synthetic-unused-key", templated_llm_payload=messages,
         final_system_message=system, app_config={}, resolved_model="synthetic")
-    _, adapter_request, _ = chat_service._build_adapter_request_from_chat_args(args)
+    _, adapter_request, _ = gateway._build_adapter_request_from_chat_args(args)
     payload = CustomOpenAIAdapter()._build_payload(adapter_request)
     return payload, save, state
 

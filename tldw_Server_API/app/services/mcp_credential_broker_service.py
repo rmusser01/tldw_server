@@ -15,18 +15,19 @@ from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import (
 from tldw_Server_API.app.core.AuthNZ.secret_backends.registry import (
     get_secret_backend,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
-    decrypt_byok_payload,
-    loads_envelope,
-)
 from tldw_Server_API.app.core.MCP_unified.external_servers.transports.base import (
     BrokeredExternalCredential,
 )
-from tldw_Server_API.app.services.mcp_hub_external_auth_service import (
-    ManagedExternalAuthBridge,
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
+    decrypt_byok_payload,
+    loads_envelope,
 )
+from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc as _coerce_datetime
 from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
     McpHubExternalAccessResolver,
+)
+from tldw_Server_API.app.services.mcp_hub_external_auth_service import (
+    ManagedExternalAuthBridge,
 )
 
 _APPROVAL_REQUIRED_BLOCKED_REASONS = {
@@ -48,22 +49,6 @@ _APPROVAL_REQUIRED_STATES = {"approval_required"}
 
 def _normalize_status_state(value: Any) -> str:
     return str(value or "").strip().lower()
-
-
-def _coerce_datetime(value: Any) -> datetime | None:
-    if isinstance(value, datetime):
-        if value.tzinfo is not None:
-            return value.astimezone(timezone.utc)
-        return value.replace(tzinfo=timezone.utc)
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = datetime.fromisoformat(value)
-        except ValueError:
-            return None
-        if parsed.tzinfo is not None:
-            return parsed.astimezone(timezone.utc)
-        return parsed.replace(tzinfo=timezone.utc)
-    return None
 
 
 @dataclass

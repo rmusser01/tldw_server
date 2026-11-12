@@ -22,6 +22,15 @@ from tldw_Server_API.app.core.MCP_unified.tool_execution.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _writable_tools_by_default(monkeypatch: pytest.MonkeyPatch):
+    """Keep write-capable unit cases independent of the ambient MCP policy."""
+    monkeypatch.setenv("MCP_DISABLE_WRITE_TOOLS", "false")
+    get_config.cache_clear()  # type: ignore[attr-defined]
+    yield
+    get_config.cache_clear()  # type: ignore[attr-defined]
+
+
 class AllowAllRBAC:
     async def check_permission(self, *args: Any, **kwargs: Any) -> bool:
         del args, kwargs

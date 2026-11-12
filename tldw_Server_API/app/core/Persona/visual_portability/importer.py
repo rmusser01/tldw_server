@@ -13,6 +13,10 @@ from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
     PersonaVisualPortabilityRepository,
 )
 from tldw_Server_API.app.core.Persona.visual_artwork import artwork_manifest_for_import
+from tldw_Server_API.app.core.Persona.companion_behavior import (
+    CompanionBehaviorValidationError,
+    normalize_companion_behavior,
+)
 from tldw_Server_API.app.core.Persona.visual_manifest_assets import remap_visual_manifest_assets
 from tldw_Server_API.app.core.Persona.visual_portability.archive import normalize_member_name
 from tldw_Server_API.app.core.Persona.visual_portability.codex_pet import (
@@ -37,7 +41,10 @@ from tldw_Server_API.app.core.Persona.visual_portability.preview import (
     _section_record,
 )
 from tldw_Server_API.app.core.Persona.visual_service import PersonaVisualService
-from tldw_Server_API.app.core.Persona.visuals import validate_visual_manifest
+from tldw_Server_API.app.core.Persona.visuals import (
+    resolved_visual_state_ids,
+    validate_visual_manifest,
+)
 
 _REPLACEABLE_IMPORT_TARGET_STATUSES = frozenset({"draft", "review", "failed"})
 
@@ -186,11 +193,18 @@ class PersonaVisualPackImporter:
                 available_asset_dimensions=asset_dimensions,
                 require_activatable=False,
             )
-            updated_pack = self.db.update_persona_visual_pack_manifest(
+            try:
+                behavior = normalize_companion_behavior(
+                    pack.get("companion_behavior"),
+                    resolvable_state_ids=resolved_visual_state_ids(validation.manifest),
+                )
+            except CompanionBehaviorValidationError as exc:
+                raise ValueError("malformed_companion_behavior") from exc
+            updated_pack = self.db.update_persona_visual_pack_payload(
                 pack_id=str(created_pack["id"]),
-                persona_id=target_persona_id,
                 user_id=self.user_id,
                 manifest=validation.manifest,
+                companion_behavior=behavior,
                 expected_version=int(created_pack["version"]),
             )
         except Exception:

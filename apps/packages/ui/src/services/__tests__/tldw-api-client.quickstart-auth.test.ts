@@ -7,8 +7,7 @@ const mocks = vi.hoisted(() => ({
   tldwRequest: vi.fn(),
   storage: new Map<string, unknown>(),
   sessionStorage: new Map<string, unknown>(),
-  storageRemoveError: null as Error | null,
-  envApiKey: vi.fn<() => string | null>()
+  storageRemoveError: null as Error | null
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -58,12 +57,6 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     vi.stubEnv("NEXT_PUBLIC_X_API_KEY", undefined)
     vi.stubEnv("VITE_TLDW_API_KEY", undefined)
     vi.stubEnv("VITE_TLDW_DEFAULT_API_KEY", undefined)
-    mocks.envApiKey.mockReset()
-    mocks.envApiKey.mockReturnValue(null)
-    vi.spyOn(
-      TldwApiClient.prototype as any,
-      "getEnvApiKey"
-    ).mockImplementation(() => mocks.envApiKey())
     mocks.bgRequest.mockReset()
     mocks.bgUpload.mockReset()
     mocks.bgStream.mockReset()
@@ -136,6 +129,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
     it.each([
       {
         caseName: "foreign-origin cookie marker",
+        docsInfoNoAuth: true,
         stored: {
           authMode: "single-user" as const,
           authSource: "cookie-session" as const,
@@ -147,6 +141,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
       },
       {
         caseName: "same-origin multi-user cookie marker",
+        docsInfoNoAuth: true,
         stored: {
           authMode: "multi-user" as const,
           authSource: "cookie-session" as const,
@@ -158,6 +153,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
       },
       {
         caseName: "exact-origin single-user cookie marker",
+        docsInfoNoAuth: false,
         stored: {
           authMode: "single-user" as const,
           authSource: "cookie-session" as const,
@@ -169,7 +165,13 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
       }
     ])(
       "keeps public discovery available while using actual client readiness for $caseName",
-      async ({ stored, ready, protectedRequests, localDirectoryCreation }) => {
+      async ({
+        stored,
+        ready,
+        docsInfoNoAuth,
+        protectedRequests,
+        localDirectoryCreation
+      }) => {
         mocks.storage.set("tldwConfig", stored)
         await tldwClient.initialize()
 
@@ -203,7 +205,8 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
         expect(getOpenAPISpec).toHaveBeenCalledTimes(1)
         expect(requestsForPath(docsInfoPath)).toHaveLength(1)
         expect(requestsForPath(docsInfoPath)[0]?.[0]).toMatchObject({
-          noAuth: true
+          noAuth: docsInfoNoAuth,
+          configSnapshot: stored
         })
         expect(requestsForPath(sourceCapabilityPath)).toHaveLength(
           protectedRequests
@@ -542,7 +545,7 @@ describe("TldwApiClient quickstart auth bootstrap", () => {
   })
 
   it("uses an active environment key after scrubbing a legacy key", async () => {
-    mocks.envApiKey.mockReturnValue("active-environment-key")
+    vi.stubEnv("NEXT_PUBLIC_X_API_KEY", "active-environment-key")
     mocks.storage.set("tldwConfig", {
       authMode: "single-user",
       serverUrl: "https://api.example.test/path",

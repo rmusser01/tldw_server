@@ -7,14 +7,6 @@
       ".github/actions/**"
     ]
   },
-  "frontend-e2e-tiers.yml": {
-    "mode": "paths",
-    "patterns": [
-      "apps/packages/ui/src/**",
-      "apps/tldw-frontend/**",
-      "tldw_Server_API/**"
-    ]
-  },
   "jobs-suite.yml": {
     "mode": "paths",
     "patterns": [

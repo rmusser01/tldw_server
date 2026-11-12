@@ -13,7 +13,7 @@ from typing import Any, Mapping
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.research_workspace_capabilities import (
+from tldw_Server_API.app.core.Research_Workspace.research_workspace_capabilities import (
     ResearchWorkspaceCapabilitiesResponse,
     ResearchWorkspaceCapability,
     ResearchWorkspaceCapabilityMode,
@@ -448,7 +448,7 @@ async def _collect_aggregate_health() -> Mapping[str, Any]:
         overall = "unhealthy"
 
     try:
-        from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_health_snapshot
+        from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import get_chacha_health_snapshot
 
         chacha_health = await asyncio.to_thread(get_chacha_health_snapshot)
         checks["chacha_notes"] = chacha_health if isinstance(chacha_health, Mapping) else {"status": "unknown"}

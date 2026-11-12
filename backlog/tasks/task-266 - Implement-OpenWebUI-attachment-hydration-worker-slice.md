@@ -34,9 +34,9 @@ Implement Stage 6 of the OpenWebUI attachment hydration implementation plan: rou
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 6 worker slice: added worker routing for openwebui_attachment_hydration without requiring legacy chatbooks_job_id, added non-retryable payload/root validation, called ChatbookService.run_openwebui_attachment_hydration, returned capped/redacted JSON-safe Jobs summaries, and preserved existing import/export routing. Added service execution support that revalidates the OpenWebUI data root with uploads required, hydrates image references, registers non-image attachments through Media DB when available, and records summary counts. Verification: initial red worker run failed as expected on missing hydration routing; worker/import tests 11 passed; worker/import/adapter tests 13 passed; broader worker/API/service tests 36 passed; full OpenWebUI hydration/import + worker slice 61 passed; git diff --check clean; Bandit report /tmp/bandit_openwebui_hydration_worker.json has 0 findings and 0 errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

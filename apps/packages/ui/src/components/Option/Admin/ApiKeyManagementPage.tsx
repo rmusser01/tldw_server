@@ -17,158 +17,338 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { Alert } from "@/components/ui/primitives"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
+
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import { useAdminRequestScope, useAdminMutation } from "./admin-request-scope"
 
 const ApiKeyManagementPage: React.FC = () => {
-  const { t } = useTranslation(["settings", "common"])
-  // Admin guard state
-  const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
+  const { config, authorityLoading } = useCanonicalConnectionConfig()
+  const { t } = useTranslation("settings")
+  if (!config || authorityLoading) {
+    return (
+      <p role="status">
+        {t("admin.resolvingConnection", "Resolving admin connection…")}
+      </p>
+    )
+  }
+  if (config.authMode === "single-user") {
+    return (
+      <Alert
+        variant="info"
+        title={t("adminApiKeys.singleUserTitle", "Single-user API key")}
+      >
+        {t(
+          "adminApiKeys.singleUserBody",
+          "This server accepts only the primary API key configured on the server. Change that key in the server configuration. Per-user key creation and rotation are available only in multi-user mode."
+        )}
+      </Alert>
+    )
+  }
+  return (
+    <ApiKeyManagementWorkspace
+      key={deriveConnectionAuthorityId(config)}
+      config={config}
+    />
+  )
+}
 
-  // User selection state
+const ApiKeyManagementWorkspace = ({ config }: { config: TldwConfig }) => {
+  const { t } = useTranslation(["settings", "common"])
+  const captureScope = useAdminRequestScope(config)
+  const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(
+    null
+  )
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
   const [users, setUsers] = useState<any[]>([])
   const [usersLoading, setUsersLoading] = useState(false)
   const [usersError, setUsersError] = useState<string | null>(null)
+  const usersRequest = useRef(0)
 
-  // API keys state
-  const [keys, setKeys] = useState<any[]>([])
-  const [keysLoading, setKeysLoading] = useState(false)
-  const [keysError, setKeysError] = useState<string | null>(null)
-
-  // Create key modal
-  const [createModalOpen, setCreateModalOpen] = useState(false)
-  const [createForm] = Form.useForm()
-  const [creating, setCreating] = useState(false)
-
-  // New key display (shown after creation with the raw key value)
-  const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
-  // The plaintext key shows once, then masks after copy (or on demand) so it
-  // does not linger on screen for shoulder-surfers (#2898 L3).
-  const [newKeyRevealed, setNewKeyRevealed] = useState(true)
-
-  const initialLoadRef = useRef(false)
-
-  const markAdminGuardFromError = useCallback((err: any) => {
-    const guardState = deriveAdminGuardFromError(err)
-    if (guardState) setAdminGuard(guardState)
-  }, [])
-
-  // Load users for the selector
-  const loadUsers = useCallback(async () => {
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadUsers = useCallback(async (search?: string) => {
+    const scope = captureScope()
+    if (!scope) return
+    const request = ++usersRequest.current
+    const current = () =>
+      !scope.abortSignal.aborted && request === usersRequest.current
     setUsersLoading(true)
     setUsersError(null)
     try {
-      const result = await tldwClient.listAdminUsers({ limit: 100 })
+      const result = await tldwClient.listAdminUsers({ limit: 20, ...(search ? { search } : {}) }, scope)
+      if (!current()) return
       const loaded = result.users || []
       setUsers(loaded)
-      // Single-user servers have exactly one account — select it directly
-      // instead of asking the operator to search for themselves.
-      if (loaded.length === 1) {
-        setSelectedUserId((current) => current ?? loaded[0].id)
-      }
+      if (!search && loaded.length === 1)
+        setSelectedUserId((value) => value ?? loaded[0].id)
     } catch (err) {
-      markAdminGuardFromError(err)
+      if (!current()) return
+      const guard = deriveAdminGuardFromError(err)
+      if (guard) setAdminGuard(guard)
       setUsersError(
-        sanitizeAdminErrorMessage(err, t("settings:adminApiKeys.usersLoadFailed", "Failed to load the user list."))
+        sanitizeAdminErrorMessage(
+          err,
+          t(
+            "settings:adminApiKeys.usersLoadFailed",
+            "Failed to load the user list."
+          )
+        )
       )
     } finally {
-      setUsersLoading(false)
+      if (current()) setUsersLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [captureScope, t])
+  // Remote search so accounts beyond the first 20 stay reachable on large
+  // servers; the Select filters nothing locally (filterOption={false}).
+  const handleUserSearch = useCallback(
+    (term: string) => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+      searchTimerRef.current = setTimeout(() => {
+        void loadUsers(term.trim() || undefined)
+      }, 300)
+    },
+    [loadUsers]
+  )
 
-  // Load API keys for selected user
-  const loadKeys = useCallback(async (userId: number) => {
-    setKeysLoading(true)
-    setKeysError(null)
-    try {
-      const result = await tldwClient.listUserApiKeys(userId)
-      setKeys(Array.isArray(result) ? result : [])
-    } catch (err: any) {
-      markAdminGuardFromError(err)
-      setKeysError(sanitizeAdminErrorMessage(err, t("settings:adminApiKeys.keysLoadFailed", "Failed to load API keys")))
-    } finally {
-      setKeysLoading(false)
-    }
-  }, [markAdminGuardFromError])
-
-  // Initial load
   useEffect(() => {
-    if (initialLoadRef.current) return
-    initialLoadRef.current = true
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
     void loadUsers()
   }, [loadUsers])
+  if (adminGuard === "forbidden") {
+    return (
+      <Alert
+        variant="error"
+        title={t("settings:adminApiKeys.forbiddenTitle", "Access Denied")}
+      >
+        {t(
+          "settings:adminApiKeys.forbiddenBody",
+          "You don't have permission to manage API keys."
+        )}
+      </Alert>
+    )
+  }
+  if (adminGuard === "notFound") {
+    return (
+      <Alert
+        variant="warning"
+        title={t("settings:adminApiKeys.notFoundTitle", "Not Available")}
+      >
+        {t(
+          "settings:adminApiKeys.notFoundBody",
+          "API key management is not available on this server."
+        )}
+      </Alert>
+    )
+  }
 
-  // Load keys when user selected
+  return (
+    <div style={{ padding: "24px", maxWidth: 1200 }}>
+      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>
+        {t("settings:adminApiKeys.title", "API Key Management")}
+      </h1>
+      <p
+        style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}
+      >
+        {t(
+          "settings:adminApiKeys.description",
+          "Create, rotate, and revoke the API keys a user presents to authenticate against this server."
+        )}
+      </p>
+
+      {usersError && (
+        <Alert
+          variant="error"
+          title={t(
+            "settings:adminApiKeys.usersErrorTitle",
+            "Unable to load users"
+          )}
+          className="mb-4"
+        >
+          <Space orientation="vertical" size="small">
+            <span>{usersError}</span>
+            <Button size="small" onClick={() => void loadUsers()}>
+              {t("common:retry", "Retry")}
+            </Button>
+          </Space>
+        </Alert>
+      )}
+
+      {/* User selector */}
+      <Card size="small" style={{ marginBottom: 16 }}>
+        <Space>
+          <span>{t("settings:adminApiKeys.selectUser", "Select User:")}</span>
+          <Select
+            showSearch
+            placeholder={t(
+              "settings:adminApiKeys.searchUsers",
+              "Search users..."
+            )}
+            style={{ width: 300 }}
+            loading={usersLoading}
+            value={selectedUserId}
+            onChange={(val) => setSelectedUserId(val)}
+            onSearch={handleUserSearch}
+            filterOption={false}
+            options={users.map((u: any) => ({
+              value: u.id,
+              label: `${u.username} (${u.email || t("settings:adminApiKeys.noEmail", "no email")})`
+            }))}
+          />
+        </Space>
+      </Card>
+
+      {/* Pre-selection guidance (multi-user servers with several accounts) */}
+      {!selectedUserId && !usersLoading && !usersError && (
+        <Card size="small">
+          <p style={{ margin: 0, color: "var(--color-text-secondary, #888)" }}>
+            {users.length === 0
+              ? t(
+                  "settings:adminApiKeys.noUsers",
+                  "No users were found on this server."
+                )
+              : t(
+                  "settings:adminApiKeys.selectUserHint",
+                  "Select a user above to view and manage their API keys."
+                )}
+          </p>
+        </Card>
+      )}
+
+      {selectedUserId !== null && (
+        <UserApiKeys
+          key={selectedUserId}
+          selectedUserId={selectedUserId}
+          config={config}
+        />
+      )}
+    </div>
+  )
+}
+
+const UserApiKeys = ({
+  selectedUserId,
+  config
+}: {
+  selectedUserId: number
+  config: TldwConfig
+}) => {
+  const { t } = useTranslation(["settings", "common"])
+  const captureScope = useAdminRequestScope(config)
+  const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(
+    null
+  )
+  const [keys, setKeys] = useState<any[]>([])
+  const [keysLoading, setKeysLoading] = useState(false)
+  const [keysError, setKeysError] = useState<string | null>(null)
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [createForm] = Form.useForm()
+  const { runMutation, mutating } = useAdminMutation(captureScope)
+  const keysRequest = useRef(0)
+  const [newKeyValue, setNewKeyValue] = useState<string | null>(null)
+  const [newKeyRevealed, setNewKeyRevealed] = useState(true)
+
+  const loadKeys = useCallback(
+    async (scope = captureScope()) => {
+      if (!scope || scope.abortSignal.aborted) return
+      const request = ++keysRequest.current
+      const current = () =>
+        !scope.abortSignal.aborted && request === keysRequest.current
+      setKeysLoading(true)
+      setKeysError(null)
+      try {
+        const result = await tldwClient.listUserApiKeys(selectedUserId, scope)
+        if (current()) setKeys(Array.isArray(result) ? result : [])
+      } catch (err) {
+        if (!current()) return
+        const guard = deriveAdminGuardFromError(err)
+        if (guard) setAdminGuard(guard)
+        setKeysError(
+          sanitizeAdminErrorMessage(
+            err,
+            t("settings:adminApiKeys.keysLoadFailed", "Failed to load API keys")
+          )
+        )
+      } finally {
+        if (current()) setKeysLoading(false)
+      }
+    },
+    [captureScope, selectedUserId, t]
+  )
+
   useEffect(() => {
-    if (selectedUserId) {
-      void loadKeys(selectedUserId)
-    } else {
-      setKeys([])
-    }
-  }, [selectedUserId, loadKeys])
+    void loadKeys()
+  }, [loadKeys])
 
-  // Create key handler
-  const handleCreateKey = async () => {
-    if (!selectedUserId) return
-    try {
-      const values = await createForm.validateFields()
-      setCreating(true)
-      const result = await tldwClient.createUserApiKey(selectedUserId, {
-        name: values.name?.trim() || undefined,
-        rate_limit: values.rate_limit || undefined,
-      })
-      // Show the new key value (only visible once)
-      if (result?.key || result?.api_key) {
-        setNewKeyValue(result.key || result.api_key)
-        setNewKeyRevealed(true)
+  const handleCreateKey = () =>
+    runMutation(
+      t("settings:adminApiKeys.createFailed", "Failed to create key"),
+      async (scope) => {
+        const values = await createForm.validateFields()
+        if (scope.abortSignal.aborted) return
+        const result = await tldwClient.createUserApiKey(
+          selectedUserId,
+          {
+            name: values.name?.trim() || undefined
+          },
+          scope
+        )
+        if (scope.abortSignal.aborted) return
+        if (result?.key || result?.api_key) {
+          setNewKeyValue(result.key || result.api_key)
+          setNewKeyRevealed(true)
+        }
+        createForm.resetFields()
+        setCreateModalOpen(false)
+        await loadKeys(scope)
+        if (!scope.abortSignal.aborted)
+          message.success(t("settings:adminApiKeys.created", "API key created"))
       }
-      createForm.resetFields()
-      setCreateModalOpen(false)
-      await loadKeys(selectedUserId)
-      message.success(t("settings:adminApiKeys.created", "API key created"))
-    } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminApiKeys.createFailed", "Failed to create key")))
-    } finally {
-      setCreating(false)
-    }
-  }
+    )
 
-  // Revoke key handler
-  const handleRevokeKey = async (keyId: number) => {
-    if (!selectedUserId) return
-    try {
-      await tldwClient.revokeUserApiKey(selectedUserId, keyId)
-      message.success(t("settings:adminApiKeys.revoked", "API key revoked"))
-      await loadKeys(selectedUserId)
-    } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminApiKeys.revokeFailed", "Failed to revoke key")))
-    }
-  }
-
-  // Rotate key handler
-  const handleRotateKey = async (keyId: number) => {
-    if (!selectedUserId) return
-    try {
-      const result = await tldwClient.rotateUserApiKey(selectedUserId, keyId)
-      if (result?.key || result?.api_key) {
-        setNewKeyValue(result.key || result.api_key)
-        setNewKeyRevealed(true)
+  const handleRevokeKey = (keyId: number) =>
+    runMutation(
+      t("settings:adminApiKeys.revokeFailed", "Failed to revoke key"),
+      async (scope) => {
+        await tldwClient.revokeUserApiKey(selectedUserId, keyId, scope)
+        if (scope.abortSignal.aborted) return
+        message.success(t("settings:adminApiKeys.revoked", "API key revoked"))
+        await loadKeys(scope)
       }
-      message.success(t("settings:adminApiKeys.rotated", "API key rotated"))
-      await loadKeys(selectedUserId)
-    } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminApiKeys.rotateFailed", "Failed to rotate key")))
-    }
-  }
+    )
 
+  const handleRotateKey = (keyId: number) =>
+    runMutation(
+      t("settings:adminApiKeys.rotateFailed", "Failed to rotate key"),
+      async (scope) => {
+        const result = await tldwClient.rotateUserApiKey(
+          selectedUserId,
+          keyId,
+          scope
+        )
+        if (scope.abortSignal.aborted) return
+        if (result?.key || result?.api_key) {
+          setNewKeyValue(result.key || result.api_key)
+          setNewKeyRevealed(true)
+        }
+        message.success(t("settings:adminApiKeys.rotated", "API key rotated"))
+        await loadKeys(scope)
+      }
+    )
   // Table columns
   const keyColumns = [
     {
       title: t("settings:adminApiKeys.colName", "Name"),
       dataIndex: "name",
       key: "name",
-      render: (name: string) => name || "\u2014",
+      render: (name: string) => name || "\u2014"
     },
     {
       title: t("settings:adminApiKeys.colPreview", "Key Preview"),
@@ -177,19 +357,13 @@ const ApiKeyManagementPage: React.FC = () => {
       render: (_: any, record: any) => {
         const preview = record.key_preview || record.prefix || record.key_prefix
         return preview ? <code>{preview}...</code> : "\u2014"
-      },
-    },
-    {
-      title: t("settings:adminApiKeys.colRateLimit", "Rate Limit"),
-      dataIndex: "rate_limit",
-      key: "rate_limit",
-      render: (val: number | null) => val ? `${val}/min` : t("settings:adminApiKeys.rateLimitDefault", "Default"),
+      }
     },
     {
       title: t("settings:adminApiKeys.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
-      render: (val: string) => val ? new Date(val).toLocaleDateString() : "\u2014",
+      render: (val: string) => val ? formatAdminDateTime(val) : "\u2014",
     },
     {
       title: t("settings:adminApiKeys.colStatus", "Status"),
@@ -197,9 +371,11 @@ const ApiKeyManagementPage: React.FC = () => {
       key: "is_active",
       render: (active: boolean) => (
         <Tag color={active !== false ? "green" : "red"}>
-          {active !== false ? t("settings:adminApiKeys.statusActive", "Active") : t("settings:adminApiKeys.statusRevoked", "Revoked")}
+          {active !== false
+            ? t("settings:adminApiKeys.statusActive", "Active")
+            : t("settings:adminApiKeys.statusRevoked", "Revoked")}
         </Tag>
-      ),
+      )
     },
     {
       title: t("settings:adminApiKeys.colActions", "Actions"),
@@ -211,58 +387,57 @@ const ApiKeyManagementPage: React.FC = () => {
             okText={t("settings:adminApiKeys.rotateOk", "Rotate key")}
             onConfirm={() => handleRotateKey(record.id)}
           >
-            <Button size="small">{t("settings:adminApiKeys.rotate", "Rotate")}</Button>
+            <Button size="small" disabled={mutating}>
+              {t("settings:adminApiKeys.rotate", "Rotate")}
+            </Button>
           </Popconfirm>
           <Popconfirm
-            title={t("settings:adminApiKeys.revokeConfirm", "Revoke this key? This cannot be undone.")}
+            title={t(
+              "settings:adminApiKeys.revokeConfirm",
+              "Revoke this key? This cannot be undone."
+            )}
             okText={t("settings:adminApiKeys.revokeOk", "Revoke key")}
             okButtonProps={{ danger: true }}
             onConfirm={() => handleRevokeKey(record.id)}
           >
-            <Button size="small" danger>{t("settings:adminApiKeys.revoke", "Revoke")}</Button>
+            <Button size="small" danger disabled={mutating}>
+              {t("settings:adminApiKeys.revoke", "Revoke")}
+            </Button>
           </Popconfirm>
         </Space>
-      ),
-    },
+      )
+    }
   ]
 
-  // Render
   if (adminGuard === "forbidden") {
     return (
-      <Alert variant="error" title={t("settings:adminApiKeys.forbiddenTitle", "Access Denied")}>
-        {t("settings:adminApiKeys.forbiddenBody", "You don't have permission to manage API keys.")}
+      <Alert
+        variant="error"
+        title={t("settings:adminApiKeys.forbiddenTitle", "Access Denied")}
+      >
+        {t(
+          "settings:adminApiKeys.forbiddenBody",
+          "You don't have permission to manage API keys."
+        )}
       </Alert>
     )
   }
   if (adminGuard === "notFound") {
     return (
-      <Alert variant="warning" title={t("settings:adminApiKeys.notFoundTitle", "Not Available")}>
-        {t("settings:adminApiKeys.notFoundBody", "API key management is not available on this server.")}
+      <Alert
+        variant="warning"
+        title={t("settings:adminApiKeys.notFoundTitle", "Not Available")}
+      >
+        {t(
+          "settings:adminApiKeys.notFoundBody",
+          "API key management is not available on this server."
+        )}
       </Alert>
     )
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: 1200 }}>
-      <h1 style={{ marginBottom: 4, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminApiKeys.title", "API Key Management")}</h1>
-      <p style={{ marginBottom: 16, color: "var(--color-text-secondary, #888)" }}>
-        {t(
-          "settings:adminApiKeys.description",
-          "Create, rotate, and revoke the API keys a user presents to authenticate against this server."
-        )}
-      </p>
-
-      {usersError && (
-        <Alert variant="error" title={t("settings:adminApiKeys.usersErrorTitle", "Unable to load users")} className="mb-4">
-          <Space orientation="vertical" size="small">
-            <span>{usersError}</span>
-            <Button size="small" onClick={() => void loadUsers()}>
-              {t("common:retry", "Retry")}
-            </Button>
-          </Space>
-        </Alert>
-      )}
-
+    <>
       {/* New key alert */}
       {newKeyValue && (
         <Alert
@@ -273,7 +448,12 @@ const ApiKeyManagementPage: React.FC = () => {
           className="mb-4"
         >
           <div>
-            <p>{t("settings:adminApiKeys.newKeyCopyHint", "Copy this key now -- it will not be shown again:")}</p>
+            <p>
+              {t(
+                "settings:adminApiKeys.newKeyCopyHint",
+                "Copy this key now -- it will not be shown again:"
+              )}
+            </p>
             <code className="block break-all rounded border border-border bg-surface2 px-3 py-2 font-mono text-sm text-foreground">
               {newKeyRevealed
                 ? newKeyValue
@@ -284,12 +464,15 @@ const ApiKeyManagementPage: React.FC = () => {
                 size="small"
                 type="primary"
                 onClick={() => {
+                  const scope = captureScope()
+                  if (!scope) return
                   void (async () => {
                     try {
                       if (!navigator.clipboard?.writeText) {
                         throw new Error("Clipboard unavailable")
                       }
                       await navigator.clipboard.writeText(newKeyValue)
+                      if (scope.abortSignal.aborted) return
                       message.success(
                         t("settings:adminApiKeys.newKeyCopied", "Key copied")
                       )
@@ -297,6 +480,7 @@ const ApiKeyManagementPage: React.FC = () => {
                       // clipboard must never hide the only visible credential.
                       setNewKeyRevealed(false)
                     } catch {
+                      if (scope.abortSignal.aborted) return
                       message.error(
                         t(
                           "settings:adminApiKeys.newKeyCopyFailed",
@@ -319,43 +503,16 @@ const ApiKeyManagementPage: React.FC = () => {
         </Alert>
       )}
 
-      {/* User selector */}
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Space>
-          <span>{t("settings:adminApiKeys.selectUser", "Select User:")}</span>
-          <Select
-            showSearch
-            placeholder={t("settings:adminApiKeys.searchUsers", "Search users...")}
-            style={{ width: 300 }}
-            loading={usersLoading}
-            value={selectedUserId}
-            onChange={(val) => setSelectedUserId(val)}
-            optionFilterProp="label"
-            options={users.map((u: any) => ({
-              value: u.id,
-              label: `${u.username} (${u.email || t("settings:adminApiKeys.noEmail", "no email")})`,
-            }))}
-          />
-        </Space>
-      </Card>
-
-      {/* Pre-selection guidance (multi-user servers with several accounts) */}
-      {!selectedUserId && !usersLoading && !usersError && (
-        <Card size="small">
-          <p style={{ margin: 0, color: "var(--color-text-secondary, #888)" }}>
-            {users.length === 0
-              ? t("settings:adminApiKeys.noUsers", "No users were found on this server.")
-              : t("settings:adminApiKeys.selectUserHint", "Select a user above to view and manage their API keys.")}
-          </p>
-        </Card>
-      )}
-
       {/* Keys table */}
       {selectedUserId && (
         <Card
           title={t("settings:adminApiKeys.keysCardTitle", "API Keys")}
           extra={
-            <Button type="primary" onClick={() => setCreateModalOpen(true)}>
+            <Button
+              type="primary"
+              disabled={mutating}
+              onClick={() => setCreateModalOpen(true)}
+            >
               {t("settings:adminApiKeys.createKey", "Create Key")}
             </Button>
           }
@@ -382,30 +539,40 @@ const ApiKeyManagementPage: React.FC = () => {
         open={createModalOpen}
         onOk={handleCreateKey}
         okText={t("settings:adminApiKeys.createModalOk", "Create key")}
-        onCancel={() => setCreateModalOpen(false)}
-        confirmLoading={creating}
+        onCancel={() => {
+          if (!mutating) setCreateModalOpen(false)
+        }}
+        confirmLoading={mutating}
+        closable={!mutating}
+        maskClosable={!mutating}
+        cancelButtonProps={{ disabled: mutating }}
       >
         <Form form={createForm} layout="vertical">
-          <Form.Item name="name" label={t("settings:adminApiKeys.keyNameLabel", "Key Name (optional)")}>
-            <Input placeholder={t("settings:adminApiKeys.keyNamePlaceholder", "e.g. Production Key")} />
-          </Form.Item>
           <Form.Item
-            name="rate_limit"
-            label={t("settings:adminApiKeys.rateLimitLabel", "Rate Limit (requests/minute, optional)")}
-            extra={
-              <a href="/admin/rate-limiting">
-                {t(
-                  "settings:adminApiKeys.rateLimitCrossLink",
-                  "Baseline limits and endpoint coverage live in Rate Limiting."
-                )}
-              </a>
-            }
+            name="name"
+            label={t(
+              "settings:adminApiKeys.keyNameLabel",
+              "Key Name (optional)"
+            )}
           >
-            <Input type="number" placeholder={t("settings:adminApiKeys.rateLimitDefault", "Default")} />
+            <Input
+              placeholder={t(
+                "settings:adminApiKeys.keyNamePlaceholder",
+                "e.g. Production Key"
+              )}
+            />
           </Form.Item>
+          <p>
+            <a href="/admin/rate-limiting">
+              {t(
+                "settings:adminApiKeys.rateLimitCrossLink",
+                "Baseline limits and endpoint coverage live in Rate Limiting."
+              )}
+            </a>
+          </p>
         </Form>
       </Modal>
-    </div>
+    </>
   )
 }
 

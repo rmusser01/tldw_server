@@ -37,6 +37,11 @@ describe("ResultsList FTUX", () => {
     expect(screen.getByText(/Get started/i)).toBeInTheDocument()
   })
 
+  it("places first-ingest guidance directly under the page heading", () => {
+    render(<ResultsList {...emptyProps} />)
+    expect(screen.getByRole("heading", { level: 2, name: /Get started/i })).toBeInTheDocument()
+  })
+
   it("has inline URL input and Ingest button", () => {
     render(<ResultsList {...emptyProps} />)
     expect(screen.getByPlaceholderText(/youtube/i)).toBeInTheDocument()
@@ -49,7 +54,7 @@ describe("ResultsList FTUX", () => {
     fireEvent.change(input, { target: { value: "https://youtube.com/watch?v=test" } })
     fireEvent.click(screen.getByRole("button", { name: /ingest/i }))
     expect(emptyProps.onOpenQuickIngest).toHaveBeenCalledWith(
-      expect.objectContaining({ source: "https://youtube.com/watch?v=test" })
+      expect.objectContaining({ source: "manual", url: "https://youtube.com/watch?v=test" })
     )
   })
 

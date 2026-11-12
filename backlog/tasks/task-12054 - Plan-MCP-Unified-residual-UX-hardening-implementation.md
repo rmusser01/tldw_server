@@ -39,11 +39,11 @@ Create the implementation plan for the approved MCP Unified residual UX hardenin
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan-review pass approved after fixes for Backlog setup, pytest filtering, explicit opt-in tests, docs contract coverage, and Stage 2 selectors.
 
 Mechanical check passed: git diff --check against plan/task files produced no output.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

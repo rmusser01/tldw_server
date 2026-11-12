@@ -27,6 +27,10 @@ const interpolate = (template: string, values: Record<string, unknown> | undefin
   })
 }
 
+vi.mock("wxt/browser", () => ({
+  browser: { runtime: { id: undefined } }
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (

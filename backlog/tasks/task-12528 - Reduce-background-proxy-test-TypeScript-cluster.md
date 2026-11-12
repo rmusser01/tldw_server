@@ -31,14 +31,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task514-tsc-final.txt`: package `tsc` reported two TS2352 diagnostics in `src/services/__tests__/background-proxy.test.ts` around a partial streaming `Response` mock and tuple access to `fetchSpy.mock.calls[0]`.
 - Root cause was intentional partial test mocks. The streaming test only needs `ok`, `status`, and `body.getReader`, not a complete DOM `Response`; the fetch call assertion knows the mock call tuple shape even though TypeScript sees the raw calls array as broader.
 - Added explicit `unknown` bridge casts at the two reported sites so the intent is visible to the compiler without changing runtime behavior.
 - Focused verification: `bunx vitest run src/services/__tests__/background-proxy.test.ts` passed: 26 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task515-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 69 in `/tmp/task514-tsc-final.txt` to 67 in `/tmp/task515-tsc-final.txt`; `rg -n 'background-proxy\.test\.ts' /tmp/task515-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -16,7 +16,8 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-_SSE_CONTROL_PREFIXES = ("event:", "id:", "retry:")
+# SSE control fields (comments, ":" lines, are handled separately).
+SSE_CONTROL_FIELD_PREFIXES = ("event:", "id:", "retry:")
 
 
 def finalize_stream(response: Optional[Any], done_already: bool = False) -> Iterable[str]:
@@ -41,6 +42,11 @@ def finalize_stream(response: Optional[Any], done_already: bool = False) -> Iter
 def sse_data(payload: dict[str, Any]) -> str:
     """Return an SSE data line with a blank line terminator."""
     return f"data: {json.dumps(payload)}\n\n"
+
+
+def sse_event(name: str, payload: dict[str, Any]) -> str:
+    """Return a named SSE event frame (``event:`` line plus one data line)."""
+    return f"event: {name}\ndata: {json.dumps(payload)}\n\n"
 
 
 def sse_done() -> str:
@@ -72,8 +78,15 @@ def openai_delta_chunk(text: str) -> str:
 
 
 def is_done_line(line: str) -> bool:
-    """Return True when the raw line represents the [DONE] sentinel."""
-    return line.strip().lower() == "data: [done]"
+    """Return True when the raw line represents the [DONE] sentinel.
+
+    Deliberately case-insensitive and tolerant of any whitespace after ``data:``
+    and of leading BOM/zero-width characters: a provider DONE in any spelling
+    must be recognised so it is suppressed rather than forwarded next to our own
+    terminal ``sse_done()`` (single-terminal-DONE contract, ADR-025).
+    """
+    s = line.lstrip("\ufeff\u200b\u200c\u200d\u2060").strip().lower()
+    return s.startswith("data:") and s[len("data:") :].strip() == "[done]"
 
 
 def normalize_provider_line(
@@ -94,7 +107,7 @@ def normalize_provider_line(
         return None
 
     lower = stripped.lower()
-    for prefix in _SSE_CONTROL_PREFIXES:
+    for prefix in SSE_CONTROL_FIELD_PREFIXES:
         if lower.startswith(prefix):
             name, value = stripped.split(":", 1)
             name = name.strip()

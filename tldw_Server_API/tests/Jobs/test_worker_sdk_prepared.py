@@ -1824,3 +1824,26 @@ async def test_same_turn_child_and_outer_cancellation_preserves_outer_cancel():
     assert len(manager.acquire_calls) == 1
     assert len(manager.apply_calls) == 1
     assert manager.fallback_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("owner", "expected"), [("7", 7), (None, None)], ids=["owned", "no-owner"])
+async def test_prepared_handler_sees_the_job_owner_as_the_llm_user(owner, expected):
+    """LLM usage accounting: a prepared job runs for its owner; a job with none runs with no user."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+
+    manager = PreparedManager()
+    if owner is not None:
+        manager.jobs[0]["owner_user_id"] = owner
+    sdk = _sdk(manager)
+    seen: list[int | None] = []
+
+    async def handler(_job_row, _context):
+        seen.append(current_llm_user_id())
+        return _complete()
+
+    await _run_once(sdk, handler)
+
+    assert seen == [expected]
+    assert len(manager.apply_calls) == 1
+    assert current_llm_user_id() is None

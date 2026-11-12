@@ -5,8 +5,8 @@ from contextlib import contextmanager
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
-    BackendType,
     BackendDatabaseError,
+    BackendType,
     CharactersRAGDB,
     CharactersRAGDBError,
     InputError,
@@ -109,7 +109,8 @@ def test_flashcard_template_queries_use_postgres_safe_deleted_clause(monkeypatch
             def fetchall(self):
                 return self._rows
 
-        def _fake_execute_query(query, params=None):
+        def _fake_execute_query(query, params=None, *, read_only=False):
+            assert read_only is True
             captured.append((str(query), params))
             if "COUNT(*)" in str(query):
                 return _Cursor(row={"cnt": 0})

@@ -38,7 +38,7 @@ Reason: Routine bugfix preserving the existing optimistic version contract.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation: AssistantDefaultsPanel now passes the saved profile with voice defaults; setup adopts that response and explicitly uses its returned version for the checkpoint PATCH. Late panel saves are discarded on persona change/unmount; setup responses/errors/saving state are fenced to the selected persona. No backend optimistic-lock behavior changed.
 Files: AssistantDefaultsPanel.tsx, usePersonaSetupOrchestrator.ts, sidepanel-persona.tsx, their three targeted regression files.
 ADR required: no; routine repair of the existing optimistic version contract.
@@ -57,7 +57,7 @@ Follow-up verification: 96/96 tests passed across the same three targeted fronte
 Coordinated final validation: 265 focused frontend tests, 54 backend tests, production Bandit0 findings, scoped frontend ESLint0 errors (warnings documented), unchanged Python lint baseline, real browser evidence and limitations recorded in Docs/Reviews/MIGU_BUDDY_UAT_2026_09_05.md. Repository-wide typechecking remains limited by80 diagnostics across6 unchanged unrelated files; no full suite run.
 
 PR review closeout: resolved the task-ID collision while preserving the older EPUB task. Server PR https://github.com/rmusser01/tldw_server/pull/2884. User supplied the human-written Change summary and requested both PRs be rebased, reviewed, and merged.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

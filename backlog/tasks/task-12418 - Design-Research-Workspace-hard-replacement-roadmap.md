@@ -36,15 +36,14 @@ Design/spec phase only. Umbrella roadmap created for hard replacing Workspace Pl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec review loop completed. First review found three planning blockers: Phase A capability fields too open, migration legacy storage inventory unresolved, and access enforcement too broad. Spec was patched to add the Phase A minimum capability contract, legacy store inventory/schema-mapping gate, and action-specific enforcement. Second review approved. Advisory clarifications applied for unknown capability states, UI-only legacy key classification, and tombstone/local UI preference scope.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 User-review follow-up completed. Added clarifications for phased implementation planning boundaries, capability mapping, fail-closed unknown governance state, all-payload-class migration deletion eligibility, chunk/object integrity validation, auditable user-acknowledged discard, concrete workspace picker contract, and local-only metrics/export semantics. Re-ran spec-document-reviewer loop; final result: Approved.
 
 Verification recorded: git diff --check passed for the spec and Backlog task; final spec-document-reviewer result was Approved. Bandit and code tests are not applicable because this patch changes documentation/task records only.
-<!-- SECTION:NOTES:END -->
+Its subtasks TASK-463.1 to TASK-463.5 were re-parented as TASK-12418.1 to TASK-12418.5 on 2026-11-03 (TASK-13962), in that order: 3a660d4f1d (2026-07-05) renumbered this task from TASK-463 without them. Docs/Development/Backlog_Task_Id_Renumbering.md maps each id.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

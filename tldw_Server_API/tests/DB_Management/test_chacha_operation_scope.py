@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
     current_connection_state,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.unit
 
@@ -114,7 +115,7 @@ def test_actual_main_registers_one_operation_middleware_in_both_modes(monkeypatc
         main = import_app_main()
         registered = [entry for entry in main.app.user_middleware if entry.cls is ChaChaOperationMiddleware]
         assert len(registered) == 1
-        assert any(route.path == "/health" for route in main.app.routes)
+        assert any(route.path == "/health" for route in iter_served_routes(main.app.routes))
     finally:
         restore_app_main(previous)
 

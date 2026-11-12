@@ -6,6 +6,11 @@ fail-closed: only Caddy publishes host ports, PostgreSQL and Redis remain on an
 internal network, application images are immutable inputs, and startup depends
 on an offline preflight.
 
+Run the deployment and rollback helper on a POSIX host with `os.fchmod` support.
+It rejects unsupported hosts before running deployment commands or writing
+recovery artifacts. Windows hosts cannot enforce the helper's owner-only
+artifact contract through Python's `chmod` interface.
+
 The public surface is intentionally small. `GET /health` returns exactly
 `{"status":"ok"}`. Caddy returns `404` for `/internal/ready`, `/ready`,
 `/health/ready`, `/api/v1/healthz`, `/api/v1/readyz`, `/setup`, `/setup/*`,

@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "Konflikt vid medieöverföring",
+    "conflict": "Det finns redan ett utkast i meddelandefältet. Infoga mediekällan, ersätt utkastet eller avbryt importen.",
+    "insert": "Infoga mediekälla",
+    "replace": "Ersätt aktuellt utkast",
+    "cancel": "Avbryt import"
+  },
   "formError": {
     "noModel": "Vänligen välj en modell",
     "noEmbeddingModel": "Vänligen ställ in en inbäddningsmodell på sidan Inställningar > RAG"

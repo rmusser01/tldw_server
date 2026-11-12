@@ -123,6 +123,42 @@ def _config_with_openai_key(raw_key: str) -> ConfigParser:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("model", "expected_status"),
+    [
+        ("unavailable-local-model", "failed"),
+        ("local-model", "ready"),
+        (" local-model ", "ready"),
+        (None, "ready"),
+        ("", "ready"),
+        ("   ", "ready"),
+    ],
+)
+async def test_a01_local_model_selection_matches_successful_discovery(monkeypatch, model, expected_status):
+    closed = []
+    response = _FakeResponse(200, {"data": [{"id": "local-model"}]})
+    monkeypatch.setattr(response, "close", lambda: closed.append(True))
+    _patch_validation_fetch(monkeypatch, _FakeAsyncClient(response=response))
+
+    result = await validate_local_openai_endpoint(
+        LocalEndpointValidationRequest(
+            provider_key="ollama",
+            base_url="http://127.0.0.1:11434/v1",
+            model=model,
+            api_key="secret-local-token",
+        )
+    )
+
+    assert result.status == expected_status  # nosec B101 # pytest checks provider readiness.
+    assert result.can_gate_first_chat is (expected_status == "ready")  # nosec B101 # pytest checks the setup gate.
+    assert result.models == ["local-model"]  # nosec B101 # pytest checks the recovery choices.
+    assert closed == [True]  # nosec B101 # pytest checks response cleanup.
+    assert "secret-local-token" not in result.model_dump_json()  # nosec B101 # pytest checks credential redaction.
+    if expected_status == "failed":
+        assert result.failure_category == "model_unavailable"  # nosec B101 # pytest checks the actionable failure.
+        assert "Select a discovered model" in result.message  # nosec B101 # pytest checks recovery guidance.
+
+@pytest.mark.asyncio
 async def test_openai_validation_uses_checked_afetch_with_route_scope(monkeypatch):
     scope = ConfiguredEndpointScope.from_url("http://10.0.0.5:18080/v1")
     calls = []

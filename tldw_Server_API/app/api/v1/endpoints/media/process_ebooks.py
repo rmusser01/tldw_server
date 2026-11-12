@@ -17,10 +17,12 @@ from fastapi import (
 from loguru import logger
 from starlette.responses import JSONResponse
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_ebooks_form,
+    media_analysis_requested,
 )
 from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
     media_create_dependencies,
@@ -31,6 +33,7 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
     apply_media_legacy_headers,
@@ -41,7 +44,6 @@ from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
     validate_media_inputs,
 )
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessEbooksForm
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
@@ -55,6 +57,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.download_utils import (
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
+    first_saved_filename,
     save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
@@ -201,6 +204,10 @@ async def process_ebooks_endpoint(
         form_data.urls,
         files,
     )
+
+    if media_analysis_requested(form_data):
+        # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
+        await enforce_llm_quota(current_user.id)
 
     system_prompt = form_data.system_prompt
     if form_data.perform_analysis and form_data.api_name and system_prompt is None:
@@ -355,10 +362,8 @@ async def process_ebooks_endpoint(
         # Prepare chunking options (with optional templates/hierarchical rules).
         if form_data.perform_chunking:
             first_url = (form_data.urls or [None])[0]
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0].get("original_filename")
+                first_filename = first_saved_filename(saved_files_info)
             except Exception:
                 first_filename = None
 
@@ -377,6 +382,7 @@ async def process_ebooks_endpoint(
                     form_data=form_data,
                     db=db,
                     chunking_options_dict=chunk_options_dict,
+                    owner_user_id=getattr(current_user, "id", None),
                     TemplateClassifier=TemplateClassifier,
                     first_url=first_url,
                     first_filename=first_filename,

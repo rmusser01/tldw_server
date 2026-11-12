@@ -211,12 +211,12 @@ describe("FlashcardCreateDrawer tags", () => {
     const props = { open: true, onClose: vi.fn(), onSuccess: vi.fn() }
     const { rerender } = render(<FlashcardCreateDrawer {...props} />)
     for (const pending of [true, false]) {
-      vi.mocked(useCreateFlashcardMutation).mockReturnValue({
+      vi.mocked(useCreateFlashcardMutation, { partial: true }).mockReturnValue({
         mutateAsync, isPending: pending,
-      } as ReturnType<typeof useCreateFlashcardMutation>)
+      })
       rerender(<FlashcardCreateDrawer {...props} />)
       for (const name of ["Create", "Create & Add Another"]) {
-        const button = await screen.findByRole("button", { name, exact: true })
+        const button = await screen.findByRole("button", { name })
         expect(button).toHaveAttribute("aria-busy", String(pending))
         if (pending) expect(button).toBeDisabled()
         else {

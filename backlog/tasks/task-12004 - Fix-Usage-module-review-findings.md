@@ -63,7 +63,7 @@ Docs/superpowers/plans/2026-06-23-usage-module-review-fixes.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added focused regression tests in `tldw_Server_API/tests/Usage/test_usage_review_fixes.py`.
 - Added unique/default audio minute operation ids and explicit operation-id support for idempotent callers.
 - Added `ResourceDailyLedger.consume_if_available()` and `audio_quota.consume_daily_minutes()` for store-backed daily-minute enforcement plus recording.
@@ -71,7 +71,24 @@ Docs/superpowers/plans/2026-06-23-usage-module-review-fixes.md
 - Removed per-user Prometheus LLM metrics; durable AuthNZ usage logs remain the per-user source of truth.
 - Changed placeholder pricing to use conservative billable fallback rates while preserving documented free non-placeholder zero rates.
 - Updated `tldw_Server_API/app/core/Usage/README.md` for ledger/RG/AuthNZ behavior and documented the `audio_quota.py` boundary to discourage adding more unrelated responsibilities before a dedicated extraction.
-<!-- SECTION:NOTES:END -->
+
+Reopened for PR #2491 review follow-up on 2026-06-24: address Qodo review comments, rebase onto latest dev, rerun focused verification, and push updated branch.
+PR #2491 follow-up addressed Qodo review items: centralized endpoint quota compatibility logic in core Usage, moved AudioQuotaStoreUnavailable to core exceptions, added missing type hints/docstrings, made zero-minute consumption a no-op when quota storage is unavailable, pruned fallback consume locks, and logged safe exception types for best-effort metrics/ledger failures without leaking raw exception messages.
+
+Follow-up verification on 2026-06-24:
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Usage/test_usage_review_fixes.py` -> 11 passed.
+- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Usage` -> 57 passed, 1 skipped.
+- Relevant Audio suite with known base-failing `test_audio_chat_ws_records_metrics` deselected -> 112 passed, 1 deselected.
+- Compile check on touched Python files -> passed.
+- Bandit touched app scope -> 0 findings in `/tmp/bandit_usage_12004_pr_followup.json`.
+2026-06-25: Rebasing PR #2491 onto latest origin/dev exposed overlap with previously merged Usage quota changes. Resolving conflicts by keeping latest dev context while retaining the review-driven fixes for atomic quota consumption, compatibility shims, logging, docs, and tests.
+Rebase verification on 2026-06-25 after resolving latest `origin/dev` conflicts:
+- Focused review regression: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Usage/test_usage_review_fixes.py` -> 11 passed.
+- Full Usage suite: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Usage` -> 59 passed, 1 skipped.
+- Relevant Audio endpoint/quota suite with known base-failing `test_audio_chat_ws_records_metrics` deselected -> 116 passed, 1 deselected.
+- Compile check on touched Python files -> passed.
+- Bandit touched app scope -> 0 findings in `/tmp/bandit_usage_12004_rebase_latest.json`.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Modified Files
 
@@ -105,24 +122,3 @@ Docs/superpowers/plans/2026-06-23-usage-module-review-fixes.md
 Fixed the Usage review findings by making audio minute usage ledger entries unique by default, adding a store-backed consume operation for daily-minute enforcement, surfacing ledger-unavailable failures to bounded fail-open paths, preserving cancellation propagation, removing per-user Prometheus LLM labels, pricing billable placeholders conservatively, and refreshing Usage documentation.
 PR #2491 follow-up rebased the branch onto latest `origin/dev` and resolved all actionable review comments while preserving the existing PII-safe logging boundary.
 <!-- SECTION:FINAL_SUMMARY:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Reopened for PR #2491 review follow-up on 2026-06-24: address Qodo review comments, rebase onto latest dev, rerun focused verification, and push updated branch.
-PR #2491 follow-up addressed Qodo review items: centralized endpoint quota compatibility logic in core Usage, moved AudioQuotaStoreUnavailable to core exceptions, added missing type hints/docstrings, made zero-minute consumption a no-op when quota storage is unavailable, pruned fallback consume locks, and logged safe exception types for best-effort metrics/ledger failures without leaking raw exception messages.
-
-Follow-up verification on 2026-06-24:
-- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Usage/test_usage_review_fixes.py` -> 11 passed.
-- `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Usage` -> 57 passed, 1 skipped.
-- Relevant Audio suite with known base-failing `test_audio_chat_ws_records_metrics` deselected -> 112 passed, 1 deselected.
-- Compile check on touched Python files -> passed.
-- Bandit touched app scope -> 0 findings in `/tmp/bandit_usage_12004_pr_followup.json`.
-2026-06-25: Rebasing PR #2491 onto latest origin/dev exposed overlap with previously merged Usage quota changes. Resolving conflicts by keeping latest dev context while retaining the review-driven fixes for atomic quota consumption, compatibility shims, logging, docs, and tests.
-Rebase verification on 2026-06-25 after resolving latest `origin/dev` conflicts:
-- Focused review regression: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Usage/test_usage_review_fixes.py` -> 11 passed.
-- Full Usage suite: `/Users/appledev/Documents/GitHub/tldw_server/.venv/bin/python -m pytest -q tldw_Server_API/tests/Usage` -> 59 passed, 1 skipped.
-- Relevant Audio endpoint/quota suite with known base-failing `test_audio_chat_ws_records_metrics` deselected -> 116 passed, 1 deselected.
-- Compile check on touched Python files -> passed.
-- Bandit touched app scope -> 0 findings in `/tmp/bandit_usage_12004_rebase_latest.json`.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -235,8 +235,7 @@ describe("WorldBookEntryManager budget feedback", () => {
     expect(addButton).not.toBeDisabled()
   }, 15000)
 
-  it("uses a canonical API id for entry edit, delete, and selected bulk actions", async () => {
-    const user = userEvent.setup()
+  const renderCanonicalEntry = () => {
     const { entry_id: _legacyEntryId, ...canonicalEntry } = sampleEntries[0]
     tldwClientMock.listWorldBookEntries.mockResolvedValue({
       entries: [{ ...canonicalEntry, id: 91, world_book_id: 1 }],
@@ -253,6 +252,11 @@ describe("WorldBookEntryManager budget feedback", () => {
     })
 
     render(<TestWrapper tokenBudget={500} />)
+  }
+
+  it("uses a canonical API id to edit an entry", async () => {
+    const user = userEvent.setup()
+    renderCanonicalEntry()
 
     const editButton = await screen.findByRole("button", { name: "Edit entry" })
     expect(tldwClientMock.listWorldBookEntries).toHaveBeenCalledWith(1, false)
@@ -264,12 +268,23 @@ describe("WorldBookEntryManager budget feedback", () => {
         expect.objectContaining({ content: sampleEntries[0].content })
       )
     })
+  }, 15000)
 
-    await user.click(screen.getByRole("button", { name: "Delete entry" }))
+  it("uses a canonical API id to delete an entry", async () => {
+    const user = userEvent.setup()
+    renderCanonicalEntry()
+
+    await user.click(await screen.findByRole("button", { name: "Delete entry" }))
     await waitFor(() => {
       expect(tldwClientMock.deleteWorldBookEntry).toHaveBeenCalledWith(91)
     })
+  }, 15000)
 
+  it("uses a canonical API id for selected bulk actions", async () => {
+    const user = userEvent.setup()
+    renderCanonicalEntry()
+
+    await screen.findByRole("button", { name: "Edit entry" })
     const rowCheckbox = screen.getAllByRole("checkbox").at(-1)
     expect(rowCheckbox).toBeDefined()
     await user.click(rowCheckbox!)

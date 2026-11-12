@@ -33,14 +33,14 @@ Address code-review findings for the Sync v2 key rotation preview/commit slice: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented review fixes for Sync v2 key rotation:
 - Commit now derives active_from_server_sequence, retained envelope range, source selection, new-key insert, and source superseding inside one storage transaction.
 - PostgreSQL rotation commit locks sync_envelopes and sync_key_records during sequencing; SQLite continues to rely on BEGIN IMMEDIATE.
 - Rotation key IDs are scoped by user_id, dataset_id, and rotation_id.
 - Committed rotations persist a canonical source-key manifest for multi-source idempotent replay.
 - The key-rotation commit endpoint parses secret-bearing input through a redacted validator before returning 422.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

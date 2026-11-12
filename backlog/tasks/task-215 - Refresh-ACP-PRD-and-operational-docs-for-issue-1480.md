@@ -67,13 +67,13 @@ Refresh the ACP PRD and operational documentation for GitHub issue #1480 in the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Issue #1480 exact scope reviewed from GitHub. The authoritative operational doc will be Docs/Development/Agent_Client_Protocol.md, with Docs/Development/ACP_Production_Readiness.md serving as the release-readiness checklist. The PRD needs a truth-status preface, current endpoint inventory, implementation-status matrix, and explicit links to remaining productionization child issues.
 
 Docs refreshed for #1480. Rewrote the PRD as a current implementation record with shipped, runtime-caveated, superseded, and remaining scope; added stable route contract families; made Agent_Client_Protocol.md the operational/contributor guide with documentation map and route inventory; updated ACP_Production_Readiness.md documentation row and #1480 closeout checklist entry. Verification recorded: git diff --check clean; targeted rg/read review found no escaped patch artifacts or draft status. Old route names only remain in the PRD superseded-claims section by design. Bandit is not applicable because this slice changed documentation and Backlog files only.
 
 GitHub issue #1480 updated with implementation summary and verification evidence: https://github.com/rmusser01/tldw_server/issues/1480#issuecomment-4414346050. Known remaining production signoff caveats are intentionally left under #1472: live-backend ACP E2E, Go runner verification, artifact retention/redaction policy, and host-specific sandbox backend verification.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

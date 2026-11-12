@@ -1,11 +1,15 @@
 import React from "react"
+import type { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import { useDictionaryImportFlow } from "./useDictionaryImportFlow"
 import { useDictionaryQuickAssign } from "./useDictionaryQuickAssign"
 import { useRestoreFocusOnClose } from "./useRestoreFocusOnClose"
 
 type UseDictionaryManagerWorkflowsParams = {
+  owner: ReturnType<typeof useChatDraftOwner>
+  onOpenChat: (chat: unknown, isCurrent: () => boolean) => Promise<boolean>
   isOnline: boolean
   dictionaries: any[]
+  isDictionaryCurrent: (dictionary: unknown) => boolean
   queryClient: {
     invalidateQueries: (input: { queryKey: readonly unknown[] }) => Promise<unknown>
   }
@@ -27,8 +31,11 @@ type UseDictionaryManagerWorkflowsParams = {
 }
 
 export function useDictionaryManagerWorkflows({
+  owner,
+  onOpenChat,
   isOnline,
   dictionaries,
+  isDictionaryCurrent,
   queryClient,
   notification,
   confirmDanger,
@@ -37,6 +44,10 @@ export function useDictionaryManagerWorkflows({
   importDialogFocusReturnRef,
 }: UseDictionaryManagerWorkflowsParams) {
   const quickAssignFlow = useDictionaryQuickAssign({
+    owner,
+    dictionaries,
+    isDictionaryCurrent,
+    onOpenChat,
     isOnline,
     notification,
     queryClient,

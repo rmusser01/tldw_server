@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "模板激活时忽略"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "媒体导入冲突"
+  },
+  "mediaHandoff_conflict": {
+    "message": "消息输入框中已有草稿。请插入媒体来源、替换草稿或取消导入。"
+  },
+  "mediaHandoff_insert": {
+    "message": "插入媒体来源"
+  },
+  "mediaHandoff_replace": {
+    "message": "替换当前草稿"
+  },
+  "mediaHandoff_cancel": {
+    "message": "取消导入"
   }
 }

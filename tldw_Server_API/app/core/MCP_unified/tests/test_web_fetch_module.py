@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import (
     web_fetch_module as wfm,
@@ -15,6 +16,20 @@ from tldw_Server_API.app.core.MCP_unified.modules.implementations.web_fetch_modu
     WebFetchResponse,
 )
 from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
+
+
+@pytest.fixture(autouse=True)
+def _hostnames_resolve_to_a_public_address(monkeypatch):
+    """Egress runs for real; made-up hostnames resolve to a public address, no DNS."""
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: ["93.184.216.34"])
+
+
+def _requested_url(request) -> str:
+    """The URL the caller asked for: egress pins the connection to an IP and keeps the name in Host."""
+    host = request.headers.get("host", "").split(":")[0]
+    return str(request.url.copy_with(host=host)) if host else str(request.url)
 
 pytestmark = pytest.mark.asyncio
 
@@ -49,7 +64,7 @@ class _FakeClient:
         return self.response
 
 
-def _module(client: _FakeClient, *, rate_limiter: Any | None = None) -> WebFetchModule:
+def _module(client: wfm.WebFetchHttpClient, *, rate_limiter: Any | None = None) -> WebFetchModule:
     return WebFetchModule(ModuleConfig(name="WebFetch"), client=client, rate_limiter=rate_limiter)
 
 
@@ -435,7 +450,7 @@ async def test_httpx_client_does_not_auto_follow_redirects() -> None:
     requested: list[str] = []
 
     def _handler(request: httpx.Request) -> httpx.Response:
-        requested.append(str(request.url))
+        requested.append(_requested_url(request))
         return httpx.Response(302, headers={"Location": "/next"})
 
     client = HttpxWebFetchClient(transport=httpx.MockTransport(_handler))
@@ -618,3 +633,167 @@ async def test_cache_hit_re_enforces_outbound_policy(monkeypatch: pytest.MonkeyP
     second = await module.execute_tool("web.fetch", {"url": "https://example.com/post"})
     assert second["ok"] is False  # nosec B101
     assert second["reason_code"] == "outbound_policy_denied"  # nosec B101
+
+
+# ---- Egress: the default client goes through core.http_client (TASK-13950.11) ----
+
+_PUBLIC_URL = "http://93.184.216.34/page"
+
+
+@pytest.fixture
+def _http_egress(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Block private and link-local addresses.
+
+    A refused request is proven by the MockTransport's record of requests. httpx
+    connects through anyio, not ``socket.create_connection``, so the patch below
+    only catches a stdlib or urllib fetch.
+    """
+    import socket
+
+    def _no_real_network(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("web.fetch bypassed core.http_client")
+
+    monkeypatch.setattr(socket, "create_connection", _no_real_network)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+
+
+def _recording_transport(requested: list[str], handler: Any | None = None) -> Any:
+    """MockTransport that records each URL; by default it serves _RICH_HTML."""
+    import httpx
+
+    def _handle(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if handler is not None:
+            response: httpx.Response = handler(request)
+            return response
+        return httpx.Response(200, request=request, headers={"Content-Type": "text/html"}, content=_RICH_HTML)
+
+    return httpx.MockTransport(_handle)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://127.0.0.1/admin", "http://169.254.169.254/latest/meta-data/", "http://10.0.0.5/"],
+)
+async def test_httpx_client_refuses_private_targets_itself(_http_egress: None, url: str) -> None:
+    """The default client is egress-checked even without the module's own policy check."""
+    requested: list[str] = []
+    client = HttpxWebFetchClient(transport=_recording_transport(requested))
+
+    with pytest.raises(EgressPolicyError):
+        await client.fetch(url, timeout_seconds=5, max_bytes=1000, user_agent="test")
+
+    assert requested == []  # nosec B101
+
+
+async def test_policy_race_still_cannot_reach_private_address(
+    monkeypatch: pytest.MonkeyPatch, _http_egress: None
+) -> None:
+    """If the module's check passes (a DNS answer that later changes), http_client refuses the connection."""
+    _allow_policy(monkeypatch)
+    requested: list[str] = []
+    module = _module(HttpxWebFetchClient(transport=_recording_transport(requested)))
+
+    result = await module.execute_tool("web.fetch", {"url": "http://169.254.169.254/latest/meta-data/"})
+
+    assert result["ok"] is False  # nosec B101
+    assert result["reason_code"] == "outbound_policy_denied"  # nosec B101
+    assert requested == []  # nosec B101
+
+
+async def test_real_policy_refuses_redirect_to_private_address_at_the_hop(_http_egress: None) -> None:
+    """A public page that redirects to cloud metadata is refused before the hop is requested."""
+    import httpx
+
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(302, request=request, headers={"Location": "http://169.254.169.254/latest/meta-data/"})
+
+    module = _module(HttpxWebFetchClient(transport=_recording_transport(requested, handler)))
+
+    result = await module.execute_tool("web.fetch", {"url": _PUBLIC_URL})
+
+    assert result["reason_code"] == "outbound_policy_denied"  # nosec B101
+    assert requested == [_PUBLIC_URL]  # nosec B101
+
+
+async def test_real_policy_public_page_fetches_through_http_client(_http_egress: None) -> None:
+    """A public page still comes back unchanged through the real policy and client."""
+    import httpx
+
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200, request=request, headers={"Content-Type": "text/html; charset=utf-8"}, content=_RICH_HTML
+        )
+
+    module = _module(HttpxWebFetchClient(transport=httpx.MockTransport(handler)))
+
+    result = await module.execute_tool("web.fetch", {"url": _PUBLIC_URL, "format": "text"})
+
+    assert result["ok"] is True  # nosec B101
+    assert result["final_url"] == _PUBLIC_URL  # nosec B101
+    assert result["status_code"] == 200  # nosec B101
+    assert result["content_type"] == "text/html; charset=utf-8"  # nosec B101
+    assert result["title"] == "Example Title"  # nosec B101
+    assert result["bytes_fetched"] == len(_RICH_HTML)  # nosec B101
+    assert result["truncated"] is False  # nosec B101
+    assert [str(request.url) for request in seen] == [_PUBLIC_URL]  # nosec B101
+    assert seen[0].headers["user-agent"] == "tldw-mcp-web-fetch/1.0"  # nosec B101
+
+
+async def test_httpx_client_byte_cap_stops_the_download(_http_egress: None) -> None:
+    """max_bytes truncates the body and stops reading the stream."""
+    import httpx
+
+    chunks = [b"x" * 65536] * 20
+    yielded: list[int] = []
+
+    class _CountingStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            for chunk in chunks:
+                yielded.append(len(chunk))
+                yield chunk
+
+    client = HttpxWebFetchClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200, request=request, headers={"Content-Type": "text/plain"}, stream=_CountingStream()
+            )
+        )
+    )
+
+    response = await client.fetch(_PUBLIC_URL, timeout_seconds=5, max_bytes=1000, user_agent="test")
+
+    assert response.truncated is True  # nosec B101
+    assert response.body == b"x" * 1000  # nosec B101
+    assert len(yielded) < len(chunks)  # nosec B101
+
+
+async def test_httpx_client_timeout_bounds_a_silent_server(_http_egress: None) -> None:
+    """timeout_seconds bounds the wait for body bytes (http_client's stream timeouts)."""
+    import asyncio
+
+    import httpx
+
+    class _SilentStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            await asyncio.Event().wait()
+            yield b""
+
+    client = HttpxWebFetchClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200, request=request, headers={"Content-Type": "text/html"}, stream=_SilentStream()
+            )
+        )
+    )
+
+    with pytest.raises(NetworkError, match="StreamTimeout"):
+        await asyncio.wait_for(
+            client.fetch(_PUBLIC_URL, timeout_seconds=0.2, max_bytes=1000, user_agent="test"),
+            timeout=2,
+        )

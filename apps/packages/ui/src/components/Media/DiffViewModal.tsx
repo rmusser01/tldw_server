@@ -110,13 +110,12 @@ export function DiffViewModal({
   )
 
   const syncDiffLines = useMemo(
-    () => (canComputeDiff && !useWorker ? computeDiffSync(effectiveLeftText, effectiveRightText) : []),
-    [canComputeDiff, useWorker, effectiveLeftText, effectiveRightText]
+    () => (open && canComputeDiff && !useWorker ? computeDiffSync(effectiveLeftText, effectiveRightText) : []),
+    [open, canComputeDiff, useWorker, effectiveLeftText, effectiveRightText]
   )
 
   useEffect(() => {
-    if (!open) return
-    if (!canComputeDiff) {
+    if (!open || !canComputeDiff) {
       setWorkerDiffLines(null)
       setDiffError(null)
       setDiffLoading(false)
@@ -129,34 +128,34 @@ export function DiffViewModal({
       return
     }
 
-    let cancelled = false
+    const controller = new AbortController()
     setDiffLoading(true)
     setDiffError(null)
     setWorkerDiffLines(null)
 
-    void computeDiffWithWorker(effectiveLeftText, effectiveRightText)
+    void computeDiffWithWorker(effectiveLeftText, effectiveRightText, controller.signal)
       .then((lines) => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         setWorkerDiffLines(lines)
         setDiffLoading(false)
       })
       .catch((error) => {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         setDiffError(error instanceof Error ? error.message : 'Diff computation failed')
         setWorkerDiffLines(computeDiffSync(effectiveLeftText, effectiveRightText))
         setDiffLoading(false)
       })
 
     return () => {
-      cancelled = true
+      controller.abort()
     }
   }, [open, canComputeDiff, useWorker, effectiveLeftText, effectiveRightText])
 
   const diffLines = useMemo(() => {
-    if (!canComputeDiff) return []
+    if (!open || !canComputeDiff) return []
     if (!useWorker) return syncDiffLines
     return workerDiffLines || []
-  }, [canComputeDiff, useWorker, syncDiffLines, workerDiffLines])
+  }, [open, canComputeDiff, useWorker, syncDiffLines, workerDiffLines])
 
   // Build side-by-side view data
   const sideBySideData = useMemo(() => {

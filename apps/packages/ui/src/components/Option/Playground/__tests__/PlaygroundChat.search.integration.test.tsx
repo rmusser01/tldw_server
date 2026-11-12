@@ -74,9 +74,15 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] })
-}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return {
+    ...actual,
+    useQueryClient: () => queryClient,
+    useQuery: () => ({ data: [] })
+  }
+})
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [false]

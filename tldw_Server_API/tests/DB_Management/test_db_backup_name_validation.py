@@ -1,15 +1,16 @@
-import pytest
 from types import SimpleNamespace
 
+import pytest
+
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.DB_Backups import (
     _POSTGRES_BACKUP_EXTS,
     _SQLITE_BACKUP_EXTS,
-    create_postgres_backup,
     _sanitize_backup_label,
     _validate_backup_name,
+    create_postgres_backup,
     restore_postgres_backup,
 )
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 
 
 @pytest.mark.parametrize(
@@ -62,7 +63,8 @@ def test_validate_backup_name_rejects_invalid_names(name: str) -> None:
 def _postgres_backend_stub(*, database: str = "tldw") -> SimpleNamespace:
     return SimpleNamespace(
         backend_type=BackendType.POSTGRESQL,
-        config=SimpleNamespace(
+        config=DatabaseConfig(
+            backend_type=BackendType.POSTGRESQL,
             pg_host="localhost",
             pg_port=5432,
             pg_database=database,

@@ -8,6 +8,7 @@ import rehypeHighlight from "rehype-highlight"
 import { useACPSessionsStore } from "@/store/acp-sessions"
 import type { ACPUpdate, ACPSessionState, ParsedUpdateMessage } from "@/services/acp/types"
 import type { ReconnectInfo } from "@/hooks/useACPSession"
+import { projectACPUpdates } from "@/services/acp/update-projection"
 
 const { TextArea } = Input
 
@@ -102,6 +103,19 @@ export function parseUpdateMessage(
   const data = update.data as Record<string, unknown>
 
   switch (update.type) {
+    case "agent_message_chunk":
+    case "user_message_chunk": {
+      const native = data.update as Record<string, unknown> | undefined
+      const content = native?.content as Record<string, unknown> | undefined
+      if (content?.type === "text" && typeof content.text === "string") {
+        return {
+          role: update.type === "agent_message_chunk" ? "assistant" : "user",
+          content: content.text,
+        }
+      }
+      return { role: "system", content: JSON.stringify(data, null, 2) }
+    }
+
     case "text":
     case "assistant_text":
       return {
@@ -115,12 +129,48 @@ export function parseUpdateMessage(
         content: String(data.text ?? data.content ?? ""),
       }
 
+    case "agent_thought_chunk": {
+      const native = data.update as Record<string, unknown> | undefined
+      const content = native?.content as Record<string, unknown> | undefined
+      if (content?.type === "text" && typeof content.text === "string")
+        return { role: "system", content: "Thought: " + content.text }
+      return { role: "system", content: JSON.stringify(data, null, 2) }
+    }
+
+    case "usage_update": {
+      const native = data.update as Record<string, unknown> | undefined
+      if (typeof native?.used === "number" && Number.isFinite(native.used) && native.used >= 0
+        && typeof native.size === "number" && Number.isFinite(native.size) && native.size >= 0)
+        return { role: "system", content: "Context: " + native.used + " / " + native.size }
+      return { role: "system", content: JSON.stringify(data, null, 2) }
+    }
+
+    case "system_text":
+      return { role: "system", content: String(data.text ?? "") }
+
     case "tool_call":
+    case "tool_call_update": {
+      const native = data.update as Record<string, unknown> | undefined
+      if (native) {
+        const input = native.rawInput
+        const output = native.rawOutput as Record<string, unknown> | undefined
+        const content = Array.isArray(native.content) ? native.content : []
+        const text = content.map((item) => item?.type === "content" && item.content?.type === "text"
+          && typeof item.content.text === "string" ? item.content.text : "").join("")
+        return {
+          role: "tool",
+          toolName: String(native.title ?? native.kind ?? native.toolCallId ?? "unknown"),
+          toolArgs: input && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {},
+          toolStatus: typeof native.status === "string" ? native.status : undefined,
+          toolResult: typeof output?.output === "string" ? output.output : text || undefined
+        }
+      }
       return {
         role: "tool",
         toolName: String(data.name ?? data.tool ?? "unknown"),
         toolArgs: (data.arguments ?? data.input ?? {}) as Record<string, unknown>,
       }
+    }
 
     case "tool_result":
       return {
@@ -177,6 +227,9 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
 
   // Store
   const activeSessionId = useACPSessionsStore((s) => s.activeSessionId)
+  const runtimeUnavailable = useACPSessionsStore((s) =>
+    s.activeSessionId ? s.sessions[s.activeSessionId]?.runtimeAvailable === false : false
+  )
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -184,7 +237,7 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
   }, [updates])
 
   const handleSend = () => {
-    if (!inputValue.trim() || !isConnected) return
+    if (!inputValue.trim() || !isConnected || runtimeUnavailable) return
 
     sendPrompt([{ role: "user", content: inputValue.trim() }])
     setInputValue("")
@@ -198,10 +251,12 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
   }
 
   const handleCancel = () => {
+    if (runtimeUnavailable) return
     cancel()
   }
 
   const handleReconnect = async () => {
+    if (runtimeUnavailable) return
     setIsReconnecting(true)
     try {
       await connect()
@@ -210,7 +265,7 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
     }
   }
 
-  const isRunning = state === "running" || state === "waiting_permission"
+  const isRunning = !runtimeUnavailable && (state === "running" || state === "waiting_permission")
 
   // No active session
   if (!activeSessionId) {
@@ -235,7 +290,7 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
   }
 
   // Connecting
-  if (state === "connecting") {
+  if (state === "connecting" && !runtimeUnavailable) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
@@ -257,13 +312,15 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
             <div className="text-center text-text-muted">
               <Bot className="mx-auto h-12 w-12 opacity-50" />
               <p className="mt-4">
-                {t("playground:acp.startPrompt", "Send a message to start the conversation")}
+                {runtimeUnavailable
+                  ? t("playground:acp.runtimeUnavailableTitle", "Session runtime unavailable")
+                  : t("playground:acp.startPrompt", "Send a message to start the conversation")}
               </p>
             </div>
           </div>
         ) : (
           <div className="mx-auto max-w-3xl space-y-4">
-            {updates.map((update, index) => (
+            {projectACPUpdates(updates).map((update, index) => (
               <UpdateMessage key={index} update={update} />
             ))}
             <div ref={messagesEndRef} />
@@ -281,7 +338,7 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
               onKeyDown={handleKeyDown}
               placeholder={t("playground:acp.inputPlaceholder", "Type your message...")}
               autoSize={{ minRows: 1, maxRows: 6 }}
-              disabled={!isConnected || isRunning}
+              disabled={!isConnected || isRunning || runtimeUnavailable}
               className="flex-1"
             />
             {isRunning ? (
@@ -298,14 +355,18 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
                 type="primary"
                 icon={<Send className="h-4 w-4" />}
                 onClick={handleSend}
-                disabled={!inputValue.trim() || !isConnected}
+                disabled={!inputValue.trim() || !isConnected || runtimeUnavailable}
               >
                 {t("playground:acp.send", "Send")}
               </Button>
             )}
           </div>
 
-          {!isConnected && (
+          {runtimeUnavailable ? (
+            <div className="mt-2 text-xs text-warning" role="status">
+              {t("playground:acp.runtimeUnavailableHistory", "Session runtime unavailable. Stored history remains available; create a new session to continue.")}
+            </div>
+          ) : !isConnected && (
             <div className="mt-2 flex items-center justify-between gap-2 text-xs text-warning">
               <span className="flex items-center gap-1">
                 <AlertCircle className="h-3 w-3" />
@@ -421,6 +482,12 @@ const UpdateMessage: React.FC<UpdateMessageProps> = ({ update }) => {
           </div>
           <div className="mt-1">
             <ToolArgumentsDisplay args={message.toolArgs} />
+            {message.toolStatus && <div className="mt-1 text-xs text-text-muted">{message.toolStatus}</div>}
+            {message.toolResult !== undefined && (
+              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-text-muted">
+                {typeof message.toolResult === "string" ? message.toolResult : JSON.stringify(message.toolResult, null, 2)}
+              </pre>
+            )}
           </div>
         </div>
       </div>

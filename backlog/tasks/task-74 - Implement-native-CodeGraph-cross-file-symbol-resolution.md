@@ -39,7 +39,7 @@ Docs/superpowers/plans/2026-05-05-native-codegraph-cross-file-resolution-impleme
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline from clean origin/dev worktree after PR #1304 merge: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/CodeGraph tldw_Server_API/app/core/MCP_unified/tests/test_codegraph_module.py -q -> 142 passed, 5 warnings.
 
 Implemented repository resolved-reference state, conservative Python/JS/TS import binding resolution, indexer resolution counters, stale cleanup, and MCP read-tool coverage for cross-file relationships.
@@ -63,7 +63,7 @@ Review-fix verification: targeted regression tests for repository/resolver/index
 Review-fix verification: focused CodeGraph/MCP suite -> 160 passed, 5 warnings.
 
 Review-fix verification: Ruff touched scopes -> All checks passed; Bandit touched production scopes -> zero findings; git diff --check -> clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

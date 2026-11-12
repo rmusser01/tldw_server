@@ -16,11 +16,13 @@ const mocks = vi.hoisted(() => ({
   callerRefresh: vi.fn(),
   callerForbidden: vi.fn(),
   capabilitiesState: {
-    capabilities: { hasPersonalization: true, hasPersona: true },
+    capabilities: { hasPersonalization: true, hasPersona: true, hasCompanion: true },
+    refresh: vi.fn(async () => {}),
     loading: false
   } as {
-    capabilities: { hasPersonalization: boolean; hasPersona?: boolean } | null
+    capabilities: { hasCompanion?: boolean; hasPersonalization: boolean; hasPersona?: boolean } | null
     loading: boolean
+    refresh: () => Promise<void>
   }
 }))
 
@@ -305,9 +307,22 @@ const renderPage = (
   )
 
 describe("CompanionHomePage", () => {
+  it("keeps enabled Personalization and other Home sources when the Companion router is absent", async () => {
+    mocks.capabilitiesState.capabilities = { hasPersonalization: true, hasPersona: true, hasCompanion: false }
+    renderPage()
+    expect((await screen.findByText("Companion routes are unavailable")).isConnected).toBe(true)
+    await screen.findByText("Nothing new from automations.")
+    expect(mocks.fetchPersonalizationProfile).toHaveBeenCalledTimes(1)
+    expect(mocks.fetchCompanionHomeSnapshot).toHaveBeenCalledWith("options", { companionAvailable: false })
+    expect(mocks.listScheduledTasks).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("button", { name: "Enable Companion" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Open conversation" })).toBeNull()
+    expect((screen.getByRole("heading", { name: "Automation Inbox" })).isConnected).toBe(true)
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.capabilitiesState.capabilities = { hasPersonalization: true, hasPersona: true }
+    mocks.capabilitiesState.capabilities = { hasPersonalization: true, hasPersona: true, hasCompanion: true }
     mocks.capabilitiesState.loading = false
     mocks.fetchCompanionHomeSnapshot.mockResolvedValue(buildSnapshot())
     mocks.listScheduledTasks.mockResolvedValue({
@@ -382,8 +397,8 @@ describe("CompanionHomePage", () => {
     mocks.saveCompanionHomeLayout.mockResolvedValue(undefined)
   })
 
-  it("shows a setup band and inbox card instead of a dead-end when personalization is unavailable", async () => {
-    mocks.capabilitiesState.capabilities = { hasPersonalization: false, hasPersona: false }
+  it("shows a setup band that names the waiting cards instead of a dead-end when personalization is unavailable", async () => {
+    mocks.capabilitiesState.capabilities = { hasPersonalization: false, hasPersona: false, hasCompanion: true }
     mocks.listScheduledTasks.mockResolvedValueOnce({
       items: [
         buildScheduledTask({
@@ -406,15 +421,12 @@ describe("CompanionHomePage", () => {
     expect(await screen.findByText("Companion setup required")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Personalization configuration guide" })).toHaveAttribute("href", "https://github.com/rmusser01/tldw_server/blob/main/Docs/Product/Personalization_Design.md#current-status-v02x-dev")
     expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /Source monitor/i })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: /Source monitor/i })).toHaveAttribute(
       "href",
       "/scheduled-tasks?tab=results&result_id=255"
     )
-    expect(screen.getByRole("heading", { name: "Inbox Preview" })).toBeInTheDocument()
-    expect(screen.getAllByText("Registry setup required").length).toBeGreaterThan(0)
-    expect(
-      screen.getByText(/Companion inbox items unlock once personalization is available for this workspace\./)
-    ).toBeInTheDocument()
+    // XS-17: the empty personalized cards are named once in the setup band.
+    expect(screen.getByTestId("companion-home-waiting-on-setup")).toHaveTextContent("Inbox Preview")
     expect(
       screen.queryByText("Companion unavailable")
     ).not.toBeInTheDocument()
@@ -429,7 +441,7 @@ describe("CompanionHomePage", () => {
     renderPage()
 
     await waitFor(() => {
-      expect(mocks.fetchCompanionHomeSnapshot).toHaveBeenCalledWith("options")
+      expect(mocks.fetchCompanionHomeSnapshot).toHaveBeenCalledWith("options", { companionAvailable: true })
     })
 
     expect(screen.getByText("Loading your companion home dashboard.")).toBeInTheDocument()
@@ -451,13 +463,12 @@ describe("CompanionHomePage", () => {
     expect(within(summary).getByText("Resume")).toBeInTheDocument()
   })
 
+  // Setup-blocked cards fold into the setup band (XS-17, covered below).
   it.each([
-    [false, false, true, "Registry setup required"],
-    [true, false, true, "Enable Companion"],
     [true, true, true, "Temporarily unavailable"],
     [true, true, false, "Reading queue is clear"]
   ])("classifies an empty reading queue by its actual prerequisites (%s, %s, %s)", async (available, enabled, degraded, label) => {
-    mocks.capabilitiesState.capabilities = { hasPersonalization: available, hasPersona: true }
+    mocks.capabilitiesState.capabilities = { hasPersonalization: available, hasPersona: true, hasCompanion: true }
     mocks.fetchPersonalizationProfile.mockResolvedValue({ enabled })
     mocks.fetchCompanionHomeSnapshot.mockResolvedValue(buildSnapshot({
       readingQueue: [],
@@ -467,7 +478,66 @@ describe("CompanionHomePage", () => {
     const heading = await screen.findByRole("heading", { name: "Reading Queue" })
     const card = within(heading.closest("section")!)
     expect(card.getAllByText(label).length).toBeGreaterThan(0)
+  })
+
+  it.each([
+    ["personalization is unavailable", false, true],
+    ["the Companion is turned off", true, false]
+  ])("XS-17: folds the setup-blocked cards into one notice when %s", async (_label, available, enabled) => {
+    mocks.capabilitiesState.capabilities = { hasPersonalization: available, hasPersona: true, hasCompanion: true }
+    mocks.fetchPersonalizationProfile.mockResolvedValue({ enabled })
+    mocks.fetchCompanionHomeSnapshot.mockResolvedValue(buildSnapshot({
+      inbox: [],
+      needsAttention: [],
+      resumeWork: [],
+      goalsFocus: [],
+      recentActivity: [],
+      readingQueue: []
+    }))
+    renderPage()
+
+    const notice = await screen.findByTestId("companion-home-waiting-on-setup")
+    await waitFor(() => {
+      for (const title of [
+        "Inbox Preview",
+        "Needs Attention",
+        "Resume Work",
+        "Goals / Focus",
+        "Recent Activity",
+        "Reading Queue"
+      ]) {
+        expect(notice).toHaveTextContent(title)
+        expect(screen.queryByRole("heading", { name: title })).not.toBeInTheDocument()
+      }
+    })
+    expect(screen.queryByText("Registry setup required")).not.toBeInTheDocument()
+    expect(screen.getAllByText("Companion setup required")).toHaveLength(1)
+    expect(screen.getByRole("heading", { name: "Automation Inbox" })).toBeInTheDocument()
     if (!available) expect(mocks.fetchCompanionHomeSnapshot).not.toHaveBeenCalled()
+  })
+
+  it("XS-17: keeps a card that already has items while the Companion is turned off", async () => {
+    mocks.fetchPersonalizationProfile.mockResolvedValue({ enabled: false })
+    mocks.fetchCompanionHomeSnapshot.mockResolvedValue(buildSnapshot({
+      inbox: [],
+      needsAttention: [],
+      resumeWork: [],
+      goalsFocus: [],
+      recentActivity: []
+    }))
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Reading Queue" })).toBeInTheDocument()
+    const notice = await screen.findByTestId("companion-home-waiting-on-setup")
+    expect(notice).toHaveTextContent("Inbox Preview")
+    expect(notice).not.toHaveTextContent("Reading Queue")
+  })
+
+  it("XS-17: shows no setup notice once the Companion is ready", async () => {
+    renderPage()
+
+    expect(await screen.findByRole("heading", { name: "Reading Queue" })).toBeInTheDocument()
+    expect(screen.queryByTestId("companion-home-waiting-on-setup")).not.toBeInTheDocument()
   })
 
   it("renders scheduled-task result and failure signals in Automation Inbox", async () => {

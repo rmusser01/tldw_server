@@ -9,6 +9,7 @@ import sys
 import pytest
 from fastapi import APIRouter, FastAPI
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.helpers.app_main_state import (
     clear_app_main,
     import_app_main,
@@ -21,7 +22,7 @@ from tldw_Server_API.tests.helpers.app_main_state import (
 def test_router_contract_includes_key_paths() -> None:
     from tldw_Server_API.app.main import app
 
-    paths = {route.path for route in app.routes}
+    paths = {route.path for route in iter_served_routes(app.routes)}
     expected_paths = {
         "/health",
         "/openapi.json",
@@ -63,7 +64,7 @@ def test_router_registry_idempotent_registration() -> None:
 
     route_signatures = {
         (route.path, tuple(sorted(getattr(route, "methods", set()))))
-        for route in app.routes
+        for route in iter_served_routes(app.routes)
         if getattr(route, "path", "").startswith("/api/v1")
     }
     assert route_signatures == {("/api/v1/health", ("GET",))}
@@ -109,7 +110,7 @@ def test_minimal_app_import_does_not_probe_setup_router_directly(monkeypatch: py
     try:
         imported_main = import_app_main()
         assert imported_main.app is not None
-        assert any(route.path == "/health" for route in imported_main.app.routes)
+        assert any(route.path == "/health" for route in iter_served_routes(imported_main.app.routes))
     finally:
         restore_app_main(existing_main)
 
@@ -138,11 +139,12 @@ def test_app_import_outside_explicit_pytest_runtime_has_no_duplicate_routes(
             "-c",
             (
                 "import tldw_Server_API.app.main as main; "
+                "from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes; "
                 "main._fail_on_duplicate_route_method_pairs("
                 "main.app, context='subprocess-import'"
                 "); "
                 "vlm_routes = ["
-                "route for route in main.app.routes "
+                "route for route in iter_served_routes(main.app.routes) "
                 "if getattr(route, 'path', None) == '/api/v1/vlm/backends'"
                 "]; "
                 "assert len(vlm_routes) == 1, "

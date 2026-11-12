@@ -29,13 +29,13 @@ Walk through the WebUI Chatbooks page in dark mode against a real backend, check
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Real-backend walkthrough completed against frontend http://127.0.0.1:8081 and backend http://127.0.0.1:18001. Covered Chatbooks export, media quality select, import, source select, OpenWebUI JSON hydration controls, conflict select, and jobs. Captured screenshots under /private/tmp/tldw-real-chatbooks-dark. Report: /private/tmp/tldw-real-chatbooks-dark/report.json. Result: 0 light-surface leaks, 0 low-contrast text leaks, no request failures, Chatbooks export/import job endpoints returned 200.
 
 Added Chatbooks coverage to apps/tldw-frontend/e2e/smoke/dark-theme-visual-fidelity.spec.ts for export, lower export pickers, export media select, import, import source select, OpenWebUI JSON hydration controls, conflict select, and jobs. Verification: npx playwright test e2e/smoke/dark-theme-visual-fidelity.spec.ts --reporter=line passed; git diff --check passed. Bandit skipped because touched repository files are frontend Playwright TypeScript and Backlog Markdown only; no Python code changed.
 
 PR review follow-up: rebased on latest dev, aligned Chatbooks job and health mocks with backend response shapes, waited for Ant dropdowns to close before continuing, replaced hardcoded wheel scrolling with locator-based scrolling, and added aria labels to the Chatbooks media quality, import source, and conflict resolution selects so the smoke test can use semantic locators.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

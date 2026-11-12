@@ -21,6 +21,7 @@ vi.mock("../schema", () => ({
     },
     modelNickname: { name: "modelNickname" },
     sessionFiles: { name: "sessionFiles" },
+    searchTokens: { name: "searchTokens" },
     transaction: (...args: unknown[]) => mocks.transaction(...args)
   }
 }))
@@ -57,7 +58,8 @@ describe("runChatPersistenceTransaction", () => {
         expect.objectContaining({ name: "chatHistories" }),
         expect.objectContaining({ name: "messages" }),
         expect.objectContaining({ name: "modelNickname" }),
-        expect.objectContaining({ name: "sessionFiles" })
+        expect.objectContaining({ name: "sessionFiles" }),
+        expect.objectContaining({ name: "searchTokens" })
       ],
       expect.any(Function)
     )
@@ -93,6 +95,31 @@ describe("runChatPersistenceTransaction", () => {
       runChatPersistenceTransaction(controller.signal, vi.fn())
     ).rejects.toMatchObject({ name: "AbortError" })
     expect(mocks.transaction).not.toHaveBeenCalled()
+  })
+
+  it("does not open a transaction for an expired history lease", async () => {
+    const operation = vi.fn()
+    await expect(
+      runChatPersistenceTransaction(undefined, operation, undefined, () => false)
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(mocks.transaction).not.toHaveBeenCalled()
+    expect(operation).not.toHaveBeenCalled()
+  })
+
+  it("rejects an expired history lease even when a caller stop would be retained", async () => {
+    let finishWrite!: () => void
+    const pendingWrite = new Promise<void>(resolve => { finishWrite = resolve })
+    const controller = new AbortController()
+    let current = true
+    const persistence = runChatPersistenceTransaction(
+      controller.signal, () => pendingWrite, () => false, () => current
+    )
+    await vi.waitFor(() => expect(mocks.transaction).toHaveBeenCalledOnce())
+    controller.abort()
+    expect(mocks.abort).not.toHaveBeenCalled()
+    current = false
+    finishWrite()
+    await expect(persistence).rejects.toMatchObject({ name: "AbortError" })
   })
 
   it("keeps the abort guard active until the transaction commit resolves", async () => {
@@ -135,7 +162,8 @@ describe("runChatPersistenceTransaction", () => {
     const persistence = runChatPersistenceTransaction(
       controller.signal,
       () => pendingWrite,
-      () => false
+      () => false,
+      () => true
     )
 
     await vi.waitFor(() => {

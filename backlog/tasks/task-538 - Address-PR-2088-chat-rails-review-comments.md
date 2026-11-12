@@ -63,19 +63,17 @@ Address review feedback and CI issues on PR #2088 after rebasing the chat rails 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started PR #2088 review-fix pass. Branch was fetched and rebased cleanly onto latest origin/dev. Review collection found unresolved Gemini/CodeRabbit/Qodo comments plus UX Smoke Gate failure in the pre-rebase CI run. Next step is validating each comment against current code and implementing only still-valid fixes.
 
 Validated and implemented the still-current PR #2088 review fixes: provider-status failures now log, assistant clear is a single awaited callback and awaits persisted-session clearing, chat model readiness tolerates null model responses, status-strip context summaries tolerate null and use count-aware hidden-source copy, provider status normalization ignores null entries, sidepanel full-app description moved outside the button, dashboard route restored to `/flashcards` while full-screen chat remains `/chat`, composition preview now uses semantic copy fields instead of English literal comparisons, docs/evidence no longer expose the fake local E2E API key, duplicate final summary markers were removed, PR-added chat `TASK-521` records were moved to decimal sub-IDs, and sidepanel E2E host-permission failures now fail loudly instead of skipping.
 
 Verification so far: focused package UI Vitest passed 6 files / 100 tests; cockpit/control guard Vitest passed 3 files / 26 tests; targeted UX smoke mobile composer Playwright passed 1 Chromium test; packaged extension sidepanel chat smoke passed 3 Chromium-extension tests after production build; evidence JSON parse passed; git diff --check passed. Bandit skipped because the touched executable code is frontend TypeScript/TSX plus Markdown/JSON/Backlog metadata, with no Python files in this slice.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 CI recheck found and fixed a second UX Smoke Gate failure after the first review-fix push: the all-pages runtime overlay detector scanned full body text with a broad /Runtime ... Error/ pattern, which matched legitimate /chat cockpit text (`Runtime` rail plus `Error` runtime status). Added a shared smoke runtime-overlay helper with stricter body patterns, updated all-pages, invalid-api-key, and Stage 1 route-matrix capture to use it, and added Vitest regression coverage for the chat rail false positive.
 
 Additional verification: runtime-overlay Vitest passed 1 file / 2 tests; targeted all-pages Chat smoke passed 1 Chromium test; invalid API key chat smoke passed 1 Chromium test; CI-matching all-pages smoke gate passed 111 Chromium tests. A non-CI local full all-pages invocation without the gate grep still has an unrelated Kanban forced-error route-boundary failure; the package CI script only runs `Smoke Tests - All Pages` and passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

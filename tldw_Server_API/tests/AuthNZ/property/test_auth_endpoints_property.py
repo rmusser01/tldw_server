@@ -27,7 +27,8 @@ class TestAuthEndpointsProperty:
     @hypothesis_settings(
         max_examples=10,
         deadline=5000,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.filter_too_much],
+        # st.emails() is slow to build on a cold, loaded runner (26.9s first draw in CI).
+        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.filter_too_much, HealthCheck.too_slow],
     )
     async def test_register_with_various_inputs(
         self,

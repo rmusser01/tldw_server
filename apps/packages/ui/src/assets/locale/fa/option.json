@@ -394,7 +394,7 @@
     "storageServerDescription": "روی سرور tldw شما ذخیره می‌شود (پیشنهادی برای RAG و محیط‌های کاری مشترک).",
     "storageLocalDescription": "فقط در این مرورگر نگه داشته می‌شود؛ هیچ داده‌ای روی سرورتان نوشته نمی‌شود.",
     "storeAfterReview": "ذخیره پس از بازبینی",
-    "reviewBeforeStorage": "بازبینی پیش از ذخیره",
+    "reviewBeforeStorage": "بازبینی محتوای استخراج‌شده پیش از ذخیره",
     "reviewBeforeStorageHint": "اکنون پردازش کنید و سپس پیش‌نویس‌ها را به‌صورت محلی ویرایش کنید قبل از اینکه در سرور ثبت شوند.",
     "reviewEnabled": "حالت بازبینی",
     "reviewStorageCap": "سقف پیش‌نویس‌های محلی {{cap}} است.",

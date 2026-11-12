@@ -44,9 +44,9 @@ Sequence: settle the flashcards isolation one first (security), then the two `ga
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 All 8 were stale tests, none a product defect. Fixed in PR #3025: 277 passed, 5 skipped across the 8 files on latest dev.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

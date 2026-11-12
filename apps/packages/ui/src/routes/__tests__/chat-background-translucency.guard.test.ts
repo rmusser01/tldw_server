@@ -63,6 +63,9 @@ describe("chat background image translucency", () => {
         sources[key] = await readSource(key)
       })
     )
+    expect(sources.extensionSidepanel.trim()).toBe('export { default } from "@/routes/sidepanel-chat"')
+    // The legacy entry delegates to the shared route; guard its actual body.
+    sources.extensionSidepanel = sources.sidepanel
   })
 
   it.each([

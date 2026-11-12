@@ -297,8 +297,6 @@ def test_evaluations_precedence_env_over_config_over_yaml(tmp_path, monkeypatch)
                 "      evaluations_per_day: 1",
                 "      total_tokens_per_day: 1",
                 "      burst_size: 1",
-                "      max_cost_per_day: 1.0",
-                "      max_cost_per_month: 1.0",
             ]
         )
         + "\n",

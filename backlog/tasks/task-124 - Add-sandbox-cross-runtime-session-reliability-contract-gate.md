@@ -34,7 +34,7 @@ Add a narrow Phase 4 sandbox reliability slice that turns the current session_co
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan/design review: kept the slice contract-only. The implementation does not generalize repair, add warm reuse to host-local runtimes, change helper behavior, or change runtime execution/admission.
 
 RED: `python -m pytest tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -q` failed on `test_inventory_documents_portable_session_contract_gate_scope` because the inventory still claimed session behavior tests were incomplete beyond discovery-level `session_contract`.
@@ -60,7 +60,7 @@ Review verification: `python -m ruff check tldw_Server_API/tests/sandbox/test_ru
 Review verification: `python -m bandit -r tldw_Server_API/tests/sandbox/test_runtime_capability_gate.py -s B101 -f json -o /tmp/bandit_sandbox_session_contract_gate_tests_review_fixes.json` reported zero findings after excluding pytest assert-use noise.
 
 Review verification: `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

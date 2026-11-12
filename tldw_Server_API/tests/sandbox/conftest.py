@@ -223,23 +223,20 @@ def sandbox_ws_signed_defaults(monkeypatch: pytest.MonkeyPatch, request: pytest.
     monkeypatch.delenv("SANDBOX_WS_SIGNING_SECRET", raising=False)
 
 
-@pytest.fixture(autouse=True)
-def patch_sandbox_heartbeat_sleep(monkeypatch: pytest.MonkeyPatch):
-    """Speed up WS heartbeats across sandbox WS tests by patching asyncio.sleep
-    in the sandbox endpoint module to a near-zero sleep.
-    """
-    try:
-        from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+@pytest.fixture
+def patch_sandbox_heartbeat_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Speed up endpoint heartbeats without changing other asyncio clocks."""
+    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
 
-        _orig_sleep = _asyncio.sleep
+    native_sleep = _asyncio.sleep
 
-        async def _fast_sleep(_n: float) -> None:  # pragma: no cover - trivial
-            await _orig_sleep(0.01)
+    async def heartbeat_sleep(delay: float, result: object = None) -> object:
+        return await native_sleep(0.01 if delay == 10 else delay, result)
 
-        monkeypatch.setattr(sb.asyncio, "sleep", _fast_sleep, raising=True)
-    except Exception:
-        # If import fails in a non-WS test, ignore
-        _ = None
+    # sb.asyncio normally aliases the shared stdlib module. Replace only the
+    # endpoint's reference; Jobs backoff, MCP loops and stdin clocks stay native.
+    facade = types.SimpleNamespace(**{**vars(_asyncio), "sleep": heartbeat_sleep})
+    monkeypatch.setattr(sb, "asyncio", facade)
 
 
 @pytest.fixture(autouse=True, scope="session")

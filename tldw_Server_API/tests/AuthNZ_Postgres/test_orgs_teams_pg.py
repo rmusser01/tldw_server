@@ -1,5 +1,15 @@
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
+
 
 @pytest.mark.integration
 @pytest.mark.asyncio
@@ -52,20 +62,28 @@ async def test_orgs_teams_postgres(test_db_pool):
     )
 
     # Create user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active) VALUES ($1, $2, $3, $4, TRUE)",
-        str(uuid.uuid4()), "pgorguser", "pgorguser@example.com", "x",
-    )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgorguser")
+    user_id = await ensure_test_user(pool, "pgorguser", "pgorguser@example.com")
 
     # Use services to exercise Postgres path
-    from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization, create_team, add_team_member, list_team_members
-    org = await create_organization(name="PG Org", owner_user_id=user_id)
+    from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
+        add_team_member,
+        create_organization_with_owner_membership,
+        create_team,
+        list_team_members,
+    )
+    org = await create_organization_with_owner_membership(
+        name="PG Org",
+        owner_user_id=user_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert org['id'] > 0
     team = await create_team(org_id=org['id'], name="PG Team")
     assert team['org_id'] == org['id']
-    member = await add_team_member(team_id=team['id'], user_id=user_id)
+    member = await add_team_member(
+        team_id=team['id'],
+        user_id=user_id,
+        context=_BOOTSTRAP_MEMBERSHIP_CONTEXT,
+    )
     assert member['team_id'] == team['id'] and member['user_id'] == user_id
     members = await list_team_members(team_id=team['id'])
     assert any(m['user_id'] == user_id for m in members)

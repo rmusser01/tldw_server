@@ -65,6 +65,87 @@ describe("EvaluationRecoveryCallout", () => {
     )
   })
 
+  it.each([
+    [
+      "dataset response",
+      {
+        response: {
+          ok: false,
+          status: 403,
+          error: { detail: "Permission denied: missing evals.read" }
+        }
+      }
+    ],
+    [
+      "recipe error",
+      { error: new Error("HTTP 403: Permission denied: missing evals.read") }
+    ]
+  ] as const)(
+    "explains account access for a forbidden %s without suggesting connection repair",
+    (_label, props) => {
+      render(
+        <EvaluationRecoveryCallout
+          title="Unable to load evaluations"
+          endpoint="/api/v1/evaluations"
+          {...props}
+        />
+      )
+
+      expect(screen.getByText("Permission denied")).toBeInTheDocument()
+      expect(
+        screen.getByText(/account with access to Evaluations API/i)
+      ).toBeInTheDocument()
+      expect(
+        screen.queryByText("Translated recovery default")
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    [401, "Sign in required"],
+    [404, "Unavailable"],
+    [500, "Error"]
+  ] as const)("preserves HTTP %s from query error response metadata", (status, label) => {
+    const error = Object.assign(new Error("Request rejected"), {
+      resp: { ok: false, status, error: "Request rejected" }
+    })
+    render(
+      <EvaluationRecoveryCallout
+        title="Unable to load recipes"
+        endpoint="/api/v1/evaluations/recipes"
+        error={error}
+      />
+    )
+
+    expect(screen.getByText(label)).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      `HTTP ${status}: Request rejected`
+    )
+    expect(
+      screen.queryByText(/account with access to Evaluations API/i)
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps the explicit response authoritative over query error metadata", () => {
+    const error = Object.assign(new Error("Permission denied: missing evals.read"), {
+      resp: { ok: false, status: 403, error: "Permission denied: missing evals.read" }
+    })
+    render(
+      <EvaluationRecoveryCallout
+        title="Unable to load recipes"
+        endpoint="/api/v1/evaluations/recipes"
+        error={error}
+        response={{ ok: false, status: 500, error: "Current server failure" }}
+      />
+    )
+
+    expect(screen.getByText("Error")).toBeInTheDocument()
+    expect(screen.getByLabelText("Diagnostics")).toHaveTextContent(
+      "HTTP 500: Current server failure"
+    )
+    expect(screen.queryByText("Permission denied")).not.toBeInTheDocument()
+  })
+
   it("extracts FastAPI detail fields from backend error payloads", () => {
     expect(
       getEvaluationRecoveryDetail(undefined, {

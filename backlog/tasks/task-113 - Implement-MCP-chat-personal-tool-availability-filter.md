@@ -57,7 +57,7 @@ Plan file: Docs/superpowers/plans/2026-05-07-mcp-chat-personal-tool-filter-imple
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 1 complete: added `apps/packages/ui/src/utils/chat-tools.ts` and `apps/packages/ui/src/utils/__tests__/chat-tools.test.ts`. Verified RED with module-not-found failure, then GREEN with `bunx vitest run apps/packages/ui/src/utils/__tests__/chat-tools.test.ts` reporting 1 file / 6 tests passed.
 
 Stage 2 complete: extended MCP disabled-tool setting/store/useMcpTools contract with scoped disabled preferences, discoveredTools, availableTools, chatTools, collision names, counts, and toggle helpers. Verified RED with hook tests failing on missing discoveredTools/chatTools fields, then GREEN with `bunx vitest run src/hooks/__tests__/useMcpTools.gating.test.tsx src/utils/__tests__/chat-tools.test.ts` in `apps/packages/ui` reporting 2 files / 11 tests passed.
@@ -67,7 +67,7 @@ Stage 3 complete: pageAssistModel now uses stored chatTools by default; ChatTldw
 Stage 4 complete: added shared `McpToolSelector`, wired it into Playground MCP settings and sidepanel ControlRow, and switched Playground MCP control/raw-preview counts to chatTools. Verified RED with the selector test failing on missing component, then GREEN with `bunx vitest run src/components/Common/__tests__/McpToolSelector.test.tsx src/hooks/playground/__tests__/useMcpToolsControl.test.tsx src/components/Option/Playground/__tests__/Playground.request-budget.test.tsx src/hooks/__tests__/useMcpTools.gating.test.tsx` in `apps/packages/ui` reporting 4 files / 10 tests passed.
 
 Stage 5 complete: final focused Vitest suite passed with 7 files / 21 tests; `bun run verify:openapi` passed in `apps/packages/ui`; `bun run verify:openapi` passed in `apps/extension`; `git diff --check` passed. Bandit skipped because no Python files changed in this frontend TypeScript/docs/task slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import configparser
 import importlib
+import importlib.util
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager, nullcontext, suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -26,6 +27,8 @@ def _reload_log_buffer() -> ModuleType:
 
     import tldw_Server_API.app.core.Logging.system_log_buffer as log_buffer
 
+    # A prior writer must finish before reload replaces its shared settings state.
+    log_buffer._LOG_FILE_QUEUE.join()
     return importlib.reload(log_buffer)
 
 
@@ -100,7 +103,7 @@ def test_log_sink_redacts_secrets_before_buffer_and_file_append(
         "provider failed api_key=sk-secretvalue123 password:open-sesame "
         "Authorization: Bearer secret-token-123"
     )
-    secret_extra = {
+    secret_extra: dict[str, object] = {
         "api_key": "sk-extra-secretvalue123",
         "db_password": "extra-open-sesame",
         "access_token": "extra-token-secret",
@@ -303,6 +306,53 @@ def test_reload_reuses_log_file_queue_and_worker(
 
     assert reloaded._LOG_FILE_QUEUE is queue
     assert reloaded._LOG_FILE_WORKER is worker
+
+
+@pytest.mark.unit
+def test_reload_finishes_queued_settings_before_reset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import tldw_Server_API.app.core.config as config_mod
+
+    log_buffer = _reload_log_buffer()
+    started = threading.Event()
+    release = threading.Event()
+
+    def _delayed_config() -> configparser.ConfigParser:
+        started.set()
+        release.wait()
+        return configparser.ConfigParser()
+
+    monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "false")
+    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(tmp_path / "previous.jsonl"))
+    monkeypatch.setenv("SYSTEM_LOG_FILE_MAX_ENTRIES", "100")
+    monkeypatch.delenv("SYSTEM_LOG_FILE_COMPACT_EVERY_WRITES", raising=False)
+    monkeypatch.setattr(config_mod, "load_comprehensive_config", _delayed_config)
+    monkeypatch.setattr(log_buffer, "_LOG_FILE_SETTINGS_INITIALIZED", False)
+    queue = log_buffer._LOG_FILE_QUEUE
+    log_buffer._ensure_log_file_worker()
+    queue.put({"message": "previous queued entry"})
+    join_queue = queue.join
+
+    def _release_and_drain() -> None:
+        release.set()
+        join_queue()
+
+    try:
+        assert started.wait(timeout=1)
+        monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(tmp_path / "current.jsonl"))
+        monkeypatch.setenv("SYSTEM_LOG_FILE_COMPACT_EVERY_WRITES", "10")
+        # Finish the old settings read at the reload helper's drain boundary.
+        monkeypatch.setattr(queue, "join", _release_and_drain)
+        log_buffer = _reload_log_buffer()
+        monkeypatch.setattr(log_buffer, "_HAS_FCNTL", False)
+        with log_buffer._log_file_lock():
+            _release_and_drain()
+            with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+                with log_buffer._log_file_lock(timeout=0):
+                    pytest.fail("Queued settings changed the held lock's path")
+    finally:
+        _release_and_drain()
 
 
 @pytest.mark.unit
@@ -566,23 +616,72 @@ def test_query_system_logs_keeps_entries_with_different_events(
 @pytest.mark.unit
 def test_log_file_lock_uses_runtime_timeout_from_env(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    request: pytest.FixtureRequest,
 ) -> None:
-    log_path = tmp_path / "system_logs.jsonl"
-    lock_path = log_path.with_suffix(log_path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text("locked", encoding="utf-8")
-
-    monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "true")
-    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(log_path))
     monkeypatch.setenv("SYSTEM_LOG_FILE_LOCK_TIMEOUT", "0.2")
+    log_buffer, _lock_path = request.getfixturevalue("fallback_log_lock")
 
-    log_buffer = _reload_log_buffer()
+    with log_buffer._log_file_lock():
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+            with log_buffer._log_file_lock():
+                pass
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.5
+
+
+@pytest.fixture
+def fallback_log_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[ModuleType, Path]:
+    """Expose the real fallback lock without background file-log appends."""
+    log_path = tmp_path / "fallback_system_logs.jsonl"
+    # Lock tests use real files without unrelated queued log appends competing.
+    monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "false")
+    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(log_path))
+    monkeypatch.setenv("SYSTEM_LOG_FILE_MAX_ENTRIES", "100")
+    monkeypatch.setenv("SYSTEM_LOG_FILE_COMPACT_EVERY_WRITES", "10")
+    # A live queue writer must not initialize this probe's globals during reload.
+    source = importlib.import_module("tldw_Server_API.app.core.Logging.system_log_buffer")
+    spec = source.__spec__
+    if spec is None or spec.loader is None:
+        raise RuntimeError("System log buffer module spec is unavailable")
+    log_buffer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(log_buffer)
     monkeypatch.setattr(log_buffer, "_HAS_FCNTL", False)
+    return log_buffer, log_path.with_suffix(log_path.suffix + ".lock")
 
-    started = time.monotonic()
-    with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+
+@pytest.mark.unit
+def test_failed_log_lock_contender_preserves_held_lock(fallback_log_lock) -> None:
+    log_buffer, lock_path = fallback_log_lock
+    with log_buffer._log_file_lock():
+        held_lock = lock_path.stat()
+        with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+            with log_buffer._log_file_lock(timeout=0):
+                pytest.fail("A contender entered another holder's lock")
+
+        assert lock_path.exists()
+        assert lock_path.stat().st_ino == held_lock.st_ino
+        with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+            with log_buffer._log_file_lock(timeout=0):
+                pytest.fail("A later contender entered the still-held lock")
+
+    assert not lock_path.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("body_error", [False, True], ids=["normal-exit", "body-error"])
+def test_acquired_log_lock_releases_on_exit(fallback_log_lock, body_error: bool) -> None:
+    log_buffer, lock_path = fallback_log_lock
+    expected_exit = pytest.raises(ValueError, match="body failure") if body_error else nullcontext()
+    with expected_exit:
         with log_buffer._log_file_lock():
-            pass
-    elapsed = time.monotonic() - started
-    assert elapsed < 0.5
+            assert lock_path.exists()
+            if body_error:
+                raise ValueError("body failure")
+
+    assert not lock_path.exists()
+    with log_buffer._log_file_lock(timeout=0):
+        assert lock_path.exists()
+    assert not lock_path.exists()

@@ -1,3 +1,4 @@
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => 'verified-fixture', quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-fixture', requestScope: { config: { serverUrl: 'http://localhost:8000', authMode: 'multi-user' }, userId: 'fixture' }, isCurrent: () => true }) } }))
 import React from 'react'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -23,7 +24,10 @@ const mocks = vi.hoisted(() => ({
   showUndoNotification: vi.fn(),
   setChatMode: vi.fn(),
   setSelectedKnowledge: vi.fn(),
-  setRagMediaIds: vi.fn()
+  setRagMediaIds: vi.fn(),
+  // Row-destined ResultsList props captured on every render by the ResultsList
+  // mock below, so tests can assert referential stability (WP-11 row memo).
+  resultsListProps: [] as Array<Record<string, unknown>>
 }))
 
 vi.mock('react-i18next', () => ({
@@ -44,7 +48,15 @@ vi.mock('@tanstack/react-query', () => ({
     refetch: mocks.refetch,
     isLoading: false,
     isFetching: false
-  })
+  }),
+  // useMediaSearch drops its cached results through the client on account changes.
+  useQueryClient: () => ({ removeQueries: vi.fn() })
+}))
+
+// Media work is bound to the current account since 645e58c6a7: with no owner scope the
+// account-bound requests (storage quota, reading progress, cached filters) never run.
+vi.mock('@/hooks/useHomeMilestoneScope', () => ({
+  useHomeMilestoneScope: () => 'server:http://127.0.0.1:8000|user:1'
 }))
 
 vi.mock('@plasmohq/storage', () => ({
@@ -255,21 +267,35 @@ vi.mock('@/components/Media/MediaSectionNavigator', () => ({
 }))
 
 vi.mock('@/components/Media/ResultsList', () => ({
-  ResultsList: ({ results, selectedId, onSelect }: any) => (
-    <div data-testid="results-list">
-      {results.map((result: any) => (
-        <button
-          key={String(result.id)}
-          type="button"
-          data-testid={`result-${String(result.id)}`}
-          aria-pressed={selectedId === result.id}
-          onClick={() => onSelect(result.id)}
-        >
-          {result.title}
-        </button>
-      ))}
-    </div>
-  )
+  ResultsList: (props: any) => {
+    mocks.resultsListProps.push({
+      results: props.results,
+      searchQuery: props.searchQuery,
+      selectionMode: props.selectionMode,
+      selectedIds: props.selectedIds,
+      onSelect: props.onSelect,
+      onToggleSelected: props.onToggleSelected,
+      favorites: props.favorites,
+      onToggleFavorite: props.onToggleFavorite,
+      readingProgress: props.readingProgress
+    })
+    const { results, selectedId, onSelect } = props
+    return (
+      <div data-testid="results-list">
+        {results.map((result: any) => (
+          <button
+            key={String(result.id)}
+            type="button"
+            data-testid={`result-${String(result.id)}`}
+            aria-pressed={selectedId === result.id}
+            onClick={() => onSelect(result.id)}
+          >
+            {result.title}
+          </button>
+        ))}
+      </div>
+    )
+  }
 }))
 
 vi.mock('@/components/Media/ContentViewer', () => ({
@@ -392,14 +418,16 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
   it('loads account storage usage through the supported user storage API', async () => {
     renderMediaPage('/media')
 
+    // Since the account-change hardening (645e58c6a7) the quota is read through the
+    // account-bound request helper, which calls bgRequest directly, instead of through
+    // tldwClient.getCurrentUserStorageQuota(). The contract is unchanged: use the
+    // supported per-user endpoint, never the legacy /api/v1/storage/usage.
+    const requestedPaths = () =>
+      mocks.bgRequest.mock.calls.map((call) => String((call[0] as { path?: string })?.path || ''))
     await waitFor(() => {
-      expect(mocks.tldwClientGetCurrentUserStorageQuota).toHaveBeenCalledTimes(1)
+      expect(requestedPaths()).toContain('/api/v1/users/storage')
     })
-
-    const requestedPaths = mocks.bgRequest.mock.calls.map(
-      (call) => String((call[0] as { path?: string })?.path || '')
-    )
-    expect(requestedPaths).not.toContain('/api/v1/storage/usage')
+    expect(requestedPaths()).not.toContain('/api/v1/storage/usage')
   })
 
   it('debounces rapid query changes before triggering refetch with active filters', async () => {
@@ -436,6 +464,48 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
       vi.advanceTimersByTime(1)
     })
     expect(mocks.refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps ResultsList row props referentially stable across parent re-renders (WP-11)', async () => {
+    renderMediaPage('/media')
+
+    // Let the mounted page settle (initial refetch resolves, rows render)
+    // before snapshotting, so async hydration doesn't race the comparison.
+    await waitFor(() => {
+      expect(mocks.refetch.mock.calls.length).toBeGreaterThan(0)
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('result-1')).toBeInTheDocument()
+    })
+    await act(async () => {})
+
+    const latestProps = () =>
+      mocks.resultsListProps[mocks.resultsListProps.length - 1]
+    const before = latestProps()
+    expect(before).toBeTruthy()
+
+    // Search typing is the hot parent re-render path (every keystroke).
+    fireEvent.change(screen.getByTestId('search-bar'), {
+      target: { value: 'stable' }
+    })
+
+    await waitFor(() => {
+      expect(latestProps()?.searchQuery).toBe('stable')
+    })
+    const after = latestProps()
+
+    // The parent really re-rendered (query text changed), yet every
+    // row-destined prop kept its identity, so the memoized ResultRow
+    // children are skipped instead of re-rendered.
+    expect(before.searchQuery).not.toBe('stable')
+    expect(after.results).toBe(before.results)
+    expect(after.onSelect).toBe(before.onSelect)
+    expect(after.selectedIds).toBe(before.selectedIds)
+    expect(after.onToggleSelected).toBe(before.onToggleSelected)
+    expect(after.selectionMode).toBe(before.selectionMode)
+    expect(after.favorites).toBe(before.favorites)
+    expect(after.onToggleFavorite).toBe(before.onToggleFavorite)
+    expect(after.readingProgress).toBe(before.readingProgress)
   })
 
   it('keeps explicit pagination changes instead of snapping back to page 1', async () => {
@@ -552,7 +622,10 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
     })
   })
 
-  it('hydrates media type filters from cache before background sampling resolves', async () => {
+  it('ignores the legacy unscoped media type cache and uses the live listing', async () => {
+    // 645e58c6a7 retired this cache: it has no account provenance, so hydrating from it
+    // could show one account the previous account's media types. A fresh legacy entry
+    // must now be ignored in favour of the current account's live listing.
     window.localStorage.setItem(
       MEDIA_TYPES_CACHE_KEY,
       JSON.stringify({
@@ -594,14 +667,22 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
 
     renderMediaPage('/media')
 
-    await waitFor(() => {
-      expect(screen.getByTestId('filter-panel-media-types')).toHaveTextContent('pdf,video')
+    // Before the live listing resolves, the legacy cache must not have been hydrated.
+    const mediaTypes = await screen.findByTestId('filter-panel-media-types')
+    expect(mediaTypes).not.toHaveTextContent('pdf')
+    expect(mediaTypes).not.toHaveTextContent('video')
+
+    await act(async () => {
+      resolveSampling?.({
+        items: [{ id: 20, title: 'Clip 20', type: 'audio' }],
+        pagination: { total_pages: 1, total_items: 1 }
+      })
     })
 
-    resolveSampling?.({
-      items: [],
-      pagination: { total_pages: 1, total_items: 0 }
+    await waitFor(() => {
+      expect(screen.getByTestId('filter-panel-media-types')).toHaveTextContent('audio')
     })
+    expect(screen.getByTestId('filter-panel-media-types')).not.toHaveTextContent('pdf')
   })
 
   it('falls back to sampled media types when no fresh cache is available', async () => {
@@ -847,7 +928,11 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
     })
 
     expect(mocks.tldwClientGetReadingProgress).toHaveBeenCalledTimes(1)
-    expect(mocks.tldwClientGetReadingProgress).toHaveBeenCalledWith('1')
+    // The account lifetime's abort signal is passed so an account change cancels it.
+    expect(mocks.tldwClientGetReadingProgress).toHaveBeenCalledWith(
+      '1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    )
   })
 
   it('skips reading-progress hydration for non-document media results', async () => {

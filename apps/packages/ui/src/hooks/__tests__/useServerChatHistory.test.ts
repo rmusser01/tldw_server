@@ -141,6 +141,7 @@ describe("deriveServerChatHistoryViewState", () => {
 
     const result = deriveServerChatHistoryViewState({
       previousData: previous,
+      total: 60,
       error: Object.assign(new Error("rate_limited"), { status: 429 })
     })
 
@@ -153,6 +154,7 @@ describe("deriveServerChatHistoryViewState", () => {
   it("returns unavailable recoverable state when no data was previously loaded", () => {
     const result = deriveServerChatHistoryViewState({
       previousData: [],
+      total: 0,
       error: new Error("The operation was aborted.")
     })
 
@@ -215,6 +217,50 @@ describe("useServerChatHistory", () => {
       expect.anything()
     )
     expect(listChatsWithMetaMock).not.toHaveBeenCalled()
+
+    queryClient.clear()
+  })
+
+  it("searches message content as well as titles and keeps content matches with their snippet (CS-02)", async () => {
+    searchConversationsWithMetaMock.mockResolvedValueOnce({
+      chats: [
+        createChat(9, {
+          title: "Weekly sync",
+          matched_in: ["content"],
+          match_snippet: "…the launch codeword is zebrafinch.",
+          match_message_id: "msg-1"
+        })
+      ],
+      total: 1
+    })
+
+    const { queryClient, wrapper } = createWrapper()
+    const { result } = renderHook(
+      () =>
+        useServerChatHistory("zebrafinch", {
+          enabled: true,
+          mode: "search"
+        }),
+      { wrapper }
+    )
+
+    // The title does not contain the query: only the server knows this chat matches.
+    await waitFor(() =>
+      expect(result.current.data.map((chat) => chat.id)).toEqual(["chat-9"])
+    )
+
+    expect(searchConversationsWithMetaMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "zebrafinch",
+        search_in: "title,content"
+      }),
+      expect.anything()
+    )
+    expect(result.current.data[0].match_snippet).toBe(
+      "…the launch codeword is zebrafinch."
+    )
+    expect(result.current.data[0].matched_in).toEqual(["content"])
+    expect(result.current.total).toBe(1)
 
     queryClient.clear()
   })
@@ -442,11 +488,11 @@ describe("useServerChatHistory", () => {
     queryClient.clear()
   })
 
-  it("keeps previously rendered chat rows visible after a recoverable refresh failure", async () => {
+  it('retains the acknowledged paged total and cached rows after a recoverable refresh failure', async () => {
     listChatsWithMetaMock
       .mockResolvedValueOnce({
-        chats: [createChat(1), createChat(2)],
-        total: 2
+        chats: Array.from({ length: 25 }, (_, index) => createChat(index + 1)),
+        total: 60,
       })
       .mockRejectedValueOnce(
         Object.assign(new Error("rate_limited (GET /api/v1/chats/)"), { status: 429 })
@@ -455,19 +501,23 @@ describe("useServerChatHistory", () => {
     const { queryClient, wrapper } = createWrapper()
     const { result } = renderHook(() => useServerChatHistory(""), { wrapper })
 
-    await waitFor(() => expect(result.current.data.map((chat) => chat.id)).toEqual(["chat-1", "chat-2"]))
-    expect(result.current.sidebarRefreshState).toBe("ready")
-    expect(result.current.hasUsableData).toBe(true)
-    expect(result.current.isShowingStaleData).toBe(false)
+    await waitFor(() => expect(result.current.data).toHaveLength(25));
+    expect(result.current.total).toBe(60);
+    expect(result.current.data.slice(0, 2).map((chat) => chat.id)).toEqual(['chat-1', 'chat-2']);
+    expect(result.current.sidebarRefreshState).toBe('ready');
+    expect(result.current.hasUsableData).toBe(true);
+    expect(result.current.isShowingStaleData).toBe(false);
 
     await result.current.refetch()
 
     await waitFor(() => {
-      expect(result.current.data.map((chat) => chat.id)).toEqual(["chat-1", "chat-2"])
-      expect(result.current.sidebarRefreshState).toBe("recoverable-error")
-      expect(result.current.hasUsableData).toBe(true)
-      expect(result.current.isShowingStaleData).toBe(true)
-    })
+      expect(result.current.data).toHaveLength(25);
+      expect(result.current.total).toBe(60);
+      expect(result.current.data.slice(0, 2).map((chat) => chat.id)).toEqual(['chat-1', 'chat-2']);
+      expect(result.current.sidebarRefreshState).toBe('recoverable-error');
+      expect(result.current.hasUsableData).toBe(true);
+      expect(result.current.isShowingStaleData).toBe(true);
+    });
 
     queryClient.clear()
   })
@@ -554,6 +604,23 @@ describe("filterServerChatHistoryItems", () => {
       ["chat-2"]
     )
   })
+
+  it("keeps chats the server matched by message content even though the title does not match (CS-02)", () => {
+    const mapped = mapServerChatHistoryItems([
+      createChat(1, {
+        title: "Weekly sync",
+        matched_in: ["content"],
+        match_snippet: "…the launch codeword is zebrafinch."
+      }),
+      createChat(2, { title: "Zebrafinch notes", matched_in: ["title"] }),
+      createChat(3, { title: "Lunch plans" })
+    ])
+
+    expect(filterServerChatHistoryItems(mapped, "zebrafinch").map((item) => item.id)).toEqual([
+      "chat-1",
+      "chat-2"
+    ])
+  })
 })
 
 describe("isRecoverableServerChatHistoryError", () => {
@@ -615,4 +682,55 @@ describe("isRecoverableServerChatHistoryError", () => {
       )
     ).toBe(false)
   })
+})
+
+
+describe("exact character filter and scoped cache", () => {
+  it("forwards character ID, paged offset and verified workspace/account scope together", async () => {
+    listChatsWithMetaMock.mockResolvedValueOnce({ chats: [createChat(26, { character_id: 7 })], total: 60 })
+    const owner = { key: "account-A", requestScope: { userId: "A", config: { serverUrl: "https://chat.test", authMode: "multi-user" as const } }, isCurrent: () => true }
+    const { queryClient, wrapper } = createWrapper()
+    const { result } = renderHook(() => useServerChatHistory("", {
+      characterId: 7, filterMode: "character", page: 2, limit: 25, owner,
+      scope: { type: "workspace", workspaceId: "workspace-A" }
+    }), { wrapper })
+    await waitFor(() => expect(result.current.data.map(row => row.id)).toEqual(["chat-26"]))
+    expect(listChatsWithMetaMock).toHaveBeenCalledWith(expect.objectContaining({ character_id: 7, character_scope: "character", offset: 25, limit: 25 }),
+      expect.objectContaining({ requestScope: owner.requestScope, scope: { type: "workspace", workspaceId: "workspace-A" } }))
+    queryClient.clear()
+  })
+
+  it("isolates exact character search results in distinct query keys", async () => {
+    searchConversationsWithMetaMock.mockResolvedValueOnce({ chats: [createChat(7, { title: "Campfire", character_id: 7 })], total: 1 })
+      .mockResolvedValueOnce({ chats: [createChat(9, { title: "Campfire", character_id: 9 })], total: 1 })
+    const { queryClient, wrapper } = createWrapper()
+    const { result, rerender } = renderHook(({ characterId }) => useServerChatHistory("campfire", {
+      mode: "search", filterMode: "character", characterId, page: 1, limit: 25
+    }), { wrapper, initialProps: { characterId: 7 } })
+    await waitFor(() => expect(result.current.data.map(row => row.id)).toEqual(["chat-7"]))
+    rerender({ characterId: 9 })
+    await waitFor(() => expect(result.current.data.map(row => row.id)).toEqual(["chat-9"]))
+    expect(searchConversationsWithMetaMock).toHaveBeenLastCalledWith(expect.objectContaining({ query: "campfire", character_id: 9 }), expect.anything())
+    expect(queryClient.getQueryCache().getAll()).toHaveLength(2)
+    queryClient.clear()
+  })
+})
+
+
+it("refreshes an explicitly invalidated inactive finder on mount without refreshing unchanged caches", async () => {
+  const { queryClient, wrapper } = createWrapper()
+  listChatsWithMetaMock.mockResolvedValue({ chats: [createChat(1)], total: 1 })
+  const first = renderHook(() => useServerChatHistory("", { mode: "overview" }), { wrapper })
+  await waitFor(() => expect(first.result.current.data.map(row => row.id)).toEqual(["chat-1"]))
+  first.unmount()
+  const unchanged = renderHook(() => useServerChatHistory("", { mode: "overview" }), { wrapper })
+  await waitFor(() => expect(unchanged.result.current.data.map(row => row.id)).toEqual(["chat-1"]))
+  expect(listChatsWithMetaMock).toHaveBeenCalledTimes(1)
+  unchanged.unmount()
+  await queryClient.invalidateQueries({ queryKey: ["serverChatHistory"], refetchType: "none" })
+  listChatsWithMetaMock.mockResolvedValue({ chats: [createChat(2), createChat(1)], total: 2 })
+  const changed = renderHook(() => useServerChatHistory("", { mode: "overview" }), { wrapper })
+  await waitFor(() => expect(changed.result.current.data.map(row => row.id)).toEqual(["chat-2", "chat-1"]))
+  changed.unmount()
+  queryClient.clear()
 })

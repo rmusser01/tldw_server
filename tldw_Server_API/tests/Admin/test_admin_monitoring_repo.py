@@ -39,31 +39,11 @@ async def test_admin_monitoring_repo_rule_state_and_event_round_trip_sqlite(tmp_
         repo = AuthnzAdminMonitoringRepo(pool)
         await repo.ensure_schema()
 
-        async with pool.transaction() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (username, email, password_hash, role, is_active)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                ("admin-actor", "actor@example.com", "hashed", "admin"),
-            )
-            await conn.execute(
-                """
-                INSERT INTO users (username, email, password_hash, role, is_active)
-                VALUES (?, ?, ?, ?, 1)
-                """,
-                ("assignee-user", "assignee@example.com", "hashed", "admin"),
-            )
-            actor_cursor = await conn.execute(
-                "SELECT id FROM users WHERE username = ?",
-                ("admin-actor",),
-            )
-            actor_id = await actor_cursor.fetchone()
-            assignee_cursor = await conn.execute(
-                "SELECT id FROM users WHERE username = ?",
-                ("assignee-user",),
-            )
-            assignee_id = await assignee_cursor.fetchone()
+        # Seeded through UsersDB: profile_user_write_guard rejects raw users writes.
+        from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
+        actor_id = await ensure_test_user(pool, "admin-actor", "actor@example.com", role="admin", password_hash="hashed")
+        assignee_id = await ensure_test_user(pool, "assignee-user", "assignee@example.com", role="admin", password_hash="hashed")
 
         created_rule = await repo.create_rule(
             metric="cpu_percent",
@@ -72,7 +52,7 @@ async def test_admin_monitoring_repo_rule_state_and_event_round_trip_sqlite(tmp_
             duration_minutes=10,
             severity="warning",
             enabled=True,
-            created_by_user_id=int(actor_id[0]),
+            created_by_user_id=actor_id,
         )
         assert created_rule["metric"] == "cpu_percent"
         assert created_rule["enabled"] is True
@@ -87,18 +67,18 @@ async def test_admin_monitoring_repo_rule_state_and_event_round_trip_sqlite(tmp_
 
         upserted_state = await repo.upsert_alert_state(
             alert_identity="alert:7",
-            assigned_to_user_id=int(assignee_id[0]),
+            assigned_to_user_id=assignee_id,
             snoozed_until="2026-03-10T11:00:00Z",
             escalated_severity="critical",
             acknowledged_at="2026-03-10T10:05:00Z",
-            updated_by_user_id=int(actor_id[0]),
+            updated_by_user_id=actor_id,
         )
-        assert upserted_state["assigned_to_user_id"] == int(assignee_id[0])
+        assert upserted_state["assigned_to_user_id"] == assignee_id
 
         cleared_state = await repo.upsert_alert_state(
             alert_identity="alert:7",
             assigned_to_user_id=None,
-            updated_by_user_id=int(actor_id[0]),
+            updated_by_user_id=actor_id,
         )
         assert cleared_state["assigned_to_user_id"] is None
 
@@ -110,14 +90,14 @@ async def test_admin_monitoring_repo_rule_state_and_event_round_trip_sqlite(tmp_
         first_event = await repo.append_alert_event(
             alert_identity="alert:7",
             action="assigned",
-            actor_user_id=int(actor_id[0]),
+            actor_user_id=actor_id,
             details_json='{"assigned_to_user_id": 2}',
             created_at="2026-03-10T10:05:00Z",
         )
         second_event = await repo.append_alert_event(
             alert_identity="alert:7",
             action="snoozed",
-            actor_user_id=int(actor_id[0]),
+            actor_user_id=actor_id,
             details_json='{"snoozed_until": "2026-03-10T11:00:00Z"}',
             created_at="2026-03-10T10:06:00Z",
         )

@@ -16,6 +16,7 @@ import {
 } from "../prompt-import-error-utils"
 
 export interface UsePromptImportExportDeps {
+  expectedOwnerId?: string | null
   queryClient: QueryClient
   data: any[] | undefined
   isOnline: boolean
@@ -26,6 +27,7 @@ export interface UsePromptImportExportDeps {
 
 export function usePromptImportExport(deps: UsePromptImportExportDeps) {
   const {
+    expectedOwnerId,
     queryClient,
     data,
     isOnline,
@@ -37,12 +39,35 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [importMode, setImportMode] = useState<"merge" | "replace">("merge")
   const [exportFormat, setExportFormat] = useState<"json" | "csv" | "markdown">("json")
+  const lifetime = useRef({ active: true, ownerId: expectedOwnerId, generation: 0 })
+  if (lifetime.current.ownerId !== expectedOwnerId) {
+    lifetime.current.ownerId = expectedOwnerId
+    lifetime.current.generation++
+  }
+  React.useEffect(() => {
+    const currentLifetime = lifetime.current
+    currentLifetime.active = true
+    const retire = () => { currentLifetime.generation++ }
+    const configChanged = (event: Event) => {
+      if ((event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged !== false) retire()
+    }
+    window.addEventListener("tldw:auth-principal-changed", retire)
+    window.addEventListener("tldw:config-updated", configChanged)
+    return () => {
+      currentLifetime.active = false
+      window.removeEventListener("tldw:auth-principal-changed", retire)
+      window.removeEventListener("tldw:config-updated", configChanged)
+    }
+  }, [])
 
   const triggerExport = React.useCallback(async () => {
+    const generation = lifetime.current.generation
+    const isCurrent = () => lifetime.current.active && lifetime.current.ownerId === expectedOwnerId && lifetime.current.generation === generation
     try {
       if (guardPrivateMode()) return
       if (exportFormat === "json") {
-        const items = await exportPrompts()
+        const items = await exportPrompts(expectedOwnerId)
+        if (!isCurrent()) return
         const blob = new Blob([JSON.stringify(items, null, 2)], {
           type: "application/json"
         })
@@ -68,7 +93,8 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
         return
       }
 
-      const response = await exportPromptsServer(exportFormat)
+      const response = await exportPromptsServer(exportFormat, expectedOwnerId)
+      if (!isCurrent()) return
       if (!response?.file_content_b64) {
         notification.info({
           message: t("managePrompts.exportEmpty", {
@@ -98,17 +124,21 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
       a.click()
       URL.revokeObjectURL(url)
     } catch (e) {
+      if (!isCurrent()) return
       notification.error({
         message: t("managePrompts.notification.error"),
         description: t("managePrompts.notification.someError")
       })
     }
-  }, [exportFormat, guardPrivateMode, isOnline, t])
+  }, [expectedOwnerId, exportFormat, guardPrivateMode, isOnline, t])
 
   const handleImportFile = React.useCallback(async (file: File) => {
+    const generation = lifetime.current.generation
+    const isCurrent = () => lifetime.current.active && lifetime.current.ownerId === expectedOwnerId && lifetime.current.generation === generation
     try {
       if (guardPrivateMode()) return
       const text = await file.text()
+      if (!isCurrent()) return
       const prompts = parseImportPromptsPayload(text)
 
       if (importMode === "replace") {
@@ -126,11 +156,12 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
           okText: t("managePrompts.importMode.replaceAndBackup", { defaultValue: "Backup & Replace" }),
           cancelText: t("common:cancel", { defaultValue: "Cancel" })
         })
-        if (!ok) return
+        if (!ok || !isCurrent()) return
 
         if (currentCount > 0) {
           try {
-            const backupItems = await exportPrompts()
+            const backupItems = await exportPrompts(expectedOwnerId)
+            if (!isCurrent()) return
             const blob = new Blob([JSON.stringify(backupItems, null, 2)], {
               type: "application/json"
             })
@@ -143,6 +174,7 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
             URL.revokeObjectURL(url)
             await new Promise(resolve => setTimeout(resolve, 100))
           } catch (backupError) {
+            if (!isCurrent()) return
             notification.warning({
               message: t("managePrompts.notification.backupFailed", { defaultValue: "Backup failed" }),
               description: t("managePrompts.notification.backupFailedDesc", {
@@ -153,10 +185,13 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
         }
       }
 
+      if (!isCurrent()) return
       const importResult = await importPromptsV2(prompts, {
+        expectedOwnerId,
         replaceExisting: importMode === "replace",
         mergeData: importMode === "merge"
       })
+      if (!isCurrent()) return
       const importCounts = normalizePromptImportCounts(importResult, prompts.length)
       const importNotificationCopy = getPromptImportNotificationCopy(
         importMode,
@@ -172,6 +207,7 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
         })
       })
     } catch (e) {
+      if (!isCurrent()) return
       const importErrorNotice = getPromptImportErrorNotice(e)
       if (importErrorNotice) {
         notification.error({
@@ -190,7 +226,7 @@ export function usePromptImportExport(deps: UsePromptImportExportDeps) {
         description: t("managePrompts.notification.someError")
       })
     }
-  }, [confirmDanger, data, guardPrivateMode, importMode, queryClient, t])
+  }, [confirmDanger, data, expectedOwnerId, guardPrivateMode, importMode, queryClient, t])
 
   return {
     fileInputRef,

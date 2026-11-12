@@ -28,14 +28,14 @@ Run the admin-ui typecheck gate, install local dependencies if needed, and reduc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification recorded for admin-ui tsc baseline:
 - Initial bun run typecheck from admin-ui failed before TypeScript diagnostics because local dependencies were not installed: /bin/bash: tsc: command not found.
 - Ran bun install from admin-ui; it installed local dependencies and did not modify tracked package files or bun.lock.
 - GREEN: bun run typecheck from admin-ui exits 0.
 - No admin-ui TypeScript diagnostics were present after dependency setup.
 - Bandit not applicable: no Python files were touched and no admin-ui source files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

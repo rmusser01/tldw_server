@@ -5,7 +5,8 @@ import { ExternalLink } from "lucide-react"
 
 import { Alert } from "@/components/ui"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { buildACPAuthHeaders } from "@/services/acp/connection"
+import { buildACPClientConfig } from "@/services/acp/connection"
+import { fetchACPRequest } from "@/services/acp/client"
 import {
   resolveBrowserRequestTransport,
   type BrowserRequestTransport
@@ -150,16 +151,6 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
     [connectionConfig]
   )
 
-  const getHeaders = React.useCallback(
-    (transport: BrowserRequestTransport | null) => {
-      if (transport?.mode === "hosted") {
-        return { "Content-Type": "application/json" }
-      }
-      return buildACPAuthHeaders(connectionConfig, { includeContentType: true })
-    },
-    [connectionConfig]
-  )
-
   const postJson = React.useCallback(
     async <T,>(path: string, payload: unknown): Promise<T> => {
       const transport = buildRequestTransport(path)
@@ -177,17 +168,17 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
         )
       }
 
-      const response = await fetch(transport.url, {
-        method: "POST",
-        headers: getHeaders(transport),
-        body: JSON.stringify(payload)
-      })
+      const response = await fetchACPRequest(
+        buildACPClientConfig(connectionConfig),
+        path,
+        { method: "POST", body: JSON.stringify(payload) }
+      )
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response))
       }
       return (await response.json()) as T
     },
-    [buildRequestTransport, connectionConfigLoading, getHeaders, t]
+    [buildRequestTransport, connectionConfig, connectionConfigLoading, t]
   )
 
   const deleteProject = React.useCallback(
@@ -207,15 +198,16 @@ export const WorkspaceAgentTaskHandoffModal: React.FC<
         )
       }
 
-      const response = await fetch(transport.url, {
-        method: "DELETE",
-        headers: getHeaders(transport)
-      })
+      const response = await fetchACPRequest(
+        buildACPClientConfig(connectionConfig),
+        `${PROJECTS_PATH}/${projectId}`,
+        { method: "DELETE" }
+      )
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response))
       }
     },
-    [buildRequestTransport, connectionConfigLoading, getHeaders, t]
+    [buildRequestTransport, connectionConfig, connectionConfigLoading, t]
   )
 
   const handleSubmit = async () => {

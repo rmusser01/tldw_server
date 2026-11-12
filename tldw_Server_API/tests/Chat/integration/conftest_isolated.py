@@ -20,6 +20,8 @@ def _get_app():
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core import config_llm_providers
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 # ============================================================================
@@ -142,7 +144,7 @@ def mock_llm_response():
 def isolated_chat_endpoint_mocks(mock_api_keys, mock_llm_response):
     """Create isolated mocks for chat endpoint without global modifications."""
     with (
-        patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", mock_api_keys),
+        patch.object(config_llm_providers, "get_api_keys", api_keys_source(mock_api_keys)),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_perform,
         patch("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call") as mock_chat_call,
     ):
@@ -243,8 +245,8 @@ def integration_test_client(isolated_db, mock_server_url):
             "CUSTOM_OPENAI_API_IP": f"{mock_server_url}/v1/chat/completions",
         },
     ):
-        # Temporarily patch API_KEYS for this test
-        with patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-mock-key-12345"}):
+        # Temporarily give openai a key for this test
+        with patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "sk-mock-key-12345"})):
             client = TestClient(test_app)
 
             # Setup CSRF

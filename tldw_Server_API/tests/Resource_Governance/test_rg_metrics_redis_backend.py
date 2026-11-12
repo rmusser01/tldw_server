@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 
 pytestmark = pytest.mark.rate_limit
@@ -12,10 +14,10 @@ async def test_redis_backend_metrics_allow_deny_refund_paths():
         def get_policy(self, pid):
             return {"requests": {"rpm": 1}, "tokens": {"per_min": 2}, "scopes": ["global", "user"]}
 
-    # Use in-memory Redis stub via default factory fallback
-    rg = RedisResourceGovernor(policy_loader=_Loader(), ns="rg_m_redis")
-    # Ensure clean windows for deterministic metrics when FakeTime≈0.0 contexts
-    await rg.test_force_clear_windows(policy_id="p")
+    # The factory uses a reachable local Redis (else the in-memory stub). Real time
+    # makes test_force_clear_windows a no-op, so a fixed namespace would inherit the
+    # previous run's window members and deny the first reserve: use a fresh one.
+    rg = RedisResourceGovernor(policy_loader=_Loader(), ns=f"rg_m_redis_{uuid.uuid4().hex[:8]}")
     reg = get_metrics_registry()
 
     # Baselines filtered by backend=redis

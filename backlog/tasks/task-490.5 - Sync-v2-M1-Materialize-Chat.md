@@ -42,7 +42,7 @@ Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md#tas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added `ChatConversationMaterializer` and `ChatMessageMaterializer` using the Task 4 Notes apply-status/object-state pattern.
 - Added ChaChaNotes-owned helpers for `upsert_conversation_from_sync`, `tombstone_conversation_from_sync`, `append_message_from_sync`, `tombstone_message_from_sync`, and stable-ID/include-deleted message fetches.
 - Stored Sync v2 message identity metadata in `message_metadata.extra.sync_v2` so divergent stable message IDs can preserve both projection rows while keeping the stable ID and payload hash discoverable.
@@ -76,7 +76,7 @@ Docs/superpowers/plans/2026-05-23-chatbook-sync-v2-m1-implementation-plan.md#tas
   - Sync v2 smoke passed, `49 passed, 5 warnings`.
   - Bandit on touched production scope completed with 0 results and 0 errors.
   - `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

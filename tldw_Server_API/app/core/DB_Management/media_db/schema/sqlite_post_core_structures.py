@@ -58,8 +58,9 @@ def ensure_sqlite_visibility_columns(db: Any, conn: sqlite3.Connection) -> None:
             "version = version + 1, last_modified = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
             "WHERE owner_user_id IS NULL "
             "AND CAST(SUBSTR(client_id, 21) AS INTEGER) > 0 "
-            "AND client_id = 'media_ingest_worker:' || "
-            "CAST(CAST(SUBSTR(client_id, 21) AS INTEGER) AS TEXT);"
+            "AND client_id IN ('media_ingest_worker:' || "
+            "CAST(CAST(SUBSTR(client_id, 21) AS INTEGER) AS TEXT), "
+            "'webscraping_service_' || CAST(CAST(SUBSTR(client_id, 21) AS INTEGER) AS TEXT));"
         )
 
     if not statements:
@@ -113,6 +114,12 @@ def ensure_sqlite_data_tables(db: Any, conn: sqlite3.Connection) -> None:
 
     try:
         conn.executescript(db._DATA_TABLES_SQL)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(data_tables)")}
+        if "generation_job_json" not in columns:
+            conn.execute("ALTER TABLE data_tables ADD COLUMN generation_job_json TEXT")
+        # Replacement live indexes must exist before removing tombstone uniqueness.
+        conn.execute("DROP INDEX IF EXISTS ux_data_table_columns_table_position_active")
+        conn.execute("DROP INDEX IF EXISTS ux_data_table_rows_table_index_active")
     except sqlite3.Error as exc:
         logger.warning(f"Could not ensure data_tables schema on SQLite: {exc}")
 

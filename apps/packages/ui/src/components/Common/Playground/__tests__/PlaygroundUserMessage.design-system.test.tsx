@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundUserMessageBubble } from "../PlaygroundUserMessage"
 
@@ -15,9 +15,10 @@ vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (_key: string, defaultValue: unknown) => [defaultValue, vi.fn()]
 }))
 
-vi.mock("antd", () => ({
-  Image: ({ src, alt }: { src?: string; alt?: string }) => (
-    <span role="img" aria-label={alt ?? ""} data-src={src ?? ""} />
+vi.mock("antd", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("antd")>()),
+  Image: ({ src, alt, onError }: { src?: string; alt?: string; onError?: () => void }) => (
+    <img alt={alt ?? ""} src={src ?? ""} onError={onError} />
   ),
   Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>
 }))
@@ -50,9 +51,11 @@ vi.mock("@/utils/chat-style", () => ({
   buildChatTextClass: () => ""
 }))
 
+const uiMode = vi.hoisted(() => ({ value: "standard" }))
+
 vi.mock("@/store/ui-mode", () => ({
   useUiModeStore: (selector: (state: { mode: string }) => unknown) =>
-    selector({ mode: "standard" })
+    selector({ mode: uiMode.value })
 }))
 
 vi.mock("@/store/option", () => ({
@@ -141,5 +144,82 @@ describe("Playground user message design-system badges", () => {
 
     expect(screen.getByText("Processing documents")).toBeInTheDocument()
     expect(screen.getByText("scan.pdf")).toBeInTheDocument()
+  })
+})
+
+// CM-10 (#3101): user turns must read apart from replies, not as a second
+// card of the same colour and width.
+describe("Playground user message turn styling", () => {
+  afterEach(() => {
+    uiMode.value = "standard"
+  })
+
+  const bubble = () =>
+    screen.getByText("Review this research plan.").closest(".message-bubble") as HTMLElement
+
+  it("tints the user bubble with the primary colour", () => {
+    renderUserMessage({ messageId: "message-4" })
+
+    expect(bubble().style.backgroundImage).toContain("--color-primary")
+  })
+
+  it("caps the user bubble at three quarters of the row in casual mode", () => {
+    uiMode.value = "casual"
+    renderUserMessage({ messageId: "message-5" })
+
+    expect(bubble().className).toMatch(/(^|\s)sm:max-w-\[75%\](\s|$)/)
+  })
+
+  it("keeps the wider bubble in Pro mode", () => {
+    uiMode.value = "pro"
+    renderUserMessage({ messageId: "message-6" })
+
+    expect(bubble().className).not.toContain("max-w-[75%]")
+  })
+})
+
+it("retains the question and names an unavailable attachment after image failure", () => {
+  renderUserMessage({ images: ["http://chat.test/missing.png"], messageId: "missing-attachment" })
+  fireEvent.error(screen.getByRole("img", { name: "Uploaded Image" }))
+  expect(screen.getByRole("status")).toHaveTextContent("Image unavailable. Attach this image again before continuing.")
+  expect(screen.getByText("Review this research plan.")).toBeVisible()
+})
+
+it("keeps an active user edit mounted when the message view changes", async () => {
+  const props = {
+    message: "Review this research plan.", isBot: false, name: "You",
+    currentMessageIndex: 0, totalMessages: 1, onRegenerate: vi.fn(),
+    onEditFormSubmit: vi.fn(), isProcessing: false, messageId: "retained-edit"
+  }
+  const { rerender } = render(<PlaygroundUserMessageBubble {...props} messageView="transcript" />)
+  fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+  fireEvent.click(await screen.findByRole("button", { name: "edit" }))
+  const form = screen.getByTestId("edit-message-form")
+  rerender(<PlaygroundUserMessageBubble {...props} messageView="conversation" />)
+  expect(screen.getByTestId("edit-message-form")).toBe(form)
+  rerender(<PlaygroundUserMessageBubble {...props} messageView="research" />)
+  expect(screen.getByTestId("edit-message-form")).toBe(form)
+})
+
+describe.each([
+  { messageView: undefined, width: "max-w-[calc(100%-1.75rem)]", shape: "rounded-3xl" },
+  { messageView: "conversation" as const, width: "max-w-[calc(100%-1.75rem)]", shape: "rounded-3xl" },
+  { messageView: "transcript" as const, width: "w-full", shape: "rounded-xl" },
+  { messageView: "research" as const, width: "w-full", shape: "rounded-xl" }
+])("user message width in $messageView", ({ messageView, width, shape }) => {
+  it.each([false, true])("preserves the content width and wrapping with editMode=%s", (editMode) => {
+    const { container } = renderUserMessage({ messageView, editMode })
+    expect(container.querySelector(".message-bubble")).toHaveClass(
+      "prose", "max-w-none", "dark:prose-invert", "break-words", width, shape
+    )
+  })
+
+  // The Casual 75% cap is for bubbles; aligned views and edit forms span the row.
+  it("caps only a read-only bubble at 75%", () => {
+    const { container: reading } = renderUserMessage({ messageView, editMode: false })
+    const capped = shape === "rounded-3xl"
+    expect(reading.querySelector(".message-bubble")?.className.includes("sm:max-w-[75%]")).toBe(capped)
+    const { container: editing } = renderUserMessage({ messageView, editMode: true })
+    expect(editing.querySelector(".message-bubble")?.className).not.toContain("sm:max-w-[75%]")
   })
 })

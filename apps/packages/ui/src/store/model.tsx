@@ -1,4 +1,5 @@
 import { createWithEqualityFn } from "zustand/traditional"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import {
   mergeGlobalAndScopedSettings,
   normalizeModelSettingsScope,
@@ -82,7 +83,7 @@ type ChatModelSettingsStore = ChatModelSettings & {
     key: K,
     value: ChatModelSettings[K]
   ) => void
-  getEffectiveSettings: (scopeKey?: string | null) => ChatModelSettings
+  getEffectiveSettings: (scopeKey?: string | null, updates?: Partial<ChatModelSettings>) => ChatModelSettings
 
   // Generic typed update method (replaces setX)
   updateSetting: <K extends keyof ChatModelSettings>(
@@ -90,7 +91,7 @@ type ChatModelSettingsStore = ChatModelSettings & {
     value: ChatModelSettings[K],
   ) => void;
   updateSettings: (updates: Partial<ChatModelSettings>) => void;
-  reset: () => void;
+  reset: (apiProvider?: string) => void;
 
   // Individual setters (for backwards compatibility)
   setF16KV: (value: boolean) => void;
@@ -340,12 +341,16 @@ export const useStoreChatModelSettings = createWithEqualityFn<ChatModelSettingsS
             : {})
         }
       }),
-    getEffectiveSettings: (scopeKey) => {
+    getEffectiveSettings: (scopeKey, updates) => {
       const state = get()
+      const activeSettingsScope = trimScopeKey(scopeKey) || state.activeSettingsScope
+      const projected = updates
+        ? { ...state, ...applyActiveSettingsUpdate({ ...state, activeSettingsScope }, updates) }
+        : state
       return getEffectiveSettingsState(
-        state.globalSettings,
-        state.scopedSettingsByModelKey,
-        trimScopeKey(scopeKey) || state.activeSettingsScope
+        projected.globalSettings,
+        projected.scopedSettingsByModelKey,
+        activeSettingsScope
       )
     },
 
@@ -354,11 +359,12 @@ export const useStoreChatModelSettings = createWithEqualityFn<ChatModelSettingsS
       set((state) => applyActiveSettingsUpdate(state, { [key]: value })),
     updateSettings: (updates) =>
       set((state) => applyActiveSettingsUpdate(state, updates)),
-    reset: () =>
+    reset: (apiProvider) =>
       set({
         ...INITIAL_STATE,
+        apiProvider,
         activeSettingsScope: undefined,
-        globalSettings: EMPTY_GLOBAL_SETTINGS,
+        globalSettings: apiProvider === undefined ? EMPTY_GLOBAL_SETTINGS : { apiProvider },
         scopedSettingsByModelKey: {}
       }),
 
@@ -488,6 +494,27 @@ export const useStoreChatModelSettings = createWithEqualityFn<ChatModelSettingsS
       set((state) => applyActiveSettingsUpdate(state, { jsonMode: value }))
   })
 )
+
+const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
+  if (!invalidated) return
+  // Inactive models must not resurrect another account's instructions later.
+  const withoutPrompt = (settings: ChatModelSettings): ChatModelSettings => {
+    const next = { ...settings }
+    delete next.systemPrompt
+    delete next.systemPromptTemplateId
+    return next
+  }
+  useStoreChatModelSettings.setState((state) => ({
+    systemPrompt: undefined,
+    systemPromptTemplateId: undefined,
+    globalSettings: withoutPrompt(state.globalSettings),
+    scopedSettingsByModelKey: Object.fromEntries(
+      Object.entries(state.scopedSettingsByModelKey).map(([key, settings]) => [key, withoutPrompt(settings)])
+    )
+  }))
+})
+const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+hot?.dispose(stopWatchingAccount)
 
 // Expose for Playwright tests and debugging (development only)
 if (typeof window !== "undefined" && import.meta?.env?.DEV) {

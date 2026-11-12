@@ -128,8 +128,8 @@ async def test_api_health_sanitizes_chacha_notes_probe_failure(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_api_health_exposes_chacha_recovery_details_without_path_leak(monkeypatch, tmp_path):
-    from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
     from tldw_Server_API.app.core.AuthNZ import database as auth_database
+    from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
     from tldw_Server_API.app.core.Metrics import metrics_manager
 
     class _HealthyPool:
@@ -142,9 +142,10 @@ async def test_api_health_exposes_chacha_recovery_details_without_path_leak(monk
     monkeypatch.setattr(auth_database, "get_db_pool", _healthy_pool)
     monkeypatch.setattr(metrics_manager, "get_metrics_registry", lambda: object())
 
-    with chacha_deps._CHACHA_HEALTH_LOCK:
-        previous_health = dict(chacha_deps._CHACHA_HEALTH)
-        chacha_deps._CHACHA_HEALTH.update(
+    runtime = get_chacha_runtime()
+    with runtime._health_lock:
+        previous_health = dict(runtime._health)
+        runtime._health.update(
             {
                 "init_attempts": 1,
                 "init_failures": 1,
@@ -186,9 +187,9 @@ async def test_api_health_exposes_chacha_recovery_details_without_path_leak(monk
         assert str(tmp_path) not in str(body)
         assert "/private/" not in str(body)
     finally:
-        with chacha_deps._CHACHA_HEALTH_LOCK:
-            chacha_deps._CHACHA_HEALTH.clear()
-            chacha_deps._CHACHA_HEALTH.update(previous_health)
+        with runtime._health_lock:
+            runtime._health.clear()
+            runtime._health.update(previous_health)
 
 
 @pytest.mark.asyncio

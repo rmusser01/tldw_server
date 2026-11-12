@@ -13,7 +13,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     QueryResult,
 )
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
-from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, _postgres_predicate_matches
 
 pytestmark = pytest.mark.unit
 
@@ -47,11 +47,11 @@ def test_fresh_content_items_bootstrap_does_not_readd_declared_columns(
     finally:
         backend.get_pool().close_all()
 
-    assert not [  # nosec B101
-        sql
-        for sql in executed_sql
-        if "ALTER TABLE CONTENT_ITEMS ADD COLUMN" in " ".join(sql.upper().split())
-    ]
+    assert (
+        not [  # nosec B101
+            sql for sql in executed_sql if "ALTER TABLE CONTENT_ITEMS ADD COLUMN" in " ".join(sql.upper().split())
+        ]
+    )
 
 
 def test_schema_memo_verifier_accepts_sqlite_mapping_rows(
@@ -85,6 +85,10 @@ def test_schema_memo_verifier_accepts_sqlite_mapping_rows(
         "_seed_watchlists_output_templates",
         lambda self: None,
     )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.Collections_DB.ensure_tag_identity",
+        lambda *_args: None,
+    )
     schema_once.reset("collections")
     try:
         CollectionsDatabase.from_backend(user_id="1", backend=backend)
@@ -94,3 +98,47 @@ def test_schema_memo_verifier_accepts_sqlite_mapping_rows(
         backend.get_pool().close_all()
 
     assert ensure_calls == [1]
+
+
+def test_cached_postgres_adapter_does_not_write_sqlite_fts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached PostgreSQL bootstrap must still disable SQLite-only FTS writes."""
+    executed_sql: list[str] = []
+    backend = types.SimpleNamespace(
+        backend_type=BackendType.POSTGRESQL,
+        execute=lambda query, *_args: executed_sql.append(query),
+    )
+    key = "cached-postgres-fts-probe"
+    monkeypatch.setattr(CollectionsDatabase, "_postgres_can_migrate", staticmethod(lambda _backend: True))
+    monkeypatch.setattr(CollectionsDatabase, "_backend_target_key", lambda self, _backend: key)
+    CollectionsDatabase._bootstrapped_backend_targets.add(key)
+    try:
+        db = CollectionsDatabase.from_backend(user_id="1", backend=backend)
+        db._update_content_fts_entry(
+            1,
+            title="Synthetic",
+            summary="Synthetic",
+            notes=None,
+            tags=None,
+            metadata_json=None,
+        )
+    finally:
+        CollectionsDatabase._bootstrapped_backend_targets.discard(key)
+
+    assert executed_sql == []
+
+
+@pytest.mark.parametrize(
+    "actual,expected,matched",
+    [
+        (None, None, True),
+        (None, "deleted = FALSE", False),
+        ("(((deleted = false)))", "deleted = FALSE", True),
+        ("(idempotency_key IS NOT NULL AND deleted) = FALSE", "idempotency_key IS NOT NULL AND deleted = FALSE", False),
+        ("deleted = (", "deleted = FALSE", False),
+    ],
+)
+def test_postgres_unique_predicate_preserves_operator_grouping(actual, expected, matched):
+    """Catalog expressions must match structurally, including malformed-expression refusal."""
+    assert _postgres_predicate_matches(actual, expected) is matched  # nosec B101 -- exact schema predicate admission.

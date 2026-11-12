@@ -56,9 +56,9 @@ Execute Docs/superpowers/plans/2026-07-03-standalone-mcp-docs-stage4b-source-dis
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 4B source discovery from the approved plan using test-first slices. Added safe discovery settings/status, DiscoverSourceRequest models, lazy optional page-link extraction with stdlib fallback, bounded sitemap/page-link discovery, dry-run and apply modes, url_sitemap registration and sync refresh, provider/host shim exposure, same-origin and prefix filtering, query redaction, metadata propagation, and import-boundary coverage. Bandit initially flagged stdlib ElementTree sitemap parsing; the parser now uses defusedxml.ElementTree, which is already a project dependency.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

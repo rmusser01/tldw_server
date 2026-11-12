@@ -49,11 +49,11 @@ Review-fix plan:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PR #1433 review fixes in .worktrees/persona-buddy-visual-diagnostics: exported and reused visual diagnostics helpers, made SpriteFrameRenderer emit null on healthy renders, cleared BuddyShellHost current-key render errors on success, added sprite-region validation for unsupported_region, and applied severity tone classes to Buddy/Persona Visuals diagnostic boxes.
 
 Verification: apps/packages/ui targeted Vitest passed for SpriteFrameRenderer.test.tsx and VisualPackEditor.test.tsx (19 tests); broader focused Vitest passed for personaVisualDiagnostics.test.ts, BuddyShellHost.test.tsx, SpriteFrameRenderer.test.tsx, and VisualPackEditor.test.tsx (45 tests). git diff --check passed. Full UI tsc still fails on existing unrelated baseline errors; filtered tsc output for PersonaBuddy/VisualPackEditor/SpriteFrameRenderer/BuddyShell paths was empty. Bandit not applicable because this review-fix touched frontend TypeScript/TSX only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

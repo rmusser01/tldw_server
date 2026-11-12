@@ -22,11 +22,7 @@ RUN apt-get update && apt-get install -y \
 RUN add-apt-repository ppa:deadsnakes/ppa && apt-get update
 
 # Install specific Python version
-RUN if [ "$PYTHON_VERSION" = "3.10" ]; then \
-        apt-get install -y python3.10 python3.10-dev python3.10-venv python3.10-distutils; \
-    elif [ "$PYTHON_VERSION" = "3.11" ]; then \
-        apt-get install -y python3.11 python3.11-dev python3.11-venv python3.11-distutils; \
-    elif [ "$PYTHON_VERSION" = "3.12" ]; then \
+RUN if [ "$PYTHON_VERSION" = "3.12" ]; then \
         apt-get install -y python3.12 python3.12-dev python3.12-venv python3.12-distutils; \
     elif [ "$PYTHON_VERSION" = "3.13" ]; then \
         apt-get install -y python3.13 python3.13-dev python3.13-venv; \

@@ -39,13 +39,13 @@ Convert the minimal-test jobs audit and config optional router block from eager 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified RED before production edits: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k 'minimal_optional_router_specs and ops' -q failed on the three new ops tests because the current implementation imported ops routers eagerly and did not expose named lazy specs.
 
 Implemented the minimal ops router conversion with ImportedRouterSpec entries using default precise optional-missing exceptions. Verification after implementation: focused ops tests 3 passed; full router group contract 101 passed; main router contract 6 passed; OpenAPI contract 69 passed; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported zero findings; git diff --check passed.
 
 Opened PR https://github.com/rmusser01/tldw_server/pull/1332 against dev for this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

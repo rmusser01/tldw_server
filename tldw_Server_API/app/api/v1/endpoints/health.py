@@ -65,22 +65,7 @@ def _check_workflows_db() -> dict:
         backend = get_content_backend_instance()
         db: WorkflowsDatabase = create_workflows_database(backend=backend)
         status["backend"] = backend.backend_type.name if backend else "sqlite"
-        # Connectivity probe
-        if db._using_backend():
-            with db.backend.transaction() as conn:  # type: ignore[union-attr]
-                # Lightweight probe
-                db._execute_backend("SELECT 1", None, connection=conn)
-                # Migration version check (backend only)
-                try:
-                    status["schema_version"] = int(db._get_backend_schema_version(conn))  # type: ignore[attr-defined]
-                    status["expected_version"] = int(db._CURRENT_SCHEMA_VERSION)  # type: ignore[attr-defined]
-                except _HEALTH_NONCRITICAL_EXCEPTIONS:
-                    pass
-        else:
-            # SQLite: best-effort probe
-            _ = db._conn.cursor().execute("SELECT 1").fetchone()  # type: ignore[attr-defined]
-            status["schema_version"] = None
-            status["expected_version"] = None
+        status.update(db.health_probe())
         status["ok"] = True
     except _HEALTH_NONCRITICAL_EXCEPTIONS:
         logger.error("/readyz DB check failed")

@@ -2,6 +2,7 @@ import React, { useState, useRef, useCallback, useEffect } from "react"
 import { Button, Input } from "antd"
 import { Send, Square } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 const { TextArea } = Input
 
@@ -23,6 +24,9 @@ export const QuickChatInput: React.FC<Props> = ({
   const { t } = useTranslation("option")
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => watchChatAccountChanges((invalidated) => {
+    if (invalidated) setValue("")
+  }), [])
 
   const handleSend = useCallback(() => {
     if (value.trim() && !isStreaming && !disabled) {

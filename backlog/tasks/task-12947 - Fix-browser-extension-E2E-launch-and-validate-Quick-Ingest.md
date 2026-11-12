@@ -42,7 +42,7 @@ Completed in five stages: characterize launch behavior; implement terminal cance
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-11 investigation evidence:
 - Packaged-extension launch health passes headed/minimal in 4.7s, headless/minimal in 3.1s, and headless/full in 2.7s after installing apps workspace dependencies and building the production extension. No launch-helper or manifest-key change is justified.
 - The exact Quick Ingest extension regression launches Chromium in about 2s, reaches Cancel All, and then fails waiting for cancelled/error results while the UI reports Succeeded (1).
@@ -61,35 +61,7 @@ Completed in five stages: characterize launch behavior; implement terminal cance
 2026-07-11 Stage 1 TDD evidence (host): focused Vitest RED had 2/2 failures. Immediate completion produced complete:1 instead of cancelled:1; immediate progress preserved outcome processed under cancelled status. After adding the modal-owned synchronous idempotent fence and rejecting all fenced runtime messages, the same 2 tests passed (25 unrelated tests skipped by the name filter). No sleeps were used.
 
 2026-07-11 Stage 2 TDD evidence (host): four deferred tests failed before the async guards: late extension ack was not cancelled, late direct ack invoked submitQuickIngestBatch, resumed setup started a session, and late start rejection changed cancelled status to error. After adding cancellation checks after awaited setup/start boundaries and in catch, the focused selection passed 5/5. Two persisted-reattach characterization tests passed before any poll code change, proving the existing effect cleanup already blocks late processing/completed snapshots; no redundant poll guard was added. Full session file: 33/33 passed.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR #2711 fixes the browser-extension Quick Ingest cancellation race and the reported React maximum-update-depth loop. Cancellation is now fenced synchronously across setup, late extension/direct acknowledgement, direct submission, runtime progress/completion, and persisted reattachment. Wizard persistence suppresses only semantically equivalent React replays while retaining real timestamps and meaningful state. The packaged MV3 regression uses the production direct HTTP path and fails on browser or unexpected-request errors. Shared fonts are included through WXT's public directory with a static contract test.
-
-Installed-extension UAT completed PDF, URL, duplicate URL, the requested YouTube Short, and duplicate YouTube against isolated databases with zero browser errors and exactly three unique media records. Post-rebase production build, 56 unit tests, two font tests, compile, strict cancellation E2E, three launch-health modes, and diff checks passed. ESLint has no applicable workspace configuration; Bandit is not applicable to TypeScript/assets. Existing unrelated build warnings remain.
-
-The PR is not merge-ready until the human requester adds the repository-required Change summary in their own words.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-11 implementation and validation evidence:
 - Launch investigation: clean packaged MV3 launch health passes headed/minimal, headless/minimal, and headless/full; no launcher or manifest change is justified.
 - Cancellation TDD: synchronous run-level intent and session fencing make Cancel All terminal. Deferred extension/direct acknowledgements, setup continuations, errors, progress, completion, and persisted reattachment cannot revive or continue a cancelled run. Full session suite passed 33/33.
@@ -106,3 +78,23 @@ Published PR #2711 against dev: https://github.com/rmusser01/tldw_server/pull/27
 2026-07-11 Qodo follow-up: three additional inline comments appeared after the initial fetch. Valid findings: log best-effort cancellation failures with session context; limit full semantic signature computation to terminal lifecycle patches where volatile completion timestamps exist; add an explicit timeout to the E2E direct-request-start wait. Task reopened for implementation and host verification.
 2026-07-11 Qodo findings resolved: centralized best-effort cancellation now logs warning context without changing terminal UI behavior; semantic signature generation is restricted to terminal patches and the replay cache is cleared for nonterminal updates; the E2E request-start wait uses Playwright waitForRequest with a 10-second timeout. Host verification passed: 56/56 Quick Ingest tests, 3/3 font tests, TypeScript compile, production MV3 build in 37.2s, and headed installed-extension cancellation regression in 23.0s.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR #2711 fixes the browser-extension Quick Ingest cancellation race and the reported React maximum-update-depth loop. Cancellation is now fenced synchronously across setup, late extension/direct acknowledgement, direct submission, runtime progress/completion, and persisted reattachment. Wizard persistence suppresses only semantically equivalent React replays while retaining real timestamps and meaningful state. The packaged MV3 regression uses the production direct HTTP path and fails on browser or unexpected-request errors. Shared fonts are included through WXT's public directory with a static contract test.
+
+Installed-extension UAT completed PDF, URL, duplicate URL, the requested YouTube Short, and duplicate YouTube against isolated databases with zero browser errors and exactly three unique media records. Post-rebase production build, 56 unit tests, two font tests, compile, strict cancellation E2E, three launch-health modes, and diff checks passed. ESLint has no applicable workspace configuration; Bandit is not applicable to TypeScript/assets. Existing unrelated build warnings remain.
+
+The PR is not merge-ready until the human requester adds the repository-required Change summary in their own words.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

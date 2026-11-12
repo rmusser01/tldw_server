@@ -57,6 +57,7 @@ MINIMAL_REQUIRED_ROUTER_NAMES = (
     "service_prompts",
     "rpg",
     "admin",
+    "billing",
     "workspace_eligibility",
 )
 MINIMAL_REQUIRED_ROUTER_OVERRIDES = {
@@ -104,11 +105,8 @@ def _append_first_available_imported_router_spec(
         return
 
 
-def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
-    """Yield optional minimal-test router specs, skipping unavailable imports."""
-    specs: list[RouterSpec] = []
-    minimal_skip_context = "in minimal test app"
-
+def _append_minimal_llm_router_specs(specs: list[RouterSpec]) -> None:
+    """Append optional LLM providers and compatibility routers in registration order."""
     append_imported_router_spec(
         specs,
         ImportedRouterSpec(
@@ -161,6 +159,14 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         ),
     ):
         append_imported_router_spec(specs, llm_spec)
+
+
+def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
+    """Yield optional minimal-test router specs, skipping unavailable imports."""
+    specs: list[RouterSpec] = []
+    minimal_skip_context = "in minimal test app"
+
+    _append_minimal_llm_router_specs(specs)
 
     for embedding_spec in (
         ImportedRouterSpec(
@@ -620,6 +626,13 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
             skip_context=minimal_skip_context,
         ),
         ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+            log_name="notes_semantic_index",
+            prefix=f"{API_V1_PREFIX}/notes",
+            tags=("notes",),
+            skip_context=minimal_skip_context,
+        ),
+        ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.notes",
             log_name="notes",
             prefix=f"{API_V1_PREFIX}/notes",
@@ -735,6 +748,15 @@ def iter_minimal_optional_router_specs() -> Iterable[RouterSpec]:
         append_imported_router_spec(specs, writing_email_spec)
 
     for ops_spec in (
+        ImportedRouterSpec(
+            import_path="tldw_Server_API.app.api.v1.endpoints.jobs_owned",
+            log_name="jobs_owned",
+            prefix=f"{API_V1_PREFIX}",
+            tags=("jobs",),
+            route_key="jobs-owned",
+            default_stable=True,
+            skip_context=minimal_skip_context,
+        ),
         ImportedRouterSpec(
             import_path="tldw_Server_API.app.api.v1.endpoints.jobs_admin",
             log_name="jobs_admin",

@@ -207,4 +207,50 @@ describe("QA with real canonical configuration and verified scope lease", () => 
     expect(current.searchHistory).toEqual([])
     expect(boundary.fetch).not.toHaveBeenCalled()
   })
+
+
+it("distinguishes rotated single-user credentials through the real snapshot and Provider projection", async () => {
+  boundary.storage = {
+    tldwConfig: {
+      serverUrl: "https://canonical-qa.test",
+      authMode: "single-user",
+      apiKey: "private-key-a",
+    },
+  };
+  const first = render(view());
+  await waitFor(() => expect(current.notesAuthorityId).toBeTruthy());
+  const captured = current.notesAuthorityId;
+  const graphOwner = current.notesAuthorityScope;
+  expect(JSON.stringify(current.notesAuthorityId)).not.toContain(
+    "private-key-a",
+  );
+  first.unmount();
+  boundary.storage = {
+    tldwConfig: {
+      serverUrl: "https://canonical-qa.test",
+      authMode: "single-user",
+      apiKey: "private-key-b",
+    },
+  };
+  render(view());
+  await waitFor(() => expect(current.notesAuthorityId).toBeTruthy());
+  expect(current.notesAuthorityScope).toBe(graphOwner);
+  expect(current.notesAuthorityId).not.toBe(captured);
+  expect(JSON.stringify(current.notesAuthorityId)).not.toContain(
+    "private-key-b",
+  );
+});
+
+it("preserves durable authority through real snapshot and Provider same-principal refresh", async () => {
+  const first = render(view());
+  await waitFor(() => expect(current.notesAuthorityId).toBeTruthy());
+  const captured = current.notesAuthorityId;
+  first.unmount();
+  boundary.storage = { tldwConfig: { ...config(), accessToken: token(1, 2) } };
+  render(view());
+  await waitFor(() => expect(current.notesAuthorityId).toBeTruthy());
+  expect(current.notesAuthorityId).toBe(captured);
+  expect(JSON.stringify(current.notesAuthorityId)).not.toContain(token(1, 2));
+});
+
 })

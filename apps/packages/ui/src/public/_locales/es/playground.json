@@ -1471,5 +1471,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignorar cuando las plantillas estén activas"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Conflicto al transferir medios"
+  },
+  "mediaHandoff_conflict": {
+    "message": "Ya hay un borrador en el editor de mensajes. Inserta la fuente multimedia, reemplaza tu borrador o cancela la importación."
+  },
+  "mediaHandoff_insert": {
+    "message": "Insertar fuente multimedia"
+  },
+  "mediaHandoff_replace": {
+    "message": "Reemplazar borrador actual"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Cancelar importación"
   }
 }

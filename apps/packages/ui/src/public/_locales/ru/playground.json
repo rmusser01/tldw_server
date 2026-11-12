@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Игнорировать при активных шаблонах"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Конфликт при переносе медиа"
+  },
+  "mediaHandoff_conflict": {
+    "message": "В поле сообщения уже есть черновик. Вставьте медиаисточник, замените черновик или отмените импорт."
+  },
+  "mediaHandoff_insert": {
+    "message": "Вставить медиаисточник"
+  },
+  "mediaHandoff_replace": {
+    "message": "Заменить текущий черновик"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Отменить импорт"
   }
 }

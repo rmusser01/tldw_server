@@ -1,17 +1,23 @@
+import { MemoryRouter } from "react-router-dom"
 import React from "react"
-import { describe, expect, it, beforeEach, vi } from "vitest"
-import { fireEvent, render, screen, within } from "@testing-library/react"
+import type { TutorialRun } from "@/store/tutorials"
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
+import { fireEvent, render as renderUI, screen, within } from "@testing-library/react"
 import { QUICK_CHAT_WORKFLOW_GUIDES } from "../workflow-guides"
 import { QuickChatGuidesPanel } from "../QuickChatGuidesPanel"
+
+const render = (ui: React.ReactNode) => renderUI(<MemoryRouter>{ui}</MemoryRouter>)
 
 const useStorageMock = vi.fn()
 const startTutorialMock = vi.fn()
 const tutorialStoreSelectorMock = vi.fn()
 const tutorialStoreState: {
   completedTutorials: string[]
+  activeRun: TutorialRun | null
   startTutorial: typeof startTutorialMock
 } = {
   completedTutorials: [],
+  activeRun: null,
   startTutorial: startTutorialMock
 }
 
@@ -40,11 +46,15 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/tutorials", () => ({
-  useTutorialStore: (selector: (state: unknown) => unknown) =>
-    tutorialStoreSelectorMock(selector)
+  useTutorialStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      tutorialStoreSelectorMock(selector),
+    { getState: () => tutorialStoreState }
+  )
 }))
 
 describe("QuickChatGuidesPanel tutorials section", () => {
+  afterEach(() => { startTutorialMock.mock.calls.forEach(call => call[1]?.dispose?.()) })
   beforeEach(() => {
     useStorageMock.mockReset()
     tutorialStoreSelectorMock.mockReset()
@@ -52,6 +62,8 @@ describe("QuickChatGuidesPanel tutorials section", () => {
 
     useStorageMock.mockReturnValue([QUICK_CHAT_WORKFLOW_GUIDES])
     tutorialStoreState.completedTutorials = []
+    tutorialStoreState.activeRun = null
+    startTutorialMock.mockImplementation((_id, focusReturn) => { tutorialStoreState.activeRun = { id: 1, focusReturn } })
     tutorialStoreSelectorMock.mockImplementation(
       (selector: (state: unknown) => unknown) => selector(tutorialStoreState)
     )
@@ -150,8 +162,10 @@ describe("QuickChatGuidesPanel tutorials section", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Start" }))
-    expect(startTutorialMock).toHaveBeenCalledWith("prompts-basics")
+    const start = screen.getByRole("button", { name: "Start" })
+    start.focus()
+    fireEvent.click(start)
+    expect(startTutorialMock).toHaveBeenCalledWith("prompts-basics", expect.objectContaining({ target: expect.any(HTMLElement), isCurrent: expect.any(Function) }))
   })
 
   it("shows locked advanced tutorials until prerequisites are completed", () => {
@@ -195,4 +209,15 @@ describe("QuickChatGuidesPanel tutorials section", () => {
     expect(within(toolsRow).queryByRole("button", { name: "Locked" })).toBeNull()
     expect(within(toolsRow).getByRole("button", { name: "Start" })).toBeInTheDocument()
   })
+})
+
+it("compact Guides retain workflow links but offer no Start without a runner", () => {
+  const original = window.location.pathname
+  window.history.replaceState(null, "", "/sidepanel.html")
+  try {
+    render(<QuickChatGuidesPanel currentRoute="/chat" onAskGuide={vi.fn()} onOpenRoute={vi.fn()} />)
+    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument()
+    expect(screen.getByText("Workflow guide browser")).toBeVisible()
+    expect(screen.getAllByRole("button", { name: /Open/i }).length).toBeGreaterThan(0)
+  } finally { window.history.replaceState(null, "", original) }
 })

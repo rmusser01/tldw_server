@@ -35,6 +35,8 @@ export interface UseComposerAttachmentsOptions {
 
   /** Called with base64 data after an image is successfully read. */
   setImageField: (base64: string) => void
+  /** Freeze the current owner/image revision before asynchronous file reads. */
+  captureImageOwnership: () => () => boolean
 
   /**
    * Called for non-image files. Omit for image-only surfaces (Sidepanel);
@@ -95,6 +97,7 @@ export function useComposerAttachments(
   const {
     chatMode,
     setImageField,
+    captureImageOwnership,
     onDocumentUpload,
     ragBlocksImages = false,
     onImageBlockedInRagMode,
@@ -107,6 +110,7 @@ export function useComposerAttachments(
   const inputRef = React.useRef<HTMLInputElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const processedFilesRef = React.useRef<WeakSet<File>>(new WeakSet())
+  const imageReadRevision = React.useRef(0)
 
   const processFile = React.useCallback(
     async (file: File) => {
@@ -123,12 +127,21 @@ export function useComposerAttachments(
           onImageBlockedInRagMode?.()
           return
         }
+        const readRevision = ++imageReadRevision.current
+        const isCurrent = captureImageOwnership()
+        if (!isCurrent()) return
         try {
           const base64 = await toBase64(file)
-          setImageField(normalizeImageDataUrlMime(base64, imageMimeType))
+          if (readRevision !== imageReadRevision.current || !isCurrent()) return
+          const normalizedImage = normalizeImageDataUrlMime(base64, imageMimeType)
+          const preview = new Image()
+          preview.src = normalizedImage
+          await preview.decode()
+          if (readRevision !== imageReadRevision.current || !isCurrent()) return
+          setImageField(normalizedImage)
           onImageAccepted?.(file)
         } catch (error) {
-          onImageReadError?.(error)
+          if (readRevision === imageReadRevision.current && isCurrent()) onImageReadError?.(error)
         }
         return
       }
@@ -142,6 +155,7 @@ export function useComposerAttachments(
     },
     [
       chatMode,
+      captureImageOwnership,
       onDocumentUpload,
       onImageAccepted,
       onImageBlockedInRagMode,

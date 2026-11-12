@@ -41,7 +41,7 @@ Expose API routes for PR1135-aligned persona visual pack export and import-previ
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added persona visual portability API schemas for export requests/responses, export status, import-preview start, and import-preview status.
 
 Added scoped export start/status/download endpoints under persona visual pack routes using PersonaVisualPortabilityRepository and Jobs enqueue helpers.
@@ -53,7 +53,7 @@ Verification passed: pytest tldw_Server_API/tests/Persona/test_persona_visuals_a
 Regression sweep passed: pytest test_persona_visuals_api.py test_persona_visual_service.py test_persona_visual_portability.py test_persona_visual_jobs.py test_persona_visual_portability_worker.py -q --tb=short => 33 passed, 5 warnings.
 
 Bandit passed with no findings for touched API/schema/repository/worker/test scope using -s B101 for test assertions: /tmp/bandit_persona_visual_portability_api.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

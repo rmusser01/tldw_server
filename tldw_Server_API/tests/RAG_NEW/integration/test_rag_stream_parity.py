@@ -163,6 +163,7 @@ def test_rag_streaming_generation_provider_override(
     client_with_stream_overrides: TestClient,
 ) -> None:
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.tests.helpers.offline_network import block_live_network
 
     captured = {"generation_config": None}
 
@@ -205,10 +206,14 @@ def test_rag_streaming_generation_provider_override(
         "generation_model": "llama-3.3-70b-versatile",
     }
 
-    with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
+    with (
+        block_live_network() as attempts,
+        client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp,
+    ):
         assert resp.status_code == 200
         list(resp.iter_lines())
 
+    assert attempts == []
     generation_config = captured["generation_config"]
     assert generation_config is not None
     assert generation_config["provider"] == "groq"
@@ -345,6 +350,123 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
     assert generation_config["model"] == "resolved-model"
     assert generation_config["max_tokens"] == 777
     assert generation_config["prompt_template"] == "resolved-prompt"
+
+
+def _stream_on_recorded_providers(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient, payload: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Stream one retrieved document through the real pipeline and generator; record each provider call."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    calls: list[dict[str, Any]] = []
+
+    class OneDocumentRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.retrievers: dict[str, Any] = {}
+
+        async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
+            return [
+                Document(
+                    id="doc-1",
+                    content="Rowan directs the observatory.",
+                    metadata={"title": "Observatory"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.9,
+                )
+            ]
+
+    async def provider_call(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        if not kwargs.get("stream"):
+            return {"choices": [{"message": {"content": "A discarded answer."}}]}
+
+        async def chunks() -> Any:
+            yield {"choices": [{"delta": {"content": "The streamed answer."}}]}
+
+        return chunks()
+
+    monkeypatch.setattr(rag_ep, "MultiDatabaseRetriever", OneDocumentRetriever)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", provider_call)
+    request = {"sources": ["media_db"], "enable_generation": True, "enable_cache": False, "enable_query_classification": False, **payload}
+    with client.stream("POST", "/api/v1/rag/search/stream", json=request) as resp:
+        assert resp.status_code == 200
+        events = [json.loads(raw) for raw in resp.iter_lines() if raw]
+    return events, calls
+
+
+def test_rag_stream_makes_one_provider_call_the_streamed_answer(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    """The stream's retrieval step makes no answer call, so the one call is the streamed answer (TASK-15482)."""
+    events, calls = _stream_on_recorded_providers(
+        monkeypatch,
+        client_with_stream_overrides,
+        {"query": "Who directs the observatory?", "enable_suggestions": True},
+    )
+
+    assert [call["stream"] for call in calls] == [True]
+    assert [event["text"] for event in events if event["type"] == "delta"] == ["The streamed answer."]
+    assert events[-1]["type"] == "complete"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"query": "Who dirrects the observatory?", "spell_check": True},
+        {
+            "query": "Who directs it?",
+            "chat_history": [{"role": "user", "content": "Tell me about the observatory."}],
+        },
+    ],
+    ids=["spell-correction", "chat-history-reformulation"],
+)
+def test_rag_stream_answers_the_effective_query(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+    extra: dict[str, Any],
+) -> None:
+    """The streamed answer's prompt carries the corrected or reformulated query, not the raw one (TASK-15482)."""
+    from tldw_Server_API.app.core.RAG.rag_service import query_classifier, unified_pipeline
+
+    async def effective_query(*_args: Any, **_kwargs: Any) -> str:
+        return "Who directs the observatory?"
+
+    monkeypatch.setattr(unified_pipeline, "spell_check_query", effective_query)
+    monkeypatch.setattr(query_classifier, "reformulate_query", effective_query)
+    _events, calls = _stream_on_recorded_providers(monkeypatch, client_with_stream_overrides, extra)
+
+    prompts = [call["messages"][-1]["content"] for call in calls if call["stream"]]
+    assert len(prompts) == 1
+    assert "Who directs the observatory?" in prompts[0]
+    assert extra["query"] not in prompts[0]
+
+
+@pytest.mark.parametrize(
+    ("setting", "clarified"),
+    [({}, True), ({"enable_pre_retrieval_clarification": False}, False)],
+    ids=["unset-follows-generation", "turned-off"],
+)
+def test_rag_stream_keeps_its_pre_retrieval_clarification(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+    setting: dict[str, Any],
+    clarified: bool,
+) -> None:
+    """Unset, the clarification gate follows the request's generation switch; an explicit False wins (TASK-15482)."""
+    events, calls = _stream_on_recorded_providers(
+        monkeypatch,
+        client_with_stream_overrides,
+        {"query": "Who directs it?", **setting},
+    )
+
+    if clarified:
+        assert [event["type"] for event in events] == ["clarification", "delta", "complete"]
+        assert calls == []
+    else:
+        assert [call["stream"] for call in calls] == [True]
 
 
 def test_rag_streaming_emits_research_progress_before_generation(
@@ -974,3 +1096,77 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
     assert agentic_kwargs["agentic"].enable_tools is True
     assert agentic_kwargs["agentic"].max_tool_calls == 9
     assert agentic_kwargs["agentic"].coverage_target == 0.88
+
+
+def test_rag_search_stream_refuses_an_over_quota_user_with_a_real_402(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    """The quota check runs before the streaming response starts, so the client gets a real 402."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_streaming_response(context: Any, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return context
+
+    monkeypatch.setattr(rag_ep, "generate_streaming_response", recording_generate_streaming_response)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_stream_overrides.post("/api/v1/rag/search/stream", json={"query": "q", "enable_generation": True})
+
+    assert_llm_quota_402(resp)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("profile", "admitted"),
+    [("accuracy", False), ("fast", True), ("balanced", True)],
+    ids=["accuracy", "fast", "balanced"],
+)
+def test_rag_search_stream_names_the_providers_of_the_resolved_request(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+    profile: str,
+    admitted: bool,
+) -> None:
+    """A profile that turns on another LLM stage keeps the 402 on the stream, as on search (TASK-13956)."""
+    from fastapi import HTTPException
+
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    asked: list[str] = []
+    marked: list[bool] = []
+
+    async def own_key(_uid: object, provider: str) -> bool:
+        """The user has their own OpenAI key (the boundary is under test)."""
+        asked.append(provider)
+        return provider == "openai"
+
+    def past_the_check(*_args: Any, **_kwargs: Any) -> Any:
+        """The stream's next step after the quota check: stop an admitted request before any work."""
+        marked.append(current_llm_call_context().prechecked)
+        raise HTTPException(status_code=418, detail="the quota check let the request through")
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", own_key)
+    monkeypatch.setattr(rag_ep, "_apply_media_collection_scope", past_the_check)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_stream_overrides.post(
+        "/api/v1/rag/search/stream",
+        json={"query": "q", "enable_generation": True, "generation_provider": "openai", "rag_profile": profile},
+    )
+
+    if admitted:
+        assert resp.status_code == 418, resp.text
+        assert marked == [False]
+        assert asked == ["openai"]
+    else:
+        assert_llm_quota_402(resp)
+        assert marked == []
+        assert asked == []

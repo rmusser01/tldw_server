@@ -70,7 +70,7 @@ export const SaveButton = ({
         }
       }}
       disabled={disabled || loading}
-      className={`inline-flex mt-4 items-center rounded-md border border-transparent bg-primary px-3 py-2 min-h-[40px] text-sm font-medium leading-4 text-surface shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] disabled:opacity-50 ${className}`}>
+      className={`inline-flex mt-4 items-center rounded-md border border-transparent bg-primary px-3 py-2 min-h-[40px] text-sm font-medium leading-4 text-surface shadow-sm transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-50 ${className}`}>
       {loading ? (
         <Loader2 className="icon mr-2 animate-spin" />
       ) : showSaved ? (

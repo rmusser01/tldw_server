@@ -11,6 +11,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 
 
 def _normalize_scope_type(scope_type: str) -> str:
@@ -180,20 +181,7 @@ class TelegramRuntimeRepo:
             return value
         return value.astimezone(timezone.utc).replace(tzinfo=None)
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if row is None:
-            return {}
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            return dict(row)
-        except Exception:
-            try:
-                keys = row.keys()
-                return {key: row[key] for key in keys}
-            except Exception:
-                return {}
+    _row_to_dict = staticmethod(row_dict)
 
     async def store_webhook_receipt(
         self,

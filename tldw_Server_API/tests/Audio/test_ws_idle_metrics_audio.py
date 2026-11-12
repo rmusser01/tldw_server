@@ -1,7 +1,10 @@
 import time
+from unittest.mock import AsyncMock
+
 import pytest
 
 from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
+from tldw_Server_API.app.core.Usage import concurrency_quota
 from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan, ws_session_or_skip
 
 
@@ -13,6 +16,8 @@ async def test_audio_ws_idle_timeout_increments_metric(monkeypatch):
     # Short idle timeout; disable WS pings to avoid noise
     monkeypatch.setenv("AUDIO_WS_IDLE_TIMEOUT_S", "0.1")
     monkeypatch.setenv("STREAM_HEARTBEAT_INTERVAL_S", "0")
+    # Quotas are outside this test: the stream-slot lookup must not spend the 0.25 s on the AuthNZ database.
+    monkeypatch.setattr(concurrency_quota, "user_quota", AsyncMock(return_value=None))
 
     settings = get_settings()
     token = settings.SINGLE_USER_API_KEY

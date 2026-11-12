@@ -26,6 +26,23 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPri
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.main import app
 
+# Restore immediately: the overrides above exist only to influence the import-time
+# side effects of the imports in this block. Under pytest-xdist every worker
+# collects (imports) this module even when none of its tests are scheduled onto
+# that worker, which runs the lines above but never instantiates the module-scoped
+# `cleanup_testing_env` fixture below (fixtures only run around actual test
+# execution) -- so its teardown never fires and these env vars would otherwise
+# leak into every other test for the rest of that worker's lifetime. The fixture
+# re-applies both overrides for the duration of this module's own tests.
+if _ORIG_TESTING is None:
+    os.environ.pop("TESTING", None)
+else:
+    os.environ["TESTING"] = _ORIG_TESTING
+if _ORIG_AUTO_DOWNLOAD_MODELS is None:
+    os.environ.pop("AUTO_DOWNLOAD_MODELS", None)
+else:
+    os.environ["AUTO_DOWNLOAD_MODELS"] = _ORIG_AUTO_DOWNLOAD_MODELS
+
 
 # Cleanup fixture to remove TESTING env var after tests
 @pytest.fixture(autouse=True, scope="module")
@@ -1164,9 +1181,11 @@ def test_adapter_builder_selects_endpoint_atomically_with_stable_precedence(
 @pytest.mark.unit
 @pytest.mark.asyncio
 @pytest.mark.parametrize("provider", ["huggingface", "google"])
+@pytest.mark.parametrize("native_flag", [None, "0", "false"])
 async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
     monkeypatch,
     provider,
+    native_flag,
 ):
     """Opt-in adapters that are disabled remain a clean legacy fallback signal."""
     import tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced as mod
@@ -1187,8 +1206,23 @@ async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
             return adapters[selected]
 
     monkeypatch.setenv("LLM_EMBEDDINGS_ADAPTERS_ENABLED", "1")
-    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", raising=False)
-    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", raising=False)
+    for flag in (
+        "LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE",
+        "LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE",
+    ):
+        if native_flag is None:
+            monkeypatch.delenv(flag, raising=False)
+        else:
+            monkeypatch.setenv(flag, native_flag)
+    native_client = MagicMock(side_effect=AssertionError("Unexpected native HTTP dispatch"))
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.providers.google_embeddings_adapter.create_client",
+        native_client,
+    )
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.providers.huggingface_embeddings_adapter.create_client",
+        native_client,
+    )
     monkeypatch.setattr(mod, "get_embeddings_registry", lambda: _Registry())
     credentials = mod.ResolvedByokCredentials(
         provider=provider,
@@ -1211,6 +1245,7 @@ async def test_disabled_embedding_native_adapter_falls_back_to_legacy(
         dimensions=None,
         credentials=credentials,
     ) is None
+    native_client.assert_not_called()
 
 
 @pytest.mark.unit

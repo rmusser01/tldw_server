@@ -38,13 +38,13 @@ Continue the local tldw-frontend test stabilization series after PR #1311 merged
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline after dependency setup: tldw-frontend TypeScript passed with node node_modules/typescript/bin/tsc --noEmit --pretty false -p tsconfig.json. Focused ManageTab Vitest reproduced the next repeated cluster: document-editing, document-mode, and undo-stage3 failed before assertions because their full ../../hooks mocks omitted useUpdateDeckMutation. ManageTab imports and calls useUpdateDeckMutation unconditionally at render; scheduling-metadata already mocks it and passed, confirming the intended test-harness contract.
 
 Fix implemented: added useUpdateDeckMutation to the three stale ManageTab hook mocks, added missing FlashcardMarkdownSnippet component mocks for document-mode/document-editing, added useGlobalFlashcardTagSuggestionsQuery to undo-stage3 because it intentionally renders the real edit drawer, and reset service mutation/query mocks between undo-stage3 tests to prevent queued mock version leakage. Verification: focused ManageTab Vitest passed 4 files / 23 tests; tldw-frontend TypeScript passed; git diff --check passed. Bandit skipped because touched source files are TypeScript test files only.
 
 Opened PR #1316: https://github.com/rmusser01/tldw_server/pull/1316.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

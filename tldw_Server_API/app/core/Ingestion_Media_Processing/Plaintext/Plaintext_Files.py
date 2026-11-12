@@ -302,10 +302,11 @@ def convert_document_to_text(
             # Attempt reading as plain text as a last resort? Or fail? Let's fail for now.
             raise ValueError(f"Unsupported document file type: {extension}")
 
-        # Basic cleanup
-        content = re.sub(r'[ \t]+', ' ', content) # Collapse multiple spaces/tabs
-        content = re.sub(r'\n\s*\n+', '\n\n', content) # Collapse multiple blank lines
-        content = content.strip()
+        # Text formats already contain the user's source; cleanup is only for conversions.
+        if extension not in {".txt", ".md", ".markdown"}:
+            content = re.sub(r"[ \t]+", " ", content)  # Collapse multiple spaces/tabs
+            content = re.sub(r"\n\s*\n+", "\n\n", content)  # Collapse multiple blank lines
+            content = content.strip()
 
         if not content:
              logging.warning(f"Conversion resulted in empty content for {file_path}")

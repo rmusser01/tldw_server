@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   setLastUsedChatModel: vi.fn(async () => undefined),
   setLastUsedChatSystemPrompt: vi.fn(async () => undefined),
   updateChatHistoryCreatedAt: vi.fn(async () => undefined),
-  generateTitle: vi.fn(async () => "Generated title"),
+  generateTitle: vi.fn(async (..._args: Parameters<typeof import("@/services/title").generateTitle>) => "Generated title"),
   runTransaction: vi.fn(
     async (
       signal: AbortSignal | undefined,
@@ -158,7 +158,10 @@ describe("saveMessageOnError", () => {
     expect(mocks.saveHistory).toHaveBeenCalledWith(
       "Please summarize this cockpit error recovery path",
       false,
-      "web-ui"
+      "web-ui",
+      undefined,
+      undefined,
+      undefined
     )
     expect(mocks.updatePageTitle).toHaveBeenCalledWith(
       "Please summarize this cockpit error recovery path"

@@ -3,6 +3,8 @@ import { createWithEqualityFn } from "zustand/traditional"
 import type { ChatHistory, Message as ChatMessage, ToolChoice } from "@/store/option"
 import type { ConversationState } from "@/services/tldw/TldwApiClient"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import type { ChatDraftAddress, ChatDraftHandle } from "@/utils/chat-draft-address"
 
 export type ChatModelSettingsSnapshot = {
   f16KV?: boolean
@@ -53,6 +55,8 @@ export type ChatModelSettingsSnapshot = {
 }
 
 export type SidepanelChatSnapshot = {
+  chatDraftHandle?: ChatDraftHandle | null
+  chatDraftAddress?: ChatDraftAddress | null
   historySelectionReference?: HistorySelectionReference | null
   history: ChatHistory
   messages: ChatMessage[]
@@ -71,6 +75,12 @@ export type SidepanelChatSnapshot = {
   serverChatClusterId: string | null
   serverChatSource: string | null
   serverChatExternalRef: string | null
+  /**
+   * The server chat's latest message when this tab last matched the server
+   * (XP-08). A newer latest message means the chat changed elsewhere; an
+   * unchanged one means the tab's earlier position was chosen on purpose.
+   */
+  serverChatLatestSeenId?: string | null
   queuedMessages: QueuedRequest[]
   modelSettings: ChatModelSettingsSnapshot
 }
@@ -95,6 +105,10 @@ export type SidepanelChatTab = {
 }
 
 type State = {
+  ownerKey: string | null
+  storageKey: string | null
+  revision: number
+  bindOwner: (ownerKey: string, revision: number) => boolean
   tabs: SidepanelChatTab[]
   activeTabId: string | null
   snapshotsById: Record<string, SidepanelChatSnapshot>
@@ -102,6 +116,7 @@ type State = {
     tabs: SidepanelChatTab[]
     activeTabId: string | null
     snapshotsById: Record<string, SidepanelChatSnapshot>
+    storageKey?: string | null
   }) => void
   setTabs: (tabs: SidepanelChatTab[]) => void
   setActiveTabId: (id: string | null) => void
@@ -116,6 +131,16 @@ type State = {
 }
 
 export const useSidepanelChatTabsStore = createWithEqualityFn<State>((set, get) => ({
+  ownerKey: null,
+  storageKey: null,
+  revision: 0,
+  bindOwner: (ownerKey, revision) => {
+    if (get().revision !== revision) return false
+    if (get().ownerKey !== ownerKey) {
+      set({ ownerKey, storageKey: null, tabs: [], activeTabId: null, snapshotsById: {} })
+    }
+    return true
+  },
   tabs: [],
   activeTabId: null,
   snapshotsById: {},
@@ -123,7 +148,8 @@ export const useSidepanelChatTabsStore = createWithEqualityFn<State>((set, get) 
     set({
       tabs: state.tabs,
       activeTabId: state.activeTabId,
-      snapshotsById: state.snapshotsById
+      snapshotsById: state.snapshotsById,
+      storageKey: state.storageKey === undefined ? get().storageKey : state.storageKey
     }),
   setTabs: (tabs) => set({ tabs }),
   setActiveTabId: (id) => set({ activeTabId: id }),
@@ -177,5 +203,15 @@ export const useSidepanelChatTabsStore = createWithEqualityFn<State>((set, get) 
         tab.id === id ? { ...tab, status } : tab
       )
     })),
-  clear: () => set({ tabs: [], activeTabId: null, snapshotsById: {} })
+  clear: () => set({ storageKey: null, tabs: [], activeTabId: null, snapshotsById: {} })
 }))
+
+const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
+  if (!invalidated) return
+  useSidepanelChatTabsStore.setState(state => ({
+    ownerKey: null, storageKey: null, revision: state.revision + 1,
+    tabs: [], activeTabId: null, snapshotsById: {}
+  }))
+})
+const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
+hot?.dispose(stopWatchingAccount)

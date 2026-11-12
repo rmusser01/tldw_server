@@ -45,14 +45,14 @@ Move the Watchlists Template FlowCheckDiffPanel flow-issue and empty-diff callou
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - TDD red/green completed for FlowCheckDiffPanel design-system Alert marker coverage.
 - Added a focused FlowCheckDiffPanel test requiring flow-issues and no-diff callout text to be inside canonical data-ds-component Alert wrappers.
 - Initial red failure confirmed the AntD Alert mock rendered callout text without a design-system Alert marker.
 - Replaced FlowCheckDiffPanel AntD Alert usage with the shared design-system Alert while preserving titles, descriptions, mode controls, and accept/reject actions.
 - Removed the two FlowCheckDiffPanel Alert baseline entries from the product-state baseline.
 - Review follow-up: rendered multiple flow issues as list items inside the design-system Alert and hardened the test to require two distinct Alert wrappers.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

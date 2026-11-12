@@ -1,0 +1,38 @@
+{
+  "capabilities": {
+    "active_note_count": 0,
+    "estimated_chunk_count": 0,
+    "estimated_run_count": 0,
+    "provider_label": "OpenAI",
+    "model": "text-embedding-3-large",
+    "endpoint_display": "https://api.openai.com",
+    "execution_boundary": "external",
+    "storage_boundary": "local",
+    "storage_label": "ChromaDB",
+    "outbound_data_categories": ["note_content_chunks", "note_title"],
+    "capability_revision": "sha256:727b45c03a68ecdd29b7ebdc152fa6da9a12d53ef79ebe0395dd60da08017c12",
+    "indexing_available": true,
+    "unavailable_reason": null,
+    "metric": "cosine",
+    "resolved_dimensions": 3072,
+    "dimension_probe_required": false,
+    "renewal_requires_delete": false,
+    "manage_authorized": true
+  },
+  "status": {
+    "state": "needs_attention",
+    "detail_reason": "stale_configuration",
+    "desired_state": "enabled",
+    "configuration_revision": 4,
+    "semantic_index_revision": 1,
+    "active_generation_id": "generation-from-api",
+    "active_generation_usable": false,
+    "indexed_notes": 0,
+    "excluded_notes": 0,
+    "failed_notes": 0,
+    "pending_notes": 0,
+    "published_chunks": 0,
+    "cleanup_pending": false,
+    "active_run": null
+  }
+}

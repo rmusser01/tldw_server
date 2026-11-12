@@ -9,11 +9,14 @@ import os
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from loguru import logger
 
 from tldw_Server_API.app.core.testing import is_truthy as _shared_is_truthy
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -86,6 +89,21 @@ async def run_heavy_initializations(
         logger.info("Deferred startup: completed non-critical initializations")
 
 
+def _llamacpp_handler_config() -> LlamaCppConfig | None:
+    """Build the llama.cpp handler config from config.py's plain settings, or None."""
+    from tldw_Server_API.app.core.config import get_llamacpp_handler_settings
+    from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Schemas import LlamaCppConfig
+
+    settings = get_llamacpp_handler_settings()
+    if not settings:
+        return None
+    try:
+        return LlamaCppConfig(**settings)
+    except (TypeError, ValueError) as exc:  # pydantic ValidationError is a ValueError
+        logger.warning(f"llama.cpp handler config invalid; disabling handler: {exc}")
+        return None
+
+
 async def _init_local_llm_manager(
     app: Any,
     route_enabled: Callable[[str], bool],
@@ -104,10 +122,9 @@ async def _init_local_llm_manager(
             logger.debug("Local LLM inference manager skipped (llm/llamacpp routes disabled)")
             return
 
-        from tldw_Server_API.app.core.config import get_llamacpp_handler_config
         from tldw_Server_API.app.core.Local_LLM import LLMInferenceManager, LLMManagerConfig
 
-        _llama_cfg = get_llamacpp_handler_config()
+        _llama_cfg = _llamacpp_handler_config()
         cfg_kwargs = {}
         if _llama_cfg:
             cfg_kwargs["llamacpp"] = _llama_cfg
@@ -247,7 +264,7 @@ async def _init_rate_limiter(*, deferred: bool) -> None:
     try:
         from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
 
-        if _rg_enabled_flag(False):
+        if _rg_enabled_flag(True):
             logger.info(
                 ("Deferred startup: " if deferred else "App Startup: ")
                 + "Rate limiter skipped (RG enabled)"

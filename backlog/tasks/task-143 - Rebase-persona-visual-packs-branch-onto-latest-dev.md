@@ -34,13 +34,13 @@ Bring the persona visual packs worktree up to date with origin/dev before adding
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/persona-visual-packs-plan branch codex/persona-visual-packs-plan onto refreshed origin/dev (a48c9bf243b8df22f87f700a16ba51ab782dc797). Dropped duplicate upstream planning commits during rebase; resolved the real persona conflict in apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellHost.tsx by using the existing PersonaBuddyRenderContext type. Verified PR #1135 VN portability files are now present under tldw_Server_API/app/core/VN_Assets/portability.
 
 Focused verification passed: bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/store/__tests__/persona-visual-runtime.test.ts src/routes/hooks/__tests__/usePersonaIncomingPayload.visuals.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx (22 tests passed). git diff --check origin/dev..HEAD passed. Post-rebase git status is clean.
 
 Bandit not run for TASK-143 because this task was a Git rebase/conflict-resolution pass with no Python source edits in the conflict resolution; security validation remains required for subsequent persona visual portability implementation changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

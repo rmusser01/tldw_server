@@ -1,364 +1,261 @@
-import { useQuery } from "@tanstack/react-query"
-import React from "react"
+import type { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import React from "react"
+
 import {
-  type DictionaryChatState,
   formatDictionaryChatReferenceTitle,
-  normalizeDictionaryChatState,
-  resolveDictionaryChatReferenceId,
+  normalizeDictionaryChatState
 } from "../listUtils"
 
-const DICTIONARY_SETTINGS_SINGLE_KEYS = new Set([
-  "chatdictionaryid",
-  "chat_dictionary_id",
-  "dictionaryid",
-  "dictionary_id",
-])
-
-const DICTIONARY_SETTINGS_LIST_KEYS = new Set([
-  "chatdictionaryids",
-  "chat_dictionary_ids",
-  "chatdictionary",
-  "chat_dictionary",
-  "dictionaryids",
-  "dictionary_ids",
-  "chatdictionaries",
-  "chat_dictionaries",
-])
-
-type UseDictionaryQuickAssignParams = {
+type Params = {
   isOnline: boolean
+  owner: ReturnType<typeof useChatDraftOwner>
+  dictionaries: Array<{ id: number; name?: string }>
   notification: {
-    success: (config: { message: string; description?: string }) => void
     warning: (config: { message: string; description?: string }) => void
   }
   queryClient: {
-    invalidateQueries: (input: { queryKey: readonly unknown[] }) => Promise<unknown>
+    invalidateQueries: (input: {
+      queryKey: readonly unknown[]
+    }) => Promise<unknown>
   }
+  isDictionaryCurrent: (dictionary: unknown) => boolean
+  onOpenChat?: (chat: unknown, isCurrent: () => boolean) => Promise<boolean>
 }
-
-type UseDictionaryQuickAssignResult = {
-  assignFor: any | null
-  assignChatIds: string[]
-  assignSearch: string
-  setAssignSearch: React.Dispatch<React.SetStateAction<string>>
-  assignSaving: boolean
-  assignableChatsStatus: "pending" | "error" | "success"
-  assignableChatsError: unknown
-  refetchAssignableChats: () => Promise<unknown>
-  quickAssignChatOptions: Array<{
-    chat: any
-    chatId: string
-    title: string
-    state: DictionaryChatState
-  }>
-  openQuickAssignModal: (dictionary: any) => void
-  closeQuickAssignModal: () => void
-  toggleAssignChatSelection: (chatId: string) => void
-  handleConfirmQuickAssign: () => Promise<void>
+type AssignModal = {
+  key: string
+  dictionary: Params["dictionaries"][number]
+  owner: Params["owner"]
 }
-
-function toPositiveDictionaryId(value: unknown): number | null {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-    return value
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    const parsed = Number(trimmed)
-    if (Number.isInteger(parsed) && parsed > 0) return parsed
-  }
-  return null
-}
-
-function collectDictionaryIdsFromSettingsValue(
-  value: unknown,
-  collector: Set<number>
-) {
-  const direct = toPositiveDictionaryId(value)
-  if (direct != null) {
-    collector.add(direct)
-    return
-  }
-
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectDictionaryIdsFromSettingsValue(item, collector)
-    }
-    return
-  }
-
-  if (!value || typeof value !== "object") {
-    return
-  }
-
-  for (const [rawKey, nested] of Object.entries(
-    value as Record<string, unknown>
-  )) {
-    const normalizedKey = rawKey.trim().toLowerCase()
-    if (
-      normalizedKey === "id" ||
-      DICTIONARY_SETTINGS_SINGLE_KEYS.has(normalizedKey) ||
-      DICTIONARY_SETTINGS_LIST_KEYS.has(normalizedKey)
-    ) {
-      collectDictionaryIdsFromSettingsValue(nested, collector)
-    }
-  }
-}
-
-function collectDictionaryIdsFromChatSettings(settings: unknown): number[] {
-  const collected = new Set<number>()
-  const queue: unknown[] = [settings]
-
-  while (queue.length > 0) {
-    const current = queue.pop()
-    if (!current || typeof current !== "object") continue
-
-    if (Array.isArray(current)) {
-      for (const item of current) {
-        queue.push(item)
-      }
-      continue
-    }
-
-    for (const [rawKey, value] of Object.entries(
-      current as Record<string, unknown>
-    )) {
-      const normalizedKey = rawKey.trim().toLowerCase()
-      if (
-        DICTIONARY_SETTINGS_SINGLE_KEYS.has(normalizedKey) ||
-        DICTIONARY_SETTINGS_LIST_KEYS.has(normalizedKey)
-      ) {
-        collectDictionaryIdsFromSettingsValue(value, collected)
-      }
-      if (value && typeof value === "object") {
-        queue.push(value)
-      }
-    }
-  }
-
-  return Array.from(collected).sort((a, b) => a - b)
-}
-
-function buildDictionaryChatAssignmentPatch(
-  existingSettings: Record<string, unknown>,
-  dictionaryId: number
-): Record<string, unknown> {
-  const merged = new Set(collectDictionaryIdsFromChatSettings(existingSettings))
-  if (dictionaryId > 0) {
-    merged.add(dictionaryId)
-  }
-  const ordered = Array.from(merged).sort((a, b) => a - b)
-  const patch: Record<string, unknown> = {
-    chat_dictionary_ids: ordered,
-  }
-  if (ordered.length === 1) {
-    patch.chat_dictionary_id = ordered[0]
-  }
-  return patch
-}
-
-function isDictionaryChatSettingsNotFound(error: unknown): boolean {
-  const message =
-    error instanceof Error
-      ? error.message.toLowerCase()
-      : String(error || "").toLowerCase()
-  if (!message) return false
-  return message.includes("404") || message.includes("not found")
-}
+const unavailable =
+  "This server version does not support dictionary assignment to saved chats across the chat interfaces. Existing links are shown for reference."
 
 export function useDictionaryQuickAssign({
   isOnline,
+  owner,
+  dictionaries,
   notification,
-  queryClient,
-}: UseDictionaryQuickAssignParams): UseDictionaryQuickAssignResult {
-  const [assignFor, setAssignFor] = React.useState<any | null>(null)
-  const [assignChatIds, setAssignChatIds] = React.useState<string[]>([])
-  const [assignSearch, setAssignSearch] = React.useState("")
-  const [assignSaving, setAssignSaving] = React.useState(false)
-
-  const {
-    data: assignableChatsData,
-    status: assignableChatsStatus,
-    error: assignableChatsError,
-    refetch: refetchAssignableChats,
-  } = useQuery({
-    queryKey: ["tldw:listChatsForDictionaryAssign", assignFor?.id ?? null],
-    queryFn: async () => {
-      await tldwClient.initialize()
-      return await tldwClient.listChats({
-        limit: 100,
-        offset: 0,
-        include_deleted: false,
-      })
-    },
-    enabled: Boolean(assignFor?.id && isOnline),
-  })
-
-  const openQuickAssignModal = React.useCallback((dictionary: any) => {
-    const refs = Array.isArray(dictionary?.used_by_chat_refs)
-      ? dictionary.used_by_chat_refs
-      : []
-    const preselectedIds = refs
-      .map((chat: any) => resolveDictionaryChatReferenceId(chat))
-      .filter((chatId: string) => chatId.length > 0)
-
-    setAssignFor(dictionary)
-    setAssignChatIds(Array.from(new Set(preselectedIds)))
-    setAssignSearch("")
-  }, [])
-
-  const closeQuickAssignModal = React.useCallback(() => {
-    if (assignSaving) return
-    setAssignFor(null)
-    setAssignChatIds([])
-    setAssignSearch("")
-  }, [assignSaving])
-
-  const assignableChats = React.useMemo(() => {
-    if (!Array.isArray(assignableChatsData)) return []
-    return assignableChatsData
-  }, [assignableChatsData])
-
-  const filteredAssignableChats = React.useMemo(() => {
-    if (!assignSearch.trim()) return assignableChats
-    const normalized = assignSearch.trim().toLowerCase()
-    return assignableChats.filter((chat: any) => {
-      const id = resolveDictionaryChatReferenceId(chat).toLowerCase()
-      const title = formatDictionaryChatReferenceTitle(chat).toLowerCase()
-      return id.includes(normalized) || title.includes(normalized)
-    })
-  }, [assignSearch, assignableChats])
-
-  const quickAssignChatOptions = React.useMemo(
-    () =>
-      filteredAssignableChats
-        .map((chat: any) => {
-          const chatId = resolveDictionaryChatReferenceId(chat)
-          if (!chatId) return null
-          return {
-            chat,
-            chatId,
-            title: formatDictionaryChatReferenceTitle(chat),
-            state: normalizeDictionaryChatState(chat?.state),
-          }
-        })
-        .filter((value): value is {
-          chat: any
-          chatId: string
-          title: string
-          state: DictionaryChatState
-        } => value != null),
-    [filteredAssignableChats]
-  )
-
-  const toggleAssignChatSelection = React.useCallback((chatId: string) => {
-    if (!chatId) return
-    setAssignChatIds((prev) => {
-      const exists = prev.includes(chatId)
-      if (exists) {
-        return prev.filter((value) => value !== chatId)
-      }
-      return [...prev, chatId]
-    })
-  }, [])
-
-  const handleConfirmQuickAssign = React.useCallback(async () => {
-    const dictionaryId = Number(assignFor?.id)
-    if (!Number.isFinite(dictionaryId) || dictionaryId <= 0) return
-
-    const selectedChatIds = Array.from(
-      new Set(
-        assignChatIds
-          .map((value) => value.trim())
-          .filter((value) => value.length > 0)
-      )
+  onOpenChat,
+  isDictionaryCurrent
+}: Params) {
+  const [modal, setModal] = React.useState<AssignModal | null>(null)
+  const [assignSearch, setSearch] = React.useState("")
+  const currentModal = React.useRef(modal)
+  const currentSource = React.useRef({ owner, dictionaries, isOnline })
+  const mounted = React.useRef(true)
+  const isModalCurrent = (captured: AssignModal | null) =>
+    Boolean(
+      captured &&
+      mounted.current &&
+      currentModal.current === captured &&
+      captured.owner.isCurrent() &&
+      currentSource.current.owner.isCurrent === captured.owner.isCurrent &&
+      currentSource.current.dictionaries.includes(captured.dictionary)
     )
+  React.useLayoutEffect(() => {
+    currentSource.current = { owner, dictionaries, isOnline }
+    if (currentModal.current && !isModalCurrent(currentModal.current)) {
+      currentModal.current = null
+      setModal(null)
+      setSearch("")
+    }
+  }, [owner, dictionaries, isOnline])
+  React.useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      currentModal.current = null
+    }
+  }, [])
 
-    if (selectedChatIds.length === 0) {
-      notification.warning({
-        message: "No chats selected",
-        description: "Select at least one chat session before assigning.",
+  const cache = useQueryClient()
+  const queryKey = [
+    "tldw:listChatsForDictionaryAssign",
+    owner.serverScopeKey,
+    modal?.dictionary.id ?? null,
+    modal?.key ?? null
+  ]
+  const query = useQuery({
+    queryKey,
+    enabled: Boolean(modal && owner.isCurrent() && isOnline),
+    retry: false,
+    queryFn: async ({ signal }) => {
+      const isCurrent = () =>
+        isModalCurrent(modal) &&
+        isDictionaryCurrent(modal?.dictionary) &&
+        currentSource.current.isOnline &&
+        !signal.aborted
+      if (!isCurrent() || !modal?.owner.requestScope)
+        throw new Error("The dictionary account changed. Reopen this panel.")
+      const snapshot = await loadServicePromptSnapshot([], {
+        requestScope: modal.owner.requestScope,
+        signal
       })
-      return
-    }
-
-    setAssignSaving(true)
-    try {
-      const assignmentResults = await Promise.all(
-        selectedChatIds.map(async (chatId) => {
-          try {
-            let existingSettings: Record<string, unknown> = {}
-            try {
-              const settingsResponse = await tldwClient.getChatSettings(chatId)
-              const rawSettings = settingsResponse?.settings
-              if (rawSettings && typeof rawSettings === "object") {
-                existingSettings = rawSettings as Record<string, unknown>
-              }
-            } catch (settingsError) {
-              if (!isDictionaryChatSettingsNotFound(settingsError)) {
-                throw settingsError
-              }
-            }
-
-            const patch = buildDictionaryChatAssignmentPatch(
-              existingSettings,
-              dictionaryId
+      try {
+        if (!isCurrent() || snapshot.scopeSignal.aborted)
+          throw new Error("The dictionary account changed. Reopen this panel.")
+        await tldwClient.initialize()
+        const chats: Awaited<
+          ReturnType<typeof tldwClient.listChatsWithMeta>
+        >["chats"] = []
+        for (let page = 0; page < 100; page++) {
+          if (!isCurrent() || snapshot.scopeSignal.aborted)
+            throw new Error(
+              "The dictionary account changed. Reopen this panel."
             )
-            await tldwClient.updateChatSettings(chatId, patch)
-            return { chatId, ok: true }
-          } catch (chatError) {
-            return { chatId, ok: false, error: chatError }
-          }
-        })
-      )
-
-      const successCount = assignmentResults.filter((item) => item.ok).length
-      const failureCount = assignmentResults.length - successCount
-
-      if (successCount > 0) {
-        notification.success({
-          message: "Dictionary assigned",
-          description:
-            successCount === 1
-              ? "Dictionary assigned to 1 chat session."
-              : `Dictionary assigned to ${successCount} chat sessions.`,
-        })
-        await queryClient.invalidateQueries({ queryKey: ["tldw:listDictionaries"] })
+          const response = await tldwClient.listChatsWithMeta(
+            { limit: 100, offset: page * 100, include_deleted: false },
+            {
+              requestScope: modal.owner.requestScope,
+              signal: snapshot.scopeSignal,
+              scope: { type: "global" }
+            }
+          )
+          if (!isCurrent() || snapshot.scopeSignal.aborted)
+            throw new Error(
+              "The dictionary account changed. Reopen this panel."
+            )
+          if (
+            !response ||
+            !Array.isArray(response.chats) ||
+            response.chats.length > 100
+          )
+            throw new Error(
+              "The saved chat list could not be verified. Retry loading it."
+            )
+          if (page === 99 && response.chats.length === 100)
+            throw new Error(
+              "The saved chat list is too large to load completely here. Open conversation history to find the chat."
+            )
+          chats.push(...response.chats)
+          if (response.chats.length < 100) return { modalKey: modal.key, chats }
+        }
+        throw new Error(
+          "The saved chat list could not be verified. Retry loading it."
+        )
+      } finally {
+        snapshot.release()
       }
-      if (failureCount > 0) {
-        notification.warning({
-          message: "Some assignments failed",
-          description:
-            failureCount === 1
-              ? "1 chat session could not be updated. Retry and check server logs."
-              : `${failureCount} chat sessions could not be updated. Retry and check server logs.`,
-        })
-      }
-
-      if (failureCount === 0) {
-        setAssignFor(null)
-        setAssignChatIds([])
-        setAssignSearch("")
-      }
-    } finally {
-      setAssignSaving(false)
     }
-  }, [assignChatIds, assignFor, notification, queryClient])
+  })
+  const hasCurrentCatalog = Boolean(
+    isModalCurrent(modal) &&
+    query.data?.modalKey === modal?.key &&
+    query.status === "success" &&
+    !query.isFetching &&
+    query.fetchStatus !== "paused"
+  )
+  const currentCatalog = React.useRef({
+    data: query.data,
+    active: hasCurrentCatalog
+  })
+  React.useLayoutEffect(() => {
+    currentCatalog.current = { data: query.data, active: hasCurrentCatalog }
+  }, [query.data, hasCurrentCatalog])
+  const catalog = hasCurrentCatalog ? query.data!.chats : []
+  const quickAssignChatOptions = catalog
+    .filter((chat) => {
+      const search = assignSearch.trim().toLowerCase()
+      return (
+        !search ||
+        chat.id?.toLowerCase().includes(search) ||
+        formatDictionaryChatReferenceTitle(chat).toLowerCase().includes(search)
+      )
+    })
+    .map((chat) => ({
+      chat,
+      chatId: chat.id,
+      title: formatDictionaryChatReferenceTitle(chat),
+      state: normalizeDictionaryChatState(chat.state),
+      disabledReason: "Assignment unavailable on this server version."
+    }))
 
+  const openQuickAssignModal = (dictionary: Params["dictionaries"][number]) => {
+    if (
+      !mounted.current ||
+      currentModal.current !== modal ||
+      !owner.isCurrent() ||
+      currentSource.current.owner.isCurrent !== owner.isCurrent ||
+      currentSource.current.dictionaries !== dictionaries ||
+      !dictionaries.includes(dictionary) ||
+      !isDictionaryCurrent(dictionary) ||
+      !Number.isSafeInteger(dictionary.id) ||
+      dictionary.id <= 0
+    )
+      return
+    const next = { key: crypto.randomUUID(), dictionary, owner }
+    currentModal.current = next
+    setModal(next)
+    setSearch("")
+  }
+  const closeQuickAssignModal = () => {
+    if (!isModalCurrent(modal)) return
+    currentModal.current = null
+    setModal(null)
+    setSearch("")
+  }
+  const refetchAssignableChats = async () => {
+    if (!isModalCurrent(modal) || !currentSource.current.isOnline) return
+    return await query.refetch()
+  }
+  const openQuickAssignChat = async (chat: unknown) => {
+    const isCurrent = () => {
+      const state = cache.getQueryState<typeof query.data>(queryKey)
+      return (
+        isModalCurrent(modal) &&
+        isDictionaryCurrent(modal?.dictionary) &&
+        currentCatalog.current.active &&
+        currentCatalog.current.data === query.data &&
+        state?.status === "success" &&
+        state.fetchStatus === "idle" &&
+        state.data === query.data
+      )
+    }
+    if (
+      !hasCurrentCatalog ||
+      !isCurrent() ||
+      !catalog.includes(chat as (typeof catalog)[number]) ||
+      !onOpenChat
+    )
+      return false
+    return await onOpenChat(chat, isCurrent)
+  }
+  const handleConfirmQuickAssign = async () => {
+    if (isModalCurrent(modal))
+      notification.warning({
+        message: "Dictionary assignment unavailable",
+        description: unavailable
+      })
+  }
+  const setAssignSearch: React.Dispatch<React.SetStateAction<string>> = (
+    value
+  ) => {
+    if (isModalCurrent(modal)) setSearch(value)
+  }
   return {
-    assignFor,
-    assignChatIds,
+    assignFor: modal?.dictionary ?? null,
+    assignChatIds: [] as string[],
     assignSearch,
     setAssignSearch,
-    assignSaving,
-    assignableChatsStatus,
-    assignableChatsError,
+    assignSaving: false,
+    assignableChatsStatus:
+      query.status === "error" || query.fetchStatus === "paused" || !isOnline
+        ? ("error" as const)
+        : hasCurrentCatalog
+          ? ("success" as const)
+          : ("pending" as const),
+    assignableChatsError:
+      query.fetchStatus === "paused" || !isOnline
+        ? new Error("You are offline. Reconnect and retry loading chats.")
+        : query.error,
     refetchAssignableChats,
     quickAssignChatOptions,
     openQuickAssignModal,
     closeQuickAssignModal,
-    toggleAssignChatSelection,
-    handleConfirmQuickAssign,
+    openQuickAssignChat,
+    toggleAssignChatSelection: (_chatId: string) => undefined,
+    handleConfirmQuickAssign
   }
 }

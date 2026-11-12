@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 import pytest
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
@@ -5,16 +7,41 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
 
 
-@pytest.fixture
-def client(monkeypatch):
+_API_KEY = "test-api-key-1234567890"
+
+
+def _health_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    """Mount the audio router on a bare app in single-user mode with a known API key."""
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("AUTH_MODE", "single_user")
-    monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key-1234567890")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", _API_KEY)
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
+    reset_settings()
     app = FastAPI()
     app.include_router(audio_router, prefix="/api/v1/audio")
-    with TestClient(app) as c:
+    return app
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """An authenticated caller: the STT health endpoint requires a signed-in user."""
+    with TestClient(_health_app(monkeypatch), headers={"X-API-KEY": _API_KEY}) as c:
         yield c
+
+
+@pytest.fixture
+def anonymous_client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    """A caller that sends no credentials."""
+    with TestClient(_health_app(monkeypatch)) as c:
+        yield c
+
+
+@pytest.mark.unit
+def test_transcriptions_health_rejects_anonymous_status(anonymous_client: TestClient):
+    """Model/provider status is not public: anonymous callers get 401."""
+    assert anonymous_client.get("/api/v1/audio/transcriptions/health").status_code == 401
 
 
 @pytest.mark.unit
@@ -41,14 +68,16 @@ def test_transcriptions_health_basic_status(client: TestClient):
 
 
 @pytest.mark.unit
-def test_transcriptions_health_rejects_anonymous_warm_up(monkeypatch, client: TestClient):
+def test_transcriptions_health_rejects_anonymous_warm_up(monkeypatch, anonymous_client: TestClient):
     """An anonymous health probe must not download or initialize a model."""
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
     calls = []
     monkeypatch.setattr(atlib, "get_whisper_model", lambda *args, **kwargs: calls.append((args, kwargs)))
 
-    response = client.get("/api/v1/audio/transcriptions/health", params={"model": "whisper-1", "warm": "true"})
+    response = anonymous_client.get(
+        "/api/v1/audio/transcriptions/health", params={"model": "whisper-1", "warm": "true"}
+    )
     assert response.status_code == 401
     assert calls == []
 
@@ -76,9 +105,14 @@ async def test_transcriptions_health_rejects_non_admin_warm_up(monkeypatch):
     ("GET", "/api/v1/audio/voices/catalog"),
     ("POST", "/api/v1/audio/reset-metrics"),
     ("POST", "/api/v1/audio/stream/test"),
+    ("GET", "/api/v1/audio/stream/status"),
+    ("GET", "/api/v1/audio/transcriptions/health"),
 ])
-def test_model_initializing_diagnostics_require_auth(client: TestClient, method: str, path: str):
-    response = client.request(method, path)
+def test_model_initializing_diagnostics_require_auth(
+    anonymous_client: TestClient, method: str, path: str
+) -> None:
+    """Diagnostics that can initialize models or reveal provider status reject anonymous callers."""
+    response = anonymous_client.request(method, path)
     assert response.status_code == 401
 
 
@@ -172,3 +206,25 @@ def test_transcriptions_health_treats_on_demand_whisper_as_usable(monkeypatch, c
     assert data.get("available") is False
     assert data.get("usable") is True
     assert data.get("on_demand") is True
+
+
+@pytest.mark.unit
+def test_transcriptions_health_reports_unavailable_when_stt_deps_missing(monkeypatch, client: TestClient):
+    """A missing STT/media dependency must yield a well-formed unavailable status, not a 500.
+
+    Audio_Files imports yt_dlp at module level; on an install without it the probe the
+    chat page fires on every load used to raise ImportError and return 500.
+    """
+    import sys
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import Audio as audio_pkg
+
+    monkeypatch.delattr(audio_pkg, "Audio_Files", raising=False)
+    monkeypatch.setitem(sys.modules, "tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files", None)
+
+    r = client.get("/api/v1/audio/transcriptions/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["available"] is False
+    assert data["usable"] is False
+    assert "not available" in data["message"]

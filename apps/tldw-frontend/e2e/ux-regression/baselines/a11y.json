@@ -1,0 +1,4 @@
+{
+  "$comment": "Accessibility ratchet baseline for a11y.spec.ts: serious and critical axe violations per page state and rule, the app's default (dark) theme, 1280x720. A new rule or a higher node count fails; so does a lower count or a missing rule, until this file is updated. See e2e/ux-regression/README.md. Empty since #3124 (AX-07, AX-16): the eight color-contrast nodes per notes state were antd primary buttons (white on #517bdc), the antd link colour and the antd 6 Select placeholder (.ant-select-placeholder, coloured by colorTextPlaceholder), and the target-size node was the 11x11 'Tags help' button; the theme token and 24x24 help-button fixes cover all of them.",
+  "entries": []
+}

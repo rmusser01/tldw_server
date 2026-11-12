@@ -47,9 +47,10 @@ def test_server_python_floor_can_import_the_shared_contract() -> None:
     server_requires = SpecifierSet(server_project["project"]["requires-python"])
     core_requires = SpecifierSet(core_project["project"]["requires-python"])
 
-    assert Version("3.10") not in server_requires
-    assert Version("3.11") in server_requires
-    assert Version("3.11") in core_requires
+    # Server floor is 3.12 since b49fa396d2; the shared core must import there.
+    assert Version("3.11") not in server_requires
+    assert Version("3.12") in server_requires
+    assert Version("3.12") in core_requires
 
 
 def test_server_matches_cross_runtime_canonical_fixture() -> None:

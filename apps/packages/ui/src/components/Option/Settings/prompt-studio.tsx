@@ -1,4 +1,5 @@
 import React from "react"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
 import { useQuery, useMutation } from "@tanstack/react-query"
 import {
   Button,
@@ -21,7 +22,7 @@ import {
   type PromptStudioStatus
 } from "@/services/prompt-studio"
 import {
-  getPromptStudioDefaults,
+  getPromptStudioDefaultsForOwner,
   setPromptStudioDefaults
 } from "@/services/prompt-studio-settings"
 
@@ -52,6 +53,11 @@ const StatusDescription = ({ status }: { status: PromptStudioStatus | undefined 
 }
 
 export const PromptStudioSettings: React.FC = () => {
+  const authority = usePromptLocalAuthority()
+  return authority.ready || authority.localOnlyReady ? <PromptStudioSettingsForOwner key={authority.ownerId ?? "local"} ownerId={authority.ownerId} /> : <Skeleton active />
+}
+
+const PromptStudioSettingsForOwner = ({ ownerId }: { ownerId: string | null }) => {
   const { t } = useTranslation(["settings", "common"])
   const [form] = Form.useForm()
   const [statusResult, setStatusResult] = React.useState<PromptStudioStatus | null>(null)
@@ -63,8 +69,8 @@ export const PromptStudioSettings: React.FC = () => {
   })
 
   const defaultsQuery = useQuery({
-    queryKey: ["prompt-studio", "defaults"],
-    queryFn: getPromptStudioDefaults
+    queryKey: ["prompt-studio", "defaults", ownerId],
+    queryFn: () => getPromptStudioDefaultsForOwner(ownerId)
   })
 
   React.useEffect(() => {
@@ -99,8 +105,8 @@ export const PromptStudioSettings: React.FC = () => {
         evalMaxTokens: values.evalMaxTokens,
         pageSize: values.pageSize,
         warnSeconds: values.warnSeconds
-      })
-      return await getPromptStudioDefaults()
+      }, ownerId)
+      return await getPromptStudioDefaultsForOwner(ownerId)
     },
     onSuccess: (next) => {
       form.setFieldsValue(next)

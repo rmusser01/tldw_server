@@ -3,6 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import ServedRoute, iter_served_routes
 from tldw_Server_API.app.api.v1.endpoints.audio import audio
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_voices
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
@@ -37,14 +38,14 @@ def test_voice_list_route_enforces_rate_limit_dependency(client):
     assert response.status_code == 429
 
 
-def _find_route(app: FastAPI, method: str, path: str) -> APIRoute:
-    for route in app.routes:
-        if isinstance(route, APIRoute) and route.path == path and method.upper() in route.methods:
+def _find_route(app: FastAPI, method: str, path: str) -> ServedRoute:
+    for route in iter_served_routes(app.routes):
+        if isinstance(route.route, APIRoute) and route.path == path and method.upper() in route.methods:
             return route
     raise AssertionError(f"Route not found: {method} {path}")
 
 
-def _extract_token_scope_dependency(route: APIRoute):
+def _extract_token_scope_dependency(route: ServedRoute):
     for dependency in route.dependencies:
         dep_fn = getattr(dependency, "dependency", None)
         if dep_fn is not None and getattr(dep_fn, "_tldw_token_scope", False):

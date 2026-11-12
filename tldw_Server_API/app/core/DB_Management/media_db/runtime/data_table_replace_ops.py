@@ -53,7 +53,7 @@ def replace_data_table_contents(
                 now,
                 1,
                 write_client_id,
-                0,
+                False,
                 column.get("prev_version"),
                 column.get("merge_parent_uuid"),
             )
@@ -84,7 +84,7 @@ def replace_data_table_contents(
                 now,
                 1,
                 write_client_id,
-                0,
+                False,
                 row.get("prev_version"),
                 row.get("merge_parent_uuid"),
             )

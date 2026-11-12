@@ -1,5 +1,6 @@
 """Snapshot authorization and path-free API contracts."""
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,9 @@ from tldw_Server_API.tests.LLM_Local.test_llamacpp_admin_config_api import (
 )
 
 pytestmark = pytest.mark.integration
+requires_posix_snapshots = pytest.mark.skipif(
+    not hasattr(os, "O_NOFOLLOW"), reason="secure snapshots require POSIX confinement"
+)
 
 ROUTES = [
     ("GET", "/slots"),
@@ -84,6 +88,7 @@ def test_all_routes_enforce_rate_limit(method, suffix):
         ("outcome_unknown", "stop_runtime"),
     ],
 )
+@requires_posix_snapshots
 def test_real_supervisor_stopped_catalog_token_and_cross_profile_receipts(tmp_path, state, recovery_action):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_profile_store import JsonLlamaCppProfileStore
     from tldw_Server_API.app.core.Local_LLM.llamacpp_runtime_models import LlamaCppProfile
@@ -137,6 +142,7 @@ def test_real_supervisor_stopped_catalog_token_and_cross_profile_receipts(tmp_pa
                 assert client.request(method, "/api/v1/llamacpp/profiles/p2" + suffix).status_code == 404
 
 
+@requires_posix_snapshots
 def test_authenticated_save_restore_delete_with_real_supervisor_factory(tmp_path):
     import asyncio
 

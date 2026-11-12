@@ -67,23 +67,9 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_models import (
     EmbeddingUsage,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventCategory, AuditEventType
-from tldw_Server_API.app.core.AuthNZ.byok_config import (
-    PROVIDER_APP_CONFIG_KEYS,
-    runtime_base_url_override_provenance,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import load_server_config_snapshot
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    ResolvedByokCredentials,
-    record_byok_missing_credentials,
-    resolve_byok_credentials,
-    resolve_static_server_fallback_from_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.permissions import EMBEDDINGS_ADMIN, SYSTEM_CONFIGURE
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal, is_single_user_principal
 from tldw_Server_API.app.core.AuthNZ.settings import is_single_user_profile_mode
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -125,8 +111,6 @@ from tldw_Server_API.app.core.Embeddings.provider_resolution import (
 )
 from tldw_Server_API.app.core.Embeddings.request_batching import (
     EmbeddingsRateLimitError,
-)
-from tldw_Server_API.app.core.Embeddings.request_batching import (
     create_embeddings_batch_async as batching_create_embeddings_batch_async,
 )
 from tldw_Server_API.app.core.Embeddings.request_types import (
@@ -159,18 +143,16 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _RetryPolicy,
-)
-from tldw_Server_API.app.core.http_client import (
     afetch as _http_afetch,
-)
-from tldw_Server_API.app.core.http_client import (
     create_async_client as _create_async_client,
 )
 
 # Circuit Breaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreaker
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import CircuitBreakerOpenError as CircuitBreakerError
-from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry as circuit_breaker_registry
+from tldw_Server_API.app.core.Infrastructure.circuit_breaker import (
+    CircuitBreaker,
+    CircuitBreakerOpenError as CircuitBreakerError,
+    registry as circuit_breaker_registry,
+)
 from tldw_Server_API.app.core.Infrastructure.redis_factory import (
     create_async_redis_client,
     ensure_async_client_closed,
@@ -184,10 +166,25 @@ from tldw_Server_API.app.core.LLM_Calls.providers.base import (
     EmbeddingsAdapterUnavailableError,
 )
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import (
+    PROVIDER_APP_CONFIG_KEYS,
+    runtime_base_url_override_provenance,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import load_server_config_snapshot
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    ResolvedByokCredentials,
+    record_byok_missing_credentials,
+    resolve_byok_credentials,
+    resolve_static_server_fallback_from_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_context, is_test_mode, is_truthy
 from tldw_Server_API.app.core.Usage.usage_tracker import (
     backfill_legacy_tokens_to_ledger,
     log_llm_usage,
@@ -220,7 +217,7 @@ _EMBEDDINGS_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     json.JSONDecodeError,
     *_REDIS_ERRORS,
 )
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 # ============================================================================
 # Embeddings Implementation Import (Safe/Lazy)
@@ -233,10 +230,8 @@ try:
         LocalAPICfg,
         ONNXModelCfg,
         OpenAIModelCfg,
-        resolve_model_storage_base_dir,
-    )
-    from tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create import (
         create_embeddings_batch_async as create_explicit_embeddings_batch_async,
+        resolve_model_storage_base_dir,
     )
 
     EMBEDDINGS_AVAILABLE = True
@@ -908,20 +903,11 @@ def _record_oauth_401_retry(provider: str, outcome: str) -> None:
         pass
 
 
-def _is_test_context() -> bool:
-    try:
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return True
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        pass
-    return env_flag_enabled("TESTING") or is_test_mode()
-
-
 def _should_skip_missing_key(
     provider: str,
     credentials: ResolvedByokCredentials | None = None,
 ) -> bool:
-    if not _is_test_context():
+    if not is_test_context():
         return False
     if credentials is None:
         return True
@@ -1495,7 +1481,7 @@ def _embedding_cache_key_secret() -> bytes:
     try:
         return derive_hmac_key()
     except ValueError:
-        if _is_test_context():
+        if is_test_context():
             # Keep cache keys deterministic in test contexts when AuthNZ secrets are absent.
             return b"tldw_embeddings_cache_hmac_fallback"
         raise
@@ -3848,11 +3834,8 @@ async def _reserve_embedding_rg_tokens(
 
     try:
         policy_id = str(getattr(request.state, "rg_policy_id", None) or "embeddings.default")
-        op_id = str(
-            getattr(request.state, "request_id", None)
-            or request.headers.get("X-Request-ID")
-            or uuid.uuid4().hex
-        )
+        # Never the client's X-Request-ID: a repeated op_id replays the cached reservation.
+        op_id = str(uuid.uuid4())
         entity = derive_entity_key(request)
         try:
             entity_scope, entity_value = entity.split(":", 1)
@@ -4373,11 +4356,8 @@ async def _create_embedding_legacy(
         if rg_governor is not None and rg_loader is not None:
             try:
                 policy_id = str(getattr(request.state, "rg_policy_id", None) or "embeddings.default")
-                rg_commit_op_id = str(
-                    getattr(request.state, "request_id", None)
-                    or request.headers.get("X-Request-ID")
-                    or uuid.uuid4().hex
-                )
+                # Never the client's X-Request-ID: a repeated op_id replays the cached reservation.
+                rg_commit_op_id = str(uuid.uuid4())
 
                 entity = derive_entity_key(request)
                 try:
@@ -5038,7 +5018,12 @@ async def create_embeddings_batch_endpoint(
 # Model Management Endpoints
 # ============================================================================
 
-@router.get("/embeddings/models", summary="List available embedding models")
+@router.get(
+    "/embeddings/models",
+    summary="List available embedding models",
+    # Capability disclosure: model ids and allowlist status.
+    dependencies=[Depends(get_request_user)],
+)
 async def list_embedding_models():
     """List configured/known models with allowlist status."""
     cfg = settings.get("EMBEDDING_CONFIG", {}) or {}

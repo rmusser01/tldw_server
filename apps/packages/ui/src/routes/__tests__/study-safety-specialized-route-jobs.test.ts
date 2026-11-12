@@ -71,9 +71,9 @@ describe("study, safety, and specialized route jobs", () => {
         }),
         expect.objectContaining({
           route: "/claims-review",
-          routeOwner: "next_alias",
-          canonicalComponent: "RouteRedirect:/content-review",
-          visibilityDecision: "alias_only"
+          routeOwner: "shared_route",
+          canonicalComponent: "ClaimsReviewShell",
+          visibilityDecision: "advanced_nav"
         }),
         expect.objectContaining({
           route: "/vn-assets",
@@ -91,10 +91,17 @@ describe("study, safety, and specialized route jobs", () => {
     )
   })
 
+  it("exposes Claims decisions as a shared advanced workflow", () => {
+    expect(getRouteMetadata("/claims-review")).toMatchObject({
+      canonicalPath: "/claims-review", surface: "advanced_self_hosted", commandPalette: "show", nav: "secondary", smoke: "manual"
+    })
+    expect(getRouteMetadata("/claims-review")?.redirectsTo).toBeUndefined()
+    expect(getRouteMetadata("/claims-review")?.availability).toEqual(["web", "extension_options"])
+  })
+
   it("keeps alias routes hidden and recoverable in route metadata", () => {
     const aliases = [
-      ["/moderation-playground", "/moderation/rules"],
-      ["/claims-review", "/content-review"]
+      ["/moderation-playground", "/moderation/rules"]
     ] as const
 
     for (const [route, destination] of aliases) {

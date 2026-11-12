@@ -105,6 +105,15 @@ for local development.
 
     Now you can make your changes locally.
 
+    If you work in several `git worktree` checkouts that share one virtualenv:
+    `pytest` always imports the first-party packages (`apps/*/src`,
+    `packages/*/src`) from the checkout it runs in, via
+    `[tool.pytest.ini_options] pythonpath`. Plain `python`, scripts and the server
+    do **not**: their editable installs point at whichever checkout ran
+    `pip install -e`. Do not re-run `pip install -e` from a worktree to "fix" that;
+    it repoints the shared venv for every other checkout. Use a separate
+    virtualenv per worktree if you need non-test runs of worktree code.
+
 1.  When you're done making changes, check that your changes pass flake8
     and the tests, including testing other Python versions with tox:
 

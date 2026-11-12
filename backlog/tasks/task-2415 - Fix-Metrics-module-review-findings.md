@@ -36,13 +36,13 @@ Docs/superpowers/plans/2026-06-23-metrics-module-review-fixes-implementation-pla
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started implementation. Added focused plan for Metrics review findings.
 
 Implemented Metrics registry fixes: user_id labels normalize to hashed user_hash values, gauge latest values are retained outside the rolling sample buffer, duplicate metric registration is compatibility-aware, typed helpers reject incompatible metric operations, negative counter increments are rejected, and unused logger_config references were removed. Verification: source .venv/bin/activate && python -m pytest -q --confcutdir=tldw_Server_API/tests/Metrics tldw_Server_API/tests/Metrics/test_metrics_label_normalization.py tldw_Server_API/tests/Metrics/test_metrics_logger_registry_bridge.py tldw_Server_API/tests/Metrics/test_metrics_cumulative_series_cap.py tldw_Server_API/tests/Metrics/test_audio_stt_metrics.py -> 25 passed, 2 warnings. Bandit: python -m bandit -r tldw_Server_API/app/core/Metrics -f json -o /tmp/bandit_metrics_module_fixes.json -> 0 results. Full repository test suite was not run; scope was the Metrics module review findings and unrelated repo-wide pytest setup imports heavy Research/RAG dependencies.
 
 PR review follow-up on 2026-06-24: rebased branch onto origin/dev, added docstrings and return annotations to new Metrics tests, rejected duplicate registrations with conflicting descriptions, and made label-name aggregation helpers treat user_id as the user_hash alias. Verification after review fixes: Metrics pytest focused suite -> 28 passed, 2 warnings; Bandit on tldw_Server_API/app/core/Metrics -> 0 results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -241,6 +241,15 @@ def test_share_link_resolve_rejects_malformed_token(tmp_path):
     assert response.json()["detail"] == "Malformed share token"
 
 
+
+def test_share_link_resolve_rejects_undecodable_signature_with_400(tmp_path):
+    """The public route answers 400, not 500, when the signature segment is not base64."""
+    db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="1")
+    client = _build_app(db, user_id=1)
+
+    response = client.get("/api/v1/chat/shared/conversations/AAAA.A")
+    assert response.status_code == 400, response.text
+
 def test_share_link_settings_write_uses_version_cas_and_surfaces_conflict():
     class _ConflictingDB:
         def __init__(self) -> None:

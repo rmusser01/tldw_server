@@ -1,9 +1,22 @@
+import "./native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import React from "react"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useChatActions } from "../useChatActions"
+import { useOriginalSdkSceneFixture } from "./sdk-original-scene-fixture"
+import { useChatActions as useRawChatActions } from "../useChatActions"
+import { useStoreMessageOption } from "@/store/option"
+import { captureChatDraftLoad, captureChatDraftSource } from "../chat-draft-transition"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
+
+const sceneSelection = vi.hoisted(() => ({ controller: null as unknown as import("../useHistorySelection").HistorySelectionController | null }))
+
+vi.mock("@/hooks/chat/useHistorySelection", async original => ({
+  ...await original<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelectionContext: () => sceneSelection.controller
+}))
 
 const {
   createChatMock,
@@ -37,11 +50,13 @@ const {
   releaseServicePromptSnapshotMock: vi.fn()
 }))
 
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async original => ({
+  ...await original<typeof import("@/services/service-prompts")>(),
   loadServicePromptSnapshot: loadServicePromptSnapshotMock
 }))
 
-vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
+vi.mock("@/hooks/chat-modes/normalChatMode", async original => ({
+  ...await original<typeof import("@/hooks/chat-modes/normalChatMode")>(),
   normalChatMode: normalChatModeMock
 }))
 
@@ -72,6 +87,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
 }))
 
 vi.mock("@/hooks/handlers/messageHandlers", () => ({
+  createNativeDeleteMessage: vi.fn(() => vi.fn(async () => false)),
   createRegenerateLastMessage: vi.fn(() => vi.fn()),
   createEditMessage: vi.fn(() => vi.fn()),
   createStopStreamingRequest: vi.fn(() => vi.fn()),
@@ -100,8 +116,8 @@ vi.mock("@/db/dexie/branch", () => ({
   generateBranchFromMessageIds: vi.fn(async () => null)
 }))
 
-vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: vi.fn(async () => null)
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>()
 }))
 
 vi.mock("@/utils/selected-character-storage", () => ({
@@ -130,11 +146,16 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: {
-    getState: () => ({ selectedModel: "deepseek-chat" as string | null })
+vi.mock("@/store/option", async original => {
+  const actual = await original<typeof import("@/store/option")>()
+  return {
+    ...actual,
+    useStoreMessageOption: {
+      getState: actual.useStoreMessageOption.getState,
+      setState: actual.useStoreMessageOption.setState
+    }
   }
-}))
+})
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
@@ -148,13 +169,13 @@ vi.mock("@/services/chat-surface-scope", () => ({
   buildChatSurfaceScopeKeyFromConfig: buildChatSurfaceScopeKeyFromConfigMock
 }))
 
-vi.mock("@/store/playground-session", () => ({
-  usePlaygroundSessionStore: {
-    getState: () => ({
-      saveSession: savePlaygroundSessionMock
-    })
-  }
-}))
+vi.mock("@/store/playground-session", async original => {
+  const actual = await original<typeof import("@/store/playground-session")>()
+  return { ...actual, usePlaygroundSessionStore: {
+    ...actual.usePlaygroundSessionStore,
+    getState: () => ({ ...actual.usePlaygroundSessionStore.getState(), saveSession: savePlaygroundSessionMock })
+  } }
+})
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -231,7 +252,13 @@ const createHookOptions = () => ({
   setServerChatClusterId: vi.fn(),
   setServerChatSource: vi.fn(),
   setServerChatExternalRef: vi.fn(),
-  ensureServerChatHistoryId: vi.fn(async () => "history-persona"),
+  ensureServerChatHistoryId: vi.fn(async (_id, _title, _signal, _snapshot, scene) => {
+    if (scene) {
+      if (!scene.acceptHistoryMirror?.("history-persona")) throw new Error("Original mirror source changed")
+      useStoreMessageOption.getState().setHistoryId("history-persona", { preserveServerChatId: true })
+    }
+    return "history-persona"
+  }),
   contextFiles: [],
   setContextFiles: vi.fn(),
   documentContext: null,
@@ -306,14 +333,20 @@ const deferred = <T,>() => {
   return { promise, resolve }
 }
 
+let entrySnapshot = servicePromptSnapshot
+const useChatActions = (options: Parameters<typeof useOriginalSdkSceneFixture>[0]) =>
+  useOriginalSdkSceneFixture(options, () => entrySnapshot)
+
 describe("useChatActions persona integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    sceneSelection.controller = null
+    entrySnapshot = servicePromptSnapshot
     syncChatSettingsForServerChatMock.mockResolvedValue(null)
     getConfigMock.mockResolvedValue({
       serverUrl: "http://127.0.0.1:8000",
-      authMode: "single-user",
-      apiKey: "test-key"
+      authMode: "multi-user",
+      authSource: "manual"
     })
     buildChatSurfaceScopeKeyFromConfigMock.mockReturnValue("scope:chat")
     loadServicePromptSnapshotMock.mockResolvedValue(servicePromptSnapshot)
@@ -336,9 +369,9 @@ describe("useChatActions persona integration", () => {
     normalChatModeMock.mockResolvedValue(undefined)
   })
 
-  it("creates a persona-backed chat with assistant_kind=persona", async () => {
-    const options = createHookOptions()
-    const { result } = renderHook(() => useChatActions(options as any))
+  it.each([false, true])("creates a persona-backed chat with assistant_kind=persona (temporary=%s)", async temporaryChat => {
+    const options = { ...createHookOptions(), temporaryChat }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -356,8 +389,13 @@ describe("useChatActions persona integration", () => {
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
-    expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1")
+    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: expect.any(AbortSignal) })
+    if (!temporaryChat) {
+      expect(createChatMock.mock.calls[0][1].signal).toBe(servicePromptSnapshot.scopeSignal)
+    }
+    expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1", { preserveTemporaryChat: temporaryChat })
+    expect(useStoreMessageOption.getState().temporaryChat).toBe(temporaryChat)
+    expect(normalChatModeMock).toHaveBeenCalledOnce()
     expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
     expect(options.setServerChatAssistantId).toHaveBeenCalledWith("garden-helper")
@@ -380,7 +418,7 @@ describe("useChatActions persona integration", () => {
         trackedAssistantDisplayName: "Garden Helper",
         trackedAssistantAvatarUrl: null,
         serverChatPersonaMemoryMode: "read_only",
-        scopeKey: servicePromptSnapshot.scopeKey,
+        scopeKey: temporaryChat ? "scope:chat" : servicePromptSnapshot.scopeKey,
         trackedAssistantSelection: expect.objectContaining({
           kind: "persona",
           id: "garden-helper",
@@ -412,26 +450,310 @@ describe("useChatActions persona integration", () => {
     )
   })
 
-  it.each(["turn", "reply"])("captures the tracked %s owner before mirror linking and releases it", async operation => {
-    const pending = deferred<typeof servicePromptSnapshot>()
-    loadServicePromptSnapshotMock.mockReturnValueOnce(pending.promise)
-    const options = { ...createHookOptions(), serverChatId: "persona-chat-1", serverChatMetaLoaded: true, serverChatAssistantKind: "persona", serverChatAssistantId: "garden-helper", compareFeatureEnabled: true }
-    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
-    let request!: Promise<unknown>
-    act(() => { request = operation === "turn" ? result.current.onSubmit({ message: "Owned follow-up", image: "" }) : result.current.sendPerModelReply({ clusterId: "cluster", modelId: "openai:gpt-4.1", message: "Owned reply" }) })
-    await vi.waitFor(() => expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1))
-    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled()
-    await act(async () => { pending.resolve(servicePromptSnapshot); await request })
-    expect(options.ensureServerChatHistoryId).toHaveBeenCalledWith("persona-chat-1", options.serverChatTitle || undefined, servicePromptSnapshot.scopeInvalidatedSignal, servicePromptSnapshot)
-    expect(servicePromptSnapshot.release).toHaveBeenCalledTimes(1)
-  })
+  it.each(["current", "new", "same-id", "account", "stop"])(
+    "retains exact persona creation ownership across %s",
+    async (boundary) => {
+      const created = deferred<{
+        id: string
+        assistant_kind: string
+        assistant_id: string
+      }>()
+      createChatMock.mockReturnValueOnce(created.promise)
+      const owner = new AbortController()
+      const snapshot = {
+        ...servicePromptSnapshot,
+        scopeInvalidatedSignal: owner.signal
+      }
+      entrySnapshot = snapshot
+      loadServicePromptSnapshotMock.mockResolvedValueOnce(snapshot)
+      const options = {
+        ...createHookOptions(),
+        historyId: null,
+        serverChatId: null
+      }
+      const hook = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+      const controller = new AbortController()
+      let pending!: Promise<unknown>
+      act(() => {
+        pending = hook.result.current.onSubmit({
+          message: "Original persona question",
+          image: "",
+          controller
+        })
+      })
+      try {
+        await vi.waitFor(() => expect(createChatMock).toHaveBeenCalledOnce())
+        if (boundary === "new" || boundary === "same-id") {
+          useStoreMessageOption.getState().startNewChatDraft(false)
+          if (boundary === "same-id")
+            useStoreMessageOption.setState({
+              historyId: null,
+              serverChatId: null
+            })
+        }
+        if (boundary === "account") owner.abort()
+        if (boundary === "stop") controller.abort()
+        await act(async () => {
+          created.resolve({
+            id: "owned-persona-created",
+            assistant_kind: "persona",
+            assistant_id: "garden-helper"
+          })
+          await pending
+        })
+        if (boundary === "current") {
+          expect(normalChatModeMock).toHaveBeenCalledOnce()
+          expect(useStoreMessageOption.getState()).toMatchObject({
+            historyId: "history-persona",
+            serverChatId: "owned-persona-created"
+          })
+          expect(
+            normalChatModeMock.mock.calls[0][6].actorSceneSend.isCurrent()
+          ).toBe(true)
+        } else {
+          expect(normalChatModeMock).not.toHaveBeenCalled()
+          expect(options.setServerChatId).not.toHaveBeenCalled()
+          expect(options.setServerChatMetaLoaded).not.toHaveBeenCalled()
+        }
+      } finally {
+        created.resolve({
+          id: "owned-persona-created",
+          assistant_kind: "persona",
+          assistant_id: "garden-helper"
+        })
+        await pending
+        hook.unmount()
+      }
+    }
+  )
+
+  it.each(["current", "new", "same-id"])(
+    "an existing Persona owns its first mirror publication across %s",
+    async (boundary) => {
+      const linking = deferred<void>()
+      const options = {
+        ...createHookOptions(),
+        historyId: null,
+        serverChatId: "existing-persona",
+        serverChatMetaLoaded: true,
+        serverChatAssistantKind: "persona" as const,
+        serverChatAssistantId: "garden-helper"
+      }
+      options.ensureServerChatHistoryId.mockImplementationOnce(
+        async (_id, _title, signal, _snapshot, scene) => {
+          await linking.promise
+          signal?.throwIfAborted()
+          if (scene && !scene.acceptHistoryMirror?.("first-persona-mirror"))
+            throw new Error("Original mirror source changed")
+          // The real legacy helper publishes too; omitting the fifth argument must not hide it.
+          useStoreMessageOption
+            .getState()
+            .setHistoryId("first-persona-mirror", { preserveServerChatId: true })
+          return "first-persona-mirror"
+        }
+      )
+      const hook = renderHook(() => useChatActions(options))
+      let pending!: Promise<unknown>
+      act(() => {
+        pending = hook.result.current.onSubmit({
+          message: "Existing Persona question",
+          image: ""
+        })
+      })
+      try {
+        await vi.waitFor(() =>
+          expect(options.ensureServerChatHistoryId).toHaveBeenCalledOnce()
+        )
+        if (boundary !== "current") {
+          useStoreMessageOption.getState().startNewChatDraft(false)
+          if (boundary === "same-id")
+            useStoreMessageOption.setState({
+              historyId: null,
+              serverChatId: "existing-persona"
+            })
+        }
+        await act(async () => {
+          linking.resolve()
+          await pending
+        })
+        expect(createChatMock).not.toHaveBeenCalled()
+        if (boundary === "current") {
+          expect(normalChatModeMock).toHaveBeenCalledOnce()
+          expect(normalChatModeMock.mock.calls[0][6]).toMatchObject({
+            historyId: "first-persona-mirror",
+            serverChatId: "existing-persona"
+          })
+          expect(
+            normalChatModeMock.mock.calls[0][6].actorSceneSend.isCurrent()
+          ).toBe(true)
+        } else {
+          expect(normalChatModeMock).not.toHaveBeenCalled()
+          expect(useStoreMessageOption.getState().historyId).toBeNull()
+        }
+      } finally {
+        linking.resolve()
+        await pending
+        hook.unmount()
+      }
+    }
+  )
+
+  it.each([false, true])(
+    "Temporary persona session configuration retains its original owner (retired=%s)",
+    async (retired) => {
+      const configuration = deferred<{ serverUrl: string; authMode: string }>()
+      getConfigMock.mockReturnValueOnce(configuration.promise)
+      const options = {
+        ...createHookOptions(),
+        temporaryChat: true,
+        historyId: null,
+        serverChatId: null
+      }
+      const hook = renderHook(() =>
+        useChatActions(options as unknown as Parameters<typeof useChatActions>[0])
+      )
+      let pending!: Promise<unknown>
+      act(() => {
+        pending = hook.result.current.onSubmit({
+          message: "Temporary persona question",
+          image: ""
+        })
+      })
+      try {
+        await vi.waitFor(() => expect(getConfigMock).toHaveBeenCalledOnce())
+        expect(loadServicePromptSnapshotMock).not.toHaveBeenCalled()
+        if (retired) useStoreMessageOption.getState().startNewChatDraft(true)
+        await act(async () => {
+          configuration.resolve({
+            serverUrl: "http://127.0.0.1:8000",
+            authMode: "multi-user"
+          })
+          await pending
+        })
+        expect(savePlaygroundSessionMock).toHaveBeenCalledTimes(retired ? 0 : 1)
+        expect(normalChatModeMock).toHaveBeenCalledTimes(retired ? 0 : 1)
+        expect(createChatMock.mock.calls[0][1]).toMatchObject({
+          requestScope: servicePromptSnapshot.requestScope,
+          signal: expect.any(AbortSignal)
+        })
+      } finally {
+        configuration.resolve({
+          serverUrl: "http://127.0.0.1:8000",
+          authMode: "multi-user"
+        })
+        await pending
+        hook.unmount()
+      }
+    }
+  )
+
+  it.each(["turn", "reply"])(
+    "captures the tracked %s owner before mirror linking and releases it",
+    async (operation) => {
+      const pending = deferred<typeof servicePromptSnapshot>()
+      loadServicePromptSnapshotMock.mockReturnValueOnce(pending.promise)
+      const options = {
+        ...createHookOptions(),
+        serverChatId: "persona-chat-1",
+        serverChatMetaLoaded: true,
+        serverChatAssistantKind: "persona",
+        serverChatAssistantId: "garden-helper",
+        compareFeatureEnabled: true
+      }
+      if (operation === "reply") {
+        // This declares only a private Scene locator, not H1 send/admission authority.
+        const account = {
+          requestScope: servicePromptSnapshot.requestScope,
+          isCurrent: () => !servicePromptSnapshot.scopeInvalidatedSignal.aborted
+        }
+        const ownerKey = chatDraftOwnerKey(account.requestScope)
+        const owner = {
+          kind: "native" as const,
+          owner_key: ownerKey,
+          conversation_id: "persona-chat-1",
+          request_scope: account.requestScope,
+          scope: { type: "global" as const },
+          validate_lease: account.isCurrent
+        }
+        const view = { owner_key: ownerKey, conversation_id: "persona-chat-1" }
+        const store = useStoreMessageOption
+        store.getState().startNewChatDraft(false)
+        store.setState({
+          historyId: options.historyId,
+          serverChatId: options.serverChatId,
+          selectedModel: options.selectedModel,
+          toolChoice: options.toolChoice
+        })
+        expect(
+          captureChatDraftLoad("switch")({ owner, view } as Parameters<
+            ReturnType<typeof captureChatDraftLoad>
+          >[0])
+        ).toBe(true)
+        const source = captureChatDraftSource(account.isCurrent)
+        sceneSelection.controller = {
+          draftAccount: account,
+          getCurrent: () => ({ owner, view, status: "ready" }),
+          fence: () => source.isCurrent
+        } as unknown as import("../useHistorySelection").HistorySelectionController
+      }
+      const hook = renderHook(() =>
+        operation === "turn"
+          ? useChatActions(
+              options as unknown as Parameters<typeof useChatActions>[0]
+            )
+          : useRawChatActions(
+              options as unknown as Parameters<typeof useRawChatActions>[0]
+            )
+      )
+      let request!: Promise<unknown>
+      act(() => {
+        request =
+          operation === "turn"
+            ? hook.result.current.onSubmit({
+                message: "Owned follow-up",
+                image: ""
+              })
+            : hook.result.current.sendPerModelReply({
+                clusterId: "cluster",
+                modelId: "openai:gpt-4.1",
+                message: "Owned reply"
+              })
+      })
+      try {
+        await vi.waitFor(() =>
+          expect(loadServicePromptSnapshotMock).toHaveBeenCalledTimes(1)
+        )
+        expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled()
+        await act(async () => {
+          pending.resolve(servicePromptSnapshot)
+          await request
+        })
+        expect(
+          options.ensureServerChatHistoryId.mock.calls[0].slice(0, 4)
+        ).toEqual([
+          "persona-chat-1",
+          options.serverChatTitle || undefined,
+          servicePromptSnapshot.scopeInvalidatedSignal,
+          servicePromptSnapshot
+        ])
+        expect(servicePromptSnapshot.release).toHaveBeenCalledTimes(1)
+      } finally {
+        pending.resolve(servicePromptSnapshot)
+        await request
+        hook.unmount()
+        sceneSelection.controller = null
+      }
+    }
+  )
 
   it("persists the canonical captured scope for a prompt-backed persona turn", async () => {
     const options = {
       ...createHookOptions(),
       webSearch: true
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -453,7 +775,7 @@ describe("useChatActions persona integration", () => {
       ...createHookOptions(),
       scope
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -513,7 +835,7 @@ describe("useChatActions persona integration", () => {
       assistant_id: "workspace-helper",
       persona_memory_mode: "read_write"
     })
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -579,6 +901,9 @@ describe("useChatActions persona integration", () => {
       expect(params.historyId).toBe("history-persona")
       expect(params.serverChatId).toBe("workspace-plain-chat")
       await params.saveMessageOnSuccess({
+        requestScope: params.servicePromptSnapshot?.requestScope,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
         historyId: "history-persona",
         isRegenerate: false,
         selectedModel: "deepseek-chat",
@@ -595,7 +920,7 @@ describe("useChatActions persona integration", () => {
       serverChatTitle: null,
       selectedAssistant: null
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -638,7 +963,7 @@ describe("useChatActions persona integration", () => {
         role: "user",
         content: "Plain workspace hello"
       }),
-      { scope }
+      { scope, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal }
     )
     expect(addChatMessageMock).toHaveBeenCalledWith(
       "workspace-plain-chat",
@@ -646,7 +971,7 @@ describe("useChatActions persona integration", () => {
         role: "assistant",
         content: "Plain workspace reply"
       }),
-      { scope }
+      { scope, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal }
     )
   })
 
@@ -655,6 +980,9 @@ describe("useChatActions persona integration", () => {
     normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
       const params = args[6] as { saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null> }
       await params.saveMessageOnSuccess({
+        requestScope: params.servicePromptSnapshot?.requestScope,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
         historyId: null, selectedModel: "deepseek-chat", message: "Hello", image: "",
         fullText: "Saved answer", source: [], saveToDb: true, conversationId: "first-saved-chat"
       })
@@ -664,7 +992,7 @@ describe("useChatActions persona integration", () => {
       serverChatAssistantKind: null, serverChatAssistantId: null,
       serverChatCharacterId: null, selectedAssistant: null, historyId: null
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
     await act(async () => { await result.current.onSubmit({ message: "Hello", image: "" }) })
     expect(options.setServerChatId).toHaveBeenCalledWith("first-saved-chat")
   })
@@ -697,7 +1025,7 @@ describe("useChatActions persona integration", () => {
       serverChatMetaLoaded: true,
       selectedAssistant: null
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -706,7 +1034,7 @@ describe("useChatActions persona integration", () => {
       })
     })
 
-    expect(getChatMock).toHaveBeenCalledWith("stale-global-chat", { scope })
+    expect(getChatMock).toHaveBeenCalledWith("stale-global-chat", { scope, requestScope: servicePromptSnapshot.requestScope, signal: expect.any(AbortSignal) })
     expect(options.setServerChatId).toHaveBeenCalledWith(null)
     expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
     expect(createChatMock).toHaveBeenCalledWith(
@@ -736,6 +1064,9 @@ describe("useChatActions persona integration", () => {
       expect(params.historyId).toBe("history-persona")
       expect(params.serverChatId).toBe("workspace-rag-chat")
       await params.saveMessageOnSuccess({
+        requestScope: params.servicePromptSnapshot?.requestScope,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
         historyId: "history-persona",
         isRegenerate: false,
         selectedModel: "deepseek-chat",
@@ -753,7 +1084,7 @@ describe("useChatActions persona integration", () => {
       serverChatTitle: null,
       selectedAssistant: null
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -807,6 +1138,7 @@ describe("useChatActions persona integration", () => {
       scopeSignal: new AbortController().signal,
       scopeInvalidatedSignal: scopeController.signal
     }
+    entrySnapshot = scopedSnapshot
     loadServicePromptSnapshotMock.mockResolvedValueOnce(scopedSnapshot)
     createChatMock.mockResolvedValueOnce({
       id: "workspace-scope-race-chat",
@@ -825,7 +1157,7 @@ describe("useChatActions persona integration", () => {
       selectedAssistant: null,
       ensureServerChatHistoryId: vi.fn(() => historyLink.promise)
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     let submission!: ReturnType<typeof result.current.onSubmit>
     act(() => {
@@ -852,7 +1184,8 @@ describe("useChatActions persona integration", () => {
       "workspace-scope-race-chat",
       "Workspace scope race",
       scopeController.signal,
-      scopedSnapshot
+      scopedSnapshot,
+      expect.objectContaining({ acceptHistoryMirror: expect.any(Function), isCurrent: expect.any(Function) })
     )
     expect(options.setServerChatId).not.toHaveBeenCalled()
     expect(options.setServerChatTitle).not.toHaveBeenCalled()
@@ -869,6 +1202,25 @@ describe("useChatActions persona integration", () => {
     expect(options.setServerChatExternalRef).not.toHaveBeenCalled()
     expect(options.invalidateServerChatHistory).not.toHaveBeenCalled()
     expect(ragModeMock).not.toHaveBeenCalled()
+  })
+
+  it("retains the draft until an existing Persona identity is loaded", async () => {
+    const options = {
+      ...createHookOptions(), serverChatId: "persona-chat-existing",
+      serverChatAssistantKind: "persona" as const, serverChatAssistantId: "garden-helper",
+      serverChatMetaLoaded: false
+    }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => {
+      expect(await result.current.onSubmit({ message: "Keep this draft", image: "" })).toMatchObject({
+        status: "failed", restoreDraft: true
+      })
+    })
+    expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(false)
+    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(options.setServerChatId).not.toHaveBeenCalled()
   })
 
   it("reuses an existing global conversation through inference and local persistence", async () => {
@@ -888,6 +1240,9 @@ describe("useChatActions persona integration", () => {
       }
       capturedParams = params
       await params.saveMessageOnSuccess({
+        requestScope: params.servicePromptSnapshot?.requestScope,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
         historyId: "history-persona",
         isRegenerate: false,
         selectedModel: "deepseek-chat",
@@ -901,9 +1256,10 @@ describe("useChatActions persona integration", () => {
       ...createHookOptions(),
       selectedAssistant: null,
       serverChatId: "existing-global-chat",
+      serverChatMetaLoaded: true,
       serverChatTitle: "Existing global chat"
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -922,7 +1278,7 @@ describe("useChatActions persona integration", () => {
     )
   })
 
-  it("does not forward stale character state into the first persona send", async () => {
+  it("does not let a draft Persona silently replace a loaded character identity", async () => {
     const options = {
       ...createHookOptions(),
       serverChatId: "character-chat-1",
@@ -938,63 +1294,34 @@ describe("useChatActions persona integration", () => {
       serverChatSource: "old-source",
       serverChatExternalRef: "old-ref"
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
-      await result.current.onSubmit({
-        message: "Hello persona",
-        image: ""
+      expect(await result.current.onSubmit({ message: "Hello persona", image: "" })).toMatchObject({
+        status: "failed", restoreDraft: true
       })
     })
 
-    expect(options.setServerChatId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith(null)
-    expect(options.setServerChatAssistantId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
-    expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
-    expect(options.setServerChatTitle).toHaveBeenCalledWith(null)
-    expect(options.setServerChatState).toHaveBeenCalledWith("in-progress")
-    expect(options.setServerChatVersion).toHaveBeenCalledWith(null)
-    expect(options.setServerChatTopic).toHaveBeenCalledWith(null)
-    expect(options.setServerChatClusterId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatSource).toHaveBeenCalledWith(null)
-    expect(options.setServerChatExternalRef).toHaveBeenCalledWith(null)
-    expect(createChatMock).toHaveBeenCalledWith({
-      assistant_kind: "persona",
-      assistant_id: "garden-helper",
-      persona_memory_mode: "read_only",
-      state: "in-progress",
-      topic_label: undefined,
-      cluster_id: undefined,
-      source: undefined,
-      external_ref: undefined
-    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
-    expect(options.setServerChatAssistantKind).toHaveBeenLastCalledWith("persona")
-    expect(options.setServerChatAssistantId).toHaveBeenLastCalledWith(
-      "garden-helper"
-    )
-    expect(normalChatModeMock).toHaveBeenCalledWith(
-      "Hello persona",
-      "",
-      false,
-      [],
-      [],
-      expect.any(AbortSignal),
-      expect.objectContaining({
-        assistantIdentity: {
-          name: "Garden Helper",
-          avatarUrl: undefined
-        },
-        serverChatId: "persona-chat-1"
-      })
-    )
+    expect(useStoreMessageOption.getState()).toMatchObject({
+      serverChatId: "character-chat-1", serverChatCharacterId: 42,
+      serverChatAssistantKind: "character", serverChatMetaLoaded: true
+    })
+    for (const key of [
+      "setServerChatId", "setServerChatCharacterId", "setServerChatAssistantKind",
+      "setServerChatAssistantId", "setServerChatPersonaMemoryMode", "setServerChatMetaLoaded",
+      "setServerChatTitle", "setServerChatState", "setServerChatVersion", "setServerChatTopic",
+      "setServerChatClusterId", "setServerChatSource", "setServerChatExternalRef"
+    ] as const) expect(options[key]).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
   })
 
   it("keeps persona routing ahead of character fallback when persona chats carry a character id", async () => {
     const options = {
       ...createHookOptions(),
       serverChatId: "persona-chat-existing",
+      serverChatMetaLoaded: true,
       serverChatAssistantKind: "persona" as const,
       serverChatAssistantId: "garden-helper",
       serverChatCharacterId: "char-shadow",
@@ -1004,7 +1331,7 @@ describe("useChatActions persona integration", () => {
         system_prompt: "Stale prompt"
       }
     }
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({
@@ -1052,9 +1379,13 @@ describe("useChatActions persona integration", () => {
     )
     normalChatModeMock.mockImplementationOnce(async (...args: unknown[]) => {
       const params = args[6] as {
+        servicePromptSnapshot?: ServicePromptSnapshot
         saveMessageOnSuccess: (payload: Record<string, unknown>) => Promise<string | null>
       }
       await params.saveMessageOnSuccess({
+        requestScope: params.servicePromptSnapshot?.requestScope,
+        scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+        scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
         historyId: null,
         isRegenerate: false,
         selectedModel: "deepseek-chat",
@@ -1068,7 +1399,7 @@ describe("useChatActions persona integration", () => {
       })
     })
 
-    const { result } = renderHook(() => useChatActions(options as any))
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
       await result.current.onSubmit({

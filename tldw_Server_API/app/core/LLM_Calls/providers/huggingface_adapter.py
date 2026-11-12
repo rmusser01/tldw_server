@@ -7,7 +7,6 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_config import is_runtime_base_url_override
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
@@ -19,13 +18,11 @@ from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
     merge_extra_body,
     merge_extra_headers,
 )
-from tldw_Server_API.app.core.LLM_Calls.sse import (
-    finalize_stream,
-    is_done_line,
-    normalize_provider_line,
-    sse_done,
+from tldw_Server_API.app.core.LLM_Calls.streaming import (
+    iter_sse_lines_raising,
+    wrap_sync_stream,
 )
-from tldw_Server_API.app.core.LLM_Calls.streaming import wrap_sync_stream
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import is_runtime_base_url_override
 
 from .base import ChatProvider
 
@@ -45,7 +42,7 @@ def _optional_config_text(value: Any) -> str | None:
 
 def _configuration_error() -> Exception:
     """Build one bounded configuration error without reflecting endpoint data."""
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
     return ChatConfigurationError(
         provider="huggingface",
@@ -181,7 +178,7 @@ class HuggingFaceAdapter(ChatProvider):
             try:
                 model_path = encode_huggingface_model_path(model)
             except ValueError:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+                from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 
                 raise ChatBadRequestError(
                     provider=self.name,
@@ -277,27 +274,7 @@ class HuggingFaceAdapter(ChatProvider):
             with http_client_factory(timeout=resolved_timeout) as client:
                 with client.stream("POST", url, headers=headers, json=payload) as resp:
                     resp.raise_for_status()
-                    seen_done = False
-                    for raw in resp.iter_lines():
-                        if not raw:
-                            continue
-                        try:
-                            line = raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else str(raw)
-                        except Exception:
-                            line = str(raw)
-                        self._raise_if_in_band_provider_error(
-                            line,
-                            phase="stream_response",
-                        )
-                        if is_done_line(line):
-                            if not seen_done:
-                                seen_done = True
-                                yield sse_done()
-                            continue
-                        normalized = normalize_provider_line(line)
-                        if normalized is not None:
-                            yield normalized
-                    yield from finalize_stream(response=resp, done_already=seen_done)
+                    yield from iter_sse_lines_raising(resp, provider=self.name)
             return
         except Exception as e:
             raise_detached_error(self.normalize_error(e))

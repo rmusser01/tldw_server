@@ -28,6 +28,145 @@ tracker. Host reboot and launchd validation are explicit manual/operator-gated
 drills; this tracker records whether those drills were run or intentionally
 skipped for a prepared-host evidence packet.
 
+## 2026-11-01: Real-VM Disposable Payload Cleanup (Accepted)
+
+- TASK-15412 ran the unchanged failure workflow on Apple Silicon arm64,
+  macOS 26.5.2 (25F84), from isolated branch
+  `codex/vz-real-cleanup-acceptance`, based on dev
+  `61d02ed484a3c80f5423676b959cf14e7b572a62`. No runtime source was edited.
+- Historical September refreshed-source/helper paths were absent. The existing
+  canonical Debian bundle was preflighted through an owned disposable VM.
+  A current guest agent was built offline and installed, using the existing
+  journal-recovering installer, into a separate offline input clone. The
+  canonical bundle was never modified or booted directly. Preparation and
+  targeted real-VM cleanup receipts are retained under
+  `~/Library/Logs/tldw-vz-real-cleanup-20261101-source/` and
+  `~/Library/Logs/tldw-vz-real-cleanup-20261101-preflight/` respectively.
+- Invocation after activating the project venv:
+
+  ```bash
+  TLDW_TEST_NO_DOCKER=1 PYTHONDONTWRITEBYTECODE=1 \
+    python tools/macos-vz-helper/scripts/vz-failure-drill.py \
+      --allow-fault-injection \
+      --source-bundle "$HOME/Library/Logs/tldw-vz-real-cleanup-20261101-source/image-store/runs/healthy-refreshed-source/bundle" \
+      --helper tools/macos-vz-helper/.build/debug/macos-vz-helper \
+      --evidence-dir "$HOME/Library/Logs/tldw-vz-real-cleanup-20261101-full"
+  ```
+
+- The command exited zero. All twelve cases met acceptance: six positive live
+  tests passed and six negative controls failed only at their intended
+  assertions after proven real execution. There were no skips, unexpected
+  failures, errors or cleanup uncertainties. Each case had empty owned VM
+  inventory and closed disk handles. All six prepared-source final comparisons
+  and the selected input before/after comparison passed before removal.
+- Default `remove-payloads` finalization removed **108 boot payload files from
+  36 invocation-owned bundles**. No `--keep-bundles` override was used.
+  Independent read-only audit verified all recorded payload names were absent,
+  each had a final SHA-256 record, both bundle/run manifests remained, and no
+  `.payload-cleanup-*` staging directories remained. Ninety manifest/build-info
+  hashes captured during finalization also matched after completion. This is
+  a logical file-removal count, not a measurement of reclaimed APFS space.
+- The original canonical rootfs remained
+  `e52c82e96667f6daa8f7e1d40be8a655aad110cd2c5acedb0a9fb5fa01118cbf`;
+  selected refreshed input rootfs remained
+  `cef38135beae00e6b517d447fb6226bdf7ebacc863b259eb63bf65c95774d01c`.
+  Both inputs are deliberately retained, not disposable run payloads.
+  Current installed guest-agent SHA-256:
+  `24db849ef1d8cabdf2bc7e8de344d431634f21541334dca6567c5af94adb9be5`.
+  Signed helper SHA-256:
+  `fffcf728bd0d1af9239c21e6bc45daa83cc14df5f479f3a3431d8db2ce1a9caa`.
+- Full receipt: `~/Library/Logs/tldw-vz-real-cleanup-20261101-full/receipt.json`,
+  SHA-256 `86ca2f4ae3c199c486da4143bf8af82f984ff34d3d1d449d2e33e9d1e57ea3d7`.
+  `independent-audit.json` records the 12-case/36-bundle/108-removal audit and
+  verification of all 70 recorded execution-input hashes. The packet retains
+  JUnit, case results, logs, provenance, the signed `helper-used`, and audit
+  script. Preparation packets retain their operator scripts.
+- Real helper teardown passed: empty VM inventory, closed handles, helper
+  shutdown, socket/PID absence and private-runtime removal. Independent
+  process/handle checks found no owned helper. No default-helper takeover,
+  Docker, host reboot, guest distribution build or historical artifact deletion
+  occurred. Portable scope: 231 passed plus two expected native opt-in skips;
+  explicit native controls: two passed. Swift: 95 passed; Go guest tests passed;
+  Ruff, Black, four canonical task-format tests, scoped Bandit and independent
+  read-only review passed. This closes the live cleanup
+  evidence gap, not host-reboot, arbitrary kernel/VZ-callback hang, workspace
+  path-escape, hostile same-UID interference or SIGKILL/host-failure guarantees.
+
+## 2026-09-26: Initramfs Boot-Stall Workflow (Accepted)
+
+- TASK-13243.10 ran on Apple Silicon `Mac17,6`, macOS 26.5.2, in an isolated
+  working copy based on `a2826f103f02a67f57adb40ed048dbfa2ecfc6e5`. The receipt
+  records the exact uncommitted fixture, workflow and host-test input hashes.
+  Every recorded input hash was rechecked against the final files after the run.
+- PR #3022 review follow-up rebased onto `f5fa1f3a41855aa02871d8b76d0ec0cebbaf9e07`
+  and changed only helper docstrings plus portable test annotations/scenario
+  separation. The receipt's `boot_stall.py` hash matches implementation commit
+  `ae56231b8be42c5601403f14b4186b99f008e10d`, not the expanded docstrings. Its
+  executable AST is unchanged after stripping docstrings; the other 64 of 65
+  recorded input hashes still match. No new live VM run occurred in this follow-up.
+- Earlier September 25 bundle/evidence paths are absent locally; they remain
+  historical records, not available prerequisites for this run. The available
+  Debian bookworm arm64 source under
+  `~/Library/Application Support/tldw/sandbox-images/source-bundles/debian-bookworm-arm64/bundle`
+  passed a fresh isolated baseline smoke. A separate disposable source clone
+  received the current production guest agent; no Docker, host reboot, default
+  helper takeover or canonical bundle mutation was used.
+- Source preparation exposed a pending ext4 journal. Read-only `e2fsck -fn`
+  skipped replay before raw `debugfs` writes; a later clone boot reported bad
+  extents, and the preserved-agent control reported permission denial followed
+  by bitmap-checksum corruption. The test-only offline installers now recover
+  the target journal first, accepting only `e2fsck -p` status 0 or 1, before
+  installed-byte verification and the final read-only filesystem check. The
+  canonical source remained unchanged in the preparation receipt at
+  `~/Library/Logs/tldw-vz-journal-experiment-20260926/receipt.json`.
+- Accepted input bundle:
+  `~/Library/Logs/tldw-vz-journal-experiment-20260926/image-store/runs/journal-clean-source/bundle`.
+  SHA-256: rootfs `c114ce9b64cbd55fa1b7b042e7c8ac9928629e7f49571bcb3dfc5c42ea2a6db6`,
+  kernel `6dc5255afb8c7722896b860e50a892c1a1f0e774a18338dc259e19736f27a3ef`,
+  initrd `89ae29154c08e22d09714588bfa94e7ed5894316c89c819b84be62f4e213a054`.
+  Signed current helper SHA-256:
+  `2db4d8c7b4ebc1b88189af736eb131107bddb36f71c4f9a0702a082f8104541b`.
+- Invocation from the isolated worktree after activating the repository venv:
+
+  ```bash
+  TLDW_TEST_NO_DOCKER=1 python tools/macos-vz-helper/scripts/vz-failure-drill.py \
+    --allow-fault-injection \
+    --source-bundle "$HOME/Library/Logs/tldw-vz-journal-experiment-20260926/image-store/runs/journal-clean-source/bundle" \
+    --helper tools/macos-vz-helper/.build/debug/macos-vz-helper \
+    --evidence-dir "$HOME/Library/Logs/tldw-vz-boot-stall-20260926-r3"
+  ```
+
+- Full receipt: `~/Library/Logs/tldw-vz-boot-stall-20260926-r3/receipt.json`.
+  All twelve cases were accepted: six positive real-VM tests and six controls
+  failing only at their intended execution assertions with completed real
+  fault-VM execution. No skips, errors or cleanup failures occurred. Each case
+  had empty VM inventory and closed disk handles. Final helper shutdown,
+  private-runtime removal, and unchanged selected input/all six fault-source
+  hashes passed. No helper or builder VM process remained after the workflow.
+- The stall VM `214c8cbb-9d24-4ca3-b17a-24871c530fc8` emitted exactly one fresh
+  serial proof with `mode=stall` and `stage=initramfs` before original `/init`,
+  rootfs mounting or agent startup. It failed with `guest_transport_timeout`
+  after 15.077 seconds, without exec or reusable control state. Healthy recovery
+  ran two successful commands on replacement VM
+  `341571f8-112a-4f8e-9084-07a5696d3602`. The same-wrapper continue control
+  produced correlated serial proof and completed its real command on
+  `4ccb6c79-9300-49cf-b6a2-1d386cca269f` with normal validation enabled.
+- The boot-stall preparation changed only its disposable initrd; its rootfs
+  hash matched the selected input. Original `/init` hash and before/after initrd
+  hashes are retained in the fault source's `build-info.json`. Boot host-test
+  SHA-256: `6e466e2c648302c6399cea06906b7f8dd9754335b0dda2de02579fd72c1c04b6`.
+- Portable checks: 259 focused tests passed with six live opt-in tests skipped;
+  another 226 helper/docs/workflow checks passed. Ruff, Black, four shell syntax
+  checks, diff checks and Bandit passed; intentional pytest assertions were
+  excluded from Bandit. Independent review found no remaining actionable issue.
+- Failed `r1` and `r2` receipts remain under
+  `~/Library/Logs/tldw-vz-boot-stall-20260926-r1/` and
+  `~/Library/Logs/tldw-vz-boot-stall-20260926-r2/`: old-agent stdout loss and the
+  preserved-agent negative-control timeout respectively. Neither is acceptance,
+  and neither reached the new boot-stall cases. This acceptance proves an
+  early-userspace stall, not arbitrary kernel hangs, a stalled Apple VZ start
+  callback, host reboot recovery, or actual workspace mount/path-escape isolation.
+
 ## 2026-09-25: Missing-Agent Startup Drill (Accepted)
 
 - Local operator run on Apple Silicon `Mac17,6` (arm64), macOS 26.5.2, branch
@@ -1406,8 +1545,9 @@ triage issue.
 | Prepared-host default smoke evidence | Recorded locally on 2026-06-16 with helper daemon smoke, real ephemeral execution, same-session reuse, and recovery diagnostics/dry-run repair smoke passing. | Repeat periodically through a trusted local or host-gated run and add newer evidence packets as needed. |
 | Failure-drill evidence | Recorded locally on 2026-06-16 with drill-owned stale VM replacement and smoke-owned helper restart drill passing. | Repeat when runtime/helper recovery behavior changes; keep manual opt-in only. |
 | Launchd-drill evidence | Recorded real VM smoke on 2026-09-13 (3 tests, no skips), plus a separate live-session restart test (1 passed, no skips/errors) proving changed helper generation, stale-VM replacement, replacement reuse, and cleanup. The latter exposed and fixed guest capped-output loss before acceptance. Durable artifacts and failed attempts are recorded above. | Repeat both bounded drills when helper lifecycle, signing, guest transport, or image preparation changes. Keep launchd validation explicitly operator-requested; host reboot remains separate. |
+| Disposable boot-payload cleanup | Real twelve-case acceptance recorded on 2026-11-01: 108 boot files removed from 36 owned bundles after source verification, real VM/helper teardown and closed-handle checks; hashes, manifests and logs retained. Earlier native tiny-file controls remain separate coverage. | Repeat when allocation, teardown, ownership or deletion behavior changes. Preserve source inputs; unknown checks retain payloads and fail acceptance. |
 | Host reboot recovery | Manual `host-reboot-drill pre/post` procedure only and out of scheduled CI. | Record results when a maintainer explicitly runs the reboot drill on a prepared host that can tolerate disruptive reboot testing and preserve logs. |
-| Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver and guest-readiness failure cleanup. Manual real acknowledged-handshake readiness withholding, timeout cleanup, and healthy session reuse passed twice on 2026-09-13 with a normal-ready negative control. A separate no-agent-connection startup timeout and recovery drill passed on 2026-09-25. The default smoke still does not inject faults. | Repeat the opt-in drills when the handshake or lifecycle changes. Kernel boot hangs remain separate; preserve stable reasons and artifact pointers rather than exposing raw serial logs. |
+| Stuck boot/readiness | Host-independent helper and runner coverage verifies boot-driver and guest-readiness failure cleanup. Manual real acknowledged-handshake readiness withholding, timeout cleanup, and healthy session reuse passed twice on 2026-09-13 with a normal-ready negative control. A separate no-agent-connection startup timeout and recovery drill passed on 2026-09-25. The twelve-case workflow on 2026-09-26 additionally proved a serial-correlated initramfs PID1 stall, bounded transport timeout, cleanup, healthy recovery/reuse and same-wrapper continue control. The default smoke still does not inject faults. | Repeat the opt-in drills when the handshake or lifecycle changes. Arbitrary kernel hangs and stalled Apple VZ start callbacks remain separate; preserve stable reasons and artifact pointers rather than exposing raw serial logs. |
 | Guest-agent mismatch | The checked-in eight-case workflow on 2026-09-14 proved missing-`exec`, guest wire protocol and advertised workspace mismatch rejection, cleanup, healthy recovery and session reuse. The ten-case workflow on 2026-09-25 added real missing-agent startup absence with a normal-agent negative control. Not part of default smoke. | Repeat the opted-in workflow when handshake or admission changes. Actual mount/path-escape isolation remains a separate evidence case under the lifecycle-drill contract. |
 | Stale socket handling | Manual stale-socket prepared-host evidence was recorded locally on 2026-07-03 with controlled inactive socket recovery, helper start/status verification, and explicit stop cleanup passing. | Repeat when helper socket-safety behavior or the operator drill command changes; keep it manual-only and out of PR/push/scheduled destructive triggers. |
 | Direct-bundle smoke mutability | Closed for the default smoke path by the 2026-06-16 disposable-clone evidence and repeated on 2026-06-20 after host reboot: source bundle hashes stayed identical before/after while the disposable run bundle rootfs hash changed after execution. | Repeat periodically when the smoke wrapper, image-store materializer, or helper VM write path changes. |

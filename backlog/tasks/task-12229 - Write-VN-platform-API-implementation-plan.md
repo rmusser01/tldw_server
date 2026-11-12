@@ -43,9 +43,9 @@ Create a phased implementation plan from the reviewed VN platform API design spe
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-10-vn-platform-api-implementation-plan.md. Mapped existing VN assets/play modules, route registration, schemas, tests, Jobs, generated-file storage, policy/script/audio additions, and docs. Plan reviewer initially found gaps in setup-options, idempotency, Jobs-backed VN audio, capabilities, router registration, script policy-evaluate, media-reference validation, runtime replay/randomness, admin/RBAC, cleanup blockers, frontend route constants, generated-profile field coverage, content validation, and safety metadata coverage. Updated the plan and re-reviewed until the reviewer returned approved. Verification: git diff --check exited 0; plan file exists; targeted rg checks confirmed required plan sections and review-fix markers. Bandit is not applicable because this touches markdown/task metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

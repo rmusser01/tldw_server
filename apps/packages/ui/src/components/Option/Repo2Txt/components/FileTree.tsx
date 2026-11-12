@@ -1,12 +1,18 @@
 import type { RepoTreeNode } from "../providers/types"
 
 type FileTreeProps = {
+  disabled?: boolean
   nodes: RepoTreeNode[]
   selectedPaths: Set<string>
   onTogglePath: (path: string) => void
 }
 
-export function FileTree({ nodes, selectedPaths, onTogglePath }: FileTreeProps) {
+export function FileTree({
+  nodes,
+  selectedPaths,
+  onTogglePath,
+  disabled
+}: FileTreeProps) {
   if (nodes.length === 0) {
     return <p className="text-sm text-text-subtle">No files loaded.</p>
   }
@@ -18,12 +24,10 @@ export function FileTree({ nodes, selectedPaths, onTogglePath }: FileTreeProps) 
         {nodes
           .filter((node) => node.type === "blob")
           .map((node) => (
-            <li
-              key={node.path}
-              className="flex items-center gap-2 text-sm"
-            >
+            <li key={node.path} className="flex items-center gap-2 text-sm">
               <input
                 type="checkbox"
+                disabled={disabled}
                 checked={selectedPaths.has(node.path)}
                 onChange={() => onTogglePath(node.path)}
                 aria-label={`Select ${node.path}`}

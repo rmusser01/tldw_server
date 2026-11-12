@@ -86,4 +86,26 @@ describe("audio studio store", () => {
     expect(state.projects[0].title).toBe("Local title")
     expect(state.revisionConflicts["project-1"]?.incoming.title).toBe("Server title")
   })
+  it("B06 list refresh preserves unsaved edits even at the same revision", () => {
+    const store = useAudioStudioStore.getState()
+    store.setProjects([project({ sections: [{ section_id: "s1", workflow: "narration", order: 0, body_text: "Saved" }] })])
+    store.setActiveProjectId("project-1")
+    store.updateProjectLocal("project-1", { title: "Unsaved" })
+    store.setProjects([{ project_id: "project-1", title: "Untitled", workflow: "narration", status: "draft", revision_id: "rev-1" }])
+    expect(useAudioStudioStore.getState().activeProject?.title).toBe("Unsaved")
+    expect(useAudioStudioStore.getState().activeProject?.sections[0].body_text).toBe("Saved")
+  })
+
+  it("B06 metadata refresh retains hydrated sections and records revision conflicts", () => {
+    const store = useAudioStudioStore.getState()
+    store.setProjects([project({ sections: [{ section_id: "s1", workflow: "narration", order: 0, body_text: "Saved" }] })])
+    store.setActiveProjectId("project-1")
+    store.setProjects([{ project_id: "project-1", title: "New title", workflow: "narration", status: "draft", revision_id: "rev-1" }])
+    expect(useAudioStudioStore.getState().activeProject?.sections).toHaveLength(1)
+    store.updateProjectLocal("project-1", { title: "Unsaved" })
+    store.setProjects([project({ title: "Remote", revision_id: "rev-2" })])
+    expect(useAudioStudioStore.getState().activeProject?.title).toBe("Unsaved")
+    expect(useAudioStudioStore.getState().revisionConflicts["project-1"]?.incoming.title).toBe("Remote")
+  })
+
 })

@@ -1,7 +1,9 @@
+from collections.abc import Callable
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     AdminPrincipal,
@@ -11,7 +13,13 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_request_user,
 )
-from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
+    ClaimsClusterRebuildRouteContext,
+    get_claim_cluster_rebuild_context,
+    get_media_db_for_user,
+)
+from tldw_Server_API.app.api.v1.API_Deps.jobs_admin_deps import authorize_jobs_admin_domain_read
+from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimNotificationResponse,
     ClaimNotificationsAckRequest,
@@ -29,6 +37,8 @@ from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
     ClaimsAnalyticsExportResponse,
     ClaimsClusterLinkCreate,
     ClaimsClusterLinkResponse,
+    ClaimsClusterRebuildAccepted,
+    ClaimsClusterRebuildConflict,
     ClaimsExtractorCatalogResponse,
     ClaimsMonitoringSettingsResponse,
     ClaimsMonitoringSettingsUpdate,
@@ -45,8 +55,15 @@ from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
+from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionRejectionReason
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 router = APIRouter(prefix="/claims", tags=["claims"])
+
+
+def get_claim_cluster_job_manager_factory() -> Callable[[], Any]:
+    """Inject lazy resolution so manager setup and admission share a worker thread."""
+    return get_job_manager
 
 
 async def _enforce_claims_export_rate_limit(request: Request) -> None:
@@ -696,26 +713,125 @@ def list_claim_clusters(
     )
 
 
-@router.post("/clusters/rebuild")
-def rebuild_claim_clusters(
+@router.post(
+    "/clusters/rebuild",
+    response_model=dict[str, Any],
+    responses={
+        200: {"description": "Legacy synchronous rebuild result, including best-effort Watchlists fields."},
+        202: {
+            "model": ClaimsClusterRebuildAccepted,
+            "description": "Accepted or replayed Jobs reference; status remains Jobs-owned.",
+            "headers": {"Location": {"description": "Equal to status_url.", "schema": {"type": "string"}}},
+        },
+        400: {"description": "Invalid clustering method or owner."},
+        403: {"description": "Claims operation, owner override or Jobs status link not authorized."},
+        409: {
+            "model": ClaimsClusterRebuildConflict,
+            "description": "Conflicting active settings or retained request key.",
+        },
+        429: {"description": "Ingress rate limit or Jobs quota rejection."},
+        503: {"description": "Jobs admission or required status route unavailable; no synchronous fallback."},
+    },
+    openapi_extra={
+        "parameters": [
+            {
+                "name": "Idempotency-Key",
+                "in": "header",
+                "required": False,
+                "schema": {"type": "string"},
+                "description": "Async only: 1..128 printable ASCII characters, no surrounding whitespace. Ignored in synchronous mode.",
+            }
+        ],
+    },
+)
+async def rebuild_claim_clusters(
+    request: Request,
     min_size: int = Query(2, ge=1, le=1000),
     method: Optional[str] = Query(None, description="embeddings or exact"),
     similarity_threshold: Optional[float] = Query(None, ge=0.0, le=1.0),
     user_id: Optional[int] = None,
     principal: AuthPrincipal = Depends(get_auth_principal),
     current_user: User = Depends(get_request_user),
-    db: Any = Depends(get_media_db_for_user),
-) -> dict[str, Any]:
-    """Rebuild claim clusters using stored embeddings."""
-    return claims_service.rebuild_claim_clusters(
-        min_size=min_size,
-        method=method,
-        similarity_threshold=similarity_threshold,
+    context: ClaimsClusterRebuildRouteContext = Depends(get_claim_cluster_rebuild_context),
+    job_manager_factory: Callable[[], Any] = Depends(get_claim_cluster_job_manager_factory),
+) -> Any:
+    """Preserve legacy rebuilds or admit an authorized, UUID-addressed Job."""
+    if not context.async_enabled:
+        return await run_in_threadpool(
+            claims_service.rebuild_claim_clusters,
+            min_size=min_size,
+            method=method,
+            similarity_threshold=similarity_threshold,
+            user_id=user_id,
+            principal=principal,
+            current_user=current_user,
+            db=context.db,
+        )
+
+    await check_rate_limit(request)
+    owner = claims_service.authorize_claim_cluster_rebuild_owner(
         user_id=user_id,
         principal=principal,
         current_user=current_user,
-        db=db,
     )
+    foreign = owner != str(current_user.id)
+    if foreign:
+        await authorize_jobs_admin_domain_read(principal, domain="claims")
+    request_key = request.headers.get("Idempotency-Key")
+    if request_key is not None and (
+        not 1 <= len(request_key) <= 128
+        or request_key != request_key.strip()
+        or any(not 32 <= ord(char) <= 126 for char in request_key)
+    ):
+        raise HTTPException(status_code=422, detail="Invalid Idempotency-Key")
+
+    required_route = "/api/v1/jobs/{job_id}" if foreign else "/api/v1/jobs/owned/{job_uuid}"
+    if not any(
+        route.path == required_route and "GET" in route.methods for route in iter_served_routes(request.app.routes)
+    ):
+        raise HTTPException(status_code=503, detail="Claims cluster rebuild status unavailable")
+
+    try:
+        # Manager construction and the complete scoped admission execute together
+        # off the event loop. No Jobs context tokens cross execution contexts.
+        admission = await run_in_threadpool(
+            lambda: claims_service.admit_claim_cluster_rebuild(
+                min_size=min_size,
+                method=method,
+                similarity_threshold=similarity_threshold,
+                user_id=user_id,
+                request_key=request_key,
+                principal=principal,
+                current_user=current_user,
+                job_manager=job_manager_factory(),
+            )
+        )
+        if admission.kind == "rejected":
+            if admission.rejection.admission_rejection_reason in {
+                AdmissionRejectionReason.QUOTA_EXCEEDED,
+                AdmissionRejectionReason.FAIR_SHARE_LIMIT,
+            }:
+                raise HTTPException(status_code=429, detail="Jobs admission quota exceeded")
+            raise HTTPException(status_code=503, detail="Claims cluster rebuild admission unavailable")
+        job = admission.job
+        status_url = (
+            f"/api/v1/jobs/{job['id']}?domain=claims&job_uuid={job['uuid']}"
+            if foreign
+            else f"/api/v1/jobs/owned/{job['uuid']}"
+        )
+        identity = {"job_id": job["id"], "job_uuid": job["uuid"], "status_url": status_url}
+        if admission.kind in {"active_conflict", "request_conflict"}:
+            conflict = ClaimsClusterRebuildConflict(code=f"claims_cluster_{admission.kind}", **identity)
+            return JSONResponse(status_code=409, content=conflict.model_dump(mode="json"))
+        if admission.kind not in {"created", "active_reused", "request_replayed"}:
+            raise HTTPException(status_code=503, detail="Claims cluster rebuild admission unavailable")
+        accepted = ClaimsClusterRebuildAccepted(reused=admission.kind != "created", **identity)
+        return JSONResponse(status_code=202, content=accepted.model_dump(mode="json"), headers={"Location": status_url})
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            raise
+        # Admission may have committed. Never retry locally or expose backend data.
+        raise HTTPException(status_code=503, detail="Claims cluster rebuild admission unavailable") from None
 
 
 @router.get("/clusters/{cluster_id}")
@@ -1021,20 +1137,13 @@ async def verify_claims_fva(
     # Get FVA config
     fva_config = payload.fva_config.model_dump() if payload.fva_config else None
 
-    # Resolve user_id string
-    resolved_user_id: Optional[str] = None
-    if user_id is not None:
-        resolved_user_id = str(user_id)
-    elif current_user is not None:
-        resolved_user_id = str(getattr(current_user, "username", None) or getattr(current_user, "id", None))
-
     return await claims_service.verify_claims_with_fva(
         claims=claims_data,
         query=payload.query,
         sources=payload.sources,
         top_k=payload.top_k,
         fva_config=fva_config,
-        user_id=resolved_user_id,
+        user_id=user_id,
         current_user=current_user,
         db=db,
     )

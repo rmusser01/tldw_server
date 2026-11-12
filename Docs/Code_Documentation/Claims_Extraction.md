@@ -54,6 +54,24 @@ APIs and service:
 - `POST /api/v1/claims/rebuild_fts` - rebuild FTS
 - Background worker: `ClaimsRebuildService` (chunks content, extracts claims, stores/replaces; see `core/Claims_Extraction/claims_rebuild_service.py`).
 
+## Cluster Rebuild Publication
+
+The opt-in `claims_rebuild_clusters` Jobs handler uses the neutral version-1
+contract and existing WorkerSDK. It opens only existing owner storage under a
+real nonadmin scope, reads an exact publication receipt before vectors, then
+calculates a bounded snapshot and publishes atomically through DB_Management.
+Jobs owns admission, retry, leases and terminalization; Claims has no lifecycle
+registry. New output/receipt/head commit together. Older generations cannot
+replace newer applied or preserving-skip output; replay preserves IDs without
+repeating best-effort Watchlists evaluation. A crash can omit that evaluation.
+
+Missing owner storage is a permanent failure, not a successful domain skip.
+Legitimately absent embeddings preserve existing clusters with a receipt-backed
+`no_embeddings` result; storage errors never become missing embeddings. Fresh
+replacement may invalidate IDs/subscriptions; no remapping is promised. See the
+[operations runbook](../Operations/Claims_Cluster_Rebuild_Jobs.md) for ceilings,
+the qualified Chroma profile, physical rollback drain and paired restore checks.
+
 ## Answer-Time Claims (Extraction + Verification)
 
 Path: `tldw_Server_API.app.core.Claims_Extraction.claims_engine`

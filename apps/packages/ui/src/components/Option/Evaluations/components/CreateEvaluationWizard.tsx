@@ -75,7 +75,7 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
   const { t } = useTranslation(["evaluations", "common"])
   const [currentStep, setCurrentStep] = useState(0)
 
-  const evalType = Form.useWatch("evalType", form) || "response_quality"
+  const evalType = Form.useWatch("evalType", { form, preserve: true }) || "response_quality"
   const evalMetadataValue = Form.useWatch("evalMetadataJson", form) || ""
   const evalTypeTooltips = useMemo(
     () => ({
@@ -274,21 +274,28 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
                               </span>
                             </Tooltip>
                           }
-                          name="idempotencyKey"
-                          initialValue={evalIdempotencyKey}
                         >
                           <Space.Compact className="w-full">
-                            <Input
-                              placeholder={
-                                t(
-                                  "evaluations:idempotencyKeyPlaceholder",
-                                  {
-                                    defaultValue:
-                                      "Prevents duplicate create on retry"
-                                  }
-                                ) as string
-                              }
-                            />
+                            <Form.Item
+                              name="idempotencyKey"
+                              initialValue={evalIdempotencyKey}
+                              noStyle
+                            >
+                              <Input
+                                aria-label={t("evaluations:idempotencyKeyLabel", {
+                                  defaultValue: "Idempotency key"
+                                })}
+                                placeholder={
+                                  t(
+                                    "evaluations:idempotencyKeyPlaceholder",
+                                    {
+                                      defaultValue:
+                                        "Prevents duplicate create on retry"
+                                    }
+                                  ) as string
+                                }
+                              />
+                            </Form.Item>
                             <Button
                               size="small"
                               onClick={() => {
@@ -361,7 +368,7 @@ export const CreateEvaluationWizard: React.FC<CreateEvaluationWizardProps> = ({
   return (
     <div className="space-y-4">
       <Steps current={currentStep} items={steps} size="small" />
-      <Form form={form} layout="vertical">
+      <Form name="evaluation-editor" form={form} layout="vertical">
         {renderStepContent()}
       </Form>
       <div className="flex items-center justify-between">

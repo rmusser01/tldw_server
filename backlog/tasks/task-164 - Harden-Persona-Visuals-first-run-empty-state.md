@@ -32,7 +32,7 @@ Improve the Persona Garden Visuals no-pack empty state from a passive message in
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added implementation plan at Docs/superpowers/plans/2026-05-09-persona-visual-empty-state-plan.md.
 
 RED: bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx failed because the empty state still rendered only "No visual packs yet."
@@ -42,7 +42,7 @@ HYGIENE: git diff --check passed.
 BANDIT: not applicable; touched code is frontend TypeScript plus Backlog/plan metadata only.
 
 Opened draft PR #1416 for the Persona Visuals first-run empty-state slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

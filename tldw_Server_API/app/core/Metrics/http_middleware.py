@@ -7,6 +7,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
+from tldw_Server_API.app.core.Utils.fastapi_routes import served_route_for_scope
 
 
 class HTTPMetricsMiddleware(BaseHTTPMiddleware):
@@ -33,7 +34,9 @@ class HTTPMetricsMiddleware(BaseHTTPMiddleware):
         finally:
             duration = monotonic() - start
             # Try to get a stable route template; fallback to path
-            route = request.scope.get("route")
+            # served_route_for_scope: scope["route"] carries only the router-local path
+            # under FastAPI >= 0.137, which collapses every router's "/" into one label.
+            route = served_route_for_scope(request.scope)
             endpoint = getattr(route, "path", None)
             if not endpoint:
                 endpoint = getattr(request.scope.get("endpoint"), "__name__", None)

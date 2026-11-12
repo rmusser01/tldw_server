@@ -38,7 +38,7 @@ Resolve Qodo review findings and CI issues for the rebased Personal Context rela
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased 61 patch-identical commits on dev c5dfe0ff73d17e177380551c946c109008d0c2cd and pushed with an exact force-with-lease. Qodo remediation adds public bounded offset paging with protected-page regression coverage; content-free after-commit relay diagnostics isolated from sink errors; centralized exception definitions with old module imports preserved; test markers, docstrings and fixture typing. Regenerated canonical OpenAPI fingerprint and local frontend schema types; drift check passes (2068 paths, 3130 schemas). Ruff and Bandit pass; Bandit emits existing nosec/parser warnings only. Independent review of the remediation diff found no issues. Initial mixed test run used an invalid /tmp basetemp and hit existing trusted-storage-path guards; rerun under native pytest temp root is in progress without modifying validation. Human-written Change summary and current-head CI/review remain merge gates. ADR: existing ADR-002; no new storage or sync policy.
 
 Final targeted nine-file regression gate: 449 passed, 74 warnings in 277.63s with TLDW_TEST_POSTGRES_REQUIRED=1 and four workers; no skips or deselections. This includes all 25 certification cases and the real two-connection PostgreSQL authority race. Final diagnostic test rerun after annotation: 2 passed. API paging documentation now covers continuation, proof-gated response shapes, and concurrent mutation caveats. All seven Qodo findings have implemented resolutions ready to publish. Task remains In Progress until remote current-head checks/review and the human summary permit merge.
@@ -64,7 +64,7 @@ Round 5 final rebase: latest dev a5aa0c8e675116a971156ee6273caeb8928df267; all 6
 Round 6 plan: address five non-behavioral test-hygiene findings. Verify the certification subprocess uses sys.executable and a fixed argument list with no shell, then document only the B404/B603 safety exceptions; add certification/exchange module docstrings, concrete annotations on four harness fixtures and the production factory iterator. Run scoped lint/security checks and the affected test files. Existing AC3 and ADR-002 apply; no runtime, schema, dependency or protocol behavior changes.
 
 Round 6 verification: all 191 tests in the three affected modules passed, 26 warnings in 67.07s, PostgreSQL required and no skips. Changes are annotations, docstrings and narrowly justified B404/B603 suppressions only; scoped Ruff and diff checks pass, independent review confirms no executable behavior changes. Requested Bandit checks pass. Broader scanning hit a pre-existing lone-surrogate fixture report-encoding bug in both text and JSON formatters; direct scanner results compared in memory with HEAD confirm zero new findings, exactly the two reviewed subprocess warnings removed, and 15 unchanged test-fixture findings. Recorded this incident and safe verification method in lessons-testing-evidence.md. No production or generated artifacts changed. Dev remains a5aa0c8e675116a971156ee6273caeb8928df267. Current-head remote review/checks and merge remain pending.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

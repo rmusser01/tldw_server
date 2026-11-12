@@ -800,6 +800,7 @@ async def test_mime_aliases_and_signatures_are_validated(
         b"\x00" * 128,
         b"OggS" + b"\x00" * 65532 + b"OpusHead",
     ],
+    ids=["ogg-no-opus", "vorbis-head", "long-ogg-no-opus", "non-ogg", "opus-head-outside-window"],
 )
 async def test_opus_requires_ogg_container_and_bounded_opus_head(
     monkeypatch: pytest.MonkeyPatch,

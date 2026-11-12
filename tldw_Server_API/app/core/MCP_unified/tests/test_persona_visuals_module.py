@@ -54,6 +54,23 @@ def _create_persona(db: CharactersRAGDB, *, user_id: str = "1", name: str = "Vis
     return db.create_persona_profile({"user_id": user_id, "name": name})
 
 
+def _activate_pack(db: CharactersRAGDB, persona_id: str, pack: dict) -> dict:
+    """Review and activate a draft pack (790b6d1073 forbids status="active" on create)."""
+    review = db.create_persona_visual_pack_review(
+        pack_id=pack["id"], user_id="1", reviewer_user_id="1",
+        fingerprint="a" * 64, expected_pack_version=int(pack["version"]),
+    )
+    return db.activate_persona_visual_pack(
+        persona_id=persona_id, user_id="1", pack_id=pack["id"],
+        expected_version=int(pack["version"]), reviewed_fingerprint=review["fingerprint"],
+    )
+
+
+def _create_active_pack(db: CharactersRAGDB, persona_id: str, *, title: str, manifest: dict) -> dict:
+    pack = db.create_persona_visual_pack(persona_id=persona_id, user_id="1", title=title, manifest=manifest)
+    return _activate_pack(db, persona_id, pack)
+
+
 def _custom_visual_state_manifest() -> dict[str, Any]:
     return {
         "manifest_version": 1,
@@ -186,7 +203,6 @@ async def test_capabilities_returns_active_and_draft_pack_summaries(chacha_db) -
         user_id="1",
         title="Active Pack",
         manifest=_custom_visual_state_manifest(),
-        status="active",
     )
     draft = db.create_persona_visual_pack(
         persona_id=persona_id,
@@ -207,6 +223,8 @@ async def test_capabilities_returns_active_and_draft_pack_summaries(chacha_db) -
         width=64,
         height=64,
     )
+    # Active pack assets are immutable, so attach the asset before activating.
+    _activate_pack(db, persona_id, active)
 
     module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
     result = await module.execute_tool(
@@ -345,13 +363,7 @@ async def test_trigger_state_requires_context_rejects_unknown_states_and_clamps_
 async def test_trigger_state_accepts_custom_state_declared_by_active_pack(chacha_db) -> None:
     db, db_path = chacha_db
     persona_id = _create_persona(db)
-    db.create_persona_visual_pack(
-        persona_id=persona_id,
-        user_id="1",
-        title="Active Custom Pack",
-        manifest=_custom_visual_state_manifest(),
-        status="active",
-    )
+    _create_active_pack(db, persona_id, title="Active Custom Pack", manifest=_custom_visual_state_manifest())
     module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
 
     payload = await module.execute_tool(
@@ -378,13 +390,7 @@ async def test_trigger_state_accepts_custom_state_declared_by_active_pack(chacha
 async def test_trigger_state_rejects_custom_state_missing_from_active_pack(chacha_db) -> None:
     db, db_path = chacha_db
     persona_id = _create_persona(db)
-    db.create_persona_visual_pack(
-        persona_id=persona_id,
-        user_id="1",
-        title="Active Custom Pack",
-        manifest=_custom_visual_state_manifest(),
-        status="active",
-    )
+    _create_active_pack(db, persona_id, title="Active Custom Pack", manifest=_custom_visual_state_manifest())
     module = PersonaVisualsModule(ModuleConfig(name="persona_visuals"))
 
     with pytest.raises(ValueError, match="not available in the active Persona Visual pack"):

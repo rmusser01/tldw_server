@@ -1,4 +1,7 @@
 import json
+import os
+import shutil
+import subprocess  # nosec B404 - exercises the repository-owned CI guard in a scratch directory
 from pathlib import Path
 
 import pytest
@@ -9,7 +12,8 @@ def test_frontend_required_enforces_strict_shared_security_boundaries() -> None:
     """The incremental strict project must execute as a failing merge gate."""
     data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
     step = next(
-        step for step in data["jobs"]["frontend-required"]["steps"]
+        step
+        for step in data["jobs"]["frontend-required"]["steps"]
         if step.get("name") == "Run strict shared-boundary typecheck"
     )
     assert step["if"] == "needs.changes.outputs.tldw_frontend_changed == 'true'"
@@ -101,7 +105,8 @@ def test_frontend_required_fails_closed_on_unit_shard_outcomes() -> None:
     assert "needs.admission.outputs.should_run == 'true'" in unit_job["if"]
     assert "needs.changes.result == 'success'" in unit_job["if"]
     assert "needs.changes.outputs.tldw_frontend_changed == 'true'" in unit_job["if"]
-    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests"]
+    assert "needs.await_license.outputs.license_passed == 'true'" in unit_job["if"]
+    assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests", "await_license"]
 
     guard = next(step for step in final_job["steps"] if step.get("name") == "Require frontend unit shard success")
     assert guard["env"] == {
@@ -121,26 +126,141 @@ def test_frontend_coverage_report_cannot_starve_required_gates() -> None:
     data = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
     steps = data["jobs"]["frontend-required"]["steps"]
 
-    coverage_step = next(step for step in steps if step.get("name") == "Frontend coverage summary (report-only)")
+    coverage_step = next(step for step in steps if step.get("name") == "Run all WebUI-owned tests with coverage")
 
-    assert coverage_step["continue-on-error"] is True
+    assert not coverage_step.get("continue-on-error", False)
     assert coverage_step["timeout-minutes"] == 17
+    assert "--maxWorkers=2" in coverage_step["run"]
     assert "timeout --kill-after=30s 15m bun run test:coverage" in coverage_step["run"]
 
 
 @pytest.mark.unit
 def test_frontend_coverage_reports_both_package_owned_suites() -> None:
-    """Excluding shared UI from WebUI must retain its own bounded coverage report."""
+    """Full shared coverage is bounded independently of the required gate."""
     data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
-    reports = {
-        step["working-directory"]: step
-        for step in data["jobs"]["frontend-required"]["steps"]
-        if "bun run test:coverage" in step.get("run", "")
-    }
-    assert set(reports) == {"apps/tldw-frontend", "apps/packages/ui"}
-    for step in reports.values():
-        assert step["if"] == "needs.changes.outputs.tldw_frontend_changed == 'true'"
-        assert step["continue-on-error"] is True
-        assert step["timeout-minutes"] == 17
-        assert "timeout --kill-after=30s 15m bun run test:coverage" in step["run"]
-    assert "--exclude" not in reports["apps/packages/ui"]["run"]
+    jobs = data["jobs"]
+    webui = next(
+        step
+        for step in jobs["frontend-required"]["steps"]
+        if step.get("name") == "Run all WebUI-owned tests with coverage"
+    )
+    assert webui["working-directory"] == "apps/tldw-frontend"
+    assert not webui.get("continue-on-error", False)
+    coverage = jobs["shared-ui-coverage"]
+    shards = coverage["strategy"]["matrix"]["shard"]
+    assert shards == list(range(1, 33))
+    assert coverage["strategy"]["max-parallel"] == 8
+    assert coverage["timeout-minutes"] == 25
+    run = next(
+        step
+        for step in coverage["steps"]
+        if step.get("name") == "Run shared UI coverage shard"
+    )
+    assert run["working-directory"] == "apps/packages/ui"
+    assert "--shard=${{ matrix.shard }}/32" in run["run"]
+    assert run["timeout-minutes"] == 17
+    assert coverage["name"] == "shared-ui-coverage (${{ matrix.shard }}/32)"
+    upload = next(
+        step
+        for step in coverage["steps"]
+        if step.get("name") == "Upload shared UI coverage blob"
+    )
+    assert (
+        upload["with"]["path"]
+        == "apps/packages/ui/.vitest-reports/blob-${{ matrix.shard }}-32.json"
+    )
+    assert "--exclude" not in run["run"]
+    assert "timeout --kill-after=30s 15m" in run["run"]
+    assert "shared-ui-coverage-report" not in jobs["frontend-required"]["needs"]
+    report = jobs["shared-ui-coverage-report"]
+    assert "shared-ui-coverage" in report["needs"]
+    assert "needs.shared-ui-coverage.result == 'success'" in report["if"]
+    guard = next(
+        step
+        for step in report["steps"]
+        if step.get("name") == "Validate coverage shards"
+    )
+    assert int(guard["env"]["SHARD_COUNT"]) == len(shards)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "missing,empty",
+    [
+        (None, False),
+        (1, False),
+        (8, False),
+        (16, False),
+        (32, False),
+        (1, True),
+        (16, True),
+        (32, True),
+    ],
+)
+def test_shared_coverage_merge_rejects_missing_shards(
+    tmp_path: Path, missing: int | None, empty: bool
+) -> None:
+    """Native Vitest accepts partial blob sets; our boundary must reject them."""
+    data = yaml.safe_load(Path(".github/workflows/frontend-required.yml").read_text())
+    report = data["jobs"]["shared-ui-coverage-report"]
+    guard = next(
+        step
+        for step in report["steps"]
+        if step.get("name") == "Validate coverage shards"
+    )
+    count = int(guard["env"]["SHARD_COUNT"])
+    for shard in range(1, count + 1):
+        if shard != missing or empty:
+            (tmp_path / f"blob-{shard}-{count}.json").write_text(
+                "" if shard == missing else "{}"
+            )
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("Workflow guard requires bash")
+    result = subprocess.run(  # nosec B603 - trusted workflow guard with only temporary report files
+        [bash, "-c", guard["run"]],
+        cwd=tmp_path,
+        env={**os.environ, **guard["env"], "REPORTS_DIR": str(tmp_path)},
+        timeout=10,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (result.returncode == 0) == (missing is None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("workflow_name", "job_name"),
+    [
+        ("frontend-required.yml", "frontend-required"),
+        ("frontend-ux-gates.yml", "onboarding-gate"),
+        ("frontend-ux-gates.yml", "smoke-gate"),
+        ("frontend-e2e-tiers.yml", "critical"),
+        ("frontend-e2e-tiers.yml", "features"),
+        ("frontend-e2e-tiers.yml", "admin"),
+        ("frontend-e2e-tiers.yml", "ux-regression"),
+        ("ui-research-workspace-parity.yml", "webui-research-workspace-parity"),
+        ("ui-research-workspace-parity.yml", "extension-research-workspace-parity"),
+    ],
+)
+def test_ux_browser_jobs_select_a_host_supported_by_locked_playwright(
+    workflow_name: str, job_name: str,
+) -> None:
+    """Playwright 1.58 cannot install Chromium on an Ubuntu 26.04 runner."""
+    data = yaml.safe_load((Path(".github/workflows") / workflow_name).read_text())
+    assert data["jobs"][job_name]["runs-on"] in {"ubuntu-22.04", "ubuntu-24.04"}
+
+
+@pytest.mark.unit
+def test_ux_gates_use_explicit_playwright_browser_instead_of_puppeteer_download() -> None:
+    data = yaml.safe_load(Path(".github/workflows/frontend-ux-gates.yml").read_text())
+    for name in ("onboarding-gate", "smoke-gate"):
+        steps = data["jobs"][name]["steps"]
+        install = next(step for step in steps if step.get("name") == "Install frontend dependencies")
+        assert install["env"]["PUPPETEER_SKIP_DOWNLOAD"] == "true"
+        assert install["run"] == "bun install --frozen-lockfile"
+        browser = next(step for step in steps if step.get("name") == "Install Playwright Chromium")
+        assert "playwright install --with-deps chromium" in browser["run"]
+        assert not browser.get("continue-on-error", False)
+        assert steps.index(install) < steps.index(browser)

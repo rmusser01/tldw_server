@@ -22,6 +22,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.repositories.keywords_repository import (
+    KeywordsRepository,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
@@ -1485,18 +1488,15 @@ class CloneSnapshotRepository:
                     ("media-clone-keyword", keyword),
                 )
 
+        keywords_repository = KeywordsRepository(self.session)
         for keyword in keywords:
-            canonical_rows = self.session._fetchall_with_connection(
-                connection,
-                "SELECT id, deleted FROM Keywords WHERE LOWER(keyword) = ?",
-                (keyword,),
-            )
-            if len(canonical_rows) > 1 or (
-                canonical_rows and bool(canonical_rows[0]["deleted"])
-            ):
+            # Identity lookup: stored keywords keep display casing, and merged case
+            # variants stay behind as soft-deleted rows next to their active survivor.
+            canonical = keywords_repository.find(connection, keyword)
+            if canonical and bool(canonical["deleted"]):
                 raise _operation_conflict()
-            if canonical_rows:
-                keyword_id = int(canonical_rows[0]["id"])
+            if canonical:
+                keyword_id = int(canonical["id"])
             else:
                 sql = (
                     "INSERT INTO Keywords "

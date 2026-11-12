@@ -29,6 +29,12 @@ export function AdvancedFilters({
           })}
         </span>
       </header>
+      <p className="text-xs text-text-subtle">
+        {t("option:repo2txt.selectionPolicy", {
+          defaultValue:
+            "Only checked files are exported. Search filters this list only; .gitignore is not applied. UTF-8 text only: 1 MiB per file, 10 MiB selected text/ZIP, 5,000 entries. Binary files and symbolic links are rejected."
+        })}
+      </p>
       <input
         type="search"
         value={filterText}

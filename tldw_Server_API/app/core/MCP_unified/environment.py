@@ -10,7 +10,8 @@ from __future__ import annotations
 import os
 from typing import Any
 
-_TRUTHY = {"1", "true", "yes", "y", "on"}
+# Keep in sync with core/Utils/coercion.TRUTHY (copied, not imported, for the standalone package boundary).
+_TRUTHY = frozenset({"1", "true", "yes", "y", "on", "enabled"})
 _ENV_HELPER_NONCRITICAL_EXCEPTIONS = (AttributeError, OSError, TypeError, ValueError)
 
 

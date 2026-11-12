@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreMessage } from "@/store"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { useStoreChatModelSettings } from "@/store/model"
+import { useSidepanelChatTabsStore } from "@/store/sidepanel-chat-tabs"
 
 const config = (user: string, revision = 1) => ({
   serverUrl: "http://localhost:8000", authMode: "multi-user", authSource: "manual",
@@ -10,20 +12,63 @@ const config = (user: string, revision = 1) => ({
 
 describe("Chat state when its route is unmounted", () => {
   beforeEach(() => {
+    const settings = useStoreChatModelSettings.getState()
+    settings.reset()
+    settings.updateSettings({ systemPrompt: "ALICE GLOBAL SECRET", systemPromptTemplateId: "alice-global", temperature: 0.4 })
+    settings.setActiveSettingsScope("llama:one")
+    settings.updateSettings({ systemPrompt: "ALICE MODEL SECRET", systemPromptTemplateId: "alice-model", topK: 12 })
+    settings.setActiveSettingsScope("llama:two")
     const messages = [{ role: "user" as const, isBot: false, name: "Alice", message: "ALICE PRIVATE", sources: [] }]
     useStoreMessageOption.setState({ messages, history: [{ role: "user", content: "ALICE PRIVATE" }],
       historyId: "alice-history", serverChatId: "alice-chat", serverChatTitle: "Alice private title",
-      selectedModel: "keep-model", contextFiles: [], replyTarget: null })
+      selectedModel: "keep-model", contextFiles: [], replyTarget: null, detachedHistoryResponse: {} })
     useStoreMessage.setState({ messages, history: [{ role: "user", content: "ALICE PRIVATE" }], historyId: "alice-history" })
     usePlaygroundSessionStore.getState().saveSession({ serverChatId: "alice-chat", scopeKey: "alice" })
+    useSidepanelChatTabsStore.setState({ tabs: [{ id: "alice-inactive", label: "ALICE PRIVATE TITLE", historyId: "alice-history", serverChatId: null, serverChatTopic: null, updatedAt: 1 }], activeTabId: "alice-inactive", snapshotsById: {} })
   })
 
   const expectCleared = () => {
     expect(useStoreMessageOption.getState()).toMatchObject({ messages: [], history: [], historyId: null,
-      serverChatId: null, serverChatTitle: null, selectedModel: "keep-model" })
+      serverChatId: null, serverChatTitle: null, selectedModel: "keep-model", detachedHistoryResponse: null })
     expect(useStoreMessage.getState()).toMatchObject({ messages: [], history: [], historyId: null })
     expect(usePlaygroundSessionStore.getState().serverChatId).toBeNull()
+    expect(useSidepanelChatTabsStore.getState()).toMatchObject({ tabs: [], activeTabId: null, snapshotsById: {} })
+    const settings = useStoreChatModelSettings.getState()
+    for (const scope of ["llama:one", "llama:two"]) {
+      expect(settings.getEffectiveSettings(scope)).toMatchObject({
+        systemPrompt: undefined, systemPromptTemplateId: undefined, temperature: 0.4
+      })
+    }
+    expect(settings.getEffectiveSettings("llama:one").topK).toBe(12)
   }
+
+  it.each([
+    ["logout", () => new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })],
+    ["credentials", () => new Event("tldw:auth-credentials-changed")],
+    ["authority", () => new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } })],
+    ["other tab", () => new StorageEvent("storage", { key: "tldwConfig",
+      oldValue: JSON.stringify(config("alice")), newValue: JSON.stringify(config("bob")) })]
+  ] as const)("A01: retires the automatic tab history reference on %s while Chat is unmounted", (_kind, event) => {
+    sessionStorage.setItem("tldw-h1-playground-reference", "alice-reference")
+    sessionStorage.setItem("other-view-reference", "keep-other-view")
+
+    window.dispatchEvent(event())
+
+    expect(sessionStorage.getItem("tldw-h1-playground-reference")).toBeNull()
+    expect(sessionStorage.getItem("other-view-reference")).toBe("keep-other-view")
+    expectCleared()
+  })
+
+  it("A01: retains the automatic tab history reference during same-account token rotation", () => {
+    sessionStorage.setItem("tldw-h1-playground-reference", "alice-reference")
+
+    window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig",
+      oldValue: JSON.stringify(config("alice")), newValue: JSON.stringify(config("alice", 2)) }))
+    window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } }))
+
+    expect(sessionStorage.getItem("tldw-h1-playground-reference")).toBe("alice-reference")
+    expect(usePlaygroundSessionStore.getState().serverChatId).toBe("alice-chat")
+  })
 
   it("clears both live surfaces and the recovery selection on logout without a mounted Chat hook", () => {
     window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
@@ -47,5 +92,28 @@ describe("Chat state when its route is unmounted", () => {
     window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } }))
     expect(useStoreMessageOption.getState().messages[0].message).toBe("ALICE PRIVATE")
     expect(usePlaygroundSessionStore.getState().serverChatId).toBe("alice-chat")
+    expect(useSidepanelChatTabsStore.getState().tabs[0].label).toBe("ALICE PRIVATE TITLE")
+    expect(useStoreChatModelSettings.getState().getEffectiveSettings("llama:one").systemPrompt).toBe("ALICE MODEL SECRET")
+  })
+})
+
+
+describe("saved server chat acceptance", () => {
+  beforeEach(() => useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true))
+
+  it("atomically retires temporary mode when accepting a saved target", () => {
+    useStoreMessageOption.setState({ temporaryChat: true })
+    const transitions: Array<{ id: string | null; temporary: boolean }> = []
+    const stop = useStoreMessageOption.subscribe(state => transitions.push({ id: state.serverChatId, temporary: state.temporaryChat }))
+    try {
+      useStoreMessageOption.getState().setServerChatId("saved-chat")
+      expect(transitions).toEqual([{ id: "saved-chat", temporary: false }])
+    } finally { stop() }
+  })
+
+  it("retains temporary mode when clearing a server target", () => {
+    useStoreMessageOption.setState({ temporaryChat: true })
+    useStoreMessageOption.getState().setServerChatId(null)
+    expect(useStoreMessageOption.getState().temporaryChat).toBe(true)
   })
 })

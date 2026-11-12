@@ -96,6 +96,21 @@ def test_temporary_directory_retries_transient_cleanup_locks(monkeypatch):
     assert not temp_path.exists()
 
 
+@pytest.mark.parametrize(
+    ("question", "answer", "expected"),
+    [
+        ({"question_type": "multiple_choice"}, 0, False),
+        ({"question_type": "multiple_choice", "correct_answer": None}, 0, False),
+        ({"question_type": "multiple_choice", "correct_answer": 0}, "0", True),
+        ({"question_type": "multiple_choice", "correct_answer": 1}, 0, False),
+        ({"question_type": "multiple_choice", "correct_answer": 0}, "invalid", False),
+    ],
+)
+def test_multiple_choice_answer_contract(question, answer, expected):
+    with _temp_chacha_db() as db:
+        assert db._check_answer(question, answer) is expected
+
+
 def test_quizzes_basic_flow():
     with _temp_chacha_db() as db:
 
@@ -630,7 +645,7 @@ def test_quiz_schema_migration_v23_to_v24_supports_matching():
         )
         _close_temp_chacha_db(seed_db, db_path)
 
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.executescript(
                 """
                 DROP TRIGGER IF EXISTS quiz_questions_ai;
@@ -673,7 +688,7 @@ def test_quiz_schema_migration_v23_to_v24_supports_matching():
 
         migrator = object.__new__(CharactersRAGDB)
         migrator.db_path_str = db_path
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             migrator._migrate_from_v23_to_v24(conn)
             version_row = conn.execute(
@@ -714,7 +729,7 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
         )
         _close_temp_chacha_db(seed_db, db_path)
 
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.executescript(
                 """
                 DROP TRIGGER IF EXISTS quiz_questions_ai;
@@ -788,7 +803,7 @@ def test_quiz_schema_migration_v24_to_v25_supports_hint_metadata():
 
         migrator = object.__new__(CharactersRAGDB)
         migrator.db_path_str = db_path
-        with sqlite3.connect(db_path) as conn:
+        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             migrator._migrate_from_v24_to_v25(conn)
             version_row = conn.execute(

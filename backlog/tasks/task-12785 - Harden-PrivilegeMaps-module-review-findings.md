@@ -57,24 +57,14 @@ Address code review findings in PrivilegeMaps: Postgres-safe snapshot/trend writ
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan: IMPLEMENTATION_PLAN_privilege_maps_review_hardening_2422.md
 
 Verification completed:
 - source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Privileges -q -> 40 passed
 - source .venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/PrivilegeMaps tldw_Server_API/app/api/v1/endpoints/privileges.py -f json -o /tmp/bandit_privilege_maps_2422.json -> 0 findings
 Known skips/blockers: none.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Hardened PrivilegeMaps against the review findings: transaction writes now normalize placeholders for raw PostgreSQL transactions; effective permissions honor expiry and explicit denies; multi-user loading fails closed; sync snapshot IDs are UUID-based; org/team filters ignore inactive memberships/entities; detail generation caps materialization; org trends carry org_id; the unused role helper was removed. Added regression coverage across service, endpoint, snapshot, trend, and role-resolution tests.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reopened to address PR #2461 review comments after initial push: rebase on latest dev, harden placeholder conversion around literal question marks, treat NULL active flags as inactive, clean up endpoint test formatting, and respond to the DB_Management boundary comment.
 PR #2461 follow-up verification completed after rebasing on latest dev:
 - source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Privileges/test_privilege_service_sqlite.py tldw_Server_API/tests/Privileges/test_privilege_snapshot_store.py tldw_Server_API/tests/Privileges/test_privilege_trends.py tldw_Server_API/tests/Privileges/test_privilege_role_normalization.py -q -> 15 passed
@@ -83,3 +73,9 @@ PR #2461 follow-up verification completed after rebasing on latest dev:
 - git diff --check -> clean
 Resolved review comments: robust PostgreSQL placeholder conversion skips SQL literals/identifiers/comments, NULL active flags are treated as inactive for users/teams/orgs, endpoint test signature was formatted. DB_Management boundary comment was addressed with PR discussion because a full PrivilegeMaps persistence relocation is broader than this hardening PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Hardened PrivilegeMaps against the review findings: transaction writes now normalize placeholders for raw PostgreSQL transactions; effective permissions honor expiry and explicit denies; multi-user loading fails closed; sync snapshot IDs are UUID-based; org/team filters ignore inactive memberships/entities; detail generation caps materialization; org trends carry org_id; the unused role helper was removed. Added regression coverage across service, endpoint, snapshot, trend, and role-resolution tests.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.Notes_Graph.semantic_erasure import SemanticErasureError
 from tldw_Server_API.app.services import admin_data_subject_requests_service as service
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -83,7 +83,7 @@ async def test_notes_erasure_preserves_attachment_parent_on_restricted_delete(
     before = _rows(db, "notes")
     edges_before = _rows(db, "note_wikilink_edges")
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(SemanticErasureError, match="^notes_semantic_erasure_cleanup_failed$"):
         await service._erase_notes(7)
 
     assert _rows(db, "notes") == before
@@ -100,7 +100,7 @@ async def test_notes_erasure_rolls_back_and_retry_succeeds(user_databases) -> No
             "BEGIN SELECT RAISE(ABORT, 'temporary deletion failure'); END"
         )
 
-    with pytest.raises(sqlite3.IntegrityError):
+    with pytest.raises(SemanticErasureError, match="^notes_semantic_erasure_cleanup_failed$"):
         await service._erase_notes(7)
 
     assert _rows(db, "notes") == before

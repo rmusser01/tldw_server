@@ -1,4 +1,4 @@
-"""PostgreSQL migration coverage from ChaChaNotes schema v52 to current v62."""
+"""PostgreSQL coverage of the ChaChaNotes v52->v53 step on a live catalog."""
 
 import pytest
 
@@ -9,7 +9,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 
 
-def test_postgres_v52_to_current_v62_preserves_questions_and_is_rerunnable(
+def test_postgres_v52_to_v53_preserves_questions_and_is_rerunnable(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -26,6 +26,10 @@ def test_postgres_v52_to_current_v62_preserves_questions_and_is_rerunnable(
             explanation="Preserved explanation",
         )
 
+        # PostgreSQL cannot build a genuine v52 catalog (the initializer applies every
+        # step through v64), and stamping v52 on the current catalog is no real
+        # predecessor: v55->v56 rejects the current WebClipper constraints. Replay the
+        # v53 step itself on the catalog without its columns, then restore the version.
         with backend.transaction() as conn:
             backend.execute(
                 "ALTER TABLE quiz_questions DROP COLUMN IF EXISTS group_id",
@@ -40,7 +44,19 @@ def test_postgres_v52_to_current_v62_preserves_questions_and_is_rerunnable(
                 (52, CharactersRAGDB._SCHEMA_NAME),
                 connection=conn,
             )
+            db._apply_postgres_migration_script(
+                CharactersRAGDB._MIGRATION_SQL_V52_TO_V53_POSTGRES,
+                conn,
+                expected_version=53,
+            )
+            assert db._get_schema_version_postgres(conn) == 53
+            backend.execute(
+                "UPDATE db_schema_version SET version = %s WHERE schema_name = %s",
+                (CharactersRAGDB._POSTGRES_SCHEMA_VERSION, CharactersRAGDB._SCHEMA_NAME),
+                connection=conn,
+            )
 
+        db.close_connection()
         db._initialize_schema_postgres()
 
         columns = {
@@ -62,8 +78,7 @@ def test_postgres_v52_to_current_v62_preserves_questions_and_is_rerunnable(
         question = db.get_question(question_id)
 
         assert columns == {"group_id", "group_prompt"}
-        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 62
-        assert int(version) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        assert int(version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         relations = {
             row["table_name"]
             for row in backend.execute(
@@ -98,7 +113,7 @@ def test_postgres_v52_to_current_v62_preserves_questions_and_is_rerunnable(
             (CharactersRAGDB._SCHEMA_NAME,),
         ).scalar
         rerun_question = db.get_question(question_id)
-        assert int(rerun_version) == CharactersRAGDB._CURRENT_SCHEMA_VERSION
+        assert int(rerun_version) == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         assert rerun_question is not None
         assert rerun_question["question_text"] == "Preserved question"
         assert rerun_question["group_id"] is None

@@ -136,7 +136,9 @@ export const WS_CONFIG = {
   HEARTBEAT_TIMEOUT_MS: 45000,
 } as const
 
-export const ACP_NON_RETRYABLE_CLOSE_CODES = new Set([4401, 4404, 4429])
+// 4403: valid credentials the server will not admit (an API key without the route's scope,
+// or a cookie from an untrusted origin); retrying cannot change the answer.
+export const ACP_NON_RETRYABLE_CLOSE_CODES = new Set([4401, 4403, 4404, 4429])
 
 export function shouldRetryACPWebSocketClose(code: number): boolean {
   return !ACP_NON_RETRYABLE_CLOSE_CODES.has(code)

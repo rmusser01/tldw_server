@@ -32,9 +32,9 @@ async def test_reset_password_integration_success(monkeypatch):
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-for-testing-only-needs-32-chars-minimum")
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.jwt_service import reset_jwt_service
+    from tldw_Server_API.app.core.Utils.app_services import app_services
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
     # Reload a fresh app instance (router mounts use the stubbed module)
     app = reload_app_main().app
@@ -104,7 +104,7 @@ async def test_reset_password_integration_success(monkeypatch):
 
     app.dependency_overrides.clear()
     reset_settings()
-    reset_jwt_service()
+    app_services().jwt_service = None
 
 
 @pytest.mark.asyncio
@@ -113,7 +113,7 @@ async def test_mfa_setup_verify_disable_integration(isolated_test_environment, t
 
     - Stubs MFA service via sys.modules before reload (avoids optional deps)
     - Stubs email service for verify step
-    - Overrides get_current_active_user dep to provide a user
+    - Overrides get_auth_principal to provide the caller
     """
     client, _db_name = isolated_test_environment
 
@@ -185,23 +185,22 @@ async def test_mfa_setup_verify_disable_integration(isolated_test_environment, t
     app = client.app
     app.dependency_overrides[get_session_manager_dep] = lambda: stub_session_manager
 
-    # Override get_current_active_user to bypass authentication
-    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
-    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_current_active_user
+    # The MFA endpoints authenticate through get_auth_principal.
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
-    async def _active_user():
-        return User(
-            id=test_user["id"],
+    async def _principal():
+        return AuthPrincipal(
+            kind="user",
+            user_id=int(test_user["id"]),
             username=test_user["username"],
             email=test_user["email"],
-            is_active=True,
-            is_verified=True,
+            roles=[str(test_user.get("role") or "user")],
+            is_admin=False,
         )
 
-    previous_override_main = app.dependency_overrides.get(get_current_active_user)
-    app.dependency_overrides[get_current_active_user] = _active_user
-    # Ensure override binds to the exact reference used in the router
-    app.dependency_overrides[auth.get_current_active_user] = _active_user  # type: ignore[attr-defined]
+    previous_override = app.dependency_overrides.get(get_auth_principal)
+    app.dependency_overrides[get_auth_principal] = _principal
 
     try:
         # Setup
@@ -234,11 +233,10 @@ async def test_mfa_setup_verify_disable_integration(isolated_test_environment, t
         assert r3.status_code == 200, r3.text
         assert "disabled" in r3.json().get("message", "").lower()
     finally:
-        if previous_override_main is not None:
-            app.dependency_overrides[get_current_active_user] = previous_override_main
+        if previous_override is not None:
+            app.dependency_overrides[get_auth_principal] = previous_override
         else:
-            app.dependency_overrides.pop(get_current_active_user, None)
-        app.dependency_overrides.pop(auth.get_current_active_user, None)  # type: ignore[attr-defined]
+            app.dependency_overrides.pop(get_auth_principal, None)
         app.dependency_overrides.pop(get_session_manager_dep, None)
 
 
@@ -248,13 +246,13 @@ async def test_resend_verification_throttled(isolated_test_environment, test_use
     client, _db_name = isolated_test_environment
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+
     pool = await get_db_pool()
-    async with pool.transaction() as conn:
-        await conn.execute(
-            "UPDATE users SET is_verified = $1 WHERE id = $2",
-            False,
-            int(test_user["id"]),
-        )
+    users = UsersDB(pool)
+    await users.update_user(int(test_user["id"]), is_verified=False)
+    updated_user = await users.get_user_by_id(int(test_user["id"]))
+    assert updated_user["is_verified"] is False
 
     class _StubEmail:
         def __init__(self) -> None:

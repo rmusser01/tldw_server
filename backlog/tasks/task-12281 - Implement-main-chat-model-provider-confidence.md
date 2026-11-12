@@ -48,7 +48,7 @@ Slice sequence:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Initial inspection found the main /chat cockpit already uses PlaygroundForm + useModelSelector, not the older shared ModelSelect. Existing code covers configured/catalog scope and recent usage, but provider-qualified selector keys can currently retain the internal tldw: model prefix, which risks confusing scope labels and blocking submit validation after a dropdown selection.
 
 Implementation complete for the model/provider confidence slice. Normalized tldw transport model ids at the selector boundary, added provider-qualified availability validation, preserved configured-by-default/catalog-explicit model search, added recent/current model promotion coverage, and added a real-server /chat proof that selects a real configured provider:model, verifies composition preview/runtime rail provider scope, sends a live conversation, and saves a screenshot.
@@ -71,7 +71,7 @@ Final verification refresh before commit:
 - git diff --check: PASS.
 - bun run verify:design-system-state: PASS with existing allowed baseline exceptions.
 - Bandit remains skipped because no Python files were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

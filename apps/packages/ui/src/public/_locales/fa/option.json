@@ -534,7 +534,7 @@
     "message": "ذخیره پس از بازبینی"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "بازبینی پیش از ذخیره"
+    "message": "بازبینی محتوای استخراج‌شده پیش از ذخیره"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "اکنون پردازش کنید و سپس پیش‌نویس‌ها را به‌صورت محلی ویرایش کنید قبل از اینکه در سرور ثبت شوند."
@@ -2428,5 +2428,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "ذخیره‌سازی آفلاین تا زمانی که حساب و ذخیره‌سازی محلی شما تأیید نشود در دسترس نیست. تغییرات شما ذخیره نشده باقی می‌مانند."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

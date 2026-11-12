@@ -33,6 +33,49 @@ it. Generated or imported assets do not become live just because a job finished.
 Deactivation clears the active visual pack for that persona while leaving
 available packs in place for later editing or activation.
 
+## Stage 1 Companion Behavior
+
+An inactive `sprite_frames` pack may declare optional, deterministic Buddy
+behavior beside its manifest. The browser uses this metadata only while the
+Buddy is otherwise idle; it does not call a model, invent states, or grant a
+pack access to network APIs. Missing `companion_behavior` means base idle only.
+
+The smallest useful declaration is:
+
+```json
+{
+  "schema_version": 1,
+  "entries": [{
+    "state": "ambient.look",
+    "trigger": "ambient",
+    "category": "idle_variant",
+    "suggested_weight": 3,
+    "suggested_cooldown_ms": 45000
+  }]
+}
+```
+
+Version 1 accepts at most 128 entries. Every state must resolve through the
+pack manifest, and each trigger/state pair must be unique. Triggers are
+`ambient`, `click`, or `drag`; categories are `idle_variant`, `reaction`, or
+`move`. Weights are finite values from 0 through 10,000. Cooldowns are whole
+milliseconds from 0 through 86,400,000. A `move` entry must declare horizontal
+movement with finite start/end ratios in the inclusive range 0 through 1 and
+start no greater than end; other categories must not declare movement.
+
+Behavior participates in the pack review fingerprint together with the
+normalized manifest, renderer/converter/provenance versions, and the metadata
+and checksums of reachable assets. Editing any fingerprinted input requires an
+inactive revision and a new review. Active pack payloads and asset bytes are
+immutable; fork the active revision, edit and review the draft, then activate
+with its expected version and current reviewed fingerprint.
+
+See [Persona Ambient Companion](Persona_Ambient_Companion.md) for modes,
+preference precedence, idle eligibility, gestures, reduced motion, and runtime
+asset loading. Technical validation establishes compatibility and integrity;
+it does not establish copyright, trademark, model-output, or other licensing
+rights. Authors remain responsible for every asset they import or activate.
+
 ## Generated Candidate Provenance
 
 Generated candidates are review artifacts. Their persisted

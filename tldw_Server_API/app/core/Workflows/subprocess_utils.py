@@ -21,6 +21,7 @@ class SubprocessTask:
     pid: int | None = None
     pgid: int | None = None
     started_at: float = 0.0
+    proc: subprocess.Popen[bytes] | None = None
 
 
 def start_process(cmd: list[str], workdir: str | Path, log_dir: str | Path) -> SubprocessTask:
@@ -66,6 +67,7 @@ def start_process(cmd: list[str], workdir: str | Path, log_dir: str | Path) -> S
         pid=proc.pid,
         pgid=pgid,
         started_at=time.time(),
+        proc=proc,
     )
     logger.info(f"Started subprocess pid={task.pid} pgid={task.pgid} cmd={' '.join(cmd)}")
     return task

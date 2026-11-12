@@ -12,6 +12,7 @@ See also:
 - `Docs/Code_Documentation/Ingestion_Pipeline_Audio.md` for the audio processing endpoint (`POST /api/v1/media/process-audios`).
 - `Docs/API-related/Email_Processing_API.md` for the email processing endpoint (`POST /api/v1/media/process-emails`) and email ingestion via `/media/add`.
 - `Docs/API-related/Reminder_Notifications_API.md` for reminder tasks, inbox notifications, SSE stream, and related env flags.
+- [Pagination Cursors](Pagination_Cursors.md): a malformed `cursor` is always `400 "Invalid cursor"`.
 
 ### URLs
 - **URLs**

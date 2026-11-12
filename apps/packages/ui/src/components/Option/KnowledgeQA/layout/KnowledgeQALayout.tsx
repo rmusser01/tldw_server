@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { Download, PanelLeftOpen, PanelLeftClose, X } from "lucide-react"
+import { Modal } from "antd"
+import { Download, PanelLeftOpen, PanelLeftClose } from "lucide-react"
 import { cn } from "@/libs/utils"
 import { useKnowledgeQA } from "../KnowledgeQAProvider"
 import { DEFAULT_RAG_SETTINGS, type RagSettings } from "@/services/rag/unified-rag"
 import { isKnowledgeQaHistoryItem, sortHistoryNewestFirst } from "../historyUtils"
+import { containDialogTab } from "../dialogKeyboard"
 import { KnowledgeContextBar } from "../context/KnowledgeContextBar"
 import { CompactToolbar } from "../context/CompactToolbar"
 import { KnowledgeComposer } from "../composer/KnowledgeComposer"
@@ -195,11 +197,11 @@ export function KnowledgeQALayout({
   // Mobile always forces simple mode layout (no sidebars)
   const effectiveSimple = isMobile || isSimple
   const [compactScopePanelOpen, setCompactScopePanelOpen] = useState(false)
+  const scopeDialogRef = useRef<HTMLDivElement>(null)
 
   // Track whether user manually closed the evidence rail for this search
   const userClosedRailRef = useRef(false)
   const latestUserTurnKeyRef = useRef<string | null>(null)
-  const compactScopeCloseButtonRef = useRef<HTMLButtonElement | null>(null)
 
   const hasResults = results.length > 0 || Boolean(answer)
   const showNoResultsState =
@@ -236,12 +238,14 @@ export function KnowledgeQALayout({
     () =>
       classifyKnowledgeReadyRecoveryState({
         knowledgeStatus,
+        sourceHealth,
         selectedSourceCount: settings.sources.length,
         webFallbackAvailable,
         webFallbackEnabled: settings.enable_web_fallback,
       }),
     [
       knowledgeStatus,
+      sourceHealth,
       settings.enable_web_fallback,
       settings.sources.length,
       webFallbackAvailable,
@@ -389,28 +393,9 @@ export function KnowledgeQALayout({
     }
   }, [compactScopePanelOpen, effectiveSimple, settingsPanelOpen])
 
-  useEffect(() => {
-    if (!compactScopePanelOpen) return
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setCompactScopePanelOpen(false)
-      }
-    }
-
-    const frame = requestAnimationFrame(() => {
-      compactScopeCloseButtonRef.current?.focus()
-    })
-    document.addEventListener("keydown", handleKeyDown)
-    return () => {
-      cancelAnimationFrame(frame)
-      document.removeEventListener("keydown", handleKeyDown)
-    }
-  }, [compactScopePanelOpen])
-
   const focusSearchInput = () => {
     const input = document.getElementById(
-      "knowledge-search-input"
+      "knowledge-search-input",
     ) as HTMLInputElement | null
     if (!input) return
     input.focus()
@@ -422,7 +407,7 @@ export function KnowledgeQALayout({
     // Select all text so the user can type to replace without manually clearing
     requestAnimationFrame(() => {
       const input = document.getElementById(
-        "knowledge-search-input"
+        "knowledge-search-input",
       ) as HTMLInputElement | null
       if (!input) return
       input.focus()
@@ -430,7 +415,7 @@ export function KnowledgeQALayout({
     })
   }
 
-  const handleBroadenScope = () => {
+  const handleSearchMoreResults = () => {
     updateSetting("top_k", Math.min(50, Math.max(settings.top_k + 5, 10)))
     setSettingsPanelOpen(true)
   }
@@ -460,7 +445,7 @@ export function KnowledgeQALayout({
       return
     }
     const sourceSelectorButton = document.getElementById(
-      "knowledge-source-selector-toggle"
+      "knowledge-source-selector-toggle",
     ) as HTMLButtonElement | null
     if (sourceSelectorButton) {
       sourceSelectorButton.focus()
@@ -473,7 +458,7 @@ export function KnowledgeQALayout({
   const handleAddSources = () => {
     const request = requestQuickIngestOpen(
       { source: "knowledge_qa" },
-      { focusTrigger: true }
+      { focusTrigger: true },
     )
     if (!request) {
       handleOpenSourceSelector()
@@ -513,16 +498,16 @@ export function KnowledgeQALayout({
             className={cn(
               "transition-all duration-300",
               effectiveSimple && !hasVisibleResultsArea
-                ? "mx-auto flex flex-1 w-full max-w-5xl items-start justify-center px-4 py-10 md:px-6"
+                ? "mx-auto flex flex-1 w-full max-w-5xl items-start justify-center px-4 py-4 md:px-6"
                 : effectiveSimple
                   ? "mx-auto w-full max-w-3xl px-4 pt-6 pb-4 md:px-6"
-                  : "px-4 pt-6 pb-4 md:px-6"
+                  : "px-4 pt-6 pb-4 md:px-6",
             )}
           >
             <div
               className={cn(
                 "w-full space-y-4",
-                isDesktopReadyState && "mx-auto flex max-w-5xl flex-col items-center"
+                isDesktopReadyState && "mx-auto flex max-w-5xl flex-col items-center",
               )}
             >
               {/* Compact toolbar in Simple mode, full context bar in Research mode */}
@@ -586,6 +571,22 @@ export function KnowledgeQALayout({
                 />
               )}
 
+              {hasVisibleResultsArea ? (
+                <KnowledgeComposer
+                  autoFocus={!hasVisibleResultsArea}
+                  showWebToggle={false}
+                  webFallbackAvailable={webFallbackAvailable}
+                  searchBlockedMessage={readySearchBlockedMessage}
+                  widthMode={
+                    isDesktopReadyState
+                      ? "wide"
+                      : effectiveSimple
+                        ? "compact"
+                        : "wide"
+                  }
+                />
+              ) : null}
+
               {!hasVisibleResultsArea ? (
                 <>
                   <KnowledgeReadyState
@@ -605,7 +606,21 @@ export function KnowledgeQALayout({
                     recoveryState={readyRecoveryState}
                     selectedSources={settings.sources}
                     sourceHealth={sourceHealth}
-                  />
+                  >
+                    <KnowledgeComposer
+                      autoFocus={!hasVisibleResultsArea}
+                      showWebToggle={false}
+                      webFallbackAvailable={webFallbackAvailable}
+                      searchBlockedMessage={readySearchBlockedMessage}
+                      widthMode={
+                        isDesktopReadyState
+                          ? "wide"
+                          : effectiveSimple
+                            ? "compact"
+                            : "wide"
+                      }
+                    />
+                  </KnowledgeReadyState>
                   {/* Inline recent sessions for returning users in Simple mode */}
                   {effectiveSimple && recentSessions.length > 0 && (
                     <React.Suspense fallback={null}>
@@ -618,14 +633,6 @@ export function KnowledgeQALayout({
                   )}
                 </>
               ) : null}
-
-              <KnowledgeComposer
-                autoFocus={!hasVisibleResultsArea}
-                showWebToggle={false}
-                webFallbackAvailable={webFallbackAvailable}
-                searchBlockedMessage={readySearchBlockedMessage}
-                widthMode={isDesktopReadyState ? "wide" : effectiveSimple ? "compact" : "wide"}
-              />
             </div>
           </div>
 
@@ -636,7 +643,7 @@ export function KnowledgeQALayout({
                 "flex-1 overflow-y-auto pb-24 md:pb-6 animate-in fade-in duration-200",
                 effectiveSimple
                   ? "mx-auto w-full max-w-3xl px-4 md:px-6"
-                  : "px-4 md:px-6"
+                  : "px-4 md:px-6",
               )}
             >
               <div className="w-full space-y-6">
@@ -655,7 +662,8 @@ export function KnowledgeQALayout({
                 {showNoResultsState ? (
                   <React.Suspense fallback={null}>
                     <LazyNoResultsRecovery
-                      onBroadenScope={handleBroadenScope}
+                      onSearchMoreResults={handleSearchMoreResults}
+                      onChangeIncludedSources={handleOpenSourceSelector}
                       onOpenQuickIngest={handleAddSources}
                       onEnableWeb={handleEnableWeb}
                       onShowNearestMatches={handleShowNearestMatches}
@@ -690,82 +698,83 @@ export function KnowledgeQALayout({
               onTabChange={setEvidenceRailTab}
               resultsCount={results.length}
               citationsCount={citations.length}
+              showTrigger={!isMobile || !(hasResults || isSearching)}
               className="bg-surface/20"
             />
           </React.Suspense>
         ) : null}
       </main>
 
-      {effectiveSimple && compactScopePanelOpen ? (
-        <div
-          className="fixed inset-0 z-40 flex items-start justify-center px-3 py-4 sm:items-center sm:px-4"
-          role="presentation"
+      {effectiveSimple ? (
+        <Modal
+          open={compactScopePanelOpen}
+          modalRender={(content) => (
+            <div ref={scopeDialogRef} onKeyDown={containDialogTab}>
+              {content}
+            </div>
+          )}
+          afterOpenChange={(open) => {
+            if (open)
+              scopeDialogRef.current
+                ?.querySelector<HTMLButtonElement>("button")
+                ?.focus()
+          }}
+          title="Source scope and profiles"
+          onCancel={() => setCompactScopePanelOpen(false)}
+          closable={{ "aria-label": "Close source scope" }}
+          width={1000}
+          footer={
+            <button
+              type="button"
+              className="rounded-md border border-border px-4 py-2"
+              onClick={() => setCompactScopePanelOpen(false)}
+            >
+              Done
+            </button>
+          }
+          styles={{
+            body: { maxHeight: "calc(100dvh - 14rem)", overflowY: "auto" },
+          }}
         >
-          <button
-            type="button"
-            aria-hidden="true"
-            tabIndex={-1}
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setCompactScopePanelOpen(false)}
+          <KnowledgeContextBar
+            preset={preset}
+            onPresetChange={setPreset}
+            sources={settings.sources}
+            onSourcesChange={(sources) => updateSetting("sources", sources)}
+            includeMediaIds={
+              Array.isArray(settings.include_media_ids)
+                ? settings.include_media_ids
+                : []
+            }
+            onIncludeMediaIdsChange={(ids) =>
+              updateSetting("include_media_ids", ids)
+            }
+            includeNoteIds={
+              Array.isArray(settings.include_note_ids)
+                ? settings.include_note_ids
+                : []
+            }
+            onIncludeNoteIdsChange={(ids) =>
+              updateSetting("include_note_ids", ids)
+            }
+            webEnabled={settings.enable_web_fallback}
+            webFallbackAvailable={webFallbackAvailable}
+            onToggleWeb={handleToggleWebFallback}
+            generationProvider={settings.generation_provider ?? null}
+            generationModel={settings.generation_model ?? null}
+            onGenerationProviderChange={(provider) =>
+              updateSetting("generation_provider", provider)
+            }
+            onGenerationModelChange={(model) =>
+              updateSetting("generation_model", model)
+            }
+            contextChangedSinceLastRun={contextChangedSinceLastRun}
+            scopeChangeDetails={scopeChangeDetails}
+            sourceHealth={sourceHealth}
+            onRefreshSourceHealth={refreshSourceHealth}
+            onOpenSettings={handleOpenSettingsFromScopePanel}
           />
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="knowledge-compact-scope-title"
-            className="relative z-10 flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-lg border border-border bg-background shadow-xl"
-          >
-            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-              <div className="min-w-0">
-                <h2
-                  id="knowledge-compact-scope-title"
-                  className="text-sm font-semibold text-text"
-                >
-                  Source scope and profiles
-                </h2>
-              </div>
-              <button
-                ref={compactScopeCloseButtonRef}
-                type="button"
-                onClick={() => setCompactScopePanelOpen(false)}
-                className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-text-muted hover:bg-hover hover:text-text transition-colors"
-                aria-label="Close source scope"
-                title="Close source scope"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="overflow-y-auto p-3 sm:p-4">
-              <KnowledgeContextBar
-                preset={preset}
-                onPresetChange={setPreset}
-                sources={settings.sources}
-                onSourcesChange={(sources) => updateSetting("sources", sources)}
-                includeMediaIds={Array.isArray(settings.include_media_ids) ? settings.include_media_ids : []}
-                onIncludeMediaIdsChange={(ids) => updateSetting("include_media_ids", ids)}
-                includeNoteIds={
-                  Array.isArray(settings.include_note_ids) ? settings.include_note_ids : []
-                }
-                onIncludeNoteIdsChange={(ids) => updateSetting("include_note_ids", ids)}
-                webEnabled={settings.enable_web_fallback}
-                webFallbackAvailable={webFallbackAvailable}
-                onToggleWeb={handleToggleWebFallback}
-                generationProvider={settings.generation_provider ?? null}
-                generationModel={settings.generation_model ?? null}
-                onGenerationProviderChange={(provider) =>
-                  updateSetting("generation_provider", provider)
-                }
-                onGenerationModelChange={(model) =>
-                  updateSetting("generation_model", model)
-                }
-                contextChangedSinceLastRun={contextChangedSinceLastRun}
-                scopeChangeDetails={scopeChangeDetails}
-                sourceHealth={sourceHealth}
-                onRefreshSourceHealth={refreshSourceHealth}
-                onOpenSettings={handleOpenSettingsFromScopePanel}
-              />
-            </div>
-          </div>
-        </div>
+        </Modal>
       ) : null}
 
       {/* Mode toggle + promotion toast + help link */}

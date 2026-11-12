@@ -29,17 +29,13 @@ Create a task-by-task implementation plan from the approved Watchlists demo reme
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Created implementation plan Docs/superpowers/plans/2026-05-20-watchlists-demo-remediation-implementation-plan.md from the approved Watchlists demo remediation spec.
 
 Local adversarial review fixed two plan gaps before completion: explicit generate_audio=true output creation fields and scheduled digest/newsletter auto_output contract.
 
 Subagent review was not dispatched because current tool policy permits subagent spawning only after explicit user authorization. Plan-only verification: git diff --check passed; Bandit is not applicable because no Python implementation code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

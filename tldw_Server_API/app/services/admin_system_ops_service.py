@@ -36,8 +36,15 @@ _WEBHOOK_EVENTS = {
 }
 _WEBHOOK_MAX_URL_LENGTH = 2048
 
+
+def _default_store_path() -> Path:
+    """Select a configured Admin store without consulting another profile's root."""
+    configured = os.getenv("SYSTEM_OPS_STORE_PATH", "").strip()
+    return Path(configured) if configured else Path(get_database_dir()) / "system_ops.json"
+
+
 _STORE_LOCK = Lock()
-_STORE_PATH = Path(get_database_dir()) / "system_ops.json"
+_STORE_PATH = _default_store_path()
 _LOCK_TIMEOUT_SECONDS = float(os.getenv("SYSTEM_OPS_LOCK_TIMEOUT", "5"))
 _STRICT_STORE_MAX_BYTES = 67_108_864
 _STRICT_STORE_READ_CHUNK_BYTES = 1024 * 1024
@@ -326,9 +333,10 @@ def _load_store() -> dict[str, Any]:
 
 
 def _atomic_write_store(path: Path, store: dict[str, Any]) -> None:
-    """Publish one complete JSON object with file and directory durability."""
+    """Publish complete JSON with file and supported parent-directory durability."""
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(store, indent=2, sort_keys=False).encode("utf-8")
+    # mkstemp creates the file with owner-only permissions on supporting platforms.
     fd, temporary_name = tempfile.mkstemp(
         prefix=f".{path.name}.",
         dir=path.parent,
@@ -336,7 +344,6 @@ def _atomic_write_store(path: Path, store: dict[str, Any]) -> None:
     temporary_path = Path(temporary_name)
     descriptor_open = True
     try:
-        os.fchmod(fd, 0o600)
         with os.fdopen(fd, "wb", closefd=True) as stream:
             descriptor_open = False
             written = stream.write(payload)
@@ -346,6 +353,9 @@ def _atomic_write_store(path: Path, store: dict[str, Any]) -> None:
             os.fsync(stream.fileno())
         os.replace(temporary_path, path)
 
+        # Windows cannot open directory descriptors for fsync.
+        if os.name == "nt":
+            return
         directory_fd = os.open(path.parent, os.O_RDONLY)
         try:
             try:

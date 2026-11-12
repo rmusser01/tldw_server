@@ -96,7 +96,7 @@ async def run_pdf_extract_adapter(config: dict[str, Any], context: dict[str, Any
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
 
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     # Get and template pdf_uri
     pdf_uri_t = config.get("pdf_uri")
@@ -296,7 +296,7 @@ async def run_ocr_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
 
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     # Get and template image_uri
     image_uri_t = config.get("image_uri")
@@ -426,7 +426,7 @@ async def run_document_table_extract_adapter(config: dict[str, Any], context: di
       - count: int
       - format: str
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_api_key_scope
 from tldw_Server_API.app.api.v1.endpoints.storage_helpers import _normalize_folder_tag
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     FolderCreateRequest,
@@ -22,7 +22,11 @@ async def _get_storage_service() -> StorageQuotaService:
     return await storage_endpoint._get_service()
 
 
-@router.get("/folders", response_model=FolderListResponse)
+@router.get(
+    "/folders",
+    response_model=FolderListResponse,
+    dependencies=[Depends(require_api_key_scope("read"))],
+)
 async def list_folders(
     user: User = Depends(get_request_user),
     service: StorageQuotaService = Depends(_get_storage_service),
@@ -43,7 +47,10 @@ async def list_folders(
     )
 
 
-@router.post("/folders")
+@router.post(
+    "/folders",
+    dependencies=[Depends(require_api_key_scope("write"))],
+)
 async def create_folder(
     request: FolderCreateRequest,
     user: User = Depends(get_request_user),

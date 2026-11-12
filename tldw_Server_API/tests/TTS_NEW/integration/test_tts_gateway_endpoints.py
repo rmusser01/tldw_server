@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -829,6 +831,7 @@ async def test_missing_gateway_credential_returns_static_overlay_without_discove
 )
 async def test_gateway_catalog_advertises_only_executable_conversion_routes(
     tmp_path,
+    monkeypatch,
     conversion_enabled: bool,
     source_format: str,
     executable_state: str,
@@ -848,7 +851,14 @@ async def test_gateway_catalog_advertises_only_executable_conversion_routes(
     if executable_state == "missing":
         spec = replace(spec, ffmpeg_path=None)
     elif executable_state == "non_executable":
-        executable.chmod(0o600)
+        real_access = os.access
+
+        def deny_execute(path, mode):
+            if Path(path) == executable and mode & os.X_OK:
+                return False
+            return real_access(path, mode)
+
+        monkeypatch.setattr(os, "access", deny_execute)
 
     provider = TTSServiceV2._serialize_gateway_provider(spec, None)
     capabilities = provider["model_capabilities"]["Vendor/Exact"]

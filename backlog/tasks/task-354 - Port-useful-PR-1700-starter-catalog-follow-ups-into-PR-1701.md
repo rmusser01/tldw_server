@@ -33,9 +33,9 @@ Follow up on PR #1701 by selectively porting non-duplicative useful pieces from 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Ported the useful non-overlapping PR #1700 pieces into PR #1701: design-spec starter catalog placement using #1701's /copy route semantics, manifest preview isolation regression coverage, and duplicate fixture asset-key regression coverage. Verification: focused starter catalog tests passed (9 passed), focused Persona Visual starter/API slice passed (59 passed), py_compile passed, black --check passed, git diff --check passed, and Bandit with pytest assert check excluded reported 0 findings; the raw Bandit run only reported B101 pytest assert usage in the touched test file.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

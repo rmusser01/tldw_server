@@ -46,13 +46,13 @@ Continue issue #1346 by replacing the display-only dayjs usage in FlashcardEditD
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented native Flashcards date-display helpers for parsing timestamps, local YYYY-MM-DD HH:mm labels, and dayjs-compatible relative labels. Replaced FlashcardEditDrawer scheduling metadata dayjs usage with the helper and removed dayjs imports from the scheduling metadata test.
 
 TDD red: focused Vitest failed on missing ../../utils/date-display and ../date-display imports before implementation. Green: bunx vitest run src/components/Flashcards/utils/__tests__/date-display.test.ts src/components/Flashcards/components/__tests__/FlashcardEditDrawer.scheduling-metadata.test.tsx passed with 2 files and 20 tests.
 
 Verification: exact shared UI dayjs package-import scan now reports 11 remaining import lines; exact scan over Flashcards/components and Flashcards/utils returns no dayjs package imports. git diff --check passed. bun run lint in apps/tldw-frontend exited 0 with the existing 131-warning baseline. UI package tsc still exits 2 on the existing repo-wide baseline, but a filtered tsc diagnostic check for date-display and FlashcardEditDrawer.scheduling-metadata returned no touched-file diagnostics after adding review_prompt_side to the local test fixture. Bandit skipped because only TypeScript, documentation, and Backlog files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

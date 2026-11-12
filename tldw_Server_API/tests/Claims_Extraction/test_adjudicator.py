@@ -5,6 +5,9 @@ These tests verify the evidence weighing and status determination logic
 for the FVA pipeline's adjudicator component.
 """
 
+import asyncio
+import threading
+
 import pytest
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -18,6 +21,10 @@ from tldw_Server_API.app.core.Claims_Extraction.adjudicator import (
     AdjudicationResult,
     create_adjudicator,
 )
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.Usage import llm_accounting, llm_quota_gate, quota_resolver
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+from tldw_Server_API.app.core.Usage.quota_checks import LLMQuotaRefusal
 
 # Import types
 try:
@@ -683,3 +690,119 @@ class TestCreateAdjudicator:
         adjudicator = create_adjudicator(llm_analyze_fn=mock_llm)
 
         assert adjudicator.llm_analyze_fn == mock_llm
+
+
+def _refusal() -> LLMQuotaExceededError:
+    return LLMQuotaExceededError(
+        category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+    )
+
+
+class TestClaimAdjudicatorLLMQuota:
+    """The adjudicator's LLM call is quota-checked, and a refusal is not an assessment (TASK-13862)."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_llm_call_runs_off_the_loop_where_the_quota_check_runs(self, monkeypatch):
+        """On the loop's own thread the check at the call is skipped (LLM usage accounting design section 5)."""
+        decided_for: list[int] = []
+
+        async def _admit(user_id, requested_tokens=1):
+            decided_for.append(user_id)
+            return None
+
+        monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+        quota_resolver.invalidate_all()
+        monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _admit)
+        monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
+        loop_thread = threading.get_ident()
+        seen: list[tuple[bool, bool]] = []
+
+        def _analyze(*_args, **_kwargs):
+            # (off the loop thread, checked) for the call the provider layer would make here
+            seen.append((threading.get_ident() != loop_thread, llm_quota_gate.check_llm_call_sync()))
+            return '{"stance": "CONTRADICTS", "confidence": 0.8}'
+
+        adjudicator = ClaimAdjudicator(llm_analyze_fn=_analyze)
+        with llm_call_context(user_id=7):
+            stance, confidence = await adjudicator._llm_assess("claim", "evidence")
+
+        assert (stance, confidence) == (EvidenceStance.CONTRADICTS, 0.8)
+        assert seen == [(True, True)]
+        assert decided_for == [7]  # the request's user crossed into the worker thread
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_quota_refusal_is_not_a_neutral_assessment(self):
+        """On dev the refusal became NEUTRAL 0.5, and the claim kept its verdict."""
+        adjudicator = ClaimAdjudicator(llm_analyze_fn=AsyncMock(side_effect=_refusal()))
+        claim = MockClaim(id="1", text="The sky is green.")
+
+        with pytest.raises(LLMQuotaExceededError) as refused:
+            await adjudicator.adjudicate(
+                claim=claim,
+                supporting_docs=[Document(id="1", content="The sky is blue.", metadata={}, score=0.8)],
+                contradicting_docs=[],
+                original_verification=MockClaimVerification(claim=claim),
+            )
+        assert refused.value.detail["category"] == "llm_tokens_month"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_refusal_in_the_worker_thread_does_not_reach_the_prompt_only_fallback(self, monkeypatch):
+        """The app's analyze shape: sync, full signature only, refused by the check in the worker thread.
+
+        Sent on to the prompt-only fallback, the refusal would be replaced by that call's TypeError: NEUTRAL 0.5.
+        """
+        decided_for: list[int] = []
+
+        async def _refuse(user_id, requested_tokens=1):
+            decided_for.append(user_id)
+            return LLMQuotaRefusal(
+                category="llm_tokens_month", current=1, limit=1, message="Monthly LLM token limit reached", retry_after=60
+            )
+
+        monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+        quota_resolver.invalidate_all()
+        monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _refuse)
+        monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
+        loop_thread = threading.get_ident()
+        off_loop: list[bool] = []
+
+        def _analyze(api_endpoint, input_data, prompt, api_key, system_message, temp=None, **_kwargs):
+            # The shape of claims_service._fva_claims_analyze_call; perform_chat_api_call runs this check first.
+            off_loop.append(threading.get_ident() != loop_thread)
+            llm_quota_gate.check_llm_call_sync()
+            return '{"stance": "SUPPORTS", "confidence": 0.9}'
+
+        adjudicator = ClaimAdjudicator(llm_analyze_fn=_analyze)
+        with llm_call_context(user_id=7), pytest.raises(LLMQuotaExceededError) as refused:
+            await adjudicator._llm_assess("claim", "evidence")
+
+        assert refused.value.detail["category"] == "llm_tokens_month"
+        assert off_loop == [True]
+        assert decided_for == [7]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_neutral_counter_evidence_does_not_count():
+    """Only CONTRADICTS documents enter the contradict score; FVA's unfloored anti-context list rests on this (TASK-13881)."""
+
+    def _analyze(api_endpoint, input_data, prompt, *args, **kwargs):
+        if "Evidence: The sky is blue, not green." in prompt:
+            return '{"stance": "CONTRADICTS", "confidence": 0.9}'
+        return '{"stance": "NEUTRAL", "confidence": 0.6}'
+
+    claim = MockClaim(id="1", text="The sky is green.")
+    neutral = [Document(id=f"n{i}", content=f"Unrelated note {i}.", metadata={}, score=0.5) for i in range(3)]
+
+    result = await ClaimAdjudicator(llm_analyze_fn=_analyze).adjudicate(
+        claim=claim,
+        supporting_docs=[],
+        contradicting_docs=[Document(id="c", content="The sky is blue, not green.", metadata={}, score=0.5), *neutral],
+        original_verification=MockClaimVerification(claim=claim),
+    )
+
+    assert result.contradict_score == 0.9
+    assert [a.document.id for a in result.contradicting_evidence] == ["c"]

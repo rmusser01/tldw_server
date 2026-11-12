@@ -42,7 +42,7 @@ Create the approved design spec for importing OpenWebUI chat JSON exports into t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote design spec at Docs/superpowers/specs/2026-05-10-openwebui-chat-import-design.md and started the spec review loop.
 
 Spec review iteration 1 found message ID collision risk for rename imports and an underspecified OpenWebUI preview/import response contract. Patched the spec to add import-copy namespacing, explicit optional OpenWebUI preview/result response fields, canonical derived external refs, and stricter v1 role handling.
@@ -52,7 +52,7 @@ Spec review iteration 2 approved. Applied advisory cleanup to specify source_for
 Reopened for user-requested design self-review before implementation planning. Found additional planning gaps to patch: OpenWebUI JSON must branch before ZIP validation, JSON filename handling cannot reuse the ZIP-only filename validator unchanged, source metadata should use explicit namespaced storage, and OpenWebUI Unix timestamps need explicit normalization.
 
 Design self-review patch added explicit endpoint/source-format branching before ZIP validation, JSON filename validation constraints, frontend helper changes for source_format, duplicate lookup helper guidance, namespaced conversation/message metadata, UUID-shaped deterministic message IDs, and Unix-second timestamp normalization.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -24,13 +24,13 @@ describe("CurrentChatModelSettings llama.cpp controls guard", () => {
     expect(source).toContain("handleLlamaControlChange")
     expect(source).toContain("settingsScope?: string | null")
     expect(source).toContain("explicitSettingsScope")
-    expect(source).toContain("selectedModelSettingsScope")
+    expect(source).toContain("resolveModelSelectorSelection(")
     expect(source).toContain("latestSettingsState.activeSettingsScope")
-    expect(source).toContain('queryKey: ["playground:chatModels"]')
+    expect(source).toMatch(/useChatModelCatalog\s*\(\s*open\s*&&\s*!sceneOnly\s*\)/)
     expect(source).not.toContain('queryKey: ["playground:chatModels", open]')
-    expect(source).toContain("return getCanonicalModelKey({")
+    expect(source).toContain("value: getCanonicalModelKey(m)")
     expect(source).toContain(
-      "explicitSettingsScope ||\n        selectedModelSettingsScope ||\n        latestSettingsState.activeSettingsScope"
+      "explicitSettingsScope || latestSettingsState.activeSettingsScope"
     )
     expect(source).toContain("updateScopedSetting(targetSettingsScope")
     expect(source).toContain("setActiveSettingsScope(targetSettingsScope)")

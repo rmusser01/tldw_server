@@ -17,6 +17,10 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
+    resolve_tiktoken_encoding_or_default,
+)
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.text._config import (
@@ -49,7 +53,7 @@ async def run_keyword_extract_adapter(config: dict[str, Any], context: dict[str,
     Output:
       - {"keywords": [str], "scores": [float], "count": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -118,6 +122,8 @@ Text:
 
         return {"keywords": keywords, "scored_keywords": scored_keywords, "method": "llm"}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.exception("Keyword extract error")
         return {"keywords": [], "scored_keywords": [], "error": "keyword_extract_error"}
@@ -142,7 +148,7 @@ async def run_sentiment_analyze_adapter(config: dict[str, Any], context: dict[st
     Output:
       - {"sentiment": str, "score": float, "confidence": float}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -194,6 +200,8 @@ Text: {text[:3000]}"""
                 return {"sentiment": "negative", "score": -0.7, "confidence": 0.6}
             return {"sentiment": "neutral", "score": 0.0, "confidence": 0.5}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.exception("Sentiment analyze error")
         return {"sentiment": "neutral", "score": 0.0, "confidence": 0.0, "error": "sentiment_analyze_error"}
@@ -217,7 +225,7 @@ async def run_language_detect_adapter(config: dict[str, Any], context: dict[str,
     Output:
       - {"language": str, "code": str, "confidence": float}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -279,7 +287,7 @@ async def run_topic_model_adapter(config: dict[str, Any], context: dict[str, Any
     Output:
       - {"topics": [{"name": str, "keywords": [str]}], "count": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -334,6 +342,8 @@ Text:
         topics = [{"label": line.strip(), "keywords": []} for line in result_text.split("\n") if line.strip()]
         return {"topics": topics[:num_topics]}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.exception("Topic model error")
         return {"topics": [], "error": "topic_model_error"}
@@ -359,7 +369,7 @@ async def run_entity_extract_adapter(config: dict[str, Any], context: dict[str, 
     Output:
       - {"entities": [{"text": str, "type": str, "start": int, "end": int}], "count": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -434,6 +444,8 @@ Example:
             "text_length": len(text),
         }
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.exception("Entity extract adapter error")
         return {"error": "entity_extract_error", "entities": {}, "total_count": 0}
@@ -457,7 +469,7 @@ async def run_token_count_adapter(config: dict[str, Any], context: dict[str, Any
     Output:
       - {"tokens": int, "characters": int, "words": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -476,11 +488,9 @@ async def run_token_count_adapter(config: dict[str, Any], context: dict[str, Any
     word_count = len(text.split())
 
     try:
-        import tiktoken
-        try:
-            encoding = tiktoken.encoding_for_model(model)
-        except KeyError:
-            encoding = tiktoken.get_encoding("cl100k_base")
+        import tiktoken  # noqa: F401 - probe so a missing dep still hits except ImportError
+
+        encoding = resolve_tiktoken_encoding_or_default(model)
         token_count = len(encoding.encode(text))
         return {"token_count": token_count, "char_count": char_count, "word_count": word_count, "model": model}
     except ImportError:

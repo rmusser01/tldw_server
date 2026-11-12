@@ -34,9 +34,9 @@ Add operator-facing documentation for the native CodeGraph MCP module now that t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added Docs/MCP/Unified/CodeGraph.md, linked it from Unified README/User Guide, and exposed max_index_seconds in mcp_modules.yaml. Verification: git diff --check passed; CodeGraph focused pytest passed (160 passed, 5 warnings). Bandit skipped because this slice touched docs/YAML/backlog only, no Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -3,6 +3,8 @@
 #
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 
@@ -96,8 +98,10 @@ async def translate_text(
     )
 
     try:
-        # Use the existing analyze function for LLM call
-        result = analyze(
+        # Use the existing analyze function for LLM call, off the event loop: a sync LLM call
+        # on the loop blocks the server and cannot be quota-checked (LLM usage accounting spec §4b).
+        result = await asyncio.to_thread(
+            analyze,
             api_name=provider,
             input_data=prompt,
             custom_prompt_arg=None,

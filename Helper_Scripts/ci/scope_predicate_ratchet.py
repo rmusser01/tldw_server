@@ -108,7 +108,7 @@ def iter_findings(root: Path = APP_ROOT) -> Iterator[str]:
             for name in sorted(guarded_scopes(node.test)):
                 if not adds_predicate_on(node.body, name):
                     continue
-                yield f"{path.relative_to(REPO_ROOT)}:{node.lineno} if {name}"
+                yield f"{path.relative_to(REPO_ROOT).as_posix()}:{node.lineno} if {name}"
 
 
 def read_baseline(path: Path = BASELINE_PATH) -> set[str]:

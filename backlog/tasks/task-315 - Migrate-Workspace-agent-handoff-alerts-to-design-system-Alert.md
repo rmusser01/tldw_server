@@ -34,13 +34,13 @@ Restore the design-system product-state guard on current dev by replacing unbase
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the guard-restoration slice by replacing WorkspaceAgentTaskHandoffModal AntD Alert usage with the design-system Alert primitive for both error and success callouts. The error message remains visible as the Alert body. The success callout keeps the existing title and created task identifiers, with role="status" and aria-live="polite" for non-urgent completion feedback.
 
 Verification: initial red check was bun run verify:design-system-state failing on two unbaselined WorkspaceAgentTaskHandoffModal AntD Alert findings. After migration: bun run test src/components/Option/WorkspacePlayground/__tests__/WorkspaceHeader.test.tsx --reporter=dot (pass, 30 tests; existing jsdom navigation not-implemented messages only); bun run test src/design-system/__tests__/product-state-guard.test.ts --reporter=dot (pass, 52 tests); bun run verify:design-system-state (pass, 504 baseline exceptions / 24 canonical-state-label); node JSON parse for design-system-product-state-baseline.json (pass); git diff --check (pass); touched-path TypeScript filter over bunx tsc --noEmit --pretty false (tsc exited 2 for existing repo-wide diagnostics, no diagnostics matched WorkspaceAgentTaskHandoffModal.tsx).
 
 Bandit: skipped because touched implementation/test files are frontend TypeScript plus this task record, with no Python runtime surface.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabas
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError, RetryExhaustedError
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
-from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime, is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import is_truthy
 
 _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -40,11 +40,6 @@ _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     sqlite3.Error,
 )
-
-
-def _now_iso() -> str:
-    import datetime as _dt
-    return _dt.datetime.utcnow().isoformat()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -113,24 +108,6 @@ def _host_allowed(url: str, tenant_id: str) -> bool:
                 res = _eg.evaluate_url_policy(url, allowlist=(allow or None), denylist=(deny or None))
                 if bool(getattr(res, "allowed", False)):
                     return True
-                # In test contexts (no DNS), allow pattern-only when explicitly allowed
-                if is_explicit_pytest_runtime() or is_test_mode():
-                    try:
-                        p = urlparse(url)
-                        host = (p.hostname or "").lower().rstrip('.')
-                        if not host:
-                            return False
-                        # Denylist wins
-                        for d in deny:
-                            if host == d or host.endswith(f".{d}"):
-                                return False
-                        if allow:
-                            for a in allow:
-                                if host == a or host.endswith(f".{a}"):
-                                    return True
-                        return False
-                    except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS:
-                        return False
                 return False
             except _WORKFLOWS_DLQ_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"DLQ: evaluate_url_policy failed: {e}")

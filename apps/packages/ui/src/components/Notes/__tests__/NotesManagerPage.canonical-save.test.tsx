@@ -143,9 +143,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
   default: ({ onSelectNote }: { onSelectNote: (id: string) => void }) => (
-    <button data-testid="notes-list-panel" onClick={() => onSelectNote("11")}>
+    <><button data-testid="notes-list-panel" onClick={() => onSelectNote("11")}>
       Open saved note
-    </button>
+    </button><button onClick={() => onSelectNote("12")}>Open next note</button></>
   )
 }))
 
@@ -339,6 +339,9 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
   afterEach(() => vi.restoreAllMocks())
   beforeEach(() => {
     vi.clearAllMocks()
+    // Unsaved drafts now survive an unmount in the offline queue (#3102
+    // NS-01); start every test without the previous test's drafts.
+    localStorage.clear()
     canonicalBoundary.userId = 7
     canonicalBoundary.storage = {
       serverUrl: "https://notes.test",
@@ -364,6 +367,28 @@ describe("Notes pending saves through actual canonical storage hydration", () =>
     expect(detail.servicePromptConfig).toMatchObject({ serverUrl: "https://notes.test", expectedUserId: 7 })
     expect(detail.headers).toMatchObject({ "X-TLDW-Expected-User-ID": "7" })
     expect(createCalls()).toHaveLength(0)
+  })
+
+  it("disables the old editor and Save until a newly selected note loads", async () => {
+    const original = mockBgRequest.getMockImplementation()!
+    const next = deferred<unknown>()
+    mockBgRequest.mockImplementation(request => request.path === '/api/v1/notes/12' ? next.promise : original(request))
+    renderPage()
+    await act(async () => {})
+    fireEvent.click(screen.getByTestId('notes-list-panel'))
+    const content = screen.getByPlaceholderText('Write your note here... (Markdown supported)')
+    await waitFor(() => expect(content).toHaveValue('Saved body'))
+    fireEvent.click(screen.getByRole('button', { name: 'Open next note' }))
+    await waitFor(() => expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/12' })))
+    expect(content).toHaveAttribute('readonly')
+    expect(screen.getByTestId('notes-save-button')).toBeDisabled()
+    await act(async () => { next.resolve({ id: 12, title: 'Next note', content: 'Next body', version: 1, last_modified: '2026-10-03T01:00:00Z' }); await next.promise })
+    await waitFor(() => expect(content).toHaveValue('Next body'))
+    expect(content).not.toHaveAttribute('readonly')
+    fireEvent.change(content, { target: { value: 'Edit belongs to next note' } })
+    fireEvent.click(screen.getByTestId('notes-save-button'))
+    await waitFor(() => expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/12', method: 'PUT', body: expect.objectContaining({ content: 'Edit belongs to next note' }) })))
+    expect(updateCalls()).toHaveLength(0)
   })
 
   it("reopens a direct Note source after reload and ignores the unrelated legacy last-note hint", async () => {

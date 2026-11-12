@@ -35,9 +35,9 @@ Create a Stage 2 implementation plan for Watchlist-first onboarding. Scope: doma
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Stage 2 setup wizard implementation plan at Docs/superpowers/plans/2026-05-15-first-class-watchlists-stage2-setup-wizard-plan.md. The plan maps current Watchlists shell create modal, Overview Quick Setup, Pipeline Builder, Zustand selected Watchlist state, existing service CRUD, locale mirrors, and Stage 1 scoping. It decomposes implementation into Stage 2A-2E with exact file ownership, tests, verification commands, and commit boundaries. Self-review fixed a TypeScript test-snippet issue around checking absence of alert rules. Stage 3 content-match alerts and Stage 5 defensible report-builder work remain explicit future boundaries. Verification for this planning-only slice: git diff --check passed. Bandit not run because no backend/code behavior changed in this task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

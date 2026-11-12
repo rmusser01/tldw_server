@@ -9,18 +9,26 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import (
+from tldw_Server_API.app.core.exceptions import (
     ChatAPIError,
     ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
+    ChatModelNotAvailableError,
     ChatProviderError,
     ChatRateLimitError,
-)
-from tldw_Server_API.app.core.exceptions import (
-    NetworkError,
-    RetryExhaustedError,
     raise_detached_error,
+)
+
+# Transport-exception classification now lives in core/Utils/http_status_extraction.py
+# so TTS, Local_LLM and Embeddings can use it without depending on LLM_Calls.
+# Re-exported here because 14 modules already import these names from this module.
+from tldw_Server_API.app.core.Utils.http_status_extraction import (  # noqa: F401
+    get_http_error_text,
+    get_http_status_from_exception,
+    is_chunked_encoding_error,
+    is_http_status_error,
+    is_network_error,
 )
 
 _ERROR_UTILS_NONCRITICAL_EXCEPTIONS = (
@@ -91,6 +99,31 @@ def log_provider_failure(
     )
 
 
+# Upstream error codes that mean the account's billing quota is spent, not a rate limit.
+_SPENT_QUOTA_ERROR_CODES = frozenset({"insufficient_quota"})
+
+
+def upstream_quota_exhausted(exc: BaseException | None) -> bool:
+    """Whether a failed upstream reply says the billing quota is spent (OpenAI ``insufficient_quota``).
+
+    Only the body's ``error.type`` and ``error.code`` are compared with a fixed allowlist, and only
+    a bool comes back, so no upstream text is kept. No reply, an unread (streamed) body, or a body
+    that is not JSON gives False.
+    """
+
+    try:
+        body = exc.response.json()
+    except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
+        return False
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return False
+    return any(
+        isinstance(error.get(key), str) and error.get(key) in _SPENT_QUOTA_ERROR_CODES
+        for key in ("type", "code")
+    )
+
+
 def build_sanitized_chat_error(
     provider: str,
     *,
@@ -99,8 +132,13 @@ def build_sanitized_chat_error(
     rate_limit_statuses: tuple[int, ...] = (429,),
     bad_request_statuses: tuple[int, ...] = (400, 404, 422),
     treat_other_4xx_as_bad_request: bool = True,
+    upstream: BaseException | None = None,
 ) -> ChatAPIError:
-    """Build one typed public error without reflecting untrusted upstream text."""
+    """Build one typed public error without reflecting untrusted upstream text.
+
+    ``upstream`` is the failed upstream call's exception. It is read only to tell a spent
+    billing quota from a rate limit (``upstream_quota_exhausted``).
+    """
 
     safe_provider = _bounded_log_label(provider)
     if status_code in auth_statuses:
@@ -109,7 +147,10 @@ def build_sanitized_chat_error(
             status_code=status_code or 401,
         )
     if status_code in rate_limit_statuses:
-        return ChatRateLimitError(provider=safe_provider)
+        return ChatRateLimitError(
+            provider=safe_provider,
+            quota_exhausted=upstream_quota_exhausted(upstream),
+        )
     if status_code in bad_request_statuses or (
         treat_other_4xx_as_bad_request
         and status_code is not None
@@ -121,75 +162,6 @@ def build_sanitized_chat_error(
     if status_code is None:
         return ChatProviderError(provider=safe_provider)
     return ChatAPIError(provider=safe_provider, status_code=status_code)
-
-
-def get_http_status_from_exception(exc: Exception) -> int | None:
-    """Best-effort extraction of an HTTP status code from common exception shapes."""
-    response = getattr(exc, "response", None)
-    if response is not None:
-        for attr in ("status_code", "status"):
-            status = getattr(response, attr, None)
-            if status is not None:
-                try:
-                    return int(status)
-                except (TypeError, ValueError):
-                    pass
-    for attr in ("status_code", "status"):
-        status = getattr(exc, attr, None)
-        if status is not None:
-            try:
-                return int(status)
-            except (TypeError, ValueError):
-                pass
-    if isinstance(exc, NetworkError):
-        # Single-escaped: inside a raw string `\\s` is a literal backslash + 's', so the
-        # double-escaped form could never match a real "HTTP 429" message. The status
-        # was then lost and the caller defaulted to 502.
-        match = re.search(r"HTTP\s+(\d{3})", str(exc))
-        if match:
-            try:
-                return int(match.group(1))
-            except ValueError:
-                return None
-    return None
-
-
-def get_http_error_text(exc: Exception) -> str:
-    """Return an error detail string from common response/exception shapes."""
-    response = getattr(exc, "response", None)
-    if response is not None:
-        try:
-            text = getattr(response, "text", None)
-        except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS as response_exc:
-            text = None
-            if getattr(response_exc.__class__, "__name__", "") == "ResponseNotRead":
-                try:
-                    response.read()
-                    text = getattr(response, "text", None)
-                except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
-                    text = None
-        if text is None:
-            try:
-                text = getattr(response, "content", None)
-            except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS as response_exc:
-                text = None
-                if getattr(response_exc.__class__, "__name__", "") == "ResponseNotRead":
-                    try:
-                        response.read()
-                        text = getattr(response, "content", None)
-                    except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
-                        text = None
-            if isinstance(text, (bytes, bytearray)):
-                try:
-                    text = text.decode("utf-8", errors="replace")
-                except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
-                    text = None
-        if text is not None:
-            return str(text)
-    response_text = getattr(exc, "response_text", None)
-    if response_text:
-        return str(response_text)
-    return str(exc)
 
 
 def _redact_sensitive_text(text: str) -> str:
@@ -300,11 +272,15 @@ def privacy_safe_chat_error(provider: str, exc: Exception) -> ChatAPIError:
 
     resolved_provider = str(getattr(exc, "provider", None) or provider or "unknown")
     status_code = get_http_status_from_exception(exc)
+    if isinstance(exc, ChatModelNotAvailableError):
+        return exc  # built from the request's provider and model, never upstream text
     if isinstance(exc, ChatAuthenticationError) or status_code in {401, 403}:
         safe: ChatAPIError = ChatAuthenticationError(
             provider=resolved_provider,
             message="Provider authentication failed.",
         )
+        if getattr(exc, "credential_refresh_retry_safe", None) is True:
+            safe.credential_refresh_retry_safe = True
     elif isinstance(exc, ChatRateLimitError) or status_code == 429:
         safe = ChatRateLimitError(
             provider=resolved_provider,
@@ -319,6 +295,7 @@ def privacy_safe_chat_error(provider: str, exc: Exception) -> ChatAPIError:
         safe = ChatConfigurationError(
             provider=resolved_provider,
             message="Provider configuration is unavailable.",
+            error_code=getattr(exc, "error_code", "provider_configuration_invalid"),
         )
     elif isinstance(exc, ChatProviderError) or (
         status_code is not None and status_code >= 500
@@ -391,33 +368,23 @@ def raise_chat_error_from_http(
             rate_limit_statuses=rate_limit_statuses,
             bad_request_statuses=bad_request_statuses,
             treat_other_4xx_as_bad_request=treat_other_4xx_as_bad_request,
+            upstream=exc,
         )
     )
 
 
-def is_network_error(exc: Exception) -> bool:
-    if isinstance(exc, (NetworkError, RetryExhaustedError)):
-        return True
-    module = getattr(exc.__class__, "__module__", "")
-    name = exc.__class__.__name__
-    if module.startswith("requests"):
-        return "RequestException" in name or "ConnectionError" in name or "Timeout" in name
-    if module.startswith("httpx"):
-        return "RequestError" in name or "Connect" in name or "Timeout" in name
-    return False
-
-
-def is_http_status_error(exc: Exception) -> bool:
-    module = getattr(exc.__class__, "__module__", "")
-    name = exc.__class__.__name__
-    if module.startswith("httpx"):
-        return name == "HTTPStatusError"
-    if module.startswith("requests"):
-        return name == "HTTPError"
-    return False
-
-
-def is_chunked_encoding_error(exc: Exception) -> bool:
-    module = getattr(exc.__class__, "__module__", "")
-    name = exc.__class__.__name__
-    return module.startswith("requests") and name == "ChunkedEncodingError"
+def exception_summary(exc: BaseException) -> dict[str, Any]:
+    """Summarize exception metadata without rendering the exception message."""
+    summary: dict[str, Any] = {"type": type(exc).__name__}
+    for attr in ("status_code", "status", "provider"):
+        value = getattr(exc, attr, None)
+        if value is not None:
+            summary[attr] = value
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status_code = getattr(response, "status_code", None)
+        if status_code is None:
+            status_code = getattr(response, "status", None)
+        if status_code is not None:
+            summary["response_status_code"] = status_code
+    return summary

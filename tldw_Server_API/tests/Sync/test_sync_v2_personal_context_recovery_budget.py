@@ -1552,28 +1552,37 @@ def test_relay_does_not_restore_authority_after_source_selection_expires() -> No
     ("row_state", "expire_on_current_call", "expected_actions"),
     [
         pytest.param("pending", 1, [], id="before-stage"),
-        pytest.param("pending", 2, ["stage"], id="before-record"),
+        pytest.param(
+            "pending",
+            2,
+            ["stage", "record", "acknowledge", "finalize"],
+            id="staged-before-record",
+        ),
         pytest.param(
             "pending",
             3,
-            ["stage", "record"],
-            id="before-acknowledge",
+            ["stage", "record", "acknowledge", "finalize"],
+            id="staged-before-acknowledge",
         ),
         pytest.param(
             "pending",
             4,
-            ["stage", "record", "acknowledge"],
-            id="before-finalize",
+            ["stage", "record", "acknowledge", "finalize"],
+            id="staged-before-finalize",
         ),
         pytest.param("acknowledged", 1, [], id="acknowledged-before-finalize"),
     ],
 )
-def test_relay_rechecks_deadline_after_each_successful_current_row_check(
+def test_relay_current_row_deadline_stops_only_rows_it_has_not_staged(
     row_state: str,
     expire_on_current_call: int,
     expected_actions: list[str],
 ) -> None:
-    """Lease/current validation may itself consume the remaining wall time."""
+    """Lease/current validation may consume the remaining wall time.
+
+    Expiry there stops a row before its Sync write. A row this attempt already
+    staged is finished instead of being left hidden and pending in Sync.
+    """
 
     clock = _ManualClock()
     publications = _LeaseFlipSource(
@@ -1700,6 +1709,61 @@ def test_relay_rechecks_deadline_before_completing_the_batch() -> None:
         "acknowledge",
         "finalize",
     ]
+
+
+def test_relay_finishes_a_row_whose_staging_crossed_the_deadline() -> None:
+    """A slow stage must not strand its committed Sync row hidden and pending.
+
+    Abandoned there, the row blocks every later projection in the dataset, and
+    an activation that covers its batch before a retry leaves it pending forever.
+    """
+
+    clock = _ManualClock()
+    publications = _LeaseFlipSource(
+        row_state="pending",
+        expire_on_current_call=0,
+        clock=clock,
+    )
+    budget = _PersonalContextRecoveryBudget(
+        deadline_ns=100,
+        remaining_rows=100,
+        clock_ns=clock,
+    )
+
+    def stage(row: PublicationSourceRow, *_args: Any) -> AuthorityStageReceipt:
+        """Stage the row and move the clock to the deadline, as a slow host would."""
+        publications.actions.append("stage")
+        clock.now_ns = 100
+        return AuthorityStageReceipt(
+            server_cursor=1,
+            deterministic_envelope_id=row.deterministic_envelope_id,
+            publication_batch_id=row.publication_batch_id,
+            profile_publication_sequence=row.profile_publication_sequence,
+            batch_ordinal=row.batch_ordinal,
+            batch_size=row.batch_size,
+            purge_generation=row.purge_generation,
+        )
+
+    def finalize(*_args: Any) -> None:
+        """Record that the staged row was finalized despite the passed deadline."""
+        publications.actions.append("finalize")
+
+    result = PersonalContextRelay(
+        publications=publications,
+        stage_authority=stage,
+        finalize_authority=finalize,
+    ).relay_profile(
+        user_id="user-a",
+        profile_id="profile-a",
+        dataset_id="dataset-a",
+        after_server_cursor=None,
+        budget=budget,
+    )
+
+    assert publications.actions == ["stage", "record", "acknowledge", "finalize"]
+    assert result.staged_rows == 1
+    assert result.continuation == "personal_context_relay_pending"
+    assert len(publications.source_limits) == 1
 
 
 class _RecoveryFenceSource(_ManyBatchSource):

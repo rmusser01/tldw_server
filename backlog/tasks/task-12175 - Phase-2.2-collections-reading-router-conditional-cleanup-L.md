@@ -43,7 +43,7 @@ Move only the covered collections and reading content router specs onto the shar
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "collections_reading_router_attr_lookup" -q` failed before implementation because collections feeds, collections WebSub, WebSub callback, and reading router attributes were resolved during spec construction.
 - Green focused check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "collections_reading_router_attr_lookup" -q` passed with `1 passed`.
 - Green full/adjacent checks: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q` passed with `53 passed`; `python -m pytest tldw_Server_API/tests/Services/test_main_router_contract.py -q` passed with `6 passed`; `python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py -q` passed with `69 passed`.
@@ -52,7 +52,7 @@ Move only the covered collections and reading content router specs onto the shar
 - Known skips or blockers: none.
 - Review follow-up: PR #1260 Qodo thread reports that the collections_websub management router and callback_router use the same log_name, making skip logs ambiguous when one fails to resolve. Reopened task to add diagnostic coverage and fix the callback spec.
 - Review follow-up verification: focused red test failed on the old callback spec name, then passed after changing the callback ImportedRouterSpec to log_name=collections_websub_callback with skip_context=(callback_router). Verified focused router regression, full router group contracts, main router contract tests, OpenAPI contract tests, Bandit touched-source scope with 0 issues, and git diff --check. Ruff was also attempted on touched files; it reports existing non-blocking baseline style findings in this branch, so no broad unrelated Ruff cleanup was folded into this review fix.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

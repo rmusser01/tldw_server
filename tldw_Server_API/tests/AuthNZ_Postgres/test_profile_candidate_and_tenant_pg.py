@@ -10,15 +10,19 @@ from tldw_Server_API.app.api.v1.endpoints.admin.admin_tenant_provisioning import
     TenantProvisionRequest,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.profile_version import (
+    VersionedUserWriteGateway,
+)
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+from tldw_Server_API.tests.helpers.authnz_seed import unmanaged_authnz_pg_connection
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 
-def _principal() -> AuthPrincipal:
+def _principal(user_id: int = 1) -> AuthPrincipal:
     return AuthPrincipal(
         kind="user",
-        user_id=1,
+        user_id=user_id,
         username="admin",
         roles=["admin"],
         is_admin=True,
@@ -26,9 +30,11 @@ def _principal() -> AuthPrincipal:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("admin_permission", ["system.configure", "admin"])
 async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
     test_db_pool,
     monkeypatch: pytest.MonkeyPatch,
+    admin_permission: str,
 ) -> None:
     suffix = uuid.uuid4().hex[:10]
     org_name = f"Tenant {suffix}"
@@ -45,6 +51,34 @@ async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
         lambda: type("PasswordService", (), {"hash_password": lambda _self, _value: "hash"})(),
     )
 
+    async with test_db_pool.transaction() as conn:
+        actor_result = await VersionedUserWriteGateway("postgres").insert_user(
+            conn,
+            values={
+                "uuid": str(uuid.uuid4()),
+                "username": f"admin_{suffix}",
+                "email": f"admin_{suffix}@example.com",
+                "password_hash": "hash",
+                "role": "user",
+                "is_active": True,
+                "is_verified": True,
+            },
+        )
+        permission_id = await conn.fetchval(
+            "INSERT INTO public.permissions (name, description, category) "
+            "VALUES ($1, 'Tenant provision permission', 'system') "
+            "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id",
+            admin_permission,
+        )
+        actor_user_id = actor_result.affected_user_ids[0]
+        await conn.execute(
+            "INSERT INTO public.user_permissions (user_id, permission_id, granted) "
+            "VALUES ($1, $2, TRUE) "
+            "ON CONFLICT (user_id, permission_id) DO UPDATE SET granted = TRUE",
+            actor_user_id,
+            permission_id,
+        )
+
     result = await admin_tenant_provisioning.provision_tenant(
         TenantProvisionRequest(
             username=f"tenant_{suffix}",
@@ -52,7 +86,7 @@ async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
             password="securepass123",
             org_name=org_name,
         ),
-        _principal(),
+        _principal(actor_user_id),
     )
     assert result.user_id > 0
     assert result.org_id > 0
@@ -66,14 +100,17 @@ async def test_postgres_tenant_provisioning_uses_real_defaults_and_rolls_back(
                 password="securepass123",
                 org_name=org_name,
             ),
-            _principal(),
+            _principal(actor_user_id),
         )
 
     assert raised.value.status_code == 500
-    assert await test_db_pool.fetchval(
-        "SELECT COUNT(*) FROM public.users WHERE username = $1",
-        rolled_back_username,
-    ) == 0
+    assert (
+        await test_db_pool.fetchval(
+            "SELECT COUNT(*) FROM public.users WHERE username = $1",
+            rolled_back_username,
+        )
+        == 0
+    )
 
 
 @pytest.mark.asyncio
@@ -86,6 +123,9 @@ async def test_postgres_candidate_validation_rejects_shadow_fk_and_missing_id_de
             is_postgres=True,
         )
 
+    # A shadow ``users`` table is out-of-band damage the guarded pool refuses
+    # to create, so fabricate it on an unmanaged connection and validate there.
+    async with unmanaged_authnz_pg_connection() as conn:
         transaction = conn.transaction()
         await transaction.start()
         try:
@@ -104,12 +144,8 @@ async def test_postgres_candidate_validation_rejects_shadow_fk_and_missing_id_de
             )
             assert constraint_name
             await conn.execute("CREATE SCHEMA profile_shadow")
-            await conn.execute(
-                "CREATE TABLE profile_shadow.users (id INTEGER PRIMARY KEY)"
-            )
-            await conn.execute(
-                f'ALTER TABLE public.org_members DROP CONSTRAINT "{constraint_name}"'
-            )
+            await conn.execute("CREATE TABLE profile_shadow.users (id INTEGER PRIMARY KEY)")
+            await conn.execute(f'ALTER TABLE public.org_members DROP CONSTRAINT "{constraint_name}"')
             await conn.execute(
                 "ALTER TABLE public.org_members ADD CONSTRAINT "
                 "org_members_shadow_user_fk FOREIGN KEY (user_id) "
@@ -124,12 +160,11 @@ async def test_postgres_candidate_validation_rejects_shadow_fk_and_missing_id_de
         finally:
             await transaction.rollback()
 
+    async with test_db_pool.pool.acquire() as conn:
         transaction = conn.transaction()
         await transaction.start()
         try:
-            await conn.execute(
-                "ALTER TABLE public.organizations ALTER COLUMN id DROP DEFAULT"
-            )
+            await conn.execute("ALTER TABLE public.organizations ALTER COLUMN id DROP DEFAULT")
             with pytest.raises(Exception, match="candidate schema validation failed"):
                 await UsersDB._validate_profile_candidate_tables(  # noqa: SLF001
                     conn,

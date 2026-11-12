@@ -29,7 +29,7 @@ Remove the ReviewPage hardcoded Ready product-state label from the guard baselin
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR: https://github.com/rmusser01/tldw_server/pull/1585
 
 Updated ReviewPage ready status fallback to use getDesignSystemState("ready")?.label. Added focused behavior coverage in ReviewPage.connection.test.tsx by mocking the design-system registry to return a distinctive ready label and asserting ReviewPage renders that fallback for a ready media result. Removed the matching canonical-state-label baseline exception.
@@ -37,7 +37,7 @@ Updated ReviewPage ready status fallback to use getDesignSystemState("ready")?.l
 Verification: red ReviewPage guard failed before implementation, then ReviewPage guard passed, product-state guard tests passed, verify:design-system-state passed, git diff --check passed, touched-path tsc filter returned no matches. Bandit skipped because this is a frontend TypeScript/test-only slice with no Python runtime changes.
 
 Addressed PR review feedback by making the ready state lookup optional and replacing the source-string guard with behavior coverage. This removed the __dirname source-path helper called out in review. Re-ran ReviewPage guard, product-state guard tests, verify:design-system-state, git diff --check, and touched-path tsc filter after the review fixes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

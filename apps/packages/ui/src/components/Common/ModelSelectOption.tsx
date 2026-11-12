@@ -1,11 +1,10 @@
-import { useQuery } from "@tanstack/react-query"
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { Avatar, Dropdown, Tooltip } from "antd"
 import { LucideBrain } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
-import { fetchChatModels } from "@/services/tldw-server"
-import { useMessageOption } from "~/hooks/useMessageOption"
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "./ProviderIcon"
 import { IconButton } from "./IconButton"
@@ -16,15 +15,9 @@ type Props = {
 
 export const ModelSelectOption: React.FC<Props> = ({ iconClassName = "size-5" }) => {
   const { t } = useTranslation("common")
-  const { setSelectedModel, selectedModel } = useMessageOption()
+  const { selectedModel, setSelectedModel } = useSelectedModel()
   const [menuDensity] = useStorage("menuDensity", "comfortable")
-  const { data } = useQuery({
-    queryKey: ["getAllModelsForSelectOption"],
-    queryFn: async () => {
-      const models = await fetchChatModels({ returnEmpty: true })
-      return models
-    }
-  })
+  const { data, isError, refetch } = useChatModelCatalog()
 
   const groupedItems = React.useMemo(() => {
     const groups = new Map<string, any[]>()
@@ -81,6 +74,20 @@ export const ModelSelectOption: React.FC<Props> = ({ iconClassName = "size-5" })
     }
     return items
   }, [data, selectedModel, setSelectedModel])
+
+  if (isError) {
+    return (
+      <IconButton
+        ariaLabel={`${t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}. ${t("playground:characterChatReadiness.model.retryAction", "Try again")}`}
+        onClick={() => { void refetch() }}
+        dataTestId="chat-model-retry"
+        className="h-11 min-w-11 px-2 text-text-muted"
+      >
+        <LucideBrain className={iconClassName} />
+        <span className="ml-1 text-xs">{t("playground:characterChatReadiness.model.retryAction", "Try again")}</span>
+      </IconButton>
+    )
+  }
 
   return (
     <>

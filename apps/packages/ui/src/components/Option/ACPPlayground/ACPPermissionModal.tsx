@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Button, Checkbox, Tag, Progress } from "antd"
 import {
@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Clock,
   Wrench,
+  Square,
 } from "lucide-react"
 import { UI_CONFIG } from "@/services/acp/constants"
 import type { ACPPendingPermission, ACPPermissionTier } from "@/services/acp/types"
@@ -16,12 +17,14 @@ interface ACPPermissionModalProps {
   pendingPermissions: ACPPendingPermission[]
   approvePermission: (requestId: string, batchApproveTier?: ACPPermissionTier) => void
   denyPermission: (requestId: string) => void
+  stopOperation: () => void
 }
 
 export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
   pendingPermissions,
   approvePermission,
   denyPermission,
+  stopOperation,
 }) => {
   const { t } = useTranslation(["playground", "common"])
 
@@ -30,6 +33,44 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
   const [now, setNow] = useState(Date.now)
   const currentPermission = pendingPermissions[0]
   const currentRequestId = currentPermission?.request_id ?? null
+  const hasPendingPermission = currentRequestId !== null;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const denyButtonRef = useRef<React.ComponentRef<typeof Button>>(null);
+
+  useEffect(() => {
+    if (!hasPendingPermission) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return;
+      const controls = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.closest('[hidden], [inert], [aria-hidden="true"]'));
+      const first = controls[0] ?? dialog;
+      const last = controls[controls.length - 1] ?? dialog;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !dialog.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !dialog.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [hasPendingPermission]);
+
+  useEffect(() => {
+    denyButtonRef.current?.focus();
+  }, [currentRequestId]);
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000)
@@ -91,6 +132,8 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
 
   return (
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-label={t("playground:acp.permissionRequired", "Permission Required")}
@@ -284,12 +327,21 @@ export const ACPPermissionModal: React.FC<ACPPermissionModalProps> = ({
         {/* Actions */}
         <div className="flex gap-3">
           <Button
+            ref={denyButtonRef}
             danger
             icon={<XCircle className="h-4 w-4" />}
             onClick={handleDeny}
             className="flex-1"
           >
             {t("playground:acp.deny", "Deny")}
+          </Button>
+          <Button
+            danger
+            icon={<Square className="h-4 w-4" />}
+            onClick={stopOperation}
+            className="flex-1"
+          >
+            {t("playground:acp.stop", "Stop")}
           </Button>
           <Button
             type="primary"

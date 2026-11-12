@@ -40,7 +40,6 @@ Task 2 from Docs/superpowers/plans/2026-06-04-canonical-workspaces-manager-proje
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-06-04: Red client route check:
   `bunx vitest run apps/packages/ui/src/services/__tests__/tldw-api-client.workspace-api.test.ts`
@@ -67,7 +66,6 @@ Task 2 from Docs/superpowers/plans/2026-06-04-canonical-workspaces-manager-proje
   Spec review and code-quality review both approved after endpoint sequencing
   fixes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

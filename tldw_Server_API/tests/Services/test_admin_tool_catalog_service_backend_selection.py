@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -272,3 +273,48 @@ async def test_tool_catalog_service_sanitizes_backend_failure_logs(
         expected_log=expected_log,
         raw_marker=raw_marker,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("call", "expected_args", "expected_row"),
+    [
+        (
+            lambda db: svc.create_tool_catalog(
+                db, name="guarded-cat", description=None, org_id=None,
+                team_id=None, is_active=True,
+            ),
+            ("guarded-cat", None, None, None, True),
+            {"id": 42, "name": "guarded-cat"},
+        ),
+        (
+            lambda db: svc.add_tool_catalog_entry(db, 42, "media.search", None),
+            (42, "media.search", None),
+            {"catalog_id": 42, "tool_name": "media.search", "module_id": None},
+        ),
+    ],
+)
+async def test_postgres_catalog_writes_pass_the_managed_query_guard(
+    call: Callable[[Any], Awaitable[Any]],
+    expected_args: tuple[Any, ...],
+    expected_row: dict[str, Any],
+) -> None:
+    """Catalog writes must survive the same query guard used by AuthNZ PostgreSQL."""
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _guard_sql
+
+    identity = object()
+    writes: list[tuple[Any, ...]] = []
+
+    async def execute(query: str, *args: Any) -> str:
+        _guard_sql(query, backend="postgres", connection_identity=identity, operation="execute")
+        writes.append(args)
+        return "INSERT 0 1"
+
+    async def fetchrow(query: str, *args: Any) -> dict[str, Any] | None:
+        _guard_sql(query, backend="postgres", connection_identity=identity, operation="fetchrow")
+        return None if query.startswith("SELECT 1 ") else expected_row
+
+    db = SimpleNamespace(_is_sqlite=False, execute=execute, fetchrow=fetchrow)
+    assert await call(db) == expected_row
+    assert writes == [expected_args]

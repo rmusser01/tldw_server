@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NotesDockPanel } from "../NotesDockPanel"
 import { useNotesDockStore } from "@/store/notes-dock"
 import { getQueryClient } from "@/services/query-client"
+import { resolveServicePromptScope } from "@/services/service-prompts"
 
 const {
   mockBgRequest,
@@ -33,6 +34,25 @@ const {
     info: vi.fn()
   }
 }))
+
+const dockAuthority = vi.hoisted(() => ({
+  userId: 1,
+  serverUrl: "https://notes.example.test",
+  initialize: vi.fn(async () => undefined),
+  ensureConfig: vi.fn<() => Promise<import("@/services/tldw/TldwApiClient").TldwConfig>>(),
+  currentUser: vi.fn<() => Promise<{ id: number; is_active: boolean }>>(),
+  watches: new Set<{ tldwConfig: (value: { newValue?: unknown }) => void }>()
+}))
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
+  initialize: dockAuthority.initialize, ensureConfigForRequest: dockAuthority.ensureConfig
+} }))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: dockAuthority.currentUser } }))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({
+  get: vi.fn(async () => null), set: vi.fn(async () => undefined), remove: vi.fn(async () => undefined),
+  watch: (watcher: { tldwConfig: (value: { newValue?: unknown }) => void }) => { dockAuthority.watches.add(watcher) },
+  unwatch: (watcher: { tldwConfig: (value: { newValue?: unknown }) => void }) => { dockAuthority.watches.delete(watcher) }
+}) }))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -70,8 +90,12 @@ class ResizeObserverMock {
 }
 
 describe("NotesDockPanel stage 4 cross-surface cache sync", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks()
+    dockAuthority.watches.clear()
+    dockAuthority.ensureConfig.mockResolvedValue({ serverUrl: dockAuthority.serverUrl, authMode: "multi-user", accessToken: "fixture-token" })
+    dockAuthority.currentUser.mockResolvedValue({ id: dockAuthority.userId, is_active: true })
+    const requestScope = await resolveServicePromptScope()
     vi.stubGlobal("ResizeObserver", ResizeObserverMock as any)
 
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
@@ -80,7 +104,7 @@ describe("NotesDockPanel stage 4 cross-surface cache sync", () => {
       if (path.startsWith("/api/v1/notes/?page=1")) {
         return { items: [], pagination: { total_items: 0, total_pages: 1 } }
       }
-      if (path === "/api/v1/notes/101" && method === "PUT") {
+      if (path === "/api/v1/notes/101?expected_version=2" && method === "PUT") {
         return {
           id: 101,
           title: "Dock note",
@@ -99,6 +123,7 @@ describe("NotesDockPanel stage 4 cross-surface cache sync", () => {
       notes: [
         {
           localId: "local-1",
+          requestScope,
           id: 101,
           title: "Dock note",
           content: "Updated dock content",

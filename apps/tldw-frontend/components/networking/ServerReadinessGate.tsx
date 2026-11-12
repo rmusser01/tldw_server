@@ -1,12 +1,15 @@
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import React from "react"
 
 import { resolvePublicApiOrigin, type DeploymentEnv } from "@web/lib/api-base"
 import { useConnectionStore } from "@tldw/ui/store/connection"
 import {
   StatePanel,
+  ActionGroup,
   type StatePanelDiagnostic,
 } from "@tldw/ui/components/ui/state"
 import { ServerHealthWarningBanner } from "./ServerHealthWarningBanner"
+import { ServerReconnectBanner } from "./ServerReconnectBanner"
 
 const _env: DeploymentEnv = {
   NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE: process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE,
@@ -247,6 +250,97 @@ async function checkHealth(healthUrl: string): Promise<ReadinessResult> {
   }
 }
 
+// Module-level readiness probe cache. It exists so the app shell can warm the
+// /health round trip in parallel with auth resolution (perf remediation W1:
+// single gate phase instead of auth → health serial phases) and so a freshly
+// mounted gate reuses the warmed in-flight/ready probe instead of issuing a
+// duplicate request. Only the first attempt of a gate effect run consults the
+// cache; retries always hit the network. Each effect run resets the probe so
+// sequential gate sessions (remounts, URL changes) re-check as before.
+type ReadinessProbeEntry = {
+  url: string
+  startedAt: number
+  promise: Promise<ReadinessResult>
+  settled: boolean
+  result: ReadinessResult | null
+}
+
+const READINESS_PROBE_REUSE_TTL_MS = 15_000
+let readinessProbeEntry: ReadinessProbeEntry | null = null
+
+const resetReadinessProbe = (): void => {
+  readinessProbeEntry = null
+}
+
+const probeReadinessHealth = (
+  healthUrl: string,
+  options?: { force?: boolean; warmOnly?: boolean }
+): Promise<ReadinessResult> => {
+  const cached = readinessProbeEntry
+  if (cached && cached.url === healthUrl) {
+    // Warm-up calls only join or seed a probe; they never refresh an existing
+    // one, so repeated auth refreshes cannot spam /health requests.
+    if (options?.warmOnly) return cached.promise
+    if (!options?.force) {
+      if (!cached.settled) return cached.promise
+      if (
+        cached.result?.state === "ready" &&
+        Date.now() - cached.startedAt <= READINESS_PROBE_REUSE_TTL_MS
+      ) {
+        return cached.promise
+      }
+    }
+  }
+
+  const entry: ReadinessProbeEntry = {
+    url: healthUrl,
+    startedAt: Date.now(),
+    promise: checkHealth(healthUrl),
+    settled: false,
+    result: null
+  }
+  entry.promise = entry.promise.then((result) => {
+    entry.settled = true
+    entry.result = result
+    return result
+  })
+  readinessProbeEntry = entry
+  return entry.promise
+}
+
+/**
+ * Start (or join) the readiness /health probe before the gate mounts.
+ *
+ * Called by the app shell as soon as the configured auth state is read so the
+ * health round trip overlaps the multi-user auth/me validation instead of
+ * running serially after it. Results are memoized per URL; see
+ * `probeReadinessHealth`.
+ */
+export function warmServerReadinessHealth(
+  configuredServerUrl?: string | null
+): void {
+  if (typeof window === "undefined") return
+  // Read the (possibly still hydrating) connection store without requiring the
+  // zustand API shape in test doubles.
+  const getState = (
+    useConnectionStore as unknown as {
+      getState?: () => { state: { serverUrl: string | null } }
+    }
+  ).getState
+  let storedServerUrl: string | null = null
+  try {
+    storedServerUrl = getState?.().state.serverUrl ?? null
+  } catch {
+    storedServerUrl = null
+  }
+  const healthUrl = resolveReadinessHealthUrl({
+    configuredServerUrl: storedServerUrl || configuredServerUrl,
+    env: _env,
+    pageOrigin: window.location.origin
+  })
+  void probeReadinessHealth(healthUrl, { warmOnly: true })
+}
+
 function emitServerReadinessState(detail: ServerReadinessPublishedState) {
   if (typeof window === "undefined") return
   window.__tldwServerReadinessState = detail
@@ -258,7 +352,7 @@ function emitServerReadinessState(detail: ServerReadinessPublishedState) {
 }
 
 function navigateTo(path: string): void {
-  if (typeof window === "undefined") return
+  if (typeof window === "undefined" || !requestSettingsNavigation(path)) return
   window.location.assign(path)
 }
 
@@ -266,11 +360,31 @@ function ReadinessRecoveryPanel({
   diagnostics,
   healthUrl,
   onRetry,
+  inline = false,
 }: {
   diagnostics: ServerReadinessPublishedState | null
   healthUrl: string
   onRetry: () => void
+  inline?: boolean
 }) {
+  const primaryAction = { label: "Retry", onClick: onRetry }
+  const secondaryActions = [
+    { label: "Health & diagnostics", onClick: () => navigateTo("/settings/health") },
+    { label: "Server settings", onClick: () => navigateTo("/settings/tldw") },
+  ]
+  if (inline) {
+    return (
+      <div role="status" aria-live="polite" data-testid="server-readiness-chat-recovery" className="border-b border-border bg-surface px-4 py-3 text-text">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">Server connection unavailable</p>
+            <p className="text-sm text-text-muted">Chat stays open while you fix the connection. Connect your tldw server before sending.</p>
+          </div>
+          <ActionGroup primaryAction={primaryAction} secondaryActions={secondaryActions} />
+        </div>
+      </div>
+    )
+  }
   const panelDiagnostics: StatePanelDiagnostic[] = [
     {
       label: "Health endpoint",
@@ -309,17 +423,8 @@ function ReadinessRecoveryPanel({
         title="Backend readiness check failed"
         message="The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing."
         diagnostics={panelDiagnostics}
-        primaryAction={{ label: "Retry", onClick: onRetry }}
-        secondaryActions={[
-          {
-            label: "Health & diagnostics",
-            onClick: () => navigateTo("/settings/health"),
-          },
-          {
-            label: "Server settings",
-            onClick: () => navigateTo("/settings/tldw"),
-          },
-        ]}
+        primaryAction={primaryAction}
+        secondaryActions={secondaryActions}
         role="alert"
         aria-live="assertive"
         className="w-full max-w-3xl"
@@ -332,13 +437,26 @@ function ReadinessRecoveryPanel({
 export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   allowDegraded?: boolean
+  /** Keep locally usable routes mounted while still checking and reporting readiness. */
+  blocking?: boolean
   bypass?: boolean
   configuredServerUrl?: string | null
+  /**
+   * Render children behind the gate instead of blocking on health (perf
+   * remediation W1). Intended for established sessions where a successful
+   * auth/me round trip already proved server reachability: health failures
+   * surface as a non-blocking reconnect banner rather than a full-screen
+   * spinner/recovery panel. Cold starts without a session keep the fully
+   * blocking behavior (default).
+   */
+  nonBlocking?: boolean
 }> = ({
   children,
   allowDegraded = false,
+  blocking = true,
   bypass = false,
-  configuredServerUrl = null
+  configuredServerUrl = null,
+  nonBlocking = false
 }) => {
   const storedServerUrl = useConnectionStore((s) => s.state.serverUrl)
   const effectiveServerUrl = storedServerUrl || configuredServerUrl
@@ -393,8 +511,14 @@ export const ServerReadinessGate: React.FC<{
       }
     }, MAX_WAIT_MS)
 
+    // Only the first attempt of a run may reuse a warmed probe (app-shell
+    // preflight or a still-settling previous request); retries are always live.
+    let isFirstAttempt = true
     const attempt = async () => {
-      const result = await checkHealth(healthUrl)
+      const result = await probeReadinessHealth(healthUrl, {
+        force: !isFirstAttempt
+      })
+      isFirstAttempt = false
       if (cancelled) return
       setLastReadinessState(result.diagnostics)
 
@@ -404,7 +528,7 @@ export const ServerReadinessGate: React.FC<{
         return
       }
 
-      if (result.state === "degraded" && allowDegraded) {
+      if (result.state === "degraded" && (allowDegraded || nonBlocking)) {
         if (deadlineTimer) clearTimeout(deadlineTimer)
         setDegradedChecks(result.degradedChecks)
         setGate("degraded")
@@ -428,8 +552,20 @@ export const ServerReadinessGate: React.FC<{
       cancelled = true
       if (retryTimer) clearTimeout(retryTimer)
       if (deadlineTimer) clearTimeout(deadlineTimer)
+      resetReadinessProbe()
     }
-  }, [allowDegraded, bypass, healthUrl, offlineBypassEnabled, retryVersion])
+  }, [allowDegraded, bypass, healthUrl, nonBlocking, offlineBypassEnabled, retryVersion])
+
+  // Non-blocking sessions stop retrying at the deadline; give them one free
+  // automatic retry when connectivity returns so the banner can clear without a
+  // manual action. This deliberately adds no poller of its own.
+  React.useEffect(() => {
+    if (!nonBlocking || bypass || gate !== "timeout") return
+    if (typeof window === "undefined") return
+    const handleOnline = () => retryNow()
+    window.addEventListener("online", handleOnline)
+    return () => window.removeEventListener("online", handleOnline)
+  }, [bypass, gate, nonBlocking, retryNow])
 
   React.useEffect(() => {
     if (typeof window === "undefined" || bypass) return
@@ -467,7 +603,59 @@ export const ServerReadinessGate: React.FC<{
     }
   }, [bypass, degradedChecks, gate, healthUrl, lastReadinessState])
 
+  if (!blocking) {
+    return (
+      <div className="server-readiness-degraded-shell" data-testid="server-readiness-chat-shell">
+        {gate === "timeout" ? (
+          <ReadinessRecoveryPanel inline diagnostics={lastReadinessState} healthUrl={healthUrl} onRetry={retryNow} />
+        ) : gate === "degraded" ? (
+          <ServerHealthWarningBanner degradedChecks={degradedChecks} />
+        ) : null}
+        <div className="server-readiness-degraded-content">{children}</div>
+      </div>
+    )
+  }
+
   if (bypass || gate === "ready") {
+    return <>{children}</>
+  }
+
+  if (nonBlocking) {
+    // Established session: the auth round trip already proved reachability, so
+    // health problems surface as banners around live content rather than a
+    // blocking spinner/recovery panel.
+    if (gate === "degraded") {
+      return (
+        <div
+          data-testid="server-readiness-degraded-shell"
+          className="server-readiness-degraded-shell"
+        >
+          <ServerHealthWarningBanner degradedChecks={degradedChecks} />
+          <div className="server-readiness-degraded-content">
+            {children}
+          </div>
+        </div>
+      )
+    }
+
+    if (gate === "waiting" || gate === "timeout") {
+      return (
+        <div
+          data-testid="server-readiness-nonblocking-shell"
+          className="server-readiness-degraded-shell"
+        >
+          <ServerReconnectBanner
+            exhausted={gate === "timeout"}
+            onRetry={retryNow}
+          />
+          <div className="server-readiness-degraded-content">
+            {children}
+          </div>
+        </div>
+      )
+    }
+
+    // Initial check still in flight: render children with no banner.
     return <>{children}</>
   }
 

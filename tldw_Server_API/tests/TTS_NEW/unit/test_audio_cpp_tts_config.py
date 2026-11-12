@@ -32,6 +32,7 @@ def test_audio_cpp_yaml_config_is_disabled_and_preserves_runtime_settings():
     extra = provider_config.extra_params
     assert extra["managed"] is False
     assert extra["allow_remote_base_url"] is False
+    assert extra["allow_private_network"] is False
     assert extra["external_voice_reference_mode"] == "disabled"
     assert extra["retain_request_artifacts"] is False
     assert extra["request_option_allowlist"] == ["max_tokens", "seed"]

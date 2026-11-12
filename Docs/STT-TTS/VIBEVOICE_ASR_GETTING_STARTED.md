@@ -105,7 +105,8 @@ Useful checks:
 - STT health:
 
 ```bash
-curl "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=vibevoice-asr"
+curl "http://127.0.0.1:8000/api/v1/audio/transcriptions/health?model=vibevoice-asr" \
+  -H "X-API-KEY: $SINGLE_USER_API_KEY"
 ```
 
 Common issues:

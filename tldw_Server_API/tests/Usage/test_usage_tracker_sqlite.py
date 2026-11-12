@@ -4,11 +4,13 @@ import contextlib
 import json
 import os
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 async def _ensure_llm_tables(pool):
@@ -97,7 +99,7 @@ async def _ensure_llm_cache_columns(pool):
 
 
 @pytest.mark.asyncio
-async def test_usage_tracker_inserts_sqlite(monkeypatch):
+async def test_usage_tracker_inserts_sqlite(monkeypatch, fresh_services):
     # Force SQLite single-user temp DB
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
@@ -105,12 +107,9 @@ async def test_usage_tracker_inserts_sqlite(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
@@ -145,7 +144,7 @@ async def test_usage_tracker_inserts_sqlite(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch):
+async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch, fresh_services):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
     monkeypatch.setenv(
@@ -167,14 +166,12 @@ async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 
     reset_settings()
     reset_pricing_catalog()
-    await reset_db_pool()
-    await reset_session_manager()
+    reset_settings()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
@@ -254,7 +251,7 @@ async def test_usage_tracker_persists_normalized_cache_fields(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_log_llm_usage_estimate_source_distinguishes_missing_usage_from_provider_usage(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, fresh_services
 ) -> None:
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
@@ -262,12 +259,9 @@ async def test_log_llm_usage_estimate_source_distinguishes_missing_usage_from_pr
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
@@ -455,8 +449,64 @@ async def test_log_llm_usage_repo_backend_error_is_best_effort(monkeypatch):
     assert "/private/usage-db" not in str(logger_stub.debugs)
 
 
+@pytest.mark.unit
 @pytest.mark.asyncio
-async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
+async def test_tokens_ledger_op_id_ignores_client_request_id(monkeypatch):
+    # The ledger dedupes on op_id; a client-repeatable X-Request-ID must not skip a charge.
+    from tldw_Server_API.app.core.Usage import usage_tracker as usage_tracker_module
+
+    class _Repo:
+        def __init__(self, _pool):
+            pass
+
+        async def get_api_key_name(self, *, key_id: int):  # noqa: ARG002
+            return None
+
+        async def insert_llm_usage_log(self, **_kwargs):
+            return None
+
+    class _Ledger:
+        def __init__(self) -> None:
+            self.op_ids: list[str] = []
+
+        async def add(self, entry) -> None:
+            self.op_ids.append(entry.op_id)
+
+    async def _fake_get_db_pool():
+        return object()
+
+    ledger = _Ledger()
+
+    async def _get_ledger():
+        return ledger
+
+    monkeypatch.setattr(usage_tracker_module, "get_settings", _safe_usage_settings)
+    monkeypatch.setattr(usage_tracker_module, "get_db_pool", _fake_get_db_pool)
+    monkeypatch.setattr(usage_tracker_module, "AuthnzUsageRepo", _Repo)
+    monkeypatch.setattr(usage_tracker_module, "_get_tokens_daily_ledger", _get_ledger)
+
+    for _ in range(2):
+        await usage_tracker_module.log_llm_usage(
+            user_id=1,
+            key_id=None,
+            endpoint="POST:/api/v1/embeddings",
+            operation="embeddings",
+            provider="test",
+            model="test-model",
+            status=200,
+            latency_ms=1,
+            prompt_tokens=5,
+            completion_tokens=0,
+            total_tokens=5,
+            request_id="replayed-req-id",
+        )
+
+    assert len(set(ledger.op_ids)) == 2, ledger.op_ids
+    assert not any("replayed-req-id" in op_id for op_id in ledger.op_ids)
+
+
+@pytest.mark.asyncio
+async def test_log_llm_usage_persists_router_enrichment(monkeypatch, fresh_services):
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
     monkeypatch.setenv("PII_REDACT_LOGS", "false")
@@ -465,12 +515,9 @@ async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
 
     pool = await get_db_pool()
     await _ensure_llm_tables(pool)
@@ -519,92 +566,87 @@ async def test_log_llm_usage_persists_router_enrichment(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_log_llm_usage_derives_token_name_from_key(monkeypatch):
+@pytest.mark.parametrize("backend_name", ["sqlite", "postgres"])
+async def test_log_llm_usage_derives_token_name_from_key(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    backend_name: str, fresh_services
+) -> None:
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("SINGLE_USER_API_KEY", "ut-key-" + uuid.uuid4().hex)
     monkeypatch.setenv("PII_REDACT_LOGS", "false")
     monkeypatch.setenv("USAGE_LOG_DISABLE_META", "false")
-    dburl = f"sqlite:///./Databases/users_test_ut_{uuid.uuid4().hex}.sqlite"
+    dburl = (
+        request.getfixturevalue("pg_temp_db")["dsn"]
+        if backend_name == "postgres"
+        else f"sqlite:///{tmp_path / 'users_usage.db'}"
+    )
     monkeypatch.setenv("DATABASE_URL", dburl)
 
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
     reset_settings()
-    await reset_db_pool()
-    await reset_session_manager()
+
+    from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
 
     pool = await get_db_pool()
-    await _ensure_llm_tables(pool)
+    try:
+        assert bool(pool.pool) is (backend_name == "postgres")
+        await _ensure_llm_tables(pool)
+        await APIKeyManager(db_pool=pool).initialize()
 
-    if pool.pool:
-        await pool.execute(
-            """
-            INSERT INTO users (id, username, email, password_hash)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            1,
-            "usage-test-user",
-            "usage-test-user@example.com",
-            "hash",
+        user_id = await ensure_test_user(pool, "usage-test-user", "usage-test-user@example.com")
+
+        key_hash = "kh-" + uuid.uuid4().hex
+        if pool.pool:
+            await pool.execute(
+                "INSERT INTO api_keys (user_id, key_hash, name, scope, key_prefix) VALUES ($1, $2, $3, $4, $5)",
+                user_id,
+                key_hash,
+                "DerivedName",
+                "read",
+                key_hash[:10],
+            )
+            key_id = await pool.fetchval("SELECT id FROM api_keys WHERE key_hash = $1", key_hash)
+        else:
+            await pool.execute(
+                "INSERT INTO api_keys (user_id, key_hash, name, scope, key_prefix) VALUES (?, ?, ?, ?, ?)",
+                user_id,
+                key_hash,
+                "DerivedName",
+                "read",
+                key_hash[:10],
+            )
+            key_id = await pool.fetchval("SELECT id FROM api_keys WHERE key_hash = ?", key_hash)
+        assert key_id is not None
+
+        await log_llm_usage(
+            user_id=user_id,
+            key_id=int(key_id),
+            endpoint="POST:/api/v1/chat/completions",
+            operation="chat",
+            provider="openai",
+            model="gpt-4o-mini",
+            status=200,
+            latency_ms=90,
+            prompt_tokens=5,
+            completion_tokens=2,
+            total_tokens=7,
+            request_id="req-derive-name",
         )
-    else:
-        await pool.execute(
-            """
-            INSERT OR IGNORE INTO users (id, username, email, password_hash)
-            VALUES (?, ?, ?, ?)
-            """,
-            1,
-            "usage-test-user",
-            "usage-test-user@example.com",
-            "hash",
-        )
 
-    key_hash = "kh-" + uuid.uuid4().hex
-    if pool.pool:
-        await pool.execute(
-            "INSERT INTO api_keys (user_id, key_hash, name, scope) VALUES ($1, $2, $3, $4)",
-            1,
-            key_hash,
-            "DerivedName",
-            "read",
-        )
-        key_id = await pool.fetchval("SELECT id FROM api_keys WHERE key_hash = $1", key_hash)
-    else:
-        await pool.execute(
-            "INSERT INTO api_keys (user_id, key_hash, name, scope) VALUES (?, ?, ?, ?)",
-            1,
-            key_hash,
-            "DerivedName",
-            "read",
-        )
-        key_id = await pool.fetchval("SELECT id FROM api_keys WHERE key_hash = ?", key_hash)
-    assert key_id is not None
+        if pool.pool:
+            row = await pool.fetchone("SELECT token_name FROM llm_usage_log WHERE request_id = $1", "req-derive-name")
+        else:
+            row = await pool.fetchone("SELECT token_name FROM llm_usage_log WHERE request_id = ?", "req-derive-name")
 
-    await log_llm_usage(
-        user_id=1,
-        key_id=int(key_id),
-        endpoint="POST:/api/v1/chat/completions",
-        operation="chat",
-        provider="openai",
-        model="gpt-4o-mini",
-        status=200,
-        latency_ms=90,
-        prompt_tokens=5,
-        completion_tokens=2,
-        total_tokens=7,
-        request_id="req-derive-name",
-    )
+        assert row is not None
+        if isinstance(row, dict):
+            assert row["token_name"] == "DerivedName"
+        else:
+            assert row[0] == "DerivedName"
 
-    if pool.pool:
-        row = await pool.fetchone("SELECT token_name FROM llm_usage_log WHERE request_id = $1", "req-derive-name")
-    else:
-        row = await pool.fetchone("SELECT token_name FROM llm_usage_log WHERE request_id = ?", "req-derive-name")
-
-    assert row is not None
-    if isinstance(row, dict):
-        assert row["token_name"] == "DerivedName"
-    else:
-        assert row[0] == "DerivedName"
+    finally:
+        reset_settings()

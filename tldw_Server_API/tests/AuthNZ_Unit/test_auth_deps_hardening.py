@@ -1,15 +1,13 @@
 import asyncio
 import io
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timezone
 from threading import Barrier
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi import HTTPException, Response
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi.testclient import TestClient
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
@@ -17,73 +15,12 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
-from tldw_Server_API.app.core.AuthNZ import migrations
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
     ConnectionPoolExhaustedError,
     DatabaseLockError,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.services import admin_audit_service
-
-
-class _FailingCommitConn:
-    async def execute(self, query: str, params: Any) -> Any:
-        return SimpleNamespace()
-
-    async def commit(self) -> None:
-        raise RuntimeError("sqlite commit failed")
-
-
-class _AcquireCM:
-    async def __aenter__(self) -> _FailingCommitConn:
-        return _FailingCommitConn()
-
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
-        return False
-
-
-class _FakeDBPool:
-    def acquire(self) -> _AcquireCM:
-        return _AcquireCM()
-
-
-class _BlockingCleanupConn:
-    def __init__(self) -> None:
-        self.rollback_started = asyncio.Event()
-        self.allow_rollback = asyncio.Event()
-        self.rollback_finished = asyncio.Event()
-
-    async def rollback(self) -> None:
-        self.rollback_started.set()
-        await self.allow_rollback.wait()
-        self.rollback_finished.set()
-
-
-class _BlockingCleanupAcquire:
-    def __init__(self, conn: _BlockingCleanupConn) -> None:
-        self.conn = conn
-        self.release_started = asyncio.Event()
-        self.allow_release = asyncio.Event()
-        self.release_finished = asyncio.Event()
-
-    async def __aenter__(self) -> _BlockingCleanupConn:
-        return self.conn
-
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
-        del exc_type, exc, tb
-        self.release_started.set()
-        await self.allow_release.wait()
-        self.release_finished.set()
-        return False
-
-
-class _BlockingCleanupPool:
-    def __init__(self) -> None:
-        self.conn = _BlockingCleanupConn()
-        self.acquire_context = _BlockingCleanupAcquire(self.conn)
-
-    def acquire(self) -> _BlockingCleanupAcquire:
-        return self.acquire_context
 
 
 class _ExplodingPoolProperty:
@@ -178,131 +115,6 @@ async def test_expected_user_guard_rejects_mismatch_without_caching() -> None:
 
 
 @pytest.mark.asyncio
-async def test_test_db_adapter_execute_propagates_sqlite_commit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _fake_get_db_pool() -> _FakeDBPool:
-        return _FakeDBPool()
-
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
-
-    agen = auth_deps.get_db_transaction()
-    adapter = await agen.__anext__()
-    await adapter.execute("SELECT 1")
-    with pytest.raises(RuntimeError, match="sqlite commit failed"):
-        await agen.__anext__()
-
-
-@pytest.mark.asyncio
-async def test_test_db_adapter_commit_propagates_sqlite_commit_errors(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def _fake_get_db_pool() -> _FakeDBPool:
-        return _FakeDBPool()
-
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
-
-    agen = auth_deps.get_db_transaction()
-    adapter = await agen.__anext__()
-    await adapter.commit()
-    with pytest.raises(RuntimeError, match="sqlite commit failed"):
-        await agen.__anext__()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("cancel_at", ["rollback", "release"])
-async def test_test_db_adapter_drains_cleanup_before_propagating_cancellation(
-    monkeypatch: pytest.MonkeyPatch,
-    cancel_at: str,
-) -> None:
-    pool = _BlockingCleanupPool()
-
-    async def _fake_get_db_pool() -> _BlockingCleanupPool:
-        return pool
-
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
-
-    async def _exercise_dependency() -> None:
-        generator = auth_deps.get_db_transaction()
-        await generator.__anext__()
-        await generator.athrow(RuntimeError("body failed"))
-
-    cleanup_task = asyncio.create_task(_exercise_dependency())
-
-    await pool.conn.rollback_started.wait()
-    if cancel_at == "rollback":
-        cleanup_task.cancel()
-        pool.conn.allow_rollback.set()
-        await pool.acquire_context.release_started.wait()
-    else:
-        pool.conn.allow_rollback.set()
-        await pool.acquire_context.release_started.wait()
-        cleanup_task.cancel()
-
-    pool.acquire_context.allow_release.set()
-    with pytest.raises(asyncio.CancelledError):
-        await cleanup_task
-
-    assert pool.conn.rollback_finished.is_set()
-    assert pool.acquire_context.release_finished.is_set()
-
-
-@pytest.mark.asyncio
-async def test_stub_session_manager_uses_timezone_aware_timestamps(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
-
-    sm = await auth_deps.get_session_manager_dep()
-    sess = await sm.create_session(
-        user_id=1,
-        access_token="access",
-        refresh_token="refresh",
-        ip_address="127.0.0.1",
-        user_agent="pytest",
-    )
-    for field in ("created_at", "last_activity", "expires_at"):
-        dt = sess[field]
-        assert getattr(dt, "tzinfo", None) is timezone.utc
-
-    refreshed = await sm.refresh_session("unused-positional", session_id=1, user_id=1)
-    assert str(refreshed["expires_at"]).endswith("+00:00")
-
-
-def test_stub_session_manager_supports_admin_endpoint_contract(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
-    app = FastAPI()
-
-    @app.post("/admin-session-contract")
-    async def exercise_admin_session_contract(
-        session_manager=Depends(auth_deps.get_session_manager_dep),
-    ) -> dict[str, int]:
-        user_id = 987_654
-        await session_manager.create_session(
-            user_id=user_id,
-            access_token="access",
-            refresh_token="refresh",
-        )
-        sessions = await session_manager.get_user_sessions(user_id, strict=True)
-        revoked = await session_manager.revoke_all_user_sessions(
-            user_id=user_id,
-            reason="Support case 123",
-            revoked_by=7,
-        )
-        remaining = await session_manager.get_user_sessions(user_id, strict=True)
-        return {
-            "listed": len(sessions),
-            "revoked": revoked,
-            "remaining": len(remaining),
-        }
-
-    response = TestClient(app).post("/admin-session-contract")
-
-    assert response.status_code == 200
-    assert response.json() == {"listed": 1, "revoked": 1, "remaining": 0}
-
-@pytest.mark.asyncio
 async def test_get_current_user_fast_path_sanitizes_cached_user(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_MODE", "0")
 
@@ -384,46 +196,6 @@ async def test_api_key_auth_error_logging_does_not_leak_exception_message_outsid
     captured = sink.getvalue()
     assert "API key authentication error in get_current_user" in captured
     assert secret not in captured
-
-
-@pytest.mark.asyncio
-async def test_test_mode_ensure_authnz_tables_fallback_log_is_sanitized(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    secret = "/tmp/authnz-users.db token=single-user-secret"
-
-    def _raise_secret_path(_path: object) -> None:
-        raise RuntimeError(secret)
-
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", "test-key")
-    monkeypatch.setattr(
-        auth_deps,
-        "get_settings",
-        lambda: SimpleNamespace(
-            AUTH_MODE="single_user",
-            DATABASE_URL="sqlite:////tmp/authnz-users.db",
-            SINGLE_USER_API_KEY=None,
-            SINGLE_USER_FIXED_ID=7,
-        ),
-    )
-    monkeypatch.setattr(auth_deps, "resolve_client_ip", lambda request, settings: "127.0.0.1")
-    monkeypatch.setattr(auth_deps, "is_single_user_ip_allowed", lambda client_ip, settings: True)
-    monkeypatch.setattr(migrations, "ensure_authnz_tables", _raise_secret_path)
-
-    sink = io.StringIO()
-    token = logger.add(sink, level="DEBUG")
-    try:
-        user = await auth_deps._authenticate_api_key_from_request(_DummyRequest(), "test-key")
-    finally:
-        logger.remove(token)
-
-    captured = sink.getvalue()
-    assert user["id"] == 7
-    assert "AuthNZ test fallback: ensure_authnz_tables skipped/failed" in captured
-    assert "RuntimeError" in captured
-    assert secret not in captured
-    assert "Traceback" not in captured
 
 
 @pytest.mark.asyncio
@@ -573,6 +345,11 @@ async def test_admin_rate_limit_bypass_is_principal_first(
 
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    # check_rate_limit's fallback now honors the RG single switch (R27): under
+    # pytest, rg_enabled() defaults to False unless RG_ENABLED is set explicitly,
+    # which would short-circuit before get_auth_governor(). Pin it on so this
+    # test keeps exercising principal-first ordering, independent of the switch.
+    monkeypatch.setenv("RG_ENABLED", "1")
     # Compatibility: these helpers may no longer be imported by auth_deps in
     # claim-first paths; patch with raising=False so the assertion remains valid
     # regardless of symbol exposure.
@@ -609,9 +386,17 @@ async def test_admin_rate_limit_bypass_is_principal_first(
 
 
 @pytest.mark.asyncio
-async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
+async def test_check_rate_limit_fallback_is_off_when_rg_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """R27 / ADR-056: RG_ENABLED=false must silence the general fallback too.
+
+    Previously this fallback kept enforcing a hidden 120/min cap even with RG
+    fully disabled, breaking the one-switch rule. It now honors the switch
+    (``honor_rg_switch=True`` in ``check_rate_limit``); ``check_auth_rate_limit``
+    deliberately does not (see the sibling tests below) since it is the
+    auth-endpoint brute-force floor, not RG enforcement.
+    """
     monkeypatch.setenv("RG_ENABLED", "0")
     monkeypatch.setenv("TEST_MODE", "0")
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
@@ -619,10 +404,10 @@ async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
     monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_LIMIT", "1")
     monkeypatch.setenv("AUTH_DEPS_FALLBACK_RATE_WINDOW_SECONDS", "60")
 
-    async def _fake_get_auth_governor() -> object:
-        return object()
+    async def _boom_get_auth_governor() -> object:
+        raise AssertionError("get_auth_governor should not run once RG_ENABLED=false short-circuits")
 
-    monkeypatch.setattr(auth_deps, "get_auth_governor", _fake_get_auth_governor)
+    monkeypatch.setattr(auth_deps, "get_auth_governor", _boom_get_auth_governor)
     auth_deps._AUTH_DEPS_FALLBACK_RATE_WINDOWS.clear()
 
     request = _DummyRequest()
@@ -640,10 +425,9 @@ async def test_check_rate_limit_enforces_fallback_limiter_when_rg_disabled(
             _ = kwargs
             raise AssertionError("legacy limiter should not be used by auth_deps fallback")
 
+    # limit=1/min: a leftover enforcement path would 429 on the second call.
     await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
-    with pytest.raises(HTTPException) as exc_info:
-        await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
-    assert exc_info.value.status_code == 429
+    await auth_deps.check_rate_limit(request=request, rate_limiter=_StubLimiter())
 
 
 @pytest.mark.asyncio
@@ -1102,45 +886,7 @@ def test_fallback_rate_bucket_capacity_never_exceeded_concurrently(
 
 
 @pytest.mark.asyncio
-async def test_get_session_manager_dep_requires_explicit_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
-
-    sentinel = object()
-
-    async def _fake_get_session_manager() -> object:
-        return sentinel
-
-    monkeypatch.setattr(auth_deps, "get_session_manager", _fake_get_session_manager)
-
-    resolved = await auth_deps.get_session_manager_dep()
-    assert resolved is sentinel
-
-
-@pytest.mark.asyncio
-async def test_get_session_manager_dep_does_not_use_stub_without_explicit_pytest_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.delenv("AUTHNZ_FORCE_REAL_SESSION_MANAGER", raising=False)
-
-    sentinel = object()
-
-    async def _fake_get_session_manager() -> object:
-        return sentinel
-
-    monkeypatch.setattr(auth_deps, "get_session_manager", _fake_get_session_manager)
-
-    resolved = await auth_deps.get_session_manager_dep()
-    assert resolved is sentinel
-
-
-@pytest.mark.asyncio
-async def test_get_db_transaction_requires_explicit_test_mode(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "0")
-
+async def test_get_db_transaction_uses_the_pool_transaction(monkeypatch: pytest.MonkeyPatch) -> None:
     sentinel = object()
 
     class _TxnCM:
@@ -1160,7 +906,7 @@ async def test_get_db_transaction_requires_explicit_test_mode(monkeypatch: pytes
             return _TxnCM()
 
         def acquire(self) -> object:
-            raise AssertionError("adapter path should not be used when TEST_MODE=0")
+            raise AssertionError("get_db_transaction uses pool.transaction(), never pool.acquire()")
 
     async def _fake_get_db_pool() -> _Pool:
         return _Pool()
@@ -1433,44 +1179,3 @@ async def test_get_db_transaction_maps_pool_exhaustion_to_exact_busy_response(
     assert exc_info.value.status_code == 503
     assert exc_info.value.detail == "Authentication database is busy. Please retry shortly."
     assert exc_info.value.headers == {"Retry-After": "4"}
-
-
-@pytest.mark.asyncio
-async def test_get_db_transaction_uses_adapter_when_tldw_test_mode_is_y(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TEST_MODE", "0")
-    monkeypatch.setenv("TLDW_TEST_MODE", "y")
-
-    class _Conn:
-        async def execute(self, query: str, params: Any) -> Any:
-            return SimpleNamespace()
-
-        async def commit(self) -> None:
-            return None
-
-    class _Acquire:
-        async def __aenter__(self) -> _Conn:
-            return _Conn()
-
-        async def __aexit__(self, exc_type, exc, tb) -> bool:
-            return False
-
-    class _Pool:
-        def acquire(self) -> _Acquire:
-            return _Acquire()
-
-        def transaction(self) -> object:
-            raise AssertionError("transaction() path should not be used when TLDW_TEST_MODE=y")
-
-    async def _fake_get_db_pool() -> _Pool:
-        return _Pool()
-
-    monkeypatch.setattr(auth_deps, "get_db_pool", _fake_get_db_pool)
-
-    agen = auth_deps.get_db_transaction()
-    try:
-        conn = await agen.__anext__()
-        assert hasattr(conn, "execute")
-    finally:
-        await agen.aclose()

@@ -1,0 +1,27 @@
+{
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-x3ueb5au",
+  "retained_uploaded_media_ids": 1700,
+  "parity": [
+    {
+      "query": "ArchiveThroughput",
+      "legacy_count": 1700,
+      "native_count": 1700,
+      "equal_exact_ids": true
+    },
+    {
+      "query": "\"ArchiveThroughput 0-000\"",
+      "legacy_count": 1,
+      "native_count": 1,
+      "equal_exact_ids": true
+    },
+    {
+      "query": "\"Unique synthetic archive body batch 0 message 0\"",
+      "legacy_count": 1,
+      "native_count": 1,
+      "equal_exact_ids": true
+    }
+  ],
+  "other_user_legacy_count": 0,
+  "outbound": 0,
+  "models": 0
+}

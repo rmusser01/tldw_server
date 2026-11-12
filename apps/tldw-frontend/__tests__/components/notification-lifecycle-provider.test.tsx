@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   connection: { phase: "connected", isConnected: true, mode: "normal", offlineBypass: false },
+  config: null as Record<string, unknown> | null,
+  apiKey: "test-api-key" as string | null,
   getUnreadCount: vi.fn(),
   listNotifications: vi.fn(),
   subscribeNotificationsStream: vi.fn()
@@ -26,8 +28,8 @@ vi.mock("@web/lib/api", () => ({
 
 vi.mock("@web/lib/authStorage", () => ({
   getApiBearer: () => null,
-  getApiKey: () => "test-api-key",
-  getEffectiveStoredTldwConfig: () => null,
+  getApiKey: () => mocks.apiKey,
+  getEffectiveStoredTldwConfig: () => mocks.config,
   getSessionAccessToken: () => window.localStorage.getItem("access_token")
 }))
 
@@ -81,12 +83,195 @@ describe("NotificationLifecycleProvider", () => {
     vi.clearAllMocks()
     mocks.connection = { phase: "connected", isConnected: true, mode: "normal", offlineBypass: false }
     window.localStorage.clear()
+    mocks.config = null
+    mocks.apiKey = "test-api-key"
     mocks.getUnreadCount.mockResolvedValue({ unread_count: 5 })
     mocks.listNotifications.mockResolvedValue({
       items: [{ id: 10, title: "Existing" }],
       total: 1
     })
     mocks.subscribeNotificationsStream.mockImplementation(() => vi.fn())
+  })
+
+  it("retires cleared manual single-user credentials while connection state is still connected", async () => {
+    vi.useFakeTimers()
+    mocks.config = { serverUrl: "https://api.example.test", authMode: "single-user", apiKey: "manual-key" }
+    mocks.apiKey = "manual-key"
+    const unsubscribe = vi.fn()
+    mocks.subscribeNotificationsStream.mockReturnValue(unsubscribe)
+    let current: NotificationLifecycleContextValue | null = null
+    const view = render(
+      <NotificationLifecycleProvider>
+        <Probe onValue={(value) => { current = value }} />
+      </NotificationLifecycleProvider>
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+
+    mocks.config = { ...mocks.config, apiKey: undefined }
+    mocks.apiKey = null
+    act(() => window.dispatchEvent(new Event("tldw:config-updated")))
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect((current as NotificationLifecycleContextValue | null)?.state).toBe("auth-required")
+    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+
+    mocks.config = { ...mocks.config, apiKey: "replacement-key" }
+    mocks.apiKey = "replacement-key"
+    act(() => window.dispatchEvent(new Event("tldw:config-updated")))
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(2)
+    expect((current as NotificationLifecycleContextValue | null)?.unreadCount).toBe(5)
+    view.unmount()
+    vi.useRealTimers()
+  })
+
+  describe("X01 document retirement", () => {
+    beforeEach(() => {
+      vi.useFakeTimers()
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible")
+    })
+
+    afterEach(() => {
+      vi.restoreAllMocks()
+      vi.useRealTimers()
+    })
+
+    it("aborts polling, closes the stream and fences late results until pageshow", async () => {
+      const unsubscribe = vi.fn()
+      let resolvePoll: ((value: { unread_count: number }) => void) | undefined
+      let streamOptions: Record<string, unknown> | undefined
+      mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
+        streamOptions = options
+        return unsubscribe
+      })
+      mocks.getUnreadCount.mockResolvedValueOnce({ unread_count: 5 }).mockImplementationOnce(
+        () => new Promise((resolve) => { resolvePoll = resolve })
+      ).mockResolvedValue({ unread_count: 8 })
+      const view = renderProvider()
+      await act(async () => vi.advanceTimersByTimeAsync(30_000))
+      const pollSignal = mocks.getUnreadCount.mock.calls[1][0].signal as AbortSignal
+      const retiredStream = streamOptions
+
+      act(() => window.dispatchEvent(new Event("pagehide")))
+      expect(pollSignal.aborted).toBe(true)
+      expect(unsubscribe).toHaveBeenCalledTimes(1)
+      await act(async () => resolvePoll?.({ unread_count: 99 }))
+      act(() => (retiredStream?.onEvent as (event: unknown) => void)({
+        event: "notification", id: 99, payload: { notification_id: 99 }
+      }))
+      expect(view.latest().unreadCount).toBe(5)
+      expect(view.latest().events).toEqual([])
+
+      await act(async () => view.latest().tryAgain())
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"))
+        window.dispatchEvent(new CustomEvent(AUTH_CREDENTIALS_CHANGED_EVENT, {
+          detail: { authenticated: true }
+        }))
+      })
+      await act(async () => vi.advanceTimersByTimeAsync(120_000))
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
+      expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+
+      act(() => window.dispatchEvent(new Event("pageshow")))
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      expect(view.latest().unreadCount).toBe(8)
+      expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(2)
+      act(() => window.dispatchEvent(new Event("pageshow")))
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(3)
+      view.unmount()
+    })
+
+    it("aborts pending bootstrap and ignores its completion after pagehide", async () => {
+      let resolveBootstrap: ((value: { unread_count: number }) => void) | undefined
+      mocks.getUnreadCount.mockImplementationOnce(
+        () => new Promise((resolve) => { resolveBootstrap = resolve })
+      )
+      const view = renderProvider()
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      const signal = mocks.getUnreadCount.mock.calls[0][0].signal as AbortSignal
+      act(() => window.dispatchEvent(new Event("pagehide")))
+      expect(signal.aborted).toBe(true)
+      await act(async () => resolveBootstrap?.({ unread_count: 99 }))
+      expect(view.latest().unreadCount).toBe(0)
+      expect(mocks.listNotifications).not.toHaveBeenCalled()
+      expect(mocks.subscribeNotificationsStream).not.toHaveBeenCalled()
+      view.unmount()
+    })
+
+    it.each([401, 403])("preserves terminal HTTP %s across page return", async (status) => {
+      mocks.getUnreadCount.mockRejectedValueOnce(Object.assign(new Error("terminal"), { status }))
+      const view = renderProvider()
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      const terminal = view.latest().state
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"))
+        window.dispatchEvent(new Event("pageshow"))
+      })
+      await act(async () => vi.advanceTimersByTimeAsync(60_000))
+      expect(view.latest().state).toBe(terminal)
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+      await act(async () => view.latest().tryAgain())
+      expect(view.latest().unreadCount).toBe(5)
+      expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+      view.unmount()
+    })
+
+    it("recovers credentials restored while retired only after pageshow", async () => {
+      mocks.config = { serverUrl: "https://api.example.test", authMode: "single-user", apiKey: "test-api-key" }
+      const view = renderProvider()
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      act(() => window.dispatchEvent(new Event("pagehide")))
+      act(() => {
+        mocks.apiKey = null
+        mocks.config = { ...mocks.config, apiKey: undefined }
+        window.dispatchEvent(new Event("tldw:config-updated"))
+      })
+      expect(view.latest().state).toBe("auth-required")
+      act(() => {
+        mocks.apiKey = "test-api-key"
+        mocks.config = { ...mocks.config, apiKey: "test-api-key" }
+        window.dispatchEvent(new CustomEvent(AUTH_CREDENTIALS_CHANGED_EVENT, {
+          detail: { authenticated: true }
+        }))
+      })
+      await act(async () => vi.advanceTimersByTimeAsync(60_000))
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+      act(() => window.dispatchEvent(new Event("pageshow")))
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      expect(view.latest().unreadCount).toBe(5)
+      expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(2)
+      view.unmount()
+    })
+
+    it("waits for visibility when a retired page returns hidden", async () => {
+      const view = renderProvider()
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      act(() => window.dispatchEvent(new Event("pagehide")))
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+      act(() => window.dispatchEvent(new Event("pageshow")))
+      await act(async () => vi.advanceTimersByTimeAsync(60_000))
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible")
+      act(() => document.dispatchEvent(new Event("visibilitychange")))
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(2)
+      view.unmount()
+    })
+
+    it("does not restart an unmounted owner on pageshow", async () => {
+      const view = renderProvider()
+      await act(async () => vi.advanceTimersByTimeAsync(0))
+      act(() => window.dispatchEvent(new Event("pagehide")))
+      view.unmount()
+      act(() => window.dispatchEvent(new Event("pageshow")))
+      await act(async () => vi.advanceTimersByTimeAsync(60_000))
+      expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+    })
   })
 
   describe("tab visibility", () => {

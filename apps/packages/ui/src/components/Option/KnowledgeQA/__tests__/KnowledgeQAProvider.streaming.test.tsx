@@ -88,6 +88,27 @@ describe("KnowledgeQAProvider streaming search", () => {
     })
   })
 
+  it.each([true, false])("honors the selected QA timeout for generation=%s", async (generation) => {
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield { type: "contexts", contexts: [{ id: "cedar", excerpt: "Cedar opens in January." }] }
+      yield { type: "delta", text: "Cedar opens in January [1]." }
+      yield completeEvent(true)
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-selected-timeout") })
+    act(() => {
+      latestContext!.setQuery("When does Cedar open?")
+      latestContext!.updateSetting("enable_generation", generation)
+      latestContext!.updateSetting("timeout_seconds", 45)
+    })
+    await act(async () => { await latestContext!.search() })
+    expect(generation ? ragSearchStreamMock : ragSearchMock).toHaveBeenCalledWith(
+      "When does Cedar open?",
+      expect.objectContaining({ timeoutMs: 45000, signal: expect.any(AbortSignal) })
+    )
+    expect(latestContext!.error).toBeNull()
+  })
+
   it("keeps received answer and evidence when the user cancels a partial stream", async () => {
     ragSearchStreamMock.mockImplementation(async function* (_query: string, options: { signal: AbortSignal }) {
       yield { type: "contexts", contexts: [{ id: "cedar", excerpt: "Cedar opens in January." }] }
@@ -113,6 +134,86 @@ describe("KnowledgeQAProvider streaming search", () => {
     expect(latestContext!.results.map(result => result.id)).toEqual(["cedar"])
     expect(latestContext!.answerTrustState).toBe(receivedTrust)
     expect(ragSearchMock).not.toHaveBeenCalled()
+  })
+
+  it("rejects a buffered answer from a superseded same-owner stream", async () => {
+    let releaseOldStream!: () => void
+    let markOldBuffered!: () => void
+    const oldStreamGate = new Promise<void>((resolve) => {
+      releaseOldStream = resolve
+    })
+    const oldBuffered = new Promise<void>((resolve) => {
+      markOldBuffered = resolve
+    })
+    ragSearchStreamMock.mockImplementation(async function* (query: string) {
+      if (query === "Old question") {
+        yield {
+          type: "contexts",
+          contexts: [{ id: "old", excerpt: "Old evidence." }]
+        }
+        yield { type: "delta", text: "Old answer [1]." }
+        markOldBuffered()
+        await oldStreamGate
+      } else {
+        yield {
+          type: "contexts",
+          contexts: [{ id: "current", excerpt: "Current evidence." }]
+        }
+        yield { type: "delta", text: "Current answer [1]." }
+      }
+      yield completeEvent(true)
+    })
+    render(
+      <KnowledgeQAProvider>
+        <ContextProbe />
+      </KnowledgeQAProvider>
+    )
+    await act(async () => {
+      await latestContext!.selectThread("local-superseded-stream")
+    })
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    let oldSearch: Promise<void> | undefined
+    try {
+      act(() => {
+        latestContext!.setQuery("Old question")
+      })
+      await act(async () => {
+        oldSearch = latestContext!.search()
+        await oldBuffered
+      })
+      act(() => {
+        latestContext!.setQuery("Current question")
+      })
+      await act(async () => {
+        await latestContext!.search()
+      })
+      expect(latestContext!.answer).toBe("Current answer [1].")
+      const currentCitations = latestContext!.citations
+      const currentTrust = latestContext!.answerTrustState
+      const currentReasons = latestContext!.answerTrustReasonCodes
+      const currentOrigin = latestContext!.answerEvidenceOrigin
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80)
+      })
+      expect(latestContext).toMatchObject({
+        query: "Current question",
+        resultQuery: "Current question",
+        answer: "Current answer [1].",
+        results: [expect.objectContaining({ id: "current" })],
+        citations: currentCitations,
+        answerTrustState: currentTrust,
+        answerTrustReasonCodes: currentReasons,
+        answerEvidenceOrigin: currentOrigin,
+        isSearching: false
+      })
+    } finally {
+      releaseOldStream()
+      await act(async () => {
+        await oldSearch
+      })
+      vi.useRealTimers()
+    }
   })
 
   it("contains timeout feedback without a console overlay and permits recovery", async () => {

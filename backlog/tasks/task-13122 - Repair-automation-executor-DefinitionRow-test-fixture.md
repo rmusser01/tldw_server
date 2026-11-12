@@ -30,9 +30,9 @@ Update the automation executor test helper to construct the current DefinitionRo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED on origin/dev at 2c6553c4ed: 8 executor tests failed before execution because _definition() omitted six required DefinitionRow fields. GREEN: all 10 focused executor tests passed after adding neutral resolution and policy values; git diff --check passed; no production files changed. Delivered in a focused test-only commit.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

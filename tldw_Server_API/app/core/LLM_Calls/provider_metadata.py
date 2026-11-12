@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
 PROVIDER_REQUIRES_KEY: dict[str, bool] = {
     "openai": True,
@@ -53,7 +54,7 @@ BYOK_CREDENTIAL_FIELDS.update(
 
 
 def provider_requires_api_key(provider: str) -> bool:
-    provider_norm = (provider or "").strip().lower()
+    provider_norm = canonical_provider_name(provider)
     if not provider_norm:
         return True
     return PROVIDER_REQUIRES_KEY.get(provider_norm, True)

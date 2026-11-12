@@ -37,7 +37,7 @@ Continue the tldw_server WebUI design-system migration by replacing StorageQuota
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation completed on branch codex/design-system-next-slice-7 in the dedicated design-system worktree.
 
 StorageQuotaBanner now imports the shared design-system Alert primitive and maps exceeded quota to variant="error" and warning quota to variant="warning" with dismissible/onDismiss behavior.
@@ -49,7 +49,7 @@ Removed the two StorageQuotaBanner AntD Alert exceptions from apps/packages/ui/s
 PR opened against dev: https://github.com/rmusser01/tldw_server/pull/1728.
 
 Review pass: localized StorageQuotaBanner warning/exceeded titles, descriptions, and dismiss label through common namespace keys while preserving English fallback copy. Verified the shared design-system Alert primitive already renders variant icons by default, so no icon-parity code change was needed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

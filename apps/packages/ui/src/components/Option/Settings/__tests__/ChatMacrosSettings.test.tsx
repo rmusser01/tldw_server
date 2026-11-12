@@ -1,4 +1,7 @@
 import React from "react"
+import { createInstance, type i18n } from "i18next"
+import enSettings from "@/assets/locale/en/settings.json"
+import frSettings from "@/assets/locale/fr/settings.json"
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -10,6 +13,7 @@ import type {
 } from "@/services/chat-macros"
 
 const mocks = vi.hoisted(() => ({
+  translationEngine: null as i18n | null,
   cloneChatMacro: vi.fn(),
   createChatMacro: vi.fn(),
   deleteChatMacro: vi.fn(),
@@ -43,8 +47,9 @@ vi.mock("@/components/Common/confirm-danger", () => ({
 }))
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
+  useTranslation: (namespace?: string) => ({
     t: (key: string, fallbackOrOptions?: string | { defaultValue?: string }) => {
+      if (mocks.translationEngine) return mocks.translationEngine.getFixedT(null, namespace)(key, fallbackOrOptions as any)
       if (typeof fallbackOrOptions === "string") return fallbackOrOptions
       return fallbackOrOptions?.defaultValue || key
     }
@@ -133,8 +138,24 @@ const makeDetail = (summary: ChatMacroSummary): ChatMacroDetail => ({
 })
 
 describe("ChatMacrosSettings", () => {
+  it("renders translated macro header and actions", async () => {
+    const instance = createInstance()
+    await instance.init({
+      lng: "fr", fallbackLng: "en", defaultNS: "common",
+      resources: { en: { settings: enSettings }, fr: { settings: frSettings } },
+    })
+    mocks.translationEngine = instance
+    render(<ChatMacrosSettings />)
+    expect(await screen.findByRole("heading", { name: "Macros de discussion" })).toBeInTheDocument()
+    expect(screen.getByText(frSettings.chatMacrosSettings.description)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Nouvelle macro" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Importer une macro" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Actualiser les macros" })).toBeInTheDocument()
+  })
+
   beforeEach(() => {
     vi.resetAllMocks()
+    mocks.translationEngine = null
     mocks.listChatMacros.mockResolvedValue(macroListResponse([builtinMacro, userMacro]))
     mocks.getChatMacroSettings.mockResolvedValue(success({ settings: makeSettings() }))
     mocks.getChatMacro.mockImplementation((name: string) => {

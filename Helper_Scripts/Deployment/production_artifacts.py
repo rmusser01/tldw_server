@@ -25,6 +25,19 @@ _MANIFEST_KEYS = frozenset(
 _ARTIFACT_KEYS = frozenset({"kind", "path", "sha256", "size_bytes"})
 
 
+def posix_owner_only_supported() -> bool:
+    """Return whether this host can enforce the artifact POSIX mode contract."""
+
+    return os.name == "posix" and callable(getattr(os, "fchmod", None))
+
+
+def require_posix_owner_only() -> None:
+    """Reject hosts that cannot enforce owner-only POSIX artifact permissions."""
+
+    if not posix_owner_only_supported():
+        raise ValueError("production deployment requires a POSIX host with os.fchmod")
+
+
 @dataclass(frozen=True)
 class ArtifactRecord:
     """One checksummed recovery artifact stored beside its manifest."""
@@ -107,6 +120,7 @@ def _validate_manifest(manifest: DeploymentManifest) -> None:
 def write_manifest(path: Path, manifest: DeploymentManifest) -> None:
     """Write a deterministic owner-only manifest without secret material."""
 
+    require_posix_owner_only()
     _validate_manifest(manifest)
     path.parent.mkdir(parents=True, exist_ok=True)
     body = asdict(manifest)

@@ -259,7 +259,11 @@ def test_all_three_triggers_preserve_update_delete_payloads(shared_store):
 def test_upgrade_replaces_existing_v71_trigger_bodies(pg_database_config, tmp_path, monkeypatch, fail_once):
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     media = MediaDatabase(str(tmp_path / "media.db"), client_id="2", backend=backend)
-    db = CharactersRAGDB(tmp_path / "notes.db", client_id="2", backend=backend)
+    # Build a genuine v71 catalog. Stamping 71 on the current schema is not a real
+    # predecessor: v72->v73 would re-add workspaces.assistant_defaults_explicit_none.
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 71)
+        db = CharactersRAGDB(tmp_path / "notes.db", client_id="2", backend=backend)
     try:
         columns = {column["name"] for column in backend.get_table_info("sync_log")}
         assert "entity_uuid" in columns and "entity_id" not in columns
@@ -307,7 +311,7 @@ def test_upgrade_replaces_existing_v71_trigger_bodies(pg_database_config, tmp_pa
         db = CharactersRAGDB(tmp_path / "notes.db", client_id="2", backend=backend)
         assert (
             backend.execute("SELECT version FROM db_schema_version WHERE schema_name=%s", (db._SCHEMA_NAME,)).scalar
-            == 72
+            == CharactersRAGDB._POSTGRES_SCHEMA_VERSION
         )
         with chacha_operation(independent=True):
             pack, card = _create_graph(db)

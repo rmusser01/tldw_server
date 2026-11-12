@@ -44,8 +44,8 @@ export const QuickChatMessage: React.FC<Props> = ({
         className={classNames(
           "max-w-[85%] rounded-lg px-3 py-2",
           isUser
-            ? "bg-[color:var(--color-primary)] text-white"
-            : "bg-[color:var(--color-surface-2)] text-[color:var(--color-text)]"
+            ? "bg-primary text-primary-foreground"
+            : "bg-surface2 text-text"
         )}>
         {isUser ? (
           <p className="text-sm whitespace-pre-wrap break-words">

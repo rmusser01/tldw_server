@@ -3,11 +3,21 @@ from __future__ import annotations
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import IO
 
 from aiofiles import threadpool as aiofiles_threadpool
 from loguru import logger
+
+
+def is_explicit_local_model_path(model_path: str) -> bool:
+    """Recognize unambiguous local paths without requiring them to exist."""
+    return bool(
+        Path(model_path).expanduser().is_absolute()
+        or PureWindowsPath(model_path).is_absolute()
+        or model_path.startswith(("./", "../", ".\\", "..\\", "~/", "~\\"))
+    )
+
 
 
 def resolve_safe_local_path(path: Path, base_dir: Path) -> Path | None:

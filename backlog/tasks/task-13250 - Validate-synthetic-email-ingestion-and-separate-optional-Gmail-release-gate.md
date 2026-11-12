@@ -36,11 +36,11 @@ Follow the September 13 email handoff: audit file parsing and persistence, prove
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Audit and synthetic validation complete. Current focused core suite: 75 passed, 8 warnings; mocked Gmail: 13 passed, 9 deselected, 4 warnings. A task-local socket/DNS guard covered collection/execution: zero outbound attempts in both runs. Six committed harness cases intercept summarization, claims, LLM chunk assistance, embedding jobs, background tasks, shared HTTP and sockets. Initial strict same-body probes failed EML/ZIP/MBOX; TASK-13251 records actual core dedupe blocker. Current collision characterization is not acceptance. No production behavior changes or live Gmail access. Metrics fixture checker passed but does not prove staging SLO. Ruff/format and Bandit passed (B101 omitted for intentional pytest assertions).
 
 Final independent read-only review found no substantive issues; corrected abbreviated parser/DB paths in the audit. git diff --check passed after whitespace cleanup. Temporary implementation plan stages completed and plan removed per repository instructions; retained plan summary in this task. Validation completed, not feature/release certification.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

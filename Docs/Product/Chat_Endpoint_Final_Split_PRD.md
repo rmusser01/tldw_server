@@ -89,10 +89,11 @@
 - `DEFAULT_SAVE_TO_DB`
 - `_process_content_for_db_sync`
 - `_save_message_turn_to_db`
-- `_sanitize_json_for_rate_limit`
-- `_estimate_tokens_for_queue`
 
 These symbols remain importable from `chat.py` through wrappers/re-exports even after extraction.
+
+`_sanitize_json_for_rate_limit` and `_estimate_tokens_for_queue` were removed by TASK-13843: every chat
+prompt-size estimate is `chat_service.estimate_tokens_from_json`, which `chat.py` imports.
 
 ## Target Module Map
 
@@ -133,8 +134,6 @@ Keep existing split modules unchanged:
   - orchestration wrapper around existing `chat_service`/`chat_orchestrator` functionality.
 - `core/Chat/audit.py`
   - endpoint-independent audit helper wrappers currently embedded in request flow.
-- `core/Chat/queue_estimation.py` (optional if needed)
-  - `_sanitize_json_for_rate_limit` and `_estimate_tokens_for_queue` logic with endpoint-level wrappers preserved.
 
 ## Migration Plan
 

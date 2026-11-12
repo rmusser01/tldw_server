@@ -81,6 +81,38 @@ def test_watchlists_postgres_round_trip(request: pytest.FixtureRequest):
     assert item.id > 0
 
 
+def test_watchlists_postgres_output_preset_name_races(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _client, db_name = request.getfixturevalue("isolated_test_environment")
+    db = WatchlistsDatabase(user_id="1", backend=_pg_backend(db_name))
+    existing = db.create_output_preset(name="Daily newsletter", is_default=True)
+    other = db.create_output_preset(name="Other preset")
+    check_name = db._check_output_preset_name_available
+    skip_preflight = True
+
+    def race_check(**kwargs):
+        nonlocal skip_preflight
+        if skip_preflight:
+            skip_preflight = False
+            return
+        check_name(**kwargs)
+
+    monkeypatch.setattr(db, "_check_output_preset_name_available", race_check)
+    with pytest.raises(ValueError, match="^output_preset_name_exists$") as created:
+        db.create_output_preset(name="daily newsletter", is_default=True)
+    assert str(created.value.__cause__) == "PostgreSQL query execution failed"
+    assert int(db.get_output_preset(preset_id=int(existing.id)).is_default) == 1
+
+    skip_preflight = True
+    with pytest.raises(ValueError, match="^output_preset_name_exists$") as updated:
+        db.update_output_preset(
+            preset_id=int(other.id), fields={"name": str(existing.name).upper(), "is_default": True}
+        )
+    assert str(updated.value.__cause__) == "PostgreSQL query execution failed"
+    assert int(db.get_output_preset(preset_id=int(existing.id)).is_default) == 1
+
+
 def test_watchlists_postgres_output_prefs_round_trip(request: pytest.FixtureRequest):
     _client, db_name = request.getfixturevalue("isolated_test_environment")  # type: ignore[assignment]
 

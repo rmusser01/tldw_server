@@ -39,11 +39,11 @@ Implement Stage 4 of the moderation review/rules remediation plan. Add backend m
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 4 backend moderation review contract: review permissions/RBAC seed defaults, sanitized schemas, SQLite review store/service, review/audit endpoints, OpenAPI guard entries, and gated capture hooks for chat moderation outcomes. The shared rbac_seed.py bootstrap covers Postgres and SQLite baseline RBAC; no pg_migrations_extra.py change was needed.
 
 Verification: focused Stage 4 pytest passed 21 tests; existing chat moderation integration passed 15 tests; bun run verify:openapi passed with existing reviewed exception paths; py_compile passed for touched backend modules; Bandit on touched backend code reported no findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -38,9 +38,9 @@ Add failing service tests proving `extra_params.split_text=true` enables service
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Mapped upstream-style `split_text` into `_resolve_chunking_params` as a service chunking enable alias, and mapped `chunk_size` to both chunk target and max character settings. Existing `chunking_service` and `chunking` flags retain precedence. Documentation clarifies that these aliases apply to non-streaming Chatterbox requests so the service can assemble PCM segments into one encoded response.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

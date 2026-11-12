@@ -41,7 +41,6 @@ const baseProps = {
   isMobileViewport: false,
   mobileSidebarOpen: false,
   sidebarCollapsed: false,
-  sidebarHeight: 720,
   listMode: 'active',
   listViewMode: 'list',
   page: 1,
@@ -119,7 +118,7 @@ const baseProps = {
   deleteMoodboard: noopAsync,
   clearBulkSelection: noop,
   exportSelectedBulk: noop,
-  assignKeywordsToSelectedBulk: noopAsync,
+  addTagsToSelectedBulk: noopAsync,
   deleteSelectedBulk: noopAsync,
   toggleNotePinned: noopAsync,
   restoreNote: noopAsync,
@@ -142,7 +141,6 @@ const notes = Array.from({ length: 5 }, (_, index) => ({
 }))
 const expandedProps = {
   ...baseProps,
-  sidebarHeight: 600,
   total: 5,
   visibleNotes: notes,
   filteredCount: 5,
@@ -187,12 +185,21 @@ describe('Notes expanded sidebar result access', () => {
     expect(screen.getByTestId('notes-results-scroll').className).toContain(
       'overflow-auto'
     )
-    await user.click(within(results).getByTestId('notes-open-button-5'))
+    const fifth = within(results).getByTestId('notes-open-button-5')
+    await user.click(fifth)
     expect(noopAsync).toHaveBeenCalledWith('5')
-    const first = within(results).getByTestId('notes-open-button-1')
-    for (let step = 0; step < 80 && document.activeElement !== first; step += 1) {
+    // The results are one Tab stop that remembers the last row used (AX-03).
+    filters.focus()
+    for (
+      let step = 0;
+      step < 80 && !document.activeElement?.hasAttribute('data-notes-list-item');
+      step += 1
+    ) {
       await user.tab()
     }
+    expect(fifth).toHaveFocus()
+    await user.keyboard('{Home}')
+    const first = within(results).getByTestId('notes-open-button-1')
     expect(first).toHaveFocus()
     await user.keyboard('{Enter}')
     expect(noopAsync).toHaveBeenCalledWith('1')
@@ -209,11 +216,12 @@ describe('Notes expanded sidebar result access', () => {
       'aria-expanded',
       'true'
     )
-    restored.rerender(<NotesSidebar {...expandedProps} sidebarHeight={760} />)
     fireEvent(window, new Event('resize'))
-    expect(screen.getByTestId('notes-list-region')).toHaveStyle({
-      height: '760px'
-    })
+    // The desktop sidebar fills the viewport-framed page; it no longer
+    // tracks window.innerHeight (NO-01).
+    expect(screen.getByTestId('notes-list-region').className).toContain(
+      'h-full'
+    )
     restored.rerender(
       <NotesSidebar {...expandedProps} isMobileViewport mobileSidebarOpen />
     )

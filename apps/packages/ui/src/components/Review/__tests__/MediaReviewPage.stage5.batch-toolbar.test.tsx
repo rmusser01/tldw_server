@@ -2,6 +2,9 @@ import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import MediaReviewPage from "../MediaReviewPage"
+import * as mediaHandoff from "@/services/tldw/media-chat-handoff"
+
+vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => "server:alice" }))
 
 const sourceItems = [
   {
@@ -54,6 +57,11 @@ vi.mock("@/hooks/useMediaCapabilities", () => ({
   useMediaCapabilities: () => ({ canDelete: mocks.canDelete, loading: false })
 }))
 
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({
+  useQuickIngestAuthority: () => 'verified-alice',
+  quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-alice', isCurrent: () => true, signal: new AbortController().signal }) }
+}))
+
 const interpolate = (template: string, values?: Record<string, unknown>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(values?.[key] ?? ""))
 
@@ -82,7 +90,8 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => mocks.navigate
+  useNavigate: () => mocks.navigate,
+  useLocation: () => ({ key: 'initial' })
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
@@ -106,33 +115,39 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: mocks.bgRequest
 }))
 
-vi.mock("@tanstack/react-query", () => {
-  const React = require("react") as typeof import("react")
+vi.mock("@tanstack/react-query", async () => {
+  const React = await import("react");
   return {
     keepPreviousData: {},
-    useQuery: ({ queryFn, queryKey }: { queryFn: () => Promise<unknown>; queryKey: unknown[] }) => {
-      const [data, setData] = React.useState<unknown>([])
-      const [isFetching, setIsFetching] = React.useState(false)
-      const queryFnRef = React.useRef(queryFn)
-      queryFnRef.current = queryFn
-      const queryHash = JSON.stringify(queryKey)
+    useQuery: ({
+      queryFn,
+      queryKey,
+    }: {
+      queryFn: () => Promise<unknown>;
+      queryKey: unknown[];
+    }) => {
+      const [data, setData] = React.useState<unknown>([]);
+      const [isFetching, setIsFetching] = React.useState(false);
+      const queryFnRef = React.useRef(queryFn);
+      queryFnRef.current = queryFn;
+      const queryHash = JSON.stringify(queryKey);
 
       const run = React.useCallback(async () => {
-        setIsFetching(true)
-        const result = await queryFnRef.current()
-        setData(result)
-        setIsFetching(false)
-        return { data: result }
-      }, [])
+        setIsFetching(true);
+        const result = await queryFnRef.current();
+        setData(result);
+        setIsFetching(false);
+        return { data: result };
+      }, []);
 
       React.useEffect(() => {
-        void run()
-      }, [run, queryHash])
+        void run();
+      }, [run, queryHash]);
 
-      return { data, isFetching, refetch: run }
-    }
-  }
-})
+      return { data, isFetching, refetch: run };
+    },
+  };
+});
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
@@ -162,20 +177,22 @@ vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [true, mocks.setHelpDismissed, { isLoading: false }]
 }))
 
-vi.mock("@/hooks/useSetting", () => {
-  const React = require("react") as typeof import("react")
+vi.mock("@/hooks/useSetting", async () => {
+  const React = await import("react");
   return {
     useSetting: (setting: { defaultValue: unknown }) => {
-      const [value, setValue] = React.useState(setting.defaultValue)
+      const [value, setValue] = React.useState(setting.defaultValue);
       const setter = async (next: unknown | ((prev: unknown) => unknown)) => {
         setValue((prev: unknown) =>
-          typeof next === "function" ? (next as (prev: unknown) => unknown)(prev) : next
-        )
-      }
-      return [value, setter, { isLoading: false }] as const
-    }
-  }
-})
+          typeof next === "function"
+            ? (next as (prev: unknown) => unknown)(prev)
+            : next,
+        );
+      };
+      return [value, setter, { isLoading: false }] as const;
+    },
+  };
+});
 
 vi.mock("@/services/settings/registry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/settings/registry")>()
@@ -195,6 +212,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING: { key: "mediaReviewFiltersCollapsed", defaultValue: false },
   MEDIA_REVIEW_FOCUSED_ID_SETTING: { key: "mediaReviewFocusedId", defaultValue: null },
   MEDIA_REVIEW_ORIENTATION_SETTING: { key: "mediaReviewOrientation", defaultValue: "vertical" },
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING: { key: 'media-review-selection-snapshot', defaultValue: null },
   MEDIA_REVIEW_SELECTION_SETTING: { key: "mediaReviewSelection", defaultValue: [] },
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: "mediaReviewViewMode", defaultValue: "spread" }
 }))
@@ -222,7 +240,15 @@ vi.mock("antd", async (importOriginal) => {
     )
   )
 
-  const Button = ({ children, onClick, disabled, icon, ...rest }: any) => (
+  const Button = ({
+    children,
+    onClick,
+    disabled,
+    icon,
+    iconPlacement,
+    danger,
+    ...rest
+  }: any) => (
     <button type="button" onClick={onClick} disabled={disabled} {...rest}>
       {icon}
       {children}
@@ -257,7 +283,11 @@ vi.mock("antd", async (importOriginal) => {
             label: child?.props?.children
           }))
     const isMultiple = mode === "multiple" || mode === "tags"
-    const selected = isMultiple ? (Array.isArray(value) ? value : []) : (value ?? "")
+    const selected = isMultiple
+      ? Array.isArray(value)
+        ? value
+        : []
+      : (value ?? "")
     return (
       <select
         multiple={isMultiple}
@@ -281,7 +311,9 @@ vi.mock("antd", async (importOriginal) => {
       </select>
     )
   }
-  ;(SelectComponent as any).Option = ({ value, children }: any) => <option value={value}>{children}</option>
+  ;(SelectComponent as any).Option = ({ value, children }: any) => (
+    <option value={value}>{children}</option>
+  )
 
   const RadioButton = ({ value, children, __groupValue, __groupOnChange }: any) => (
     <button
@@ -313,7 +345,12 @@ vi.mock("antd", async (importOriginal) => {
   }
 
   const Skeleton = () => <div>loading-skeleton</div>
-  const Alert = ({ title, action }: any) => <div>{title}{action}</div>
+  const Alert = ({ title, action }: any) => (
+    <div>
+      {title}
+      {action}
+    </div>
+  )
   const Dropdown = ({ menu, children }: any) => (
     <div>
       {children}
@@ -342,7 +379,11 @@ vi.mock("antd", async (importOriginal) => {
   const Modal = () => null
   ;(Modal as any).confirm = vi.fn()
   const Drawer = ({ open, title, children }: any) =>
-    open ? <div role="dialog" aria-label={typeof title === "string" ? title : "drawer"}>{children}</div> : null
+    open ? (
+      <div role="dialog" aria-label={typeof title === "string" ? title : "drawer"}>
+        {children}
+      </div>
+    ) : null
 
   return {
     ...actual,
@@ -368,7 +409,9 @@ vi.mock("antd", async (importOriginal) => {
 })
 
 vi.mock("@/components/Common/Markdown", () => ({
-  Markdown: ({ message }: { message: string }) => <div data-testid="mock-markdown">{message}</div>
+  Markdown: ({ message }: { message: string }) => (
+    <div data-testid="mock-markdown">{message}</div>
+  )
 }))
 
 vi.mock("@/components/Media/diff-worker-client", () => ({
@@ -468,11 +511,42 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     fireEvent.click(checkbox, options)
   }
 
+  it("addresses every selected source to this tab without changing Chat before acceptance", async () => {
+    sessionStorage.clear()
+    mocks.navigate.mockClear()
+    mocks.setChatMode.mockClear()
+    mocks.setRagMediaIds.mockClear()
+    render(<MediaReviewPage />)
+    await screen.findByTestId('media-review-selection-count')
+    selectItemByCheckbox("Alpha paper")
+    selectItemByCheckbox("Beta notes")
+    fireEvent.click(screen.getByRole("button", { name: "Chat about selection (2)" }))
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1))
+    const token = new URL(mocks.navigate.mock.calls[0][0], "http://localhost").searchParams.get(mediaHandoff.MEDIA_CHAT_HANDOFF_PARAM)!
+    expect(await mediaHandoff.readMediaChatHandoff(token, "server:alice")).toEqual({ ownerScope: "server:alice", mediaId: "1", mediaIds: [1, 2], mode: "rag_media" })
+    expect(mocks.setChatMode).not.toHaveBeenCalled()
+    expect(mocks.setRagMediaIds).not.toHaveBeenCalled()
+  })
+
+  it("continues the exact reviewed set into Knowledge instead of the whole library", async () => {
+    render(<MediaReviewPage />)
+    await screen.findByTestId("media-review-selection-count")
+    selectItemByCheckbox("Alpha paper")
+    selectItemByCheckbox("Beta notes")
+    const toolbar = await screen.findByTestId("media-multi-batch-toolbar")
+    fireEvent.click(
+      within(toolbar).getByRole("button", { name: "Ask selected items" }),
+    )
+    expect(mocks.navigate.mock.calls.at(-1)?.[0]).toBe(
+      "/knowledge?media_ids=1%2C2",
+    )
+  })
+
   it("shows batch toolbar when selection is non-empty", async () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText("0 / 30 selected")).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     selectItemByCheckbox("Alpha paper")
@@ -485,7 +559,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
   it("disables bulk trash when the account lacks delete permission", async () => {
     mocks.canDelete = false
     render(<MediaReviewPage />)
-    await screen.findByText("0 / 30 selected")
+    await screen.findByTestId('media-review-selection-count')
     selectItemByCheckbox("Alpha paper")
     expect(screen.getByTestId("media-multi-batch-trash")).toBeDisabled()
   })
@@ -494,7 +568,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText("0 / 30 selected")).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     selectItemByCheckbox("Alpha paper")
@@ -509,7 +583,7 @@ describe("MediaReviewPage stage5 batch toolbar", () => {
     render(<MediaReviewPage />)
 
     await waitFor(() => {
-      expect(screen.getByText("0 / 30 selected")).toBeInTheDocument()
+      expect(screen.getByTestId('media-review-selection-count')).toHaveTextContent('0 selected')
     })
 
     selectItemByCheckbox("Alpha paper")

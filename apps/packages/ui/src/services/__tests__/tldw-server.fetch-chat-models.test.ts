@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(),
+  getModels: vi.fn(),
   getChatModels: vi.fn(),
   getCachedChatModels: vi.fn(),
   clearModelsCache: vi.fn(),
@@ -35,10 +36,13 @@ vi.mock("@/services/app", () => ({
 
 vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) =>
-    (mocks.bgRequest as (...args: unknown[]) => unknown)(...args)
+    (mocks.bgRequest as (...args: unknown[]) => unknown)(...args),
+  bgStream: vi.fn(),
+  bgUpload: vi.fn()
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/safe-storage")>()),
   createSafeStorage: () => ({
     get: vi.fn(async () => undefined),
     set: vi.fn(async () => undefined)
@@ -58,8 +62,10 @@ const deferred = <T>() => {
 describe("fetchChatModels", () => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
     vi.resetModules()
     mocks.getConfig.mockReset()
+    mocks.getModels.mockReset()
     mocks.getChatModels.mockReset()
     mocks.getCachedChatModels.mockReset()
     mocks.clearModelsCache.mockReset()
@@ -84,6 +90,155 @@ describe("fetchChatModels", () => {
       mocks.invalidationSequence += 1
       mocks.invalidationListener?.(`test-token-${mocks.invalidationSequence}`)
     })
+  })
+
+  it.each(["expired", "cache-only", "fetch-failure"])("withholds cookie models in the outer %s cache path", async (path) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({
+      serverUrl: "http://localhost:3000",
+      authMode: "single-user",
+      authSource: "cookie-session"
+    })
+    mocks.getChatModels.mockResolvedValueOnce([
+      { id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }
+    ])
+    const { fetchChatModels } = await importService()
+    expect(await fetchChatModels()).toHaveLength(1)
+    if (path !== "cache-only") {
+      mocks.getChatModels.mockRejectedValueOnce(Object.assign(new Error("Expired cookie session"), { status: 401 }))
+    } else {
+      mocks.getChatModels.mockResolvedValueOnce([])
+    }
+    await expect(fetchChatModels({
+      returnEmpty: true,
+      allowNetwork: path !== "cache-only",
+      forceRefresh: path === "fetch-failure"
+    })).resolves.toEqual([])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(path === "cache-only" ? 1 : 2)
+  })
+
+  it.each([false, true])("does not share in-flight requests across cookie and key auth (cookie first=%s)", async (cookieFirst) => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    const keyConfig = { serverUrl: "http://localhost:3000", authMode: "single-user", apiKey: "test-key" }
+    const cookieConfig = { serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" }
+    mocks.getConfig.mockResolvedValue(cookieFirst ? cookieConfig : keyConfig)
+    const pending = deferred<Array<Record<string, unknown>>>()
+    mocks.getChatModels.mockImplementationOnce(() => pending.promise).mockResolvedValueOnce(
+      cookieFirst ? [{ id: "key-model", name: "Key Model", provider: "llama", type: "chat" }] : []
+    )
+    const { fetchChatModels } = await importService()
+    const first = fetchChatModels({ returnEmpty: true })
+    await vi.waitFor(() => expect(mocks.getChatModels).toHaveBeenCalledOnce())
+    mocks.getConfig.mockResolvedValue(cookieFirst ? keyConfig : cookieConfig)
+    const second = fetchChatModels({ returnEmpty: true })
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    pending.resolve(cookieFirst ? [] : [{ id: "key-model", name: "Key Model", provider: "llama", type: "chat" }])
+    await first
+    await expect(second).resolves.toEqual(cookieFirst ? [expect.objectContaining({ model: "tldw:key-model" })] : [])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([
+    { requireFresh: false, invalidate: true, forceRefresh: false },
+    { requireFresh: true, invalidate: true, forceRefresh: false },
+    { requireFresh: true, invalidate: true, forceRefresh: true },
+    { requireFresh: false, invalidate: false, forceRefresh: false },
+    { requireFresh: true, invalidate: false, forceRefresh: false }
+  ])(
+    "settles a held config read before sharing discovery (%j)",
+    async (options) => {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+      const config = {
+        serverUrl: "http://localhost:3000",
+        authMode: "single-user",
+        authSource: "cookie-session"
+      }
+      const heldConfig = deferred<typeof config>()
+      mocks.getConfig
+        .mockImplementationOnce(() => heldConfig.promise)
+        .mockResolvedValue(config)
+      mocks.getChatModels.mockResolvedValue([
+        {
+          id: "current-model",
+          name: "Current model",
+          provider: "llama",
+          type: "chat"
+        }
+      ])
+      const { fetchChatModels } = await importService()
+      const settled = vi.fn()
+      const pending = fetchChatModels({
+        returnEmpty: true,
+        refreshOpenRouter: true,
+        requireFresh: options.requireFresh,
+        forceRefresh: options.forceRefresh
+      }).then(settled)
+      await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledOnce())
+      if (options.invalidate)
+        mocks.invalidationListener?.("config-retired-during-read")
+      heldConfig.resolve(config)
+      await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce())
+      expect(settled).toHaveBeenCalledWith([
+        expect.objectContaining({ model: "tldw:current-model" })
+      ])
+      expect(mocks.getConfig).toHaveBeenCalledTimes(options.invalidate ? 2 : 1)
+      expect(mocks.getChatModels).toHaveBeenCalledTimes(1)
+      expect(mocks.getChatModels).toHaveBeenCalledWith(options.forceRefresh, {
+        refreshOpenRouter: true,
+        ...(options.requireFresh
+          ? { requireFresh: true, throwOnError: true }
+          : {})
+      })
+      await pending
+    }
+  )
+
+  it("rereads a retired held config and shares its already-current successor", async () => {
+    const config = { serverUrl: "http://current", authMode: "multi-user" }
+    const heldConfig = deferred<typeof config>()
+    const heldModels = deferred<Array<Record<string, unknown>>>()
+    mocks.getConfig
+      .mockImplementationOnce(() => heldConfig.promise)
+      .mockResolvedValue(config)
+    mocks.getChatModels.mockImplementation(() => heldModels.promise)
+    const { fetchChatModels } = await importService()
+    const first = fetchChatModels({ requireFresh: true })
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledOnce())
+    mocks.invalidationListener?.("successor-during-config")
+    const current = fetchChatModels({ requireFresh: true })
+    await vi.waitFor(() => expect(mocks.getChatModels).toHaveBeenCalledOnce())
+    heldConfig.resolve(config)
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(3))
+    heldModels.resolve([
+      { id: "successor", name: "Successor", provider: "llama", type: "chat" }
+    ])
+    await expect(Promise.all([first, current])).resolves.toEqual([
+      [expect.objectContaining({ model: "tldw:successor" })],
+      [expect.objectContaining({ model: "tldw:successor" })]
+    ])
+    expect(mocks.getConfig).toHaveBeenCalledTimes(3)
+    expect(mocks.getChatModels).toHaveBeenCalledOnce()
+  })
+
+  it("shares simultaneous cookie requests with the same authentication mode", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+    mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:3000", authMode: "single-user", authSource: "cookie-session" })
+    const pending = deferred<Array<Record<string, unknown>>>()
+    mocks.getChatModels.mockImplementation(() => pending.promise)
+    const { fetchChatModels } = await importService()
+    const first = fetchChatModels()
+    await vi.waitFor(() => expect(mocks.getChatModels).toHaveBeenCalledOnce())
+    const second = fetchChatModels()
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(2))
+    pending.resolve([{ id: "cookie-model", name: "Cookie Model", provider: "llama", type: "chat" }])
+    const [a, b] = await Promise.all([first, second])
+    expect(a).toEqual(b)
+    expect(a).toHaveLength(1)
+    expect(mocks.getChatModels).toHaveBeenCalledOnce()
   })
 
   it("does not cache an empty startup result over later configured models", async () => {
@@ -276,11 +431,27 @@ describe("fetchChatModels", () => {
     expect(mocks.clearModelsCache).not.toHaveBeenCalled()
   })
 
-  it("does not let a pre-update fetch overwrite or release the post-update fetch", async () => {
-    const stale = deferred<Array<Record<string, unknown>>>()
+  it("does not fall back to a warmed wrapper catalog when discovery throws", async () => {
+    mocks.getChatModels
+      .mockResolvedValueOnce([{ id: "retired-model", provider: "openai", type: "chat" }])
+      .mockRejectedValueOnce(new Error("Discovery unavailable"))
+    const { fetchChatModels } = await importService()
+    expect(await fetchChatModels()).toHaveLength(1)
+
+    await expect(fetchChatModels({ forceRefresh: true, returnEmpty: true })).resolves.toEqual([])
+    await expect(fetchChatModels({ allowNetwork: false })).resolves.toEqual([])
+    expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
+  })
+
+  it.each(["success", "empty", "failure"])("joins the post-update fetch after a pre-update %s without overwriting or releasing it", async (outcome) => {
+    const stale = deferred<Array<Record<string, unknown>> | Error>()
     const fresh = deferred<Array<Record<string, unknown>>>()
     mocks.getChatModels
-      .mockImplementationOnce(() => stale.promise)
+      .mockImplementationOnce(async () => {
+        const result = await stale.promise
+        if (result instanceof Error) throw result
+        return result
+      })
       .mockImplementationOnce(() => fresh.promise)
 
     const { fetchChatModels } = await importService()
@@ -292,7 +463,7 @@ describe("fetchChatModels", () => {
     const postUpdate = fetchChatModels({ returnEmpty: true })
     await vi.waitFor(() => expect(mocks.getChatModels).toHaveBeenCalledTimes(2))
 
-    stale.resolve([
+    stale.resolve(outcome === "failure" ? new Error("Older discovery failed") : outcome === "empty" ? [] : [
       { id: "llama/stale", name: "Stale", provider: "llama", type: "chat" }
     ])
 
@@ -312,5 +483,79 @@ describe("fetchChatModels", () => {
       expect.objectContaining({ model: "tldw:llama/fresh" })
     ])
     expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
+  })
+
+  describe("with the real model cache", () => {
+    beforeEach(async () => {
+      const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+      vi.spyOn(tldwClient, "getConfig").mockImplementation(mocks.getConfig)
+      vi.spyOn(tldwClient, "initialize").mockResolvedValue(undefined)
+      vi.spyOn(tldwClient, "getModels").mockImplementation(mocks.getModels)
+      const { TldwModelsService } = await import("@/services/tldw/TldwModels")
+      const models = new TldwModelsService()
+      mocks.getChatModels.mockImplementation(models.getChatModels)
+      mocks.getCachedChatModels.mockImplementation(models.getCachedChatModels)
+      mocks.clearModelsCache.mockImplementation(() => models.clearCache())
+      mocks.subscribeInvalidation.mockImplementation((listener) => models.subscribeInvalidation(listener))
+    })
+
+    it.each([
+      ["Error", false], ["AbortError", false], ["TypeError", false],
+      ["Error", true], ["AbortError", true], ["TypeError", true]
+    ] as const)(
+      "settles a %s failure tombstone without recursive discovery (warmed: %s)",
+      async (name, warmed) => {
+        if (warmed) mocks.getModels.mockResolvedValueOnce([
+          { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+        ])
+        const error = Object.assign(new Error("Discovery unavailable"), { name })
+        mocks.getModels
+          .mockRejectedValueOnce(error)
+          .mockRejectedValueOnce(error)
+          .mockRejectedValueOnce(error)
+          .mockResolvedValue([
+            { id: "unexpected-retry", name: "Unexpected Retry", provider: "openai", type: "chat" }
+          ])
+        const { fetchChatModels } = await importService()
+        if (warmed) expect(await fetchChatModels()).toHaveLength(1)
+
+        await expect(fetchChatModels({ forceRefresh: true })).resolves.toEqual([])
+        // An aborted read is not a server failure, so a warmed catalog survives it (review M7).
+        const kept = warmed && name === "AbortError"
+        await expect(fetchChatModels({ allowNetwork: false })).resolves.toHaveLength(kept ? 1 : 0)
+        expect(mocks.getModels).toHaveBeenCalledTimes(warmed ? 2 : 1)
+      }
+    )
+
+    it("replaces a warmed wrapper catalog after a successful empty discovery", async () => {
+      mocks.getModels
+        .mockResolvedValueOnce([
+          { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+        ])
+        .mockResolvedValue([])
+      const { fetchChatModels } = await importService()
+      await expect(fetchChatModels()).resolves.toEqual([
+        expect.objectContaining({ model: "tldw:retired-model" })
+      ])
+
+      await expect(fetchChatModels({ forceRefresh: true })).resolves.toEqual([])
+      await expect(fetchChatModels()).resolves.toEqual([])
+      await expect(fetchChatModels({ allowNetwork: false })).resolves.toEqual([])
+      expect(mocks.getModels).toHaveBeenCalledTimes(2)
+    })
+
+    it("withholds an expired wrapper and inner catalog when network access is disabled", async () => {
+      const now = Date.now()
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now)
+      mocks.getModels.mockResolvedValue([
+        { id: "retired-model", name: "Retired Model", provider: "openai", type: "chat" }
+      ])
+      const { fetchChatModels } = await importService()
+      expect(await fetchChatModels()).toHaveLength(1)
+      clock.mockReturnValue(now + 5 * 60 * 1000)
+
+      await expect(fetchChatModels({ allowNetwork: false })).resolves.toEqual([])
+      expect(mocks.getModels).toHaveBeenCalledTimes(1)
+    })
   })
 })

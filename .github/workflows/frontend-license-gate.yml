@@ -4,17 +4,33 @@ on:
   pull_request_target:
     branches: [main, dev]
     types: [opened, reopened, synchronize, ready_for_review, edited]
+  # The merge queue rebases the front pull request with GITHUB_TOKEN, which starts no
+  # pull_request_target run, so the rebased head would never get this status. The queue
+  # dispatches this workflow on dev with the pull request number instead. See
+  # Docs/superpowers/specs/2026-10-04-merge-queue-design.md, section 4.4.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to evaluate (the merge queue dispatches this on dev)
+        required: true
+        type: string
 
 permissions:
   contents: read
   statuses: write
 
 concurrency:
-  group: frontend-license-gate-${{ github.event.pull_request.number }}
+  # The dispatch input is reached only when there is no pull request event, so a
+  # pull_request_target run keeps the group it always had, and a dispatch for pull
+  # request N shares N's group. It is read through github.event, which exists on every
+  # event: this file runs for every pull request from dev's copy, so an expression that
+  # failed to evaluate here would stop every license audit, and only after merging.
+  group: frontend-license-gate-${{ github.event.pull_request.number || github.event.inputs.pr }}
   cancel-in-progress: true
 
 jobs:
   frontend-license-gate-audit:
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -49,6 +65,171 @@ jobs:
           # timeout (:19), which is why this step kept being cancelled mid-checkout and the
           # fail-closed publisher then stamped a policy-violation status on the commit.
           # See TASK-13361.
+          fetch-depth: 1
+          persist-credentials: false
+
+      - id: evaluate
+        name: Evaluate immutable pull request metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          verdict=failure
+          emit_verdict() {
+            printf 'verdict=%s\n' "${verdict}" >> "${GITHUB_OUTPUT}"
+          }
+          trap emit_verdict EXIT
+
+          [[ "${PR_NUMBER}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${BASE_REF}" == main || "${BASE_REF}" == dev ]]
+          [[ -n "${PR_AUTHOR}" && -n "${REPOSITORY_OWNER}" ]]
+
+          if [[ "${PR_AUTHOR,,}" == "${REPOSITORY_OWNER,,}" ]]; then
+            python3 Helper_Scripts/ci/check_frontend_license_gate.py \
+              --author "${PR_AUTHOR}" --owner "${REPOSITORY_OWNER}" --null \
+              </dev/null
+            verdict=success
+            exit 0
+          fi
+
+          readonly public_remote="https://github.com/${STATUS_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 "${public_remote}" \
+            "+refs/heads/${BASE_REF}:refs/remotes/license-gate/base"
+          git fetch --no-tags --depth=1 "${public_remote}" \
+            "+refs/pull/${PR_NUMBER}/head:refs/remotes/license-gate/pr-head"
+
+          fetched_base="$(git rev-parse refs/remotes/license-gate/base)"
+          readonly fetched_base
+          fetched_head="$(git rev-parse refs/remotes/license-gate/pr-head)"
+          readonly fetched_head
+          [[ "${fetched_base}" == "${BASE_SHA}" ]]
+          [[ "${fetched_head}" == "${HEAD_SHA}" ]]
+
+          set +e
+          git --no-pager diff --name-only -z --no-renames \
+            --no-ext-diff --no-textconv "${BASE_SHA}" "${HEAD_SHA}" -- | \
+            python3 Helper_Scripts/ci/check_frontend_license_gate.py \
+              --author "${PR_AUTHOR}" --owner "${REPOSITORY_OWNER}" --null
+          readonly pipeline_status=("${PIPESTATUS[@]}")
+          set -e
+
+          [[ "${pipeline_status[0]}" -eq 0 ]]
+          [[ "${pipeline_status[1]}" -eq 0 ]]
+          verdict=success
+
+      - name: Publish trusted policy result
+        if: always() && (steps.evaluate.outcome == 'success' || steps.evaluate.outcome == 'failure')
+        shell: bash
+        env:
+          VERDICT: ${{ steps.evaluate.outputs.verdict }}
+        run: |
+          set -euo pipefail
+          state=failure
+          description='Trusted frontend license policy failed closed'
+          if [[ "${VERDICT}" == success ]]; then
+            state=success
+            description='Trusted frontend license policy authorized this exact commit'
+          fi
+          gh api --method POST \
+            "repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state="${state}" \
+            -f context="${STATUS_CONTEXT}" \
+            -f description="${description}"
+          [[ "${state}" == success ]]
+
+  # The merge queue's route to the same status; see the workflow_dispatch trigger. The
+  # steps after the first are the audit job's, verbatim:
+  # tldw_Server_API/tests/CI/test_merge_queue_license_dispatch.py fails if they drift.
+  frontend-license-gate-dispatch:
+    # Only from dev. The checkout below takes github.sha, which on this event is the tip
+    # of the dispatched ref, so the policy that runs is always dev's.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      STATUS_REPOSITORY: ${{ github.repository }}
+      REPOSITORY_OWNER: ${{ github.repository_owner }}
+    steps:
+      # The audit job reads the pull request from the event payload. A dispatch has none,
+      # so this step reads it from the API and exports the same names for the steps below.
+      # If it fails, nothing has been posted: the commit keeps no status for this context,
+      # and a missing status never satisfies the required check.
+      - name: Resolve pull request metadata
+        shell: bash
+        env:
+          PR_INPUT: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          fail() {
+            printf '::error::%s\n' "$1"
+            exit 1
+          }
+          readonly number_pattern='^[1-9][0-9]*$'
+          readonly sha_pattern='^[0-9a-f]{40}$'
+          # A user login, or an app's login with its [bot] suffix. Deliberately no tighter
+          # than the characters GitHub has ever allowed (legacy and managed-user logins
+          # break the "single hyphens" rule). The point is what it keeps out: nothing but
+          # ASCII letters, digits, hyphen, underscore and that literal suffix can reach
+          # GITHUB_ENV or the classifier's argv, and the value cannot start with a hyphen.
+          readonly login_pattern='^[A-Za-z0-9][A-Za-z0-9_-]{0,38}(\[bot\])?$'
+
+          # The input is a string anyone with write access can type. It is not sent to the
+          # API, exported or printed until it is known to be a number.
+          [[ "${PR_INPUT}" =~ ${number_pattern} ]] || fail 'The pr input is not a pull request number.'
+
+          pull="$(gh api "repos/${STATUS_REPOSITORY}/pulls/${PR_INPUT}")"
+          pr_number="$(jq -r '.number // empty' <<< "${pull}")"
+          pr_state="$(jq -r '.state // empty' <<< "${pull}")"
+          base_ref="$(jq -r '.base.ref // empty' <<< "${pull}")"
+          head_sha="$(jq -r '.head.sha // empty' <<< "${pull}")"
+          pr_author="$(jq -r '.user.login // empty' <<< "${pull}")"
+
+          [[ "${pr_number}" == "${PR_INPUT}" ]] || fail 'GitHub returned a different pull request.'
+          [[ "${pr_state}" == open ]] || fail 'The pull request is not open.'
+          [[ "${base_ref}" == dev || "${base_ref}" == main ]] || fail 'The pull request base is not dev or main.'
+          [[ "${head_sha}" =~ ${sha_pattern} ]] || fail 'The pull request head is not a commit SHA.'
+          [[ "${pr_author}" =~ ${login_pattern} ]] || fail 'The pull request author is not a well-formed login.'
+
+          # The base branch as it is now, not the base recorded on the pull request: the
+          # evaluate step fetches the branch and requires its tip to equal BASE_SHA.
+          base_tip="$(gh api "repos/${STATUS_REPOSITORY}/git/ref/heads/${base_ref}")"
+          base_tip_ref="$(jq -r '.ref // empty' <<< "${base_tip}")"
+          base_sha="$(jq -r '.object.sha // empty' <<< "${base_tip}")"
+          [[ "${base_tip_ref}" == "refs/heads/${base_ref}" ]] || fail 'GitHub returned a different base branch.'
+          [[ "${base_sha}" =~ ${sha_pattern} ]] || fail 'The base branch tip is not a commit SHA.'
+
+          # Written once, after every check has passed. Each value matched a pattern that
+          # admits no newline, so each line sets exactly the one variable it names.
+          {
+            printf 'PR_NUMBER=%s\n' "${PR_INPUT}"
+            printf 'PR_AUTHOR=%s\n' "${pr_author}"
+            printf 'HEAD_SHA=%s\n' "${head_sha}"
+            printf 'BASE_REF=%s\n' "${base_ref}"
+            printf 'BASE_SHA=%s\n' "${base_sha}"
+            printf 'STATUS_CONTEXT=frontend-license-policy/trusted/%s\n' "${base_ref}"
+          } >> "${GITHUB_ENV}"
+
+      - name: Mark trusted policy pending
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --method POST \
+            "repos/${STATUS_REPOSITORY}/statuses/${HEAD_SHA}" \
+            -f state=pending \
+            -f context="${STATUS_CONTEXT}" \
+            -f description='Trusted frontend license policy is evaluating this exact commit'
+
+      - name: Checkout trusted policy
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ github.sha }}
+          # Depth 1 for the reason given on the audit job's checkout (TASK-13361).
           fetch-depth: 1
           persist-credentials: false
 

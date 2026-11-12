@@ -109,7 +109,7 @@ class _BrokenCreateProjectDb:
     def create_project(self, *_args, **_kwargs):
         raise self._create_exc
 
-    def _execute(self, *_args, **_kwargs):
+    def get_project_by_name(self, *_args, **_kwargs):
         raise self._fallback_exc
 
 

@@ -28,6 +28,7 @@ from tldw_Server_API.app.api.v1.schemas.outputs_templates_schemas import (
     TemplatePreviewResponse,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
+from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 from tldw_Server_API.app.services.outputs_service import (
     build_items_context_from_content_items,
@@ -251,36 +252,16 @@ def _build_items_context_from_media_ids(media_db, item_ids: list[int], limit: in
     return items
 
 
-def _select_media_ids_for_run(media_db, run_id: int, limit: int) -> list[int]:
-    """Attempt to resolve media IDs for a run across candidate mapping tables.
+def _select_media_ids_for_run(user_id: int | str, run_id: int, limit: int) -> list[int]:
+    """Media ids a watchlist run produced, for this user's run only; [] if not theirs.
 
-    This function is defensive: it tries several known table names and returns
-    the first successful set. If no mapping tables exist, returns empty list.
+    The run-to-media mapping (scrape_run_items) lives in the Watchlists database. This
+    used to probe the Media database for it and several guessed table names, which
+    never exist there, so run-based selection always came back empty.
     """
-    candidates = [
-        "scrape_run_items",
-        "watchlist_run_items",
-        "runs_items",
-        "scrape_runs_items",
-    ]
-    for tbl in candidates:
-        try:
-            media_lookup_sql_template = "SELECT media_id FROM {tbl} WHERE run_id = ? ORDER BY media_id LIMIT ?"
-            q = media_lookup_sql_template.format_map(locals())  # nosec B608
-            cur = media_db.execute_query(q, (run_id, limit))
-            rows = cur.fetchall()
-            mids = [int(r["media_id"]) if isinstance(r, dict) else int(r[0]) for r in rows]
-            if mids:
-                return mids
-        except (sqlite3.Error, ValueError, TypeError, KeyError, AttributeError, RuntimeError):
-            continue
-    # Fallback: try if Media has run_id (unlikely)
     try:
-        cur = media_db.execute_query("SELECT id FROM Media WHERE run_id = ? ORDER BY id LIMIT ?", (run_id, limit))
-        rows = cur.fetchall()
-        mids = [int(r["id"]) if isinstance(r, dict) else int(r[0]) for r in rows]
-        return mids
-    except (sqlite3.Error, ValueError, TypeError, KeyError, AttributeError, RuntimeError):
+        return WatchlistsDatabase.for_user(user_id).list_run_media_ids(run_id, limit)
+    except KeyError:  # run_not_found: missing, or owned by another user
         return []
 
 
@@ -328,7 +309,7 @@ async def preview_output_template(
                 )
                 items = []
             if not items:
-                mids = _select_media_ids_for_run(media_db, payload.run_id, payload.limit)
+                mids = _select_media_ids_for_run(current_user.id, payload.run_id, payload.limit)
                 items = _build_items_context_from_media_ids(media_db, mids, payload.limit) if mids else []
         else:
             # Provide samples when no selection is provided.

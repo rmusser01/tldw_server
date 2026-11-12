@@ -32,9 +32,9 @@ Continue issue #1116 Phase 2.2 by converting the next remaining minimal-test opt
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a narrow minimal collections/social router tranche. Added red/green router-group coverage that proves collections_feeds, collections_websub router, collections_websub callback_router, slack, discord, and telegram defer module import and router attribute access until ImportedRouterSpec resolution. Replaced only those eager try/import RouterSpec blocks in minimal.py.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

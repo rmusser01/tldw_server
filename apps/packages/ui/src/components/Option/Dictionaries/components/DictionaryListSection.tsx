@@ -49,11 +49,11 @@ const HowItWorksDictionaries: React.FC = () => {
           </li>
           <li>
             <span className="font-medium text-text">
-              {t("option:dictionariesList.stepAssignTitle", "Assign to chats")}
+              {t("option:dictionariesList.savedChatLinksTitle", "Inspect saved chat links")}
             </span>{" "}
             {t(
-              "option:dictionariesList.stepAssignBody",
-              "— link the dictionary to chat sessions so rules apply automatically."
+              "option:dictionariesList.savedChatLinksBody",
+              "— existing links are references. Saved chat assignment is unavailable in this server version."
             )}
           </li>
         </ol>
@@ -192,8 +192,8 @@ export const DictionaryListSection: React.FC<DictionaryListSectionProps> = ({
             <FeatureEmptyState
               title={t("option:dictionariesList.emptyTitle", "No dictionaries yet")}
               description={t(
-                "option:dictionariesList.emptyDescription",
-                "Create your first dictionary to transform text consistently across chats."
+                "option:dictionariesList.previewEmptyDescription",
+                "Create a dictionary and preview its text transformations. Saved chat assignment is unavailable in this server version."
               )}
               examples={[
                 t(

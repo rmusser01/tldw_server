@@ -73,6 +73,37 @@ export interface WorkflowDefinitionPayload {
   visibility?: "private"
 }
 
+export interface SavedWorkflowSummary {
+  id: number
+  name: string
+  version: number
+  description?: string | null
+  tags?: string[]
+  is_active: boolean
+}
+
+export interface SavedWorkflowDefinition {
+  id: number
+  name: string
+  version: number
+  is_active: boolean
+  definition: WorkflowDefinitionPayload
+}
+
+export interface ServerWorkflowRun {
+  run_id: string
+  workflow_id?: number | null
+  user_id?: string | null
+  status: "queued" | "running" | "paused" | "waiting_human" | "waiting_approval" | "succeeded" | "failed" | "cancelled"
+  inputs: Record<string, unknown>
+  outputs?: Record<string, unknown> | null
+  error?: string | null
+  status_reason?: string | null
+  definition_version?: number | null
+}
+
+export type WorkflowInputValidator = (data: unknown, schema: Record<string, unknown>) => Promise<string[]>
+
 export interface WorkflowFailureSummary {
   reason_code_core?: string | null
   reason_code_detail?: string | null
@@ -469,6 +500,7 @@ export interface ServerWorkflowDefinition {
 
 export type WorkflowRunStatus =
   | "idle"
+  | "queued"
   | "running"
   | "paused"
   | "waiting_human"

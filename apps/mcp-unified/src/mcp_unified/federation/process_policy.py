@@ -15,11 +15,8 @@ _SHELL_EXECUTABLES = frozenset(
         "zsh",
         "fish",
         "cmd",
-        "cmd.exe",
         "powershell",
-        "powershell.exe",
         "pwsh",
-        "pwsh.exe",
     }
 )
 
@@ -160,7 +157,7 @@ def validate_stdio_process_policy(
     )
     if (
         policy.reject_shell_executables
-        and executable_name.lower() in _SHELL_EXECUTABLES
+        and executable_name.lower().removesuffix(".exe") in _SHELL_EXECUTABLES
         and not allowed_executable
     ):
         raise StdioProcessPolicyViolation(

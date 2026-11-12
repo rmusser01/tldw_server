@@ -10,14 +10,15 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
+from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
+from tldw_Server_API.app.core.Chat.chat_request_schemas import ChatCompletionRequest
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
     ConflictError,
     InputError,
 )
+from tldw_Server_API.app.core.LLM_Calls.provider_results import extract_response_content  # noqa: F401 - re-exported
 from tldw_Server_API.app.core.Utils.image_validation import estimate_decoded_size, get_max_base64_bytes
 
 #######################################################################################################################
@@ -251,7 +252,18 @@ async def _ensure_default_character(
             if fetched:
                 return fetched, fetched.get("id")
             return None, None
-        except (CharactersRAGDBError, InputError, ConflictError) as db_error:
+        except ConflictError:
+            # A concurrent first request created it between our read and our insert.
+            try:
+                fetched = db.get_character_card_by_name(DEFAULT_CHARACTER_NAME)
+            except (CharactersRAGDBError, InputError) as read_error:
+                logger.warning("Default character '{}' could not be read back: {}", DEFAULT_CHARACTER_NAME, read_error)
+                return None, None
+            if fetched:
+                return fetched, fetched.get("id")
+            logger.error("Default character '{}' conflicted but could not be read back", DEFAULT_CHARACTER_NAME)
+            return None, None
+        except (CharactersRAGDBError, InputError) as db_error:
             logger.error("Failed to ensure default character '{}': {}", DEFAULT_CHARACTER_NAME, db_error)
             return None, None
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -372,7 +384,6 @@ async def load_conversation_history(
         List of messages in OpenAI format
     """
     if not loop:
-        import asyncio
         loop = asyncio.get_running_loop()
 
     historical_messages = []
@@ -531,32 +542,6 @@ def extract_system_message(
     # Fall back to character system prompt
     if character_card and character_card.get('system_prompt'):
         return character_card.get('system_prompt')
-
-    return None
-
-
-#######################################################################################################################
-#
-# Response Processing Functions:
-
-def extract_response_content(llm_response: Any) -> Optional[str]:
-    """
-    Extract text content from LLM response.
-
-    Args:
-        llm_response: Response from LLM API
-
-    Returns:
-        Extracted text content or None
-    """
-    if isinstance(llm_response, str):
-        return llm_response
-    elif isinstance(llm_response, dict):
-        # OpenAI-style response
-        choices = llm_response.get("choices", [])
-        if choices:
-            message = choices[0].get("message", {})
-            return message.get("content")
 
     return None
 

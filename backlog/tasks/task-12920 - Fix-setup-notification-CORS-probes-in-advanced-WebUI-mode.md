@@ -24,9 +24,9 @@ Real-backend UAT on the clean dev-based worktree exposed console CORS errors fro
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: after rebasing onto dev, setup mounted global notification clients before auth was configured. The toast bridge and header unread-count poll made credentialed cross-origin notification requests, which the backend CORS policy rejected in advanced local mode.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

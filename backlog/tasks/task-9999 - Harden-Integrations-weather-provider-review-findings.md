@@ -38,7 +38,7 @@ Address validated review findings in tldw_Server_API/app/core/Integrations: avoi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added focused regression coverage for sanitized OpenWeather exception metadata, oversized location rejection, out-of-range coordinate rejection, and non-blocking weather command dispatch. The standard pytest invocation for the same files hung in parent conftest/app setup and cleanup; rerunning with `--confcutdir=tldw_Server_API/tests/Chat_NEW/unit` executed the unit tests directly and passed.
 
 Verification:
@@ -58,7 +58,7 @@ Qodo review update:
 - Rebased PR #2468 onto `origin/dev` at `46595e31c0b1bd45e6a06422906eef5e405babc4`.
 - Addressed Qodo comments for the async weather test marker, timing-based assertion, missing SlowClient annotations, missing OpenWeather helper docstrings, and awaitable handler detection.
 - Post-review verification: focused pytest -> 33 passed; py_compile on touched Python and test files passed; `git diff --check` passed; Bandit on touched runtime scope -> 0 results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

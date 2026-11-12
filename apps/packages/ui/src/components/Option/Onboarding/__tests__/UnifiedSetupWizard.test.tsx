@@ -5,11 +5,14 @@ import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import settingsEs from "@/assets/locale/es/settings.json";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { HashRouter, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStoreMessageOption } from "@/store/option";
-import type { FirstRunState } from "@/types/setup-onboarding";
+import type {
+  FirstRunState,
+  SetupProviderCatalogEntry,
+} from "@/types/setup-onboarding";
 
 vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"));
 vi.mock("@plasmohq/storage/hook", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"));
@@ -17,10 +20,15 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { getConfig: async
 
 const setupHookMocks = vi.hoisted(() => ({
   authMode: "single_user",
+  stateAvailable: true,
+  connectionConfigured: true,
+  metadataAvailable: true,
+  loadError: null as Error | null,
   navigate: vi.fn(),
   setConfigPartial: vi.fn(),
   saveStep: vi.fn(),
   skip: vi.fn(),
+  providerCatalog: null as SetupProviderCatalogEntry[] | null,
   loadProviderCatalog: vi.fn(),
   loadMcpToolsCatalog: vi.fn(),
   loadAudioRecommendations: vi.fn(),
@@ -135,15 +143,15 @@ const mcpToolsCatalog = {
 
 vi.mock("@/hooks/useSetupOnboarding", () => ({
   useSetupOnboarding: () => ({
-    state: {
+    state: setupHookMocks.stateAvailable ? {
       status: "not_started",
       completed_steps: [],
       skipped_steps: [],
       step_data: {},
       acknowledged_steps: [],
       first_chat: { completed: false },
-    },
-    metadata: {
+    } : null,
+    metadata: setupHookMocks.metadataAvailable ? {
       auth_mode: setupHookMocks.authMode,
       bundled_single_user_auth_available: true,
       manual_auth_required: false,
@@ -157,8 +165,8 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
       },
       setup_paths: [],
       multi_user_exit: { guide_path: "/docs/multi-user" },
-    },
-    providerCatalog: [
+    } : null,
+    providerCatalog: setupHookMocks.providerCatalog ?? [
       {
         provider_key: "openai",
         label: "OpenAI",
@@ -170,7 +178,9 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
     mcpToolsCatalog,
     audioRecommendations: [],
     loading: false,
-    error: null,
+    connectionConfigured: setupHookMocks.connectionConfigured,
+    connectionChecking: false,
+    error: setupHookMocks.loadError,
     refresh: setupHookMocks.refresh,
     loadProviderCatalog: setupHookMocks.loadProviderCatalog,
     loadMcpToolsCatalog: setupHookMocks.loadMcpToolsCatalog,
@@ -215,7 +225,13 @@ describe("UnifiedSetupWizard", () => {
   beforeEach(() => {
     window.localStorage.clear();
     useStoreMessageOption.setState({ selectedModel: "tldw:existing-choice" });
+    setupHookMocks.providerCatalog = null;
     setupHookMocks.authMode = "single_user";
+    setupHookMocks.stateAvailable = true;
+    setupHookMocks.connectionConfigured = true;
+    setupHookMocks.metadataAvailable = true;
+    setupHookMocks.loadError = null;
+    window.location.hash = "";
     setupHookMocks.navigate.mockReset();
     setupHookMocks.setConfigPartial.mockReset().mockResolvedValue(undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -320,6 +336,23 @@ describe("UnifiedSetupWizard", () => {
     vi.restoreAllMocks();
   });
 
+  it("offers connection settings before unconfigured setup without backend writes or Retry", async () => {
+    setupHookMocks.connectionConfigured = false;
+    setupHookMocks.stateAvailable = false;
+    setupHookMocks.metadataAvailable = false;
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    render(<MemoryRouter><UnifiedSetupWizard /></MemoryRouter>);
+    expect(screen.getByRole("heading", { level: 1, name: "Connect your tldw server" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open connection settings" }));
+    expect(setupHookMocks.navigate).toHaveBeenCalledWith("/settings/tldw");
+    expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
+    expect(setupHookMocks.loadProviderCatalog).not.toHaveBeenCalled();
+    expect(setupHookMocks.skip).not.toHaveBeenCalled();
+    expect(readinessHookMocks.refresh).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("renders a focused first-run heading and setup path choices", async () => {
     const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
 
@@ -369,6 +402,85 @@ describe("UnifiedSetupWizard", () => {
     fireEvent.click(screen.getByRole("button", { name: /multi-user/i }));
 
     expect(screen.getByText(/multi-user setup guide/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open connection settings" }));
+    expect(setupHookMocks.navigate).toHaveBeenCalledWith("/settings/tldw");
+    expect(setupHookMocks.setConfigPartial).not.toHaveBeenCalled();
+    expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
+  });
+
+  it("does not offer server-managed Skip before setup state can load", async () => {
+    setupHookMocks.stateAvailable = false;
+    setupHookMocks.metadataAvailable = false;
+    setupHookMocks.loadError = new Error("tldw server not configured");
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    const onStateChange = vi.fn();
+
+    render(<UnifiedSetupWizard onStateChange={onStateChange} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("connection details may be missing");
+    expect(screen.queryByRole("button", { name: "Skip for now" })).not.toBeInTheDocument();
+    expect(setupHookMocks.skip).not.toHaveBeenCalled();
+    expect(onStateChange).not.toHaveBeenCalled();
+  });
+
+  it.each(["setup paths", "multi-user guide"])(
+    "opens native settings through the options hash route from fresh %s without writing setup progress",
+    async (entry) => {
+      setupHookMocks.stateAvailable = false;
+      setupHookMocks.metadataAvailable = false;
+      setupHookMocks.loadError = new Error("tldw server not configured");
+      const actualRouter = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+      const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+      const onStateChange = vi.fn();
+      function RoutedWizard() {
+        const navigate = actualRouter.useNavigate();
+        setupHookMocks.navigate.mockImplementation(navigate);
+        return <UnifiedSetupWizard onStateChange={onStateChange} />;
+      }
+
+      render(
+        <HashRouter>
+          <Routes>
+            <Route path="/" element={<RoutedWizard />} />
+            <Route path="/settings/tldw" element={<h1>Native connection settings</h1>} />
+          </Routes>
+        </HashRouter>,
+      );
+      if (entry === "multi-user guide") {
+        fireEvent.click(screen.getByRole("button", { name: /multi-user/i }));
+        expect(screen.getByRole("link", { name: "Open guide" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Back to setup paths" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Open connection settings" }));
+
+      expect(await screen.findByRole("heading", { name: "Native connection settings" })).toBeInTheDocument();
+      expect(window.location.hash).toBe("#/settings/tldw");
+      expect(setupHookMocks.setConfigPartial).not.toHaveBeenCalled();
+      expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
+      expect(setupHookMocks.skip).not.toHaveBeenCalled();
+      expect(onStateChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps actual server-managed Skip available when only metadata failed to load", async () => {
+    setupHookMocks.metadataAvailable = false;
+    setupHookMocks.loadError = new Error("metadata unavailable");
+    const skippedState: FirstRunState = {
+      ...initialStateForCompletedSteps(["setup_path"]),
+      status: "skipped",
+      skip_reason: "user_skip",
+    };
+    setupHookMocks.skip.mockResolvedValueOnce(skippedState);
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    const onStateChange = vi.fn();
+
+    render(<UnifiedSetupWizard onStateChange={onStateChange} />);
+
+    expect(screen.getByRole("button", { name: "Open connection settings" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    await waitFor(() => expect(onStateChange).toHaveBeenCalledWith(skippedState));
+    expect(setupHookMocks.skip).toHaveBeenCalledWith({ reason: "user_skip" });
   });
 
   it("routes an already multi-user server to login without a solo skip mutation", async () => {
@@ -693,6 +805,7 @@ describe("UnifiedSetupWizard", () => {
           acknowledged: true,
           default_provider: "openai",
           default_model: "gpt-4.1-mini",
+          default_base_url: null,
           default_provider_credential_configured: true,
         },
       });
@@ -1050,6 +1163,53 @@ describe("UnifiedSetupWizard", () => {
         confirmation_version: "v1",
       });
     });
+  });
+
+  it("resumes a saved local provider draft without resetting its endpoint or bypassing validation", async () => {
+    setupHookMocks.providerCatalog = [
+      {
+        provider_key: "llamacpp",
+        label: "llama.cpp",
+        provider_type: "local_endpoint",
+        default_base_url: "http://127.0.0.1:8080/v1",
+        supports_preflight: true,
+        recommended_for_first_chat: false,
+      },
+    ];
+    const state = initialStateForCompletedSteps([
+      "setup_path",
+      "privacy_security",
+    ]);
+    state.step_data.providers = {
+      acknowledged: false,
+      default_provider: "llamacpp",
+      default_model: "real-model",
+      default_base_url: "http://127.0.0.1:8010/v1",
+    };
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    render(<UnifiedSetupWizard initialState={state} />);
+    expect(await screen.findByLabelText(/llama.cpp base url/i)).toHaveValue(
+      "http://127.0.0.1:8010/v1",
+    );
+    expect(screen.getByLabelText(/default model/i)).toHaveValue("real-model");
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /validate llama.cpp/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await waitFor(() =>
+      expect(setupHookMocks.saveStep).toHaveBeenCalledWith({
+        step: "providers",
+        data: {
+          acknowledged: true,
+          default_provider: "llamacpp",
+          default_model: "real-model",
+          default_base_url: "http://127.0.0.1:8010/v1",
+          default_provider_credential_configured: false,
+        },
+      }),
+    );
   });
 
   it("refreshes readiness after a failed skip attempt", async () => {

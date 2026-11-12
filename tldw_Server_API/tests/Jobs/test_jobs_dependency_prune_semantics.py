@@ -850,6 +850,7 @@ def test_postgres_dependency_snapshot_migration_failure_fails_closed(
 
     real_connect = psycopg.connect
     injected = threading.Event()
+    injected_failure = RuntimeError("injected dependency snapshot migration failure")
 
     def fail_required_migration(query: str) -> None:
         normalized = " ".join(query.lower().split())
@@ -859,7 +860,7 @@ def test_postgres_dependency_snapshot_migration_failure_fails_closed(
             and "depends_on_terminal_status" in normalized
         ):
             injected.set()
-            raise RuntimeError("injected dependency snapshot migration failure")
+            raise injected_failure
 
     def failing_connect(*args: Any, **kwargs: Any) -> _ExecuteHookConnection:
         return _ExecuteHookConnection(
@@ -870,8 +871,11 @@ def test_postgres_dependency_snapshot_migration_failure_fails_closed(
     try:
         with monkeypatch.context() as context:
             context.setattr(psycopg, "connect", failing_connect)
-            with pytest.raises(RuntimeError, match="dependency snapshot"):
+            with pytest.raises(RuntimeError, match="required schema migration failed") as exc_info:
                 jobs_pg_migrations.ensure_jobs_tables_pg(jobs_pg_dsn)
+            required_failure = exc_info.value.__cause__
+            assert isinstance(required_failure, RuntimeError)
+            assert required_failure.__cause__ is injected_failure
     finally:
         jobs_pg_migrations.ensure_jobs_tables_pg(jobs_pg_dsn)
     assert injected.is_set()

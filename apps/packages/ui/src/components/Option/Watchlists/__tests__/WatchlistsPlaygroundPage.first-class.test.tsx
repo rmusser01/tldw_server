@@ -323,6 +323,41 @@ describe("WatchlistsPlaygroundPage first-class Watchlist shell", () => {
     cleanup()
   })
 
+  it.each([
+    { primary: "items", destination: "runs", section: "activity" },
+    { primary: "sources", destination: "jobs", section: "monitors" },
+    { primary: "outputs", destination: "templates", section: "templates" }
+  ] as const)("B07 reveals and can collapse $section after a child selects $destination", async ({ primary, destination, section }) => {
+    const keys = ["watchlists:show-all-views:v1", "watchlists:secondary-expanded:v1"]
+    const previous = keys.map((key) => localStorage.getItem(key))
+    try {
+      localStorage.setItem(keys[0], "false")
+      localStorage.setItem(keys[1], "{}")
+      mocks.state.activeTab = primary
+      mocks.state.watchlists = [container]
+      mocks.state.selectedWatchlistId = container.id
+      const view = render(<WatchlistsPlaygroundPage />)
+      const header = within(await screen.findByTestId(`watchlists-secondary-${section}`)).getByRole("button")
+      expect(header).toHaveAttribute("aria-expanded", "false")
+
+      // Child views select the canonical destination directly through the shared store.
+      mocks.state.activeTab = destination
+      view.rerender(<WatchlistsPlaygroundPage />)
+      await waitFor(() => expect(header).toHaveAttribute("aria-expanded", "true"))
+      fireEvent.click(header)
+      await waitFor(() => expect(header).toHaveAttribute("aria-expanded", "false"))
+
+      mocks.state.activeTab = destination
+      view.rerender(<WatchlistsPlaygroundPage />)
+      await waitFor(() => expect(header).toHaveAttribute("aria-expanded", "true"))
+    } finally {
+      keys.forEach((key, index) => {
+        if (previous[index] === null) localStorage.removeItem(key)
+        else localStorage.setItem(key, previous[index]!)
+      })
+    }
+  })
+
   it("exposes distinct canonical workflow controls while Watchlists Basics is active", async () => {
     setViewport(420)
     mocks.state.activeTab = "overview"

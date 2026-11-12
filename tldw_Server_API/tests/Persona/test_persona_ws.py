@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Personalization_DB import PersonalizationDB, SemanticMemory
+from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import PersonaExemplarPromptAssembly
 from tldw_Server_API.app.core.Persona.exemplar_runtime import PersonaExemplarRuntimeContext
 from tldw_Server_API.app.core.Persona.session_manager import SessionManager
@@ -116,7 +117,7 @@ def _recv_until(client, predicate, timeout=8.0):
     try:
         status, payload = inbox.get(timeout=timeout)
     except queue.Empty:
-        raise AssertionError("Expected event not received in time")
+        raise AssertionError("Expected event not received in time") from None
     if status == "err":
         raise payload  # type: ignore[misc]
     if status == "ok":
@@ -127,6 +128,9 @@ def _recv_until(client, predicate, timeout=8.0):
 @pytest.fixture(autouse=True)
 def _mock_persona_auth(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
 
     async def _fake_resolve(*args, **kwargs):
         return "1", True, True
@@ -281,9 +285,9 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
         with c.websocket_connect("/api/v1/persona/stream") as ws:
             # Initial notice
             init = json.loads(ws.receive_text())
+            session_id = init["session_id"]
             assert init.get("event") in {"notice", "assistant_delta"}
 
-            session_id = "sess_basic"
             # Send a user message that triggers plan with ingest_url
             ws.send_text(
                 json.dumps(
@@ -326,6 +330,84 @@ def test_persona_websocket_plan_and_confirm(monkeypatch):
             assert evt_res["output"] == evt_res["result"]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("active_scope", [None, AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)])
+async def test_persona_mcp_forwarder_preserves_response_and_optional_trusted_scope(active_scope):
+    from unittest.mock import AsyncMock
+
+    request = persona_ep.MCPRequest(method="tools/list", params={})
+    response = SimpleNamespace(error=None, result={"tools": []})
+    metadata = {"source": "persona"}
+    server = SimpleNamespace(handle_http_request=AsyncMock(return_value=response))
+    ws = SimpleNamespace(state=SimpleNamespace(persona_server_auth_scope=active_scope))
+
+    result = await persona_ep._forward_persona_mcp_request(server, request, ws, "1", metadata)
+
+    assert result is response
+    expected = {"user_id": "1", "metadata": metadata}
+    if active_scope is not None:
+        expected["server_auth_scope"] = active_scope
+    server.handle_http_request.assert_awaited_once_with(request, **expected)
+
+
+def test_persona_mcp_tool_receives_authenticated_execution_scope(monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
+
+    scope = AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+            self.server_auth_scope = None
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(
+            self,
+            request,
+            user_id=None,
+            metadata=None,
+            server_auth_scope=None,
+        ):
+            self.server_auth_scope = server_auth_scope
+            return SimpleNamespace(error=None, result={"ok": True, "tool": request.params.get("name")})
+
+    async def _fake_resolve(ws, *args, **kwargs):
+        ws.state.persona_auth_method = "access"
+        ws.state.persona_api_key_scopes = None
+        ws.state.persona_server_auth_scope = scope
+        return "1", True, True
+
+    fake_server = _FakeServer()
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
+
+    with TestClient(fastapi_app) as c:
+        with c.websocket_connect("/api/v1/persona/stream") as ws:
+            session_id = json.loads(ws.receive_text())["session_id"]
+            ws.send_text(
+                json.dumps(
+                    {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
+                )
+            )
+            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan", timeout=8.0)
+            ws.send_text(
+                json.dumps(
+                    {
+                        "type": "confirm_plan",
+                        "session_id": session_id,
+                        "plan_id": plan["plan_id"],
+                        "approved_steps": [int(plan["steps"][0]["idx"])],
+                    }
+                )
+            )
+            result = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+            assert result["ok"] is True
+
+    assert fake_server.server_auth_scope == scope
+
+
 def test_persona_tool_result_handles_empty_mcp_response(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 
@@ -343,8 +425,8 @@ def test_persona_tool_result_handles_empty_mcp_response(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_empty_mcp_response"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
@@ -404,8 +486,8 @@ def test_persona_ws_persistence_offloads_to_thread(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_offloaded_persistence"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(json.dumps({"type": "user_message", "session_id": session_id, "text": "hello"}))
             plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
             plan_id = str(plan.get("plan_id") or "")
@@ -448,12 +530,13 @@ def test_persona_ws_companion_context_load_offloads_to_thread(tmp_path, monkeypa
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
                         "type": "user_message",
-                        "session_id": "sess_companion_offload",
+                        "session_id": session_id,
                         "text": "find notes about pytest",
                     }
                 )
@@ -742,9 +825,9 @@ def test_persona_confirm_plan_ignores_client_supplied_steps():
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
 
-            session_id = "sess_tamper"
             ws.send_text(json.dumps({"type": "user_message", "session_id": session_id, "text": "hello"}))
             plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
             plan_id = plan["plan_id"]
@@ -774,11 +857,15 @@ def test_persona_confirm_plan_rejects_session_mismatch():
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered = json.loads(ws.receive_text())
+            session_id = offered["session_id"]
+            persona_ep.get_session_manager().create(
+                user_id="1", persona_id="research_assistant", resume_session_id="sess_b",
+            )
 
             ws.send_text(
                 json.dumps(
-                    {"type": "user_message", "session_id": "sess_a", "text": "https://example.com"}
+                    {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
                 )
             )
             plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
@@ -802,7 +889,6 @@ def test_persona_confirm_plan_rejects_session_mismatch():
             )
             assert notice.get("level") == "error"
 
-
 def test_persona_stream_rejects_missing_credentials(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 
@@ -822,44 +908,83 @@ def test_persona_stream_rejects_missing_credentials(monkeypatch):
             pass
 
 
+@pytest.mark.parametrize(("key_scope", "allowed"), [(["read", "write:preview"], True), (["write:preview"], False)])
 @pytest.mark.asyncio
-async def test_persona_resolve_api_key_enforces_read_scope_and_sets_context(monkeypatch):
-    class _FakeWS:
-        headers = {}
-        query_params = {}
-        client = ("127.0.0.1", 9000)
+async def test_persona_resolve_api_key_enforces_read_scope_and_sets_context(monkeypatch, key_scope, allowed):
+    """The core resolver checks the connect scope ("read"); persona keeps the key's scopes for per-tool checks."""
+    from unittest.mock import AsyncMock
 
-        def __init__(self):
-            self.state = SimpleNamespace()
+    from starlette.websockets import WebSocket
 
-    calls: dict[str, str] = {}
+    from tldw_Server_API.app.core.AuthNZ import websocket_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
-    class _FakeApiKeyManager:
-        async def validate_api_key(self, api_key, required_scope=None, ip_address=None):
-            calls["required_scope"] = str(required_scope or "")
-            calls["ip_address"] = str(ip_address or "")
-            assert api_key == "test-key"
-            return {"user_id": 7, "scope": ["read", "write:preview"]}
+    seen: list[tuple[str | None, tuple[str, int] | None]] = []
 
-    async def _fake_get_api_key_manager():
-        return _FakeApiKeyManager()
+    async def _http_verifier(request):
+        seen.append((request.headers.get("x-api-key"), request.client and tuple(request.client)))
+        request.state._api_key_scope = key_scope
+        return AuthPrincipal(
+            kind="api_key", user_id=7, api_key_id=3, token_type="api_key", active_org_id=9, active_team_id=11
+        )
 
-    monkeypatch.setattr(persona_ep, "get_api_key_manager", _fake_get_api_key_manager)
-    monkeypatch.setattr(persona_ep, "resolve_client_ip", lambda ws, settings=None: "127.0.0.1")
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", _http_verifier)
+    scope = {
+        "type": "websocket",
+        "path": "/api/v1/persona/stream",
+        "headers": [(b"x-api-key", b"test-key")],
+        "query_string": b"",
+        "client": ("127.0.0.1", 9000),
+    }
+    ws = WebSocket(scope, receive=AsyncMock(), send=AsyncMock())
 
-    ws = _FakeWS()
-    user_id, supplied, ok = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(
-        ws,
-        token=None,
-        api_key="test-key",
-    )
-    assert user_id == "7"
-    assert supplied is True
-    assert ok is True
-    assert calls.get("required_scope") == "read"
-    assert calls.get("ip_address") == "127.0.0.1"
-    assert getattr(ws.state, "persona_auth_method", "") == "api_key"
-    assert set(getattr(ws.state, "persona_api_key_scopes", [])) == {"read", "write:preview"}
+    result = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(ws)
+
+    assert seen == [("test-key", ("127.0.0.1", 9000))]  # the peer reaches the HTTP verifier's IP checks
+    if not allowed:
+        assert result == (None, True, False)
+        return
+    assert result == ("7", True, True)
+    assert ws.state.persona_auth_method == "api_key"
+    assert set(ws.state.persona_api_key_scopes) == {"read", "write:preview"}
+    assert ws.state.persona_server_auth_scope == AuthenticatedExecutionScope(active_org_id=9, active_team_id=11)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token_type", ["access", "api_key"])
+async def test_persona_verified_principal_projects_scope(monkeypatch, token_type):
+    """Both credential kinds use only the shared resolver's verified active scope."""
+    ws = SimpleNamespace(state=SimpleNamespace())
+
+    async def _resolve(_ws, *, required_scope):
+        assert required_scope == "read"
+        return SimpleNamespace(user_id=7, token_type=token_type, active_org_id=9, active_team_id=11)
+
+    monkeypatch.setattr(persona_ep, "resolve_ws_principal_or_deprecated_query", _resolve)
+    result = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(ws)
+
+    assert result == ("7", True, True)
+    assert ws.state.persona_server_auth_scope == AuthenticatedExecutionScope(active_org_id=9, active_team_id=11)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_id,org_id", [(7, True), (7, -1), (None, 9)])
+async def test_persona_invalid_verified_scope_clears_previous_scope(monkeypatch, user_id, org_id):
+    """A watchdog rejection must not retain a previously authenticated execution scope."""
+    ws = SimpleNamespace(state=SimpleNamespace(persona_server_auth_scope=AuthenticatedExecutionScope(active_org_id=9)))
+    calls = []
+
+    async def _resolve(_ws, *, required_scope):
+        calls.append(required_scope)
+        return SimpleNamespace(user_id=user_id, token_type="access", active_org_id=org_id, active_team_id=None)
+
+    monkeypatch.setattr(persona_ep, "resolve_ws_principal_or_deprecated_query", _resolve)
+    result = await _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID(ws)
+
+    assert result == (None, True, False)
+    assert ws.state.persona_server_auth_scope is None
+    assert ws.state.persona_api_key_scopes == []
+    assert calls == ["read"]
 
 
 def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
@@ -878,8 +1003,8 @@ def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
             return SimpleNamespace(error=None, result={"ok": True})
 
     async def _fake_resolve(ws, *args, **kwargs):
-        setattr(ws.state, "persona_auth_method", "api_key")
-        setattr(ws.state, "persona_api_key_scopes", ["read"])
+        ws.state.persona_auth_method = "api_key"
+        ws.state.persona_api_key_scopes = ["read"]
         return "1", True, True
 
     fake_server = _FakeServer()
@@ -888,8 +1013,8 @@ def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_api_key_scope_denied"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
@@ -912,6 +1037,80 @@ def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
             assert deny_result.get("ok") is False
             assert deny_result.get("reason_code") == "API_KEY_SCOPE_MISSING"
             assert "write:preview" in str(deny_result.get("error"))
+
+    assert fake_server.calls == []
+
+
+def test_a_read_only_key_stays_denied_write_tools_while_revalidation_is_in_flight(monkeypatch):
+    """The watchdog re-verifies the caller in its own task while a plan's tools run. Until that
+    verdict is in, the last verified scopes must stand: clearing them first would read as "not a
+    scoped key" and let a read-only key through a write-scoped tool (TASK-13950.7 review)."""
+    import threading
+
+    from tldw_Server_API.app.core.AuthNZ import websocket_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+            self.calls = []
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            self.calls.append(request)
+            return SimpleNamespace(error=None, result={"ok": True})
+
+    armed, in_flight, release = threading.Event(), threading.Event(), threading.Event()
+
+    async def _http_verifier(request):  # a read-only scoped key; held once armed
+        if armed.is_set():
+            in_flight.set()
+            while not release.is_set():
+                await asyncio.sleep(0.005)
+        request.state._api_key_scope = "read"
+        return AuthPrincipal(kind="api_key", user_id=1, api_key_id=3, token_type="api_key")
+
+    send_json = persona_ep.WebSocketStream.send_json
+
+    async def _send_json(self, payload):
+        if payload.get("event") == "tool_call":  # the step is about to be scope-checked
+            armed.set()
+            deadline = time.monotonic() + 5
+            while not in_flight.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.005)
+        await send_json(self, payload)
+
+    fake_server = _FakeServer()
+    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID)
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", _http_verifier)
+    monkeypatch.setattr(persona_ep.WebSocketStream, "send_json", _send_json)
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.01)
+
+    try:
+        with TestClient(fastapi_app) as c:
+            with c.websocket_connect("/api/v1/persona/stream", headers={"X-API-KEY": "read-only-key"}) as ws:
+                session_id = json.loads(ws.receive_text())["session_id"]
+                ws.send_text(json.dumps({"type": "user_message", "session_id": session_id, "text": "https://example.com"}))
+                plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "confirm_plan",
+                            "session_id": session_id,
+                            "plan_id": plan["plan_id"],
+                            "approved_steps": [int(plan["steps"][0]["idx"])],
+                        }
+                    )
+                )
+                result = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+                assert in_flight.is_set(), "the watchdog's revalidation must be in flight at the scope check"
+                assert result.get("reason_code") == "API_KEY_SCOPE_MISSING", result
+                release.set()
+    finally:
+        release.set()
 
     assert fake_server.calls == []
 
@@ -946,8 +1145,8 @@ def test_persona_stream_closes_on_auth_revocation_before_confirm_plan(monkeypatc
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_auth_revoked"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
@@ -1011,7 +1210,7 @@ async def test_persona_stream_start_failure_executes_stream_stop(monkeypatch):
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
     monkeypatch.setattr(persona_ep, "WebSocketStream", _FailingStream)
 
-    await persona_ep.persona_stream(_FakeWebSocket(), token=None, api_key=None)
+    await persona_ep.persona_stream(_FakeWebSocket())
 
     assert lifecycle["stop_calls"] == 1
 
@@ -1060,7 +1259,7 @@ async def test_persona_stream_disconnect_executes_stream_stop(monkeypatch):
     monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda *args, **kwargs: None)
     monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.0)
 
-    await persona_ep.persona_stream(_FakeWebSocket(), token=None, api_key=None)
+    await persona_ep.persona_stream(_FakeWebSocket())
 
     assert lifecycle["stop_calls"] == 1
 
@@ -1069,8 +1268,8 @@ def test_persona_cancel_clears_pending_plan():
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_cancel"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
 
             ws.send_text(
                 json.dumps(
@@ -1114,8 +1313,8 @@ def test_persona_respects_max_tool_steps(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_max_steps"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
 
             ws.send_text(
                 json.dumps(
@@ -1714,9 +1913,12 @@ def test_persona_tool_result_surfaces_workspace_trust_source_hard_deny(tmp_path,
             assert evt_result.get("path_scope", {}).get("workspace_id") == "workspace-missing"
 
 
-def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
+@pytest.mark.parametrize("parent_deleted", [False, True])
+def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch, parent_deleted):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    tool_name = "notes.search" if parent_deleted else "knowledge.search"
 
     base = tmp_path / "user_db_mcp_retry"
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base))
@@ -1736,7 +1938,7 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
         _ = db.replace_persona_policy_rules(
             persona_id=persona_id,
             user_id="1",
-            rules=[{"rule_kind": "mcp_tool", "rule_name": "knowledge.search", "allowed": True}],
+            rules=[{"rule_kind": "mcp_tool", "rule_name": tool_name, "allowed": True}],
         )
         _ = db.create_persona_session(
             {
@@ -1753,17 +1955,17 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
         db.close_connection()
 
     manager = SessionManager()
-    manager.create(user_id="1", persona_id="research_assistant", resume_session_id="sess_policy_retry_mcp")
+    manager.create(user_id="1", persona_id="research_assistant", resume_session_id="sess_policy_retry_mcp", persisted=True)
     manager.update_preferences(
         session_id="sess_policy_retry_mcp",
         user_id="1",
         preferences={
             "pending_retry_approvals": {
-                "plan_policy_retry_mcp|0|knowledge.search": {
+                f"plan_policy_retry_mcp|0|{tool_name}": {
                     "plan_id": "plan_policy_retry_mcp",
                     "step_idx": 0,
                     "step_type": "mcp_tool",
-                    "tool": "knowledge.search",
+                    "tool": tool_name,
                     "args": {"query": "retry me"},
                     "why": "Retry after approval",
                     "description": "Retry knowledge search",
@@ -1788,6 +1990,13 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
 
+    if parent_deleted:
+        db = CharactersRAGDB(str(db_path), client_id="persona-ws-retry-deletion")
+        try:
+            db.update_persona_session(session_id="sess_policy_retry_mcp", user_id="1", update_data={"deleted": True})
+        finally:
+            db.close_connection()
+
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
             _ = json.loads(ws.receive_text())
@@ -1799,7 +2008,7 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
                         "plan_id": "plan_policy_retry_mcp",
                         "step_idx": 0,
                         "step_type": "mcp_tool",
-                        "tool": "knowledge.search",
+                        "tool": tool_name,
                         "args": {"query": "tampered retry args"},
                         "why": "tampered why",
                         "description": "tampered description",
@@ -1807,8 +2016,14 @@ def test_persona_retry_tool_call_reexecutes_mcp_step(tmp_path, monkeypatch):
                 )
             )
 
+            if parent_deleted:
+                outcome = _recv_until(ws, lambda event: event.get("event") == "tool_call" or event.get("reason_code") == "SESSION_NOT_FOUND")
+                assert outcome.get("reason_code") == "SESSION_NOT_FOUND"  # nosec B101 -- Reject before tool admission.
+                assert fake_server.calls == []  # nosec B101 -- Retained approval cannot execute after parent deletion.
+                return
+
             evt_call = _recv_until(ws, lambda d: d.get("event") == "tool_call")
-            assert evt_call.get("tool") == "knowledge.search"
+            assert evt_call.get("tool") == tool_name  # nosec B101 -- The original tool assertion is retained for both lifecycle variants.
             assert evt_call.get("step_idx") == 0
             assert evt_call.get("plan_id") == "plan_policy_retry_mcp"
 
@@ -1995,7 +2210,7 @@ def test_persona_tool_call_attaches_audit_metadata(monkeypatch):
             return SimpleNamespace(error=None, result={"ok": True})
 
     async def _fake_resolve(*args, **kwargs):
-        return "user_1", True, True
+        return "1", True, True
 
     fake_server = _FakeServer()
     monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
@@ -2003,8 +2218,8 @@ def test_persona_tool_call_attaches_audit_metadata(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_audit"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
@@ -2031,7 +2246,7 @@ def test_persona_tool_call_attaches_audit_metadata(monkeypatch):
     call = fake_server.calls[0]
     meta = call["metadata"] or {}
     persona_audit = meta.get("persona_audit") or {}
-    assert call["user_id"] == "user_1"
+    assert call["user_id"] == "1"
     assert meta.get("session_id") == session_id
     assert persona_audit.get("source") == "persona_ws"
     assert persona_audit.get("plan_id")
@@ -2131,14 +2346,15 @@ def test_persona_audio_chunk_emits_partial_transcript_and_voice_commit_routes_to
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            _prepare_test_voice(ws, 'sess_audio', configure=True)
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
+            _prepare_test_voice(ws, session_id, configure=True)
             audio_payload = base64.b64encode(b"hello from audio").decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_audio",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": audio_payload,
                     }
@@ -2146,7 +2362,7 @@ def test_persona_audio_chunk_emits_partial_transcript_and_voice_commit_routes_to
             )
 
             partial = _recv_until(ws, lambda d: d.get("event") == "partial_transcript")
-            assert partial.get("session_id") == "sess_audio"
+            assert partial.get("session_id") == session_id
             assert "hello from audio" in str(partial.get("text_delta"))
             assert partial.get("audio_format") == "pcm16"
             assert isinstance(partial.get("seq"), int)
@@ -2157,12 +2373,12 @@ def test_persona_audio_chunk_emits_partial_transcript_and_voice_commit_routes_to
                     {
                         "type": "voice_commit",
                         "transcript": "Search my notes",
-                        "session_id": "sess_audio",
+                        "session_id": session_id,
                     }
                 )
             )
             plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
-            assert plan.get("session_id") == "sess_audio"
+            assert plan.get("session_id") == session_id
             assert plan.get("steps")
 
 
@@ -2218,13 +2434,14 @@ def test_persona_audio_chunk_uses_streaming_transcriber_for_pcm16_partials(monke
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "voice_config",
-                        "session_id": "sess_audio_streaming",
+                        "session_id": session_id,
                         "stt": {"model": "whisper-1", "language": "en-US"},
                     }
                 )
@@ -2234,12 +2451,12 @@ def test_persona_audio_chunk_uses_streaming_transcriber_for_pcm16_partials(monke
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
             )
-            _prepare_test_voice(ws, 'sess_audio_streaming')
+            _prepare_test_voice(ws, session_id)
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_audio_streaming",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": audio_payload,
                     }
@@ -2247,7 +2464,7 @@ def test_persona_audio_chunk_uses_streaming_transcriber_for_pcm16_partials(monke
             )
 
             partial = _recv_until(ws, lambda d: d.get("event") == "partial_transcript")
-            assert partial.get("session_id") == "sess_audio_streaming"
+            assert partial.get("session_id") == session_id
             assert partial.get("text_delta") == "streaming partial transcript"
             assert fake_transcriber.initialize_called is True
             assert len(fake_transcriber.processed_chunks) == 1
@@ -2302,13 +2519,14 @@ def test_persona_voice_commit_uses_transcriber_snapshot_when_client_omits_transc
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "voice_config",
-                        "session_id": "sess_audio_snapshot",
+                        "session_id": session_id,
                         "stt": {"model": "whisper-1", "language": "en-US"},
                     }
                 )
@@ -2318,12 +2536,12 @@ def test_persona_voice_commit_uses_transcriber_snapshot_when_client_omits_transc
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
             )
-            _prepare_test_voice(ws, 'sess_audio_snapshot')
+            _prepare_test_voice(ws, session_id)
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_audio_snapshot",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": audio_payload,
                     }
@@ -2334,14 +2552,14 @@ def test_persona_voice_commit_uses_transcriber_snapshot_when_client_omits_transc
                 json.dumps(
                     {
                         "type": "voice_commit",
-                        "session_id": "sess_audio_snapshot",
+                        "session_id": session_id,
                     }
                 )
             )
 
             reply = _recv_until(ws, lambda d: d.get("event") == "assistant_delta")
             assert reply["text_delta"] == "Test conversational reply"
-            assert reply.get("session_id") == "sess_audio_snapshot"
+            assert reply.get("session_id") == session_id
             assert conversation_calls[0]["turns"][-1]["content"] == "open my notes"
             assert fake_transcriber.initialize_called is True
             assert fake_transcriber.reset_called is True
@@ -3048,13 +3266,14 @@ def test_persona_audio_chunk_vad_auto_commit_routes_stripped_transcript_to_plan(
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "voice_config",
-                        "session_id": "sess_audio_auto_commit",
+                        "session_id": session_id,
                         "voice": {"trigger_phrases": ["hey helper"]},
                         "stt": {"model": "whisper-1", "language": "en-US"},
                     }
@@ -3065,12 +3284,12 @@ def test_persona_audio_chunk_vad_auto_commit_routes_stripped_transcript_to_plan(
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
             )
-            _prepare_test_voice(ws, 'sess_audio_auto_commit')
+            _prepare_test_voice(ws, session_id)
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_audio_auto_commit",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": audio_payload,
                     }
@@ -3086,7 +3305,7 @@ def test_persona_audio_chunk_vad_auto_commit_routes_stripped_transcript_to_plan(
             assert commit_notice.get("transcript") == "search my notes"
 
             plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
-            assert plan.get("session_id") == "sess_audio_auto_commit"
+            assert plan.get("session_id") == session_id
             assert plan.get("steps")
             assert fake_transcriber.initialize_called is True
             assert len(fake_turn_detector.observed_chunks) == 1
@@ -3294,13 +3513,14 @@ def test_persona_audio_chunk_vad_auto_commit_ignores_missing_trigger_phrase(monk
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "voice_config",
-                        "session_id": "sess_audio_trigger_gate",
+                        "session_id": session_id,
                         "voice": {"trigger_phrases": ["hey helper"]},
                         "stt": {"model": "whisper-1", "language": "en-US"},
                     }
@@ -3311,12 +3531,12 @@ def test_persona_audio_chunk_vad_auto_commit_ignores_missing_trigger_phrase(monk
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
             )
-            _prepare_test_voice(ws, 'sess_audio_trigger_gate')
+            _prepare_test_voice(ws, session_id)
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_audio_trigger_gate",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": audio_payload,
                     }
@@ -3328,7 +3548,7 @@ def test_persona_audio_chunk_vad_auto_commit_ignores_missing_trigger_phrase(monk
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_TRIGGER_NOT_HEARD",
             )
-            assert ignored_notice.get("session_id") == "sess_audio_trigger_gate"
+            assert ignored_notice.get("session_id") == session_id
 
 
 def test_persona_audio_chunk_warns_and_keeps_manual_mode_when_vad_unavailable(
@@ -3606,13 +3826,14 @@ def test_persona_voice_commit_is_ignored_after_vad_auto_commit(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             audio_payload = base64.b64encode(b"\x00\x00\xff\x7f\x00\x80").decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "voice_config",
-                        "session_id": "sess_audio_ignore_manual",
+                        "session_id": session_id,
                         "voice": {"trigger_phrases": ["hey helper"]},
                         "stt": {"model": "whisper-1", "language": "en-US"},
                     }
@@ -3623,12 +3844,12 @@ def test_persona_voice_commit_is_ignored_after_vad_auto_commit(monkeypatch):
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_CONFIG_UPDATED",
             )
-            _prepare_test_voice(ws, 'sess_audio_ignore_manual')
+            _prepare_test_voice(ws, session_id)
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_audio_ignore_manual",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": audio_payload,
                     }
@@ -3646,7 +3867,7 @@ def test_persona_voice_commit_is_ignored_after_vad_auto_commit(monkeypatch):
                 json.dumps(
                     {
                         "type": "voice_commit",
-                        "session_id": "sess_audio_ignore_manual",
+                        "session_id": session_id,
                         "transcript": "search my notes",
                         "source": "persona_live_voice"
                     }
@@ -3658,7 +3879,7 @@ def test_persona_voice_commit_is_ignored_after_vad_auto_commit(monkeypatch):
                 lambda d: d.get("event") == "notice"
                 and d.get("reason_code") == "VOICE_COMMIT_IGNORED_ALREADY_COMMITTED",
             )
-            assert ignored_notice.get("session_id") == "sess_audio_ignore_manual"
+            assert ignored_notice.get("session_id") == session_id
 
 
 def test_persona_voice_config_stores_runtime_preferences(monkeypatch):
@@ -3670,8 +3891,8 @@ def test_persona_voice_config_stores_runtime_preferences(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_voice_config"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
@@ -3738,8 +3959,8 @@ def test_persona_voice_commit_reuses_persona_tool_plan_flow(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_voice_commit"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             _prepare_test_voice(ws, session_id, configure=True)
             ws.send_text(
                 json.dumps(
@@ -3799,8 +4020,8 @@ def test_persona_voice_commit_emits_processing_notice_after_quiet_delay(monkeypa
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_voice_processing_notice"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             _prepare_test_voice(ws, session_id, configure=True)
             ws.send_text(
                 json.dumps(
@@ -3847,8 +4068,8 @@ def test_persona_voice_processing_notice_is_suppressed_by_tool_plan_progress(mon
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_voice_processing_suppressed"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             _prepare_test_voice(ws, session_id, configure=True)
             ws.send_text(
                 json.dumps(
@@ -4206,14 +4427,15 @@ def test_persona_audio_chunk_rejects_unsupported_format(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            _prepare_test_voice(ws, 'sess_bad_format', configure=True)
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
+            _prepare_test_voice(ws, session_id, configure=True)
             audio_payload = base64.b64encode(b"hello").decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_bad_format",
+                        "session_id": session_id,
                         "audio_format": "flac",
                         "bytes_base64": audio_payload,
                     }
@@ -4235,14 +4457,15 @@ def test_persona_audio_chunk_rejects_oversized_payload(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            _prepare_test_voice(ws, 'sess_big_audio', configure=True)
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
+            _prepare_test_voice(ws, session_id, configure=True)
             audio_payload = base64.b64encode(b"hello-world").decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_big_audio",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": audio_payload,
                     }
@@ -4264,13 +4487,14 @@ def test_persona_audio_chunk_predecode_rejects_large_invalid_base64(monkeypatch)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            _prepare_test_voice(ws, 'sess_large_invalid_b64', configure=True)
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
+            _prepare_test_voice(ws, session_id, configure=True)
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_large_invalid_b64",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": "!" * 64,
                     }
@@ -4288,13 +4512,14 @@ def test_persona_audio_chunk_predecode_rejects_large_invalid_base64(monkeypatch)
 def test_persona_audio_chunk_rejects_invalid_base64_payload():
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            _prepare_test_voice(ws, 'sess_invalid_b64', configure=True)
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
+            _prepare_test_voice(ws, session_id, configure=True)
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_invalid_b64",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": "!!!!",
                     }
@@ -4328,15 +4553,16 @@ def test_persona_audio_chunk_rate_limited(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            _prepare_test_voice(ws, 'sess_rate_limit', configure=True)
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
+            _prepare_test_voice(ws, session_id, configure=True)
 
             first_payload = base64.b64encode(b"\x00\x00" * 8).decode("ascii")
             ws.send_text(
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_rate_limit",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": first_payload,
                     }
@@ -4349,7 +4575,7 @@ def test_persona_audio_chunk_rate_limited(monkeypatch):
                 json.dumps(
                     {
                         "type": "audio_chunk",
-                        "session_id": "sess_rate_limit",
+                        "session_id": session_id,
                         "audio_format": "pcm16",
                         "bytes_base64": second_payload,
                     }
@@ -4384,8 +4610,8 @@ def test_persona_persists_session_turns_and_tool_outcomes(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_turn_persist"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(json.dumps({"type": "user_message", "session_id": session_id, "text": "hello"}))
             plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
             first_idx = int(plan["steps"][0]["idx"])
@@ -4439,8 +4665,8 @@ def test_persona_tool_result_turn_retention_uses_summary_not_raw_output(monkeypa
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
-            session_id = "sess_retention_summary"
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {"type": "user_message", "session_id": session_id, "text": "https://example.com"}
@@ -4461,7 +4687,7 @@ def test_persona_tool_result_turn_retention_uses_summary_not_raw_output(monkeypa
             _ = _recv_until(ws, lambda d: d.get("event") == "tool_call")
             _ = _recv_until(ws, lambda d: d.get("event") == "tool_result")
 
-    turns = manager.list_turns(session_id="sess_retention_summary", user_id="1")
+    turns = manager.list_turns(session_id=session_id, user_id="1")
     tool_turns = [turn for turn in turns if turn.get("type") == "tool_result"]
     assert tool_turns
     tool_turn = tool_turns[-1]
@@ -4490,12 +4716,13 @@ def test_persona_memory_context_applied_when_opted_in(tmp_path, monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
                         "type": "user_message",
-                        "session_id": "sess_mem_on",
+                        "session_id": session_id,
                         "text": "find notes about FastAPI testing",
                     }
                 )
@@ -4526,12 +4753,13 @@ def test_persona_memory_context_skipped_when_opted_out(tmp_path, monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
                         "type": "user_message",
-                        "session_id": "sess_mem_off",
+                        "session_id": session_id,
                         "text": "find notes about FastAPI testing",
                     }
                 )
@@ -4558,12 +4786,13 @@ def test_persona_memory_context_can_be_disabled_per_message(tmp_path, monkeypatc
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
                         "type": "user_message",
-                        "session_id": "sess_mem_disable_msg",
+                        "session_id": session_id,
                         "text": "find notes for pytest",
                         "use_memory_context": False,
                     }
@@ -4624,12 +4853,13 @@ def test_persona_companion_context_applied_when_available(tmp_path, monkeypatch)
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
                         "type": "user_message",
-                        "session_id": "sess_companion_on",
+                        "session_id": session_id,
                         "text": "find notes about pytest",
                     }
                 )
@@ -4688,12 +4918,13 @@ def test_persona_companion_context_can_be_disabled_per_message(tmp_path, monkeyp
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
                         "type": "user_message",
-                        "session_id": "sess_companion_off",
+                        "session_id": session_id,
                         "text": "find notes about pytest",
                         "use_companion_context": False,
                     }
@@ -4873,12 +5104,13 @@ def test_persona_memory_top_k_override_used(monkeypatch):
 
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
                         "type": "user_message",
-                        "session_id": "sess_mem_topk",
+                        "session_id": session_id,
                         "text": "find testing notes",
                         "memory_top_k": 1,
                     }
@@ -4894,7 +5126,7 @@ def test_persona_memory_top_k_override_used(monkeypatch):
     assert captured.get("top_k") == 1
     assert captured.get("persona_id")
     assert captured.get("runtime_mode") == "session_scoped"
-    assert captured.get("session_id") == "sess_mem_topk"
+    assert captured.get("session_id") == session_id
     memory_payload = plan.get("memory") or {}
     assert memory_payload.get("requested_top_k") == 1
     assert memory_payload.get("applied_count") == 2
@@ -4918,7 +5150,8 @@ def test_persona_ws_required_fields_and_event_ordering(monkeypatch):
     session_id = "sess_contract_order"
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
@@ -5009,7 +5242,8 @@ def test_persona_ws_ignores_forged_security_fields(monkeypatch):
     session_id = "sess_forged_fields"
     with TestClient(fastapi_app) as c:
         with c.websocket_connect("/api/v1/persona/stream") as ws:
-            _ = json.loads(ws.receive_text())
+            offered_session = json.loads(ws.receive_text())
+            session_id = offered_session["session_id"]
             ws.send_text(
                 json.dumps(
                     {
@@ -5097,24 +5331,18 @@ def test_persona_ws_rejects_cross_user_scope_injection(tmp_path, monkeypatch):
                     }
                 )
             )
-            plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
-            ws.send_text(
-                json.dumps(
-                    {
-                        "type": "confirm_plan",
-                        "session_id": injected_session_id,
-                        "plan_id": plan["plan_id"],
-                        "approved_steps": [0],
-                    }
-                )
-            )
-            _ = _recv_until(ws, lambda d: d.get("event") == "tool_call")
-            _ = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+            refusal = _recv_until(ws, lambda d: d.get("reason_code") == "SESSION_ID_UNAVAILABLE")
+            assert refusal["level"] == "error"  # nosec B101 -- Foreign IDs are refused before plan/tool creation.
 
-    assert fake_server.calls
-    metadata = fake_server.calls[0].get("metadata") or {}
-    assert metadata.get("session_id") == injected_session_id
-    assert metadata.get("persona_scope") is None
+    assert fake_server.calls == []  # nosec B101 -- No foreign-session action may execute with a fallback scope.
+    assert persona_ep.get_session_manager().get(injected_session_id) is None  # nosec B101
+    owner = CharactersRAGDB(str(DatabasePaths.get_chacha_db_path(2)), client_id="scope-injection-owner-check")
+    try:
+        row = owner.get_persona_session(injected_session_id, user_id="2", include_deleted=False)
+        assert row["scope_snapshot"]["scope_snapshot_id"] == "scope_user_2_only"  # nosec B101
+        assert row["scope_snapshot"]["materialized_scope"]["explicit_ids"]["conversation_id"] == ["conv-secret"]  # nosec B101
+    finally:
+        owner.close_connection()
 
 
 def test_persona_session_scoped_persisted_session_disables_memory_context(tmp_path, monkeypatch):
@@ -5686,7 +5914,7 @@ def test_queued_same_session_turns_keep_client_message_ids_and_confirmation_rese
     sid = "sess_queued_correlation"
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
-            json.loads(ws.receive_text())
+            sid = json.loads(ws.receive_text())["session_id"]
             for text, client_id in [("first search", "message-a"), ("second search", "message-b")]:
                 ws.send_json(
                     {
@@ -5743,18 +5971,19 @@ def test_typed_turn_internal_failure_notice_keeps_request_identity(monkeypatch):
     monkeypatch.setattr(persona_ep, "_load_persona_policy_rules_for_session", fail_policy_lookup)
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
-            json.loads(ws.receive_text())
+            session_id = json.loads(ws.receive_text())["session_id"]
             ws.send_json(
                 {
                     "type": "user_message",
-                    "session_id": "sess_failed",
+                    "session_id": session_id,
                     "text": "hello",
                     "client_message_id": "failed-request",
                 }
             )
             failure = _recv_until(ws, lambda d: d.get("level") == "error" or d.get("type") == "error")
-            assert failure.get("session_id") == "sess_failed"
+            assert failure.get("session_id") == session_id
             assert failure.get("client_message_id") == "failed-request"
+            assert failure.get("reason_code") == "USER_TURN_FAILED"  # nosec B101 -- Exercise the intended failing lookup.
             assert "private failure details" not in json.dumps(failure)
 
 
@@ -5801,6 +6030,8 @@ def test_stop_cancels_queued_turn_without_starting_it_and_allows_fresh_send(monk
     monkeypatch.setattr(persona_ep, "resolve_persona_exemplar_runtime_context", gated_exemplars)
     try:
         with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
+            sid = ws.receive_json()["session_id"]
+
             def send(text, client_id):
                 ws.send_json({
                     "type": "user_message", "session_id": sid,
@@ -5856,13 +6087,13 @@ def test_persona_revised_voice_snapshots_do_not_replay_partial_text(monkeypatch,
     events = []
     with TestClient(fastapi_app) as client:
         with client.websocket_connect("/api/v1/persona/stream") as ws:
-            ws.receive_json()
-            ws.send_json({"type": "voice_config", "session_id": "snapshot-test", "stt": {"model": "tiny", "enable_vad": auto_commit}})
+            session_id = ws.receive_json()["session_id"]
+            ws.send_json({"type": "voice_config", "session_id": session_id, "stt": {"model": "tiny", "enable_vad": auto_commit}})
             _recv_until(ws, lambda e: e.get("reason_code") == "VOICE_CONFIG_UPDATED")
-            _prepare_test_voice(ws, "snapshot-test")
+            _prepare_test_voice(ws, session_id)
             for _ in range(6):
-                ws.send_json({"type": "audio_chunk", "session_id": "snapshot-test", "audio_format": "pcm16", "bytes_base64": base64.b64encode(b"\0\0").decode()})
-            ws.send_json({"type": "voice_commit", "session_id": "snapshot-test"})
+                ws.send_json({"type": "audio_chunk", "session_id": session_id, "audio_format": "pcm16", "bytes_base64": base64.b64encode(b"\0\0").decode()})
+            ws.send_json({"type": "voice_commit", "session_id": session_id})
             def committed(event):
                 events.append(event)
                 return event.get("reason_code") == "VOICE_TURN_COMMITTED"
@@ -5874,3 +6105,263 @@ def test_persona_revised_voice_snapshots_do_not_replay_partial_text(monkeypatch,
     ]
     warnings = [event for event in events if event.get("reason_code") == "VOICE_MANUAL_MODE_REQUIRED"]
     assert bool(warnings) is auto_commit
+
+
+def test_a_confirm_plan_rule_save_survives_a_turn_saving_preferences_meanwhile(monkeypatch, tmp_path):
+    """A turn's read-then-save of the session preferences must not overwrite rules saved in between (TASK-13896).
+
+    The read and the save are separate worker calls. The turn's save is held until a confirm_plan
+    carrying session_policy_rules has had its chance to read and save; the rules must survive.
+    """
+
+    class _FakeServer:
+        initialized = True
+
+        async def initialize(self):
+            return None
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            return SimpleNamespace(error=None, result={"ok": True})
+
+    db_path = tmp_path / "persona_prefs.db"
+    seed = CharactersRAGDB(str(db_path), client_id="persona-prefs-seed")
+    seed.create_persona_profile({"id": "research_assistant", "user_id": "1", "name": "Research Assistant",
+                                 "mode": "session_scoped", "system_prompt": "Helper", "is_active": True})
+    seed.create_persona_session({"id": "sess_prefs", "persona_id": "research_assistant", "user_id": "1",
+                                 "mode": "session_scoped", "status": "active"})
+    seed.close_connection()
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: _FakeServer())
+    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: CharactersRAGDB(str(db_path), client_id="1"))
+
+    real_persist = persona_ep._persist_persona_session_preferences
+    armed, turn_save_waiting, rules_saved = threading.Event(), threading.Event(), threading.Event()
+
+    def persist(db, **kwargs):
+        patch = kwargs.get("patch_preferences") or {}
+        if armed.is_set() and "use_memory_context" in patch:  # the turn's save
+            turn_save_waiting.set()
+            rules_saved.wait(3)  # held until the confirm has saved, or cannot (it waits for this save)
+        result = real_persist(db, **kwargs)
+        if set(patch) == {"session_policy_rules"}:  # the confirm_plan's save
+            rules_saved.set()
+        return result
+
+    monkeypatch.setattr(persona_ep, "_persist_persona_session_preferences", persist)
+    seen: set[str] = set()
+
+    def both_done(event):
+        seen.add(str(event.get("event")))
+        return {"tool_plan", "tool_result"} <= seen
+
+    with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "user_message", "session_id": "sess_prefs", "text": "https://example.com"})
+        plan = _recv_until(ws, lambda e: e.get("event") == "tool_plan", timeout=20)
+        armed.set()
+        ws.send_json({"type": "user_message", "session_id": "sess_prefs", "text": "https://example.org",
+                      "use_companion_context": False})  # a change, so the turn's save writes
+        assert turn_save_waiting.wait(20)
+        rules = [{"rule_kind": "mcp_tool", "rule_name": plan["steps"][0]["tool"], "allowed": True,
+                  "require_confirmation": False}]
+        ws.send_json({"type": "confirm_plan", "session_id": "sess_prefs", "plan_id": plan["plan_id"],
+                      "approved_steps": [plan["steps"][0]["idx"]], "session_policy_rules": rules})
+        _recv_until(ws, both_done, timeout=30)  # the confirmed step ran, and the second turn planned
+
+    reader = CharactersRAGDB(str(db_path), client_id="persona-prefs-reader")
+    try:
+        saved = reader.get_persona_session("sess_prefs", user_id="1")["preferences"]
+    finally:
+        reader.close_connection()
+    assert (saved.get("session_policy_rules"), saved.get("use_companion_context")) == (
+        persona_ep.normalize_policy_rules(rules),
+        False,
+    ), saved
+
+
+@pytest.mark.parametrize("message_type", ["user_message", "voice_config", "unknown_probe"])
+def test_cold_ws_alias_cannot_occupy_another_users_session(tmp_path, monkeypatch, message_type):
+    """Every allocating WS path must reject a client-chosen unknown alias."""
+    from tldw_Server_API.app.core.Persona.session_materialization import materialize_persona_session
+
+    session_id = "cold-owned-session"
+    _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id=session_id, mode="session_scoped")
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    calls = _stub_persona_conversation(monkeypatch)
+
+    async def other_user(*args, **kwargs):
+        return "2", True, True
+
+    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", other_user)
+    with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
+        _recv_until(ws, lambda row: row.get("reason_code") == "WS_CONNECTED")
+        ws.send_json(
+            {
+                "type": message_type,
+                "session_id": session_id,
+                "text": "Hello",
+                "use_memory_context": False,
+                "use_companion_context": False,
+                "use_persona_state_context": False,
+            }
+        )
+        event = _recv_until(
+            ws,
+            lambda row: (
+                row.get("reason_code")
+                in {
+                    "SESSION_ID_UNAVAILABLE",
+                    "USER_TURN_FAILED",
+                    "VOICE_CONFIG_UPDATED",
+                }
+                or row.get("event") in {"assistant_delta", "tool_plan"}
+            ),
+        )
+        assert event.get("reason_code") == "SESSION_ID_UNAVAILABLE"  # nosec B101 -- Refusal precedes any allocator/effect.
+        assert manager.get(session_id) is None and calls == []  # nosec B101
+    other = CharactersRAGDB(str(DatabasePaths.get_chacha_db_path(2)), client_id="cold-alias-other-check")
+    owner = CharactersRAGDB(str(DatabasePaths.get_chacha_db_path(1)), client_id="cold-alias-owner-check")
+    try:
+        assert other.get_persona_session(session_id, user_id="2", include_deleted=False) is None  # nosec B101
+        resumed = materialize_persona_session(
+            owner,
+            session_manager=manager,
+            user_id="1",
+            persona_id="research_assistant",
+            resume_session_id=session_id,
+        )
+        assert resumed.session_id == session_id and manager.get(session_id).user_id == "1"  # nosec B101
+    finally:
+        other.close_connection()
+        owner.close_connection()
+
+
+@pytest.mark.parametrize("explicit_offered_id", [False, True])
+def test_server_offered_temporary_ws_session_still_works(tmp_path, monkeypatch, explicit_offered_id):
+    """A scaffold uses the unguessable ID issued by its own connection."""
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_db"))
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
+        offered = _recv_until(ws, lambda row: row.get("reason_code") == "WS_CONNECTED")["session_id"]
+        message = {"type": "unknown_probe"}
+        if explicit_offered_id:
+            message["session_id"] = offered
+        ws.send_json(message)
+        event = _recv_until(ws, lambda row: row.get("event") == "assistant_delta")
+        assert event["session_id"] == offered and event["text_delta"] == "(scaffold)"  # nosec B101
+        assert manager.get(offered).user_id == "1" and not manager.get(offered).persisted  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_ws_admission_cancellation_joins_owned_lookup_before_retirement(tmp_path, monkeypatch):
+    import contextlib
+
+    from starlette.datastructures import Headers
+
+    db = CharactersRAGDB(str(tmp_path / "admission-cancel.db"), client_id="admission-cancel")
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    stopped_after_read = []
+    frames = []
+    manager = SessionManager()
+    original = persona_ep._admit_persona_stream_session_id
+
+    def held_read(*args, **kwargs):
+        entered.set()
+        try:
+            assert release.wait(5)  # nosec B101 -- Bounded actual database admission operation.
+            return original(*args, **kwargs)
+        finally:
+            finished.set()
+
+    class Socket:
+        headers = Headers()
+        query_params = {}
+        client = None
+        state = SimpleNamespace()
+
+        async def close(self, code=1000):
+            return None
+
+    class Stream:
+        def __init__(self, ws, *args, **kwargs):
+            self.ws = ws
+
+        async def start(self):
+            return None
+
+        async def receive_text(self):
+            return json.dumps({"type": "unknown_probe", "session_id": "unowned-held-alias"})
+
+        async def send_json(self, payload):
+            frames.append(payload)
+
+        async def stop(self):
+            stopped_after_read.append(finished.is_set())
+
+        async def error(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(persona_ep, "WebSocketStream", Stream)
+    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda user_id: db)
+    monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.0)
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(persona_ep, "_admit_persona_stream_session_id", held_read)
+    task = asyncio.create_task(persona_ep.persona_stream(Socket()))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)  # nosec B101
+        task.cancel()
+        # Deliver cancellation while the independent checkout remains held.
+        for _ in range(8):
+            await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+        assert finished.is_set() and stopped_after_read == [True]  # nosec B101 -- Retirement cannot precede lookup completion.
+        assert manager.get("unowned-held-alias") is None  # nosec B101
+        assert not any(row.get("event") == "assistant_delta" for row in frames)  # nosec B101
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.wait_for(task, 5)
+        db.close_connection()
+
+
+@pytest.mark.parametrize("lookup_error", [RuntimeError, CharactersRAGDBError])
+def test_ws_admission_storage_failure_is_not_temporary_session_permission(tmp_path, monkeypatch, lookup_error):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_db"))
+    manager = SessionManager()
+    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    calls = _stub_persona_conversation(monkeypatch)
+
+    def unavailable(*args, **kwargs):
+        raise lookup_error("PRIVATE-ADMISSION-FAILURE")
+
+    monkeypatch.setattr(CharactersRAGDB, "get_persona_session", unavailable)
+    with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
+        _recv_until(ws, lambda row: row.get("reason_code") == "WS_CONNECTED")
+        ws.send_json(
+            {"type": "unknown_probe", "session_id": "unavailable-cold-id", "client_message_id": "blocked-request"}
+        )
+        error = _recv_until(ws, lambda row: row.get("level") == "error")
+        assert error["reason_code"] == "SESSION_ADMISSION_FAILED"  # nosec B101
+        assert error["client_message_id"] == "blocked-request"  # nosec B101
+        assert "PRIVATE-ADMISSION-FAILURE" not in json.dumps(error)  # nosec B101 -- No storage values in client errors.
+        assert manager.get("unavailable-cold-id") is None and calls == []  # nosec B101
+
+
+def test_ws_admission_foreign_runtime_precedes_connection_default_id():
+    manager = SessionManager()
+    manager.create(user_id="2", persona_id="research_assistant", resume_session_id="same-offered-id")
+    assert (
+        persona_ep._admit_persona_stream_session_id(  # nosec B101 -- Even an offered-ID collision cannot override an owner.
+            None,
+            session_manager=manager,
+            session_id="same-offered-id",
+            user_id="1",
+            connection_session_id="same-offered-id",
+        )
+        is False
+    )

@@ -34,4 +34,4 @@ async def test_db_policy_loader_merges_route_map_from_file_on_postgres(monkeypat
     # Validate we have policies from DB and route_map from file
     assert "chat.default" in snap.policies
     assert isinstance(snap.route_map, dict) and snap.route_map
-    assert snap.route_map.get("by_tag", {}).get("chat") == "chat.default"
+    assert snap.route_map.get("by_tag", {}).get("health") == "health.default"

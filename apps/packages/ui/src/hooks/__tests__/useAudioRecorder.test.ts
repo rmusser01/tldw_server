@@ -204,6 +204,26 @@ describe("useAudioRecorder", () => {
     expect(result.current.durationMs).toBe(0)
   })
 
+  it.each([true, false])("B05 history restore refuses audio while capture is pending or active (pending %s)", async (permissionPending) => {
+    let grant!: (stream: { getTracks: () => { stop: () => void }[] }) => void
+    mockGetUserMedia.mockImplementationOnce(() => new Promise((resolve) => { grant = resolve }))
+    const view = renderHook(() => useAudioRecorder())
+    let start!: Promise<void>
+    act(() => { start = view.result.current.startRecording() })
+    const stream = { getTracks: () => [{ stop: mockTrackStop }] }
+    if (!permissionPending) await act(async () => { grant(stream); await start })
+    try {
+      let accepted: unknown
+      act(() => { accepted = view.result.current.loadBlob(new Blob(["history"]), 5000) })
+      expect(accepted).toBe(false)
+      expect(view.result.current.blob).toBeNull()
+    } finally {
+      if (permissionPending) await act(async () => { grant(stream); await start })
+      act(() => { view.result.current.stopRecording() })
+      view.unmount()
+    }
+  })
+
   it("accepts a blob via loadBlob", () => {
     const { result } = renderHook(() => useAudioRecorder())
     const externalBlob = new Blob(["external"], { type: "audio/webm" })
@@ -226,6 +246,41 @@ describe("useAudioRecorder", () => {
     })
 
     expect(result.current.status).toBe("idle")
+  })
+
+  it("B05 microphone arriving after unmount is stopped without retiring a newer owner", async () => {
+    const oldStop = vi.fn()
+    const newStop = vi.fn()
+    let grant: (stream: { getTracks: () => { stop: () => void }[] }) => void
+    mockGetUserMedia.mockImplementationOnce(() => new Promise((resolve) => {
+      grant = resolve
+    }))
+    mockGetUserMedia.mockResolvedValueOnce({ getTracks: () => [{ stop: newStop }] })
+    const old = renderHook(() => useAudioRecorder())
+    let pending: Promise<void>
+    act(() => { pending = old.result.current.startRecording() })
+    old.unmount()
+    const current = renderHook(() => useAudioRecorder())
+    await act(async () => { await current.result.current.startRecording() })
+    try {
+      await act(async () => {
+        grant!({ getTracks: () => [{ stop: oldStop }] })
+        await pending!
+      })
+      expect(oldStop).toHaveBeenCalledOnce()
+      expect(recorderInstances).toHaveLength(1)
+      expect(current.result.current.status).toBe("recording")
+      expect(newStop).not.toHaveBeenCalled()
+      act(() => current.result.current.stopRecording())
+      expect(newStop).toHaveBeenCalledOnce()
+    } finally {
+      act(() => {
+        for (const recorder of recorderInstances) {
+          if (recorder.state === "recording") recorder.stop()
+        }
+      })
+      current.unmount()
+    }
   })
 
   it("cleans up on unmount during recording", async () => {

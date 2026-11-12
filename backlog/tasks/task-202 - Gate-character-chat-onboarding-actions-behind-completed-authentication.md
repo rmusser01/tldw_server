@@ -30,7 +30,7 @@ Ensure route-aware character-chat onboarding actions are only visible after the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation: removed the disabled character-chat action lane from the unauthenticated first-run OptionIndex shell; kept route-aware title/copy; left the active lane in the OnboardingConnectForm authenticated success screen. Also fixed returnTo route recognition so /characters?... query paths preserve their existing source context when adding create/import action flags.
 
 Verification: bunx vitest run src/routes/__tests__/core-route-identity.test.tsx src/components/Option/Onboarding/__tests__/OnboardingConnectForm.success-screen.guard.test.tsx src/utils/__tests__/onboarding-route-intent.test.ts --maxWorkers=1 --no-file-parallelism passed 15/15; git diff --check passed; Chromium browser check of first-run character-chat route after readiness timeout reported laneCount=0 headingCount=1 credentialFields=2 and saved output/playwright/character-chat-first-run-pre-auth-no-lane-dismissed.png.
@@ -38,7 +38,7 @@ Verification: bunx vitest run src/routes/__tests__/core-route-identity.test.tsx 
 Bandit: skipped because touched implementation/test files are TypeScript frontend files, not Python.
 
 PR: https://github.com/rmusser01/tldw_server/pull/1470
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

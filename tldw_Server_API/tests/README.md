@@ -10,6 +10,31 @@ This directory contains the end-to-end, integration, and unit tests for `tldw_se
 - Run by marker: `python -m pytest -m "unit"` or `pytest -m "integration and not slow"`.
 - Use `pytest --maxfail=1 -x` while iterating to stop on the first failure.
 
+## Where Does a New Test Go?
+Several modules have more than one test tree. The `_NEW` suffix does **not** mean "newer" or
+"preferred", and no tree here is legacy. Conftest fixtures are scoped to their directory, so the
+tree you pick decides which fixtures and env presets your test gets. Do not start new `_NEW` or
+per-module sibling trees; use markers (`unit`, `integration`, ...) and subdirectories instead.
+
+| Module | Put the test in | When |
+|---|---|---|
+| Chat | `Chat/unit`, `Chat/integration` (default) | Chat service, provider routing, orchestration, ChaCha deps, endpoint integration. Uses the shared `_plugins.chat_fixtures`. |
+| | `Chat_NEW/{unit,integration,property}` | `/chat/completions` public contract tests that want its conftest presets (`TEST_MODE`, `DEFAULT_LLM_PROVIDER=openai`, bearer key), and property tests. |
+| RAG | `RAG_NEW/{unit,integration,property}` (default) | Pipeline, retrieval, reranking, caching, endpoints. Its autouse fixtures isolate the semantic cache and provider overrides. |
+| | `RAG/` | Knowledge QA, feedback, analytics, and dual-backend regressions. |
+| | either | Anything that runs real SQL must use `dual_backend_env` (SQLite + Postgres). It is defined in `RAG/conftest.py` and re-exported by `RAG_NEW/conftest.py`, so it works in both trees. |
+| TTS | `TTS/` | Security, sanitization, and adapter internals. |
+| | `TTS_NEW/{unit,integration,property}` | Public contract: endpoints, adapter registry behaviour, provider switching. The two trees split coverage between them and don't overlap, so don't copy a test into both. |
+| AuthNZ | `AuthNZ_Unit/` | Pure unit tests with no database. |
+| | `AuthNZ_SQLite/`, `AuthNZ_Postgres/` | Tests that only make sense on that backend. `AuthNZ_Postgres` always gets a Postgres DSN. |
+| | `AuthNZ_Federation/` | Federation/SSO. |
+| | `AuthNZ/` | Everything else (API, integration, property). |
+| Ingestion / Media | the tree that already tests the same source module | The ingestion trees have no single axis. Find where the module you changed is imported (`grep -rl <module> tldw_Server_API/tests`) and add to that tree. |
+
+CI shard names in `.github/workflows/ci.yml` are chosen to balance wall-clock time. They do not
+describe the domain. For example, AuthNZ is sliced alphabetically across shards, and
+`chat-*` / `chat-new-*` are the `Chat` / `Chat_NEW` trees.
+
 ## Pytest Markers & CLI Switches
 - Common markers registered across the suite: `unit`, `integration`, `slow`, `stress`, `external_api`, `pg_jobs`, `requires_model`, `multi_user`, `single_user`.
 - View the full list any time with `pytest --markers`.

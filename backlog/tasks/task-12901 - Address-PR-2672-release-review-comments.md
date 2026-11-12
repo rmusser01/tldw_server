@@ -37,9 +37,9 @@ Address unresolved review threads and actionable checks on release PR #2672 with
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed PR #2672 review threads for non-secure-context UUID generation, handoff_id matching, defensive Studio generated artifact access, malformed Deep Research provenance arrays, and deterministic handoff storage tests. Verification: focused Vitest run passed 94 tests across agent-task-handoff, ResearchWorkspace.stage2.responsive, deep-research-bundle-import, and StudioPane.stage1; git diff --check passed. Bandit not applicable because touched code is TypeScript/frontend plus Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

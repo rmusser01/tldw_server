@@ -40,11 +40,11 @@ Address the new Qodo review comments on PR #1258 after the initial follow-up pus
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented second-pass Qodo fixes. Added RED tests for unreadable per-candidate file handling and single-open file processing. CodeGraphIndexer now reads each candidate from one stream, reuses the binary probe for extraction source or streaming hash, and records per-file OSError as extraction_failed without aborting the run. Verification: focused CodeGraph/MCP suite passed with 53 passed and 5 warnings; Ruff touched files passed; Bandit /tmp/bandit_codegraph_qodo_second_pass.json reported 0 results and 0 errors; git diff --check passed.
 
 No product documentation changes were needed for this PR-review-only resilience and test cleanup. Remaining external state: PR #1258 stays draft pending the required human-authored Change summary, and GitHub CI is queued after the latest push.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

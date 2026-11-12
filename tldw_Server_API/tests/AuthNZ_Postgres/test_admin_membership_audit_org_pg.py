@@ -2,6 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.tests.helpers.audit_helpers import await_audit_action, flush_audit_events
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 @pytest.mark.real_audit
@@ -33,23 +34,19 @@ async def test_org_membership_audit_events_postgres(real_audit_service, test_db_
     )
 
     # Insert admin (role=admin, verified) and target user
-    import uuid
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, role, is_active, is_verified) VALUES ($1, $2, $3, $4, 'admin', TRUE, TRUE)",
-        str(uuid.uuid4()), "pgadmin_org_audit", "pgadmin_org_audit@example.com", "x",
+    admin_id = await ensure_test_user(
+        pool, "pgadmin_org_audit", "pgadmin_org_audit@example.com", role="admin", is_verified=True
     )
-    admin_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgadmin_org_audit")
-    await pool.execute(
-        "INSERT INTO users (uuid, username, email, password_hash, is_active, is_verified) VALUES ($1, $2, $3, $4, TRUE, TRUE)",
-        str(uuid.uuid4()), "pgvictim_org", "pgvictim_org@example.com", "x",
+    target_id = await ensure_test_user(
+        pool, "pgvictim_org", "pgvictim_org@example.com", is_verified=True
     )
-    target_id = await pool.fetchval("SELECT id FROM users WHERE username = $1", "pgvictim_org")
 
     # Override AuthPrincipal to treat this user as admin for claim-first gates
-    from tldw_Server_API.app.main import app
-    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
     from starlette.requests import Request
+
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+    from tldw_Server_API.app.main import app
 
     async def _principal_override(request: Request) -> AuthPrincipal:  # type: ignore[override]
         principal = AuthPrincipal(

@@ -37,9 +37,9 @@ Resolve the non-inline CodeRabbit PR #1237 review-body finding that the unified 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: test_embeddings_orchestrator_events_unified_normal_close_cancels_producer timed out before the fix while awaiting the still-running producer task. GREEN: focused normal_close regression passed after the production change. Adjacent verification: test_orchestrator_sse_unified_flag.py plus test_orchestrator_sse.py passed with existing Redis-fixture skips (1 passed, 5 skipped); OpenAPI embeddings orchestrator contract selection passed (1 passed). Bandit source scope reported 0 findings in /tmp/bandit_pr1237_embeddings_sse_producer.json. git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

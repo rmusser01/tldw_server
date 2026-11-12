@@ -2154,7 +2154,7 @@
     "message": "Salvar após revisão"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Revisar antes de salvar"
+    "message": "Revisar o conteúdo extraído antes de salvar"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Processe agora e depois edite os rascunhos localmente antes de enviá-los ao servidor."

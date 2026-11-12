@@ -796,7 +796,7 @@ class TestTemplateRenderAdapter:
         from tldw_Server_API.app.core.Workflows.adapters.text import run_template_render_adapter
 
         monkeypatch.setattr(
-            "tldw_Server_API.app.core.Chat.prompt_template_manager.apply_template_to_string",
+            "tldw_Server_API.app.core.Utils.template_render.apply_template_to_string",
             lambda *args, **kwargs: (_ for _ in ()).throw(
                 RuntimeError("template backend exploded at /private/template-cache")
             ),

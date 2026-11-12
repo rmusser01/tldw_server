@@ -33,7 +33,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Frontend capability gating implemented. Sequential Vitest evidence: research-studio-capabilities 6 passed; WorkspacePlayground.stage2.responsive 13 passed; ChatPane.stage1 12 passed; StudioPane.stage3 22 passed. Combined three-file Vitest run hit parallel per-test timeouts, then each modified file passed when run individually.
 
 Verification update:
@@ -45,7 +45,7 @@ Verification update:
 - Focused frontend Vitest: research-studio-capabilities 6 passed; WorkspacePlayground.stage2 13 passed; StudioPane.stage3 22 passed; ChatPane.stage1 12 passed; frontend route/readiness tests 9 passed.
 - Bandit touched backend scope: 0 findings in /tmp/bandit_research_studio_capabilities.json.
 - git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

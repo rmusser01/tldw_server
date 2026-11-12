@@ -61,7 +61,7 @@ Docs/superpowers/plans/2026-06-18-workspace-activity-index-contract-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan in isolated worktree `.worktrees/workspace-activity-index-contract`.
 
 Implemented ChaChaNotes schema v50 activity storage; activity DB APIs; WorkspaceActivityIndexService; `GET /api/v1/workspaces/{workspace_id}/index`; best-effort membership/runtime binding activity hooks; frontend `src/services/workspace-index` contract normalizers; and docs updates.
@@ -73,27 +73,7 @@ Verification:
 - `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/activity_index.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspace_activity_index.json` completed with zero results.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/2396. Earlier Git DNS fetch blocker is resolved; branch was rebased onto `origin/dev` before final verification.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Implemented the Workspace #1994 activity/index contract in PR https://github.com/rmusser01/tldw_server/pull/2396. The backend now stores secret-safe workspace activity events, exposes a contained-resource index endpoint with grouped previews/runtime warnings/recent activity, and records best-effort membership/runtime binding events. The frontend has minimal TypeScript contract normalizers for future UI consumption, and the design doc records the endpoint as an inspection/navigation contract rather than a duplicate workspace dashboard. Verification passed: 138 focused backend tests, 3 frontend normalizer tests, `git diff --check`, and Bandit with zero results.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review follow-up for PR #2396: rebased branch against latest origin/dev (already up to date), addressed Gemini/Qodo comments by moving runtime-binding activity event construction into core, isolating the workspace index builder in run_in_threadpool, narrowing runtime-binding upsert activity to normalized user-field changes, replacing activity listing dynamic SQL with static parameterized query variants, returning deleted-workspace index payloads with workspace_deleted warnings, and replacing list+scan activity insert readback with direct primary-key lookup plus return_row=False support for best-effort write hooks.
 
 Review verification:
@@ -111,3 +91,19 @@ Second review verification:
 - `git diff --check` passed.
 - `python -m bandit -r tldw_Server_API/app/core/DB_Management/ChaChaNotes_DB.py tldw_Server_API/app/core/Workspaces/activity_index.py tldw_Server_API/app/core/Workspaces/membership_service.py tldw_Server_API/app/core/Workspaces/runtime_bindings.py tldw_Server_API/app/api/v1/endpoints/workspaces.py tldw_Server_API/app/api/v1/schemas/workspace_schemas.py -f json -o /tmp/bandit_workspace_activity_index_review2.json` completed with zero results/errors after activating the project venv.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented the Workspace #1994 activity/index contract in PR https://github.com/rmusser01/tldw_server/pull/2396. The backend now stores secret-safe workspace activity events, exposes a contained-resource index endpoint with grouped previews/runtime warnings/recent activity, and records best-effort membership/runtime binding events. The frontend has minimal TypeScript contract normalizers for future UI consumption, and the design doc records the endpoint as an inspection/navigation contract rather than a duplicate workspace dashboard. Verification passed: 138 focused backend tests, 3 frontend normalizer tests, `git diff --check`, and Bandit with zero results.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignorer quand les templates sont actifs"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Conflit lors du transfert de média"
+  },
+  "mediaHandoff_conflict": {
+    "message": "Le champ de rédaction contient déjà un brouillon. Insérez la source média, remplacez votre brouillon ou annulez l’importation."
+  },
+  "mediaHandoff_insert": {
+    "message": "Insérer la source média"
+  },
+  "mediaHandoff_replace": {
+    "message": "Remplacer le brouillon actuel"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Annuler l’importation"
   }
 }

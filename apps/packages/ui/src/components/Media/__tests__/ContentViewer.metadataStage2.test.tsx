@@ -63,6 +63,41 @@ const baseSelectedMedia = {
 }
 
 describe('ContentViewer metadata stage 2 details', () => {
+  it.each([
+    [0, "not_indexed", "Not Indexed"],
+    ["0", "not_indexed", "Not Indexed"],
+    ["queued", "pending", "Pending"],
+    [1, "completed", "Completed"],
+    [-1, "failed", "Failed"],
+  ])(
+    "reports vector status %s without inventing a queued job",
+    (value, status, label) => {
+      render(
+        <ContentViewer
+          selectedMedia={baseSelectedMedia}
+          content={"saved source"}
+          mediaDetail={{
+            processing: {
+              chunking_status: "skipped",
+              vector_processing_status: value,
+            },
+          }}
+        />,
+      );
+      expect(
+        screen.getByTestId("media-processing-status-vector"),
+      ).toHaveAttribute("data-status", status);
+      expect(
+        screen.getByTestId("media-processing-status-vector"),
+      ).toHaveTextContent(`Vector: ${label}`);
+      fireEvent.click(screen.getByTestId("metadata-details-toggle"));
+      expect(screen.getByTestId("metadata-processing-vector")).toHaveAttribute(
+        "data-status",
+        status,
+      );
+    },
+  );
+
   it('renders processing badges and prioritized safe metadata fields', () => {
     render(
       <ContentViewer
@@ -89,7 +124,7 @@ describe('ContentViewer metadata stage 2 details', () => {
     )
     expect(screen.getByTestId('media-processing-status-vector')).toHaveAttribute(
       'data-status',
-      'pending'
+      'not_indexed'
     )
 
     fireEvent.click(screen.getByTestId('metadata-details-toggle'))
@@ -124,7 +159,7 @@ describe('ContentViewer metadata stage 2 details', () => {
     )
     expect(screen.getByTestId('media-processing-status-vector')).toHaveAttribute(
       'data-status',
-      'pending'
+      'not_indexed'
     )
 
     rerender(

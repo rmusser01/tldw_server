@@ -1,13 +1,16 @@
-"""Chat transport keeps the socket's chosen identity and proxy trust inputs."""
+"""Chat transport forwards exactly the credential the socket was verified with, and proxy trust inputs."""
 
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 from starlette.websockets import WebSocket
 
 from tldw_Server_API.app.api.v1.endpoints import persona
+from tldw_Server_API.app.core.AuthNZ import websocket_principal
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 
 pytestmark = pytest.mark.unit
 
@@ -16,14 +19,14 @@ async def _unused_io(*args):
     raise AssertionError("Credential projection must not perform socket I/O")
 
 
-def _socket(method, headers, *, peer="192.0.2.10"):
+def _socket(method, headers, *, peer="192.0.2.10", query=b""):
     ws = WebSocket(
         {
             "type": "websocket",
             "path": "/api/v1/persona/stream",
             "headers": [(name.encode(), value.encode()) for name, value in headers],
             "client": (peer, 4321),
-            "query_string": b"",
+            "query_string": query,
         },
         receive=_unused_io,
         send=_unused_io,
@@ -32,36 +35,49 @@ def _socket(method, headers, *, peer="192.0.2.10"):
     return ws
 
 
+@pytest.fixture
+def http_verifier(monkeypatch):
+    """HTTP's choice: the JWT ``chosen-token`` first, else the API key (``X-API-KEY``, or a non-JWT bearer)."""
+
+    async def verify(request):
+        if request.headers.get("authorization") == "Bearer chosen-token":
+            return AuthPrincipal(kind="user", user_id=1, token_type="access")
+        if request.headers.get("x-api-key") or request.headers.get("authorization"):
+            return AuthPrincipal(kind="user", user_id=1, token_type="api_key")
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verify)
+
+
 @pytest.mark.parametrize(
-    "headers,token,key,expected",
+    "headers,query",
     [
-        ([("authorization", "Bearer ignored-key"), ("x-api-key", "chosen-key")], None, None, "chosen-key"),
-        ([("authorization", "Bearer chosen-key")], None, None, "chosen-key"),
-        ([], "chosen-key", None, "chosen-key"),
-        ([("authorization", "Bearer expired-jwt")], None, "chosen-key", "chosen-key"),
+        ([("authorization", "Bearer stale-jwt"), ("x-api-key", "chosen-key")], b""),
+        ([("authorization", "Bearer chosen-key")], b""),
+        ([], b"api_key=chosen-key"),
     ],
 )
-def test_api_key_auth_forwards_only_the_selected_key(headers, token, key, expected):
-    ws = _socket("api_key", headers + [("cookie", "session=ambient"), ("x-csrf-token", "unrelated")])
-    result = persona._persona_conversation_headers(ws, token, key)
-    assert result == {"x-api-key": expected}
+@pytest.mark.asyncio
+async def test_api_key_auth_forwards_only_the_selected_key(http_verifier, headers, query):
+    ws = _socket("", headers + [("cookie", "session=ambient"), ("x-csrf-token", "unrelated")], query=query)
+    assert await persona._resolve_authenticated_user_id(ws) == ("1", True, True)
+    assert persona._persona_conversation_headers(ws) == {"x-api-key": "chosen-key"}
 
 
-@pytest.mark.parametrize("method", ["jwt_authnz", "jwt_mcp"])
 @pytest.mark.parametrize("source", ["header", "subprotocol", "query"])
-def test_jwt_auth_cannot_fall_back_to_a_different_key_or_cookie(method, source):
-    headers = [("x-api-key", "other-owner"), ("cookie", "session=other-owner")]
-    token = None
+@pytest.mark.asyncio
+async def test_jwt_auth_cannot_fall_back_to_a_different_key_or_cookie(http_verifier, source):
+    headers = [("cookie", "session=other-owner")]
+    query = b""
     if source == "header":
-        headers.append(("authorization", "Bearer chosen-token"))
+        headers += [("authorization", "Bearer chosen-token"), ("x-api-key", "other-owner")]
     elif source == "subprotocol":
-        headers.append(("sec-websocket-protocol", "bearer, chosen-token"))
-    else:
-        token = "chosen-token"
-    ws = _socket(method, headers)
-    assert persona._persona_conversation_headers(ws, token, None) == {
-        "authorization": "Bearer chosen-token",
-    }
+        headers += [("sec-websocket-protocol", "bearer, chosen-token"), ("x-api-key", "other-owner")]
+    else:  # a header credential would win over the query, so the query stands alone
+        query = b"token=chosen-token"
+    ws = _socket("", headers, query=query)
+    assert await persona._resolve_authenticated_user_id(ws) == ("1", True, True)
+    assert persona._persona_conversation_headers(ws) == {"authorization": "Bearer chosen-token"}
 
 
 def test_cookie_credentials_require_successful_cookie_auth_state():
@@ -73,13 +89,13 @@ def test_cookie_credentials_require_successful_cookie_auth_state():
         ("x-csrf-token", "untrusted-header"),
     ]
     ws = _socket("single_user_session", headers)
-    assert persona._persona_conversation_headers(ws, None, None) == {
+    assert persona._persona_conversation_headers(ws) == {
         "origin": "https://trusted.example",
         "cookie": "session=owned; csrf_token=owned-csrf",
         "x-csrf-token": "owned-csrf",
     }
     ws.state.persona_auth_method = ""
-    assert persona._persona_conversation_headers(ws, None, None) == {
+    assert persona._persona_conversation_headers(ws) == {
         "origin": "https://trusted.example",
     }
 
@@ -95,7 +111,7 @@ def test_cookie_credentials_require_successful_cookie_auth_state():
 )
 def test_forwarding_preserves_original_proxy_trust_resolution(peer, forwarding, expected):
     ws = _socket("api_key", [("x-api-key", "chosen-key"), *forwarding], peer=peer)
-    headers = persona._persona_conversation_headers(ws, None, None)
+    headers = persona._persona_conversation_headers(ws)
     request = Request(
         {
             "type": "http",

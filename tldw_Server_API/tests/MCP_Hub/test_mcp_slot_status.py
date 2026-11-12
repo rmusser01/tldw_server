@@ -16,9 +16,9 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 @pytest.mark.asyncio
 async def test_assignment_binding_reports_reauth_required_when_managed_secret_ref_requires_reauth(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_credential_broker_service import (
@@ -30,7 +30,6 @@ async def test_assignment_binding_reports_reauth_required_when_managed_secret_re
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -120,9 +119,9 @@ async def test_assignment_binding_reports_reauth_required_when_managed_secret_re
 @pytest.mark.asyncio
 async def test_assignment_binding_reports_missing_when_granted_slot_has_no_secret(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_credential_broker_service import (
@@ -134,7 +133,6 @@ async def test_assignment_binding_reports_missing_when_granted_slot_has_no_secre
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 
@@ -205,9 +203,9 @@ async def test_assignment_binding_reports_missing_when_granted_slot_has_no_secre
 @pytest.mark.asyncio
 async def test_assignment_binding_reports_approval_required_when_slot_secret_exists_but_slot_is_not_granted(
     tmp_path,
-    monkeypatch,
+    monkeypatch, fresh_services
 ) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
     from tldw_Server_API.app.services.mcp_credential_broker_service import (
@@ -219,7 +217,6 @@ async def test_assignment_binding_reports_approval_required_when_slot_secret_exi
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
 

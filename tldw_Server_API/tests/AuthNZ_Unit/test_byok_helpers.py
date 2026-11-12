@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -423,6 +424,18 @@ def test_openrouter_keeps_general_credential_policy_when_used_by_tts(monkeypatch
     ) == {"org_id": "org-general", "project_id": "project-general"}
 
 
+def _allow_probe_host(monkeypatch) -> None:
+    """Admit the synthetic probe host under CI's restrictive egress allowlist.
+
+    CI exports WORKFLOWS_EGRESS_ALLOWLIST, which the central http_client enforces
+    before any MockTransport sees the request; without this the probe fails with
+    EgressPolicyError and reports ``stored-unverified``.
+    """
+    configured = os.getenv("WORKFLOWS_EGRESS_ALLOWLIST", "")
+    if configured.strip():
+        monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", f"{configured},voice.example")
+
+
 def _probe_spec(*, enabled=True, discovery_enabled=True, models_path="models"):
     return SimpleNamespace(
         backend_id="gateway:voice-lab",
@@ -516,6 +529,9 @@ async def test_gateway_credential_probe_stops_oversized_chunked_discovery_early(
     from tldw_Server_API.app.core.AuthNZ import byok_testing
     from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
 
+    # Allow the mock host through the real egress check regardless of CI policy.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "voice.example")
+
     chunks = [b'{"data":["', b"x" * 700_000, b"y" * 700_000, b'"]}']
 
     class _CountingStream(httpx.AsyncByteStream):
@@ -544,6 +560,7 @@ async def test_gateway_credential_probe_stops_oversized_chunked_discovery_early(
             stream=stream,
         )
 
+    _allow_probe_host(monkeypatch)
     client = create_async_client(transport=httpx.MockTransport(handler))
 
     async def _central_fetch(**kwargs):
@@ -559,7 +576,7 @@ async def test_gateway_credential_probe_stops_oversized_chunked_discovery_early(
         await client.aclose()
 
     assert result == "stored-unverified"
-    assert stream.yielded < len(chunks)
+    assert 0 < stream.yielded < len(chunks)
     assert stream.close_count == 1
 
 
@@ -571,6 +588,9 @@ async def test_gateway_credential_probe_classifies_rejection_before_reading_body
 
     from tldw_Server_API.app.core.AuthNZ import byok_testing
     from tldw_Server_API.app.core.http_client import afetch_json, create_async_client
+
+    # Allow the mock host through the real egress check regardless of CI policy.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "voice.example")
 
     class _CountingStream(httpx.AsyncByteStream):
         def __init__(self) -> None:
@@ -594,6 +614,7 @@ async def test_gateway_credential_probe_classifies_rejection_before_reading_body
             stream=stream,
         )
 
+    _allow_probe_host(monkeypatch)
     client = create_async_client(transport=httpx.MockTransport(handler))
 
     async def _central_fetch(**kwargs):

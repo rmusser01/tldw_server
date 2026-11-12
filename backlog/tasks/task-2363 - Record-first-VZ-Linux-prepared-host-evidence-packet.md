@@ -33,9 +33,9 @@ Run the prepared-host VZ Linux smoke path where available and update the prepare
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Inspected current operator docs and run-host-e2e-smoke.sh before execution. Used local evidence dir /var/folders/p_/x47tgtn57cv43r7yxxn40tyh0000gn/T/tldw-vz-evidence-20260616-065631, canonical Debian Bookworm arm64 bundle, repo entitlements, and project Python 3.11. Default smoke only; manual failure, launchd, stale-socket, host reboot, and boot-fault drills were intentionally skipped and recorded as residual evidence gaps.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

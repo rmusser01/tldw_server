@@ -34,11 +34,11 @@ Defer the covered outputs_templates and outputs content router imports after PR 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red/green verified the output router laziness contract: initial focused run failed because outputs_templates and outputs resolved router attrs during iter_content_router_specs; after converting both to ImportedRouterSpec, the focused test passed.
 
 Verification: focused output_router_attr_lookup passed; full router_groups_contract passed 51 tests; main_router_contract passed 6 tests; openapi_contracts passed 69 tests; Bandit content.py JSON reported 0 results and 0 errors; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

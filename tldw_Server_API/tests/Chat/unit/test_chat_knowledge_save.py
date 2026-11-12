@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_router
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 pytestmark = pytest.mark.unit
 
@@ -261,19 +261,57 @@ def test_legacy_knowledge_save_rejects_ungrounded_turn_before_writes(tmp_path, q
         db.close_connection()
 
 
-def test_legacy_knowledge_save_rejects_foreign_parent_before_writes(tmp_path):
+def test_legacy_knowledge_save_rejects_foreign_parent_before_writes(
+    tmp_path, monkeypatch
+):
     db = CharactersRAGDB(db_path=str(tmp_path / "chacha.db"), client_id="user-1")
     try:
         app = _build_app(db)
         conv_id = db.add_conversation({"character_id": 1, "client_id": "user-1"})
         foreign_id = db.add_conversation({"character_id": 1, "client_id": "other-user"})
-        parent_id = db.add_message({"conversation_id": foreign_id, "sender": "user", "content": "Private question?"})
-        answer_id = db.add_message({
-            "conversation_id": conv_id, "sender": "assistant", "content": "Seven beds.", "parent_message_id": parent_id,
-        })
-        response = app.post("/api/v1/chat/knowledge/save", json={
-            "conversation_id": conv_id, "message_id": answer_id, "snippet": "Seven beds.", "make_flashcard": True,
-        })
+        parent_id = db.add_message(
+            {
+                "conversation_id": foreign_id,
+                "sender": "user",
+                "content": "Private question?",
+            }
+        )
+        with pytest.raises(InputError, match="parent_message_unavailable"):
+            db.add_message(
+                {
+                    "conversation_id": conv_id,
+                    "sender": "assistant",
+                    "content": "Seven beds.",
+                    "parent_message_id": parent_id,
+                }
+            )
+        assert db.get_messages_for_conversation(conv_id) == []
+        answer_id = db.add_message(
+            {
+                "conversation_id": conv_id,
+                "sender": "assistant",
+                "content": "Seven beds.",
+            }
+        )
+        get_message = db.get_message_by_id
+
+        def historical_message(message_id):
+            """Present only the old malformed link; keep real parent ownership reads."""
+            message = get_message(message_id)
+            if message_id == answer_id:
+                return {**message, "parent_message_id": parent_id}
+            return message
+
+        monkeypatch.setattr(db, "get_message_by_id", historical_message)
+        response = app.post(
+            "/api/v1/chat/knowledge/save",
+            json={
+                "conversation_id": conv_id,
+                "message_id": answer_id,
+                "snippet": "Seven beds.",
+                "make_flashcard": True,
+            },
+        )
         assert response.status_code == 403, response.text
         assert db.count_notes() == 0
         assert db.list_flashcards() == []

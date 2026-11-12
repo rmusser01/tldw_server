@@ -4,6 +4,9 @@ import {
   type TldwConfig
 } from "./TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { createServicePromptScopeChangedError } from "./service-prompt-scope-error"
+import { requestScopeFields, type ServicePromptRequestScope } from "./domains/service-prompts"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import {
@@ -32,6 +35,7 @@ export type ServerCapabilities = {
   hasFlashcards: boolean
   hasQuizzes: boolean
   hasCharacters: boolean
+  hasRoleplayResumeV1?: boolean
   hasWorldBooks: boolean
   hasChatDictionaries: boolean
   hasChatKnowledgeSave: boolean
@@ -57,6 +61,7 @@ export type ServerCapabilities = {
   hasPersona: boolean
   hasPersonaLiveControl: boolean
   hasPersonalization: boolean
+  hasCompanion: boolean
   hasGuardian: boolean
   hasSelfMonitoring: boolean
   ffmpegAvailable: boolean | null
@@ -84,6 +89,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasFlashcards: false,
   hasQuizzes: false,
   hasCharacters: false,
+  hasRoleplayResumeV1: false,
   hasWorldBooks: false,
   hasChatDictionaries: false,
   hasChatKnowledgeSave: false,
@@ -109,6 +115,7 @@ const defaultCapabilities: ServerCapabilities = {
   hasPersona: false,
   hasPersonaLiveControl: false,
   hasPersonalization: false,
+  hasCompanion: false,
   hasGuardian: false,
   hasSelfMonitoring: false,
   ffmpegAvailable: null,
@@ -222,7 +229,7 @@ type IngestionSourceCapabilitiesResponse = {
 }
 
 const CAPABILITIES_CACHE_TTL_MS = 5 * 60 * 1000
-const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV5"
+const CAPABILITIES_STORAGE_KEY = "__tldwServerCapabilitiesCacheV7"
 
 type CapabilitiesCachePayload = {
   key: string
@@ -291,31 +298,139 @@ const normalizePaths = (raw: any): Record<string, any> => {
   return out
 }
 
-const resolveSchemaRef = (schema: any, spec: any): any => {
+const schemaAnnotationKeys = [
+  "title",
+  "description",
+  "default",
+  "example",
+  "examples",
+  "deprecated",
+  "readOnly",
+  "writeOnly",
+  "$comment"
+]
+
+const resolveSchemaRef = (
+  schema: any,
+  spec: any,
+  seen: Set<string> = new Set(),
+  rejectRefConstraints = false
+): any => {
   if (!schema || typeof schema !== "object") return schema
   const ref = schema.$ref
   if (typeof ref !== "string") return schema
+  if (
+    rejectRefConstraints &&
+    Object.keys(schema).some(
+      (key) => !["$ref", ...schemaAnnotationKeys].includes(key)
+    )
+  )
+    return null
   const prefix = "#/components/schemas/"
-  if (!ref.startsWith(prefix)) return schema
-  const name = ref.slice(prefix.length)
-  const resolved = spec?.components?.schemas?.[name]
-  return resolved || schema
+  if (!ref.startsWith(prefix) || seen.has(ref) || seen.size >= 64) return null
+  seen.add(ref)
+  return resolveSchemaRef(
+    spec?.components?.schemas?.[ref.slice(prefix.length)],
+    spec,
+    seen,
+    rejectRefConstraints
+  )
 }
 
 const schemaHasProperty = (
   schema: any,
   property: string,
   spec: any,
-  seen: Set<string> = new Set()
+  seen: Set<string> = new Set(),
+  propertyType?: string,
+  depth = 0,
+  allowedBoolean = false
 ): boolean => {
-  if (!schema || typeof schema !== "object") return false
+  if (!schema || typeof schema !== "object" || depth >= 64) return false
   const ref = typeof schema.$ref === "string" ? schema.$ref : null
   if (ref) {
     if (seen.has(ref)) return false
     seen.add(ref)
-    return schemaHasProperty(resolveSchemaRef(schema, spec), property, spec, seen)
+    return schemaHasProperty(
+      resolveSchemaRef(schema, spec, new Set(), Boolean(propertyType)),
+      property,
+      spec,
+      seen,
+      propertyType,
+      depth + 1,
+      allowedBoolean
+    )
   }
-  if (schema.properties && schema.properties[property]) return true
+  // Unsupported request constraints cannot grant strict admission authority.
+  if (
+    propertyType &&
+    ((schema.type !== undefined && schema.type !== "object") ||
+      Object.keys(schema).some(
+        (key) =>
+          ![
+            "type",
+            "properties",
+            "required",
+            "additionalProperties",
+            ...schemaAnnotationKeys
+          ].includes(key)
+      ))
+  )
+    return false
+  const field = resolveSchemaRef(
+    schema.properties?.[property],
+    spec,
+    new Set(),
+    Boolean(propertyType)
+  )
+  if (field && !propertyType) return true
+  if (field && propertyType) {
+    const fieldKeys = [
+      "type",
+      "const",
+      "enum",
+      "anyOf",
+      "oneOf",
+      ...schemaAnnotationKeys
+    ]
+    if (Object.keys(field).some((key) => !fieldKeys.includes(key))) return false
+    const variants = field.anyOf ?? field.oneOf ?? [field]
+    const isSimple = (entry: Record<string, unknown> | null | undefined) =>
+      Boolean(entry) &&
+      Object.keys(entry ?? {}).every((key) => fieldKeys.includes(key)) &&
+      entry?.anyOf === undefined &&
+      entry?.oneOf === undefined
+    const allowsBoolean = (entry: Record<string, unknown> | null | undefined) =>
+      isSimple(entry) &&
+      entry?.type === propertyType &&
+      (entry.const === undefined || entry.const === allowedBoolean) &&
+      (entry.enum === undefined ||
+        (Array.isArray(entry.enum) && entry.enum.includes(allowedBoolean)))
+    if (
+      Array.isArray(variants) &&
+      variants.length > 0 &&
+      variants.length <= 64 &&
+      !(field.anyOf !== undefined && field.oneOf !== undefined) &&
+      (field.type === undefined || field.type === propertyType) &&
+      (field.const === undefined || field.const === allowedBoolean) &&
+      (field.enum === undefined ||
+        (Array.isArray(field.enum) && field.enum.includes(allowedBoolean)))
+    ) {
+      const resolved = variants.map((entry) =>
+        resolveSchemaRef(entry, spec, new Set(), true)
+      )
+      if (
+        (field.oneOf !== undefined
+          ? resolved.filter(allowsBoolean).length === 1
+          : resolved.some(allowsBoolean)) &&
+        resolved.every(
+          (entry) =>
+            allowsBoolean(entry) || (isSimple(entry) && entry?.type === "null")
+        )
+      )
+        return true
+    }
+  }
 
   const combos = [
     ...(Array.isArray(schema.allOf) ? schema.allOf : []),
@@ -323,9 +438,148 @@ const schemaHasProperty = (
     ...(Array.isArray(schema.oneOf) ? schema.oneOf : [])
   ]
   for (const entry of combos) {
-    if (schemaHasProperty(entry, property, spec, seen)) return true
+    if (schemaHasProperty(entry, property, spec, seen, propertyType, depth + 1, allowedBoolean))
+      return true
   }
   return false
+}
+
+/** Only the deployed operation's JSON request contract grants strict admission support. */
+export const detectNativeHistoryBranchAdmission = (
+  spec: unknown,
+  operation: "messages" | "completion"
+): boolean => {
+  const path =
+    operation === "messages"
+      ? "/api/v1/chats/{chat_id}/messages"
+      : "/api/v1/chat/completions"
+  const paths = resolveSchemaRef(spec, spec)?.paths
+  const post = paths?.[path]?.post ?? paths?.[`${path}/`]?.post
+  const content = post?.requestBody?.content
+  const schema =
+    content?.["application/json"]?.schema ??
+    content?.["application/json;charset=utf-8"]?.schema
+  return schemaHasProperty(
+    schema,
+    "tldw_history_branch",
+    spec,
+    new Set(),
+    "boolean"
+  )
+}
+
+/** Require the primary operation's exact versioned excluded-target contract. */
+export const detectNativeHistoryEditAdmission = (
+  spec: unknown,
+  operation: "messages" | "completion"
+): boolean => {
+  const path =
+    operation === "messages"
+      ? "/api/v1/chats/{chat_id}/messages"
+      : "/api/v1/chat/completions"
+  const paths = resolveSchemaRef(spec, spec)?.paths
+  const content = (paths?.[path]?.post ?? paths?.[`${path}/`]?.post)
+    ?.requestBody?.content
+  const request = resolveSchemaRef(
+    content?.["application/json"]?.schema ??
+      content?.["application/json;charset=utf-8"]?.schema,
+    spec,
+    new Set(),
+    true
+  )
+  if (
+    !schemaHasProperty(
+      request,
+      "tldw_history_branch",
+      spec,
+      new Set(),
+      "boolean",
+      0,
+      true
+    )
+  )
+    return false
+  const field = resolveSchemaRef(
+    request?.properties?.tldw_history_edit_v1,
+    spec,
+    new Set(),
+    true
+  )
+  if (!field || typeof field !== "object") return false
+  const keysAre = (value: unknown, allowed: string[]) =>
+    Boolean(value) &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    Object.keys(value).every((key) =>
+      [...allowed, ...schemaAnnotationKeys].includes(key)
+    )
+  const union = field.anyOf ?? field.oneOf
+  let target = field
+  if (union !== undefined) {
+    if (
+      !keysAre(field, ["anyOf", "oneOf"]) ||
+      (field.anyOf !== undefined && field.oneOf !== undefined) ||
+      !Array.isArray(union) ||
+      union.length !== 2
+    )
+      return false
+    const variants = union.map((entry) =>
+      resolveSchemaRef(entry, spec, new Set(), true)
+    )
+    const objects = variants.filter((entry) => entry?.type === "object")
+    if (
+      objects.length !== 1 ||
+      variants.filter(
+        (entry) => keysAre(entry, ["type"]) && entry.type === "null"
+      ).length !== 1
+    )
+      return false
+    target = objects[0]
+  }
+  const members = ["version", "message_id", "message_revision"]
+  if (
+    !keysAre(target, [
+      "type",
+      "properties",
+      "required",
+      "additionalProperties"
+    ]) ||
+    target.type !== "object" ||
+    target.additionalProperties !== false ||
+    !Array.isArray(target.required) ||
+    target.required.length !== members.length ||
+    !members.every((key) => target.required.includes(key)) ||
+    !target.properties ||
+    Object.keys(target.properties).length !== members.length ||
+    !members.every((key) => Object.hasOwn(target.properties, key))
+  )
+    return false
+  const version = resolveSchemaRef(
+    target.properties.version,
+    spec,
+    new Set(),
+    true
+  )
+  if (
+    !keysAre(version, ["type", "const"]) ||
+    version.type !== "integer" ||
+    version.const !== 1
+  )
+    return false
+  return members.slice(1).every((key) => {
+    const value = resolveSchemaRef(
+      target.properties[key],
+      spec,
+      new Set(),
+      true
+    )
+    return (
+      keysAre(value, ["type", "minLength"]) &&
+      value.type === "string" &&
+      Number.isSafeInteger(value.minLength) &&
+      value.minLength >= 1
+    )
+  })
 }
 
 const detectChatSaveToDb = (spec: any): boolean => {
@@ -369,6 +623,27 @@ const extractFeatureFlag = (
     }
   }
   return null
+}
+
+const hasRoleplayResumeV1 = (
+  docsInfo: DocsInfoResponse | null | undefined
+): boolean => {
+  const capabilities = docsInfo?.capabilities
+  const version = capabilities?.roleplay_resume_contract_version
+  const features = capabilities?.roleplay_resume_features
+  return (
+    typeof version === "number" &&
+    Number.isSafeInteger(version) &&
+    version >= 1 &&
+    Array.isArray(features) &&
+    features.every((feature) => typeof feature === "string") &&
+    [
+      "snapshot_completion",
+      "fenced_completion",
+      "idempotent_user_append",
+      "nonstream_assistant_persist"
+    ].every((feature) => features.includes(feature))
+  )
 }
 
 const applyDocsInfoFeatureGates = (
@@ -455,6 +730,7 @@ const applyDocsInfoFeatureGates = (
 
   return {
     ...capabilities,
+    hasRoleplayResumeV1: hasRoleplayResumeV1(docsInfo),
     hasAudio,
     hasStt,
     hasTts,
@@ -632,6 +908,7 @@ const computeCapabilities = (
       has("/api/v1/persona/stream") ||
       hasPersonaLiveControl,
     hasPersonaLiveControl,
+    hasCompanion: has("/api/v1/companion/check-ins"),
     hasPersonalization:
       has("/api/v1/personalization/profile") ||
       has("/api/v1/personalization/opt-in") ||
@@ -653,7 +930,7 @@ const computeCapabilities = (
 }
 
 const inMemoryCapabilitiesCache = new Map<string, CapabilitiesCachePayload>()
-const inFlightByCacheKey = new Map<string, Promise<ServerCapabilities>>()
+const inFlightByCacheKey = new Map<string, { promise: Promise<ServerCapabilities>; signal: AbortSignal }>()
 let capabilitiesStorage: ReturnType<typeof createSafeStorage> | null = null
 
 const isDevRuntime = (): boolean => {
@@ -754,6 +1031,7 @@ const shouldProbeIngestionSourceCapabilities = (
 }
 
 type CapabilitiesFetchContext = {
+  configSnapshot: TldwConfig | null
   cacheKey: string
   shouldProbeIngestionSourceCapabilities: boolean
 }
@@ -772,6 +1050,7 @@ const getCapabilitiesFetchContext = async (): Promise<CapabilitiesFetchContext> 
     : config
 
   return {
+    configSnapshot: cacheConfig ? { ...cacheConfig } : null,
     cacheKey: buildChatSurfaceScopeKeyFromConfig(cacheConfig),
     shouldProbeIngestionSourceCapabilities:
       shouldProbeIngestionSourceCapabilities(config)
@@ -815,29 +1094,35 @@ const persistCapabilities = async (
 }
 
 const fetchCapabilitiesFromServer = async (
-  shouldProbeSourceCapabilities: boolean
+  { configSnapshot, shouldProbeIngestionSourceCapabilities: shouldProbeSourceCapabilities }: CapabilitiesFetchContext,
+  signal: AbortSignal
 ): Promise<ServerCapabilities> => {
+  signal.throwIfAborted()
   const startedAt = Date.now()
   capabilitiesDiagnostics.networkFetches += 1
   let spec: any | null = null
   let docsInfo: DocsInfoResponse | null = null
   try {
     const [openApiSpec, docsInfoResponse] = await Promise.all([
-      tldwClient.getOpenAPISpec(),
+      tldwClient.getOpenAPISpec({ configSnapshot, signal }),
       bgRequest<DocsInfoResponse, any>({
         path: "/api/v1/config/docs-info" as any,
         method: "GET" as any,
-        noAuth: true
+        noAuth: !shouldProbeSourceCapabilities,
+        configSnapshot,
+        abortSignal: signal
       }).catch(() => null)
     ])
     spec = openApiSpec
     docsInfo = docsInfoResponse
     capabilitiesDiagnostics.lastError = null
   } catch (error) {
+    signal.throwIfAborted()
     capabilitiesDiagnostics.networkErrors += 1
     capabilitiesDiagnostics.lastError = toErrorString(error)
     // ignore, fall back to bundled spec
   }
+  signal.throwIfAborted()
   let diagnosticsSource: ServerCapabilitiesCacheDiagnostics["lastSource"] = "network"
   let specSource: "authoritative" | "fallback" = "authoritative"
   if (!spec) {
@@ -864,84 +1149,115 @@ const fetchCapabilitiesFromServer = async (
       const sourceCapabilities =
         await bgRequest<IngestionSourceCapabilitiesResponse, any>({
           path: "/api/v1/ingestion-sources/capabilities" as any,
-          method: "GET" as any
+          method: "GET" as any,
+          configSnapshot,
+          abortSignal: signal
         })
       capabilities = applyIngestionSourceCapabilityGates(
         capabilities,
         sourceCapabilities
       )
     } catch {
+      signal.throwIfAborted()
       // Source entitlements are user-scoped. Failure should not hide generic source support.
     }
   }
 
+  signal.throwIfAborted()
   return capabilities
 }
 
 export const getServerCapabilities = async (
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; requestScope?: ServicePromptRequestScope; signal?: AbortSignal }
 ): Promise<ServerCapabilities> => {
-  const { cacheKey, shouldProbeIngestionSourceCapabilities } =
-    await getCapabilitiesFetchContext()
-  const now = Date.now()
-  const forceRefresh = options?.forceRefresh === true
-  capabilitiesDiagnostics.calls += 1
-  capabilitiesDiagnostics.lastCacheKey = cacheKey
-
-  if (forceRefresh) {
-    capabilitiesDiagnostics.forceRefreshCalls += 1
+  if (options?.requestScope) {
+    options.signal?.throwIfAborted()
+    const docsInfo = await bgRequest<DocsInfoResponse>({
+      path: "/api/v1/config/docs-info",
+      method: "GET",
+      noAuth: false,
+      abortSignal: options.signal,
+      ...requestScopeFields(options.requestScope)
+    })
+    options.signal?.throwIfAborted()
+    return applyDocsInfoFeatureGates({ ...defaultCapabilities }, docsInfo)
   }
 
-  if (!forceRefresh) {
-    const inMemory = inMemoryCapabilitiesCache.get(cacheKey)
-    if (inMemory) {
-      if (!isFreshCache(inMemory.fetchedAt, now)) {
-        capabilitiesDiagnostics.staleMemoryMisses += 1
-      } else {
-        capabilitiesDiagnostics.inMemoryHits += 1
-        capabilitiesDiagnostics.lastSource = "in-memory"
-        maybeLogDiagnostics("in-memory-hit")
-        return inMemory.capabilities
+  const controller = new AbortController()
+  const signal = controller.signal
+  const release = watchChatAccountChanges(invalidated => {
+    if (invalidated) controller.abort(createServicePromptScopeChangedError())
+  })
+  try {
+    const context = await getCapabilitiesFetchContext()
+    signal.throwIfAborted()
+    const { cacheKey } = context
+    const now = Date.now()
+    const forceRefresh = options?.forceRefresh === true
+    capabilitiesDiagnostics.calls += 1
+    capabilitiesDiagnostics.lastCacheKey = cacheKey
+
+    if (forceRefresh) {
+      capabilitiesDiagnostics.forceRefreshCalls += 1
+    }
+
+    if (!forceRefresh) {
+      const inMemory = inMemoryCapabilitiesCache.get(cacheKey)
+      if (inMemory) {
+        if (!isFreshCache(inMemory.fetchedAt, now)) {
+          capabilitiesDiagnostics.staleMemoryMisses += 1
+        } else {
+          capabilitiesDiagnostics.inMemoryHits += 1
+          capabilitiesDiagnostics.lastSource = "in-memory"
+          maybeLogDiagnostics("in-memory-hit")
+          return inMemory.capabilities
+        }
+      }
+
+      const persisted = await readPersistedCapabilities(cacheKey, now)
+      signal.throwIfAborted()
+      if (persisted) {
+        capabilitiesDiagnostics.persistedHits += 1
+        capabilitiesDiagnostics.lastSource = "persisted"
+        inMemoryCapabilitiesCache.set(cacheKey, persisted)
+        maybeLogDiagnostics("persisted-hit")
+        return persisted.capabilities
       }
     }
 
-    const persisted = await readPersistedCapabilities(cacheKey, now)
-    if (persisted) {
-      capabilitiesDiagnostics.persistedHits += 1
-      capabilitiesDiagnostics.lastSource = "persisted"
-      inMemoryCapabilitiesCache.set(cacheKey, persisted)
-      maybeLogDiagnostics("persisted-hit")
-      return persisted.capabilities
+    const existing = inFlightByCacheKey.get(cacheKey)
+    if (existing && !existing.signal.aborted) {
+      capabilitiesDiagnostics.inFlightHits += 1
+      capabilitiesDiagnostics.lastSource = "in-flight"
+      maybeLogDiagnostics("in-flight-hit")
+      const capabilities = await existing.promise
+      signal.throwIfAborted()
+      return capabilities
     }
-  }
 
-  const existing = inFlightByCacheKey.get(cacheKey)
-  if (existing) {
-    capabilitiesDiagnostics.inFlightHits += 1
-    capabilitiesDiagnostics.lastSource = "in-flight"
-    maybeLogDiagnostics("in-flight-hit")
-    return existing
-  }
+    const request = (async () => {
+      const capabilities = await fetchCapabilitiesFromServer(context, signal)
+      signal.throwIfAborted()
+      const payload: CapabilitiesCachePayload = {
+        key: cacheKey,
+        fetchedAt: Date.now(),
+        capabilities
+      }
+      inMemoryCapabilitiesCache.set(cacheKey, payload)
+      void persistCapabilities(payload)
+      return capabilities
+    })()
 
-  const request = (async () => {
-    const capabilities = await fetchCapabilitiesFromServer(
-      shouldProbeIngestionSourceCapabilities
-    )
-    const payload: CapabilitiesCachePayload = {
-      key: cacheKey,
-      fetchedAt: Date.now(),
-      capabilities
+    inFlightByCacheKey.set(cacheKey, { promise: request, signal })
+    try {
+      const capabilities = await request
+      signal.throwIfAborted()
+      return capabilities
+    } finally {
+      if (inFlightByCacheKey.get(cacheKey)?.promise === request) inFlightByCacheKey.delete(cacheKey)
+      publishCapabilitiesDiagnostics()
     }
-    inMemoryCapabilitiesCache.set(cacheKey, payload)
-    void persistCapabilities(payload)
-    return capabilities
-  })()
-
-  inFlightByCacheKey.set(cacheKey, request)
-  try {
-    return await request
   } finally {
-    inFlightByCacheKey.delete(cacheKey)
-    publishCapabilitiesDiagnostics()
+    release()
   }
 }

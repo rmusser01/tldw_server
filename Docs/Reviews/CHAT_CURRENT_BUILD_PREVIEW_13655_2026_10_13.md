@@ -1,0 +1,11 @@
+# Current production artifact and owned preview — TASK-13655
+
+Tracked source from head43fb6875f9 refreshed7986files into the existing isolated locked-Bun root; lock bytes remain identical, live dependencies/primary checkout untouched. Docker production Turbopack builds154pages, buildfq_kLRnDnfmZsXc77pQW7; tokens pass and unchanged budgets pass shared590.2KB/600,heaviest868.9KB/900. Actual801Turbopack manifests reference1127JS/CSS assets,allpresent. An initial root-level webpack manifest guess is excluded.
+
+Docker artifact correctly embeds app:8000 rewrites and cannot route on this host. It remains preserved in .next. A separate same-source local preview in .next-live-tier-pr3229-13655 embeds ownedloopback19767 and passes build/tokens/the same budgets; buildP0wWoFmCs_5eBdfwKji8N. Initial startup without explicitquickstart mode and initialDocker readiness errors are excluded; no gate/manifest/networking validation was bypassed. Only the verified owned stale preview process on19769 was replaced. No new browser window,tab orcontext.
+
+The deployment profile selected same-origin URL19769 without an API key. The existing sealed test credential was restored through ordinary Settings API-key/Save/Test Connection controls, values/logs private. This is a declared profile repair, not automatic legacy server-namespace continuity or cold-history proof.
+
+Current owned headless page390x844: actualFilters height44px,displaylist-item,native marker/focus visible. RealkeyboardEnter opensbothstatus/attachmentcontrols; Spacecloses,focusstayssummary,emptytargetvisible,zero horizontaloverflow. Desktop1280x900: bothfiltercontrolsvisible,no compactdisclosure,nooverflow. Mobile screenshot inspected:/private/tmp/chat-pr3229-library-13655-mobile.png. Private boolean/geometry logs record eachstep. These qualify TASK13654 current-build controls, not installedextension/physicalAT/participantstudy.
+
+Immutableoriginalbaseline comparison afterbuild/auth/keyboard proves9conversations/28rows deeplyequal; originalbaseline notrewritten. Other remaining UI/E2E/backend/H2 work and finalwholePRreview/rebase/merge stayopen. Bandit N/A verificationdocs; normalhooks required. ADR assessment:no newADR,verificationonly. PR:https://github.com/rmusser01/tldw_server/pull/3229.

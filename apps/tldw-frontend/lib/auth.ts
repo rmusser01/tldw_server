@@ -24,7 +24,7 @@ export interface User {
   is_verified?: boolean;
   created_at?: string;
   last_login?: string;
-  storage_quota_mb?: number;
+  storage_quota_mb?: number | null;
   storage_used_mb?: number;
   media_count?: number;
   notes_count?: number;

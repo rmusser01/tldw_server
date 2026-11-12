@@ -42,13 +42,13 @@ Write a repo-grounded implementation plan for the first design-system migration 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-04-tldw-web-design-system-proof-surface-implementation-plan.md with a contract-bound proof-surface implementation sequence for state tokens, state registry, shared state primitives, recovery boundaries, setup/readiness gates, health/admin pages, WebUI compile, extension build, visual smoke checks, and final verification.
 
 Self-reviewed the plan against Docs/Design/tldw_web_design_system_contract.md and current repo files under apps/packages/ui, apps/tldw-frontend, and apps/extension. No reviewer subagent was used because the available spawn-agent tool is restricted to explicit user requests for delegation/subagents.
 
 Verification: git diff --check passed for the new implementation plan and TASK-45.1 Backlog task. rg checks confirmed required plan header, proof-surface paths, extension Tailwind inheritance, Button non-migration guidance, build verification, and Bandit skip guidance. Runtime tests and Bandit were not run because this task only added documentation/planning files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -20,10 +20,11 @@ class WikilinkRef:
 
 
 def extract_wikilinks(content: str) -> list[WikilinkRef]:
-    """Return deduplicated wikilink refs in order of first occurrence.
+    """Return deduplicated ``[[id:<UUID>]]`` refs in order of first occurrence.
 
-    Only ``[[id:<UUID>]]`` syntax is matched.  Title-based ``[[Title]]``
-    links are intentionally ignored (deferred to Phase 2).
+    ``[[Title]]`` links are not returned: a title resolves to a note only
+    against the owner's notes, which ``NoteGraphProjectionStore`` does when it
+    projects edges (see ``tldw_Server_API.app.core.Notes.wikilinks``).
     """
     return [
         WikilinkRef(target_note_id=target)

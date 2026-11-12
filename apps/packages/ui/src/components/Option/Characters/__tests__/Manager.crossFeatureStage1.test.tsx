@@ -201,6 +201,7 @@ describe("CharactersManager cross-feature integration stage-1", () => {
     )
 
     useQueryClientMock.mockReturnValue({
+      getQueryState: vi.fn(),
       invalidateQueries: vi.fn(),
       setQueryData: vi.fn()
     })

@@ -36,9 +36,9 @@ Resolve actionable review feedback on PR 1624: align capability field names with
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed PR 1624 review feedback in Docs/Design/2026-05-13-persona-visual-manifest-v2-contract.md. Verified Qodo's capability-field mismatch against the existing API design spec, backend test, and WebUI type, then changed the design to preserve manifest_versions, buddy_runtime_supported, import_supported, and export_supported with additive V2 fields only. Added explicit embedded data rejection, clarified common role categories versus renderer-specific concrete roles, and defined the V2 activation state baseline. Verification: git diff --check passed; rg confirmed the conflicting field names are absent. Tests and Bandit skipped because this is docs-only plus Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

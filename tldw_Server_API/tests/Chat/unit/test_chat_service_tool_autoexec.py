@@ -10,7 +10,6 @@ from unittest.mock import AsyncMock
 import pytest
 from fastapi import HTTPException
 
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import execute_non_stream_call
 from tldw_Server_API.app.core.Chat.tool_auto_exec import (
@@ -18,6 +17,8 @@ from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionRecord,
 )
 from tldw_Server_API.app.core.Chat.tool_execution_service import request_declares_local_tool_use
+from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.LLM_Calls.structured_generation import (
     StructuredGenerationParseError,
 )
@@ -2172,7 +2173,7 @@ async def test_concurrent_tool_continuations_do_not_cross_results_or_marks(
         if not any(message.get("role") == "tool" for message in payload["messages"]):
             return _build_llm_response_with_tool_calls()
         ready[index].set()
-        assert release.wait(timeout=2.0)
+        assert release.wait(timeout=10.0)
         if index == 0:
             invalid_result = _late_continuation_response(
                 "nested_structured_error_and_text",
@@ -2282,21 +2283,23 @@ async def test_concurrent_tool_continuations_do_not_cross_results_or_marks(
     tasks = [asyncio.create_task(invoke(index)) for index in range(2)]
     try:
         observed = await asyncio.gather(
-            *(asyncio.to_thread(event.wait, 1.0) for event in ready)
+            # Readiness barriers only; generous so a loaded CI runner cannot fail
+            # the setup before the cross-request assertions run.
+            *(asyncio.to_thread(event.wait, 10.0) for event in ready)
         )
         assert observed == [True, True]
         release.set()
         await asyncio.gather(
-            *(asyncio.wait_for(event.wait(), 1.0) for event in mark_ready)
+            *(asyncio.wait_for(event.wait(), 10.0) for event in mark_ready)
         )
         assert marked == [[], []]
         assert all(task.done() is False for task in tasks)
 
         release_mark[1].set()
-        await asyncio.wait_for(mark_done[1].wait(), timeout=1.0)
+        await asyncio.wait_for(mark_done[1].wait(), timeout=10.0)
         assert marked == [[], ["openai"]]
         release_mark[0].set()
-        await asyncio.wait_for(mark_done[0].wait(), timeout=1.0)
+        await asyncio.wait_for(mark_done[0].wait(), timeout=10.0)
         bad_response, good_response = await asyncio.gather(*tasks)
     finally:
         release.set()
@@ -2436,6 +2439,8 @@ async def test_auto_continue_cancellation_drains_sync_adapter_before_exit(
     """Cancellation drains continuation work and marks only usable late output."""
 
     entered = threading.Event()
+    entered_async = asyncio.Event()
+    loop = asyncio.get_running_loop()
     release = threading.Event()
     marked: list[str] = []
     mark_attempts: list[str] = []
@@ -2471,6 +2476,7 @@ async def test_auto_continue_cancellation_drains_sync_adapter_before_exit(
     async def blocking_followup(**_kwargs):
         def invoke_sync_adapter() -> Any:
             entered.set()
+            loop.call_soon_threadsafe(entered_async.set)
             release.wait()
             return _late_continuation_response(late_outcome, sentinel)
 
@@ -2500,7 +2506,7 @@ async def test_auto_continue_cancellation_drains_sync_adapter_before_exit(
         )
     )
     try:
-        assert await asyncio.to_thread(entered.wait, 1.0)
+        await asyncio.wait_for(entered_async.wait(), timeout=10.0)
         assert mark_attempts == ["openai"]
         assert marked == []
         task.cancel()
@@ -2528,6 +2534,8 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
 
     lifecycle: list[str] = []
     continuation_entered = threading.Event()
+    continuation_entered_async = asyncio.Event()
+    loop = asyncio.get_running_loop()
     release_continuation = threading.Event()
     drain_entered = _install_owned_worker_drain_probe(monkeypatch)
     predicate = getattr(chat_service, "_nonstream_provider_result_is_usable", None)
@@ -2551,6 +2559,7 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
         if not any(message.get("role") == "tool" for message in payload["messages"]):
             return _build_llm_response_with_tool_calls()
         continuation_entered.set()
+        loop.call_soon_threadsafe(continuation_entered_async.set)
         assert release_continuation.wait(timeout=2.0)
         return _late_continuation_response(
             "valid_text",
@@ -2636,7 +2645,7 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
 
     task = asyncio.create_task(invoke())
     try:
-        assert await asyncio.to_thread(continuation_entered.wait, 1.0)
+        await asyncio.wait_for(continuation_entered_async.wait(), timeout=1.0)
         task.cancel()
         await asyncio.wait_for(drain_entered.wait(), timeout=1.0)
         assert task.done() is False
@@ -3125,9 +3134,12 @@ async def test_tool_autoexec_rejects_multi_choice_fallback_args_before_provider_
     assert provider_manager.failures == [("openai", "SanitizedProviderStreamError")]
 
 
-@pytest.mark.asyncio
-@pytest.mark.unit
-async def test_non_stream_auto_continue_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+def _auto_continue_followup_raises(monkeypatch: pytest.MonkeyPatch, error: Exception):
+    """Auto-execute one tool, then fail the one auto-continuation call with ``error``.
+
+    Returns the message save function and the payloads it saved.
+    """
+
     async def fake_log_llm_usage(**_kwargs):
         return None
 
@@ -3161,7 +3173,7 @@ async def test_non_stream_auto_continue_failure_is_non_fatal(monkeypatch: pytest
     monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
 
     async def fake_followup_call(**_kwargs):
-        raise RuntimeError("continuation failed")
+        raise error
 
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_followup_call)
 
@@ -3171,11 +3183,44 @@ async def test_non_stream_auto_continue_failure_is_non_fatal(monkeypatch: pytest
         saved_payloads.append(payload)
         return f"m-{len(saved_payloads)}"
 
+    return save_message_fn, saved_payloads
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_non_stream_auto_continue_failure_is_non_fatal(monkeypatch: pytest.MonkeyPatch) -> None:
+    save_message_fn, saved_payloads = _auto_continue_followup_raises(monkeypatch, RuntimeError("continuation failed"))
+    provider_manager = _ProviderManagerStub("anthropic")
+
     response = await _run_execute_non_stream_call(
         llm_call_func=_build_llm_response_with_tool_calls,
         save_message_fn=save_message_fn,
+        provider_manager=provider_manager,
     )
 
     assert [p["role"] for p in saved_payloads] == ["assistant", "tool"]
     assert response["choices"][0]["message"]["content"] == "Calling tool"
     assert response["tldw_tool_auto_continue"] == {"attempted": True, "succeeded": False}
+    assert provider_manager.failures == [("openai", "SanitizedProviderStreamError")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_non_stream_auto_continue_policy_refusal_reaches_the_caller_not_the_provider_health(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gateway policy refusal of the continuation is the caller's 400, as a quota refusal is (TASK-13950.13)."""
+    refusal = LLMPolicyRefusal("Tool output violates moderation policy")
+    save_message_fn, saved_payloads = _auto_continue_followup_raises(monkeypatch, refusal)
+    provider_manager = _ProviderManagerStub("anthropic")
+
+    with pytest.raises(LLMPolicyRefusal) as raised:
+        await _run_execute_non_stream_call(
+            llm_call_func=_build_llm_response_with_tool_calls,
+            save_message_fn=save_message_fn,
+            provider_manager=provider_manager,
+        )
+
+    assert (raised.value.status_code, raised.value.detail) == (400, "Tool output violates moderation policy")
+    assert [p["role"] for p in saved_payloads] == ["assistant", "tool"]
+    assert provider_manager.failures == []

@@ -311,7 +311,7 @@ def test_media_postgres_migration_reaches_v9_and_restores_visibility_owner_colum
 
 @pytest.mark.integration
 def test_media_postgres_sequence_sync(pg_database_config: DatabaseConfig) -> None:
-    """Sequences are advanced to match table maxima after initialization."""
+    """Routine reopen leaves IDs alone; the explicit v18 migration repairs them."""
 
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = MediaDatabase(db_path=":memory:", client_id="pg-seq", backend=backend)
@@ -345,6 +345,13 @@ def test_media_postgres_sequence_sync(pg_database_config: DatabaseConfig) -> Non
             )
 
         db._initialize_schema()
+
+        with backend.transaction() as conn:
+            sequence_state = backend.execute(
+                "SELECT last_value, is_called FROM media_id_seq", connection=conn,
+            ).rows[0]
+            assert sequence_state == {"last_value": 1, "is_called": False}
+            db._postgres_migrate_to_v18(conn)
 
         with backend.transaction() as conn:
             sequence = _serial_sequence_name(backend, conn, "media", "id")
@@ -880,7 +887,7 @@ def test_media_postgres_migration_reaches_v24_and_preserves_claims_analytics_exp
                 connection=conn,
             ).rows
 
-            assert int(version) == 26
+            assert int(version) == 27
             assert _column_definition(
                 backend, conn, "claims_analytics_exports", "job_id"
             ) == {"data_type": "bigint", "is_nullable": "YES"}
@@ -977,7 +984,7 @@ def test_media_postgres_migration_v24_repairs_missing_monitoring_event_extension
                 connection=conn,
             ).scalar
 
-            assert int(version) == 26
+            assert int(version) == 27
             assert backend.table_exists("claims_monitoring_events", connection=conn)
             assert _index_exists(
                 backend,
@@ -1101,7 +1108,7 @@ def test_media_postgres_migration_v25_adds_owned_media_schema_and_preserves_rows
                 connection=conn,
             ).rows[0]
 
-            assert int(version) == 26
+            assert int(version) == 27
             assert all(
                 _column_definition(backend, conn, "media", column_name)
                 == {"data_type": "text", "is_nullable": "YES"}

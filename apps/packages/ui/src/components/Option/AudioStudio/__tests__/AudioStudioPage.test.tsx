@@ -1,12 +1,16 @@
 import React from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as testingRender, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+const render: typeof testingRender = (ui, options) => testingRender(ui, { wrapper: ({ children }) => <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{children}</QueryClientProvider>, ...options });
 
 const generationMocks = vi.hoisted(() => ({
   mutateAsync: vi.fn(),
 }));
 
 const audioStudioServiceMocks = vi.hoisted(() => ({
+  getProviders: vi.fn(),
   fetchAudioStudioArtifactBlob: vi.fn(),
   mintAudioStudioArtifactMediaTicket: vi.fn(),
 }));
@@ -28,6 +32,10 @@ const projectHookMocks = vi.hoisted(() => ({
   upsertSectionPending: false,
   upsertClipPending: false,
 }));
+
+vi.mock("@/components/Option/AudioStudio/AudioStudioSession", () => ({ AudioStudioSession: ({children}: React.PropsWithChildren) => <>{children}</>, useAudioStudioSession: () => null }));
+vi.mock("@/entries/shared/route-leave-prompt", () => ({ RouteLeavePrompt: () => null }));
+vi.mock("@/components/Option/AudioStudio/useAudioStudioJobs", () => ({ useAudioStudioJobs: () => ({ data: [], isLoading: false }), useCancelAudioStudioJob: () => ({ isPending: false }), isAudioStudioJobActive: () => false }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -74,6 +82,9 @@ vi.mock("@/components/Option/AudiobookStudio/Output/OutputPanel", () => ({
 }));
 
 vi.mock("@/hooks/useAudioStudioGeneration", () => ({
+  useRetryAudioStudioAdmission: () => ({ intent: undefined, isPending: false }),
+  useCreateAudioStudioRender: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCreateAudioStudioExport: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCreateAudioStudioGeneration: () => ({
     mutateAsync: generationMocks.mutateAsync,
     isPending: false,
@@ -81,6 +92,7 @@ vi.mock("@/hooks/useAudioStudioGeneration", () => ({
 }));
 
 vi.mock("@/hooks/useAudioStudioProjects", () => ({
+  useAudioStudioProjectDetail: () => ({ isLoading: false, isError: false }),
   useAudioStudioProjects: (...args: unknown[]) =>
     projectHookMocks.useProjects(...args),
   useAudioStudioArtifacts: (...args: unknown[]) =>
@@ -108,6 +120,9 @@ vi.mock("@/services/audio-studio", async (importOriginal) => {
     await importOriginal<typeof import("@/services/audio-studio")>();
   return {
     ...actual,
+    getAudioStudioProviders: (...args: unknown[]) => audioStudioServiceMocks.getProviders(...args),
+    getAudioStudioSpeechProviders: vi.fn().mockResolvedValue({ providers: { pocket_tts: { models: ["pocket_tts"] } } }),
+    getAudioStudioVoices: vi.fn().mockResolvedValue([{ id: "reference", name: "Reference" }]),
     fetchAudioStudioArtifactBlob: (...args: unknown[]) =>
       audioStudioServiceMocks.fetchAudioStudioArtifactBlob(...args),
     mintAudioStudioArtifactMediaTicket: (...args: unknown[]) =>
@@ -120,7 +135,7 @@ import {
   useAudioStudioStore,
   type AudioStudioProject,
 } from "@/store/audio-studio";
-import type { AudioStudioArtifact } from "@/services/audio-studio";
+import { getAudioStudioSpeechProviders, type AudioStudioArtifact } from "@/services/audio-studio";
 
 const SMALL_AUDIO_BLOB_URL = "blob:mock-selected-clip-audio";
 
@@ -150,6 +165,7 @@ const setActiveProject = (overrides: Partial<AudioStudioProject> = {}) => {
           section_id: "section-1",
           workflow: "narration",
           title: "Intro",
+          body_text: "Welcome.",
           order: 0,
         },
       ],
@@ -162,7 +178,7 @@ const setActiveProject = (overrides: Partial<AudioStudioProject> = {}) => {
         },
       ],
       clips: [],
-      settings: {},
+      settings: { speech: { model: "pocket_tts", voice: "reference", provider_hint: "pocket_tts" } },
       ...overrides,
     } satisfies AudioStudioProject,
   ]);
@@ -182,6 +198,11 @@ const createDeferred = <T,>() => {
 describe("AudioStudioPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getAudioStudioSpeechProviders).mockResolvedValue({ providers: { pocket_tts: { models: ["pocket_tts"] } }, voices: {} });
+    audioStudioServiceMocks.getProviders.mockResolvedValue({ providers: [{ provider_id: "ace_step", supported_kinds: ["music"] }] });
+    projectHookMocks.createProject.mockResolvedValue(undefined);
+    projectHookMocks.updateProject.mockResolvedValue(undefined);
+    generationMocks.mutateAsync.mockResolvedValue({ job_id: "job-test", status: "queued" });
     Object.defineProperty(URL, "createObjectURL", {
       configurable: true,
       writable: true,
@@ -280,33 +301,22 @@ describe("AudioStudioPage", () => {
     expect(useAudioStudioStore.getState().activeWorkflow).toBe("podcast");
   });
 
-  it("shows imported audiobook controls in Narration without the old top heading", () => {
+  it("shows saved Studio sections without the disconnected legacy editor", () => {
+    setActiveProject({ workflow: "narration" });
     useAudioStudioStore.getState().setActiveWorkflow("narration");
-
     render(<AudioStudioPage />);
-
-    expect(screen.getByText("Paste or type your content")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Chapters" }));
-    expect(screen.getByText("Chapter List")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Voice" }));
-    expect(screen.getByText("Voice Settings")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("heading", { name: "Audiobook Studio" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Section 1 text")).toHaveValue("Welcome.");
+    expect(screen.getByRole("button", { name: "Add section" })).toBeEnabled();
+    expect(screen.queryByText("Paste or type your content")).not.toBeInTheDocument();
   });
 
-  it("surfaces Podcast and Briefing as production workflows", () => {
-    useAudioStudioStore.getState().setActiveWorkflow("podcast");
+  it("surfaces saved Podcast and Briefing sections", () => {
+    setActiveProject({ workflow: "podcast" }); useAudioStudioStore.getState().setActiveWorkflow("podcast");
     const { rerender } = render(<AudioStudioPage />);
-
-    expect(screen.getByText("Podcast script")).toBeInTheDocument();
-    expect(screen.getByText("Speakers")).toBeInTheDocument();
-
-    useAudioStudioStore.getState().setActiveWorkflow("briefing");
+    expect(screen.getByLabelText("Section 1 text")).toHaveValue("Welcome.");
+    setActiveProject({ workflow: "briefing" }); useAudioStudioStore.getState().setActiveWorkflow("briefing");
     rerender(<AudioStudioPage />);
-
-    expect(screen.getByText("Briefing outline")).toBeInTheDocument();
-    expect(screen.getByText("Source notes")).toBeInTheDocument();
+    expect(screen.getByLabelText("Section 1 text")).toHaveValue("Welcome.");
   });
 
   it("shows Music prompt, lyrics, style, and provider controls", () => {
@@ -475,30 +485,12 @@ describe("AudioStudioPage", () => {
     expect(generationMocks.mutateAsync).not.toHaveBeenCalled();
   });
 
-  it("keeps render and export controls disabled until the render controls slice", () => {
-    setActiveProject({ workflow: "narration" });
-    useAudioStudioStore.getState().setActiveWorkflow("narration");
-
+  it("refuses render/export until current section audio is available", () => {
+    setActiveProject({ workflow: "narration" }); useAudioStudioStore.getState().setActiveWorkflow("narration");
     render(<AudioStudioPage />);
-
-    expect(
-      screen.getByRole("button", { name: "Create preview render" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Create export" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Create preview render" }),
-    ).toHaveAttribute(
-      "title",
-      "Render/export controls need a ready timeline render controls slice.",
-    );
-    expect(
-      screen.getByRole("button", { name: "Create export" }),
-    ).toHaveAttribute(
-      "title",
-      "Render/export controls need a ready timeline render controls slice.",
-    );
+    expect(screen.getByRole("button", { name: "Create preview render" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create export" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create preview render" })).toHaveAttribute("title", "Generate current audio for every section before rendering.");
   });
 
   it("renders active project tracks and clips in the timeline editor", () => {
@@ -586,7 +578,7 @@ describe("AudioStudioPage", () => {
     await waitFor(() =>
       expect(
         audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
-      ).toHaveBeenCalledWith("project-1", artifact),
+      ).toHaveBeenCalledWith("project-1", artifact, undefined),
     );
     const audioPreview = await screen.findByLabelText(
       "Selected clip audio preview",
@@ -649,7 +641,7 @@ describe("AudioStudioPage", () => {
     await waitFor(() =>
       expect(
         audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
-      ).toHaveBeenCalledWith("project-1", artifact),
+      ).toHaveBeenCalledWith("project-1", artifact, undefined),
     );
 
     unmount();
@@ -700,7 +692,7 @@ describe("AudioStudioPage", () => {
     await waitFor(() =>
       expect(
         audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
-      ).toHaveBeenCalledWith("project-1", artifact),
+      ).toHaveBeenCalledWith("project-1", artifact, undefined),
     );
     expect(
       await screen.findByLabelText("Selected clip audio preview"),
@@ -849,7 +841,7 @@ describe("AudioStudioPage", () => {
     await waitFor(() =>
       expect(
         audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
-      ).toHaveBeenCalledWith("project-1", "artifact-host", "download"),
+      ).toHaveBeenCalledWith("project-1", "artifact-host", "download", undefined),
     );
     expect(anchorClick).toHaveBeenCalled();
     anchorClick.mockRestore();
@@ -894,7 +886,7 @@ describe("AudioStudioPage", () => {
     await waitFor(() =>
       expect(
         audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
-      ).toHaveBeenCalledWith("project-1", "artifact-host", "playback"),
+      ).toHaveBeenCalledWith("project-1", "artifact-host", "playback", undefined),
     );
     expect(
       audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
@@ -945,7 +937,7 @@ describe("AudioStudioPage", () => {
     await waitFor(() =>
       expect(
         audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
-      ).toHaveBeenCalledWith("project-1", "artifact-host", "playback"),
+      ).toHaveBeenCalledWith("project-1", "artifact-host", "playback", undefined),
     );
     expect(
       audioStudioServiceMocks.fetchAudioStudioArtifactBlob,
@@ -1089,7 +1081,7 @@ describe("AudioStudioPage", () => {
       await waitFor(() =>
         expect(
           audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
-        ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback"),
+        ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback", undefined),
       );
       const guestAudio = (await screen.findByLabelText(
         "Selected clip audio preview",
@@ -1210,14 +1202,14 @@ describe("AudioStudioPage", () => {
     expect(document.body.innerHTML).not.toContain("ticket-download");
     expect(
       audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
-    ).not.toHaveBeenCalledWith("project-1", "artifact-host", "download");
+    ).not.toHaveBeenCalledWith("project-1", "artifact-host", "download", undefined);
 
     fireEvent.click(button);
 
     await waitFor(() =>
       expect(
         audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
-      ).toHaveBeenLastCalledWith("project-1", "artifact-host", "download"),
+      ).toHaveBeenLastCalledWith("project-1", "artifact-host", "download", undefined),
     );
     expect(anchorClick).toHaveBeenCalled();
     expect(document.body.innerHTML).not.toContain("ticket-download");
@@ -1318,7 +1310,7 @@ describe("AudioStudioPage", () => {
     await waitFor(() =>
       expect(
         audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
-      ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback"),
+      ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback", undefined),
     );
 
     hostDownload.reject(new Error("download failed"));
@@ -1434,7 +1426,7 @@ describe("AudioStudioPage", () => {
       await waitFor(() =>
         expect(
           audioStudioServiceMocks.mintAudioStudioArtifactMediaTicket,
-        ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback"),
+        ).toHaveBeenCalledWith("project-1", "artifact-guest", "playback", undefined),
       );
 
       hostDownload.resolve(hostDownloadTicket);
@@ -1611,7 +1603,7 @@ describe("AudioStudioPage", () => {
     expect(screen.getByLabelText("Start seconds")).toHaveValue("9.0");
   });
 
-  it("supports timeline preview play pause and manual scrub state", () => {
+  it("supports timeline playhead animation pause and manual scrub state", () => {
     setActiveProject({
       workflow: "music",
       tracks: [
@@ -1645,10 +1637,10 @@ describe("AudioStudioPage", () => {
     expect(screen.getByText("12.0s / 45.0s")).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Play timeline preview" }),
+      screen.getByRole("button", { name: "Animate playhead" }),
     );
     expect(
-      screen.getByRole("button", { name: "Pause timeline preview" }),
+      screen.getByRole("button", { name: "Pause playhead animation" }),
     ).toBeInTheDocument();
   });
 
@@ -1667,6 +1659,13 @@ describe("AudioStudioPage", () => {
     fireEvent.change(screen.getByLabelText("Style"), {
       target: { value: "cinematic, ambient" },
     });
+    projectHookMocks.updateProject.mockImplementationOnce(async () => {
+      const store = useAudioStudioStore.getState(); const current = store.activeProject!;
+      store.markProjectClean(current.project_id); store.upsertProjectFromServer({ ...current, current_revision_id: "revision-music-saved" });
+      return useAudioStudioStore.getState().activeProject;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate music" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Generate music" }));
 
     await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled());
@@ -1676,7 +1675,7 @@ describe("AudioStudioPage", () => {
         provider: "ace_step",
         target_resource_kind: "track",
         target_resource_id: "music-track-1",
-        target_revision_id: "revision-current",
+        target_revision_id: "revision-music-saved",
         options: {
           prompt: "Warm documentary intro",
           lyrics: "Hold the first phrase",
@@ -1690,26 +1689,12 @@ describe("AudioStudioPage", () => {
     ).toBeGreaterThanOrEqual(16);
   });
 
-  it("queues shared music generation from the side panel", async () => {
-    setActiveProject({ workflow: "music" });
-    useAudioStudioStore.getState().setActiveWorkflow("music");
-
+  it("does not submit a blank Music request from the shared panel", () => {
+    setActiveProject({ workflow: "music" }); useAudioStudioStore.getState().setActiveWorkflow("music");
     render(<AudioStudioPage />);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Queue music generation" }),
-    );
-
-    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled());
-    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "music",
-        provider: "ace_step",
-        target_resource_kind: "track",
-        target_resource_id: "music-track-1",
-        target_revision_id: "revision-current",
-      }),
-    );
+    expect(screen.getByRole("button", { name: "Queue music generation" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Queue music generation" }));
+    expect(generationMocks.mutateAsync).not.toHaveBeenCalled();
   });
 
   it("queues shared speech generation for the first available section", async () => {
@@ -1734,147 +1719,29 @@ describe("AudioStudioPage", () => {
     );
   });
 
-  it("queues Podcast and Briefing inline speech actions from their saved draft sections", async () => {
-    setActiveProject({ workflow: "podcast" });
-    useAudioStudioStore.getState().setActiveWorkflow("podcast");
-    const { rerender } = render(<AudioStudioPage />);
-
-    fireEvent.change(screen.getByLabelText("Podcast script"), {
-      target: { value: "Host: Welcome." },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Generate segment speech" }),
-    );
-
-    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled());
-    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "speech",
-        provider: "tts",
-        target_resource_kind: "section",
-        target_resource_id: "section_podcast_script",
-        target_revision_id: "revision-section-saved",
-      }),
-    );
-
-    generationMocks.mutateAsync.mockClear();
-    projectHookMocks.upsertSection.mockResolvedValueOnce({
-      section_id: "section_briefing_outline",
-      workflow: "briefing",
-      title: "Briefing outline",
-      body_text: "Briefing text",
-      order_index: 0,
-      current_revision_id: "revision-briefing-saved",
-    });
-    setActiveProject({ workflow: "briefing" });
-    useAudioStudioStore.getState().setActiveWorkflow("briefing");
-    rerender(<AudioStudioPage />);
-
-    fireEvent.change(screen.getByLabelText("Briefing outline"), {
-      target: { value: "Briefing text" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Generate briefing sections" }),
-    );
-
-    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled());
-    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "speech",
-        target_resource_id: "section_briefing_outline",
-        target_revision_id: "revision-briefing-saved",
-      }),
-    );
+  it("queues Podcast and Briefing using saved section identity and the selected voice", async () => {
+    for (const workflow of ["podcast", "briefing"] as const) {
+      setActiveProject({ workflow }); useAudioStudioStore.getState().setActiveWorkflow(workflow);
+      const view = render(<AudioStudioPage />);
+      fireEvent.click(screen.getByRole("button", { name: "Generate section 1" }));
+      await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ kind: "speech", target_resource_id: "section-1", target_revision_id: "revision-current", options: expect.objectContaining({ model: "pocket_tts", voice: "reference", workflow }) })));
+      view.unmount(); generationMocks.mutateAsync.mockClear();
+    }
   });
 
-  it("saves Podcast and Briefing draft text before queuing inline speech generation", async () => {
-    setActiveProject({ workflow: "podcast", sections: [] });
-    useAudioStudioStore.getState().setActiveWorkflow("podcast");
-    const { rerender } = render(<AudioStudioPage />);
-
-    fireEvent.change(screen.getByLabelText("Podcast script"), {
-      target: { value: "Host: Welcome.\nGuest: Good to be here." },
-    });
-    fireEvent.change(screen.getByLabelText("Host speaker"), {
-      target: { value: "Ava" },
-    });
-    fireEvent.change(screen.getByLabelText("Guest speaker"), {
-      target: { value: "Noah" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Generate segment speech" }),
-    );
-
-    await waitFor(() =>
-      expect(projectHookMocks.upsertSection).toHaveBeenCalled(),
-    );
-    expect(projectHookMocks.upsertSection).toHaveBeenCalledWith({
-      sectionId: "section_podcast_script",
-      payload: {
-        base_revision_id: "revision-current",
-        title: "Podcast script",
-        body_text: "Host: Welcome.\nGuest: Good to be here.",
-        order_index: 0,
-        settings: {
-          hostSpeaker: "Ava",
-          guestSpeaker: "Noah",
-        },
-      },
-    });
-    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled());
-    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target_resource_id: "section_podcast_script",
-        target_revision_id: "revision-section-saved",
-      }),
-    );
-
-    generationMocks.mutateAsync.mockClear();
-    projectHookMocks.upsertSection.mockClear();
-    projectHookMocks.upsertSection.mockResolvedValueOnce({
-      section_id: "section_briefing_outline",
-      workflow: "briefing",
-      title: "Briefing outline",
-      body_text: "Top story and implications.",
-      order_index: 0,
-      current_revision_id: "revision-briefing-saved",
-    });
-    setActiveProject({ workflow: "briefing", sections: [] });
-    useAudioStudioStore.getState().setActiveWorkflow("briefing");
-    rerender(<AudioStudioPage />);
-
-    fireEvent.change(screen.getByLabelText("Briefing outline"), {
-      target: { value: "Top story and implications." },
-    });
-    fireEvent.change(screen.getByLabelText("Source notes"), {
-      target: { value: "Source note A" },
-    });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Generate briefing sections" }),
-    );
-
-    await waitFor(() =>
-      expect(projectHookMocks.upsertSection).toHaveBeenCalled(),
-    );
-    expect(projectHookMocks.upsertSection).toHaveBeenCalledWith({
-      sectionId: "section_briefing_outline",
-      payload: {
-        base_revision_id: "revision-current",
-        title: "Briefing outline",
-        body_text: "Top story and implications.",
-        order_index: 0,
-        settings: {
-          sourceNotes: "Source note A",
-        },
-      },
-    });
-    await waitFor(() => expect(generationMocks.mutateAsync).toHaveBeenCalled());
-    expect(generationMocks.mutateAsync).toHaveBeenCalledWith(
-      expect.objectContaining({
-        target_resource_id: "section_briefing_outline",
-        target_revision_id: "revision-briefing-saved",
-      }),
-    );
+  it("retains Podcast and Briefing drafts and refuses generation until an explicit save", () => {
+    for (const workflow of ["podcast", "briefing"] as const) {
+      useAudioStudioStore.getState().resetAudioStudio(); setActiveProject({ workflow }); useAudioStudioStore.getState().setActiveWorkflow(workflow);
+      const view = render(<AudioStudioPage />);
+      fireEvent.change(screen.getByLabelText("Section 1 text"), { target: { value: "New spoken text" } });
+      fireEvent.change(screen.getByLabelText("Section 1 voice override"), { target: { value: "guest" } });
+      expect(screen.getByRole("button", { name: "Generate section 1" })).toBeDisabled();
+      expect(generationMocks.mutateAsync).not.toHaveBeenCalled();
+      expect(useAudioStudioStore.getState().activeProject?.sections[0]).toMatchObject({ body_text: "New spoken text", settings: { voice: "guest" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+      expect(projectHookMocks.updateProject).toHaveBeenCalled();
+      view.unmount();
+    }
   });
 
   it("disables shared speech generation without a usable section target", () => {
@@ -1887,4 +1754,45 @@ describe("AudioStudioPage", () => {
       screen.getByRole("button", { name: "Queue speech generation" }),
     ).toBeDisabled();
   });
+  it("B06 accepts an explicit model ID when an available provider omits enumeration", async () => {
+    vi.mocked(getAudioStudioSpeechProviders).mockResolvedValue({ providers: { pocket_tts: { provider_name: "PocketTTS" } }, voices: {} });
+    setActiveProject({ workflow: "narration", settings: { speech: { provider_hint: "pocket_tts", model: "", voice: "reference" } } });
+    useAudioStudioStore.getState().setActiveWorkflow("narration");
+    render(<AudioStudioPage />);
+    const field = await screen.findByRole("textbox", { name: "Speech model", exact: true });
+    fireEvent.change(field, { target: { value: "pocket_tts" } });
+    expect(useAudioStudioStore.getState().activeProject?.settings.speech).toMatchObject({ model: "pocket_tts", voice: "" });
+    expect(screen.getByText(/does not publish a model list/)).toBeInTheDocument();
+  });
+
+  it("B06 refuses New Project while a local draft needs saving", () => {
+    setActiveProject({ workflow: "narration" }); useAudioStudioStore.getState().setActiveWorkflow("narration");
+    useAudioStudioStore.getState().updateProjectLocal("project-1", { title: "Unsaved" });
+    render(<AudioStudioPage />);
+    expect(screen.getByRole("button", { name: "New Audio Studio project" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "New Audio Studio project" }));
+    expect(projectHookMocks.createProject).not.toHaveBeenCalled();
+    expect(useAudioStudioStore.getState().activeProject?.title).toBe("Unsaved");
+  });
+
+  it("B06 missing music provider cannot be replaced by speech generation", async () => {
+    audioStudioServiceMocks.getProviders.mockResolvedValue({ providers: [{ provider_id: "tts", supported_kinds: ["speech"] }] });
+    setActiveProject({ workflow: "music", settings: { music: { prompt: "A short instrumental cue" } } }); useAudioStudioStore.getState().setActiveWorkflow("music");
+    render(<AudioStudioPage />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate music" })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Generate music" })).toHaveAttribute("title", "Configure a music service before generating Music."));
+    expect(generationMocks.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it("B06 Music draft uses saved project settings and requires Save after edits", () => {
+    setActiveProject({ workflow: "music", settings: { music: { prompt: "Saved cue", lyrics: "Saved lyrics", style: "ambient", provider: "ace_step", duration: 30 } } });
+    useAudioStudioStore.getState().setActiveWorkflow("music");
+    render(<AudioStudioPage />);
+    expect(screen.getByLabelText("Prompt")).toHaveValue("Saved cue");
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Edited cue" } });
+    expect(useAudioStudioStore.getState().activeProject?.settings.music).toMatchObject({ prompt: "Edited cue", lyrics: "Saved lyrics", style: "ambient", duration: 30 });
+    expect(screen.getByRole("button", { name: "Generate music" })).toBeDisabled();
+    expect(generationMocks.mutateAsync).not.toHaveBeenCalled();
+  });
+
 });

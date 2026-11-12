@@ -23,8 +23,17 @@ CURRENT_POLICIES = [
 ]
 
 
-def test_normal_startup_validates_fresh_postgres_policies(pg_temp_db, tmp_path):
-    """The actual startup delegate must pass without pytest runtime exemptions."""
+def test_normal_startup_validates_fresh_postgres_policies(pg_restricted_backend, tmp_path):
+    """The actual startup delegate must pass without pytest runtime exemptions.
+
+    Since 9a9d97e2eb startup refuses a SUPERUSER/BYPASSRLS role, which the
+    fixture's admin DSN is, so it connects as a role that cannot bypass RLS.
+    """
+    app_role = pg_restricted_backend.config
+    app_dsn = (
+        f"postgresql://{app_role.pg_user}:{app_role.pg_password}"
+        f"@{app_role.pg_host}:{app_role.pg_port}/{app_role.pg_database}"
+    )
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / ".env").write_text("", encoding="utf-8")
@@ -43,7 +52,7 @@ def test_normal_startup_validates_fresh_postgres_policies(pg_temp_db, tmp_path):
         "SINGLE_USER_API_KEY": "media-validation-runtime-fixture-key",
         "DATABASE_URL": f"sqlite:///{tmp_path / 'auth.db'}",
         "TLDW_CONTENT_DB_BACKEND": "postgresql",
-        "TLDW_CONTENT_PG_DSN": str(pg_temp_db["dsn"]),
+        "TLDW_CONTENT_PG_DSN": app_dsn,
         "USER_DB_BASE_DIR": str(tmp_path / "users"),
     }
     script = """

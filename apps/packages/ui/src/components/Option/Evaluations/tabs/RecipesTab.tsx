@@ -43,6 +43,7 @@ import type {
   RecipeManifest
 } from "@/services/evaluations"
 import { useEvaluationsStore } from "@/store/evaluations"
+import type { ApiSendResponse } from "@/services/api-send"
 
 const { Paragraph, Text, Title } = Typography
 const { TextArea } = Input
@@ -300,7 +301,15 @@ const joinCsvList = (items: unknown): string =>
         .join(", ")
     : ""
 
-export const RecipesTab: React.FC = () => {
+type RecipesTabProps = {
+  recipeRunId?: string | null
+  onRecipeRunIdChange?: (runId: string | null) => void
+}
+
+export const RecipesTab: React.FC<RecipesTabProps> = ({
+  recipeRunId,
+  onRecipeRunIdChange
+}) => {
   const { t } = useTranslation(["evaluations", "common"])
   const [selectedRecipeId, setSelectedRecipeId] = React.useState<string | null>(null)
   const [datasetSource, setDatasetSource] = React.useState<"inline" | "saved">("inline")
@@ -311,7 +320,15 @@ export const RecipesTab: React.FC = () => {
   const [validationResult, setValidationResult] =
     React.useState<RecipeDatasetValidation | null>(null)
   const [localError, setLocalError] = React.useState<string | null>(null)
-  const [currentRunId, setCurrentRunId] = React.useState<string | null>(null)
+  const [localRunId, setLocalRunId] = React.useState<string | null>(null)
+  const currentRunId = recipeRunId === undefined ? localRunId : recipeRunId
+  const [existingRunIdInput, setExistingRunIdInput] = React.useState(currentRunId || "")
+  const existingRunInputId = React.useId()
+  const runSelectionVersion = React.useRef(0)
+  const currentSelection = React.useRef({ currentRunId, selectedRecipeId })
+  currentSelection.current = { currentRunId, selectedRecipeId }
+  const onRunChange = React.useRef(onRecipeRunIdChange)
+  onRunChange.current = onRecipeRunIdChange
   const [previewApplyData, setPreviewApplyData] = React.useState<Record<string, any> | null>(null)
   const [previewApplyError, setPreviewApplyError] = React.useState<string | null>(null)
   const setActiveTab = useEvaluationsStore((s) => s.setActiveTab)
@@ -365,6 +382,10 @@ export const RecipesTab: React.FC = () => {
     : []
   const isEmbeddingsRecipeReport =
     report?.run?.recipe_id === "embeddings_model_selection"
+  const isPersonaRecipeReport =
+    report?.run?.recipe_id === "persona_dialogue_tree_robustness"
+  const isPersonaSetup =
+    selectedManifest?.recipe_id === "persona_dialogue_tree_robustness"
   const parsedInlineDataset =
     datasetSource === "inline" ? parseJsonDatasetSafe(inlineDatasetText) : null
   const parsedRunConfig = parseJsonObjectSafe(runConfigText)
@@ -390,13 +411,13 @@ export const RecipesTab: React.FC = () => {
 
   React.useEffect(() => {
     if (!selectedRecipeId) return
+    runSelectionVersion.current += 1
     setDatasetSource("inline")
     setSelectedDatasetId(null)
     setInlineDatasetText(DEFAULT_INLINE_DATASETS[selectedRecipeId] || "[]")
     setRunConfigText(DEFAULT_RUN_CONFIGS[selectedRecipeId] || "{}")
     setValidationResult(null)
     setLocalError(null)
-    setCurrentRunId(null)
     setPreviewApplyData(null)
     setPreviewApplyError(null)
     setForceRerun(false)
@@ -433,6 +454,44 @@ export const RecipesTab: React.FC = () => {
     lastAutoOpenedBatchId.current = batchId
     setActiveTab("synthetic-review")
   }, [setActiveTab, syntheticReviewBatchId, syntheticReviewRecipeKind])
+
+  React.useEffect(() => {
+    runSelectionVersion.current += 1
+    setExistingRunIdInput(currentRunId || "")
+    setPreviewApplyData(null)
+    setPreviewApplyError(null)
+  }, [currentRunId])
+
+  React.useEffect(() => {
+    return () => { runSelectionVersion.current += 1 }
+  }, [])
+
+  const captureRunSelection = () => {
+    const selectionVersion = runSelectionVersion.current
+    const selection = currentSelection.current
+    return () =>
+      runSelectionVersion.current === selectionVersion &&
+      currentSelection.current.currentRunId === selection.currentRunId &&
+      currentSelection.current.selectedRecipeId === selection.selectedRecipeId
+  }
+
+  const changeCurrentRun = (runId: string | null) => {
+    runSelectionVersion.current += 1
+    setLocalRunId(runId)
+    setPreviewApplyData(null)
+    setPreviewApplyError(null)
+    onRunChange.current?.(runId)
+  }
+
+  const openExistingRun = () => {
+    const runId = existingRunIdInput.trim()
+    if (runId) changeCurrentRun(runId)
+  }
+
+  const selectRecipe = (recipeId: string) => {
+    if (recipeId !== selectedRecipeId) changeCurrentRun(null)
+    setSelectedRecipeId(recipeId)
+  }
 
   const buildDatasetPayload = (): {
     datasetId?: string
@@ -502,6 +561,7 @@ export const RecipesTab: React.FC = () => {
 
   const handleRun = async () => {
     if (!selectedManifest) return
+    const isCurrent = captureRunSelection()
     try {
       setLocalError(null)
       setPreviewApplyData(null)
@@ -515,8 +575,10 @@ export const RecipesTab: React.FC = () => {
         runConfig,
         forceRerun
       })
-      setCurrentRunId((resp as any)?.data?.run_id || (resp as any)?.run_id || null)
+      if (!isCurrent()) return
+      changeCurrentRun((resp as any)?.data?.run_id || (resp as any)?.run_id || null)
     } catch (error: any) {
+      if (!isCurrent()) return
       setLocalError(getRecipeRunUserErrorMessage(error))
     }
   }
@@ -527,6 +589,7 @@ export const RecipesTab: React.FC = () => {
   ) => {
     const runId = String(report?.run?.run_id || currentRunId || "").trim()
     if (!runId) return
+    const isCurrent = captureRunSelection()
     try {
       setPreviewApplyError(null)
       const response = await previewApplyMutation.mutateAsync({
@@ -534,8 +597,10 @@ export const RecipesTab: React.FC = () => {
         slotName,
         candidateRunId: candidateRunId || null
       })
+      if (!isCurrent()) return
       setPreviewApplyData((response as any)?.data || response || null)
     } catch (error: any) {
+      if (!isCurrent()) return
       setPreviewApplyData(null)
       setPreviewApplyError(error?.message || "Unable to preview the config change.")
     }
@@ -549,6 +614,7 @@ export const RecipesTab: React.FC = () => {
 
   const handleApplyRecommendation = async () => {
     if (!previewApplyData) return
+    const isCurrent = captureRunSelection()
     const runId = String(previewApplyData.run_id || report?.run?.run_id || currentRunId || "").trim()
     const proposed = (previewApplyData.proposed || {}) as Record<string, any>
     const confirmedProvider = String(proposed.provider || "").trim()
@@ -566,8 +632,10 @@ export const RecipesTab: React.FC = () => {
         confirmedProvider,
         confirmedModel
       })
+      if (!isCurrent()) return
       setPreviewApplyData((response as any)?.data || response || null)
     } catch (error: any) {
+      if (!isCurrent()) return
       setPreviewApplyError(error?.message || "Unable to apply the config change.")
     }
   }
@@ -1472,6 +1540,122 @@ export const RecipesTab: React.FC = () => {
     )
   }
 
+  const renderPersonaFields = (fields: ReadonlyArray<readonly [string, unknown]>) => {
+    const available = fields.filter(([, value]) =>
+      (typeof value === "string" && value.trim()) ||
+      (typeof value === "number" && Number.isFinite(value) && value >= 0)
+    )
+    if (available.length === 0) return null
+    return (
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+        {available.map(([label, value]) => (
+          <React.Fragment key={label}>
+            <dt className="font-medium">{label}</dt>
+            <dd className="m-0 break-all">{String(value)}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    )
+  }
+
+  const personaCountFields = (summary: unknown): Array<readonly [string, unknown]> => {
+    if (!summary || typeof summary !== "object" || Array.isArray(summary)) return []
+    const counts = summary as Record<string, unknown>
+    return ([
+      ["target_count", "Targets"], ["total_cases", "Cases"],
+      ["hard_prune_count", "Hard prunes"], ["soft_prune_count", "Soft prunes"],
+      ["selected_trajectory_count", "Selected trajectories"],
+      ["skipped_scorer_count", "Skipped scorers"], ["trace_artifact_count", "Trace artifacts"]
+    ] as const).map(([key, label]) => [
+      t(`evaluations:recipePersonaCount_${key}`, { defaultValue: label }),
+      typeof counts[key] === "number" ? counts[key] : undefined
+    ])
+  }
+
+  const renderPersonaReport = () => {
+    if (!report) return null
+    const summary = renderPersonaFields(personaCountFields(reportPayload?.summary))
+    const targets: Record<string, unknown>[] = Array.isArray(reportPayload?.target_results)
+      ? reportPayload.target_results.filter((value: unknown) => value && typeof value === "object" && !Array.isArray(value))
+      : []
+    const traces: Record<string, unknown>[] = Array.isArray(reportPayload?.trace_artifact_refs)
+      ? reportPayload.trace_artifact_refs.filter((value: unknown) => value && typeof value === "object" && !Array.isArray(value))
+      : []
+    const label = (key: string, fallback: string) => t(`evaluations:${key}`, { defaultValue: fallback })
+    return (
+      <div className="space-y-4">
+        <section aria-label={label("recipeRunDetailsTitle", "Run details")}>
+          <Title level={5}>{label("recipeRunDetailsTitle", "Run details")}</Title>
+          {renderPersonaFields([
+            [label("recipeRunIdLabel", "Run ID"), report.run.run_id],
+            [label("recipeIdentityLabel", "Recipe"), `${report.run.recipe_id} v${report.run.recipe_version}`],
+            [label("recipeJobIdLabel", "Job ID"), report.run.metadata?.jobs?.job_id],
+            [label("recipeWorkerStateLabel", "Worker state"), report.run.metadata?.jobs?.worker_state],
+            [label("recipeDatasetIdLabel", "Dataset ID"), report.run.metadata?.dataset_id],
+            [label("recipeDatasetSnapshotLabel", "Dataset snapshot"), report.run.dataset_snapshot_ref],
+            [label("recipeDatasetContentHashLabel", "Dataset content hash"), report.run.dataset_content_hash],
+            [label("recipeDatasetModeLabel", "Dataset mode"), report.run.metadata?.dataset_mode],
+            [label("recipeReviewStateLabel", "Review state"), report.run.review_state]
+          ])}
+        </section>
+        {summary && (
+          <section aria-label={label("recipePersonaSummaryTitle", "Persona summary")}>
+            <Title level={5}>{label("recipePersonaSummaryTitle", "Persona summary")}</Title>
+            {summary}
+          </section>
+        )}
+        {targets.length > 0 && (
+          <section aria-label={label("recipePersonaTargetsTitle", "Target results")} className="space-y-2">
+            <Title level={5}>{label("recipePersonaTargetsTitle", "Target results")}</Title>
+            {targets.map((target, index) => (
+              <Card key={index} size="small">
+                {renderPersonaFields([
+                  [label("recipePersonaTargetIdLabel", "Target ID"), target.target_id],
+                  [label("recipePersonaIdLabel", "Persona ID"), target.persona_id],
+                  [label("recipeCharacterIdLabel", "Character ID"), target.character_id]
+                ])}
+                {renderPersonaFields(personaCountFields(target.summary))}
+                {Array.isArray(target.cases) && target.cases.map((result: unknown, caseIndex: number) => {
+                  if (!result || typeof result !== "object" || Array.isArray(result)) return null
+                  const item = result as Record<string, unknown>
+                  return (
+                    <section key={caseIndex} className="mt-3 border-t border-border pt-3">
+                      {renderPersonaFields([
+                        [label("recipePersonaCaseIdLabel", "Case ID"), item.case_id],
+                        [label("recipePersonaSelectedNodeLabel", "Selected node"), item.selected_node_id]
+                      ])}
+                      {item.selected_node_id === null && (
+                        <Text type="secondary">{label("recipePersonaNoTrajectory", "No trajectory selected")}</Text>
+                      )}
+                      {renderPersonaFields(personaCountFields(item))}
+                    </section>
+                  )
+                })}
+              </Card>
+            ))}
+          </section>
+        )}
+        {traces.length > 0 && (
+          <section aria-label={label("recipePersonaTracesTitle", "Trace references")} className="space-y-2">
+            <Title level={5}>{label("recipePersonaTracesTitle", "Trace references")}</Title>
+            {traces.map((trace, index) => (
+              <Card key={index} size="small">
+                {renderPersonaFields([
+                  [label("recipePersonaTargetIdLabel", "Target ID"), trace.target_id],
+                  [label("recipePersonaCaseIdLabel", "Case ID"), trace.case_id],
+                  [label("recipePersonaTraceIdLabel", "Trace ID"), trace.artifact_id]
+                ])}
+              </Card>
+            ))}
+          </section>
+        )}
+        {!summary && targets.length === 0 && traces.length === 0 && (
+          <Text type="secondary">{label("recipePersonaResultsUnavailable", "Persona results are not available yet.")}</Text>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
       <Card
@@ -1536,7 +1720,7 @@ export const RecipesTab: React.FC = () => {
                     type={
                       selectedRecipeId === manifest.recipe_id ? "primary" : "default"
                     }
-                    onClick={() => setSelectedRecipeId(manifest.recipe_id)}
+                    onClick={() => selectRecipe(manifest.recipe_id)}
                   >
                     {t("evaluations:recipesUseCta", {
                       defaultValue: `Use ${manifest.name}`
@@ -1550,6 +1734,25 @@ export const RecipesTab: React.FC = () => {
       </Card>
 
       <div className="space-y-4">
+        <Card title={t("evaluations:recipeOpenExistingTitle", { defaultValue: "Open existing recipe run" })}>
+          <div className="space-y-2">
+            <label htmlFor={existingRunInputId}>
+              {t("evaluations:recipeExistingRunIdLabel", { defaultValue: "Existing recipe run ID" })}
+            </label>
+            <Input
+              id={existingRunInputId}
+              value={existingRunIdInput}
+              onChange={(event) => setExistingRunIdInput(event.target.value)}
+              onPressEnter={openExistingRun}
+            />
+            <Button onClick={openExistingRun} disabled={!existingRunIdInput.trim()}>
+              {t("evaluations:recipeOpenExistingCta", { defaultValue: "Open existing run" })}
+            </Button>
+            <Paragraph className="mb-0 text-xs text-text-muted">
+              {t("evaluations:recipeOpenExistingHint", { defaultValue: "Enter a saved recipe run ID to read its report." })}
+            </Paragraph>
+          </div>
+        </Card>
         {selectedManifest ? (
           <Card
             title={selectedManifest.name}
@@ -1608,6 +1811,20 @@ export const RecipesTab: React.FC = () => {
                 )}
               </div>
 
+              {isPersonaSetup && (
+                <DesignSystemAlert
+                  variant="info"
+                  title={t("evaluations:recipePersonaSetupTitle", {
+                    defaultValue: "Persona scenario setup"
+                  })}
+                >
+                  {t("evaluations:recipePersonaSetupDescription", {
+                    defaultValue:
+                      "Use Advanced JSON to define scenarios and at least one Persona or Character target. This recipe runs offline without candidate models or a judge."
+                  })}
+                </DesignSystemAlert>
+              )}
+
               {datasetSource === "saved" ? (
                 <div>
                   <Text strong>
@@ -1627,6 +1844,7 @@ export const RecipesTab: React.FC = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
+                  {!isPersonaSetup && (
                   <DesignSystemAlert
                     variant="info"
                     title={t("evaluations:recipeGuidedSetupTitle", {
@@ -1638,6 +1856,7 @@ export const RecipesTab: React.FC = () => {
                         "Use the guided fields below for the common setup path. Advanced JSON is still available if you need to fine-tune the payload."
                     })}
                   </DesignSystemAlert>
+                  )}
 
                   {inlineDatasetEditorInvalid && (
                     <DesignSystemAlert
@@ -1646,9 +1865,12 @@ export const RecipesTab: React.FC = () => {
                         defaultValue: "Inline dataset JSON is invalid."
                       })}
                     >
-                      {t("evaluations:recipeInlineJsonInvalidDescription", {
-                        defaultValue:
-                          "Guided edits will restore a valid inline dataset payload."
+                      {t(isPersonaSetup
+                        ? "evaluations:recipePersonaJsonInvalidDescription"
+                        : "evaluations:recipeInlineJsonInvalidDescription", {
+                        defaultValue: isPersonaSetup
+                          ? "Correct the JSON in Advanced JSON before validating or running."
+                          : "Guided edits will restore a valid inline dataset payload."
                       })}
                     </DesignSystemAlert>
                   )}
@@ -1660,9 +1882,12 @@ export const RecipesTab: React.FC = () => {
                         defaultValue: "Run config JSON is invalid."
                       })}
                     >
-                      {t("evaluations:recipeRunConfigInvalidDescription", {
-                        defaultValue:
-                          "Guided edits will restore a valid run config payload."
+                      {t(isPersonaSetup
+                        ? "evaluations:recipePersonaJsonInvalidDescription"
+                        : "evaluations:recipeRunConfigInvalidDescription", {
+                        defaultValue: isPersonaSetup
+                          ? "Correct the JSON in Advanced JSON before validating or running."
+                          : "Guided edits will restore a valid run config payload."
                       })}
                     </DesignSystemAlert>
                   )}
@@ -1693,7 +1918,7 @@ export const RecipesTab: React.FC = () => {
                         onDatasetChange={replaceInlineDataset}
                         onRunConfigChange={replaceRunConfig}
                       />
-                    ) : (
+                    ) : isPersonaSetup ? null : (
                       <div className="space-y-3">
                         <div>
                           <Text strong>
@@ -1768,9 +1993,12 @@ export const RecipesTab: React.FC = () => {
                         defaultValue: "Run config JSON is invalid."
                       })}
                     >
-                      {t("evaluations:recipeRunConfigInvalidDescription", {
-                        defaultValue:
-                          "Guided edits will restore a valid run config payload."
+                      {t(isPersonaSetup
+                        ? "evaluations:recipePersonaJsonInvalidDescription"
+                        : "evaluations:recipeRunConfigInvalidDescription", {
+                        defaultValue: isPersonaSetup
+                          ? "Correct the JSON in Advanced JSON before validating or running."
+                          : "Guided edits will restore a valid run config payload."
                       })}
                     </DesignSystemAlert>
                   )}
@@ -1799,7 +2027,7 @@ export const RecipesTab: React.FC = () => {
                       onDatasetChange={() => {}}
                       onRunConfigChange={replaceRunConfig}
                     />
-                  ) : (
+                  ) : isPersonaSetup ? null : (
                     <div>
                       <Text strong>
                         {t("evaluations:recipeGuidedRunConfigLabel", {
@@ -1977,10 +2205,11 @@ export const RecipesTab: React.FC = () => {
                 })}
                 endpoint={
                   currentRunId
-                    ? `/api/v1/evaluations/recipe-runs/${currentRunId}/report`
+                    ? `/api/v1/evaluations/recipe-runs/${encodeURIComponent(currentRunId)}/report`
                     : "/api/v1/evaluations/recipe-runs/{run_id}/report"
                 }
                 error={reportErrorValue}
+                response={(reportErrorValue as (Error & { resp?: ApiSendResponse }) | null)?.resp}
                 primaryAction={{
                   label: t("evaluations:tryAgainAction", {
                     defaultValue: "Try again"
@@ -2010,7 +2239,9 @@ export const RecipesTab: React.FC = () => {
                   </DesignSystemAlert>
                 )}
 
-                {isEmbeddingsRecipeReport ? (
+                {isPersonaRecipeReport ? (
+                  renderPersonaReport()
+                ) : isEmbeddingsRecipeReport ? (
                   renderEmbeddingsRecommendationCards()
                 ) : (
                   <div className="grid gap-3 md:grid-cols-3">

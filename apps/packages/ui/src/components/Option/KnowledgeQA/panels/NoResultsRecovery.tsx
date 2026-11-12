@@ -15,7 +15,8 @@ import { getSourceHealthStatusLabel } from "../sourceHealth"
 import { getKnowledgeTrustReasonMessages } from "../trustState"
 
 type NoResultsRecoveryProps = {
-  onBroadenScope?: () => void
+  onSearchMoreResults?: () => void
+  onChangeIncludedSources?: () => void
   onOpenQuickIngest: () => void
   onEnableWeb: () => void
   onShowNearestMatches: () => void
@@ -30,7 +31,8 @@ type NoResultsRecoveryProps = {
 }
 
 export function NoResultsRecovery({
-  onBroadenScope,
+  onSearchMoreResults,
+  onChangeIncludedSources,
   onOpenQuickIngest,
   onEnableWeb,
   onShowNearestMatches,
@@ -152,18 +154,33 @@ export function NoResultsRecovery({
               Open Quick Ingest
             </button>
             <Link
-              to="/sources"
+              to="/media"
               className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-subtle hover:bg-hover hover:text-text transition-colors"
             >
-              Open source page
+              Open Media library
             </Link>
-            {onBroadenScope ? (
+            <Link
+              to="/notes"
+              className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-subtle"
+            >
+              Open Notes
+            </Link>
+            {onChangeIncludedSources && (
               <button
                 type="button"
-                onClick={onBroadenScope}
+                onClick={onChangeIncludedSources}
+                className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-subtle"
+              >
+                Change included sources
+              </button>
+            )}
+            {onSearchMoreResults ? (
+              <button
+                type="button"
+                onClick={onSearchMoreResults}
                 className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-subtle hover:bg-hover hover:text-text transition-colors"
               >
-                Broaden source scope
+                Search more results
               </button>
             ) : null}
             {canEnableWebFallback ? (

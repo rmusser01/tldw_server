@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.adapters import StaticSyncAdapter, SyncAdapterRegistry
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes import NotesDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.materializers.notes import NotesMaterializer
-from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate
+from tldw_Server_API.app.core.Sync.v2.models import SyncEnvelopeCreate, SyncOperation
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -72,28 +73,48 @@ def sync_service(
     return service
 
 
-def _note_envelope(**overrides) -> SyncEnvelopeCreate:
-    payload = {
-        "dataset_id": "dataset-1",
-        "client_envelope_id": "env-create",
-        "domain": "notes.note",
-        "operation": "upsert",
-        "object_id": "note-1",
-        "device_id": "device-1",
-        "client_sequence": 1,
-        "schema_version": 1,
-        "object_revision": 1,
-        "payload": {
-            "title": "Trip notes",
-            "content": "Packed outline and research links.",
-        },
-        "payload_hash": "sha256:note-v1",
-        "created_at_client": "2026-05-23T18:12:44+00:00",
-        "deleted": False,
-        "encryption_metadata": {"policy": "server_trusted_v1"},
-    }
-    payload.update(overrides)
-    return SyncEnvelopeCreate(**payload)
+def _note_envelope(
+    *,
+    client_envelope_id: str = "env-create",
+    operation: SyncOperation = "upsert",
+    object_id: str = "note-1",
+    client_sequence: int = 1,
+    base_server_cursor: int | None = None,
+    base_object_revision: int | None = None,
+    base_object_hash: str | None = None,
+    object_revision: int = 1,
+    payload: dict[str, object] | None = None,
+    payload_hash: str = "sha256:note-v1",
+    deleted: bool = False,
+    routing_metadata: dict[str, object] | None = None,
+) -> SyncEnvelopeCreate:
+    return SyncEnvelopeCreate(
+        dataset_id="dataset-1",
+        client_envelope_id=client_envelope_id,
+        domain="notes.note",
+        operation=operation,
+        object_id=object_id,
+        device_id="device-1",
+        client_sequence=client_sequence,
+        schema_version=1,
+        base_server_cursor=base_server_cursor,
+        base_object_revision=base_object_revision,
+        base_object_hash=base_object_hash,
+        object_revision=object_revision,
+        payload=(
+            payload
+            if payload is not None
+            else {
+                "title": "Trip notes",
+                "content": "Packed outline and research links.",
+            }
+        ),
+        payload_hash=payload_hash,
+        created_at_client="2026-05-23T18:12:44+00:00",
+        deleted=deleted,
+        encryption_metadata={"policy": "server_trusted_v1"},
+        routing_metadata=routing_metadata if routing_metadata is not None else {},
+    )
 
 
 def _push_one(
@@ -802,7 +823,9 @@ def test_restore_intent_upsert_against_active_note_is_a_conflict(
 
     assert result.accepted == []
     assert len(result.conflicts) == 1
-    assert chacha_db.get_note_by_id("note-1")["title"] == "Trip notes"
+    stored_note = chacha_db.get_note_by_id("note-1")
+    assert stored_note is not None
+    assert stored_note["title"] == "Trip notes"
 
 
 def test_restore_intent_upsert_cannot_create_a_missing_note(
@@ -842,7 +865,9 @@ def test_remote_ingestion_version_precondition_is_ignored(
     )
 
     assert [item.client_envelope_id for item in result.accepted] == ["env-create"]
-    assert chacha_db.get_note_by_id("note-1")["title"] == "Trip notes"
+    stored_note = chacha_db.get_note_by_id("note-1")
+    assert stored_note is not None
+    assert stored_note["title"] == "Trip notes"
 
 
 def test_apply_failure_marks_accepted_envelope_failed_and_replayable(
@@ -964,3 +989,66 @@ def test_exact_retry_after_object_state_update_and_failed_applied_mark_completes
     note = chacha_db.get_note_by_id("note-1")
     assert note is not None
     assert note["title"] == "Trip notes revised"
+
+
+@pytest.mark.parametrize("object_id", [None, "", 17])
+@pytest.mark.parametrize("operation", ["upsert", "tombstone"])
+def test_materializer_rejects_corrupt_stored_note_id_before_lookup(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    object_id,
+    operation,
+) -> None:
+    _push_one(sync_service, _note_envelope())
+    stored = sync_service.store.get_envelope_by_client_id("dataset-1", "env-create")
+    assert stored is not None
+    envelope = replace(stored, operation=operation)
+    # Model construction rejects missing IDs; simulate a corrupted stored object explicitly.
+    object.__setattr__(envelope, "object_id", object_id)
+    before = chacha_db.get_note_by_id("note-1")
+    state = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+
+    def unexpected_access(*args, **kwargs):
+        pytest.fail("Invalid note identity reached state or product access")
+
+    monkeypatch.setattr(sync_service.store, "get_object_state", unexpected_access)
+    monkeypatch.setattr(sync_service.store, "upsert_object_state", unexpected_access)
+    monkeypatch.setattr(chacha_db, "upsert_note_from_sync", unexpected_access)
+    monkeypatch.setattr(chacha_db, "tombstone_note_from_sync", unexpected_access)
+    result = NotesMaterializer(chacha_db).apply(envelope, store=sync_service.store)
+    assert result.status == "failed"
+    assert result.message == "Stored notes.note envelope requires a non-empty string object ID"
+    failed = sync_service.store.list_failed_applies("dataset-1")
+    assert len(failed) == 1
+    assert failed[0].apply_error_code == "notes_projection_failed"
+    assert failed[0].apply_error_message == result.message
+    assert chacha_db.get_note_by_id("note-1") == before
+    monkeypatch.undo()
+    assert sync_service.store.get_object_state("dataset-1", "notes.note", "note-1") == state
+
+
+@pytest.mark.parametrize("object_id", [None, "", 17])
+@pytest.mark.parametrize("operation", ["upsert", "tombstone"])
+def test_direct_product_projection_rejects_corrupt_stored_note_id(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    object_id,
+    operation,
+) -> None:
+    _push_one(sync_service, _note_envelope())
+    stored = sync_service.store.get_envelope_by_client_id("dataset-1", "env-create")
+    assert stored is not None
+    envelope = replace(stored, operation=operation)
+    object.__setattr__(envelope, "object_id", object_id)
+    before = chacha_db.get_note_by_id("note-1")
+
+    def unexpected_access(*args, **kwargs):
+        pytest.fail("Invalid note identity reached product access")
+
+    monkeypatch.setattr(chacha_db, "upsert_note_from_sync", unexpected_access)
+    monkeypatch.setattr(chacha_db, "tombstone_note_from_sync", unexpected_access)
+    with pytest.raises(ValueError, match="^Stored notes.note envelope requires a non-empty string object ID$"):
+        NotesMaterializer(chacha_db).project_product(envelope, object_revision=2, conn=None)
+    assert chacha_db.get_note_by_id("note-1") == before

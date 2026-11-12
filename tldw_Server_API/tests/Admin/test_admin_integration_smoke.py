@@ -11,6 +11,8 @@ from functools import lru_cache
 
 import pytest
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
 # ---------------------------------------------------------------------------
 # Helper: collect all route paths from the app
 # ---------------------------------------------------------------------------
@@ -21,7 +23,7 @@ def _get_all_route_paths() -> frozenset[str]:
     from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
     app = reload_app_main().app
-    return frozenset(route.path for route in app.routes if hasattr(route, "path"))
+    return frozenset(route.path for route in iter_served_routes(app.routes) if hasattr(route, "path"))
 
 
 # ---------------------------------------------------------------------------
@@ -97,6 +99,11 @@ class TestAdminKeyEndpointsExist:
         "/api/v1/admin/rate-limits",
         "/api/v1/admin/roles/{role_id}/rate-limits",
         "/api/v1/admin/users",
+        # Billing dashboard read endpoints (admin-guarded, admin-webui perf
+        # plan A stage 1); the per-user management routes below stay absent.
+        "/api/v1/admin/billing/overview",
+        "/api/v1/admin/billing/subscriptions",
+        "/api/v1/admin/billing/events",
     ]
 
     def test_key_endpoints_present(self) -> None:
@@ -107,12 +114,9 @@ class TestAdminKeyEndpointsExist:
     @pytest.mark.parametrize(
         "path",
         [
-            "/api/v1/admin/billing/overview",
-            "/api/v1/admin/billing/subscriptions",
             "/api/v1/admin/billing/subscriptions/{user_id}",
             "/api/v1/admin/billing/subscriptions/{user_id}/override",
             "/api/v1/admin/billing/subscriptions/{user_id}/credits",
-            "/api/v1/admin/billing/events",
         ],
     )
     def test_admin_billing_endpoints_absent_from_oss_route_table(self, path: str) -> None:

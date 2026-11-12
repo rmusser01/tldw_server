@@ -20,6 +20,8 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
     DEFAULT_CHARACTER_NAME,
 )
+from tldw_Server_API.app.core import config_llm_providers
+from tldw_Server_API.tests.helpers.provider_keys import api_keys_source
 
 
 @pytest.fixture
@@ -31,7 +33,7 @@ def test_db():
         db_path = tmp.name
 
     # Initialize database
-    db = CharactersRAGDB(db_path, "test_client")
+    db = CharactersRAGDB(db_path, "1", owner_user_id="1")
 
     # Enable WAL mode for better concurrency handling in tests
     conn = db.get_connection()
@@ -118,7 +120,7 @@ def test_client(test_db):
 
     try:
         # Mock API keys to prevent 503 errors
-        with patch.dict("tldw_Server_API.app.api.v1.endpoints.chat.API_KEYS", {"openai": "sk-mock-key-12345"}):
+        with patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "sk-mock-key-12345"})):
             # Mock the actual chat API call
             mock_response = {
                 "id": "chatcmpl-test",
@@ -274,14 +276,14 @@ class TestChatEndpointIntegration:
             headers=auth_headers,
         )
 
-        if response1.status_code == 503:
-            pytest.skip("LLM service not configured")
-        assert response1.status_code in [200, 503]
+        assert response1.status_code == 200, response1.text
         data1 = response1.json()
 
         # Extract conversation ID from response
         conv_id = data1.get("tldw_conversation_id")
         assert conv_id, "No conversation ID returned in response"
+        conversation = test_db.get_conversation_by_id(conv_id)
+        assert conversation["client_id"] == test_db.owner_user_id == "1"
 
         # Second message in same conversation
         response2 = test_client.post(
@@ -296,7 +298,7 @@ class TestChatEndpointIntegration:
             headers=auth_headers,
         )
 
-        assert response2.status_code in [200, 503]
+        assert response2.status_code == 200, response2.text
 
         # Verify messages are in database
         messages = test_db.get_messages_for_conversation(conv_id)

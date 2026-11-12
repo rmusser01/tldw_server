@@ -31,9 +31,9 @@ Write a product/design spec that reviews the WebUI/browser-extension Research Wo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec: Docs/superpowers/specs/2026-07-04-research-workspace-notebooklm-pro-ultra-review-design.md. Spec review result: Approved with no blocking issues. Verification: git diff --check passed; ASCII scan passed. Bandit skipped because this is docs-only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

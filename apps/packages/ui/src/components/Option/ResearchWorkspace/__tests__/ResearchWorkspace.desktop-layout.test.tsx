@@ -1,9 +1,18 @@
 import { readFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render as renderUI, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
+
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 
 const testDirname = dirname(fileURLToPath(import.meta.url))
 const chatPanePropsSpy = vi.fn()
@@ -159,9 +168,15 @@ vi.mock("@/store/workspace", () => ({
     })
 }))
 
-vi.mock("@/utils/research-workspace-prefill", () => ({
-  consumeResearchWorkspacePrefill: vi.fn().mockResolvedValue(null),
-  buildKnowledgeQaSeedNote: vi.fn().mockReturnValue(""),
+vi.mock("@/utils/use-research-workspace-prefill", () => ({
+  useResearchWorkspacePrefill: () => ({
+    attached: 0,
+    pending: 0,
+    failed: 0,
+    importing: false,
+    error: null,
+    retry: vi.fn(),
+  }),
 }))
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({

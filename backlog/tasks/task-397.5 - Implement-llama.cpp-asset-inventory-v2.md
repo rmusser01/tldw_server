@@ -35,7 +35,7 @@ Implement the merged Asset Inventory V2 plan: local asset schemas, imported fold
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Executed Docs/superpowers/plans/2026-05-16-llamacpp-asset-inventory-v2-implementation-plan.md inline with TDD in worktree .worktrees/llamacpp-asset-inventory-v2.
 
 Implementation commits:
@@ -51,7 +51,7 @@ Implementation commits:
 Known verification skip: bunx tsc --noEmit --pretty false could not run because Bun could not write to its tempdir inside the sandbox; the required escalated rerun was rejected by the approval reviewer. Frontend behavior was validated through focused Vitest coverage instead.
 
 Review-fix pass for PR #1764: verified live review comments and fixed only still-valid findings. Fixed: asset endpoint blocking I/O by offloading asset/config scans and mutations to the threadpool, registered mmproj/projector leakage in legacy inventory/resolve paths, missing Ant List rowKey on grouped assets, and silent frontend catch handling. Skipped as already satisfied in current code: Gemini backend symbol/import warnings for datetime/UTC, _QUANT_RE, _canonical_path, and _unresolved_path_key. Skipped as incompatible with the installed Ant Design version: changing Space orientation to direction; the local Vitest run warned direction is deprecated and orientation is the current compatible prop.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

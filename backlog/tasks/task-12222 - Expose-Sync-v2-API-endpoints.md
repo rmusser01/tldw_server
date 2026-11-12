@@ -42,7 +42,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting Task 4 endpoint implementation from branch codex/sync-v2-schemas. MCP task_view did not see TASK-220, but backlog CLI resolves the task file in this worktree; using CLI fallback for task updates.
 
 Implemented Sync v2 endpoint wrappers under the existing /api/v1/sync router. Added endpoint coverage for capabilities, register, enroll, restore filters, push idempotency/rejections, pull filters/echo/paging, conflicts list/resolve, attachment feature-detect response, key recovery metadata, safe error details, and legacy /send + /get compatibility. Added minimal SyncV2Service helpers for conflict listing/resolution and encrypted key recovery storage; attachment capability now reports unsupported until persistence exists.
@@ -57,7 +57,7 @@ Second quality re-review fix pass: SyncV2Service now requires push, pull, confli
 Final quality re-review fix pass: SyncV2Service no longer persists a device cursor for empty explicit-cursor pulls, preventing a registered sibling device ID from being advanced by an arbitrary high cursor without any server-observed envelopes. Added regression coverage that an empty high cursor does not poison the target device cursor and a later normal pull still receives pending envelopes. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 84 passed.
 
 Final cursor poisoning variant fix: explicit-cursor pulls are now stateless for server-side cursor storage. Server-side device cursors only advance when the service resolved the cursor from stored state, so a caller cannot use another registered device ID plus a high explicit cursor over echo-only raw envelopes to skip that device past pending visible envelopes. Added regression coverage for both raw-empty and visible-empty-over-echo explicit-cursor poisoning variants. Verification: python -m pytest tldw_Server_API/tests/Sync/test_sync_v2_endpoints.py tldw_Server_API/tests/Sync/test_sync_error_mapping.py tldw_Server_API/tests/Sync/test_sync_v2_service.py tldw_Server_API/tests/Sync/test_sync_v2_security.py tldw_Server_API/tests/Sync/test_sync_v2_models.py tldw_Server_API/tests/Sync/test_sync_v2_store.py -q -> 85 passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

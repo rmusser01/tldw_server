@@ -24,6 +24,33 @@ from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 
 pytestmark = pytest.mark.integration
 
+# Hang guard for real DB setup, worker dispatch and completion; no latency SLA.
+_WORKER_TEST_WATCHDOG_SECONDS = 30.0
+
+
+@pytest.fixture(params=[0.0, 2.1], ids=["warm", "cold-start"])
+def worker_startup(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exercise real workers after a controlled, cancellable cold dispatch."""
+    delay = float(request.param)
+    if delay == 0:
+        return
+    real_handler = claims_job_handlers.process_claims_job
+    startup_pending = True
+
+    async def process_after_cold_start(job: dict[str, Any]) -> dict[str, Any]:
+        nonlocal startup_pending
+        if startup_pending:
+            startup_pending = False
+            # Wait before handing work to the real thread/DB handler so a RED
+            # watchdog cancellation cannot leave an orphaned database write.
+            await asyncio.sleep(delay)
+        return await real_handler(job)
+
+    monkeypatch.setattr(claims_job_handlers, "process_claims_job", process_after_cold_start)
+
 
 def _principal() -> AuthPrincipal:
     return AuthPrincipal(
@@ -66,7 +93,7 @@ async def _run_worker_until_completed(manager: JobManager) -> None:
 
     await asyncio.wait_for(
         sdk.run(handler=claims_job_handlers.process_claims_job, on_completed=on_completed),
-        timeout=2,
+        timeout=_WORKER_TEST_WATCHDOG_SECONDS,
     )
 
 
@@ -74,6 +101,7 @@ async def _run_worker_until_completed(manager: JobManager) -> None:
 async def test_claims_analytics_export_api_worker_and_download_flow(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    worker_startup,
 ) -> None:
     jobs_path = tmp_path / "jobs.sqlite"
     media_path = tmp_path / "owner-media.sqlite"
@@ -170,6 +198,7 @@ async def test_claims_analytics_export_api_worker_and_download_flow(
 async def test_claims_analytics_export_retry_recovers_and_late_failure_cannot_overwrite_ready(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    worker_startup,
 ) -> None:
     jobs_path = tmp_path / "retry-jobs.sqlite"
     media_path = tmp_path / "retry-owner-media.sqlite"
@@ -249,7 +278,10 @@ async def test_claims_analytics_export_retry_recovers_and_late_failure_cannot_ov
                 finally:
                     first_sdk.stop()
 
-            await asyncio.wait_for(first_sdk.run(handler=stop_after_failure), timeout=2)
+            await asyncio.wait_for(
+                first_sdk.run(handler=stop_after_failure),
+                timeout=_WORKER_TEST_WATCHDOG_SECONDS,
+            )
             first_job = manager.get_job(job_id)
             assert first_job["status"] == "queued"
             assert first_job["retry_count"] == 1

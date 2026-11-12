@@ -36,7 +36,7 @@ Replace the remaining hardcoded FlashcardsWorkspace setup-required product-state
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation notes:
 - Replaced FlashcardsWorkspace setup-required offline banner badge label with getDesignSystemState("setup_required").label.
 - Added a registry-backed regression assertion in FlashcardsWorkspace.connection-state.test.tsx.
@@ -57,7 +57,7 @@ PR #1618 review fix:
 - Made the getDesignSystemState test mock defensively pass through a missing registry state instead of dereferencing state.label.
 - Fresh review-fix verification: FlashcardsWorkspace connection-state Vitest passed 3 tests; product-state guard Vitest passed 52 tests; verify:design-system-state exited 0 with baseline exceptions 506 and canonical-state-label 26; git diff --check passed.
 - Full UI tsc still exits nonzero due existing unrelated package diagnostics outside this PR touched files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

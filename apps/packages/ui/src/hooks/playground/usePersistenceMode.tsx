@@ -1,72 +1,69 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 
-const getPersistenceModeLabel = (
-  t: (...args: any[]) => any,
-  temporaryChat: boolean,
-  isConnectionReady: boolean,
-  serverChatId: string | null
-) => {
-  if (temporaryChat) {
-    return t(
-      "playground:composer.persistence.ephemeral",
-      "Not saved: cleared when you close this window."
-    )
-  }
-  if (serverChatId || isConnectionReady) {
-    return t(
-      "playground:composer.persistence.server",
-      "Saved to your tldw server (and locally)."
-    )
-  }
-  return t(
-    "playground:composer.persistence.local",
-    "Saved locally until your tldw server is connected."
-  )
-}
+type ModeTranslator = (key: string, defaultValue: string) => string
+
+/** History eligibility is a mode, never a receipt for the latest write. */
+export const getPersistenceModeLabel = (
+  t: ModeTranslator,
+  temporaryChat: boolean
+) =>
+  temporaryChat
+    ? t(
+        "playground:composer.persistence.temporaryModeHelp",
+        "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
+      )
+    : t(
+        "playground:composer.persistence.historyModeHelp",
+        "New messages can be stored in chat history."
+      )
+
+export const getPersistenceModePillLabel = (
+  t: ModeTranslator,
+  temporaryChat: boolean
+) =>
+  temporaryChat
+    ? t("playground:composer.persistence.temporaryModeTitle", "Temporary")
+    : t("playground:composer.persistence.historyModeTitle", "History on")
+
+/** Keep the history toggle's semantic subject stable and include visible state. */
+export const getPersistenceModeControlLabel = (
+  t: ModeTranslator,
+  temporaryChat: boolean
+) =>
+  `${t("playground:composer.persistence.historyControl", "Chat history")}: ${getPersistenceModePillLabel(t, temporaryChat)}`
+
+import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
+import {
+  resolveChatPersistenceKind
+} from "@/utils/chat-persistence-status"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 export type UsePersistenceModeParams = {
   temporaryChat: boolean
-  serverChatId: string | null
-  isConnectionReady: boolean
+  serverChatId?: string | null
 }
 
+/**
+ * Persistence status for the active chat (CS-03 / XS-05, #3104).
+ *
+ * The label claims the server only when the chat has a server id and its
+ * latest server write was acknowledged. Connectivity alone never counts.
+ */
 export function usePersistenceMode({
   temporaryChat,
-  serverChatId,
-  isConnectionReady
+  serverChatId = null
 }: UsePersistenceModeParams) {
   const { t } = useTranslation(["playground", "common"])
-
-  const persistenceModeLabel = React.useMemo(
-    () =>
-      getPersistenceModeLabel(
-        t,
-        temporaryChat,
-        isConnectionReady,
-        serverChatId
-      ),
-    [isConnectionReady, serverChatId, temporaryChat, t]
+  const persistenceModeLabel = getPersistenceModeLabel(t, temporaryChat)
+  const persistencePillLabel = getPersistenceModePillLabel(t, temporaryChat)
+  const persistenceControlLabel = getPersistenceModeControlLabel(
+    t,
+    temporaryChat
   )
 
-  const persistencePillLabel = React.useMemo(() => {
-    if (temporaryChat) {
-      return t(
-        "playground:composer.persistence.ephemeralPill",
-        "Not saved"
-      )
-    }
-    if (serverChatId || isConnectionReady) {
-      return t(
-        "playground:composer.persistence.serverPill",
-        "Server"
-      )
-    }
-    return t(
-      "playground:composer.persistence.localPill",
-      "Local"
-    )
-  }, [isConnectionReady, serverChatId, temporaryChat, t])
+  const serverSaveStatus = useServerChatSaveStatus(serverChatId)
+  const persistenceKind = resolveChatPersistenceKind({ temporaryChat, serverChatId, serverSaveStatus })
 
   const persistenceTooltip = React.useMemo(
     () => (
@@ -82,7 +79,7 @@ export function usePersistenceMode({
     try {
       const card = document.getElementById("server-connection-card")
       if (card) {
-        card.scrollIntoView({ block: "nearest", behavior: "smooth" })
+        card.scrollIntoView({ block: "nearest", behavior: smoothScrollBehavior() })
         ;(card as HTMLElement).focus()
         return
       }
@@ -90,8 +87,7 @@ export function usePersistenceMode({
       // ignore DOM errors and fall through to hash navigation
     }
     try {
-      const base =
-        window.location.href.replace(/#.*$/, "") || "/options.html"
+      const base = window.location.href.replace(/#.*$/, "") || "/options.html"
       const target = `${base}#/settings/tldw`
       window.location.href = target
     } catch {
@@ -100,11 +96,11 @@ export function usePersistenceMode({
   }, [])
 
   return {
+    persistenceKind,
     persistenceModeLabel,
     persistencePillLabel,
+    persistenceControlLabel,
     persistenceTooltip,
-    focusConnectionCard,
-    /** Re-exported for callers that need the raw function (e.g. toggle handler) */
-    getPersistenceModeLabel
+    focusConnectionCard
   }
 }

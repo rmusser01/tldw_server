@@ -1,13 +1,9 @@
-"""Shared opaque observability context for planned STT network calls."""
+"""Moved to ``core/Logging/stt_observability_context.py`` (TASK-13950.12).
 
-from contextvars import ContextVar
+Re-exported so the old path keeps the same ``ContextVar``.
+"""
 
-OPAQUE_STT_ENDPOINT_ID: ContextVar[str | None] = ContextVar(
-    "opaque_stt_endpoint_id",
-    default=None,
+from tldw_Server_API.app.core.Logging.stt_observability_context import (  # noqa: F401
+    OPAQUE_STT_ENDPOINT_ID,
+    get_opaque_stt_endpoint_id,
 )
-
-
-def get_opaque_stt_endpoint_id() -> str | None:
-    """Return the planned STT endpoint identity in the current context."""
-    return OPAQUE_STT_ENDPOINT_ID.get()

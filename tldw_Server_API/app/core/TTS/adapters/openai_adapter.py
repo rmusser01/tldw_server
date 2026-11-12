@@ -38,6 +38,8 @@ from ..tts_exceptions import (
 from ..tts_resource_manager import get_resource_manager
 from ..tts_validation import validate_tts_request
 from .base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities, TTSRequest, TTSResponse, VoiceInfo
+# Was httpx-only; the shared copy also recognises requests.HTTPError.
+from tldw_Server_API.app.core.Utils.http_status_extraction import is_http_status_error as _is_http_status_error  # noqa: F401
 
 #
 #######################################################################################################################
@@ -47,12 +49,6 @@ from .base import AudioFormat, ProviderStatus, TTSAdapter, TTSCapabilities, TTSR
 def _is_httpx_exception(exc: Exception) -> bool:
     module = getattr(exc.__class__, "__module__", "")
     return module.startswith("httpx")
-
-
-def _is_http_status_error(exc: Exception) -> bool:
-    if not _is_httpx_exception(exc):
-        return False
-    return exc.__class__.__name__ == "HTTPStatusError"
 
 
 def _is_timeout_error(exc: Exception) -> bool:

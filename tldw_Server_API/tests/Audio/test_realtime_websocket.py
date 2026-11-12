@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTranscriptDone,
     RealtimePipelineTurnDone,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.tests.Audio.ws_test_helpers import ws_client_without_lifespan
 
 pytestmark = pytest.mark.integration
@@ -69,31 +70,20 @@ class BlockingPipeline(FakePipeline):
 
 @pytest.fixture(autouse=True)
 def _realtime_test_env(monkeypatch: pytest.MonkeyPatch):
-    from tldw_Server_API.app.core.Audio import streaming_service
-    from tldw_Server_API.app.core.AuthNZ import ip_allowlist
-    from tldw_Server_API.app.core.AuthNZ import settings as auth_settings
+    """Single-user mode with a known key: the routes verify it on the core WebSocket resolver (TASK-13950.7)."""
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     monkeypatch.setenv("MINIMAL_TEST_INCLUDE_AUDIO", "1")
     monkeypatch.delenv("ROUTES_DISABLE", raising=False)
     monkeypatch.delenv("ROUTES_ENABLE", raising=False)
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "single-user-secret")
+    monkeypatch.delenv("SINGLE_USER_ALLOWED_IPS", raising=False)
     config_mod._route_toggle_policy.cache_clear()
-    monkeypatch.setattr(streaming_service, "is_multi_user_mode", lambda: False)
-    monkeypatch.setattr(
-        auth_settings,
-        "get_settings",
-        lambda: type(
-            "Settings",
-            (),
-            {
-                "SINGLE_USER_API_KEY": "single-user-secret",
-                "SINGLE_USER_ALLOWED_IPS": [],
-                "SINGLE_USER_FIXED_ID": 1,
-            },
-        )(),
-    )
-    monkeypatch.setattr(ip_allowlist, "resolve_client_ip", lambda *_args, **_kwargs: "127.0.0.1")
+    reset_settings()
     yield
     config_mod._route_toggle_policy.cache_clear()
+    reset_settings()
 
 
 def _build_app(monkeypatch: pytest.MonkeyPatch, pipeline: FakePipeline | None = None) -> FastAPI:
@@ -308,7 +298,7 @@ def test_audio_realtime_route_toggle_removes_native_and_compat_routes(
     config_mod._route_toggle_policy.cache_clear()
     app = _build_app(monkeypatch)
 
-    paths = {getattr(route, "path", "") for route in app.routes}
+    paths = {getattr(route, "path", "") for route in iter_served_routes(app.routes)}
 
     assert "/v1/realtime" not in paths
     assert "/api/v1/audio/realtime" not in paths

@@ -45,7 +45,7 @@ Implement Task 5 of the VN platform API implementation plan. Scope: harden VN Pl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Implemented action request recovery for stale/active/failed/abandoned turn requests and same-key session-action concurrency handling.
 - Added per-session save slot CRUD/restore APIs with checkpoint-backed restore and idempotent session-action replay.
 - Extended setup-options for scripted_story published script versions, readiness, policy warnings, defaults, and empty states.
@@ -55,7 +55,7 @@ Implement Task 5 of the VN platform API implementation plan. Scope: harden VN Pl
 - Verification: compileall on touched VN Play/API/DB/schema paths exited 0.
 - Verification: git diff --check exited 0.
 - Verification: Bandit on touched production Python paths wrote /tmp/bandit_vn_play_task226.json with 0 results and 0 errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

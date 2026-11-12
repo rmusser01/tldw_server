@@ -58,7 +58,8 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    # Locked Playwright 1.58 does not support the Ubuntu 26.04 latest image.
+    runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
       PYTHONPATH: .
@@ -100,6 +101,8 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
         run: bun install --frozen-lockfile
 
       - name: Install Playwright Chromium
@@ -215,7 +218,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 55
     env:
       PYTHONPATH: .
@@ -262,6 +265,8 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: apps
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
         run: bun install --frozen-lockfile
 
       - name: Build advanced frontend production bundle for smoke gate

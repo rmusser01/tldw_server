@@ -1,6 +1,6 @@
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import ViewMediaPage from '../ViewMediaPage'
 import { MEDIA_REVIEW_SELECTION_SETTING } from '@/services/settings/ui-settings'
@@ -22,9 +22,13 @@ const mocks = vi.hoisted(() => ({
   setRagMediaIds: vi.fn(),
   downloadBlob: vi.fn(),
   owner: 'alice',
+  storageFailure: false,
+  mobile: false,
   transferStudyPack: vi.fn()
 }))
 
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => mocks.owner, quickIngestAuthority: { capture: () => ({ authorityKey: mocks.owner, requestScope: { config: { serverUrl: 'http://localhost:8000', authMode: 'multi-user' }, userId: mocks.owner }, isCurrent: () => true }) } }))
+vi.mock('@/hooks/useMediaQuery', () => ({ useMobile: () => mocks.mobile }))
 vi.mock('@/hooks/useHomeMilestoneScope', () => ({ useHomeMilestoneScope: () => mocks.owner }))
 vi.mock('@/hooks/useFlashcardsGenerateTransfer', () => ({
   useStudyPackTransfer: () => mocks.transferStudyPack,
@@ -35,10 +39,12 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (
       key: string,
-      fallbackOrOptions?: string | { defaultValue?: string; [k: string]: unknown }
+      fallbackOrOptions?: string | { defaultValue?: string; [k: string]: unknown },
+      options?: Record<string, unknown>
     ) => {
-      if (typeof fallbackOrOptions === 'string') return fallbackOrOptions
-      return fallbackOrOptions?.defaultValue || key
+      const values = typeof fallbackOrOptions === 'string' ? options : fallbackOrOptions
+      const fallback = typeof fallbackOrOptions === 'string' ? fallbackOrOptions : fallbackOrOptions?.defaultValue || key
+      return fallback.replace(/{{(\w+)}}/g, (_match, field) => String(values?.[field] ?? `{{${field}}}`))
     }
   })
 }))
@@ -72,7 +78,10 @@ vi.mock('@plasmohq/storage/hook', async () => {
   return {
     useStorage: (_key: string, initialValue: unknown) => {
       const [value, setValue] = React.useState(initialValue)
-      return [value, setValue] as const
+      return [value, async (next: React.SetStateAction<unknown>) => {
+        setValue(next)
+        if (mocks.storageFailure && _key.startsWith('media:collections:')) throw new Error('Storage full')
+      }, { isLoading: false, setRenderValue: setValue }] as const
     }
   }
 })
@@ -197,10 +206,6 @@ vi.mock('@/components/Media/FilterChips', () => ({
   FilterChips: () => <div data-testid="filter-chips" />
 }))
 
-vi.mock('@/components/Media/Pagination', () => ({
-  Pagination: () => <div data-testid="pagination" />
-}))
-
 vi.mock('@/components/Media/MediaSectionNavigator', () => ({
   MediaSectionNavigator: () => <div data-testid="media-section-navigator" />
 }))
@@ -221,16 +226,17 @@ vi.mock('@/components/Media/ResultsList', () => ({
     <div data-testid="results-list">
       {results.map((result: any) => {
         const key = String(result.id)
-        const checked = selectedIds?.has(key) === true
+        const selectionKey = `${result.kind}:${result.id}`
+        const checked = selectedIds?.has(selectionKey) === true
         return (
-          <div key={key}>
+          <div key={selectionKey}>
             <button
               type="button"
               data-testid={`result-${key}`}
               aria-pressed={selectedId === result.id}
               onClick={() => {
                 if (selectionMode) {
-                  onToggleSelected?.(result.id)
+                  onToggleSelected?.(selectionKey)
                   return
                 }
                 onSelect(result.id)
@@ -243,7 +249,7 @@ vi.mock('@/components/Media/ResultsList', () => ({
                 type="button"
                 data-testid={`toggle-selected-${key}`}
                 aria-pressed={checked}
-                onClick={() => onToggleSelected?.(result.id)}
+                onClick={() => onToggleSelected?.(selectionKey)}
               >
                 {checked ? 'selected' : 'select'}
               </button>
@@ -299,6 +305,8 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
 
   beforeEach(() => {
     mocks.owner = 'alice'
+    mocks.mobile = false
+    mocks.storageFailure = false
     mocks.transferStudyPack.mockReset()
     mocks.queryData = [
       {
@@ -333,7 +341,7 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     mocks.setRagMediaIds.mockReset()
     mocks.downloadBlob.mockReset()
     mocks.bgRequest.mockReset()
-    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: { keywords: string[]; mode: string } }) => {
       const path = String(request?.path || '')
       if (path === '/api/v1/media/capabilities') {
         return { can_delete: true }
@@ -352,6 +360,12 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
       if (request?.method === 'DELETE' && path.startsWith('/api/v1/media/')) {
         return { ok: true }
       }
+      if (request?.method === 'PATCH' && /^\/api\/v1\/media\/\d+\/keywords$/.test(path)) {
+        const id = Number(path.split('/')[4])
+        const item = mocks.queryData.find(row => row.id === id)
+        const keywords = Array.from(new Set([...(item?.keywords || []), ...(request.body?.keywords || [])]))
+        return { media_id: id, keywords }
+      }
       if (request?.method === 'PUT' && path.startsWith('/api/v1/media/')) {
         return { ok: true }
       }
@@ -363,41 +377,193 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     })
   })
 
-  it.each(['same-media', 'other-media', 'other-owner'])('validates the Study Pack source after detail hydration: %s', async change => {
-    let finishDetails!: (value: unknown) => void
-    const details = new Promise(resolve => { finishDetails = resolve })
-    let finishAuthority!: () => void
-    const authority = new Promise<void>(resolve => { finishAuthority = resolve })
-    const delivered = vi.fn()
-    mocks.transferStudyPack.mockImplementation(async (acquire: () => unknown) => {
+  it.each(['same-media', 'other-media', 'other-owner'])(
+    'validates the Study Pack source after detail hydration: %s',
+    async (change) => {
+      let finishDetails!: (value: unknown) => void
+      const details = new Promise((resolve) => {
+        finishDetails = resolve
+      })
+      let finishAuthority!: () => void
+      const authority = new Promise<void>((resolve) => {
+        finishAuthority = resolve
+      })
+      const delivered = vi.fn()
+      mocks.transferStudyPack.mockImplementation(async (acquire: () => unknown) => {
       await authority
       delivered(acquire())
     })
-    const originalRequest = mocks.bgRequest.getMockImplementation()!
-    mocks.bgRequest.mockImplementation((request: { path?: string; method?: string }) =>
+      const originalRequest = mocks.bgRequest.getMockImplementation()!
+      mocks.bgRequest.mockImplementation((request: { path?: string; method?: string }) =>
       request.method === 'GET' && request.path === '/api/v1/media/2'
         ? details
         : originalRequest(request)
     )
-    const view = renderMediaPage()
-    fireEvent.click(screen.getByTestId('result-2'))
-    await waitFor(() => expect(screen.getByTestId('mock-content-viewer')).toHaveTextContent('2'))
-    fireEvent.click(screen.getByRole('button', { name: 'Create study pack' }))
-    await waitFor(() => expect(mocks.transferStudyPack).toHaveBeenCalledOnce())
-    await act(async () => { finishDetails({ media_id: 2, content: 'Hydrated text', keywords: ['hydrated'] }) })
-    if (change === 'other-media') fireEvent.click(screen.getByTestId('result-1'))
-    if (change === 'other-owner') {
-      mocks.owner = 'bob'
-      view.rerender(<MemoryRouter initialEntries={['/media']}><Routes><Route path='/media' element={<ViewMediaPage />} /></Routes></MemoryRouter>)
-    }
-    await act(async () => { finishAuthority() })
-    if (change === 'same-media') {
+      const view = renderMediaPage()
+      fireEvent.click(screen.getByTestId('result-2'))
+      await waitFor(() => expect(screen.getByTestId('mock-content-viewer')).toHaveTextContent('2'))
+      fireEvent.click(screen.getByRole('button', { name: 'Create study pack' }))
+      await waitFor(() => expect(mocks.transferStudyPack).toHaveBeenCalledOnce())
+      await act(async () => { finishDetails({ media_id: 2, content: 'Hydrated text', keywords: ['hydrated'] }) })
+      if (change === 'other-media') fireEvent.click(screen.getByTestId('result-1'))
+      if (change === "other-owner") {
+        mocks.owner = "bob"
+        view.rerender(
+          <MemoryRouter initialEntries={['/media']}>
+            <Routes>
+              <Route path='/media' element={<ViewMediaPage />} />
+            </Routes>
+          </MemoryRouter>
+        )
+      }
+      await act(async () => { finishAuthority() })
+      if (change === 'same-media') {
       expect(delivered).toHaveBeenCalledWith({ title: 'Doc 2', sourceItems: [{ sourceType: 'media', sourceId: '2', sourceTitle: 'Doc 2' }] })
       expect(mocks.messageError).not.toHaveBeenCalled()
     } else {
       expect(delivered).not.toHaveBeenCalled()
       expect(mocks.messageError).toHaveBeenCalledWith(expect.stringContaining('source account or selection changed'))
     }
+    }
+  )
+
+  it.each([false, true])(
+    'offers actual version-bound Note recovery after confirmation, mixed=%s',
+    async (mixed) => {
+    mocks.queryData = mixed ? [mocks.queryData[0], { ...mocks.queryData[0], kind: 'note' }] : [{ ...mocks.queryData[0], kind: 'note' }]
+    const original = mocks.bgRequest.getMockImplementation()!
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: { keywords: string[]; mode: string } }) => {
+      if (request.path === '/api/v1/notes/1' && request.method === 'GET') return { version: 7 }
+      return original(request)
+    })
+    renderMediaPage()
+    await enableBulkMode()
+    fireEvent.click(screen.getByRole('button', { name: 'Select this page' }))
+    fireEvent.click(screen.getByTestId('media-bulk-delete'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }))
+    const restore = await screen.findByRole('button', { name: 'Restore 1 note' })
+    expect(Boolean(screen.queryByRole('button', { name: 'Open Trash' }))).toBe(mixed)
+    fireEvent.click(restore)
+    await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({ path: '/api/v1/notes/1/restore?expected_version=8', method: 'POST', headers: expect.objectContaining({ 'X-TLDW-Expected-User-ID': 'alice' }), servicePromptConfig: expect.objectContaining({ expectedUserId: 'alice' }), abortSignal: expect.any(AbortSignal) })))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Restore 1 note' })).not.toBeInTheDocument())
+  }
+  )
+
+  it('keeps failed Note restores available and retries only the failed Note', async () => {
+    mocks.queryData = mocks.queryData.map((item) => ({
+      ...item,
+      kind: "note"
+    }))
+    const original = mocks.bgRequest.getMockImplementation()!
+    let failSecond = true
+    mocks.bgRequest.mockImplementation(async (request: { path?: string; method?: string; body?: { keywords: string[]; mode: string } }) => {
+      if (request.method === 'GET' && request.path?.startsWith('/api/v1/notes/')) return { version: 7 }
+      if (request.path === '/api/v1/notes/2/restore?expected_version=8' && failSecond) throw new Error('Conflict')
+      return original(request)
+    })
+    renderMediaPage()
+    await enableBulkMode()
+    fireEvent.click(screen.getByRole('button', { name: 'Select this page' }))
+    fireEvent.click(screen.getByTestId('media-bulk-delete'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Restore 2 notes' }))
+    const retry = await screen.findByRole('button', { name: 'Restore 1 note' })
+    failSecond = false
+    fireEvent.click(retry)
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Restore 1 note' })).not.toBeInTheDocument())
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => request.path?.includes('/restore?')).map(([request]) => request.path)).toEqual(['/api/v1/notes/1/restore?expected_version=8', '/api/v1/notes/2/restore?expected_version=8', '/api/v1/notes/2/restore?expected_version=8'])
+  })
+
+  it('explains which selected kinds Open selection reviews', async () => {
+    mocks.queryData.push({ id: 1, kind: 'note', title: 'Note with matching raw ID', raw: {}, keywords: [] })
+    renderMediaPage()
+    await enableBulkMode()
+    fireEvent.click(screen.getByRole('button', { name: 'Select this page' }))
+    expect(screen.getByTestId('media-bulk-toolbar')).toHaveTextContent('3 selected')
+    expect(screen.getByTestId('media-bulk-toolbar')).toHaveTextContent('Review opens Media only; Notes stay selected.')
+    expect(screen.getByRole('button', { name: 'Open selection' })).toBeEnabled()
+  })
+
+  it('retains selection actions when a refreshed current page becomes empty', async () => {
+    const view = renderMediaPage()
+    await enableBulkMode()
+    await selectBulkItems(1, 2)
+    mocks.queryData = []
+    mocks.refetch.mockResolvedValue({ data: [] })
+    view.rerender(
+      <MemoryRouter initialEntries={['/media']}>
+        <Routes>
+          <Route path='/media' element={<ViewMediaPage />} />
+        </Routes>
+      </MemoryRouter>
+    )
+    await waitFor(() => expect(screen.queryByTestId('result-1')).not.toBeInTheDocument())
+    expect(screen.getByTestId('media-bulk-toolbar')).toHaveTextContent('2 selected')
+    expect(screen.getByRole('button', { name: 'Open selection' })).toBeEnabled()
+    fireEvent.click(screen.getByTestId('media-bulk-export'))
+    expect(mocks.downloadBlob).toHaveBeenCalledOnce()
+  })
+
+  it('preserves the mobile query and selection when opening Content and returning to Results', async () => {
+    mocks.mobile = true
+    renderMediaPage()
+    fireEvent.change(screen.getByTestId('search-bar'), { target: { value: 'saved query' } })
+    screen.getByTestId('result-2').focus()
+    fireEvent.click(screen.getByTestId('result-2'))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Back to results' })).toHaveFocus())
+    expect(screen.getByTestId('inspector-results-view')).not.toBeVisible()
+    expect(screen.getByTestId('inspector-content-view')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+    await waitFor(() => expect(screen.getByTestId('result-2')).toHaveFocus())
+    expect(screen.getByTestId('inspector-results-view')).toBeVisible()
+    expect(screen.getByTestId('search-bar')).toHaveValue('saved query')
+    await enableBulkMode()
+    await selectBulkItems(1, 2)
+    const toolbar = screen.getByTestId('media-bulk-toolbar')
+    expect(toolbar).toHaveTextContent('2 selected')
+    expect(screen.getByTestId('inspector-filter-controls').contains(toolbar)).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: 'Content' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Back to results' }))
+    expect(toolbar).toHaveTextContent('2 selected')
+    expect(screen.getByText('Review a batch')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByText('Review a batch')).not.toBeInTheDocument()
+  })
+
+  it('offers Open Trash after a confirmed partial move and retains the failed selection', async () => {
+    const original = mocks.bgRequest.getMockImplementation()!
+    mocks.bgRequest.mockImplementation((request: { path?: string; method?: string }) => {
+      if (request.method === 'DELETE' && request.path === '/api/v1/media/2') return Promise.reject(new Error('Unavailable'))
+      return original(request)
+    })
+    renderMediaPage()
+    await enableBulkMode()
+    await selectBulkItems(1, 2)
+    fireEvent.click(screen.getByTestId('media-bulk-delete'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }))
+    expect(await screen.findByRole('button', { name: 'Open Trash' })).toBeInTheDocument()
+    expect(screen.getByTestId('media-bulk-toolbar')).toHaveTextContent('1 selected')
+    expect(screen.getByTestId('toggle-selected-2')).toHaveAttribute('aria-pressed', 'true')
+    expect(mocks.messageWarning).toHaveBeenCalledWith('Moved 1 item(s) to trash, 1 failed.')
+  })
+
+  it('asks before trash, cancels without requests and exposes labeled export and Add media', async () => {
+    renderMediaPage()
+    expect(screen.getByRole('button', { name: 'Add media' })).toBeInTheDocument()
+    await enableBulkMode()
+    await selectBulkItems(1, 2)
+    fireEvent.click(screen.getByText('Tags, collections and export'))
+    expect(screen.getByRole('combobox', { name: 'Export format' })).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('media-bulk-delete'))
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Move 2 items to trash')
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => request.method === 'DELETE')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => {
+      const closing = screen.queryByRole('dialog')
+      if (closing) expect(closing).toHaveClass('ant-zoom-leave')
+      else expect(closing).not.toBeInTheDocument()
+    })
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => request.method === 'DELETE')).toHaveLength(0)
   })
 
   it('deletes selected items in bulk mode', async () => {
@@ -406,6 +572,7 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     await enableBulkMode()
     await selectBulkItems(1, 2)
     fireEvent.click(screen.getByTestId('media-bulk-delete'))
+    fireEvent.click(await screen.findByRole('button', { name: 'Move to trash' }))
 
     await waitFor(() => {
       expect(mocks.bgRequest).toHaveBeenCalledWith(
@@ -417,11 +584,11 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     })
 
     expect(mocks.messageSuccess).toHaveBeenCalledWith(
-      expect.stringContaining('Deleted')
+      expect.stringContaining('Moved')
     )
   })
 
-  it('places ingest jobs and library stats after the results flow in the sidebar', () => {
+  it("shows imports before results and keeps library stats in bottom tools", () => {
     renderMediaPage()
 
     const resultsList = screen.getByTestId('results-list')
@@ -436,12 +603,11 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
           resultsList.compareDocumentPosition(bottomUtilities) & Node.DOCUMENT_POSITION_FOLLOWING
         ).toBeTruthy()
         expect(
-          bottomUtilities.compareDocumentPosition(resolvedIngestJobsPanel) &
-            Node.DOCUMENT_POSITION_CONTAINED_BY
-        ).toBeTruthy()
+          bottomUtilities.contains(resolvedIngestJobsPanel) ? 1 : 0
+        ).toBeFalsy()
         expect(
           resultsList.compareDocumentPosition(resolvedIngestJobsPanel) &
-            Node.DOCUMENT_POSITION_FOLLOWING
+            Node.DOCUMENT_POSITION_PRECEDING
         ).toBeTruthy()
         expect(
           resolvedIngestJobsPanel.compareDocumentPosition(resolvedLibraryStatsPanel) &
@@ -464,9 +630,9 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     await waitFor(() => {
       expect(mocks.bgRequest).toHaveBeenCalledWith(
         expect.objectContaining({
-          path: '/api/v1/media/1',
-          method: 'PUT',
-          body: { keywords: ['alpha', 'beta', 'gamma'] }
+          path: '/api/v1/media/1/keywords',
+          method: 'PATCH',
+          body: { keywords: ['beta', 'gamma'], mode: 'add' }
         })
       )
     })
@@ -487,6 +653,73 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     expect(filename).toContain('media-bulk-export-')
     expect(filename.endsWith('.json')).toBe(true)
     await expect(blob.text()).resolves.toContain('"id": 1')
+  })
+
+  it('B08 creates an empty collection, edits its metadata and deletes only the collection', async () => {
+    mocks.queryData = []
+    renderMediaPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage collections', exact: true }))
+    expect(screen.getByRole('combobox', { name: 'Managed collection', exact: true })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Collection name'), { target: { value: 'Rowan research' } })
+    fireEvent.change(screen.getByLabelText('Collection description'), { target: { value: 'Observatory sources' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create collection', exact: true }))
+    await screen.findByText('0 saved references')
+    expect(screen.getByLabelText('Collection name')).toHaveValue('Rowan research')
+    fireEvent.change(screen.getByLabelText('Collection name'), { target: { value: 'Revised Rowan' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save collection', exact: true }))
+    await waitFor(() => expect(within(screen.getByRole('dialog')).getByRole('option', { name: 'Revised Rowan (0)' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'Delete collection', exact: true }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Delete collection only', exact: true }))
+    await waitFor(() => expect(within(screen.getByRole('dialog')).queryByRole('option', { name: 'Revised Rowan (0)' })).not.toBeInTheDocument())
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => request.method === 'DELETE')).toEqual([])
+  })
+
+  it('B08 keeps a failed collection save out of the displayed membership count', async () => {
+    renderMediaPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Manage collections', exact: true }))
+    fireEvent.change(screen.getByLabelText('Collection name'), { target: { value: 'Cannot persist' } })
+    mocks.storageFailure = true
+    fireEvent.click(screen.getByRole('button', { name: 'Create collection', exact: true }))
+    await waitFor(() => expect(mocks.messageError).toHaveBeenCalled())
+    expect(within(screen.getByRole('dialog')).queryByRole('option', { name: 'Cannot persist (0)' })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Collection name')).toHaveValue('Cannot persist')
+  })
+
+  it('B08 removes membership without deleting the source and prevents duplicate references', async () => {
+    renderMediaPage()
+    await enableBulkMode()
+    await selectBulkItems(1, 2)
+    fireEvent.change(screen.getByTestId('media-bulk-collection-name'), { target: { value: 'Retained sources' } })
+    fireEvent.click(screen.getByTestId('media-bulk-add-collection'))
+    await waitFor(() => expect(screen.getByRole('option', { name: 'Retained sources (2)' })).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('media-bulk-add-collection'))
+    fireEvent.click(screen.getByRole('button', { name: 'Manage collections', exact: true }))
+    await screen.findByText('2 saved references')
+    fireEvent.click(screen.getByRole('button', { name: 'Remove media:1 from collection', exact: true }))
+    await screen.findByText('1 saved reference')
+    expect(within(screen.getByRole('dialog')).getByRole('option', { name: 'Retained sources (1)' })).toBeInTheDocument()
+    expect(mocks.bgRequest.mock.calls.filter(([request]) => request.method === 'DELETE')).toEqual([])
+  })
+
+  it('counts only visible collection members in the footer and restores the full count when cleared', async () => {
+    renderMediaPage()
+    // This existing query fixture leaves the server total at zero; only the visible count changes.
+    expect(screen.getByText('2 of 0 results')).toBeInTheDocument()
+    await enableBulkMode()
+    await selectBulkItems(1)
+    fireEvent.change(screen.getByTestId('media-bulk-collection-name'), {
+      target: { value: 'Visible member count' }
+    })
+    fireEvent.click(screen.getByTestId('media-bulk-add-collection'))
+    await waitFor(() => {
+      expect(screen.queryByTestId('result-2')).not.toBeInTheDocument()
+      expect(screen.getByText('1 of 0 results')).toBeInTheDocument()
+    })
+    fireEvent.change(screen.getByTestId('media-collection-filter'), {
+      target: { value: '' }
+    })
+    expect(screen.getByTestId('result-2')).toBeInTheDocument()
+    expect(screen.getByText('2 of 0 results')).toBeInTheDocument()
   })
 
   it('creates a collection from bulk selection and opens it in multi-review', async () => {
@@ -572,17 +805,17 @@ describe('ViewMediaPage stage 14 bulk actions baseline', () => {
     await waitFor(() => {
       expect(mocks.bgRequest).toHaveBeenCalledWith(
         expect.objectContaining({
-          path: '/api/v1/media/1',
-          method: 'PUT',
-          body: { keywords: ['alpha', 'only-active'] }
+          path: '/api/v1/media/1/keywords',
+          method: 'PATCH',
+          body: { keywords: ['only-active'], mode: 'add' }
         })
       )
     })
 
     expect(mocks.bgRequest).not.toHaveBeenCalledWith(
       expect.objectContaining({
-        path: '/api/v1/media/2',
-        method: 'PUT',
+        path: '/api/v1/media/2/keywords',
+        method: 'PATCH',
         body: expect.any(Object)
       })
     )

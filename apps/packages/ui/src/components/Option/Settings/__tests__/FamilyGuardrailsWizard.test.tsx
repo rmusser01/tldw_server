@@ -1531,15 +1531,23 @@ describe("FamilyGuardrailsWizard", { timeout: 60_000 }, () => {
 
     const continueButton = screen.getByRole("button", { name: /Save & Continue/i })
     expect(continueButton).toBeEnabled()
-    fireEvent.click(continueButton)
-    expect(screen.getByPlaceholderText("Child 1 display name")).toHaveFocus()
+    // Retry the click with the assertion: loaded CI runners can swallow a
+    // single click during re-render (#2911). A CI failure here showed the
+    // field without its error status, i.e. validation never ran. Re-clicking
+    // is safe: an incomplete row fails validation again without persisting.
+    await waitFor(() => {
+      fireEvent.click(continueButton)
+      expect(screen.getByPlaceholderText("Child 1 display name")).toHaveFocus()
+    })
     expect(screen.getAllByText("Display name is required.").length).toBeGreaterThan(0)
 
     fireEvent.change(screen.getByPlaceholderText("Child 1 display name"), {
       target: { value: "Alex" }
     })
-    fireEvent.click(continueButton)
-    expect(screen.getByPlaceholderText("Child 2 display name")).toHaveFocus()
+    await waitFor(() => {
+      fireEvent.click(continueButton)
+      expect(screen.getByPlaceholderText("Child 2 display name")).toHaveFocus()
+    })
 
     fireEvent.change(screen.getByPlaceholderText("Child 2 display name"), {
       target: { value: "Sam" }

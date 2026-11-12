@@ -20,9 +20,7 @@ from uuid import UUID
 from loguru import logger
 from pydantic import ValidationError
 
-from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
-    SharedWorkspaceCloneResult as SharedWorkspaceCloneResultModel,
-)
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     TerminalOperationResultPatchCommand,
     TerminalOperationResultPatchOutcome,
@@ -62,6 +60,9 @@ from tldw_Server_API.app.core.Sharing.shared_workspace_clone_operations import (
     parse_clone_publication_abort,
     parse_clone_publication_checkpoint,
     target_workspace_id,
+)
+from tldw_Server_API.app.core.Sharing.shared_workspace_recipient_schemas import (
+    SharedWorkspaceCloneResult as SharedWorkspaceCloneResultModel,
 )
 
 _PAYLOAD_FIELDS = frozenset(
@@ -484,6 +485,7 @@ def _serialize_clone_result(
     return validated.model_dump(mode="json")
 
 
+@owns_chacha_checkouts
 async def handle_shared_workspace_clone_job(
     job: dict[str, Any],
     *,
@@ -1417,9 +1419,6 @@ async def _build_default_runtime(
     jobs: Any,
     stop_event: asyncio.Event | None = None,
 ) -> SharedWorkspaceCloneRuntime:
-    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
-        get_chacha_db_for_owner,
-    )
     from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
         managed_media_db_for_owner,
     )
@@ -1428,6 +1427,9 @@ async def _build_default_runtime(
         SharedWorkspaceRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+    from tldw_Server_API.app.core.Character_Chat.chacha_db_provider import (
+        get_chacha_db_for_owner,
+    )
 
     pool = await get_db_pool()
     share_repo = SharedWorkspaceRepo(db_pool=pool)

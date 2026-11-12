@@ -35,11 +35,11 @@ Implement Task 1 from Docs/superpowers/plans/2026-05-10-vn-scripted-generation-b
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented authored VN script generation profile maps with default fallback compatibility, publish-time profile snapshot maps, stable idempotent replay for stored request payloads, validator profile_key/output_schema/control-flow/routing policy checks, and focused API/service/DB/validator tests.
 
 Verification: source ../../.venv/bin/activate && python -m pytest tldw_Server_API/tests/VN_Scripts/test_vn_script_validator.py tldw_Server_API/tests/VN_Scripts/test_vn_script_publish_snapshots.py tldw_Server_API/tests/VN_Scripts/test_vn_scripts_api.py tldw_Server_API/tests/VN_Scripts/test_vn_scripts_db.py -q -> 40 passed, 5 warnings. Bandit touched backend scope -> 0 findings, JSON at /tmp/bandit_vn_script_profile_maps.json. compileall and git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

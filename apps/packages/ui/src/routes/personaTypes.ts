@@ -136,6 +136,15 @@ export type SetupLiveDetourState = {
   lastText: string
 }
 
+export type SetupLiveAttempt = {
+  personaId: string
+  clientMessageId: string
+  sessionId: string
+  text: string
+  responseText: string
+  socket: WebSocket
+}
+
 export type SetupVisualDetourState = {
   source: "wizard_optional_card"
   returnStep: PersonaSetupStep

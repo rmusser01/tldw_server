@@ -40,7 +40,7 @@ Address validated review findings in `tldw_Server_API/app/core/WebSearch/Web_Sea
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task created manually because Backlog MCP was unavailable and the Backlog CLI hung on search/list/create operations in this workspace. User approved the temporary manual fallback. The task was moved to TASK-12000 after unrelated untracked task files appeared with overlapping TASK-10000 IDs.
 
 Red verification before production changes:
@@ -54,7 +54,16 @@ Final verification:
 
 Pull request:
 - https://github.com/rmusser01/tldw_server/pull/2492
-<!-- SECTION:NOTES:END -->
+
+2026-06-24 follow-up: Reopened to rebase PR #2492 on latest `dev` and address review comments/check failures before re-finalizing.
+2026-06-24 follow-up results: Rebased PR #2492 onto latest `dev` and addressed the four actionable review comments: direct `logger.info` for the touched Google parameter log line, docstrings on new helper functions, removal of the extra `pytest.mark.asyncio` marker while retaining the module-level `unit` marker, and bounded `relevant_results` response/debug-log projection that omits `original_content` by default with an explicit `include_original_content` opt-in.
+
+Follow-up verification:
+- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/WebSearch/unit/test_legacy_websearch_sanitizers.py tldw_Server_API/tests/WebSearch/unit/test_deprecated_session_shims_removed.py tldw_Server_API/tests/Web_Scraping/test_phase3_3_sanitizers.py -q` passed with 44 passed and 96 warnings.
+- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m compileall -q tldw_Server_API/app/core/WebSearch tldw_Server_API/tests/WebSearch/unit/test_legacy_websearch_sanitizers.py` passed.
+- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/WebSearch -f json -o /tmp/bandit_legacy_websearch_review_fixes_rebased.json` exited 0; JSON reported `results: 0`, `errors: 0`.
+- `git diff --check` passed.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -72,16 +81,3 @@ Follow-up PR review pass rebased the branch onto latest `dev`, addressed all act
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-2026-06-24 follow-up: Reopened to rebase PR #2492 on latest `dev` and address review comments/check failures before re-finalizing.
-2026-06-24 follow-up results: Rebased PR #2492 onto latest `dev` and addressed the four actionable review comments: direct `logger.info` for the touched Google parameter log line, docstrings on new helper functions, removal of the extra `pytest.mark.asyncio` marker while retaining the module-level `unit` marker, and bounded `relevant_results` response/debug-log projection that omits `original_content` by default with an explicit `include_original_content` opt-in.
-
-Follow-up verification:
-- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m pytest tldw_Server_API/tests/WebSearch/unit/test_legacy_websearch_sanitizers.py tldw_Server_API/tests/WebSearch/unit/test_deprecated_session_shims_removed.py tldw_Server_API/tests/Web_Scraping/test_phase3_3_sanitizers.py -q` passed with 44 passed and 96 warnings.
-- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m compileall -q tldw_Server_API/app/core/WebSearch tldw_Server_API/tests/WebSearch/unit/test_legacy_websearch_sanitizers.py` passed.
-- `source /Users/appledev/Documents/GitHub/tldw_server/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/WebSearch -f json -o /tmp/bandit_legacy_websearch_review_fixes_rebased.json` exited 0; JSON reported `results: 0`, `errors: 0`.
-- `git diff --check` passed.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

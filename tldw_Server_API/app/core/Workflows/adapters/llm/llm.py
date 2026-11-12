@@ -13,6 +13,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.exceptions import AdapterError
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
@@ -48,9 +49,9 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
       - metadata: token_usage/cost if available
       - response: raw provider response (optional)
     """
-    from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.config_llm_providers import get_default_provider
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     def _render_str(val: Any) -> Any:
         if isinstance(val, str):
@@ -75,7 +76,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
         config.get("provider")
         or config.get("api_provider")
         or config.get("api_endpoint")
-        or DEFAULT_LLM_PROVIDER
+        or get_default_provider()
     )
     provider = str(_render_str(provider_raw) or "").strip().lower()
     if not provider:
@@ -150,6 +151,17 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
     stream = bool(config.get("stream", False))
     include_response = bool(config.get("include_response", False))
 
+    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import ensure_app_config, resolve_provider_model
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        capture_provider_override_call_snapshot,
+    )
+
+    # Bind the configured default so policy checks the same model sent to dispatch.
+    override_snapshot = capture_provider_override_call_snapshot(provider)
+    if not model:
+        model = resolve_provider_model(override_snapshot.provider, ensure_app_config())
+    override_snapshot.enforce(model, require_model=True)
+
     call_args: dict[str, Any] = {
         "api_endpoint": provider,
         "messages_payload": messages,
@@ -183,7 +195,7 @@ async def run_llm_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
             raw = raw.strip()
             if not raw:
                 continue
-            if raw.lower() == "data: [done]":
+            if is_done_line(raw):
                 break
             if raw.startswith("data:"):
                 payload = raw[5:].strip()
@@ -246,7 +258,7 @@ async def run_llm_with_tools_adapter(config: dict[str, Any], context: dict[str, 
       - system_message: str
     Output: { "text": str, "tool_results": list, "iterations": int }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -350,7 +362,7 @@ async def run_llm_compare_adapter(config: dict[str, Any], context: dict[str, Any
       - responses: list[dict] - Responses from each provider
       - comparison: dict - Comparison metadata
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -444,7 +456,7 @@ async def run_llm_critique_adapter(config: dict[str, Any], context: dict[str, An
       - model: str
     Output: { "critique": str, "revised": str, "criteria": list }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

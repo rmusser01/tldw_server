@@ -10,6 +10,7 @@ import type { Prompt } from "@/db/dexie/types"
 import { getAllPrompts } from "@/db/dexie/helpers"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { clearRuntimeAuthOverride } from "@/services/tldw/runtime-auth-override"
+import { resolveRecipePersistenceOwnerView } from "@/services/recipe-persistence-uncertainty"
 import { setPromptStudioDefaults } from "@/services/prompt-studio-settings"
 import { usePromptEditor } from "../hooks/usePromptEditor"
 import { usePromptSync } from "../hooks/usePromptSync"
@@ -23,10 +24,13 @@ vi.mock("@/db/dexie/schema", () => ({
     prompts: {
       get: async (id: string) => structuredClone(rows.get(id)),
       put: async (row: Prompt) => { rows.set(row.id, structuredClone(row)); return row.id },
-      update: async (id: string, fields: Partial<Prompt>) => {
+      update: async (id: string, fields: Partial<Prompt> | ((value: Prompt) => boolean | void)) => {
         const row = rows.get(id)
         if (!row) return 0
-        rows.set(id, structuredClone({ ...row, ...fields }))
+        const next = structuredClone(row)
+        if (typeof fields === "function") { if (fields(next) === false) return 0 }
+        else Object.assign(next, fields)
+        rows.set(id, next)
         return 1
       },
       filter: (predicate: (row: Prompt) => boolean) => ({
@@ -53,7 +57,7 @@ const t = (key: string, options?: Record<string, unknown>) =>
   String(options?.defaultValue || key).replace("{{error}}", String(options?.error || ""))
 
 function SaveHarness({ queryClient }: { queryClient: QueryClient }) {
-  const query = useQuery({ queryKey: ["fetchAllPrompts"], queryFn: getAllPrompts })
+  const query = useQuery({ queryKey: ["fetchAllPrompts"], queryFn: () => getAllPrompts() })
   const sync = usePromptSync({ queryClient, isOnline: true, t })
   const record = query.data?.[0]
   const editor = usePromptEditor({
@@ -132,6 +136,9 @@ beforeEach(async () => {
     credentialSource: "manual", apiKeyPersistence: "device", apiKeyServerOrigin: "https://prompt.test"
   })
   await setPromptStudioDefaults({ defaultProjectId: 1, autoSyncWorkspacePrompts: true })
+  const ownerId = (await resolveRecipePersistenceOwnerView())?.ownerId
+  rows.set(original.id, { ...structuredClone(original), ownerId })
+  await chrome.storage.local.set({ prompts: [{ ...original, ownerId }] })
 })
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); clearRuntimeAuthOverride() })

@@ -38,9 +38,9 @@ Convert the approved aligned tldw product roadmap spec into an executable implem
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-06-tldw-product-roadmap-first-slice-implementation-plan.md. The plan narrows execution to canonical workspace discovery, the existing /api/v1/workspaces server-local bridge, a minimal artifact review contract, template metadata for all flagship work products, and executive brief as the only end-to-end golden path. Self-review patched two issues: future execution now uses its own implementation Backlog task instead of TASK-97.1, and template ID types live in a separate types module to avoid an import cycle. Verification: git diff --check passed; ASCII scan passed. Bandit skipped because touched files are documentation/task markdown only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

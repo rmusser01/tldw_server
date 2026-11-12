@@ -1,3 +1,4 @@
+import { getEligibleQueueItems } from "./queue-items"
 import React from "react"
 import {
   AutoComplete,
@@ -14,7 +15,7 @@ import { ArrowLeft, ArrowRight, ChevronRight } from "lucide-react"
 
 import { useIngestWizard } from "./IngestWizardContext"
 import { PresetSelector } from "./PresetSelector"
-import type { CommonOptions, DetectedMediaType, TypeDefaults } from "./types"
+import type { CommonOptions, DetectedMediaType, TypeDefaults, WizardQueueItem } from "./types"
 import { SUPPORTED_LANGUAGES } from "@/utils/supported-languages"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { getQuickIngestAnalysisProviderWarning } from "@/services/tldw/quick-ingest-batch"
@@ -63,12 +64,14 @@ const nextTypeDefaults = (
 }
 
 type WizardConfigureStepProps = {
+  processingItems?: WizardQueueItem[]
   isStepVisible?: boolean
   analysisProviderWarning?: string | null
   focusAnalysisProvider?: boolean
 }
 
 export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
+  processingItems,
   isStepVisible = true,
   analysisProviderWarning = null,
   focusAnalysisProvider = false,
@@ -76,6 +79,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
   const { t } = useTranslation(["option"])
   const { state, setPreset, setCustomOptions, goNext, goBack } = useIngestWizard()
   const { queueItems, selectedPreset, presetConfig } = state
+  const eligibleItems = React.useMemo(() => processingItems ?? getEligibleQueueItems(queueItems), [processingItems, queueItems])
 
   const qi = React.useCallback(
     (key: string, defaultValue: string, options?: Record<string, unknown>) =>
@@ -87,11 +91,11 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
 
   const detectedTypes = React.useMemo(() => {
     const types = new Set<DetectedMediaType>()
-    for (const item of queueItems) {
+    for (const item of eligibleItems) {
       types.add(item.detectedType)
     }
     return types
-  }, [queueItems])
+  }, [eligibleItems])
 
   const hasAudioItems = detectedTypes.has("audio")
   const hasVideoItems = detectedTypes.has("video")
@@ -628,11 +632,12 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
 
   return (
     <div className="space-y-5 py-3">
+      <p className="text-sm text-text-muted">{qi("configureEligibleCount", eligibleItems.length === 1 ? "{{count}} eligible item in this run" : "{{count}} eligible items in this run", { count: eligibleItems.length })}</p>
       <PresetSelector
         qi={qi}
         value={selectedPreset}
         onChange={setPreset}
-        queueItems={queueItems}
+        queueItems={eligibleItems}
       />
 
       <div className="rounded-md border border-border bg-surface p-4">
@@ -644,7 +649,7 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
             <Typography.Text type="secondary" className="text-xs text-text-subtle">
               {qi(
                 "defaultsForNewItems",
-                "Defaults apply to items added after this point."
+                "Settings apply to all eligible items in this run. Saved preset defaults are managed in Quick Ingest settings for future runs."
               )}
             </Typography.Text>
           </div>
@@ -1051,12 +1056,12 @@ export const WizardConfigureStep: React.FC<WizardConfigureStepProps> = ({
                         <Switch
                           aria-label={qi(
                             "reviewBeforeStorage",
-                            "Review before saving"
+                            "Review extracted content before saving"
                           )}
                           checked={presetConfig.reviewBeforeStorage}
                           onChange={handleReviewBeforeStorageChange}
                         />
-                        <span>{qi("reviewBeforeStorage", "Review before saving")}</span>
+                        <span>{qi("reviewBeforeStorage", "Review extracted content before saving")}</span>
                       </label>
                       {presetConfig.reviewBeforeStorage ? (
                         <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">

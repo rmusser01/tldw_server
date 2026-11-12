@@ -1,3 +1,4 @@
+import type { ServicePromptTargetConfig } from "@/services/tldw/TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
 import type {
   AllowedMethodFor,
@@ -28,12 +29,14 @@ export type RequestFn = <
   body?: any
   timeoutMs?: number
   abortSignal?: AbortSignal
+  servicePromptConfig?: ServicePromptTargetConfig
 }) => Promise<T>
 
 export type RequestOptions = {
   headers?: Record<string, string>
   timeoutMs?: number
   abortSignal?: AbortSignal
+  servicePromptConfig?: ServicePromptTargetConfig
   queryOptions?: QueryOptions
 }
 
@@ -122,7 +125,8 @@ export const createResourceClient = ({
         method: "GET",
         headers: options?.headers,
         timeoutMs: options?.timeoutMs,
-        abortSignal: options?.abortSignal
+        abortSignal: options?.abortSignal,
+        ...(options?.servicePromptConfig ? { servicePromptConfig: options.servicePromptConfig } : {})
       })
     },
     create: async <T = any>(body?: any, options?: RequestOptions) => {
@@ -132,7 +136,8 @@ export const createResourceClient = ({
         headers: mergeHeaders(options?.headers),
         body,
         timeoutMs: options?.timeoutMs,
-        abortSignal: options?.abortSignal
+        abortSignal: options?.abortSignal,
+        ...(options?.servicePromptConfig ? { servicePromptConfig: options.servicePromptConfig } : {})
       })
     },
     get: async <T = any>(
@@ -145,7 +150,8 @@ export const createResourceClient = ({
         method: "GET",
         headers: options?.headers,
         timeoutMs: options?.timeoutMs,
-        abortSignal: options?.abortSignal
+        abortSignal: options?.abortSignal,
+        ...(options?.servicePromptConfig ? { servicePromptConfig: options.servicePromptConfig } : {})
       })
     },
     update: async <T = any>(
@@ -159,7 +165,8 @@ export const createResourceClient = ({
         headers: mergeHeaders(options?.headers),
         body,
         timeoutMs: options?.timeoutMs,
-        abortSignal: options?.abortSignal
+        abortSignal: options?.abortSignal,
+        ...(options?.servicePromptConfig ? { servicePromptConfig: options.servicePromptConfig } : {})
       })
     },
     remove: async <T = any>(
@@ -172,7 +179,8 @@ export const createResourceClient = ({
         method: "DELETE",
         headers: options?.headers,
         timeoutMs: options?.timeoutMs,
-        abortSignal: options?.abortSignal
+        abortSignal: options?.abortSignal,
+        ...(options?.servicePromptConfig ? { servicePromptConfig: options.servicePromptConfig } : {})
       })
     }
   }

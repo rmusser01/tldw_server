@@ -23,7 +23,10 @@ Protocol (JSON frames):
 - Client can send: {"type": "stop"} to end the session
 - Client can send: {"type": "ping"}; server replies {"type": "pong"}
 
-This module does not enforce auth/quotas; it is a drop-in core for external servers.
+This module does not enforce auth/quotas. It is a handler for an embedding server to call
+after its own authentication, not a route: it used to export an unauthenticated
+``/core/parakeet/stream`` router that nothing mounted, and mounting it would have served
+transcription to anyone (TASK-13950.7).
 """
 
 from __future__ import annotations
@@ -31,7 +34,7 @@ from __future__ import annotations
 import contextlib
 import json
 
-from fastapi import APIRouter, WebSocket
+from fastapi import WebSocket
 from loguru import logger
 
 from ..model_utils import normalize_model_and_variant
@@ -76,10 +79,6 @@ except _PARAKEET_WS_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     StreamingDiarizer = None  # type: ignore
 
 
-router = APIRouter()
-
-
-@router.websocket("/core/parakeet/stream")
 async def websocket_parakeet_core(
     websocket: WebSocket,
     decode_fn: DecodeFn | None = None,
@@ -387,4 +386,4 @@ async def websocket_parakeet_core(
             pass
 
 
-__all__ = ["router", "websocket_parakeet_core"]
+__all__ = ["websocket_parakeet_core"]

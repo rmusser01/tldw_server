@@ -144,7 +144,7 @@ def _new_runner_client_for_permissions() -> ACPRunnerClient:
 
 
 @pytest.mark.unit
-async def test_runtime_policy_refresh_applies_updated_permissions() -> None:
+async def test_runtime_policy_refresh_applies_updated_permissions(admitted_permission_prompt) -> None:
     client = _new_runner_client_for_permissions()
     session_id = "session-refresh-policy"
     policy_state = {"allowed_tools": ["web.search"], "fingerprint": "snap-allow"}
@@ -215,6 +215,7 @@ async def test_runtime_policy_refresh_applies_updated_permissions() -> None:
     client._get_acp_session_store = _get_store  # type: ignore[assignment]
     client._should_force_runtime_policy_refresh = lambda *, tier: True  # type: ignore[assignment]
 
+    await admitted_permission_prompt(client, session_id)
     allowed_response = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",
@@ -255,7 +256,7 @@ async def test_runtime_policy_refresh_applies_updated_permissions() -> None:
 
 
 @pytest.mark.unit
-async def test_low_risk_permission_reuses_cached_runtime_snapshot() -> None:
+async def test_low_risk_permission_reuses_cached_runtime_snapshot(admitted_permission_prompt) -> None:
     client = _new_runner_client_for_permissions()
     session_id = "session-refresh-cache"
     policy_state = {"allowed_tools": ["web.search"], "fingerprint": "snap-cache"}
@@ -325,6 +326,7 @@ async def test_low_risk_permission_reuses_cached_runtime_snapshot() -> None:
     client._runtime_policy_service = _RuntimePolicyService()  # type: ignore[assignment]
     client._get_acp_session_store = _get_store  # type: ignore[assignment]
 
+    await admitted_permission_prompt(client, session_id)
     first = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",
@@ -358,7 +360,7 @@ async def test_low_risk_permission_reuses_cached_runtime_snapshot() -> None:
 
 
 @pytest.mark.unit
-async def test_failed_runtime_policy_refresh_fails_closed() -> None:
+async def test_failed_runtime_policy_refresh_fails_closed(admitted_permission_prompt) -> None:
     client = _new_runner_client_for_permissions()
     session_id = "session-refresh-failure"
 
@@ -424,6 +426,7 @@ async def test_failed_runtime_policy_refresh_fails_closed() -> None:
     assert store.record.policy_snapshot_fingerprint is None
     assert store.record.policy_refresh_error == "policy_refresh_failed"
 
+    await admitted_permission_prompt(client, session_id)
     response = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",

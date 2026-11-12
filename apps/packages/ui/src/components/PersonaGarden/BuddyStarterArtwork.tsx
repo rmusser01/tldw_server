@@ -10,7 +10,10 @@ import type {
   PersonaVisualManifest
 } from "@/types/persona-visuals"
 
-type Artwork = { asset: PersonaVisualAsset; frame: PersonaVisualFrame }
+type Artwork = {
+  asset: Pick<PersonaVisualAsset, "id" | "url" | "mime_type" | "width" | "height">
+  frame: PersonaVisualFrame
+}
 
 const ArtworkImage = ({
   artwork,
@@ -108,10 +111,9 @@ export const BuddyStarterArtwork = ({
           frame,
           asset: {
             id: source.asset_key,
-            asset_role: source.asset_role,
             mime_type: source.mime_type,
-            width: source.width,
-            height: source.height,
+            width: source.width ?? null,
+            height: source.height ?? null,
             url: `/api/v1/persona/visual-starter-packs/${encodeURIComponent(starterId)}/assets/${encodeURIComponent(source.asset_key)}/content`
           }
         })

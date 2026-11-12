@@ -117,3 +117,60 @@ describe("useComposerSubmit", () => {
     expect(dispatchResult).toBe("ok")
   })
 })
+
+it("reports dispatch rejection to the recovery hook and preserves the original error", async () => {
+  const error = new Error("dispatch rejected")
+  const beforeSend = vi.fn(),
+    afterSend = vi.fn(),
+    onSendError = vi.fn()
+  const { result } = renderHook(() =>
+    useComposerSubmit({
+      sendMessage: async () => {
+        throw error
+      }
+    })
+  )
+  await expect(
+    result.current.dispatch({ message: "original text" }, {
+      beforeSend,
+      afterSend,
+      onSendError
+    })
+  ).rejects.toBe(error)
+  expect(beforeSend).toHaveBeenCalledOnce()
+  expect(onSendError).toHaveBeenCalledWith(error)
+  expect(afterSend).not.toHaveBeenCalled()
+})
+
+it.each(["resolve", "reject"])("does not run another source's completion hooks after %s", async outcome => {
+  let finish!: () => void, retired = false
+  const wait = new Promise<void>(resolve => { finish = resolve })
+  const failure = new Error("original failure")
+  const options = {
+    sendMessage: async () => { await wait; if (outcome === "reject") throw failure; return "saved" },
+    captureCompletionGuard: () => () => !retired
+  }
+  const { result } = renderHook(() => useComposerSubmit(options))
+  const afterSend = vi.fn(), onSendError = vi.fn()
+  const pending = result.current.dispatch({}, { afterSend, onSendError }).catch(error => error)
+  retired = true; finish()
+  expect(await pending).toBe(outcome === "reject" ? failure : "saved")
+  expect(afterSend).not.toHaveBeenCalled()
+  expect(onSendError).not.toHaveBeenCalled()
+})
+
+it("refuses an already retired composer before optimistic cleanup or dispatch", async () => {
+  const sendMessage = vi.fn(async () => "unused"),
+    beforeSend = vi.fn();
+  const view = renderHook(() =>
+    useComposerSubmit({
+      sendMessage,
+      captureCompletionGuard: () => () => false,
+    }),
+  );
+  await expect(
+    view.result.current.dispatch("old", { beforeSend }),
+  ).rejects.toMatchObject({ name: "AbortError" });
+  expect(sendMessage).not.toHaveBeenCalled();
+  expect(beforeSend).not.toHaveBeenCalled();
+});

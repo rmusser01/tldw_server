@@ -30,6 +30,7 @@ _BASELINE_ROLES: Sequence[RoleDef] = (
 _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
     ("media.read", "Read media", "media"),
     ("media.create", "Create media", "media"),
+    ("media.update", "Update media", "media"),
     ("media.delete", "Delete media", "media"),
     ("sql.read", "Run read-only SQL retrieval", "sql"),
     ("sql.target:media_db", "Allow SQL retrieval against media_db target", "sql"),
@@ -48,6 +49,11 @@ _BASELINE_PERMISSIONS: Sequence[PermissionDef] = (
         "Generate and review Notes graph suggestions",
         "notes",
     ),
+    (
+        "notes.graph.semantic.manage",
+        "Manage Notes semantic indexing",
+        "notes",
+    ),
     ("notes.link_keyword", "Accept Notes keyword-link suggestions", "notes"),
     ("keywords.create", "Create keywords while accepting suggestions", "keywords"),
 )
@@ -60,7 +66,12 @@ _MCP_PERMISSIONS: Sequence[PermissionDef] = (
 
 _INTERACTIVE_ROLES = ("admin", "user", "moderator", "reviewer", "viewer")
 _GRANT_ONLY_ON_CATALOG_CREATE = frozenset(
-    {"notes.graph.suggest", "notes.link_keyword", "keywords.create"}
+    {
+        "notes.graph.suggest",
+        "notes.graph.semantic.manage",
+        "notes.link_keyword",
+        "keywords.create",
+    }
 )
 
 
@@ -83,9 +94,11 @@ def _build_role_grants(
             for p in (
                 "media.read",
                 "media.create",
+                "media.update",
                 "sql.read",
                 "sql.target:media_db",
                 "notes.graph.suggest",
+                "notes.graph.semantic.manage",
                 "notes.link_keyword",
                 "keywords.create",
             )
@@ -93,7 +106,12 @@ def _build_role_grants(
         ],
         "moderator": [
             p
-            for p in ("notes.graph.suggest", "notes.link_keyword", "keywords.create")
+            for p in (
+                "notes.graph.suggest",
+                "notes.graph.semantic.manage",
+                "notes.link_keyword",
+                "keywords.create",
+            )
             if p in base
         ],
         "viewer": [p for p in ("media.read",) if p in base],

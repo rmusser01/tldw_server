@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
@@ -93,12 +94,7 @@ def _update_fts_media(
             )
             logging.debug("Updated SQLite FTS entry for Media ID {}", media_id)
         except sqlite3.Error as exc:
-            logging.error(
-                "Failed to update media_fts for Media ID {}: {}",
-                media_id,
-                exc,
-                exc_info=True,
-            )
+            logging.error("Media FTS update failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Failed to update FTS for Media ID {media_id}: {exc}") from exc  # noqa: TRY003
         return
 
@@ -133,12 +129,7 @@ def _update_fts_media(
             self._execute_with_connection(conn, sql, (media_id,))
             logging.debug("Updated PostgreSQL FTS vector for Media ID {}", media_id)
         except DatabaseError as exc:
-            logging.error(
-                "Failed to update PostgreSQL FTS for Media ID {}: {}",
-                media_id,
-                exc,
-                exc_info=True,
-            )
+            logging.error("Media FTS update failed (error_type={})", exception_type_for_log(exc))
             raise
         return
 
@@ -153,12 +144,7 @@ def _delete_fts_media(
             conn.execute("DELETE FROM media_fts WHERE rowid = ?", (media_id,))
             logging.debug("Deleted SQLite FTS entry for Media ID {}", media_id)
         except sqlite3.Error as exc:
-            logging.error(
-                "Failed to delete from media_fts for Media ID {}: {}",
-                media_id,
-                exc,
-                exc_info=True,
-            )
+            logging.error("Media FTS removal failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Failed to delete FTS for Media ID {media_id}: {exc}") from exc  # noqa: TRY003
         return
 
@@ -172,12 +158,7 @@ def _delete_fts_media(
             )
             logging.debug("Cleared PostgreSQL FTS vector for Media ID {}", media_id)
         except DatabaseError as exc:
-            logging.error(
-                "Failed to clear PostgreSQL FTS for Media ID {}: {}",
-                media_id,
-                exc,
-                exc_info=True,
-            )
+            logging.error("Media FTS removal failed (error_type={})", exception_type_for_log(exc))
             raise
         return
 
@@ -196,12 +177,7 @@ def _update_fts_keyword(
             )
             logging.debug("Updated SQLite FTS entry for Keyword ID {}", keyword_id)
         except sqlite3.Error as exc:
-            logging.error(
-                "Failed to update keyword_fts for Keyword ID {}: {}",
-                keyword_id,
-                exc,
-                exc_info=True,
-            )
+            logging.error("Keyword FTS update failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Failed to update FTS for Keyword ID {keyword_id}: {exc}") from exc  # noqa: TRY003
         return
 
@@ -218,12 +194,7 @@ def _update_fts_keyword(
             )
             logging.debug("Updated PostgreSQL FTS vector for Keyword ID {}", keyword_id)
         except DatabaseError as exc:
-            logging.error(
-                "Failed to update PostgreSQL FTS for Keyword ID {}: {}",
-                keyword_id,
-                exc,
-                exc_info=True,
-            )
+            logging.error("Keyword FTS update failed (error_type={})", exception_type_for_log(exc))
             raise
         return
 
@@ -238,12 +209,7 @@ def _delete_fts_keyword(
             conn.execute("DELETE FROM keyword_fts WHERE rowid = ?", (keyword_id,))
             logging.debug("Deleted SQLite FTS entry for Keyword ID {}", keyword_id)
         except sqlite3.Error as exc:
-            logging.error(
-                "Failed to delete from keyword_fts for Keyword ID {}: {}",
-                keyword_id,
-                exc,
-                exc_info=True,
-            )
+            logging.error("Keyword FTS removal failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Failed to delete FTS for Keyword ID {keyword_id}: {exc}") from exc  # noqa: TRY003
         return
 
@@ -256,12 +222,7 @@ def _delete_fts_keyword(
             )
             logging.debug("Cleared PostgreSQL FTS vector for Keyword ID {}", keyword_id)
         except DatabaseError as exc:
-            logging.error(
-                "Failed to clear PostgreSQL FTS for Keyword ID {}: {}",
-                keyword_id,
-                exc,
-                exc_info=True,
-            )
+            logging.error("Keyword FTS removal failed (error_type={})", exception_type_for_log(exc))
             raise
         return
 
@@ -285,11 +246,7 @@ def sync_refresh_fts_for_entity(
             (entity_uuid,),
         )
         if not row:
-            logging.warning(
-                "sync_refresh_fts_for_entity: Media row not found for uuid={} operation={}",
-                entity_uuid,
-                operation,
-            )
+            logging.warning("FTS refresh skipped: source row unavailable")
             return
 
         media_id = int(row["id"])
@@ -317,11 +274,7 @@ def sync_refresh_fts_for_entity(
             (entity_uuid,),
         )
         if not row:
-            logging.warning(
-                "sync_refresh_fts_for_entity: Keyword row not found for uuid={} operation={}",
-                entity_uuid,
-                operation,
-            )
+            logging.warning("FTS refresh skipped: source row unavailable")
             return
 
         keyword_id = int(row["id"])

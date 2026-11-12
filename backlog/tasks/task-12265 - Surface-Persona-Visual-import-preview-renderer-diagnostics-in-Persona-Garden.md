@@ -35,7 +35,7 @@ Add the next narrow Buddy/Persona visual-pack slice under GitHub issue #1645. PR
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation:
 - Typed and normalized proposed_plan.renderer_import_preview in the Persona Visual frontend contract.
 - Rendered renderer import diagnostics in Persona Garden import previews, including status, blockers, warnings, role categories, and activation eligibility.
@@ -62,7 +62,7 @@ Review fix verification:
 - PASS: bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx --testNamePattern "import-preview|blocked renderer"
 - PASS: bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx
 - PASS: git diff --check
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,6 +1,7 @@
 import React from "react"
 import { useNavigate } from "react-router-dom"
 import { setReturnTo, type ReturnToTarget } from "@/utils/return-to"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 export const useScrollToServerCard = (
   returnTo?: ReturnToTarget | null
@@ -15,7 +16,7 @@ export const useScrollToServerCard = (
       if (typeof document !== "undefined") {
         const el = document.getElementById("server-connection-card")
         if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "start" })
+          el.scrollIntoView({ behavior: smoothScrollBehavior(), block: "start" })
           ;(el as HTMLElement).focus?.()
           return
         }

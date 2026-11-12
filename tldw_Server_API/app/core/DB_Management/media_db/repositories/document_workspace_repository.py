@@ -6,8 +6,14 @@ import json
 from typing import Any
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 
 _UNSET = object()
+# document_annotations.deleted is INTEGER on both backends. The Postgres query
+# transform rewrites a literal "deleted = 0" to "deleted = FALSE", which fails on
+# an integer column, so the flag is always bound as a parameter here.
+_ACTIVE = 0
+_DELETED = 1
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
@@ -55,7 +61,8 @@ class DocumentWorkspaceRepository:
         WHERE media_id = ? AND user_id = ?
         """
         with self.db.transaction() as conn:
-            return self.db._fetchone_with_connection(conn, query, (media_id, user_id))
+            progress: dict[str, Any] | None = self.db._fetchone_with_connection(conn, query, (media_id, user_id))
+        return progress
 
     def upsert_reading_progress(
         self,
@@ -120,18 +127,48 @@ class DocumentWorkspaceRepository:
         """
         with self.db.transaction() as conn:
             cursor = self.db._execute_with_connection(conn, delete_sql, (media_id, user_id))
-            return cursor.rowcount > 0
+            return bool(cursor.rowcount > 0)
 
     def list_annotations(self, *, media_id: int, user_id: str) -> list[dict[str, Any]]:
         """Return active annotations for a media item and user."""
         query = """
         SELECT id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at
         FROM document_annotations
-        WHERE media_id = ? AND user_id = ? AND deleted = 0
+        WHERE media_id = ? AND user_id = ? AND deleted = ?
         ORDER BY created_at DESC, id ASC
         """
         with self.db.transaction() as conn:
-            return self.db._fetchall_with_connection(conn, query, (media_id, user_id))
+            rows: list[dict[str, Any]] = self.db._fetchall_with_connection(conn, query, (media_id, user_id, _ACTIVE))
+        return rows
+
+    def list_annotations_for_export(self, *, media_id: int, user_id: str) -> list[dict[str, Any]]:
+        """Bound rows and text before materializing the canonical export payload."""
+        # SQLite SUBSTR stops at NUL; PostgreSQL TEXT cannot contain NUL.
+        if self._is_postgres():
+            query = """
+        SELECT 0 AS invalid_text, SUBSTR(location, 1, 65) AS location, SUBSTR(text, 1, 6001) AS text,
+               SUBSTR(color, 1, 16) AS color, SUBSTR(note, 1, 6001) AS note,
+               SUBSTR(annotation_type, 1, 32) AS annotation_type
+        FROM document_annotations
+        WHERE media_id = ? AND user_id = ? AND deleted = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 501
+        """
+        else:
+            query = """
+        SELECT CASE WHEN
+            INSTR(CAST(location AS BLOB), X'00') > 0 OR INSTR(CAST(text AS BLOB), X'00') > 0 OR
+            INSTR(CAST(note AS BLOB), X'00') > 0 OR INSTR(CAST(color AS BLOB), X'00') > 0 OR
+            INSTR(CAST(annotation_type AS BLOB), X'00') > 0 THEN 1 ELSE 0 END AS invalid_text, SUBSTR(location, 1, 65) AS location, SUBSTR(text, 1, 6001) AS text,
+               SUBSTR(color, 1, 16) AS color, SUBSTR(note, 1, 6001) AS note,
+               SUBSTR(annotation_type, 1, 32) AS annotation_type
+        FROM document_annotations
+        WHERE media_id = ? AND user_id = ? AND deleted = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT 501
+        """
+        with self.db.transaction() as conn:
+            return self.db._fetchall_with_connection(conn, query, (media_id, user_id, 0))
 
     def create_annotation(
         self,
@@ -184,10 +221,13 @@ class DocumentWorkspaceRepository:
         query = """
         SELECT id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at
         FROM document_annotations
-        WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = 0
+        WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = ?
         """
         with self.db.transaction() as conn:
-            return self.db._fetchone_with_connection(conn, query, (annotation_id, media_id, user_id))
+            row: dict[str, Any] | None = self.db._fetchone_with_connection(
+                conn, query, (annotation_id, media_id, user_id, _ACTIVE)
+            )
+        return row
 
     def update_annotation(
         self,
@@ -222,11 +262,11 @@ class DocumentWorkspaceRepository:
 
         updates.append("updated_at = ?")
         params.append(updated_at)
-        params.extend([annotation_id, media_id, user_id])
+        params.extend([annotation_id, media_id, user_id, _ACTIVE])
         update_sql = f"""
         UPDATE document_annotations
         SET {", ".join(updates)}
-        WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = 0
+        WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = ?
         """  # nosec B608
         with self.db.transaction() as conn:
             self.db._execute_with_connection(conn, update_sql, tuple(params))
@@ -246,15 +286,16 @@ class DocumentWorkspaceRepository:
         placeholders = ", ".join("?" for _ in annotation_ids)
         # Dynamic placeholder count is generated here; values remain bound parameters.
         query = f"""
-        SELECT id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at
+        SELECT id, client_id, location, text, color, note, annotation_type, chapter_title, percentage,
+               created_at, updated_at
         FROM document_annotations
-        WHERE media_id = ? AND user_id = ? AND deleted = 0 AND id IN ({placeholders})
+        WHERE media_id = ? AND user_id = ? AND deleted = ? AND id IN ({placeholders})
         """  # nosec B608
         with self.db.transaction() as conn:
             rows = self.db._fetchall_with_connection(
                 conn,
                 query,
-                tuple([media_id, user_id, *annotation_ids]),
+                tuple([media_id, user_id, _ACTIVE, *annotation_ids]),
             )
         rows_by_id = {normalized["id"]: normalized for normalized in (_row_to_dict(row) for row in rows)}
         return [
@@ -269,13 +310,27 @@ class DocumentWorkspaceRepository:
         media_id: int,
         user_id: str,
         annotation_rows: list[dict[str, Any]],
+        allow_replay: bool = False,
     ) -> list[dict[str, Any]]:
-        """Insert a batch of annotation rows and return the saved rows."""
+        """Insert a batch of annotation rows and return the saved active rows.
+
+        Idempotent on ``client_id``: a row whose client id already exists for this
+        user and media item is not inserted again, and the stored row is returned
+        in its place. A replay never overwrites or resurrects the stored annotation.
+        """
         insert_sql = """
         INSERT INTO document_annotations
-        (id, media_id, user_id, location, text, color, note, annotation_type, chapter_title, percentage, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, media_id, user_id, location, text, color, note, annotation_type, chapter_title, percentage,
+         created_at, updated_at, client_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (user_id, media_id, client_id) DO NOTHING
         """
+        if allow_replay:
+            insert_sql = insert_sql.replace("ON CONFLICT (user_id, media_id, client_id)", "ON CONFLICT")
+        admitted = []
+        # An empty client id is stored as NULL, which never conflicts.
+        client_ids = [row["client_id"] for row in annotation_rows if row.get("client_id")]
+        stored_id_by_client: dict[str, str] = {}
         with self.db.transaction() as conn:
             for row in annotation_rows:
                 self.db._execute_with_connection(
@@ -294,12 +349,47 @@ class DocumentWorkspaceRepository:
                         row.get("percentage"),
                         row["created_at"],
                         row["updated_at"],
+                        row.get("client_id") or None,
                     ),
                 )
+                if allow_replay:
+                    saved = self.db._fetchone_with_connection(
+                        conn,
+                        "SELECT * FROM document_annotations WHERE media_id = ? AND user_id = ? AND client_id = ?"
+                        if row.get("client_id")
+                        else "SELECT * FROM document_annotations WHERE media_id = ? AND user_id = ? AND id = ?",
+                        (media_id, user_id, row.get("client_id") or row["id"]),
+                    )
+                    fields = ("location", "text", "color", "note", "annotation_type", "chapter_title", "percentage")
+                    if (
+                        not saved
+                        or saved["media_id"] != media_id
+                        or str(saved["user_id"]) != user_id
+                        or saved["deleted"]
+                        or any(saved.get(key) != row.get(key) for key in fields)
+                    ):
+                        raise ConflictError("Annotation creation intent conflicts")
+                    admitted.append(dict(saved))
+            if client_ids:
+                placeholders = ", ".join("?" for _ in client_ids)
+                lookup_sql = f"""
+                SELECT id, client_id FROM document_annotations
+                WHERE media_id = ? AND user_id = ? AND client_id IN ({placeholders})
+                """  # nosec B608
+                for found in self.db._fetchall_with_connection(
+                    conn, lookup_sql, (media_id, user_id, *client_ids)
+                ):
+                    found_row = _row_to_dict(found)
+                    stored_id_by_client[found_row["client_id"]] = str(found_row["id"])
+        if allow_replay:
+            return admitted
+        resolved_ids = [
+            stored_id_by_client.get(row.get("client_id") or "", str(row["id"])) for row in annotation_rows
+        ]
         return self._list_annotations_by_ids(
             media_id=media_id,
             user_id=user_id,
-            annotation_ids=[str(item["id"]) for item in annotation_rows],
+            annotation_ids=list(dict.fromkeys(resolved_ids)),
         )
 
     def soft_delete_annotation(
@@ -313,16 +403,16 @@ class DocumentWorkspaceRepository:
         """Mark an annotation deleted."""
         delete_sql = """
         UPDATE document_annotations
-        SET deleted = 1, updated_at = ?
-        WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = 0
+        SET deleted = ?, updated_at = ?
+        WHERE id = ? AND media_id = ? AND user_id = ? AND deleted = ?
         """
         with self.db.transaction() as conn:
             cursor = self.db._execute_with_connection(
                 conn,
                 delete_sql,
-                (updated_at, annotation_id, media_id, user_id),
+                (_DELETED, updated_at, annotation_id, media_id, user_id, _ACTIVE),
             )
-            return cursor.rowcount > 0
+            return bool(cursor.rowcount > 0)
 
     def get_parsed_references_cache(
         self,

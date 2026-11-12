@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import monitoring as monitoring_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE, SYSTEM_LOGS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 MUTATING_MONITORING_REQUESTS = (
     ("POST", "/api/v1/monitoring/watchlists", "/api/v1/monitoring/watchlists", {"name": "scope-check", "rules": []}),
@@ -118,7 +119,7 @@ def test_scope_regression_inventory_covers_every_monitoring_mutation(
     expected = {(method, route_path) for method, route_path, _request_path, _payload in MUTATING_MONITORING_REQUESTS}
     actual = {
         (method, route.path)
-        for route in app.routes
+        for route in iter_served_routes(app.routes)
         if route.path.startswith("/api/v1/monitoring/")
         for method in route.methods or set()
         if method in UNSAFE_METHODS

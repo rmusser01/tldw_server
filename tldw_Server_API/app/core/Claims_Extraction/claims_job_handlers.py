@@ -6,19 +6,40 @@ import asyncio
 import errno
 import json
 import sqlite3
+from datetime import date
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.claims_cluster_rebuild_contract import ClusterRebuildSettings, canonical_cluster_settings
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
 )
-from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
+from tldw_Server_API.app.core.DB_Management.chroma_existing import ChromaPreflightLimits
+from tldw_Server_API.app.core.DB_Management.db_path_utils import (
+    DatabasePaths,
+    get_user_media_db_path,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.DB_Management.media_db.claims_cluster_rebuild_types import (
+    ClusterPublicationIdentity,
+    ClusterRebuildStorageError,
+)
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError as MediaDatabaseError,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import defaults as media_db_runtime_defaults
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import MEDIA_NONCRITICAL_EXCEPTIONS
+from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.Jobs.resource_contracts import (
+    ResourceAttempt,
+    ResourceBinding,
+    ResourceScope,
+    canonical_settings_json,
+    settings_fingerprint,
+)
+from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 
 from .claims_alert_delivery import (
     build_claims_alert_delivery_payload,
@@ -29,24 +50,67 @@ from .claims_analytics_exports import (
     ClaimsAnalyticsExportError,
     process_export_artifact,
 )
+from .claims_cluster_rebuild import calculate_claim_cluster_rebuild
+from .claims_cluster_vectors import open_claim_cluster_vector_reader
+from .claims_cluster_watchlists import evaluate_published_cluster_watchlists
 from .claims_job_contracts import (
+    CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE,
     CLAIMS_DELIVER_ALERT_JOB_TYPE,
     CLAIMS_DELIVER_REVIEW_NOTIFICATION_JOB_TYPE,
     CLAIMS_GENERATE_ANALYTICS_EXPORT_JOB_TYPE,
     CLAIMS_MAX_OWNER_USER_ID,
+    CLAIMS_REBUILD_CLUSTERS_JOB_TYPE,
     CLAIMS_REBUILD_MEDIA_JOB_TYPE,
     ClaimsJobError,
     is_routable_claims_owner_id_text,
     validate_alert_delivery_payload,
     validate_analytics_export_payload,
+    validate_cluster_rebuild_payload,
     validate_rebuild_media_payload,
+    validate_review_metrics_payload,
     validate_review_notification_payload,
 )
+from .claims_jobs import claims_cluster_rebuild_limits
 from .claims_notifications import deliver_claim_review_notifications_now
 from .claims_rebuild_service import rebuild_claims_for_media
+from .claims_review_metrics import aggregate_claims_review_metrics_window
+
+_CLUSTER_DOMAIN_FAILURE_CODES = frozenset(
+    {
+        "claims_cluster_source_changed",
+        "claims_cluster_foreign_reference",
+        "claims_cluster_corruption",
+        "claims_cluster_resource_limit",
+        "claims_cluster_vector_access",
+        "claims_cluster_vector_busy",
+        "claims_cluster_vector_closed",
+        "claims_cluster_vector_configuration",
+        "claims_cluster_vector_corruption",
+        "claims_cluster_vector_forked_handle",
+        "claims_cluster_vector_invalid_request",
+        "claims_cluster_vector_lock_unsupported",
+        "claims_cluster_vector_log_coverage",
+        "claims_cluster_vector_mixed_access",
+        "claims_cluster_vector_path_alias",
+        "claims_cluster_vector_read_only",
+        "claims_cluster_vector_shutdown",
+        "claims_cluster_vector_source_changed",
+        "claims_cluster_vector_unsupported_sdk",
+    }
+)
+
+try:
+    from psycopg import Error as PsycopgError
+    from psycopg.errors import ConnectionTimeout as PsycopgConnectionTimeout
+except ImportError:
+    _CLAIMS_NATIVE_POSTGRES_ERROR_TYPES: tuple[type[BaseException], ...] = ()
+    _CLAIMS_POSTGRES_TIMEOUT_TYPES: tuple[type[BaseException], ...] = ()
+else:
+    _CLAIMS_NATIVE_POSTGRES_ERROR_TYPES = (PsycopgError,)
+    _CLAIMS_POSTGRES_TIMEOUT_TYPES = (PsycopgConnectionTimeout,)
 
 _CLAIMS_HANDLER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
-_CLAIMS_EXPORT_STORAGE_ERROR_TYPES: tuple[type[BaseException], ...] = (
+_CLAIMS_STORAGE_ERROR_TYPES: tuple[type[BaseException], ...] = (
     sqlite3.OperationalError,
     BackendDatabaseError,
     MediaDatabaseError,
@@ -175,9 +239,9 @@ def _exception_chain(exc: BaseException) -> list[BaseException]:
     return chain
 
 
-def _is_transient_export_storage_error(exc: BaseException) -> bool:
+def _is_transient_claims_storage_error(exc: BaseException) -> bool:
     """Classify only explicit temporary database and storage failures."""
-    if not isinstance(exc, _CLAIMS_EXPORT_STORAGE_ERROR_TYPES):
+    if not isinstance(exc, _CLAIMS_STORAGE_ERROR_TYPES):
         return False
 
     for current in _exception_chain(exc):
@@ -197,6 +261,23 @@ def _is_transient_export_storage_error(exc: BaseException) -> bool:
         if isinstance(current, OSError) and current.errno in _TRANSIENT_OS_ERRNOS:
             return True
     return False
+
+
+# Preserve the export classifier's original root-exception gate for callers.
+_is_transient_export_storage_error = _is_transient_claims_storage_error
+
+
+def _is_transient_review_metrics_storage_error(exc: BaseException) -> bool:
+    """Recognize native PostgreSQL deadlines without changing export policy."""
+    if not isinstance(exc, _CLAIMS_STORAGE_ERROR_TYPES + _CLAIMS_NATIVE_POSTGRES_ERROR_TYPES):
+        return False
+    if any(isinstance(current, _CLAIMS_POSTGRES_TIMEOUT_TYPES) for current in _exception_chain(exc)):
+        return True
+    if isinstance(exc, _CLAIMS_NATIVE_POSTGRES_ERROR_TYPES):
+        wrapped = BackendDatabaseError("Claims review metrics storage failure")
+        wrapped.__cause__ = exc
+        return _is_transient_claims_storage_error(wrapped)
+    return _is_transient_claims_storage_error(exc)
 
 
 def _db_path(owner_user_id: Any) -> str:
@@ -334,7 +415,7 @@ def _process_analytics_export(
             failure_code=exc.code,
         ) from exc
     except Exception as exc:  # noqa: BLE001 - translate worker failures without leaking raw text.
-        retryable = _is_transient_export_storage_error(exc)
+        retryable = _is_transient_claims_storage_error(exc)
         failure_code = "claims_export_storage_unavailable" if retryable else "claims_export_failed"
         public_message = (
             "Claims analytics export storage is temporarily unavailable."
@@ -355,6 +436,193 @@ def _process_analytics_export(
         ) from exc
 
 
+def _aggregate_review_metrics(
+    *,
+    owner_user_id: str,
+    start_date: str,
+    end_date: str,
+    job_id: int,
+) -> dict[str, Any]:
+    """Open, aggregate, and close an explicit owner window in maintenance scope."""
+    is_postgres = media_db_runtime_defaults.postgres_content_mode
+    opened = False
+    result = {"start_date": start_date, "end_date": end_date, "groups_written": 0}
+    try:
+        with scoped_context(user_id=int(owner_user_id), is_admin=True):
+            options: dict[str, Any] = {
+                "client_id": "claims_jobs_worker",
+                "initialize": False,
+                "existing_only": True,
+            }
+            if not is_postgres:
+                owner_dir = DatabasePaths.resolve_user_base_directory(int(owner_user_id))
+                options.update(
+                    db_path=str(owner_dir / DatabasePaths.MEDIA_DB_NAME),
+                )
+            with managed_media_database(**options) as db:
+                opened = True
+                written = aggregate_claims_review_metrics_window(
+                    db=db,
+                    owner_user_id=owner_user_id,
+                    start_date=date.fromisoformat(start_date),
+                    end_date=date.fromisoformat(end_date),
+                )
+        if written == 0:
+            return {**result, "outcome": "skipped", "reason": "no_activity"}
+        return {**result, "outcome": "ok", "groups_written": written}
+    except Exception as exc:  # noqa: BLE001 - sanitize all domain/storage failures at the worker boundary.
+        if not is_postgres and not opened and (
+            isinstance(exc, FileNotFoundError)
+            or (isinstance(exc, OSError) and exc.errno == errno.ENOENT)
+        ):
+            return {**result, "outcome": "skipped", "reason": "owner_database_missing"}
+        retryable = _is_transient_review_metrics_storage_error(exc)
+        failure_code = "claims_review_metrics_storage_unavailable" if retryable else "claims_review_metrics_failed"
+        logger.bind(
+            operation="aggregate_review_metrics",
+            owner_user_id=owner_user_id,
+            job_id=job_id,
+            error_code=failure_code,
+            error_type=type(exc).__name__,
+        ).warning("Claims review metrics worker failed")
+        raise ClaimsJobError(
+            "Claims review metrics storage is temporarily unavailable." if retryable else "Claims review metrics failed.",
+            retryable=retryable,
+            failure_code=failure_code,
+        ) from exc
+
+
+def _cluster_attempt(job: dict[str, Any], payload: dict[str, Any]) -> ResourceAttempt:
+    """Prove the acquired row matches its immutable neutral contract before I/O."""
+    owner = payload["owner_user_id"]
+    effective = ClusterRebuildSettings(**{key: value for key, value in payload.items() if key != "owner_user_id"})
+    canonical = canonical_cluster_settings(effective)
+    if (
+        job.get("job_type") != CLAIMS_REBUILD_CLUSTERS_JOB_TYPE
+        or job.get("domain") != "claims"
+        or job.get("owner_user_id") != owner
+        or job.get("resource") != "cluster-rebuild"
+        or job.get("status") != "processing"
+        or job.get("resource_settings_json") != canonical_settings_json(canonical)
+        or job.get("resource_settings_fingerprint") != settings_fingerprint(canonical)
+    ):
+        raise ClaimsJobError("Invalid Claims cluster rebuild binding.", failure_code="claims_invalid_payload")
+    try:
+        return ResourceAttempt(
+            job_id=job.get("id"),
+            job_uuid=job.get("uuid"),
+            worker_id=job.get("worker_id"),
+            lease_id=job.get("lease_id"),
+            binding=ResourceBinding(
+                ResourceScope("claims", owner, "cluster-rebuild"),
+                job.get("resource_authority_uuid"),
+                job.get("resource_generation"),
+            ),
+        )
+    except (TypeError, ValueError):
+        raise ClaimsJobError("Invalid Claims cluster rebuild attempt.", failure_code="claims_invalid_payload") from None
+
+
+def _rebuild_claim_clusters(job: dict[str, Any]) -> dict[str, Any]:
+    """Offload one existing-only owner session, vector epoch and publication.
+
+    Jobs owns leases/cancellation/finalization. The two authority opportunities
+    narrow cross-store races; the Media publication generation fences late work.
+    """
+    payload = validate_cluster_rebuild_payload(_payload(job))
+    attempt = _cluster_attempt(job, payload)
+    owner = payload["owner_user_id"]
+    effective = ClusterRebuildSettings(**{key: value for key, value in payload.items() if key != "owner_user_id"})
+    try:
+        limits = claims_cluster_rebuild_limits()
+    except (TypeError, ValueError):
+        raise ClaimsJobError(
+            "Invalid Claims cluster rebuild limits.", failure_code="claims_cluster_configuration"
+        ) from None
+    identity = ClusterPublicationIdentity(
+        owner,
+        attempt.job_uuid,
+        attempt.binding.authority_uuid,
+        attempt.binding.generation,
+        job["resource_settings_fingerprint"],
+    )
+    is_postgres = media_db_runtime_defaults.postgres_content_mode
+    opened = False
+    committed_result: dict[str, Any] | None = None
+    try:
+        manager = jobs_manager_from_env()
+        with manager.scoped_rls_context(is_admin=False, domain_allowlist="claims", owner_user_id=owner):
+            if not manager.validate_resource_attempt(attempt):
+                raise ClaimsJobError(
+                    "Claims cluster rebuild attempt is inactive.", failure_code="claims_cluster_attempt_inactive"
+                )
+            with scoped_context(user_id=int(owner), is_admin=False):
+                options: dict[str, Any] = {
+                    "client_id": "claims_jobs_worker",
+                    "initialize": False,
+                    "existing_only": True,
+                }
+                if not is_postgres:
+                    owner_dir = DatabasePaths.resolve_user_base_directory(int(owner))
+                    options["db_path"] = str(owner_dir / DatabasePaths.MEDIA_DB_NAME)
+                with managed_media_database(**options) as db:
+                    opened = True
+                    publication = db.load_claim_cluster_publication(identity=identity)
+                    if publication is not None:
+                        committed_result = dict(publication.result)
+                        return committed_result
+                    snapshot = db.read_claim_cluster_source(
+                        owner_user_id=owner,
+                        claim_limit=limits.exact_claims if effective.method == "exact" else limits.embedding_claims,
+                        text_byte_limit=limits.text_bytes,
+                    )
+                    if effective.method == "exact":
+                        calculation = calculate_claim_cluster_rebuild(
+                            snapshot, settings=effective, limits=limits, read_vectors=None
+                        )
+                    else:
+                        embedding_config = dict(settings.get("EMBEDDING_CONFIG") or {})
+                        embedding_config["USER_DB_BASE_DIR"] = settings.get("USER_DB_BASE_DIR")
+                        preflight = ChromaPreflightLimits(
+                            vector_width=limits.vector_width,
+                            queue_components=limits.embedding_components,
+                            returned_components=limits.embedding_components,
+                        )
+                        with open_claim_cluster_vector_reader(
+                            owner_user_id=owner, embedding_config=embedding_config, preflight_limits=preflight
+                        ) as reader:
+                            calculation = calculate_claim_cluster_rebuild(
+                                snapshot, settings=effective, limits=limits, read_vectors=reader
+                            )
+                    if not manager.validate_resource_attempt(attempt):
+                        raise ClaimsJobError(
+                            "Claims cluster rebuild attempt is inactive.",
+                            failure_code="claims_cluster_attempt_inactive",
+                        )
+                    publication = db.publish_claim_cluster_rebuild(
+                        identity=identity, settings=effective, snapshot=snapshot, calculation=calculation, limits=limits
+                    )
+                    result = dict(publication.result)
+                    if publication.newly_published:
+                        committed_result = result
+                        evaluate_published_cluster_watchlists(db, owner_user_id=owner)
+                    return result
+    except Exception as exc:
+        if committed_result is not None:
+            logger.warning("Published cluster post-commit processing failed")
+            return committed_result
+        if isinstance(exc, ClaimsJobError):
+            raise
+        if not is_postgres and not opened and isinstance(exc, FileNotFoundError):
+            code, retryable = "claims_cluster_owner_database_missing", False
+        elif isinstance(exc, ClusterRebuildStorageError) and exc.code in _CLUSTER_DOMAIN_FAILURE_CODES:
+            code, retryable = exc.code, exc.retryable
+        else:
+            retryable = _is_transient_review_metrics_storage_error(exc)
+            code = "claims_cluster_storage_unavailable" if retryable else "claims_cluster_failed"
+        raise ClaimsJobError("Claims cluster rebuild failed.", retryable=retryable, failure_code=code) from None
+
+
 async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
     """Validate and dispatch one Claims job through the Jobs worker runtime.
 
@@ -370,6 +638,20 @@ async def process_claims_job(job: dict[str, Any]) -> dict[str, Any]:
             Claims operation cannot be processed by this worker.
     """
     job_type = str(job.get("job_type") or "").strip()
+    if job_type == CLAIMS_REBUILD_CLUSTERS_JOB_TYPE:
+        return await asyncio.to_thread(_rebuild_claim_clusters, job)
+    if job_type == CLAIMS_AGGREGATE_REVIEW_METRICS_JOB_TYPE:
+        payload = validate_review_metrics_payload(_payload(job))
+        owner_user_id = _assert_owner(job, payload["owner_user_id"])
+        if job.get("owner_user_id") != owner_user_id:
+            raise _owner_scope_error()
+        return await asyncio.to_thread(
+            _aggregate_review_metrics,
+            owner_user_id=owner_user_id,
+            start_date=payload["start_date"],
+            end_date=payload["end_date"],
+            job_id=_positive_job_id(job.get("id")),
+        )
     if job_type == CLAIMS_REBUILD_MEDIA_JOB_TYPE:
         payload = validate_rebuild_media_payload(_payload(job))
         owner_user_id = _assert_owner(job, payload["owner_user_id"])

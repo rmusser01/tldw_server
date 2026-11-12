@@ -704,14 +704,14 @@ class TestKeywordEndpoints:
         response = client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json=payload)
         assert response.status_code == status.HTTP_201_CREATED, response.text
         data = response.json()
-        assert data["keyword_text"] == payload["keyword_text"].lower()  # Assuming normalization to lowercase
+        assert data["keyword_text"] == payload["keyword_text"]  # stored display casing
         assert "id" in data
         assert "uuid" in data
 
     def test_create_keyword_duplicate_normalized(self, client: TestClient):
         # Use a keyword text that, after normalization, will be identical for both calls.
         keyword_to_test_raw = "  TEST DUPLICATE KW  "
-        normalized_keyword_expected = "test duplicate kw"
+        normalized_keyword_expected = "TEST DUPLICATE KW"  # stripped, display casing kept
 
         payload1 = {"keyword_text": keyword_to_test_raw}
         response1 = client.post(f"{API_V1_PROMPTS_PREFIX}/keywords/", json=payload1)
@@ -745,11 +745,9 @@ class TestKeywordEndpoints:
         assert response.status_code == status.HTTP_200_OK, response.text
         data = response.json()
         assert isinstance(data, list)
-        # Assuming keywords are normalized (e.g., lowercased)
-        normalized_kw1 = kw1_payload["keyword_text"].lower()
-        normalized_kw2 = kw2_payload["keyword_text"].lower()
-        assert normalized_kw1 in data
-        assert normalized_kw2 in data
+        # Stored display casing
+        assert kw1_payload["keyword_text"] in data
+        assert kw2_payload["keyword_text"] in data
 
     def test_list_keywords_empty(self, client: TestClient):
         # Assumes a fresh DB state for keywords for this user

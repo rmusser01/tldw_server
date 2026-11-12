@@ -24,14 +24,13 @@ const {
   mockGetCurrentUser,
   mockCanonicalConfig
 } = vi.hoisted(() => {
-  const cyInstance: Record<string, any> = {
+  const cyInstance = {
     on: vi.fn(),
     fit: vi.fn(),
     destroy: vi.fn(),
     zoom: vi.fn(() => 1)
   }
-  const cytoscapeFactory: any = vi.fn(() => cyInstance)
-  cytoscapeFactory.use = vi.fn()
+  const cytoscapeFactory = Object.assign(vi.fn(() => cyInstance), { use: vi.fn() })
 
   return {
     mockBgRequest: vi.fn(),
@@ -347,6 +346,7 @@ describe("NotesManagerPage stage 22 accessibility regression", () => {
     await seedAndSaveNote()
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }))
+    fireEvent.click(screen.getByTestId("notes-section-connections-toggle"))
     fireEvent.click(await screen.findByTestId("notes-open-graph-view"))
 
     const workspace = await screen.findByTestId("notes-graph-workspace")

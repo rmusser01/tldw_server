@@ -19,6 +19,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime import (
 from tldw_Server_API.app.core.RAG.rag_service import analytics_db
 
 
+_COLLECTIONS_AUTHORITY_SQL = (
+    "SELECT CASE WHEN to_regclass('public.output_templates') IS NULL "
+    "THEN has_schema_privilege(current_user,'public','CREATE') "
+    "ELSE pg_has_role(current_user,(SELECT relowner FROM pg_class "
+    "WHERE oid=to_regclass('public.output_templates')),'USAGE') END AS can_migrate"
+)
+
+
 class _FakePool:
     def __init__(self, label: str = "backend") -> None:
         self.closed = 0
@@ -66,6 +74,7 @@ class _FakeBackend:
         self.backend_type = backend_type
         self.label = label
         self.execute_calls: list[tuple[str, tuple | None, _FakeConnection | None]] = []
+        self.authority_probes: list[str] = []
         self.execute_many_calls: list[tuple[str, list | None, _FakeConnection | None]] = []
         self.create_tables_calls: list[tuple[str, _FakeConnection | None]] = []
         self.existing_tables: set[str] = set()
@@ -86,6 +95,9 @@ class _FakeBackend:
         return self.pool
 
     def execute(self, query: str, params=None, connection=None):
+        if query == _COLLECTIONS_AUTHORITY_SQL:
+            self.authority_probes.append(query)
+            return QueryResult(rows=[{"can_migrate": True}], rowcount=1)
         self.execute_calls.append((query, params, connection))
         if connection is not None:
             return QueryResult(rows=[{"backend": self.label}], rowcount=1)
@@ -318,6 +330,7 @@ def test_collections_database_refreshes_shared_backend_after_cache_rotation(monk
     monkeypatch.setattr(collections_db, "load_comprehensive_config", lambda: _make_config("pw1", "prefer"))
     monkeypatch.setattr(collections_db, "get_content_backend", lambda _cfg: holder["backend"])
     monkeypatch.setattr(collections_db.CollectionsDatabase, "ensure_schema", lambda self: None)
+    monkeypatch.setattr(collections_db, "ensure_tag_identity", lambda *_args: None)
     monkeypatch.setattr(
         collections_db.CollectionsDatabase,
         "_seed_watchlists_output_templates",
@@ -430,6 +443,9 @@ def test_collections_database_pins_backend_for_multi_query_read_operations(
 
     def make_execute(backend: _FakeBackend):
         def execute(query: str, params=None, connection=None) -> QueryResult:
+            if query == _COLLECTIONS_AUTHORITY_SQL:
+                backend.authority_probes.append(query)
+                return QueryResult(rows=[{"can_migrate": True}], rowcount=1)
             backend.execute_calls.append((query, params, connection))
             if "COUNT(*) AS cnt FROM output_templates" in query:
                 if backend is old_backend:
@@ -725,6 +741,7 @@ def test_collections_database_reruns_bootstrap_when_shared_backend_target_change
         "ensure_schema",
         lambda self: schema_calls.append(self._backend.label),
     )
+    monkeypatch.setattr(collections_db, "ensure_tag_identity", lambda *_args: None)
     monkeypatch.setattr(
         collections_db.CollectionsDatabase,
         "_seed_watchlists_output_templates",
@@ -766,7 +783,7 @@ def test_collections_database_bootstrap_runs_once_per_shared_target_across_insta
     _ = collections_db.CollectionsDatabase(user_id="1")
     _ = collections_db.CollectionsDatabase(user_id="1")
 
-    assert bootstrap_calls == ["postgresql:///shared"]
+    assert bootstrap_calls == [collections_db.CollectionsDatabase._backend_target_key(shared_backend)]  # nosec B101 -- Pytest asserts the updated real contract.
 
 
 def test_evaluations_database_bootstrap_runs_once_per_shared_target_across_instances(
@@ -836,6 +853,7 @@ def test_watchlists_database_reruns_bootstrap_when_pg_host_changes_with_same_db_
         "ensure_schema",
         lambda self: schema_calls.append(self._backend_target_key(self._backend) or "<none>"),
     )
+    monkeypatch.setattr(watchlists_db, "ensure_tag_identity", lambda *_args: None)
     monkeypatch.setattr(watchlists_db.WatchlistsDatabase, "_schema_init_keys", set())
 
     db = watchlists_db.WatchlistsDatabase(user_id="1")

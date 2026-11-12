@@ -177,7 +177,12 @@ async def test_response_quality_public_call_bypasses_saturated_default_executor(
     assert task is not None
     metric, result = task.result()
     assert metric == "relevance"
-    assert result["score"] == pytest.approx(0.8)
+    # A judge score of 4 on the 1-5 scale normalizes to (4-1)/4 = 0.75.
+    # This asserted 0.8 under the old inline raw/5.0, which put a 20% floor under
+    # every metric (1 mapped to 0.2 rather than 0.0). See core/Evaluations/scoring.py
+    # for the recorded decision. The score is incidental to this test, which covers
+    # executor bypass.
+    assert result["score"] == pytest.approx(0.75)
     assert pool.active_count == 0
 
 
@@ -260,3 +265,56 @@ async def test_response_quality_breaker_timeout_drains_before_safe_failure(
         "provider-exit",
         "capacity-release",
     ]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_quality_metrics_retain_model_rationale_and_actual_rubric(monkeypatch):
+    """Structured grading keeps model evidence instead of a static criterion label."""
+    import json
+
+    from tldw_Server_API.app.core.Evaluations.circuit_breaker import LLMCircuitBreaker
+
+    calls = []
+
+    def judge(*args, **_kwargs):
+        calls.append(args)
+        return json.dumps({"score": 5, "explanation": "The response names Mira Vale, matching the supplied source."})
+
+    monkeypatch.setattr(response_quality_evaluator, "analyze", judge)
+    monkeypatch.setattr(response_quality_evaluator, "llm_circuit_breaker", LLMCircuitBreaker())
+    result = await ResponseQualityEvaluator().evaluate(
+        prompt="Source: Dr Mira Vale leads Rowan Observatory. Who leads it?",
+        response="Dr Mira Vale", custom_criteria={"grounding": "Use the supplied source only."},
+        api_name="openai", model="grader-fixture",
+    )
+    assert len(calls) == 5  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+    assert result["overall_quality"] == 1.0  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+    for metric in result["metrics"].values():
+        assert metric["rationale"] == "The response names Mira Vale, matching the supplied source."  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+        assert metric["rubric"] in [args[2] for args in calls]  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+        assert "JSON" in metric["rubric"]  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+        assert metric["raw_score"] == 5  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("text,want", [
+    ("4", (4.0, None)),
+    (" 3.5 ", (3.5, None)),
+    ('{"score":5,"explanation":" source agrees "}', (5.0, "source agrees")),
+])
+def test_quality_rating_preserves_numeric_compatibility_and_model_evidence(text, want):
+    assert response_quality_evaluator._parse_quality_rating(text) == want  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("text", [
+    "true", "NaN", "null", "[]", "not a rating",
+    '{"score":true,"explanation":"reason"}',
+    '{"score":5,"explanation":[]}',
+    '{"score":5,"explanation":"  "}',
+    '{"score":5}', '{"explanation":"reason"}',
+])
+def test_quality_rating_rejects_invalid_or_fabricated_evidence(text):
+    with pytest.raises((ValueError, TypeError, KeyError)):
+        response_quality_evaluator._parse_quality_rating(text)

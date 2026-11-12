@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.Notes_Graph.suggestion_api import SuggestionAPIErr
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -204,7 +205,7 @@ def _app(
     async def allow() -> None:
         return None
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         dependant = getattr(route, "dependant", None)
         if dependant is None:
             continue

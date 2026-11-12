@@ -38,7 +38,7 @@ Add the Jobs contract helpers for persona visual pack portability so later API e
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added persona visual portability Jobs contract helpers in tldw_Server_API/app/core/Persona/visual_jobs.py: export/import-preview job type constants, payload builders, portability queue fallback, batch-group helpers, idempotency keys, and create-job helpers. The helpers keep the existing persona_visuals domain and mirror the PR #1135 VN pack Jobs model for export/import-preview enqueue behavior.
 
 Extended tldw_Server_API/tests/Persona/test_persona_visual_jobs.py with focused coverage for export and import-preview payload shape, default queue, batch group strings, owner attribution, options/archive digests in idempotency keys, and create-job arguments. Existing generation job tests still pass.
@@ -46,7 +46,7 @@ Extended tldw_Server_API/tests/Persona/test_persona_visual_jobs.py with focused 
 Verification passed: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_jobs.py -q (5 passed). Bandit passed with B101 skipped for pytest assertions: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/Persona/visual_jobs.py tldw_Server_API/tests/Persona/test_persona_visual_jobs.py -s B101 -f json -o /tmp/bandit_persona_visual_portability_jobs.json (0 findings). git diff --check passed.
 
 Follow-up worker/API slice: add persistent portability job/preview records, worker handlers using PersonaVisualPackExporter and PersonaVisualPackImportPreviewer, persona API endpoints for export job start/status/download/cancel and import preview upload/status/cancel/delete, then frontend review UX.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

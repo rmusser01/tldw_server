@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from "react"
+import React, { useState, useCallback, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import {
   Card,
@@ -21,10 +21,35 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
+import { formatAdminDateTime } from "./admin-format"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { serverSupportsPath } from "@/services/tldw/capability-probe"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 const BILLING_OVERVIEW_PATH = "/api/v1/admin/billing/overview"
+
+// Deterministic row keys for subscription/event rows the server sends
+// without an id: a `user|created_at` composite (never Math.random, which
+// churned every row's identity on each render) plus a fetch-order suffix
+// for duplicates such as batch events sharing a timestamp (C-S5).
+const billingRowKey = (r: any): string =>
+  `${r.user_id ?? r.id ?? "u"}|${r.created_at ?? ""}`
+
+const tagDuplicateBillingRowKeys = (records: any[]): any[] => {
+  const seen = new Map<string, number>()
+  let tagged = false
+  const result = records.map((record) => {
+    const base = billingRowKey(record)
+    const nth = (seen.get(base) ?? 0) + 1
+    seen.set(base, nth)
+    if (nth > 1) {
+      tagged = true
+      return { ...record, _rowKey: `${base}#${nth}` }
+    }
+    return record
+  })
+  return tagged ? result : records
+}
 
 // ── Overview Tab ──
 
@@ -177,7 +202,13 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       const params: any = { limit: 100 }
       if (statusFilter !== "all") params.status = statusFilter
       const result = await tldwClient.listAllSubscriptions(params)
-      setSubscriptions(Array.isArray(result) ? result : result?.data ?? result?.subscriptions ?? [])
+      // The server returns the {items, total} envelope; legacy shapes
+      // (data/subscriptions arrays) stay as fallbacks for older builds.
+      setSubscriptions(
+        tagDuplicateBillingRowKeys(
+          Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.subscriptions ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -271,7 +302,7 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       title: t("settings:adminBilling.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
-      render: (val: string) => val ? new Date(val).toLocaleDateString() : "N/A"
+      render: (val: string) => val ? formatAdminDateTime(val) : "N/A"
     },
     {
       title: t("settings:adminBilling.colActions", "Actions"),
@@ -315,12 +346,19 @@ const SubscriptionsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
         <Button icon={<ReloadOutlined />} onClick={loadSubscriptions} loading={loading}>
           {t("common:refresh", "Refresh")}
         </Button>
+        {/* Bounded snapshot (limit:100) — full server pagination waits on a
+            truthful total; disclose the truncation instead of hiding it. */}
+        <span
+          style={{ color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}
+        >
+          {t("settings:adminBilling.showingFirst100Subscriptions", "Showing first 100 subscriptions")}
+        </span>
       </div>
 
       <Table
         dataSource={subscriptions}
         columns={columns}
-        rowKey={(r) => r.user_id ?? r.id ?? Math.random()}
+        rowKey={(r) => r._rowKey ?? billingRowKey(r)}
         loading={loading}
         pagination={{ pageSize: 20 }}
         size="small"
@@ -374,7 +412,12 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
     setLoading(true)
     try {
       const result = await tldwClient.listBillingEvents({ limit: 100 })
-      setEvents(Array.isArray(result) ? result : result?.data ?? result?.events ?? [])
+      // Same {items, total} envelope as subscriptions; legacy fallbacks kept.
+      setEvents(
+        tagDuplicateBillingRowKeys(
+          Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.events ?? []
+        )
+      )
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -415,7 +458,7 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       title: t("settings:adminBilling.colCreated", "Created"),
       dataIndex: "created_at",
       key: "created_at",
-      render: (val: string) => val ? new Date(val).toLocaleString() : "N/A"
+      render: (val: string) => val ? formatAdminDateTime(val) : "N/A"
     }
   ]
 
@@ -424,13 +467,20 @@ const BillingEventsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGu
       <div style={{ marginBottom: 16 }}>
         <Button icon={<ReloadOutlined />} onClick={loadEvents} loading={loading}>
           {t("common:refresh", "Refresh")}
-        </Button>
+        </Button>{" "}
+        {/* Bounded snapshot (limit:100) — same truncation disclosure as
+            subscriptions; full pagination waits on a truthful total. */}
+        <span
+          style={{ color: "var(--color-text-secondary, #888)", fontSize: "0.85rem" }}
+        >
+          {t("settings:adminBilling.showingFirst100Events", "Showing first 100 events")}
+        </span>
       </div>
 
       <Table
         dataSource={events}
         columns={columns}
-        rowKey={(r) => r.id ?? r.event_id ?? Math.random()}
+        rowKey={(r) => r._rowKey ?? billingRowKey(r)}
         loading={loading}
         pagination={{ pageSize: 25 }}
         size="small"
@@ -445,65 +495,41 @@ const BillingDashboardPage: React.FC = () => {
   const { t } = useTranslation(["settings", "common"])
   const { config: connectionConfig, loading: connectionConfigLoading } = useCanonicalConnectionConfig()
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
-  const initialLoadRef = useRef(false)
-  const [capabilityCheckResolved, setCapabilityCheckResolved] = useState(false)
+  // null = probe pending/unknown; false = the server lacks the billing routes.
+  // The tabs render immediately either way - the probe only downgrades the
+  // billing content in place, it never gates the first render.
+  const [billingSupported, setBillingSupported] = useState<boolean | null>(null)
 
   const markAdminGuardFromError = useCallback((err: any) => {
     const guardState = deriveAdminGuardFromError(err)
     if (guardState) setAdminGuard(guardState)
   }, [])
 
+  // Capability probe through the shared session cache (one openapi.json fetch
+  // per server URL). Tri-state: false = the fetched spec definitively lacks
+  // the billing routes (downgrade in place); null = probe unknown/failed or
+  // the 4s failsafe fired - no downgrade, the runtime endpoints report their
+  // own errors instead of the probe gating the render.
   useEffect(() => {
-    if (initialLoadRef.current || connectionConfigLoading) return
-    initialLoadRef.current = true
+    if (connectionConfigLoading) return
+    const serverUrl = connectionConfig?.serverUrl?.trim()
+    if (!serverUrl) return
     let cancelled = false
-
-    const checkBillingSupport = async () => {
-      const serverUrl = connectionConfig?.serverUrl?.trim()
-      if (!serverUrl) {
-        if (!cancelled) {
-          setCapabilityCheckResolved(true)
-        }
-        return
-      }
-
-      try {
-        const response = await fetch(`${serverUrl}/openapi.json`)
-        if (response.ok) {
-          const spec = await response.json()
-          const paths =
-            spec && typeof spec === "object" && spec.paths && typeof spec.paths === "object"
-              ? (spec.paths as Record<string, unknown>)
-              : null
-          if (!cancelled && (!paths || !(BILLING_OVERVIEW_PATH in paths))) {
-            setAdminGuard("notFound")
-          }
-        }
-      } catch {
-        // Ignore capability probe failures and let the page try runtime endpoints.
-      } finally {
-        if (!cancelled) {
-          setCapabilityCheckResolved(true)
-        }
-      }
-    }
-
-    void checkBillingSupport()
-
+    let timeoutId: ReturnType<typeof setTimeout> | undefined
+    const probeTimedOut = new Promise<null>((resolve) => {
+      timeoutId = setTimeout(() => resolve(null), 4000)
+    })
+    void Promise.race([
+      serverSupportsPath(serverUrl, BILLING_OVERVIEW_PATH).catch(() => null),
+      probeTimedOut
+    ]).then((supported) => {
+      if (!cancelled && supported !== null) setBillingSupported(supported)
+    })
     return () => {
       cancelled = true
+      if (timeoutId) clearTimeout(timeoutId)
     }
   }, [connectionConfig?.serverUrl, connectionConfigLoading])
-
-  // Failsafe: the capability probe must never hold the whole page in a
-  // skeleton (e.g. when the connection config never finishes loading or the
-  // openapi fetch hangs). After a short grace period, render and let the
-  // runtime endpoints report their own errors.
-  useEffect(() => {
-    if (capabilityCheckResolved) return
-    const timer = setTimeout(() => setCapabilityCheckResolved(true), 4000)
-    return () => clearTimeout(timer)
-  }, [capabilityCheckResolved])
 
   // The page heading (and its Usage cross-link) renders in every state -
   // guard panels included - so the page never loses its h1 (#2898 L2).
@@ -516,16 +542,15 @@ const BillingDashboardPage: React.FC = () => {
     </span>
   )
 
-  if (!capabilityCheckResolved) {
-    return (
-      <div style={{ padding: 24 }}>
-        {pageHeading}
-        <Card loading />
-      </div>
-    )
-  }
+  // Once the probe has DEFINITIVELY ruled the billing routes absent, a 404
+  // from the speculative overview call is route absence, not an anomaly:
+  // suppress the page-level notFound guard so the inline downgrade notice is
+  // the durable end state, whichever of the two resolves first. Forbidden
+  // (403) always passes through.
+  const effectiveAdminGuard =
+    adminGuard === "notFound" && billingSupported === false ? null : adminGuard
 
-  if (adminGuard === "forbidden") {
+  if (effectiveAdminGuard === "forbidden") {
     return (
       <div style={{ padding: 24 }}>
         {pageHeading}
@@ -536,7 +561,7 @@ const BillingDashboardPage: React.FC = () => {
     )
   }
 
-  if (adminGuard === "notFound") {
+  if (effectiveAdminGuard === "notFound") {
     return (
       <div style={{ padding: 24 }}>
         {pageHeading}
@@ -550,21 +575,33 @@ const BillingDashboardPage: React.FC = () => {
     )
   }
 
+  // The billing routes are missing on this server (e.g. single-user
+  // deployments): downgrade the tab content in place - RateLimitingPage's
+  // lazy per-endpoint style - instead of swapping the whole page for a guard.
+  const unavailableNotice = billingSupported === false ? (
+    <Alert variant="warning" title={t("settings:adminBilling.notFoundTitle", "Not available on this server")}>
+      {t(
+        "settings:adminBilling.notFoundBody",
+        "Billing endpoints are not enabled here. Billing applies to multi-user deployments with subscription management configured; single-user servers do not use it."
+      )}
+    </Alert>
+  ) : null
+
   const tabItems = [
     {
       key: "overview",
       label: t("settings:adminBilling.tabOverview", "Overview"),
-      children: <OverviewTab onGuardError={markAdminGuardFromError} />
+      children: unavailableNotice ?? <OverviewTab onGuardError={markAdminGuardFromError} />
     },
     {
       key: "subscriptions",
       label: t("settings:adminBilling.tabSubscriptions", "Subscriptions"),
-      children: <SubscriptionsTab onGuardError={markAdminGuardFromError} />
+      children: unavailableNotice ?? <SubscriptionsTab onGuardError={markAdminGuardFromError} />
     },
     {
       key: "events",
       label: t("settings:adminBilling.tabEvents", "Billing Events"),
-      children: <BillingEventsTab onGuardError={markAdminGuardFromError} />
+      children: unavailableNotice ?? <BillingEventsTab onGuardError={markAdminGuardFromError} />
     }
   ]
 

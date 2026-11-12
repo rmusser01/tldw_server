@@ -32,16 +32,16 @@ from typing import Any, Optional, Union
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call as chat_api_call
 
 # Local imports
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
 
 _DOCGEN_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -137,7 +137,8 @@ class DocumentGeneratorService:
         self.db = db
         # Load external overrides from Prompts/chat if available
         try:
-            from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt  # local import to avoid cycles
+            # local import to avoid cycles
+            from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
             overrides = {
                 DocumentType.TIMELINE: (load_prompt("chat", "timeline_system"), load_prompt("chat", "timeline_user")),
                 DocumentType.STUDY_GUIDE: (load_prompt("chat", "study_guide_system"), load_prompt("chat", "study_guide_user")),
@@ -496,6 +497,15 @@ class DocumentGeneratorService:
             context = "...[truncated]\n" + context[-max_context_length:]
 
         return context
+
+    def has_custom_prompt(self, document_type: DocumentType) -> bool:
+        """Whether the user saved an active custom prompt for this document type."""
+        with self.db.get_connection() as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM user_prompts WHERE document_type = ? AND is_active = 1",
+                (document_type.value,),
+            )
+            return cursor.fetchone() is not None
 
     def get_user_prompt_config(self, document_type: DocumentType) -> dict[str, Any]:
         """

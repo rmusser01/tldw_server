@@ -61,7 +61,7 @@ Constraints: backend-only; no WebUI changes; no model calls; no runtime session 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 pure graph builder completed and accepted after review. Commit 85068f2da adds authoring_graph.py and focused graph tests. Verification: focused graph pytest passed with 16 tests; spec compliance review approved; code quality review initially found omitted-target, duplicate edge ID, and mutable diagnostics issues, all fixed with regression tests; re-review approved. The worktree lacks its own .venv, so verification used /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python.
 
 Task 2 service graph methods completed and accepted after review. Commit d0d05dfea4 adds get_draft_graph, preview_draft_graph, and get_version_graph plus service tests. Code quality review found a published-version snapshot drift bug where validation could recompute from live character metadata; fixed by using stored version validation for version graph responses, with regression coverage. Verification: focused graph pytest passed with 22 tests; publish snapshot tests passed; spec and quality re-reviews approved.
@@ -73,7 +73,7 @@ Task 4 capabilities/docs completed. Commits 22e0224ed and 89a221561 add route-ga
 PR review fixes added on 2026-05-14: graph draft endpoints now resolve AuthNZ profile rows and accessible audio refs before validation; graph reachability is derived from emitted bounded edges so truncated responses stay internally consistent; capabilities now require exact graph route path+method pairs; supplied_draft_invalid_shape has explicit 400 mapping; helper docstrings and wrapped long lines added. Regression coverage added for custom AuthNZ graph validation context, method-aware capability gating, emitted-edge reachability under edge truncation, and static fallthrough warning diagnostics.
 
 Final verification after review fixes: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Scripts -q -> 123 passed, 5 warnings; /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/VN_Platform/test_vn_capabilities_api.py -q -> 4 passed, 8 warnings; compileall on touched VN modules passed; Bandit on touched backend VN modules reported 0 findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -51,13 +51,13 @@ Roadmap epic for Milestone 2 after M1 lands: attachment/blob transfer, restore c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added Docs/Design/Sync_V2_M2_Restore_Completeness_and_Blobs.md to lock M2 design decisions after M1 stabilized.
 - Added Docs/superpowers/plans/2026-05-23-sync-v2-m2-restore-completeness-blobs-implementation-plan.md with staged test-first implementation tasks.
 - Completed child tasks TASK-490.12.1 through TASK-490.12.7 covering protocol models/capabilities, blob ledger/storage, resumable upload, download manifests, restore completeness, key recovery hardening, API docs, and final e2e verification.
 - Added Docs/API/Sync_V2_M2.md and final e2e coverage for uploaded blob restore completeness.
 - Final verification for the M2 track passed: Sync suite 313 passed, restore e2e 5 passed, Ruff passed, Bandit reported 0 findings at /tmp/bandit_sync_v2_m2_final.json, and git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

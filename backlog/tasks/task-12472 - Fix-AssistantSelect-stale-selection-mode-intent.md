@@ -25,16 +25,14 @@ Address post-merge review finding where AssistantSelect.handleSelect can use sta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED regression failed before implementation with selectedAssistant.metadata.selectionMode=overlay after rerendering selectionModePreference to tracked. Replaced transient selectionMode React state with selectionModeIntentRef. handleSelect now reads one local nextMode and uses it for both selected-assistant metadata and overlay persistence.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed AssistantSelect stale selection intent handling by reading a ref-backed nextMode in handleSelect and using it consistently for metadata and overlay settings writes. Added regression coverage for rerendered selectionModePreference changes before selection.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

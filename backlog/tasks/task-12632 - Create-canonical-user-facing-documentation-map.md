@@ -33,7 +33,7 @@ Design and implement the first documentation IA slice: a canonical public user d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Approved brainstorming design written to Docs/superpowers/specs/2026-06-01-user-docs-map-design.md. Scope is canonical Docs/User_Guides hub, optional feature map, MkDocs nav, README pointer, and extension docs pointer; WebUI documentation behavior is deferred.
 
 Design review before implementation planning tightened the spec around public link targets, MkDocs Home behavior, exact MkDocs build command, and generated Docs/Published commit policy.
@@ -43,7 +43,7 @@ Implementation plan written to Docs/superpowers/plans/2026-06-01-user-docs-map.m
 Task 4 verification: refreshed curated docs with Helper_Scripts/refresh_docs_published.sh. Kept generated Docs/Published/User_Guides/index.md, Docs/Published/User_Guides/Feature_Map.md, and Docs/Published/Getting_Started/TROUBLESHOOTING.md because the generated user guide hub links to the troubleshooting guide. Changed Markdown link check passed across README.md, source hub/map, published hub/map, the published troubleshooting target, and extension docs. git diff --check passed. MkDocs build was attempted with the project virtualenv and failed because mkdocs is not installed: python -m mkdocs build -f Docs/mkdocs.yml: No module named mkdocs. Bandit is not applicable for this docs-only slice because no Python or executable code was changed.
 
 Final review follow-up: softened README and extension docs wording from exhaustive/complete phrasing to task-oriented/shared map phrasing, matching the selective workflow-map scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -42,6 +42,7 @@ from loguru import logger
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError, TransactionError
+from tldw_Server_API.app.core.exceptions import exception_type_chain
 from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
     ensure_postgres_profile_version_on_connection,
 )
@@ -182,11 +183,20 @@ class UsersDB:
         return self._normalize_user_row(row, is_postgres=is_postgres)
 
     def _log_storage_failure(self, operation: str, error: BaseException) -> None:
+        backend = "postgres" if self._using_postgres_backend() else "sqlite"
+        # The type chain goes in the message text: the bound extras are not printed by
+        # the CI log format, and the callers re-raise `from None`, so this line is the
+        # only place the real cause survives (TASK-13387).
         logger.bind(
             operation=operation,
-            backend="postgres" if self._using_postgres_backend() else "sqlite",
+            backend=backend,
             exception_type=type(error).__name__,
-        ).error("UsersDB storage operation failed")
+        ).error(
+            "UsersDB storage operation failed: operation={} backend={} cause={}",
+            operation,
+            backend,
+            exception_type_chain(error),
+        )
 
     async def initialize(self, *, ensure_schema: bool = True) -> None:
         """Initialize database access and optionally ensure users tables exist."""

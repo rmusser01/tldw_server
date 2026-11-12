@@ -47,7 +47,7 @@ Snapshot compliance revision for PR #1482: add failing tests that assert the per
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan for the reference-backed personal Persona Visual pack library. Focused baseline backend tests passed before implementation: 50 passed across persona visual DB/service/API suites.
 
 Stage 1 persistence foundation implemented. Schema v46 creates persona_visual_library_items and DB helpers now upsert list get update and soft-delete user-scoped entries while preserving stale source rows as unavailable. Verification: DB library test 4 passed. Persona visual DB service API suite 54 passed. git diff --check clean. Bandit on touched production files reported 0 results.
@@ -69,7 +69,7 @@ Snapshot compliance review fix completed: removed source display snapshot column
 Docstring compliance review fix: visual_library_service.py already had a one-line module docstring, but it is being expanded to describe module purpose and behavior for compliance with the review finding.
 
 Docstring compliance fix verified: expanded visual_library_service.py module docstring to describe the personal library reference model, metadata validation/error mapping, and draft duplication behavior. Verification: persona visual library service tests 4 passed; py_compile succeeded; Bandit on visual_library_service.py reported 0 results; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

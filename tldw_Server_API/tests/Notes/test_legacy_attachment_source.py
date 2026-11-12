@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -12,6 +14,17 @@ from fastapi import HTTPException
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 OWNER_ID = "owner-1"
+_SECURE_SOURCE_FLAGS = ("O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY")
+# Positive descriptor tests require the same no-follow primitives as the reader,
+# plus native support for its descriptor-relative opens and directory scans.
+_requires_secure_descriptors = pytest.mark.skipif(
+    not (
+        all(getattr(os, name, 0) for name in _SECURE_SOURCE_FLAGS)
+        and os.open in os.supports_dir_fd
+        and os.scandir in os.supports_fd
+    ),
+    reason="requires no-follow directory descriptors, dir_fd opens, and fd scans",
+)
 
 
 def _source_type() -> type[Any]:
@@ -67,6 +80,7 @@ def test_note_pages_are_id_ordered_bounded_and_include_soft_deleted(
 
 
 @pytest.mark.unit
+@_requires_secure_descriptors
 def test_candidates_use_authoritative_note_directory_and_sorted_stable_keys(
     tmp_path: Path,
     note_db: CharactersRAGDB,
@@ -99,6 +113,7 @@ def test_candidates_use_authoritative_note_directory_and_sorted_stable_keys(
 
 
 @pytest.mark.unit
+@_requires_secure_descriptors
 def test_candidate_enumeration_is_capped_per_note_and_cursor_is_bounded(
     tmp_path: Path,
     note_db: CharactersRAGDB,
@@ -156,6 +171,7 @@ def test_legacy_route_helper_rejects_attachment_root_symlink_escape(
 
 
 @pytest.mark.unit
+@_requires_secure_descriptors
 def test_sidecar_is_read_with_a_64_kib_limit(
     tmp_path: Path,
     note_db: CharactersRAGDB,
@@ -176,6 +192,7 @@ def test_sidecar_is_read_with_a_64_kib_limit(
 
 
 @pytest.mark.unit
+@_requires_secure_descriptors
 def test_symlinked_note_directory_and_candidate_fail_closed(
     tmp_path: Path,
     note_db: CharactersRAGDB,
@@ -217,3 +234,157 @@ def test_source_rejects_note_ids_not_owned_by_the_database(
         source.list_candidates("unknown-note")
 
     assert _source_error_code(raised.value) == "notes_attachment_source_note_not_found"
+
+
+def _trap_source_io(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    missing_flags: tuple[str, ...] = (),
+) -> tuple[Any, list[str]]:
+    """Replace only the reader's OS reference; keep shared stdlib calls native."""
+    module = importlib.import_module(
+        "tldw_Server_API.app.core.Notes.legacy_attachment_source"
+    )
+    values = dict(vars(os))
+    for name in missing_flags:
+        values.pop(name, None)
+    calls: list[str] = []
+
+    def trap(*_args: Any, **_kwargs: Any) -> None:
+        calls.append("descriptor I/O")
+        pytest.fail("unsupported source must not open, read, or scan")
+
+    for name in ("open", "read", "scandir"):
+        values[name] = trap
+    monkeypatch.setattr(module, "os", SimpleNamespace(**values))
+    return module, calls
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("directory", [False, True], ids=["regular", "directory"])
+def test_native_secure_flags_fail_closed_when_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    directory: bool,
+) -> None:
+    module, calls = _trap_source_io(monkeypatch)
+    required = ("O_NOFOLLOW", "O_NONBLOCK")
+    if directory:
+        required += ("O_DIRECTORY",)
+    if all(hasattr(os, name) for name in required):
+        flags = module.LegacyAttachmentSource._secure_open_flags(directory=directory)
+        for name in required:
+            assert flags & getattr(os, name) == getattr(os, name)
+    else:
+        with pytest.raises(module.LegacyAttachmentSourceError) as raised:
+            if directory:
+                module.LegacyAttachmentSource._open_directory("unopened-directory")
+            else:
+                module.LegacyAttachmentSource._open_regular("unopened-file", dir_fd=0)
+        assert raised.value.error_code == "notes_attachment_source_platform_unsupported"
+    assert calls == []
+    assert os.open is not module.os.open
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing_flag", _SECURE_SOURCE_FLAGS)
+@pytest.mark.parametrize("operation", ["enumerate", "verify"])
+def test_missing_secure_flag_rejects_source_before_descriptor_io(
+    tmp_path: Path,
+    note_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    missing_flag: str,
+    operation: str,
+) -> None:
+    note_id = "note-capabilities"
+    note_db.note_store.add_note("owned", "body", note_id=note_id)
+    user_root = tmp_path / "owner"
+    note_dir = _note_dir(user_root, note_id)
+    note_dir.mkdir(parents=True)
+    payload = note_dir / "payload.txt"
+    payload.write_bytes(b"unchanged")
+    source = _source_type()(note_db, owner_user_id=OWNER_ID, user_root=user_root)
+    module, calls = _trap_source_io(monkeypatch, missing_flags=(missing_flag,))
+    snapshot = payload.stat()
+    source_key = "notes_attachments/note-capabilities/payload.txt"
+    candidate = module.LegacyAttachmentCandidate(
+        note_id=note_id,
+        file_name="payload.txt",
+        source_key=source_key,
+        relative_path=source_key,
+        size_bytes=snapshot.st_size,
+        modified_ns=snapshot.st_mtime_ns,
+        sha256="sha256:" + hashlib.sha256(b"unchanged").hexdigest(),
+        metadata={},
+    )
+
+    with pytest.raises(module.LegacyAttachmentSourceError) as raised:
+        if operation == "enumerate":
+            source.list_candidates(note_id)
+        else:
+            source.verify_candidate(candidate)
+
+    assert raised.value.error_code == "notes_attachment_source_platform_unsupported"
+    assert calls == []
+    assert payload.read_bytes() == b"unchanged"
+    assert os.open is not module.os.open
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("missing_flag", ["O_NOFOLLOW", "O_NONBLOCK"])
+def test_missing_regular_file_flag_rejects_before_descriptor_io(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_flag: str,
+) -> None:
+    module, calls = _trap_source_io(monkeypatch, missing_flags=(missing_flag,))
+
+    with pytest.raises(module.LegacyAttachmentSourceError) as raised:
+        module.LegacyAttachmentSource._open_regular("unopened-file", dir_fd=0)
+
+    assert raised.value.error_code == "notes_attachment_source_platform_unsupported"
+    assert calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("limit", [0, 1001])
+def test_candidate_limit_guard_runs_without_secure_descriptors(
+    tmp_path: Path,
+    note_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    limit: int,
+) -> None:
+    module, calls = _trap_source_io(monkeypatch, missing_flags=_SECURE_SOURCE_FLAGS)
+    source = module.LegacyAttachmentSource(
+        note_db, owner_user_id=OWNER_ID, user_root=tmp_path / "owner"
+    )
+
+    with pytest.raises(ValueError, match="1..1000"):
+        source.list_candidates("unknown-note", limit=limit)
+
+    assert calls == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("cursor", "error_code"),
+    [
+        ("x" * 4097, "notes_attachment_source_cursor_too_large"),
+        ("../foreign-source", "notes_attachment_source_cursor_invalid"),
+    ],
+)
+def test_candidate_cursor_guard_runs_without_secure_descriptors(
+    tmp_path: Path,
+    note_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    cursor: str,
+    error_code: str,
+) -> None:
+    module, calls = _trap_source_io(monkeypatch, missing_flags=_SECURE_SOURCE_FLAGS)
+    source = module.LegacyAttachmentSource(
+        note_db, owner_user_id=OWNER_ID, user_root=tmp_path / "owner"
+    )
+
+    with pytest.raises(module.LegacyAttachmentSourceError) as raised:
+        source.list_candidates("unknown-note", after_source_key=cursor)
+
+    assert raised.value.error_code == error_code
+    assert calls == []

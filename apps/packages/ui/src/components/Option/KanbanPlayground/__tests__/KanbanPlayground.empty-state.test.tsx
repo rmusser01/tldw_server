@@ -23,7 +23,16 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: { serverUrl: "https://kanban.example.test", authMode: "single-user", apiKey: "fixture-key" },
+    authorityLoading: false
+  })
+}))
 vi.mock("@/services/kanban", () => ({
+  createKanbanClient: () => ({
+    listBoards: vi.fn(), getBoard: vi.fn(), createBoard: vi.fn(), deleteBoard: vi.fn()
+  }),
   listBoards: vi.fn(),
   getBoard: vi.fn(),
   createBoard: vi.fn(),
@@ -78,7 +87,7 @@ describe("KanbanPlayground empty-state copy", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(useQueryClient).mockReturnValue({
-      invalidateQueries: vi.fn()
+      invalidateQueries: vi.fn(), removeQueries: vi.fn()
     } as any)
     vi.mocked(useMutation).mockReturnValue({
       mutate: vi.fn(),
@@ -94,14 +103,14 @@ describe("KanbanPlayground empty-state copy", () => {
 
     vi.mocked(useQuery).mockImplementation((options: any) => {
       const queryKey = Array.isArray(options?.queryKey) ? options.queryKey : []
-      if (queryKey[0] === "kanban-boards") {
+      if (queryKey.includes("kanban-boards")) {
         return {
           data: { boards },
           isLoading: false,
           refetch: vi.fn()
         } as any
       }
-      if (queryKey[0] === "kanban-board") {
+      if (queryKey.includes("kanban-board")) {
         return {
           data: null,
           isLoading: false,
@@ -121,16 +130,24 @@ describe("KanbanPlayground empty-state copy", () => {
     render(<KanbanPlayground />)
 
     expect(
-      screen.getByText("No boards yet. Create your first board")
+      screen.getByText(
+        "Organize research tasks, track projects with boards and cards."
+      )
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /Create Board/ })
     ).toBeInTheDocument()
   })
 
-  it("shows selection guidance when boards already exist", () => {
+  it("shows the board gallery when boards already exist", () => {
     mockQueryResponses(1)
     render(<KanbanPlayground />)
 
+    expect(screen.getByRole("button", { name: /Board 1/ })).toBeInTheDocument()
     expect(
-      screen.getByText("Select an existing board to get started")
-    ).toBeInTheDocument()
+      screen.queryByText(
+        "Organize research tasks, track projects with boards and cards."
+      )
+    ).not.toBeInTheDocument()
   })
 })

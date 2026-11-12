@@ -31,6 +31,7 @@ describe("WorldBookEmptyState", () => {
     const { container } = render(<WorldBookEmptyState {...defaultProps} />)
 
     expect(container.querySelector('[data-ds-component="EmptyState"]')).toBeInTheDocument()
+    expect(screen.getByTestId("world-books-empty-state")).toBeVisible()
     expect(screen.getByText(/create a world book/i)).toBeInTheDocument()
     expect(screen.getByText(/add entries/i)).toBeInTheDocument()
     expect(screen.getByText(/attach/i)).toBeInTheDocument()

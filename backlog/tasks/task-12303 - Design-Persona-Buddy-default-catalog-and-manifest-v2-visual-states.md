@@ -40,6 +40,7 @@ Create a repo-backed design spec for the Persona Buddy default visual catalog an
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Closeout 2026-05-23: PR #1708 merged the design task into `dev` at `e66f1e75ed1d92c7c7187c118fc780a944807ab8`, and TASK-419 / PR #1818 reconciled the later Codex Buddy catalog expansion so the current source of truth is the six-basic/twelve-starter catalog described in issue #1787. The original "9 bundled default buddies" acceptance wording is superseded by the current catalog correction; this design task is closed because the spec, tracker, and reconciliation task now carry the current contract.
+Its subtask TASK-410.1 was re-parented as TASK-12303.1 on 2026-11-03 (TASK-13962): 3a660d4f1d (2026-07-05) renumbered this task from TASK-410 without it. Docs/Development/Backlog_Task_Id_Renumbering.md maps each id.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

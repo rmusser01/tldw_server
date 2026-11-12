@@ -31,7 +31,7 @@ Verify and address validated review findings in the current Persona core module 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified findings and fixed validated issues.
 
 Red verification: focused regression run failed before fixes for native import cleanup, candidate terminal review state, stale live focus reconciliation, oversized export preflight, and template log redaction.
@@ -49,7 +49,10 @@ Final current-code verification:
 - `python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visuals_api.py tldw_Server_API/tests/Persona/test_persona_live_control_api.py tldw_Server_API/tests/Persona/test_persona_connection_helpers.py -q --tb=short` passed 128 tests.
 - `git diff --check` passed.
 - Bandit over touched backend Persona/API/DB files exited 0.
-<!-- SECTION:NOTES:END -->
+
+PR #2455 follow-up: rebased onto latest origin/dev and validating review comments for remediation (focus conflict handling, exporter domain exception, missing docstrings, test type annotations, and focus reconciliation comment).
+PR #2455 review follow-up completed. Addressed validated comments: rebased the branch onto latest origin/dev and dropped the unrelated inherited Claims commit from the PR diff; added bounded optimistic-concurrency retries for Persona Live preference updates; serialized focus mutations with the live-session mutation lock; reconciled focused rows in bounded passes and reverts target focus before surfacing unreconciled conflicts; added an explanatory focus reconciliation comment; changed new export limit failures to PersonaVisualPackExportError; added missing docstrings; annotated new live-control regression tests; added a regression for conflicted focused-row cleanup. Verification: targeted review tests passed 4 tests; focused Persona suite passed 129 tests; git diff --check passed; Bandit over touched Persona/API/DB paths exited 0 with only existing nosec warnings in persona_state_store.py.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -69,10 +72,3 @@ Rebased PR #2455 onto latest origin/dev, removing the unrelated inherited Claims
 - [x] #8 Bandit runs on touched Python files.
 - [x] #9 Backlog task records verification and final summary.
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2455 follow-up: rebased onto latest origin/dev and validating review comments for remediation (focus conflict handling, exporter domain exception, missing docstrings, test type annotations, and focus reconciliation comment).
-PR #2455 review follow-up completed. Addressed validated comments: rebased the branch onto latest origin/dev and dropped the unrelated inherited Claims commit from the PR diff; added bounded optimistic-concurrency retries for Persona Live preference updates; serialized focus mutations with the live-session mutation lock; reconciled focused rows in bounded passes and reverts target focus before surfacing unreconciled conflicts; added an explanatory focus reconciliation comment; changed new export limit failures to PersonaVisualPackExportError; added missing docstrings; annotated new live-control regression tests; added a regression for conflicted focused-row cleanup. Verification: targeted review tests passed 4 tests; focused Persona suite passed 129 tests; git diff --check passed; Bandit over touched Persona/API/DB paths exited 0 with only existing nosec warnings in persona_state_store.py.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

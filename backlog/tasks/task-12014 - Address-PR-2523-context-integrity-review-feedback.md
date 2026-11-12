@@ -32,7 +32,6 @@ Address live CodeRabbit and Qodo review feedback on PR #2523 for context integri
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Fixed valid CodeRabbit items: Unicode-normalized filesystem digest paths with collision detection; accepted mapping-backed signed manifest payloads; froze boot-state findings; detected duplicate live asset IDs as verification errors; rejected unknown startup modes; cleared global resolver before TestClient startup; and filtered integrity-allowed skills before pagination/counting.
 - Fixed valid Qodo items: added admin module and manifest helper docstrings; narrowed startup settings exception handling with debug logging; added the missing fixture return type; hardened prompt and skill runtime file reads with no-follow lstat/fstat checks; skipped symlinked SKILL.md during registry sync; and added a short file-fingerprint cache for repeated discovery decisions.
@@ -41,7 +40,6 @@ Address live CodeRabbit and Qodo review feedback on PR #2523 for context integri
 - Verification: focused 88-test regression run passed; broader focused suite passed with 318 passed and 6 warnings; Bandit on touched app scope exited 0 with zero findings; final quick regression run passed with 8 passed; git diff --check is clean.
 - PR follow-up: pushed commit 947e92c16c, replied to all 9 current non-outdated unresolved review threads, resolved those threads through GitHub, and confirmed the current non-outdated unresolved review-thread list is empty. PR checks were pending at finalization time with no current failed GitHub Actions checks reported by `gh pr checks`.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

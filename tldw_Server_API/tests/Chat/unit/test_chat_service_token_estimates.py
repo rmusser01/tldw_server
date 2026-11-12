@@ -1,9 +1,8 @@
 from tldw_Server_API.app.core.Chat import chat_service
 
 
-def test_token_estimate_redacts_base64_images():
-    base64_payload = "A" * 4000
-    messages = [
+def _messages(base64_payload: str) -> list[dict]:
+    return [
         {
             "role": "user",
             "content": [
@@ -12,17 +11,10 @@ def test_token_estimate_redacts_base64_images():
             ],
         }
     ]
-    messages_redacted = [
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": "Hello"},
-                {"type": "image_url", "image_url": {"url": "data:image/omitted"}},
-            ],
-        }
-    ]
 
-    est_with_payload = chat_service._estimate_tokens_from_messages(messages)
-    est_redacted = chat_service._estimate_tokens_from_messages(messages_redacted)
 
-    assert est_with_payload == est_redacted
+def test_token_estimate_redacts_base64_images():
+    est_with_payload = chat_service._estimate_tokens_from_messages(_messages("A" * 4000))
+    est_small_payload = chat_service._estimate_tokens_from_messages(_messages("A" * 4))
+
+    assert est_with_payload == est_small_payload

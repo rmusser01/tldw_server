@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -13,6 +14,7 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     _flatten_params,
     _normalize_sqlite_sql,
 )
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import load_json, row_dict
 
 _VALID_SCOPE_TYPES = {"global", "org", "team", "user"}
 _VALID_CAPABILITY_ADAPTER_SCOPE_TYPES = {"global", "org", "team"}
@@ -149,34 +151,6 @@ def encode_managed_secret_credential_ref(secret_ref_id: int) -> str:
     return f"{_MANAGED_SECRET_REF_PREFIX}{int(secret_ref_id)}"
 
 
-def _load_json_dict(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, dict):
-        return dict(raw)
-    if not raw:
-        return {}
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return {}
-        return dict(parsed) if isinstance(parsed, dict) else {}
-    return {}
-
-
-def _load_json_list(raw: Any) -> list[Any]:
-    if isinstance(raw, list):
-        return list(raw)
-    if not raw:
-        return []
-    if isinstance(raw, str):
-        try:
-            parsed = json.loads(raw)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            return []
-        return list(parsed) if isinstance(parsed, list) else []
-    return []
-
-
 def _dump_canonical_json_dict(value: dict[str, Any] | None) -> str:
     return json.dumps(value or {}, sort_keys=True, separators=(",", ":"))
 
@@ -260,22 +234,7 @@ class McpHubRepo:
             logger.error(f"McpHubRepo.ensure_tables failed: {exc}")
             raise
 
-    @staticmethod
-    def _row_to_dict(row: Any) -> dict[str, Any]:
-        if row is None:
-            return {}
-        if isinstance(row, dict):
-            return dict(row)
-        try:
-            return dict(row)
-        except Exception as exc:
-            logger.debug(f"McpHubRepo._row_to_dict direct cast failed: {exc}")
-        try:
-            keys = row.keys()
-            return {key: row[key] for key in keys}
-        except Exception as exc:
-            logger.debug(f"McpHubRepo._row_to_dict key extraction failed: {exc}")
-            return {}
+    _row_to_dict = staticmethod(row_dict)
 
     @staticmethod
     def _normalize_acp_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -301,7 +260,7 @@ class McpHubRepo:
             if out.get("runtime_executable") is not None
             else (out["server_source"] == "managed" and out["enabled"])
         )
-        out["config"] = _load_json_dict(out.get("config_json"))
+        out["config"] = load_json(out.get("config_json"), dict)
         return out
 
     @staticmethod
@@ -324,7 +283,7 @@ class McpHubRepo:
         out = dict(row)
         out["is_active"] = _to_bool(out.get("is_active"))
         out["is_immutable"] = _to_bool(out.get("is_immutable"))
-        out["policy_document"] = _load_json_dict(out.pop("policy_document_json", None))
+        out["policy_document"] = load_json(out.pop("policy_document_json", None), dict)
         return out
 
     @staticmethod
@@ -333,7 +292,7 @@ class McpHubRepo:
             return None
         out = dict(row)
         out["is_active"] = _to_bool(out.get("is_active"))
-        out["path_scope_document"] = _load_json_dict(out.pop("path_scope_document_json", None))
+        out["path_scope_document"] = load_json(out.pop("path_scope_document_json", None), dict)
         return out
 
     @staticmethod
@@ -344,7 +303,7 @@ class McpHubRepo:
         out["is_active"] = _to_bool(out.get("is_active"))
         out["is_immutable"] = _to_bool(out.get("is_immutable"))
         out["workspace_source_mode"] = str(out.get("workspace_source_mode") or "").strip().lower() or None
-        out["inline_policy_document"] = _load_json_dict(out.pop("inline_policy_document_json", None))
+        out["inline_policy_document"] = load_json(out.pop("inline_policy_document_json", None), dict)
         out["has_override"] = _to_bool(out.get("has_override"))
         out["override_active"] = _to_bool(out.get("override_active"))
         if out.get("override_id") is None:
@@ -390,10 +349,8 @@ class McpHubRepo:
         out = dict(row)
         out["is_active"] = _to_bool(out.get("is_active"))
         out["broadens_access"] = _to_bool(out.get("broadens_access"))
-        out["override_policy_document"] = _load_json_dict(out.pop("override_document_json", None))
-        out["grant_authority_snapshot"] = _load_json_dict(
-            out.pop("grant_authority_snapshot_json", None)
-        )
+        out["override_policy_document"] = load_json(out.pop("override_document_json", None), dict)
+        out["grant_authority_snapshot"] = load_json(out.pop("grant_authority_snapshot_json", None), dict)
         return out
 
     @staticmethod
@@ -403,7 +360,7 @@ class McpHubRepo:
         out = dict(row)
         out["is_active"] = _to_bool(out.get("is_active"))
         out["is_immutable"] = _to_bool(out.get("is_immutable"))
-        out["rules"] = _load_json_dict(out.pop("rules_json", None))
+        out["rules"] = load_json(out.pop("rules_json", None), dict)
         return out
 
     @staticmethod
@@ -418,11 +375,9 @@ class McpHubRepo:
         out["mapping_id"] = str(out.get("mapping_id") or "").strip()
         out["title"] = str(out.get("title") or out["mapping_id"]).strip()
         out["capability_name"] = str(out.get("capability_name") or "").strip()
-        out["resolved_policy_document"] = _load_json_dict(
-            out.pop("resolved_policy_document_json", None)
-        )
+        out["resolved_policy_document"] = load_json(out.pop("resolved_policy_document_json", None), dict)
         out["supported_environment_requirements"] = _normalize_string_list(
-            _load_json_list(out.pop("supported_environment_requirements_json", None))
+            load_json(out.pop("supported_environment_requirements_json", None), list)
         )
         return out
 
@@ -441,8 +396,8 @@ class McpHubRepo:
         out["verified_object_type"] = str(out.get("verified_object_type") or "").strip() or None
         out["verification_result_code"] = str(out.get("verification_result_code") or "").strip() or None
         out["verification_warning_code"] = str(out.get("verification_warning_code") or "").strip() or None
-        out["manifest"] = _load_json_dict(out.pop("manifest_json", None))
-        out["normalized_ir"] = _load_json_dict(out.pop("normalized_ir_json", None))
+        out["manifest"] = load_json(out.pop("manifest_json", None), dict)
+        out["normalized_ir"] = load_json(out.pop("normalized_ir_json", None), dict)
         return out
 
     @staticmethod
@@ -459,7 +414,7 @@ class McpHubRepo:
         out["verified_object_type"] = str(out.get("verified_object_type") or "").strip() or None
         out["verification_result_code"] = str(out.get("verification_result_code") or "").strip() or None
         out["verification_warning_code"] = str(out.get("verification_warning_code") or "").strip() or None
-        out["pack_document"] = _load_json_dict(out.pop("pack_document_json", None))
+        out["pack_document"] = load_json(out.pop("pack_document_json", None), dict)
         return out
 
     @staticmethod
@@ -470,7 +425,7 @@ class McpHubRepo:
             return None
         out = dict(row)
         out["policy_document_json_raw"] = str(out.get("policy_document_json") or "").strip() or "{}"
-        out["policy_document"] = _load_json_dict(out.pop("policy_document_json", None))
+        out["policy_document"] = load_json(out.pop("policy_document_json", None), dict)
         return out
 
     @staticmethod
@@ -488,8 +443,8 @@ class McpHubRepo:
         if row is None:
             return None
         out = dict(row)
-        out["plan_summary"] = _load_json_dict(out.pop("plan_summary_json", None))
-        out["accepted_resolutions"] = _load_json_dict(out.pop("accepted_resolutions_json", None))
+        out["plan_summary"] = load_json(out.pop("plan_summary_json", None), dict)
+        out["accepted_resolutions"] = load_json(out.pop("accepted_resolutions_json", None), dict)
         return out
 
     @staticmethod
@@ -505,7 +460,7 @@ class McpHubRepo:
         if row is None:
             return None
         out = dict(row)
-        usage_rules = _load_json_dict(out.pop("usage_rules_json", None))
+        usage_rules = load_json(out.pop("usage_rules_json", None), dict)
         out["usage_rules"] = usage_rules
         out["slot_name"] = _normalize_slot_name(out.get("slot_name"), allow_blank=True) or None
         out["credential_ref"] = _normalize_credential_ref(
@@ -523,7 +478,8 @@ class McpHubRepo:
         if result is None:
             return False
         if isinstance(result, str):
-            return result.upper().startswith(("UPDATE ", "DELETE ", "INSERT "))
+            match = re.fullmatch(r"(?:(?:UPDATE|DELETE) |INSERT [0-9]+ )([0-9]+)", result.upper())
+            return bool(match and int(match[1]) > 0)
         rowcount = getattr(result, "rowcount", None)
         if isinstance(rowcount, int):
             return rowcount > 0
@@ -2247,8 +2203,8 @@ class McpHubRepo:
             SELECT id, name, description, owner_scope_type, owner_scope_id, is_active,
                    created_by, updated_by, created_at, updated_at
             FROM mcp_workspace_set_objects
-            WHERE (? IS NULL OR owner_scope_type = ?)
-              AND (? IS NULL OR owner_scope_id = ?)
+            WHERE (CAST(? AS TEXT) IS NULL OR owner_scope_type = ?)
+              AND (CAST(? AS INTEGER) IS NULL OR owner_scope_id = ?)
             ORDER BY name, id
             """,
             (
@@ -2413,9 +2369,9 @@ class McpHubRepo:
             SELECT id, workspace_id, display_name, absolute_root, owner_scope_type, owner_scope_id, is_active,
                    created_by, updated_by, created_at, updated_at
             FROM mcp_shared_workspaces
-            WHERE (? IS NULL OR owner_scope_type = ?)
-              AND (? IS NULL OR owner_scope_id = ?)
-              AND (? IS NULL OR workspace_id = ?)
+            WHERE (CAST(? AS TEXT) IS NULL OR owner_scope_type = ?)
+              AND (CAST(? AS INTEGER) IS NULL OR owner_scope_id = ?)
+              AND (CAST(? AS TEXT) IS NULL OR workspace_id = ?)
             ORDER BY owner_scope_type, owner_scope_id, workspace_id, id
             """,
             (
@@ -3599,7 +3555,15 @@ class McpHubRepo:
                 legacy_source_ref = excluded.legacy_source_ref,
                 superseded_by_server_id = excluded.superseded_by_server_id,
                 updated_by = excluded.updated_by,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                last_error_category = CASE WHEN
+                    COALESCE(mcp_external_servers.enabled, FALSE) <> excluded.enabled OR
+                    mcp_external_servers.transport <> excluded.transport OR
+                    mcp_external_servers.config_json <> excluded.config_json OR
+                    mcp_external_servers.server_source <> excluded.server_source OR
+                    COALESCE(mcp_external_servers.superseded_by_server_id, '') <>
+                        COALESCE(excluded.superseded_by_server_id, '')
+                    THEN 'config_changed' ELSE mcp_external_servers.last_error_category END
             """,
             (
                 server_id.strip(),
@@ -3667,7 +3631,12 @@ class McpHubRepo:
                 legacy_source_ref = COALESCE(?, legacy_source_ref),
                 superseded_by_server_id = COALESCE(?, superseded_by_server_id),
                 updated_by = ?,
-                updated_at = ?
+                updated_at = ?,
+                last_error_category = CASE WHEN
+                    COALESCE(enabled, FALSE) <> ? OR transport <> ? OR config_json <> ? OR
+                    server_source <> COALESCE(?, server_source) OR
+                    COALESCE(superseded_by_server_id, '') <> COALESCE(?, superseded_by_server_id, '')
+                    THEN 'config_changed' ELSE last_error_category END
             WHERE id = ?
             """,
             (
@@ -3682,13 +3651,37 @@ class McpHubRepo:
                 next_superseded_by,
                 actor_id,
                 ts,
+                enabled_value,
+                transport.strip(),
+                config_json,
+                next_source,
+                next_superseded_by,
                 server_id.strip(),
             ),
         )
-        rowcount = getattr(cursor, "rowcount", 0)
-        if not (rowcount and rowcount > 0):
+        if not self._command_touched_rows(cursor):
             return None
         return await self.get_external_server(server_id)
+
+    async def record_external_server_discovery(
+        self, server_id: str, *, expected_updated_at: datetime | str, failed: bool
+    ) -> bool:
+        """Publish an outcome only for the configuration that was actually refreshed."""
+        now = datetime.now(timezone.utc)
+        ts = now if getattr(self.db_pool, "pool", None) is not None else now.isoformat()
+        result = await self.db_pool.execute(
+            """
+            UPDATE mcp_external_servers
+            SET last_discovery_at = ?,
+                last_successful_discovery_at = CASE WHEN ? THEN last_successful_discovery_at ELSE ? END,
+                last_error_category = ?
+            WHERE id = ? AND updated_at = ?
+            """,
+            (ts, failed, ts, "discovery_failed" if failed else None, server_id, expected_updated_at),
+        )
+        if isinstance(result, str):
+            return result == "UPDATE 1"
+        return getattr(result, "rowcount", 0) == 1
 
     async def get_external_server(self, server_id: str) -> dict[str, Any] | None:
         row = await self.db_pool.fetchone(
@@ -3707,6 +3700,9 @@ class McpHubRepo:
                    s.updated_by,
                    s.created_at,
                    s.updated_at,
+                   s.last_discovery_at,
+                   s.last_successful_discovery_at,
+                   s.last_error_category,
                    CASE
                      WHEN EXISTS (
                        SELECT 1 FROM mcp_external_server_secrets sec WHERE sec.server_id = s.id
@@ -3776,6 +3772,9 @@ class McpHubRepo:
                    s.updated_by,
                    s.created_at,
                    s.updated_at,
+                   s.last_discovery_at,
+                   s.last_successful_discovery_at,
+                   s.last_error_category,
                    CASE
                      WHEN EXISTS (
                        SELECT 1 FROM mcp_external_server_secrets sec WHERE sec.server_id = s.id
@@ -3809,8 +3808,8 @@ class McpHubRepo:
                        )
                    ) AS key_hint
             FROM mcp_external_servers s
-            WHERE (? IS NULL OR s.owner_scope_type = ?)
-              AND (? IS NULL OR s.owner_scope_id = ?)
+            WHERE (CAST(? AS TEXT) IS NULL OR s.owner_scope_type = ?)
+              AND (CAST(? AS INTEGER) IS NULL OR s.owner_scope_id = ?)
             ORDER BY s.name, s.id
             """,
             (
@@ -3830,8 +3829,7 @@ class McpHubRepo:
             "DELETE FROM mcp_external_servers WHERE id = ?",
             (server_id.strip(),),
         )
-        rowcount = getattr(cursor, "rowcount", 0)
-        return bool(rowcount and rowcount > 0)
+        return self._command_touched_rows(cursor)
 
     async def upsert_external_secret(
         self,

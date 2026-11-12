@@ -106,7 +106,12 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
-describe("ResultsTab remediation panel", () => {
+// Suite-scoped timeout: the conversion flows drive antd modals, selects and a
+// confirm-and-retry round trip under jsdom. They take 3-7.5s locally and about
+// twice that on a loaded CI runner, where the old per-test 12s cap (below the
+// CI job's own 15s default) timed out with no assertion failing. Same pattern
+// as FamilyGuardrailsWizard and sidepanel-flashcards.
+describe("ResultsTab remediation panel", { timeout: 60_000 }, () => {
   const onRetakeQuiz = vi.fn()
   let assistantQueryState: any
   const assistantRefetchMock = vi.fn()
@@ -590,7 +595,7 @@ describe("ResultsTab remediation panel", () => {
         }
       })
     })
-  }, 12000)
+  })
 
   it("resubmits already-converted questions with replace_active when confirmed", async () => {
     mocks.convertRemediationQuestions
@@ -687,7 +692,7 @@ describe("ResultsTab remediation panel", () => {
         }
       })
     })
-  }, 12000)
+  })
 
   it("reuses the server-created deck when a new-deck conversion needs replace_active retry", async () => {
     mocks.convertRemediationQuestions
@@ -789,7 +794,7 @@ describe("ResultsTab remediation panel", () => {
         }
       })
     })
-  }, 12000)
+  })
 
   it("drops the deck filter when active remediation conversions span multiple decks", async () => {
     vi.mocked(useAttemptRemediationConversionsQuery).mockReturnValue({
@@ -855,10 +860,13 @@ describe("ResultsTab remediation panel", () => {
     )
   })
 
-  it("recovers remediation assistant conflicts in place", async () => {
+  it.each([
+    ["nested response", { response: { status: 409 } }],
+    ["transport status", { status: 409 }]
+  ])("recovers remediation assistant conflicts in place (%s)", async (_shape, status) => {
     mocks.assistantRespond
-      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), { response: { status: 409 } }))
-      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), { response: { status: 409 } }))
+      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), status))
+      .mockRejectedValueOnce(Object.assign(new Error("Version mismatch"), status))
       .mockResolvedValueOnce({
         assistant_message: {
           id: 401,
@@ -867,7 +875,9 @@ describe("ResultsTab remediation panel", () => {
       })
     await openDetails()
 
-    fireEvent.click(screen.getByRole("button", { name: /explain mistake for question 12/i }))
+    const explainButton = screen.getByLabelText(/explain mistake for question 12/i)
+    expect(explainButton).toHaveRole("button")
+    fireEvent.click(explainButton)
 
     await waitFor(() => {
       expect(assistantRefetchMock).toHaveBeenCalled()
@@ -875,12 +885,11 @@ describe("ResultsTab remediation panel", () => {
       expect(screen.getByText("Conversation changed elsewhere.")).toBeInTheDocument()
       expect(screen.getByText("Quiz #7, question 12")).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /explain mistake for question 12/i }))
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Retry my message" })).toBeInTheDocument()
-    })
+    fireEvent.click(explainButton)
+    const assistant = within(screen.getByTestId("flashcards-review-study-assistant"))
+    const retryButton = await assistant.findByRole("button", { name: "Retry my message" })
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry my message" }))
+    fireEvent.click(retryButton)
 
     await waitFor(() => {
       expect(mocks.assistantRespond).toHaveBeenNthCalledWith(3, {

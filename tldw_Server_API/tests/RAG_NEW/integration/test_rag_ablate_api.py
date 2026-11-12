@@ -14,8 +14,10 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 )
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import ProviderCredentialRuntime
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import UnifiedSearchResult
 from tldw_Server_API.app.main import app as fastapi_app
+from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
 
 pytestmark = pytest.mark.integration
 
@@ -103,6 +105,57 @@ async def test_authenticated_ablate_passes_same_real_runtime_to_all_four_calls(m
     assert seen == [runtime, runtime, runtime, runtime]  # nosec B101
     assert runtime.close_calls == 1  # nosec B101
     assert _SENTINEL not in repr(response)  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_ablate_with_answer_refuses_an_over_quota_user(monkeypatch):
+    runtime = _CountingRuntime()
+    ran = []
+    _install_direct_ablate_fakes(monkeypatch, runtime)
+
+    async def recorder(**_kwargs):
+        ran.append(True)
+        return UnifiedSearchResult(documents=[], query="ablate")
+
+    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", recorder)
+    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", recorder)
+    refuse_llm_work(monkeypatch)
+
+    with pytest.raises(LLMQuotaExceededError):
+        await rag_endpoint.rag_ablate(
+            request_raw=_request(),
+            request=rag_endpoint.AblationRequest(query="ablate", with_answer=True),
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+            media_db=None,
+            chacha_db=None,
+        )
+
+    assert ran == []  # nosec B101
+
+
+@pytest.mark.asyncio
+async def test_ablate_without_answer_is_not_refused_by_the_llm_quota(monkeypatch):
+    runtime = _CountingRuntime()
+    ran = []
+    _install_direct_ablate_fakes(monkeypatch, runtime)
+
+    async def recorder(**_kwargs):
+        ran.append(True)
+        return UnifiedSearchResult(documents=[], query="ablate")
+
+    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", recorder)
+    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", recorder)
+    refuse_llm_work(monkeypatch)
+
+    await rag_endpoint.rag_ablate(
+        request_raw=_request(),
+        request=rag_endpoint.AblationRequest(query="ablate", with_answer=False),
+        current_user=User(id=1, username="tester", email=None, is_active=True),
+        media_db=None,
+        chacha_db=None,
+    )
+
+    assert len(ran) == 4  # nosec B101
 
 
 @pytest.mark.asyncio
@@ -262,3 +315,31 @@ def test_rag_ablate_capabilities_smoke(auth_headers):
         agentic = data.get("features", {}).get("agentic_chunking", {})
         params = set(agentic.get("parameters", []))
         assert {"agentic_adaptive_budgets", "agentic_coverage_target", "agentic_min_corroborating_docs"}.issubset(params)
+
+
+@pytest.mark.asyncio
+async def test_ablate_passes_an_llm_quota_refusal_through(monkeypatch):
+    """A refusal raised inside an ablation run keeps its 402; it is not turned into a 500 (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    runtime = _CountingRuntime()
+    _install_direct_ablate_fakes(monkeypatch, runtime)
+
+    async def refused(**_kwargs):
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", refused)
+    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", refused)
+
+    with pytest.raises(LLMQuotaExceededError):
+        await rag_endpoint.rag_ablate(
+            request_raw=_request(),
+            request=rag_endpoint.AblationRequest(query="ablate", with_answer=False),
+            current_user=User(id=1, username="tester", email=None, is_active=True),
+            media_db=None,
+            chacha_db=None,
+        )
+
+    assert runtime.close_calls == 1  # nosec B101

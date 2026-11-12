@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "メディア取り込みの競合",
+    "conflict": "メッセージ入力欄にすでに下書きがあります。メディアソースを挿入するか、下書きを置き換えるか、インポートをキャンセルしてください。",
+    "insert": "メディアソースを挿入",
+    "replace": "現在の下書きを置き換える",
+    "cancel": "インポートをキャンセル"
+  },
   "formError": {
     "noModel": "モデルを選択してください",
     "noEmbeddingModel": "設定 > RAGページでembeddingモデルを設定してください"

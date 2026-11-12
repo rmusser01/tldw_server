@@ -39,7 +39,7 @@ Scope: create source Personas user guide and refresh core Persona README; do not
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation in clean worktree: /Users/appledev/Documents/GitHub/tldw_server/.worktrees/personas-documentation on branch codex/personas-documentation.
 Touched source docs: Docs/User_Guides/Server/Personas_User_Guide.md; tldw_Server_API/app/core/Persona/README.md.
 Tracking artifacts: Docs/superpowers/specs/2026-06-01-personas-documentation-design.md; Docs/superpowers/plans/2026-06-01-personas-documentation.md.
@@ -53,7 +53,7 @@ PR integration: combined with TASK-587 in branch codex/personas-character-cards-
 Combined branch verification before PR: git diff --check passed; git status --short Docs/Published produced no output; trailing-whitespace scan returned no matches; stale placeholder scan returned no matches; source route scans confirmed documented Persona mount and key endpoint paths. Pytest and Bandit were not run because this PR changes Markdown documentation only.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2212
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

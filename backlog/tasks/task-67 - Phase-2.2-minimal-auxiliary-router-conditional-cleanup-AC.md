@@ -32,9 +32,9 @@ Continue issue #1116 Phase 2.2 by converting the first remaining auxiliary minim
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a narrow minimal auxiliary router tranche. Added red/green router-group coverage that proves chunking_templates, prompts, claims, text2sql, feedback, vlm, consent, outputs_templates, and outputs defer module import and router attribute access until ImportedRouterSpec resolution. Replaced only those eager try/import RouterSpec blocks in minimal.py.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,3 +1,4 @@
+import { WEB_CLIPPER_ANALYZE_MESSAGE_TYPE } from "@/services/web-clipper/analyze-handoff"
 import { createSafeStorage } from "@/utils/safe-storage"
 
 const storage = createSafeStorage()
@@ -177,6 +178,8 @@ export const getPrompt = async (key: string) => {
             return await getExplainPrompt()
         case "custom":
             return await getCustomPrompt()
+        case WEB_CLIPPER_ANALYZE_MESSAGE_TYPE:
+            return DEFAULT_CUSTOM_PROMPT
         default:
             return ""
     }

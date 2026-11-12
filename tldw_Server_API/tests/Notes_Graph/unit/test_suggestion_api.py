@@ -538,7 +538,7 @@ def test_suggestion_page_cursor_is_encoded_outside_store_and_evidence_is_reconst
             cursor=f"{first.next_cursor}x",
         )
     assert (exc_info.value.status_code, exc_info.value.code) == (
-        422,
+        400,
         "notes_graph_cursor_invalid",
     )
 
@@ -564,7 +564,7 @@ def test_suggestion_target_title_requires_current_matching_target_evidence() -> 
     assert item.target_title is None
 
 
-def test_run_page_rejects_an_invalid_opaque_cursor_with_stable_422() -> None:
+def test_run_page_rejects_an_invalid_opaque_cursor_with_stable_400() -> None:
     with pytest.raises(SuggestionAPIError) as exc_info:
         _api().list_runs(
             note_id=SOURCE_ID,
@@ -574,7 +574,7 @@ def test_run_page_rejects_an_invalid_opaque_cursor_with_stable_422() -> None:
         )
 
     assert (exc_info.value.status_code, exc_info.value.code) == (
-        422,
+        400,
         "notes_graph_cursor_invalid",
     )
 

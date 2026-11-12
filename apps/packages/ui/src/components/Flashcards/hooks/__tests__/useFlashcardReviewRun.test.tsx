@@ -137,6 +137,58 @@ describe("review run with real scope lease, mutations and outbound transport", (
     expect(ratingCalls()).toHaveLength(1)
   })
 
+  it("waits for session closing before dispatching one re-rate and suppresses the duplicate", async () => {
+    const view = setup()
+    const held = await holdOperation(view, "end")
+    let rerate!: Promise<unknown>
+    let duplicate!: Promise<unknown>
+    act(() => {
+      rerate = view.result.current.submit({ cardUuid: "card-1", rating: 2 })
+      duplicate = view.result.current.submit({ cardUuid: "card-1", rating: 2 })
+    })
+    expect(ratingCalls()).toHaveLength(1)
+    sessionId = 88
+    await act(async () => {
+      held.pending.resolve(response({ id: 77, status: "completed" }))
+      await held.result
+      expect(await rerate).toMatchObject({ review_session_id: 88 })
+      expect(await duplicate).toBeNull()
+    })
+    expect(ratingCalls()).toHaveLength(2)
+    expect(JSON.parse(ratingCalls()[1][1].body)).toEqual({ card_uuid: "card-1", rating: 2, review_context: globalContext })
+    expect(view.result.current.activeSessionId).toBe(88)
+  })
+
+  it("reports a closing failure to the current re-rate owner without dispatching another rating", async () => {
+    const view = setup()
+    const held = await holdOperation(view, "end")
+    let rerate!: Promise<unknown>
+    act(() => { rerate = view.result.current.submit({ cardUuid: "card-1", rating: 2 }) })
+    const failedEnd = expect(held.result).rejects.toMatchObject({ status: 500 })
+    const failedRerate = expect(rerate).rejects.toMatchObject({ status: 500 })
+    await act(async () => {
+      held.pending.resolve(response({ detail: "Current close failed" }, 500))
+      await failedEnd
+      await failedRerate
+    })
+    expect(ratingCalls()).toHaveLength(1)
+  })
+
+  it.each([["account", false], ["scope", false], ["account", true], ["scope", true]] as const)("does not replay a waiting re-rate after a %s change (failed end=%s)", async (change, failedEnd) => {
+    const view = setup()
+    const held = await holdOperation(view, "end")
+    let rerate!: Promise<unknown>
+    act(() => { rerate = view.result.current.submit({ cardUuid: "card-1", rating: 2 }) })
+    if (change === "account") act(() => switchAccount(8))
+    else view.rerender({ context: { ...globalContext, deck_id: 5 }, enabled: true })
+    await act(async () => {
+      held.pending.resolve(failedEnd ? response({ detail: "Old close failed" }, 500) : response({ id: 77, status: "completed" }))
+      await held.result
+      expect(await rerate).toBeNull()
+    })
+    expect(ratingCalls()).toHaveLength(1)
+  })
+
   it.each([
     { review_mode: "due", deck_id: 1, tag_filter: null },
     { review_mode: "cram", deck_id: null, tag_filter: "biology" }

@@ -16,10 +16,19 @@ from tldw_Server_API.tests._plugins import chat_fixtures as _chat_pl  # noqa: F4
 
 
 @pytest.fixture(autouse=True)
-def _enable_adapters(monkeypatch):
+def _enable_adapters(monkeypatch, request):
     monkeypatch.setenv("STREAMS_UNIFIED", "1")
     monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.setenv("LOGURU_LEVEL", "ERROR")
+    if getattr(request, "param", False):
+        from tldw_Server_API.app.core.AuthNZ.repos.llm_provider_overrides_repo import (
+            AuthnzLLMProviderOverridesRepo,
+        )
+
+        async def _unavailable_rows(_self):
+            raise OSError("simulated startup policy-store failure")
+
+        monkeypatch.setattr(AuthnzLLMProviderOverridesRepo, "list_overrides", _unavailable_rows)
     yield
 
 
@@ -39,6 +48,12 @@ def _payload(provider: str) -> dict:
 
 
 @pytest.mark.integration
+@pytest.mark.parametrize(
+    "_enable_adapters",
+    [False, True],
+    ids=["healthy-startup", "failed-startup-refresh"],
+    indirect=True,
+)
 def test_chat_endpoint_streaming_error_openai(monkeypatch, authenticated_client):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-test")
     adapter_called = Event()
@@ -57,7 +72,7 @@ def test_chat_endpoint_streaming_error_openai(monkeypatch, authenticated_client)
         json=_payload("openai"),
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 502, response.text
     assert response.json()["detail"]["error_code"] == "provider_unavailable"
     assert "invalid input" not in response.text
     assert adapter_called.is_set()
@@ -82,7 +97,7 @@ def test_chat_endpoint_streaming_error_anthropic(monkeypatch, authenticated_clie
         json=_payload("anthropic"),
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 502, response.text
     assert response.json()["detail"]["error_code"] == "provider_unavailable"
     assert "server error" not in response.text
     assert adapter_called.is_set()
@@ -107,7 +122,7 @@ def test_chat_endpoint_streaming_error_groq(monkeypatch, authenticated_client):
         json=_payload("groq"),
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 502, response.text
     assert response.json()["detail"]["error_code"] == "provider_unavailable"
     assert "too many requests" not in response.text
     assert adapter_called.is_set()
@@ -132,7 +147,7 @@ def test_chat_endpoint_streaming_error_openrouter(monkeypatch, authenticated_cli
         json=_payload("openrouter"),
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 502, response.text
     assert response.json()["detail"]["error_code"] == "provider_authentication_failed"
     assert "bad key" not in response.text
     assert adapter_called.is_set()

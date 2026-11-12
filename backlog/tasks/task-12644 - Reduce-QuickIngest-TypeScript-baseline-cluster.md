@@ -27,9 +27,9 @@ Reduce the rebased package-wide TypeScript baseline by fixing the QuickIngest Fi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Changed FileDropZone acceptance coverage to use the current running prop for disabled behavior. Narrowed playlist preflight seeds through isQuickIngestPlaylistPreflightDetail. Guarded first-source retry fallback with isFirstSourceQuickIngestKind. Full package tsc dropped from 20 src diagnostics after rebase to 12, with no QuickIngest diagnostics remaining. Bandit is not applicable for this JS/TS-only touched scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

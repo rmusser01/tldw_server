@@ -1,0 +1,50 @@
+{
+  "backend": "postgresql",
+  "full_app": true,
+  "auth_mode": "multi_user",
+  "test_mode": false,
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "cpu_count": 18,
+  "python": "3.11.13",
+  "runs": [
+    {
+      "batch": 0,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 3.1804844579892233,
+      "messages_per_second": 31.441750878173554
+    },
+    {
+      "batch": 1,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 2.8705504999961704,
+      "messages_per_second": 34.83652351705131
+    },
+    {
+      "batch": 2,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 2.8580759579781443,
+      "messages_per_second": 34.98857324657734
+    }
+  ],
+  "messages": 300,
+  "attachment_ratio": 0,
+  "rerun_messages": 100,
+  "idempotent": true,
+  "cross_user_search_count": 0,
+  "cross_user_detail_status": 404,
+  "outbound_attempts": 0,
+  "model_attempts": 0,
+  "aggregate_messages_per_second": 33.673393768445905,
+  "target_messages_per_second": 50,
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-woc5fm02",
+  "rls_enabled": true,
+  "rls_forced": true,
+  "superuser": false,
+  "bypass_rls": false,
+  "owner_media_rows": 300,
+  "other_media_rows": 0,
+  "all_batches_meet_target": false
+}

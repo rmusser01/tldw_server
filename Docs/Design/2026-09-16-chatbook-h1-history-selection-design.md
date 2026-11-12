@@ -109,7 +109,7 @@ Swiping a variant selects that stable variant ID as the boundary. Descendants be
 
 New versioned writes use explicit parent relationships and protected interpretation provenance. A complete, valid unique chain can be interpreted automatically. An already versioned valid graph may branch and is resolved by its cursor. Unversioned parentless, mixed, conflicting, cyclic or orphaned rows are not converted into ancestry by sorting. A single live root or an empty source is unambiguous. Cross-owner/conversation parents are invalid, never imported by following their IDs.
 
-For ambiguous legacy data, reading, browsing and export continue. On the first dependent send/fork/rewind-continuation, show **Review conversation history**: the complete owner-ordered row list, clear alternatives and the proposed included path. The user can select an ordered subset, with omissions visibly retained as alternatives. Default chronological presentation is not confirmation. The review can be virtualized, but confirmation covers all source identities/revisions, not only rendered rows.
+For ambiguous legacy data, reading, browsing and export continue. On the first dependent send/fork/rewind-continuation, show **Review conversation history**: the complete owner-ordered row list, clear alternatives and the proposed included path. The user can select an ordered subset, with omissions visibly retained as alternatives. Default chronological presentation is not confirmation. The review can be virtualized, but confirmation covers all source identities/revisions, not only rendered rows. Presentation (CC-04, 2026-10-27): rows keep owner order except that a reply never appears before the message it answers, previews are plain text, and roles read "You" and "Assistant". The default proposed order follows this presentation; confirmation still covers every source identity/revision.
 
 Server presentation order is `timestamp, last_modified, id`; local order is `createdAt, id`. Fetch the complete lightweight manifest in one coherent owner read. If selected content is fetched separately, bind it to that manifest and reject drift before admission. Explicit resource exhaustion returns an error, never an apparently complete truncated manifest. The acceptance test includes more than 20,000 rows to exceed current display-pagination assumptions; binary payloads are not loaded to render that review. Confirming through the last included message must remain usable: bound transcript rendering without truncating the selected owner/provider path, and retain access, search and timeline navigation to offscreen rows.
 
@@ -161,6 +161,32 @@ For an already client-composed inference request, use the existing stateless pat
 The current tracked-character browser branch is server-managed and remains separate from the ordinary/overlay client composer. Integrate it with this versioned server-owned completion path using only new current inputs and frozen explicit request values. The existing saved-behavior adapter supplies supported native character context inside owner admission; a mutable card read or legacy timestamp stream cannot substitute for it. The server owns the input/result writes, so the browser must not perform the separate append/settlement used by client-managed inference. Stage3 includes this distinct integration and cannot finish with only its ordinary-chat task complete.
 
 Versioned streaming must acknowledge successful settlement with the canonical saved result ID even when optional legacy stream metadata is disabled. This acknowledgement is emitted only after the owner save succeeds and is bound to the original admitted operation. Provider-supplied admission or result identity fields cannot become owner acknowledgements. A stop marker, successful provider completion or finished stream without that identity is not proof of persistence; retain the known admission and generated text as uncertain. Preserve the metadata flag's behavior for unversioned requests.
+
+### Leaf check at admission (D7 P1, 2026-10-04)
+
+H1 admission accepts any valid selection, so a view that missed a newer turn silently forks the chat. Both admission requests (`MessageCreate` and `ChatCompletionRequest`) accept an optional `tldw_history_branch` beside `tldw_history_selection_v1`, outside the digest-covered selection:
+
+- Omitted or `null`: no leaf check (the H1 behaviour), so older clients and digests are unaffected.
+- `false`: the send must extend the latest message. Under the owner lock, after selection validation and before any write, the owner refuses when the selection's last message already has a live child. Nothing is written and no provider is called.
+- `true`: an explicit branch (Edit & resend, "Branch here"), admitted beside any newer messages.
+
+The field without a selection is a 422. Rules:
+
+- A live child is a non-deleted row whose parent, under the selection's interpretation, is the selected tip. For `parent_graph_v1` that is `parent_message_id`. For an accepted `legacy_linear_v1` projection, a reviewed path member's parent is its predecessor in `ordered_path_ids`.
+- An empty or before-first selection has no tip, so existing root rows count as its children.
+- Siblings of the tip never count. Continuing from an older assistant variant is an explicit pager choice.
+- Settlement never runs the check, so regenerate (another reply settled against an admitted input) is unaffected. The legacy `tldw_continuation` and `tldw_regenerate_from_message_id` controls cannot be combined with a selection, so they never reach it.
+- A replay of an already-admitted message id returns its admission first, whatever the flag.
+- On the server-completion path, a reused selection still fails first with `selection_already_consumed`.
+- Leaves are computed from the same validated statement snapshot, so on SQLite (`BEGIN IMMEDIATE`) and PostgreSQL (`FOR UPDATE` on the conversation) two racing "extend latest" sends from one tip admit exactly one.
+
+The refusal is `409 {"detail": {"status": "stale_selection", "code": "history_branch_changed", "conversation_id", "parent_message_id", "leaf_ids", "history_version"}}`:
+
+- `parent_message_id` is the selected tip, `null` for an empty selection.
+- `leaf_ids` are the tip's live descendants without children, in snapshot order (oldest first).
+- `history_version` is the conversation's current history fence, as returned by `GET /chats/{id}`.
+
+The client recaptures, shows the "updated elsewhere" notice, and offers "Send after latest" or "Branch here" (P6).
 
 ### Active sync and compatibility
 

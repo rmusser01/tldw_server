@@ -10,6 +10,7 @@ import sqlite3
 import subprocess
 import sys
 import uuid
+from contextlib import closing
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -668,7 +669,9 @@ def test_service_prompt_override_content_change_uses_cas_and_new_uuid(memory_db)
     assert memory_db.get_service_prompt_override("chat.rag.answer") == updated
 
 
-@pytest.mark.parametrize("expected_revision", [None, str(uuid.uuid4())])
+@pytest.mark.parametrize(
+    "expected_revision", [None, str(uuid.uuid4())], ids=["missing-revision", "stale-revision"]
+)
 @pytest.mark.integration
 def test_service_prompt_override_changed_save_conflicts_with_current_revision(
     memory_db,
@@ -1018,7 +1021,7 @@ def test_service_prompt_override_rollback_failure_retires_connection_and_discard
 
     later_connection = file_db.get_connection()
     later_connection.commit()
-    with sqlite3.connect(file_db.db_path) as observer:
+    with closing(sqlite3.connect(file_db.db_path)) as observer:
         stored = observer.execute(
             """
             SELECT parts_json, revision
@@ -1206,6 +1209,29 @@ def test_update_keywords_for_prompt(memory_db: PromptsDatabase):
 
     memory_db.update_keywords_for_prompt(p_id, [])  # Remove all
     assert memory_db.fetch_keywords_for_prompt(p_id) == []
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("query", ["uat-20261002", 'Quoted "Prompt"', "paren(prompt)"])
+@pytest.mark.parametrize("fields", [["name"], ["keywords"], ["name", "keywords"]])
+def test_prompt_search_punctuation_uses_literal_fallback(memory_db: PromptsDatabase, query, fields):
+    memory_db.add_prompt(name=query, author="tester", details="", keywords=[query])
+    memory_db.add_prompt(name="Unrelated", author="tester", details="", keywords=["unrelated"])
+
+    results, total = memory_db.search_prompts(query, search_fields=fields)
+
+    assert (total, [item["name"] for item in results]) == (1, [query])
+
+
+@pytest.mark.integration
+def test_prompt_search_failed_fts_fallback_respects_fields_and_pagination(memory_db: PromptsDatabase):
+    memory_db.add_prompt(name="Older uat-20261002", author="tester", details="")
+    memory_db.add_prompt(name="Newest uat-20261002", author="tester", details="")
+    memory_db.add_prompt(name="Unrelated", author="tester", details="uat-20261002")
+
+    results, total = memory_db.search_prompts("uat-20261002", search_fields=["name"], page=2, results_per_page=1)
+
+    assert (total, [item["name"] for item in results]) == (2, ["Older uat-20261002"])
 
 
 @pytest.mark.integration
@@ -1420,3 +1446,10 @@ def test_get_next_version_logic(memory_db: PromptsDatabase):
 
     # Test for non-existent record
     assert memory_db._get_next_version(conn, "Prompts", "id", 99999) is None
+
+
+@pytest.mark.parametrize("query", ["missing author:alice", "missing keyword:atlas"])
+def test_prompt_search_embedded_prefix_never_returns_unfiltered_page(memory_db, query):
+    memory_db.add_prompt(name="Unrelated", author="alice", details="", keywords=["atlas"])
+    results, total = memory_db.search_prompts(query, search_fields=["keywords"])
+    assert (results, total) == ([], 0)

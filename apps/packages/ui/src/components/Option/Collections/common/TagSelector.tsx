@@ -2,6 +2,7 @@ import React, { useCallback, useState } from "react"
 import { Input, Tag } from "antd"
 import { Plus, X } from "lucide-react"
 import { useCollectionsStore } from "@/store/collections"
+import { hasTag, tagIdentity } from "@/utils/tag-identity"
 
 interface TagSelectorProps {
   tags: string[]
@@ -33,8 +34,8 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
   )
 
   const handleInputConfirm = useCallback(() => {
-    const trimmedValue = inputValue.trim().toLowerCase()
-    if (trimmedValue && !tags.includes(trimmedValue) && tags.length < maxTags) {
+    const trimmedValue = inputValue.trim()
+    if (trimmedValue && !hasTag(tags, trimmedValue) && tags.length < maxTags) {
       onChange([...tags, trimmedValue])
     }
     setInputVisible(false)
@@ -56,14 +57,14 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
 
   const handleRemoveTag = useCallback(
     (tagToRemove: string) => {
-      onChange(tags.filter((tag) => tag !== tagToRemove))
+      onChange(tags.filter((tag) => tagIdentity(tag) !== tagIdentity(tagToRemove)))
     },
     [tags, onChange]
   )
 
   const handleSuggestionClick = useCallback(
     (tag: string) => {
-      if (!tags.includes(tag) && tags.length < maxTags) {
+      if (!hasTag(tags, tag) && tags.length < maxTags) {
         onChange([...tags, tag])
       }
       setInputValue("")
@@ -73,9 +74,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
 
   // Filter suggestions based on input
   const filteredSuggestions = suggestedTags.filter(
-    (tag) =>
-      !tags.includes(tag) &&
-      tag.toLowerCase().includes(inputValue.toLowerCase())
+    (tag) => !hasTag(tags, tag) && tagIdentity(tag).includes(tagIdentity(inputValue))
   )
 
   return (

@@ -26,6 +26,8 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from tldw_Server_API.app.core.testing import is_production_like_env
+
 _DEFAULT_IMPORT_WHITELIST = ("math", "statistics")
 _WRAPPER_ALLOWED_IMPORTS = {"json", "sys", "builtins", "resource", "math"}
 _FORBIDDEN_PATTERNS = [
@@ -37,14 +39,6 @@ _FORBIDDEN_PATTERNS = [
     r"\bsocket\.",
     r"\b__import__\(",
 ]
-_PRODUCTION_VALUES = {"production", "prod", "live"}
-_PRODUCTION_ENV_KEYS = (
-    "ENVIRONMENT",
-    "APP_ENV",
-    "DEPLOYMENT_ENV",
-    "FASTAPI_ENV",
-    "TLDW_ENV",
-)
 
 
 @dataclass
@@ -96,12 +90,7 @@ class ProgramEvaluator:
 
     @staticmethod
     def is_production_like_environment() -> bool:
-        if ProgramEvaluator._env_truthy("tldw_production"):
-            return True
-        for key in _PRODUCTION_ENV_KEYS:
-            if str(os.getenv(key, "")).strip().lower() in _PRODUCTION_VALUES:
-                return True
-        return False
+        return is_production_like_env()
 
     @staticmethod
     def is_project_metadata_enablement_allowed() -> bool:

@@ -8,15 +8,16 @@ import pytest
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.Watchlists.pipeline import run_watchlist_job
 from tldw_Server_API.app.core.DB_Management.scope_context import set_scope, reset_scope
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
 
 pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
-def _test_env(monkeypatch, tmp_path):
+def _test_env(monkeypatch, tmp_path, fresh_services):
      # Offline behavior and isolated DBs
     monkeypatch.setenv("TEST_MODE", "1")
     base_dir = Path.cwd() / "Databases" / "test_user_dbs_include_org_default"
@@ -24,7 +25,6 @@ def _test_env(monkeypatch, tmp_path):
     monkeypatch.setenv("USER_DB_BASE_DIR", str(base_dir))
 
     # Isolate AuthNZ DB as well
-    asyncio.run(reset_db_pool())
     auth_db_path = tmp_path / "authnz_org_default.db"
     # Ensure a fresh DB per run to avoid leftover rows across test sessions
     try:
@@ -37,7 +37,7 @@ def _test_env(monkeypatch, tmp_path):
             # File already absent; acceptable for cleanup
             pass
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{auth_db_path}")
-    asyncio.run(reset_db_pool())
+    reset_settings()
 
     # Ensure AuthNZ tables exist
     ensure_authnz_tables(auth_db_path)
@@ -58,10 +58,7 @@ def _test_env(monkeypatch, tmp_path):
             loop.run_until_complete(_cleanup())
     except Exception:
         _ = None
-    try:
-        yield
-    finally:
-        asyncio.run(reset_db_pool())
+    yield
 
 
 @pytest.mark.asyncio

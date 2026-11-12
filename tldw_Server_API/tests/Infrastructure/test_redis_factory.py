@@ -268,3 +268,57 @@ async def test_async_factory_handles_malformed_redis_url_in_warning(monkeypatch)
     warning_payload = repr(captured)
     assert "secret" not in warning_payload
     assert "<invalid-redis-url>" in warning_payload
+
+
+@pytest.mark.unit
+def test_zset_key_honors_expiry_in_zcard_keys_and_dbsize(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An expired zset key is gone from zcard/keys/dbsize, matching real Redis (TASK-13430)."""
+    client = rf.InMemorySyncRedis()
+    core = client._core
+    current = [1000.0]
+    monkeypatch.setattr(core, "_now", lambda: current[0])
+
+    client.zadd("rg:win:expiring", {"m1": 1000.0})
+    client.expire("rg:win:expiring", 1)
+    assert client.zcard("rg:win:expiring") == 1
+    assert "rg:win:expiring" in client.keys("rg:win:*")
+
+    current[0] = 1002.0  # past the 1s deadline
+
+    assert client.zcard("rg:win:expiring") == 0
+    assert "rg:win:expiring" not in client.keys("rg:win:*")
+    assert client.dbsize() == 0
+
+
+@pytest.mark.unit
+def test_zadd_on_expired_key_starts_from_empty_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """zadd on an expired key must not resurrect its old members (TASK-13430)."""
+    client = rf.InMemorySyncRedis()
+    core = client._core
+    current = [1000.0]
+    monkeypatch.setattr(core, "_now", lambda: current[0])
+
+    client.zadd("rg:win:reused", {"old": 1000.0})
+    client.expire("rg:win:reused", 1)
+    current[0] = 1002.0
+
+    client.zadd("rg:win:reused", {"new": 1002.0})
+    assert client.zrange("rg:win:reused", 0, -1) == ["new"]
+
+
+@pytest.mark.unit
+def test_zadd_purges_expired_keys_periodically(monkeypatch: pytest.MonkeyPatch) -> None:
+    """zadd sweeps expired keys every 256 calls so idle zsets don't live forever (TASK-13430)."""
+    client = rf.InMemorySyncRedis()
+    core = client._core
+    current = [1000.0]
+    monkeypatch.setattr(core, "_now", lambda: current[0])
+
+    client.zadd("rg:win:idle", {"m": 1000.0})
+    client.expire("rg:win:idle", 1)
+    current[0] = 1002.0  # past the deadline, but nothing has swept it yet
+
+    for i in range(256):
+        client.zadd(f"rg:win:other:{i}", {"m": current[0]})
+
+    assert "rg:win:idle" not in core._sorted_sets

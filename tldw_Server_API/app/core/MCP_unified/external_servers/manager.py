@@ -411,7 +411,31 @@ class ExternalServerManager:
         if adapter is None:
             raise ValueError(f"Unknown external server '{server_id}'")
 
-        server_cfg = self._servers[server_id]
+        # Cached discovery is inventory; only current configuration authorizes a call.
+        try:
+            servers, load_errors = await self._load_configured_server_snapshot()
+            server_cfg = next(
+                (server for server in servers if server.id == server_id and server.enabled),
+                None,
+            )
+            bound_config = self._server_fingerprint(self._servers[server_id])
+            current_config = self._server_fingerprint(server_cfg) if server_cfg is not None else None
+        except Exception as exc:
+            logger.warning(
+                "External MCP execution configuration unavailable for server '{}'",
+                server_id,
+                error_type=type(exc).__name__,
+            )
+            raise PermissionError("Current external server configuration is unavailable") from exc
+
+        if server_id in load_errors or server_cfg is None:
+            raise PermissionError("Current external server configuration is unavailable")
+        for field in ("name", "enabled", "policy"):
+            bound_config.pop(field, None)
+            current_config.pop(field, None)
+        if bound_config != current_config:
+            raise PermissionError("Current external server configuration requires reconciliation")
+
         if not server_cfg.policy.allows_tool(upstream_tool_name):
             self._mark_policy_denial(
                 server_id,

@@ -35,7 +35,7 @@ Evaluate and fix unresolved PR review comments for the unified first-run solo on
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented review fixes for PR #2194:
 
 - Backend: tightened first-run step-data sanitizer key matching, allowed storage path values only under optional advanced storage keys, accepted common local provider host suffixes, moved InvalidFirstRunTransition to core exceptions, offloaded first-run store calls from async setup endpoints, split setup write guards for recovery, reordered completion persistence, removed dead audio pack import path handling, and switched TTS health logging to logger.exception.
@@ -51,7 +51,7 @@ Follow-up implementation: added owner-safe shell override cleanup in OptionLayou
 Follow-up RED/GREEN evidence: the new focused Vitest tests first failed on the inherited preset key and stale readiness overwrite, setup-status helper was missing, and the shell override cleanup test failed because cleanup called another owner setOverrides(null). After implementation, the focused follow-up/onboarding Vitest suite passed with 43 tests. Targeted ESLint exited 0 with the existing Next pages-directory warning, and git diff --check exited 0.
 
 Final Cubic cleanup: changed the setup recovery title from a path-like label to the natural-language "Setup operator recovery" in both locale files and the route fallback, and updated the route identity expectation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -61,10 +61,6 @@ Addressed the original PR #2194 review threads in 2b1c568ecf, the post-push Cubi
 Verification: python -m pytest tldw_Server_API/tests/Setup tldw_Server_API/tests/integration/test_unified_first_run_setup_api.py tldw_Server_API/tests/TTS_NEW/integration/test_kokoro_runtime_health_envelope.py -q passed with 347 passed, 4 warnings; bunx vitest run targeted onboarding/setup tests passed with 19 passed; follow-up focused Vitest run passed with 43 passed; route identity recovery-title focused test passed; Bandit on touched Python implementation files exited 0 and wrote /tmp/bandit_pr2194_review_fixes.json; targeted ESLint exited 0 with the existing Next pages-directory warning; git diff --check exited 0.
 
 PR thread closeout: replied to and resolved the original 24 review threads, then replied to and resolved the 5 post-push Cubic code threads and the final task/locale cleanup threads. No known blockers remain.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

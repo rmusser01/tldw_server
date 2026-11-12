@@ -125,6 +125,7 @@ export const VisualSpecBuilder: React.FC<VisualSpecBuilderProps> = ({
               <div className="text-xs text-text-subtle">{field.label}</div>
               <div className="flex items-center gap-3">
                 <Slider
+                  ariaLabelForHandle={field.label}
                   min={field.min ?? 0}
                   max={field.max ?? 1}
                   step={field.step ?? 0.05}
@@ -133,6 +134,7 @@ export const VisualSpecBuilder: React.FC<VisualSpecBuilderProps> = ({
                   onChange={(value) => updateSpecAtPath(field.path, value)}
                 />
                 <InputNumber
+                  aria-label={field.label}
                   min={field.min ?? 0}
                   max={field.max ?? 1}
                   step={field.step ?? 0.05}
@@ -150,6 +152,7 @@ export const VisualSpecBuilder: React.FC<VisualSpecBuilderProps> = ({
           <div key={field.key} className="flex items-center justify-between">
             <span className="text-xs text-text-subtle">{field.label}</span>
             <Switch
+              aria-label={field.label}
               checked={Boolean(getValueAtPath(specObject, field.path))}
               onChange={(value) => updateSpecAtPath(field.path, value)}
             />
@@ -184,6 +187,9 @@ export const VisualSpecBuilder: React.FC<VisualSpecBuilderProps> = ({
           })}
         </span>
         <Switch
+          aria-label={t("evaluations:specAdvancedLabel", {
+            defaultValue: "Advanced: Edit JSON"
+          })}
           checked={showJsonEditor || schema?.builder === "json"}
           disabled={schema?.builder === "json"}
           onChange={(checked) => setShowJsonEditor(checked)}

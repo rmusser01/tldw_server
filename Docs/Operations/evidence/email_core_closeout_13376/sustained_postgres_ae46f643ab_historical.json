@@ -1,0 +1,668 @@
+{
+  "backend": "postgresql",
+  "full_app": true,
+  "auth_mode": "multi_user",
+  "test_mode": false,
+  "platform": "macOS-26.5.2-arm64-arm-64bit",
+  "cpu_count": 18,
+  "python": "3.11.13",
+  "runs": [
+    {
+      "batch": 0,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.448993333033286,
+      "messages_per_second": 69.01343002777143
+    },
+    {
+      "batch": 1,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.3971883329795673,
+      "messages_per_second": 71.57231250760982
+    },
+    {
+      "batch": 2,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.039130917051807,
+      "messages_per_second": 96.234264960297
+    },
+    {
+      "batch": 3,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.0821686249691993,
+      "messages_per_second": 92.40704054125224
+    },
+    {
+      "batch": 4,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.0418717910069972,
+      "messages_per_second": 95.98109946267698
+    },
+    {
+      "batch": 5,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.1026486249174923,
+      "messages_per_second": 90.69072208518166
+    },
+    {
+      "batch": 6,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.0792821659706533,
+      "messages_per_second": 92.65417622282762
+    },
+    {
+      "batch": 7,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.0842754589393735,
+      "messages_per_second": 92.22748626794423
+    },
+    {
+      "batch": 8,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.0650071669369936,
+      "messages_per_second": 93.89608173962274
+    },
+    {
+      "batch": 9,
+      "messages": 100,
+      "archive_bytes": 36280,
+      "elapsed_seconds": 1.0337669170694426,
+      "messages_per_second": 96.73360440231865
+    },
+    {
+      "batch": 10,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0929783340543509,
+      "messages_per_second": 91.493121944197
+    },
+    {
+      "batch": 11,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0430509590078145,
+      "messages_per_second": 95.87259293172349
+    },
+    {
+      "batch": 12,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.9026277500670403,
+      "messages_per_second": 110.78764196267261
+    },
+    {
+      "batch": 13,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.879027958959341,
+      "messages_per_second": 113.76202426870184
+    },
+    {
+      "batch": 14,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.9683469170704484,
+      "messages_per_second": 103.26877510234783
+    },
+    {
+      "batch": 15,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.9250445410143584,
+      "messages_per_second": 108.1029026887126
+    },
+    {
+      "batch": 16,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0635239579714835,
+      "messages_per_second": 94.02703084445355
+    },
+    {
+      "batch": 17,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0613225830020383,
+      "messages_per_second": 94.22205991051445
+    },
+    {
+      "batch": 18,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.086135125020519,
+      "messages_per_second": 92.06957559549585
+    },
+    {
+      "batch": 19,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.1181994579965249,
+      "messages_per_second": 89.42948351912972
+    },
+    {
+      "batch": 20,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.1875734999775887,
+      "messages_per_second": 84.20531445159997
+    },
+    {
+      "batch": 21,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.9012437080964446,
+      "messages_per_second": 110.95777879128197
+    },
+    {
+      "batch": 22,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.8530985829420388,
+      "messages_per_second": 117.21974693139796
+    },
+    {
+      "batch": 23,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.8679335420019925,
+      "messages_per_second": 115.21619474382571
+    },
+    {
+      "batch": 24,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.8731600840110332,
+      "messages_per_second": 114.52653623449008
+    },
+    {
+      "batch": 25,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.9745258330367506,
+      "messages_per_second": 102.61400633001884
+    },
+    {
+      "batch": 26,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0656582079827785,
+      "messages_per_second": 93.83871794061764
+    },
+    {
+      "batch": 27,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0752697499701753,
+      "messages_per_second": 92.99991932514952
+    },
+    {
+      "batch": 28,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.1725749170873314,
+      "messages_per_second": 85.28239734856291
+    },
+    {
+      "batch": 29,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.2215005001053214,
+      "messages_per_second": 81.8665239935454
+    },
+    {
+      "batch": 30,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.154141291975975,
+      "messages_per_second": 86.64450418266608
+    },
+    {
+      "batch": 31,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.8020144579932094,
+      "messages_per_second": 55.49345043067176
+    },
+    {
+      "batch": 32,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.8650925409747288,
+      "messages_per_second": 115.59456967150201
+    },
+    {
+      "batch": 33,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.8948899159440771,
+      "messages_per_second": 111.74558816489015
+    },
+    {
+      "batch": 34,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0259808339178562,
+      "messages_per_second": 97.46770767455327
+    },
+    {
+      "batch": 35,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.1207628339761868,
+      "messages_per_second": 89.22494301959047
+    },
+    {
+      "batch": 36,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0953459999291226,
+      "messages_per_second": 91.29535325501784
+    },
+    {
+      "batch": 37,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.094513374962844,
+      "messages_per_second": 91.36480401931567
+    },
+    {
+      "batch": 38,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.4436571670230478,
+      "messages_per_second": 69.26852322300944
+    },
+    {
+      "batch": 39,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.247741459053941,
+      "messages_per_second": 80.1448082648642
+    },
+    {
+      "batch": 40,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.9787766250083223,
+      "messages_per_second": 102.16835736054662
+    },
+    {
+      "batch": 41,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.9849074159283191,
+      "messages_per_second": 101.53238607280213
+    },
+    {
+      "batch": 42,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 0.8875065409811214,
+      "messages_per_second": 112.67522590814028
+    },
+    {
+      "batch": 43,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0076755000045523,
+      "messages_per_second": 99.23829645510706
+    },
+    {
+      "batch": 44,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.057090749964118,
+      "messages_per_second": 94.59925744633979
+    },
+    {
+      "batch": 45,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.072458375012502,
+      "messages_per_second": 93.24371213832356
+    },
+    {
+      "batch": 46,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0719366249395534,
+      "messages_per_second": 93.28909720352078
+    },
+    {
+      "batch": 47,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0874779589939862,
+      "messages_per_second": 91.95588671287544
+    },
+    {
+      "batch": 48,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0369959169765934,
+      "messages_per_second": 96.43239511641892
+    },
+    {
+      "batch": 49,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0686507080681622,
+      "messages_per_second": 93.57594511004774
+    },
+    {
+      "batch": 50,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.0878769170958549,
+      "messages_per_second": 91.92216364600814
+    },
+    {
+      "batch": 51,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.1948268749983981,
+      "messages_per_second": 83.69413351213251
+    },
+    {
+      "batch": 52,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.181484333006665,
+      "messages_per_second": 84.63929415425932
+    },
+    {
+      "batch": 53,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.3170187909854576,
+      "messages_per_second": 75.92906090973473
+    },
+    {
+      "batch": 54,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.1678255830192938,
+      "messages_per_second": 85.62922533471155
+    },
+    {
+      "batch": 55,
+      "messages": 100,
+      "archive_bytes": 36580,
+      "elapsed_seconds": 1.1752740839729086,
+      "messages_per_second": 85.08653544197875
+    }
+  ],
+  "messages": 5600,
+  "attachment_ratio": 0,
+  "rerun_messages": 100,
+  "minimum_measurement_seconds": 60.0,
+  "measured_ingestion_seconds": 60.82905241695698,
+  "measured_window_wall_seconds": 62.28367679193616,
+  "wall_messages_per_second": 89.9111980608863,
+  "idempotent": true,
+  "retry_matches_first_batch_ids": true,
+  "cross_user_search_count": 0,
+  "cross_user_detail_status": 404,
+  "outbound_attempts": 0,
+  "model_attempts": 0,
+  "aggregate_messages_per_second": 92.06127298538878,
+  "target_messages_per_second": 50,
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-pexwoiaa",
+  "rls_enabled": true,
+  "rls_forced": true,
+  "superuser": false,
+  "bypass_rls": false,
+  "owner_media_rows": 5600,
+  "other_media_rows": 0,
+  "local_release_checks": {
+    "environment": "guarded_local_reference",
+    "baseline_flags": {
+      "EMAIL_NATIVE_PERSIST_ENABLED": true,
+      "EMAIL_OPERATOR_SEARCH_ENABLED": true,
+      "EMAIL_MEDIA_SEARCH_DELEGATION_MODE": "opt_in",
+      "EMAIL_GMAIL_CONNECTOR_ENABLED": false,
+      "CONNECTORS_WORKER_ENABLED": false
+    },
+    "parity": [
+      {
+        "query": "ArchiveThroughput",
+        "legacy_count": 5600,
+        "native_count": 5600,
+        "equal_ids": true
+      },
+      {
+        "query": "\"ArchiveThroughput 0-000\"",
+        "legacy_count": 1,
+        "native_count": 1,
+        "equal_ids": true
+      },
+      {
+        "query": "\"Unique synthetic archive body batch 0 message 0\"",
+        "legacy_count": 1,
+        "native_count": 1,
+        "equal_ids": true
+      }
+    ],
+    "auto_email": {
+      "configured": "auto_email",
+      "same_ids_as_explicit": true,
+      "count": 5600
+    },
+    "rollback": {
+      "flags": {
+        "EMAIL_NATIVE_PERSIST_ENABLED": false,
+        "EMAIL_OPERATOR_SEARCH_ENABLED": false,
+        "EMAIL_MEDIA_SEARCH_DELEGATION_MODE": "opt_in",
+        "EMAIL_GMAIL_CONNECTOR_ENABLED": false,
+        "CONNECTORS_WORKER_ENABLED": false
+      },
+      "email_search_status": 404,
+      "email_detail_status": 404,
+      "operator_bridge_status": 422,
+      "legacy_search_count": 5600,
+      "legacy_content_preserved": true
+    },
+    "restored_detail_status": 200,
+    "metric_export_samples": [
+      "email_ingestion_parse_total{format=\"eml\",outcome=\"parsed\"} 5700.0",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"0.001\",outcome=\"parsed\"} 5650",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"0.01\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"0.05\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"0.1\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"0.25\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"0.5\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"1\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"2.5\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"5\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"10\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"30\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"60\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"120\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"300\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_bucket{format=\"eml\",le=\"+Inf\",outcome=\"parsed\"} 5700",
+      "email_ingestion_parse_seconds_sum{format=\"eml\",outcome=\"parsed\"} 2.8316625592997298",
+      "email_ingestion_parse_seconds_count{format=\"eml\",outcome=\"parsed\"} 5700",
+      "email_ingestion_persist_total{backend=\"postgresql\",outcome=\"success\"} 5700.0",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"0.001\",outcome=\"success\"} 0",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"0.01\",outcome=\"success\"} 5590",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"0.05\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"0.1\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"0.25\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"0.5\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"1\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"2.5\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"5\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"10\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"30\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"60\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"120\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"300\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_bucket{backend=\"postgresql\",le=\"+Inf\",outcome=\"success\"} 5700",
+      "email_ingestion_persist_seconds_sum{backend=\"postgresql\",outcome=\"success\"} 29.389196917647496",
+      "email_ingestion_persist_seconds_count{backend=\"postgresql\",outcome=\"success\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"0.001\",outcome=\"success\",path_kind=\"archive_child\"} 0",
+      "email_native_persist_seconds_bucket{le=\"0.01\",outcome=\"success\",path_kind=\"archive_child\"} 5692",
+      "email_native_persist_seconds_bucket{le=\"0.05\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"0.1\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"0.25\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"0.5\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"1\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"2.5\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"5\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"10\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"30\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"60\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"120\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"300\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_bucket{le=\"+Inf\",outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_native_persist_seconds_sum{outcome=\"success\",path_kind=\"archive_child\"} 16.621321643237025",
+      "email_native_persist_seconds_count{outcome=\"success\",path_kind=\"archive_child\"} 5700",
+      "email_ingestion_dedupe_total{backend=\"postgresql\"} 100.0",
+      "email_native_persist_total{outcome=\"success\",path_kind=\"archive_child\"} 5700.0",
+      "email_native_search_requests_total{include_deleted=\"false\",phase=\"attempt\",query_present=\"true\"} 194.0",
+      "email_native_search_requests_total{include_deleted=\"false\",phase=\"success\",query_present=\"true\"} 194.0",
+      "email_native_search_requests_total{include_deleted=\"false\",phase=\"attempt\",query_present=\"false\"} 1.0",
+      "email_native_search_requests_total{include_deleted=\"false\",phase=\"success\",query_present=\"false\"} 1.0",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.001\",query_present=\"true\"} 0",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.005\",query_present=\"true\"} 0",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.01\",query_present=\"true\"} 6",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.025\",query_present=\"true\"} 191",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.05\",query_present=\"true\"} 193",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.1\",query_present=\"true\"} 193",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.25\",query_present=\"true\"} 193",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.5\",query_present=\"true\"} 194",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"1\",query_present=\"true\"} 194",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"2.5\",query_present=\"true\"} 194",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"5\",query_present=\"true\"} 194",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"10\",query_present=\"true\"} 194",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"30\",query_present=\"true\"} 194",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"+Inf\",query_present=\"true\"} 194",
+      "email_native_search_duration_seconds_sum{include_deleted=\"false\",query_present=\"true\"} 3.2170811294345185",
+      "email_native_search_duration_seconds_count{include_deleted=\"false\",query_present=\"true\"} 194",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.001\",query_present=\"false\"} 0",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.005\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.01\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.025\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.05\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.1\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.25\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"0.5\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"1\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"2.5\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"5\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"10\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"30\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_bucket{include_deleted=\"false\",le=\"+Inf\",query_present=\"false\"} 1",
+      "email_native_search_duration_seconds_sum{include_deleted=\"false\",query_present=\"false\"} 0.0028616669587790966",
+      "email_native_search_duration_seconds_count{include_deleted=\"false\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"0\",query_present=\"true\"} 0",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"1\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"5\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"10\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"25\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"50\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"100\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"250\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"500\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"1000\",query_present=\"true\"} 2",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"10000\",query_present=\"true\"} 194",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"+Inf\",query_present=\"true\"} 194",
+      "email_native_search_results_total_sum{include_deleted=\"false\",query_present=\"true\"} 1075202.0",
+      "email_native_search_results_total_count{include_deleted=\"false\",query_present=\"true\"} 194",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"0\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"1\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"5\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"10\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"25\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"50\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"100\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"250\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"500\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"1000\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"10000\",query_present=\"false\"} 1",
+      "email_native_search_results_total_bucket{include_deleted=\"false\",le=\"+Inf\",query_present=\"false\"} 1",
+      "email_native_search_results_total_sum{include_deleted=\"false\",query_present=\"false\"} 0.0",
+      "email_native_search_results_total_count{include_deleted=\"false\",query_present=\"false\"} 1"
+    ],
+    "restored_flags": {
+      "EMAIL_NATIVE_PERSIST_ENABLED": true,
+      "EMAIL_OPERATOR_SEARCH_ENABLED": true,
+      "EMAIL_MEDIA_SEARCH_DELEGATION_MODE": "opt_in",
+      "EMAIL_GMAIL_CONNECTOR_ENABLED": false,
+      "CONNECTORS_WORKER_ENABLED": false
+    }
+  },
+  "all_batches_meet_target": true,
+  "environment": {
+    "platform": "macOS-26.5.2-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "python_version": "3.11.13",
+    "cpu_count": 18,
+    "cpu_model": "Apple M5 Max",
+    "memory_bytes": 137438953472
+  },
+  "source_identity": {
+    "revision": "ae46f643ab31b8e6cc9c46a91cbd1eb771441a43",
+    "sha256": {
+      "Docs/Operations/probes/email_million_search_13376.py": "fb014eca4f90cd280dce9ec81319841f58682b0df2d22c64e7ec14b2d9b1bff1",
+      "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+      "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+      "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+      "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+      "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "55f7a37c91f17f811a91e682730ee63a1dc234f1f574dd639836557085f1d4cf",
+      "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "8a08c4f6b499406fa6d3057fe64cdf4ee95c9431f237e10b7886cec728a15235",
+      "tldw_Server_API/app/core/DB_Management/backends/query_utils.py": "557555546a2465e80966595e6bc5c8fb2ed06fc59eec4911a4cae05d3c895556",
+      "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "9b3e4385a1f39d76d763361a2b4adb1f4a405adcbfbf4bf44661fdc9207332b3",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "cb4f615bffc512779685ec1afdf3651be42a40a5427b0c4ecc87a72a59d77b6e",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py": "fecc3eb7cc60164a3ed82f756bd9b6424d5f8bc5db3d3c0a7c0a395cf3c17664",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "b9ee5e90eacca190af638e7ae82a7bdac8ac5bd8247cf35ca284b0c1b939768f",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py": "7236e2c6dd3957ea48d2c9bf2cb46a21fe155b797ee85324304d299df5516f52",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "ccf3232e460caec49235ce15645fd2c3c97f0d75d774c16ed404c3bac9f4b7ee",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "6244e99aa4edc24a7b1d3a298d9d39ca5480b7fea017827f9c7214d8e2fa4fa0",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "9419d6c081704af513cd367b9fb61c0e2d40ac29d5a63c99f3958a328d1b4f09",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "768eb28505313f4d386efe68a622c8007a4fedf51f5045177b7dde8999bef499",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "e9b023d3ae924fb1385fcf8fd2f5589fe1078bc127f6824e879616c1578c8b56",
+      "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4"
+    }
+  },
+  "source_identity_after_probe": {
+    "revision": "ae46f643ab31b8e6cc9c46a91cbd1eb771441a43",
+    "sha256": {
+      "Docs/Operations/probes/email_million_search_13376.py": "fb014eca4f90cd280dce9ec81319841f58682b0df2d22c64e7ec14b2d9b1bff1",
+      "Docs/Operations/probes/email_archive_throughput_sqlite_2026_09_25.py": "1f0735567d31913bb225bd129fc8ee98760a44d9332edc0b516203f09f113675",
+      "Docs/Operations/probes/email_archive_throughput_postgres_2026_09_25.py": "97e700887e777ac9f9c24d7ee7b271d2b6d87b376422acfe3e1c20166e52b24d",
+      "Docs/Operations/probes/email_local_release_checks_13376.py": "7b6898f1abf8df3bc2916e5fd29e3979f271c1820b7c677c6dcbc81516cbbd82",
+      "Helper_Scripts/benchmarks/email_search_bench.py": "827c26a396b26dcadcc4ded2c9e9b1309b85ab03bdf33b17b2af232ea66fb991",
+      "tldw_Server_API/app/core/DB_Management/backends/postgresql_backend.py": "55f7a37c91f17f811a91e682730ee63a1dc234f1f574dd639836557085f1d4cf",
+      "tldw_Server_API/app/core/DB_Management/backends/sqlite_backend.py": "8a08c4f6b499406fa6d3057fe64cdf4ee95c9431f237e10b7886cec728a15235",
+      "tldw_Server_API/app/core/DB_Management/backends/query_utils.py": "557555546a2465e80966595e6bc5c8fb2ed06fc59eec4911a4cae05d3c895556",
+      "tldw_Server_API/app/core/DB_Management/media_db/media_database_impl.py": "07e311516af634c23cd2170332c91bde72da71e371cc3775a1528e83fb1587fa",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/execution_ops.py": "aed8b8b2ea4f7e02bf38da71395fec889685734035a995972120a88c41f1e3ea",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_query_ops.py": "9b3e4385a1f39d76d763361a2b4adb1f4a405adcbfbf4bf44661fdc9207332b3",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_benchmark_fixture.py": "cb4f615bffc512779685ec1afdf3651be42a40a5427b0c4ecc87a72a59d77b6e",
+      "tldw_Server_API/app/core/DB_Management/media_db/runtime/email_graph_persistence_ops.py": "fecc3eb7cc60164a3ed82f756bd9b6424d5f8bc5db3d3c0a7c0a395cf3c17664",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/email_schema_structures.py": "b9ee5e90eacca190af638e7ae82a7bdac8ac5bd8247cf35ca284b0c1b939768f",
+      "tldw_Server_API/app/core/DB_Management/media_db/schema/features/postgres_rls.py": "7236e2c6dd3957ea48d2c9bf2cb46a21fe155b797ee85324304d299df5516f52",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": "ccf3232e460caec49235ce15645fd2c3c97f0d75d774c16ed404c3bac9f4b7ee",
+      "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py": "6244e99aa4edc24a7b1d3a298d9d39ca5480b7fea017827f9c7214d8e2fa4fa0",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/persistence.py": "9419d6c081704af513cd367b9fb61c0e2d40ac29d5a63c99f3958a328d1b4f09",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/Email_Processing_Lib.py": "768eb28505313f4d386efe68a622c8007a4fedf51f5045177b7dde8999bef499",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/email_ingestion_metrics.py": "2b8d1ec859b5429aa7b1e1c2e5f69e922eedcb50fa2224d7e61da70ce9bab4d6",
+      "tldw_Server_API/app/core/Ingestion_Media_Processing/Email/attachment_policy.py": "e9b023d3ae924fb1385fcf8fd2f5589fe1078bc127f6824e879616c1578c8b56",
+      "tldw_Server_API/app/core/Metrics/metrics_manager.py": "f3a152d6b3548357b2a1a3675a3912752992f76153d32a7a64419097a3dedba4"
+    }
+  },
+  "source_unchanged_during_probe": true
+}

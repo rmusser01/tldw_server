@@ -9,6 +9,12 @@ export const RESEARCH_WORKSPACE_INDEXEDDB_NAME = "tldw-workspace-storage"
 export const RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE = "workspace-chat-sessions"
 export const RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE =
   "workspace-artifact-payloads"
+export const RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX =
+  "tldw:research-workspace:migration:tombstone";
+export const RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX =
+  "tldw:research-workspace:migration:tombstone-preflight";
+export const RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX =
+  "tldw:research-workspace:chat-reference"
 export const RESEARCH_WORKSPACE_RECONCILIATION_MARKER_PREFIX =
   "tldw:research-workspace:reconciliation:v1"
 
@@ -90,8 +96,12 @@ export interface ResearchWorkspaceLegacyDeletionEligibility {
 }
 
 const workspaceSplitKeyPattern = /^tldw-workspace:workspace:([^:]+):(snapshot|chat)$/
-const workspaceReconciliationMarkerKeyPattern =
-  /^tldw:research-workspace:reconciliation:v1:(.+)$/
+const markerPrefixes = [
+  RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX,
+  RESEARCH_WORKSPACE_RECONCILIATION_MARKER_PREFIX,
+  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFIX,
+  RESEARCH_WORKSPACE_MIGRATION_TOMBSTONE_PREFLIGHT_PREFIX,
+];
 
 const decodeWorkspaceId = (encodedWorkspaceId: string): string => {
   try {
@@ -126,11 +136,11 @@ const inventory = [
       "notes",
       "artifacts",
       "chat_messages",
-      "metadata"
+      "metadata",
     ],
     serverDestination:
       "Workspace core, workspace sources, notes, artifacts, chats, and migration receipt.",
-    authoritativeForMigration: true
+    authoritativeForMigration: true,
   },
   {
     id: "localStorage:tldw-workspace:workspace:*:snapshot",
@@ -147,11 +157,11 @@ const inventory = [
       "selected_sources",
       "notes",
       "artifacts",
-      "metadata"
+      "metadata",
     ],
     serverDestination:
       "Workspace core, workspace sources, folders/tags, notes, artifacts, and migration receipt.",
-    authoritativeForMigration: true
+    authoritativeForMigration: true,
   },
   {
     id: "localStorage:tldw-workspace:workspace:*:chat",
@@ -163,7 +173,7 @@ const inventory = [
       "Split-storage per-workspace chat session or IndexedDB chat pointer.",
     contentClasses: ["chat_messages", "chat_session_metadata"],
     serverDestination: "Workspace chat history and migration receipt.",
-    authoritativeForMigration: true
+    authoritativeForMigration: true,
   },
   {
     id: "indexedDB:tldw-workspace-storage/workspace-chat-sessions",
@@ -176,7 +186,7 @@ const inventory = [
       "IndexedDB offload store for large workspace chat sessions referenced from split localStorage chat keys.",
     contentClasses: ["chat_messages", "chat_session_metadata"],
     serverDestination: "Workspace chat history and migration receipt.",
-    authoritativeForMigration: true
+    authoritativeForMigration: true,
   },
   {
     id: "indexedDB:tldw-workspace-storage/workspace-artifact-payloads",
@@ -189,7 +199,7 @@ const inventory = [
       "IndexedDB offload store for large generated artifact content/data referenced from split workspace snapshots.",
     contentClasses: ["artifacts", "artifact_payloads"],
     serverDestination: "Workspace artifacts, outputs, and migration receipt.",
-    authoritativeForMigration: true
+    authoritativeForMigration: true,
   },
   {
     id: "localStorage:tldw:research-workspace:pinned-workspaces:v1",
@@ -201,7 +211,7 @@ const inventory = [
       "Pinned workspace preference used by the Research Workspace header.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: "localStorage:tldw:research-workspace:recent-output-types:v1",
@@ -213,7 +223,7 @@ const inventory = [
       "Local preference for recent Studio output types. It does not contain generated output payloads.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: "localStorage:tldw:research-workspace:add-source-tab-usage:v1",
@@ -225,7 +235,7 @@ const inventory = [
       "Add Source modal tab-use preference used to choose the default intake tab.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: "localStorage:tldw:research-workspace:onboarding-dismissed:v1",
@@ -236,7 +246,7 @@ const inventory = [
     description: "Dismissal flag for the Research Workspace first-run panel.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: "localStorage:tldw:research-workspace:telemetry",
@@ -248,20 +258,26 @@ const inventory = [
       "Local-only Research Workspace product/quality telemetry counters and recent events. Content-free by policy.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
-  {
-    id: "localStorage:tldw:research-workspace:reconciliation:v1:*",
-    kind: "local_storage",
-    keyPattern: "tldw:research-workspace:reconciliation:v1:<workspace_id>",
-    classification: "metadata",
-    deletionPolicy: "retain_local",
-    description:
-      "Local reconciliation marker linking a legacy Research Workspace record to canonical server Workspace metadata. It must not contain source, note, artifact, or chat payloads.",
-    contentClasses: [],
-    serverDestination: null,
-    authoritativeForMigration: false
-  },
+  ...markerPrefixes.map(
+    (prefix): ResearchWorkspaceLegacyStorageInventoryItem => ({
+      id: "localStorage:" + prefix + ":*",
+      kind: "local_storage",
+      keyPattern:
+        prefix +
+        (prefix === RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX
+          ? ":<scope_key>:<workspace_id>"
+          : ":<workspace_id>"),
+      classification: "metadata",
+      deletionPolicy: "retain_local",
+      description:
+        "Local Chat reference, reconciliation or migration receipt marker. It is retained and grants no content or deletion authority.",
+      contentClasses: [],
+      serverDestination: null,
+      authoritativeForMigration: false,
+    }),
+  ),
   {
     id: "localStorage:tldw:workspace:playground:telemetry",
     kind: "local_storage",
@@ -272,7 +288,7 @@ const inventory = [
       "Legacy telemetry import source. It is behavior metadata, not workspace content, and is not authoritative for migration completion.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: "localStorage:workspace_migrated",
@@ -284,7 +300,7 @@ const inventory = [
       "Old one-time migration flag from an earlier non-receipted helper. The true-move migration must ignore it as an authority.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: "localStorage:tldw:feature-rollout:workspace_split_storage_v1:enabled",
@@ -295,7 +311,7 @@ const inventory = [
     description: "Local rollout flag for split workspace persistence.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: "localStorage:tldw:feature-rollout:workspace_indexeddb_offload_v1:enabled",
@@ -306,7 +322,7 @@ const inventory = [
     description: "Local rollout flag for workspace IndexedDB payload offload.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: `localStorage:${WORKSPACE_BROADCAST_SYNC_FLAG}`,
@@ -317,7 +333,7 @@ const inventory = [
     description: "Local flag enabling multi-tab workspace storage broadcasts.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
+    authoritativeForMigration: false,
   },
   {
     id: "broadcastChannel:tldw-workspace-sync",
@@ -329,9 +345,9 @@ const inventory = [
       "Runtime-only BroadcastChannel name for multi-tab storage notifications. It is not persisted content.",
     contentClasses: [],
     serverDestination: null,
-    authoritativeForMigration: false
-  }
-] as const satisfies readonly ResearchWorkspaceLegacyStorageInventoryItem[]
+    authoritativeForMigration: false,
+  },
+] as const satisfies readonly ResearchWorkspaceLegacyStorageInventoryItem[];
 
 export const RESEARCH_WORKSPACE_LEGACY_STORAGE_INVENTORY = inventory
 
@@ -373,22 +389,40 @@ const classifySplitWorkspaceKey = (
 }
 
 const classifyReconciliationMarkerKey = (
-  key: string
+  key: string,
 ): ResearchWorkspaceLegacyStorageSurface | null => {
-  const match = workspaceReconciliationMarkerKeyPattern.exec(key)
-  if (!match) return null
-
-  const inventoryItem = inventory.find(
-    (item) =>
-      item.id === "localStorage:tldw:research-workspace:reconciliation:v1:*"
+  const prefix = markerPrefixes.find((value) => key.startsWith(value + ":"))
+  if (!prefix) return null
+  const encodedParts = key.slice(prefix.length + 1).split(":")
+  if (
+    encodedParts.length !==
+    (prefix === RESEARCH_WORKSPACE_CHAT_REFERENCE_PREFIX ? 2 : 1)
   )
-  if (!inventoryItem) return null
-
-  return cloneInventoryItem(inventoryItem, {
-    id: `localStorage:${key}`,
-    key,
-    workspaceId: decodeWorkspaceId(match[1] || "")
-  })
+    return null
+  let parts: string[]
+  try {
+    parts = encodedParts.map(decodeURIComponent)
+  } catch {
+    return null
+  }
+  if (
+    parts.some(
+      (part, index) =>
+        !part.trim() || encodeURIComponent(part) !== encodedParts[index],
+    )
+  )
+    return null
+  const workspaceId = parts[parts.length - 1]
+  const inventoryItem = inventory.find(
+    (item) => item.id === "localStorage:" + prefix + ":*",
+  )
+  return inventoryItem
+    ? cloneInventoryItem(inventoryItem, {
+        id: "localStorage:" + key,
+        key,
+        workspaceId,
+      })
+    : null
 }
 
 const classifyIndexedDbStore = (

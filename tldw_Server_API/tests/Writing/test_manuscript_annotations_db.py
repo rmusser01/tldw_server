@@ -109,28 +109,31 @@ def test_fresh_db_creates_manuscript_annotations_table(raw_db):
     }.issubset(_trigger_names(raw_db))
 
 
-def test_sqlite_v50_migration_routes_to_current_schema(tmp_path):
+def test_sqlite_v50_migration_routes_to_current_schema(tmp_path, monkeypatch):
     db_path = tmp_path / "migrating.db"
-    db = CharactersRAGDB(str(db_path), client_id="test_client")
-    db.close_connection()
+    def initialize_historical(db: CharactersRAGDB) -> None:
+        with db.transaction() as conn:
+            db._apply_schema_v4(conn)
+            steps = db._sqlite_linear_migration_steps()
+            for version in range(4, 50):
+                steps[version](conn)
+                assert db._get_db_version(conn) == version + 1
 
-    with sqlite3.connect(str(db_path)) as conn:
-        conn.executescript(
-            """
-            DROP TRIGGER IF EXISTS manuscript_annotations_sync_create;
-            DROP TRIGGER IF EXISTS manuscript_annotations_sync_update;
-            DROP TRIGGER IF EXISTS manuscript_annotations_sync_delete;
-            DROP TRIGGER IF EXISTS manuscript_annotations_sync_undelete;
-            DROP INDEX IF EXISTS idx_mann_project_target;
-            DROP INDEX IF EXISTS idx_mann_project_status;
-            DROP INDEX IF EXISTS idx_mann_source;
-            DROP INDEX IF EXISTS idx_mann_deleted;
-            DROP TABLE IF EXISTS manuscript_annotations;
-            UPDATE db_schema_version
-               SET version = 50
-             WHERE schema_name = 'rag_char_chat_schema';
-            """
-        )
+    with monkeypatch.context() as patch:
+        patch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 50)
+        patch.setattr(CharactersRAGDB, "_initialize_schema", initialize_historical)
+        seed = CharactersRAGDB(db_path, "test_client")
+    try:
+        with seed.transaction() as conn:
+            assert seed._get_db_version(conn) == 50
+            assert {"manuscript_annotations", "note_attachments"}.isdisjoint(seed._sqlite_table_names(conn))
+            conn.execute(
+                "INSERT INTO manuscript_projects (id, title, client_id) VALUES (?, ?, ?)",
+                ("retained-project", "Historical manuscript", seed.client_id),
+            )
+            before = dict(conn.execute("SELECT * FROM manuscript_projects").fetchone())
+    finally:
+        seed.close_all_connections()
 
     migrated = CharactersRAGDB(str(db_path), client_id="test_client")
     try:
@@ -140,8 +143,11 @@ def test_sqlite_v50_migration_routes_to_current_schema(tmp_path):
         assert "CHECK(anchor_status IN ('scene_level','attached','reattached','needs_review'))" in table_sql
         assert "idx_mann_project_target" in _index_names(migrated)
         assert "manuscript_annotations_sync_create" in _trigger_names(migrated)
+        with migrated.transaction() as conn:
+            after = dict(conn.execute("SELECT * FROM manuscript_projects WHERE id = ?", (before["id"],)).fetchone())
+        assert all(after[key] == value for key, value in before.items())
     finally:
-        migrated.close_connection()
+        migrated.close_all_connections()
 
 
 def test_postgres_v50_migration_script_contract_and_routing():

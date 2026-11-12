@@ -649,3 +649,36 @@ class TestCircuitBreakerErrorHandling:
 
         with pytest.raises(CircuitOpenError):
             await cb.call(test_func)
+
+
+@pytest.mark.asyncio
+async def test_llm_quota_refusal_never_opens_the_breaker():
+    """A quota refusal propagates unchanged and counts as neither a failure nor a success (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    config = CircuitBreakerConfig(failure_threshold=2)
+    cb = CircuitBreaker("quota", config)
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=100, limit=100, message="Monthly LLM token limit reached", retry_after=60
+    )
+
+    async def refused():
+        """Raise the refusal."""
+        raise refusal
+
+    for _ in range(config.failure_threshold + 3):
+        with pytest.raises(LLMQuotaExceededError) as exc_info:
+            await cb.call(refused)
+        assert exc_info.value is refusal
+
+    assert cb.state == CircuitState.CLOSED
+    assert (cb.stats.failed_calls, cb.stats.consecutive_failures, cb.stats.rejected_calls) == (0, 0, 0)
+
+    async def broken():
+        """A real provider failure."""
+        raise RuntimeError("provider down")
+
+    for _ in range(config.failure_threshold):
+        with pytest.raises(RuntimeError):
+            await cb.call(broken)
+    assert cb.state == CircuitState.OPEN

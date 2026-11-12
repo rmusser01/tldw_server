@@ -292,6 +292,8 @@ def production_factories(
     )
     monkeypatch.setenv("SYNC_V2_BLOB_STORE_PATH", str(tmp_path / "sync_blobs"))
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    # These tests exercise sync relay behaviour, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv("CSRF_ENABLED", "false")
     _clear_factory_caches()
     from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
     from tldw_Server_API.app.api.v1.router_registry import register_router_specs
@@ -408,9 +410,19 @@ def _device_payload(public_key: rsa.RSAPublicKey) -> dict[str, object]:
 
 
 def _seed_exchange(service: SyncV2Service, dataset_id: str) -> dict[str, object]:
-    """Install and acknowledge through the real journals before test-only rollout."""
+    """Install and acknowledge through the real journals before test-only rollout.
 
-    baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+    Like a client, restart activation once when told it is required: activation
+    refuses while the relay that ran first left a staged row unfinished, and
+    the restart's relay finishes it.
+    """
+
+    try:
+        baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+    except SyncStoreError as exc:
+        if str(exc) != "personal_context_activation_required":
+            raise
+        baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
     _receipt, proof = service.acknowledge_personal_context_activation(
         user_id=_USER_ID,
         dataset_id=dataset_id,
@@ -1218,6 +1230,12 @@ def test_postgres_two_connections_choose_exactly_one_existing_authority(
             return str(exc)
         return "bound"
 
+    checked_out = [first_connection, second_connection]
+
+    def _return_checked_out() -> None:
+        while checked_out:
+            pool.return_connection(checked_out.pop())
+
     try:
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = (
@@ -1230,6 +1248,13 @@ def test_postgres_two_connections_choose_exactly_one_existing_authority(
             sorted([_AUTHORITY_ERROR, "bound"]),
             "PostgreSQL race did not choose exactly one authority",
         )
+        # The race is over and both transactions have committed, so give the pool its
+        # connections back BEFORE verifying. The pool is deliberately sized at 2 with
+        # no overflow so the two binds genuinely contend, which also means holding both
+        # checkouts starves anything else: list_datasets_for_user takes no connection
+        # argument and reaches for the pool, so verifying here used to deadlock the
+        # test against itself and fail with PoolTimeout after 30 seconds.
+        _return_checked_out()
         active = [
             dataset
             for dataset in database.list_datasets_for_user(owner)
@@ -1237,8 +1262,7 @@ def test_postgres_two_connections_choose_exactly_one_existing_authority(
         ]
         _require(len(active) == 1, "PostgreSQL race persisted multiple authorities")
     finally:
-        pool.return_connection(first_connection)
-        pool.return_connection(second_connection)
+        _return_checked_out()
         pool.close_all()
 
 

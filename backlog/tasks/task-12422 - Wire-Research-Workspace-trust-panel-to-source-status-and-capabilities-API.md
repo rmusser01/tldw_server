@@ -34,11 +34,7 @@ Docs/superpowers/plans/2026-05-23-research-workspace-trust-panel-api-wiring-plan
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented review follow-ups after code review: neutral pre-load trust panel state; backend-schema-aligned source-status types including nullable media_id and job uuid/status/job_type fields; fail-closed unknown lifecycle handling; stale trust state clearing on missing or switched workspace; workspace_id mismatch protection; Promise.allSettled partial-success fetch handling; and in-flight polling suppression.
 
 Verification recorded:
@@ -47,14 +43,12 @@ Verification recorded:
 - Real backend started on http://127.0.0.1:18002 and WebUI on http://127.0.0.1:18013. CDP/Playwright validation against /research-workspace passed: no /workspace-playground redirect, trust panel rendered, GET /api/v1/workspaces/{id}/sources/status returned 200, GET /api/v1/workspaces/{id}/capabilities returned 200. Screenshot: /tmp/research-workspace-trust-panel-cdp.png.
 
 Bandit: skipped for TASK-466 because this slice only changed frontend TypeScript/tests plus the plan file; no backend Python code was touched in this task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Wired Research Workspace to the authoritative workspace source-status and capabilities projections, hardened the trust panel against loading/stale/partial-failure states, and validated the route with a real backend plus CDP browser automation. No legacy /workspace-playground aliases or redirects were added.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

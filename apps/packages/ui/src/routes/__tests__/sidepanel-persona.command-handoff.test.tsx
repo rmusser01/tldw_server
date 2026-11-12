@@ -9,7 +9,7 @@ vi.mock("@/hooks/useServerOnline", () => ({
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
   useServerCapabilities: () => ({
-    capabilities: { hasPersona: true, hasPersonalization: true },
+    capabilities: { hasPersona: true, hasPersonalization: true, hasCompanion: true },
     loading: false
   })
 }))
@@ -24,7 +24,7 @@ vi.mock("@/services/companion", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
-    getConfig: vi.fn(),
+    getConfig: vi.fn().mockResolvedValue(null),
     fetchWithAuth: vi.fn()
   }
 }))

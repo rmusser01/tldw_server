@@ -133,7 +133,9 @@ VN_SCRIPT_PUBLISH_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/publish"
 VN_SCRIPT_VERSIONS_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions"
 VN_SCRIPT_VERSION_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}"
 VN_SCRIPT_MANIFEST_SNAPSHOT_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/manifest-snapshot"
-VN_SCRIPT_VERSION_POLICY_EVALUATE_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/policy/evaluate"
+VN_SCRIPT_VERSION_POLICY_EVALUATE_PATH = (
+    "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/policy/evaluate"
+)
 VN_SCRIPT_VERSION_PLAYTEST_PATH = "/api/v1/vn/vn-scripts/scripts/{script_id}/versions/{version_id}/playtest"
 SLIDES_EXPORT_PATH = "/api/v1/slides/presentations/{presentation_id}/export"
 SLIDES_EXPORT_CONTENT_TYPES = {
@@ -144,10 +146,19 @@ SLIDES_EXPORT_CONTENT_TYPES = {
 }
 WEBSUB_VERIFY_CALLBACK_PATH = "/api/v1/websub/callback/{user_id}/{callback_token}"
 WEBSUB_PUSH_CALLBACK_PATH = "/api/v1/websub/callback/{user_id}/{callback_token}"
-NOTES_CSV_EXPORT_PATHS = (
-    "/api/v1/notes/export.csv",
-)
+NOTES_CSV_EXPORT_PATHS = ("/api/v1/notes/export.csv",)
 NOTES_ATTACHMENT_DOWNLOAD_PATH = "/api/v1/notes/{note_id}/attachments/{file_name}"
+NOTES_SEMANTIC_INDEX_OPERATIONS = {
+    "/api/v1/notes/graph/semantic-index/capabilities": {"get": ("200", "SemanticCapabilitiesResponse")},
+    "/api/v1/notes/graph/semantic-index": {
+        "get": ("200", "SemanticIndexStatusResponse"),
+        "put": ("202", "SemanticIndexMutationResponse"),
+        "delete": ("202", "SemanticIndexMutationResponse"),
+    },
+    "/api/v1/notes/graph/semantic-index/runs": {"post": ("202", "SemanticRunResponse")},
+    "/api/v1/notes/graph/semantic-index/runs/{run_id}": {"get": ("200", "SemanticRunResponse")},
+    "/api/v1/notes/graph/semantic-index/runs/{run_id}/cancel": {"post": ("202", "SemanticIndexMutationResponse")},
+}
 CONNECTOR_PROVIDER_WEBHOOK_PATH = "/api/v1/connectors/providers/{provider}/webhook"
 WORKFLOW_ARTIFACT_DOWNLOAD_PATH = "/api/v1/workflows/artifacts/{artifact_id}/download"
 WORKFLOW_RUN_ARTIFACTS_DOWNLOAD_PATH = "/api/v1/workflows/runs/{run_id}/artifacts/download"
@@ -174,9 +185,7 @@ PAPER_SEARCH_RAW_JSON_CSV_PATHS = (
     "/api/v1/paper-search/biorxiv/raw/reports/summary",
     "/api/v1/paper-search/biorxiv/raw/reports/usage",
 )
-PAPER_SEARCH_RAW_JSON_XML_PATHS = (
-    "/api/v1/paper-search/biorxiv/raw/funder",
-)
+PAPER_SEARCH_RAW_JSON_XML_PATHS = ("/api/v1/paper-search/biorxiv/raw/funder",)
 PAPER_SEARCH_RAW_XML_PATHS = (
     "/api/v1/paper-search/chemrxiv/oai",
     "/api/v1/paper-search/zenodo/oai",
@@ -397,9 +406,7 @@ def test_openapi_operation_tag_declaration_ignores_malformed_tag_values() -> Non
     main_module._ensure_openapi_operation_tags_declared(openapi_schema)
 
     declared_tags = {
-        tag["name"]
-        for tag in openapi_schema["tags"]
-        if isinstance(tag, dict) and isinstance(tag.get("name"), str)
+        tag["name"] for tag in openapi_schema["tags"] if isinstance(tag, dict) and isinstance(tag.get("name"), str)
     }
     assert "media" in declared_tags
     assert "health" not in declared_tags
@@ -421,9 +428,7 @@ def test_openapi_path_parameters_match_route_templates(openapi_spec: dict[str, A
             if isinstance(parameter, dict) and parameter.get("in") == "path"
         ]
         declared_parameters = {
-            parameter["name"]
-            for parameter in operation_parameters
-            if isinstance(parameter.get("name"), str)
+            parameter["name"] for parameter in operation_parameters if isinstance(parameter.get("name"), str)
         }
         location = f"{method.upper()} {route}"
 
@@ -441,9 +446,7 @@ def test_openapi_path_parameters_match_route_templates(openapi_spec: dict[str, A
     assert not extra_parameters, "OpenAPI path parameters not present in route template:\n" + "\n".join(
         extra_parameters[:50]
     )
-    assert not optional_parameters, "OpenAPI path parameters must be required:\n" + "\n".join(
-        optional_parameters[:50]
-    )
+    assert not optional_parameters, "OpenAPI path parameters must be required:\n" + "\n".join(optional_parameters[:50])
 
 
 @pytest.mark.integration
@@ -1141,6 +1144,59 @@ def test_notes_attachment_download_openapi_documents_file_response() -> None:
     operation = app.openapi()["paths"][NOTES_ATTACHMENT_DOWNLOAD_PATH]["get"]
 
     _assert_file_response_content(operation, {"application/octet-stream"})
+
+
+@pytest.mark.integration
+def test_notes_semantic_index_openapi_documents_only_nested_stable_contracts(
+    openapi_spec: dict[str, Any],
+) -> None:
+    paths = openapi_spec["paths"]
+    semantic_paths = {path for path in paths if "semantic-index" in path}
+    nested_root = "/api/v1/notes/graph/semantic-index"
+    semantic_aliases = {
+        path for path in semantic_paths if path != nested_root and not path.startswith(f"{nested_root}/")
+    }
+    feature_jobs_paths = {
+        path
+        for path in paths
+        if "job" in path.lower() and ("semantic-index" in path.lower() or "notes-semantic" in path.lower())
+    }
+
+    assert semantic_aliases == set()
+    assert feature_jobs_paths == set()
+    assert semantic_paths == set(NOTES_SEMANTIC_INDEX_OPERATIONS)
+    semantic_operations = {
+        (path, method) for path in semantic_paths for method in paths[path] if method in HTTP_METHODS
+    }
+    expected_operations = {
+        (path, method) for path, methods in NOTES_SEMANTIC_INDEX_OPERATIONS.items() for method in methods
+    }
+    assert semantic_operations == expected_operations
+
+    for path, methods in NOTES_SEMANTIC_INDEX_OPERATIONS.items():
+        for method, (success_status, response_model) in methods.items():
+            operation = paths[path][method]
+            assert {"notes", "notes-semantic-index"} <= set(operation["tags"])
+            success_schema = operation["responses"][success_status]["content"]["application/json"]["schema"]
+            assert success_schema["$ref"].endswith(f"/{response_model}")
+            for error_status in ("403", "404", "409", "422", "429", "503"):
+                error_schema = operation["responses"][error_status]["content"]["application/json"]["schema"]
+                assert error_schema["$ref"].endswith("/SemanticHTTPErrorResponse")
+
+    tags = {tag["name"]: tag for tag in openapi_spec["tags"]}
+    semantic_tag = tags["notes-semantic-index"]
+    assert semantic_tag["externalDocs"]["url"].endswith("/docs-static/API/Notes_Semantic_Index.md")
+
+
+@pytest.mark.integration
+def test_notes_graph_openapi_documents_semantic_edge_type() -> None:
+    from tldw_Server_API.app.api.v1.endpoints.notes_graph import router as graph_router
+
+    app = FastAPI()
+    app.include_router(graph_router, prefix="/api/v1/notes")
+    operation = app.openapi()["paths"]["/api/v1/notes/graph"]["get"]
+
+    assert "semantic" in operation["description"]
 
 
 @pytest.mark.integration

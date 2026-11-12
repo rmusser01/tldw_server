@@ -31,13 +31,9 @@ Update the changelog with work since the last release/update and verify release/
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Prepared 0.1.33 release metadata: CHANGELOG.md entry for post-0.1.32 work through PR #2557, root pyproject.toml version bump, README release references, and Docs/mkdocs.yml version metadata. Validation: git diff --check passed; release helper unit tests passed (41 passed); package build produced tldw-server 0.1.33 wheel/sdist in /tmp/tldw_release_check_2557_0133; wheel METADATA reports Name: tldw-server and Version: 0.1.33; pre-commit passed on touched release-prep files. Bandit skipped because this task touched docs/metadata only and no Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

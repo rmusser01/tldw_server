@@ -4,16 +4,9 @@ Post-auth startup runtime orchestration extracted from the application lifespan.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from tldw_Server_API.app.services.startup_auth import AuthStartupError
-
-
-@dataclass
-class AuthRuntimeHandles:
-    db_pool: Any | None = None
-    session_manager: Any | None = None
 
 
 async def initialize_auth_runtime_services(
@@ -21,17 +14,16 @@ async def initialize_auth_runtime_services(
     app: Any,
     logger: Any,
     startup_guard_exceptions: tuple[type[BaseException], ...],
-) -> AuthRuntimeHandles:
-    handles = AuthRuntimeHandles()
-
+) -> None:
     try:
         db_pool = await _init_auth_services()
         if db_pool is None:
             raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_RETURNED_NONE")
-        handles.db_pool = db_pool
         await _init_resource_governor(app)
+        await _warn_if_plan_limits_unenforced()
+        _warn_if_llm_quotas_defeated()
         _validate_auth_rg_startup_guards(app)
-        handles.session_manager = await _get_session_manager()
+        await _get_session_manager()  # warms the container's session_manager slot
         logger.info("App Startup: Session manager initialized")
 
         try:
@@ -49,8 +41,6 @@ async def initialize_auth_runtime_services(
     except startup_guard_exceptions as exc:
         logger.exception(f"App Startup: Security alert validation / auth services init failed: {exc}")
 
-    return handles
-
 
 async def _init_auth_services() -> Any:
     from tldw_Server_API.app.services.startup_auth import init_auth_services
@@ -64,6 +54,20 @@ async def _init_resource_governor(app: Any) -> None:
     )
 
     await init_resource_governor(app)
+
+
+async def _warn_if_plan_limits_unenforced() -> None:
+    """Log at startup when a billing repository is wired but usage quotas are off (spec 2 §1)."""
+    from tldw_Server_API.app.core.Billing.enforcement import billing_checks_active
+
+    await billing_checks_active()
+
+
+def _warn_if_llm_quotas_defeated() -> None:
+    """Log at startup when a setting silently disables the LLM quotas (LLM usage accounting spec §6)."""
+    from tldw_Server_API.app.core.Usage import quota_checks
+
+    quota_checks.warn_if_llm_quotas_defeated()
 
 
 def _validate_auth_rg_startup_guards(app: Any) -> None:

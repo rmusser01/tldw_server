@@ -433,6 +433,7 @@ class TestUnifiedPipeline:
                     mock_reranker.rerank.assert_called_once()
                     # Documents should be reordered
                     docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+                    assert isinstance(docs, list)
                     assert len(docs) <= 3
 
     @pytest.mark.asyncio
@@ -469,6 +470,7 @@ class TestUnifiedPipeline:
 
                         # Only non-sensitive document should be in results
                         docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+                        assert isinstance(docs, list)
                         assert len(docs) == 1
                         first_id = docs[0]['id'] if docs and isinstance(docs[0], dict) else getattr(docs[0], 'id', None)
                         assert first_id == "1"
@@ -529,6 +531,7 @@ class TestUnifiedPipeline:
                     )
 
                     docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+                    assert isinstance(docs, list)
                     errors = getattr(result, 'errors', None) if not isinstance(result, dict) else result.get('errors', [])
                     security_report = getattr(result, 'security_report', None) if not isinstance(result, dict) else result.get('security_report', {})
 
@@ -538,6 +541,7 @@ class TestUnifiedPipeline:
                         "retained_count": 1,
                     }
                     content = docs[0].get("content") if isinstance(docs[0], dict) else getattr(docs[0], "content", "")
+                    assert isinstance(content, str)
                     assert "[REDACTED]" in content
                     assert not any("Security filter failed" in err for err in (errors or []))
                     assert security_report == {"pii_detected": [[{"type": "person_name"}], [{"type": "person_name"}]]}
@@ -698,7 +702,7 @@ class TestUnifiedPipeline:
                     result = await unified_rag_pipeline(
                         query="test",
                         enable_citations=True,
-                        citation_style="academic"
+                        citation_style="apa"
                     )
 
                     citations = getattr(result, 'citations', None) if not isinstance(result, dict) else result.get('citations', {})
@@ -745,7 +749,9 @@ class TestUnifiedPipeline:
             )
 
             docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+            assert isinstance(docs, list)
             metadata = getattr(result, 'metadata', None) if not isinstance(result, dict) else result.get('metadata', {})
+            assert isinstance(metadata, dict)
             chunk_citations = getattr(result, 'chunk_citations', None) if not isinstance(result, dict) else result.get('chunk_citations', [])
 
             assert len(docs) == 1
@@ -784,10 +790,13 @@ class TestUnifiedPipeline:
                 )
 
                 docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+                assert isinstance(docs, list)
                 errors = getattr(result, 'errors', None) if not isinstance(result, dict) else result.get('errors', [])
                 first_doc = docs[0]
                 content = first_doc.get("content") if isinstance(first_doc, dict) else getattr(first_doc, "content", "")
+                assert isinstance(content, str)
                 metadata = first_doc.get("metadata") if isinstance(first_doc, dict) else getattr(first_doc, "metadata", {})
+                assert isinstance(metadata, dict)
 
                 assert "[Table serialized]" in content
                 assert metadata.get("table_metadata") == [{"rows": 1, "method": "hybrid"}]
@@ -819,9 +828,11 @@ class TestUnifiedPipeline:
             )
 
             docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+            assert isinstance(docs, list)
             errors = getattr(result, 'errors', None) if not isinstance(result, dict) else result.get('errors', [])
             first_doc = docs[0]
             metadata = first_doc.get("metadata") if isinstance(first_doc, dict) else getattr(first_doc, "metadata", {})
+            assert isinstance(metadata, dict)
 
             assert metadata.get("highlighted")
             assert metadata.get("match_count", 0) > 0
@@ -864,7 +875,7 @@ class TestUnifiedPipeline:
 
             # Citation settings
             enable_citations=True,
-            citation_style="numeric",
+            citation_style="apa",
 
             # Analytics
             enable_analytics=True,
@@ -927,9 +938,9 @@ class TestUnifiedPipeline:
                 )
 
                 md = getattr(result, 'metadata', None) if not isinstance(result, dict) else result.get('metadata', {})
+                assert isinstance(md, dict)
                 for key, value in custom_metadata.items():
                     assert md.get(key) == value
-
 
 
 @pytest.mark.unit
@@ -941,8 +952,6 @@ class TestUnifiedPipelineParams:
         result = await unified_rag_pipeline(query="   ")
         errs = getattr(result, 'errors', None) if not isinstance(result, dict) else result.get('errors', [])
         assert errs and len(errs) > 0
-
-
 
 
 @pytest.mark.unit
@@ -974,6 +983,7 @@ class TestStreamingSupport:
                 ans = getattr(result, 'generated_answer', None) if not isinstance(result, dict) else result.get('generated_answer') or result.get('answer')
                 assert ans is None
                 md = getattr(result, 'metadata', None) if not isinstance(result, dict) else result.get('metadata', {})
+                assert isinstance(md, dict)
                 assert md.get("answer_generation_skipped") == "no_documents"
                 mock_generator_instance.generate.assert_not_awaited()
 
@@ -1015,3 +1025,103 @@ class TestStreamingSupport:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interface", ["filter_by_sensitivity", "filter_documents"])
+@pytest.mark.parametrize("outcome", ["excluded", "partial", "mixed", "none", "invalid"])
+async def test_security_exclusion_reason_survives_real_finalization(monkeypatch, interface, outcome):
+    """Actual retained counts must survive finalization without attributing unrelated empties."""
+    from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as up
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import BaseRetriever, MultiDatabaseRetriever
+
+    class Source(BaseRetriever):
+        def __init__(self, source):
+            super().__init__(":memory:")
+            self.source = source
+
+        async def get_metadata(self, doc_id):
+            return {}
+
+        async def retrieve(self, query, **kwargs):
+            if self.source == DataSource.CHAT_HISTORY:
+                return []
+            if self.source == DataSource.MEDIA_DB:
+                return (
+                    [Document(id="allowed-media", content="public media", metadata={}, source=self.source)]
+                    if outcome == "mixed"
+                    else []
+                )
+            return [
+                Document(id="excluded", content="private evidence", metadata={}, source=self.source),
+                Document(id="allowed", content="public evidence", metadata={}, source=self.source),
+                Document(
+                    id="artifact", content="generated evidence", metadata={"is_generated": True}, source=self.source
+                ),
+            ]
+
+    retriever = MultiDatabaseRetriever({})
+    retriever.retrievers = {
+        source: Source(source) for source in [DataSource.NOTES, DataSource.CHAT_HISTORY, DataSource.MEDIA_DB]
+    }
+    monkeypatch.setattr(up, "MultiDatabaseRetriever", lambda *args, **kwargs: retriever)
+
+    def filter_documents(self, documents, **kwargs):
+        if outcome == "none":
+            return None
+        if outcome == "invalid":
+            return 42
+        if outcome == "excluded":
+            return []
+        allowed_id = "allowed-media" if outcome == "mixed" else "allowed"
+        return [
+            doc for doc in documents if (doc.id if interface == "filter_by_sensitivity" else doc["id"]) == allowed_id
+        ]
+
+    security_filter = type("SecurityFilter", (), {interface: filter_documents})
+    monkeypatch.setattr(up, "SecurityFilter", security_filter)
+    monkeypatch.setattr(up, "SensitivityLevel", SimpleNamespace(PUBLIC=1, INTERNAL=2, CONFIDENTIAL=3, RESTRICTED=4))
+    result = await unified_rag_pipeline(
+        query="source security diagnostic",
+        sources=["notes", "media_db", "chats", "prompts"],
+        notes_db_path=":memory:",
+        enable_security_filter=True,
+        sensitivity_level="internal",
+        detect_pii=False,
+        redact_pii=False,
+        enable_generation=outcome not in ("partial", "mixed"),
+        enable_cache=False,
+        enable_reranking=False,
+    )
+    partial = outcome == "partial"
+    mixed = outcome == "mixed"
+    retained = int(partial or mixed)
+    assert [doc["id"] for doc in result.documents] == (["allowed-media" if mixed else "allowed"] if retained else [])
+    assert result.metadata["security_filter"] == {"excluded_count": 2 - int(partial), "retained_count": retained}
+    assert result.metadata["source_status"] == {
+        "notes": (
+            {"status": "searched", "count": 1, "filtered_artifact_count": 1}
+            if partial
+            else {
+                "status": "empty",
+                "count": 0,
+                "reason": "security_filtered",
+                "filtered_artifact_count": 1,
+            }
+        ),
+        "media_db": (
+            {"status": "searched", "count": 1}
+            if mixed
+            else {
+                "status": "empty",
+                "count": 0,
+                "reason": "no_matching_entries",
+            }
+        ),
+        "chats": {"status": "empty", "count": 0, "reason": "no_matching_entries"},
+        "prompts": {"status": "unavailable", "count": 0, "reason": "no_retriever_configured"},
+    }
+    assert result.generated_answer is None
+    if not retained:
+        assert result.metadata["answer_generation_skipped"] == "no_documents"

@@ -41,7 +41,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the canonical /research-studio route by reusing the existing WorkspacePlayground surface and converting /workspace-playground plus /workspace-studio into compatibility redirects.
 
 Added a shared React Router alias helper that preserves location.search and location.hash, then registered /research-studio as canonical in the shared UI route registry and extension route registry while retaining both legacy aliases.
@@ -57,7 +57,7 @@ Verification run:
 - git diff --check -> clean.
 
 Bandit was not run because this slice touched only frontend TypeScript, route registry tests, and Backlog metadata; no Python/backend code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

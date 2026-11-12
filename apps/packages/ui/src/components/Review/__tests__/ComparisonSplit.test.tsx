@@ -16,6 +16,7 @@ vi.mock("@/utils/media-transcript-display", () => ({
 }))
 
 vi.mock("@/components/Media/diff-worker-client", () => ({
+  shouldRequireSampling: () => false,
   computeDiffSync: (left: string, right: string) => {
     // Simple mock: return same lines for matching, add/del for differences
     const leftLines = left.split("\n")

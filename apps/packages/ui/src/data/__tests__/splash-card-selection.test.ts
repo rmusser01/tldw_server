@@ -1,10 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { SPLASH_CARDS, randomSplashCard } from "../splash-cards"
+import {
+  DEFAULT_SPLASH_CARD_NAMES,
+  SPLASH_CARDS,
+  randomSplashCard
+} from "../splash-cards"
 
 describe("randomSplashCard selection", () => {
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it("preserves canonical preference names and order without loading card definitions in settings", () => {
+    expect(DEFAULT_SPLASH_CARD_NAMES).toEqual(
+      SPLASH_CARDS.map((card) => card.name)
+    )
   })
 
   it("returns the only enabled splash card when filtered to one name", () => {
@@ -19,4 +29,3 @@ describe("randomSplashCard selection", () => {
     expect(card.name).toBe(SPLASH_CARDS[0].name)
   })
 })
-

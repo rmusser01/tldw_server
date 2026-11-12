@@ -1488,7 +1488,7 @@ async def test_runtime_egress_legacy_and_result_link_tripwires_receive_zero_call
     from tldw_Server_API.app.core.Third_Party import Arxiv
 
     monkeypatch.setattr(socket, "create_connection", forbidden)
-    monkeypatch.setattr(socket, "socket", forbidden)
+    monkeypatch.setattr(socket.socket, "__new__", forbidden)
     monkeypatch.setattr(http.client, "HTTPConnection", forbidden)
     monkeypatch.setattr(http.client, "HTTPSConnection", forbidden)
     monkeypatch.setattr(urllib.request, "urlopen", forbidden)

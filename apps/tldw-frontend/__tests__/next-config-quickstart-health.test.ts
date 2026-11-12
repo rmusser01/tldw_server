@@ -24,6 +24,7 @@ describe('quickstart public health routing', () => {
         source: '/health',
         destination: 'http://app:8000/health',
       });
+      expect(rewrites).toContainEqual({ source: '/openapi.json', destination: 'http://app:8000/openapi.json' });
       expect(
         rewrites.filter(({ source }: { source: string }) => source.startsWith('/api'))
       ).toEqual([

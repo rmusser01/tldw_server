@@ -4,16 +4,8 @@ import os
 from typing import Any, Mapping
 
 from loguru import logger
-from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.testing import is_production_like_env, is_truthy
 
-_PRODUCTION_VALUES = {"production", "prod", "live"}
-_PRODUCTION_ENV_KEYS = (
-    "ENVIRONMENT",
-    "APP_ENV",
-    "DEPLOYMENT_ENV",
-    "FASTAPI_ENV",
-    "TLDW_ENV",
-)
 _REQUIRED_AUTH_POLICIES = (
     "authnz.default",
     "authnz.forgot_password",
@@ -30,17 +22,6 @@ _REQUIRED_AUTH_PATHS = (
 
 class AuthRGStartupGuardError(Exception):
     """Raised when production auth RG guardrails are not satisfied at startup."""
-
-
-def is_production_like_env() -> bool:
-    """Detect production-like runtime from common deployment environment variables."""
-    if is_truthy(str(os.getenv("tldw_production", "")).strip().lower()):
-        return True
-    for key in _PRODUCTION_ENV_KEYS:
-        value = str(os.getenv(key, "")).strip().lower()
-        if value in _PRODUCTION_VALUES:
-            return True
-    return False
 
 
 def route_map_matches(path: str, by_path: Mapping[str, Any]) -> bool:
@@ -76,7 +57,7 @@ def validate_auth_rg_startup_guards(
 
     from tldw_Server_API.app.core.config import rg_enabled
 
-    if not bool(rg_enabled(False)):
+    if not bool(rg_enabled(True)):
         logger.warning(
             "Resource Governor is disabled in production-like environment (RG_ENABLED=0). "
             "Startup will continue; auth routes rely on non-RG limiter paths."

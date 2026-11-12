@@ -160,3 +160,38 @@ async def test_claims_review_metrics_scheduler_does_not_send_caller_db_to_thread
         to_thread_mock.assert_not_awaited()
     finally:
         db.close_connection()
+
+
+@pytest.mark.parametrize(
+    "configured,lookback_days,expected",
+    [(None, None, 2), ("7", None, 7), ("7", "invalid", 2), ("7", 3, 3)],
+    ids=["omitted-default", "omitted-configured", "invalid-explicit", "valid-explicit"],
+)
+@pytest.mark.asyncio
+async def test_caller_owned_db_normalizes_injected_aggregator_lookback(
+    monkeypatch: pytest.MonkeyPatch, configured: str | None, lookback_days: int | str | None, expected: int
+) -> None:
+    """Injected aggregators receive the configured/default integer or the invalid-input fallback."""
+    key = "CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS"
+    monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(scheduler_mod, "settings", {} if configured is None else {key: configured})
+    caller_db = _seed_review_metrics_db()
+    received = []
+
+    def _aggregator(*, db, target_user_id=None, report_date=None, lookback_days=None) -> int:
+        assert db is caller_db  # nosec B101 - pytest regression assertion.
+        received.append(lookback_days)
+        return 7
+
+    try:
+        lookback_args = {} if lookback_days is None else {"lookback_days": lookback_days}
+        written = await run_claims_review_metrics_once(
+            aggregator=_aggregator,
+            db=caller_db,
+            target_user_id="1",
+            **lookback_args,
+        )
+        assert written == 7  # nosec B101 - pytest regression assertion.
+        assert received == [expected]  # nosec B101 - pytest regression assertion.
+    finally:
+        caller_db.close_connection()

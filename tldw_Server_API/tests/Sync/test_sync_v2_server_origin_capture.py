@@ -1202,6 +1202,95 @@ def test_inactive_sync_note_restore_keeps_existing_direct_behavior(
     assert chacha_db.get_note_by_id("note-restore-direct", include_deleted=True)["deleted"] in (0, False)
 
 
+def test_active_sync_wikilink_rewrite_and_undo_are_captured_as_server_origin_upserts(
+    monkeypatch: pytest.MonkeyPatch,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    """Updating ``[[Old title]]`` links after a rename (#3110) must not bypass active Sync."""
+
+    client = _notes_app(monkeypatch, chacha_db=chacha_db, sync_service=sync_service)
+    for note_id, title, content in (
+        ("note-renamed", "Old title", "The renamed note."),
+        ("note-linker", "Linker", "See [[Old title]]."),
+        ("note-stale", "Stale linker", "Also [[Old title]]."),
+    ):
+        created = client.post("/api/v1/notes/", json={"id": note_id, "title": title, "content": content})
+        assert created.status_code == 201, created.text
+    renamed = client.put(
+        "/api/v1/notes/note-renamed", json={"title": "New title"}, headers={"expected-version": "1"}
+    )
+    assert renamed.status_code == 200, renamed.text
+    dataset_id = sync_service.profile(user_id="user-1").active_dataset_id or ""
+
+    def note_envelopes(object_id: str) -> list[SyncEnvelope]:
+        envelopes = sync_service.store.list_envelopes_after(dataset_id, 0, domains=["notes.note"], limit=50)
+        return [envelope for envelope in envelopes if envelope.object_id == object_id]
+
+    referrers = client.post(
+        "/api/v1/notes/wikilinks/referrers",
+        json={"title": "Old title", "exclude_note_id": "note-renamed", "unresolved_only": True},
+    )
+    assert referrers.status_code == 200, referrers.text
+    targets = {note["id"]: note["version"] for note in referrers.json()["notes"]}
+    assert set(targets) == {"note-linker", "note-stale"}
+    # One linking note changes after the count.
+    edited = client.put(
+        "/api/v1/notes/note-stale",
+        json={"content": "Edited: [[Old title]]."},
+        headers={"expected-version": str(targets["note-stale"])},
+    )
+    assert edited.status_code == 200, edited.text
+    stale_envelopes_before = len(note_envelopes("note-stale"))
+
+    rewrite = client.post(
+        "/api/v1/notes/wikilinks/rewrite",
+        json={
+            "note_id": "note-renamed",
+            "old_title": "Old title",
+            "notes": [{"id": note_id, "expected_version": version} for note_id, version in targets.items()],
+        },
+    )
+
+    assert rewrite.status_code == 200, rewrite.text
+    results = {result["id"]: result for result in rewrite.json()["results"]}
+    assert results["note-linker"]["status"] == "updated"
+    assert results["note-stale"]["status"] == "skipped_conflict"
+    assert chacha_db.get_note_by_id("note-linker")["content"] == "See [[New title]]."
+    assert chacha_db.get_note_by_id("note-stale")["content"] == "Edited: [[Old title]]."
+    assert len(note_envelopes("note-stale")) == stale_envelopes_before
+    linker_envelopes = note_envelopes("note-linker")
+    assert [envelope.operation for envelope in linker_envelopes] == ["upsert", "upsert"]
+    assert linker_envelopes[-1].payload == {
+        "title": "Linker",
+        "content": "See [[New title]].",
+        "conversation_id": None,
+        "message_id": None,
+    }
+
+    undo = client.post(
+        "/api/v1/notes/wikilinks/rewrite/undo",
+        json={
+            "old_title": "Old title",
+            "replacement": rewrite.json()["replacement"],
+            "notes": [
+                {
+                    "id": "note-linker",
+                    "expected_version": results["note-linker"]["version"],
+                    "replacements": results["note-linker"]["replacements"],
+                }
+            ],
+        },
+    )
+
+    assert undo.status_code == 200, undo.text
+    assert [result["status"] for result in undo.json()["results"]] == ["restored"]
+    assert chacha_db.get_note_by_id("note-linker")["content"] == "See [[Old title]]."
+    linker_envelopes = note_envelopes("note-linker")
+    assert [envelope.operation for envelope in linker_envelopes] == ["upsert", "upsert", "upsert"]
+    assert linker_envelopes[-1].payload["content"] == "See [[Old title]]."
+
+
 def test_active_sync_note_create_idempotency_key_replays_and_rejects_conflicts(
     monkeypatch: pytest.MonkeyPatch,
     sync_service: SyncV2Service,
@@ -1442,23 +1531,27 @@ def test_workspace_chat_api_write_stays_direct_when_sync_active(
 
     app.dependency_overrides[chat_sessions_endpoint.get_chacha_db_for_user] = _db_override
     app.dependency_overrides[chat_sessions_endpoint.get_request_user] = _user_override
-    created_conversations: dict[str, dict] = {}
-
-    def _fake_add_conversation(data: dict) -> str:
-        row = dict(data)
-        row["state"] = row.get("state") or "active"
-        row["version"] = row.get("version") or 1
-        row["deleted"] = row.get("deleted") or 0
-        row["assistant_display_name"] = row.get("assistant_display_name") or "Workspace Assistant"
-        created_conversations[data["id"]] = row
-        return data["id"]
-
-    def _fake_get_conversation_by_id(conversation_id: str, include_deleted: bool = False):
-        return created_conversations.get(conversation_id)
-
-    monkeypatch.setattr(chacha_db, "add_conversation", _fake_add_conversation)
-    monkeypatch.setattr(chacha_db, "get_conversation_by_id", _fake_get_conversation_by_id)
-    monkeypatch.setattr(chacha_db, "upsert_conversation_settings", lambda *args, **kwargs: True)
+    # The conversation write is left REAL. This test used to fake add_conversation and
+    # get_conversation_by_id into a dict, which worked while the workspace-scoped path
+    # returned before touching the database. It now takes the direct branch through
+    # create_character_conversation -- which is exactly what "stays direct" means and
+    # what this test asserts -- and that writes participant rows keyed on the
+    # conversation, so a conversation that exists only in a dict fails the foreign key.
+    # Letting the real write happen is both simpler and a truer test of the branch.
+    # Workspace-scoped creation now resolves Workspace Persona defaults first, and
+    # Workspaces/assistant_defaults.py:19-21 answers 404 when the workspace does not
+    # exist. This test predates that check and posted workspace_id="workspace-1"
+    # without ever creating it, so it failed with "Workspace not found" rather than
+    # exercising its actual subject. A real row is inserted rather than a faked
+    # get_workspace, because conversations.workspace_id is a FOREIGN KEY -- stubbing
+    # the lookup alone gets past the 404 and then fails the constraint. The request
+    # carries character_id, so resolve_new_conversation_assistant returns early and no
+    # Persona default is consulted.
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO workspaces (id, name) VALUES (?, ?)",
+            ("workspace-1", "Workspace"),
+        )
     monkeypatch.setattr(
         chat_sessions_endpoint,
         "get_active_server_origin_sync_service_for_user",

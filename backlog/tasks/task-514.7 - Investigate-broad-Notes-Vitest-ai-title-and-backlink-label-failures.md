@@ -30,12 +30,12 @@ Follow up on optional broad Notes/NotesDock Vitest failures found during TASK-51
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause investigation:
 - The originally recorded ai-title strategy dropdown and backlink-label failures no longer reproduce on current dev; both files pass in isolation and in the broad Notes/NotesDock sweep.
 - The current broad sweep exposed one remaining failure in NotesManagerPage.stage48.first-time-ux.test.tsx. The test queried the list empty-state Create note CTA before the async first-time empty-state render had settled; the list region still only contained toolbar actions such as New note.
 - Fixed the Stage 48 test harness to wait for the No notes yet empty-state title before querying and clicking the Create note CTA.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

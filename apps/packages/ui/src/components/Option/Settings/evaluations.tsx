@@ -31,7 +31,7 @@ const EVAL_TYPES = [
 ]
 
 export const EvaluationsSettings = () => {
-  const { t } = useTranslation(["settings", "common"])
+  const { t } = useTranslation(["settings", "common", "evaluations"])
   const isOnline = useServerOnline()
   const navigate = useNavigate()
   const { uxState } = useConnectionUxState()
@@ -103,7 +103,11 @@ export const EvaluationsSettings = () => {
               defaultValue: "Evaluations API reachable"
             }) as string,
           rate: `${d.tier || ""} · ${d.usage?.evaluations_today ?? 0}/${
-            d.limits?.evaluations_per_day ?? "?"
+            d.limits?.evaluations_per_day === null
+              ? t("evaluations:rateLimitsUnlimited", {
+                  defaultValue: "Unlimited"
+                })
+              : (d.limits?.evaluations_per_day ?? "?")
           } today`
         })
       } else {

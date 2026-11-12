@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.database import (
     should_enforce_sqlite_schema_strictness,
     validate_required_sqlite_api_key_schema,
 )
+from tldw_Server_API.app.core.exceptions import APIKeyRotationRejected
 
 
 def _affected_row_count(result: Any) -> int:
@@ -139,7 +140,19 @@ class AuthnzApiKeysRepo:
                 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
                     ensure_api_keys_tables_pg,
                 )
+                from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+                    validate_postgres_api_keys_runtime,
+                )
+                from tldw_Server_API.app.core.exceptions import SchemaReadinessError
 
+                async with self.db_pool.transaction() as conn:
+                    authority = await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL)
+                    if authority is False:
+                        await validate_postgres_api_keys_runtime(conn)
+                        return
+                    if authority is not True:
+                        raise SchemaReadinessError("PostgreSQL AuthNZ migration authority is unavailable")
                 ok = await ensure_api_keys_tables_pg(self.db_pool)
                 if not ok:
                     raise RuntimeError("PostgreSQL api_keys schema ensure failed")
@@ -1218,7 +1231,7 @@ class AuthnzApiKeysRepo:
                     active_status,
                 )
                 if _affected_row_count(old_update_result) == 0:
-                    raise ValueError("API key not found or inactive")
+                    raise APIKeyRotationRejected()
                 await conn.execute(
                     "UPDATE api_keys SET rotated_from = $1 WHERE id = $2",
                     old_key_id,
@@ -1267,7 +1280,7 @@ class AuthnzApiKeysRepo:
                     ),
                 )
                 if _affected_row_count(old_update_cursor) == 0:
-                    raise ValueError("API key not found or inactive")
+                    raise APIKeyRotationRejected()
                 await conn.execute(
                     "UPDATE api_keys SET rotated_from = ? WHERE id = ?",
                     (old_key_id, new_key_id),

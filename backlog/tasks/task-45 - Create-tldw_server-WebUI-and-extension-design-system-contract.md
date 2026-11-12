@@ -50,7 +50,7 @@ Create a governance-first design-system contract for tldw_server that covers bot
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created initial contract document at Docs/Design/tldw_web_design_system_contract.md from the approved brainstorming decisions. This is documentation-only work; no runtime code was touched.
 
 Spec review loop completed. First review found three issues: incomplete state contract table, ambiguous tailwind.css/tailwind-shared.css and Button ownership anchors, and overly broad v1 primitive/pattern commitments. The document was revised to address all three. Second review returned APPROVED with no remaining blockers before user review.
@@ -62,7 +62,7 @@ Commit attempt was blocked by the pre-existing repository state: `git commit --o
 Reopened briefly to address post-review spec polish requested by the user: pin the v1 proof surface to concrete screens/files, define state token defaults as aliases to existing color tokens, and clarify Button migration timing.
 
 Addressed post-review findings in the contract: added v1 state-token alias guidance to the existing color tokens, clarified that Button should not be migrated wholesale during the proof-surface slice, and pinned the v1 proof surface to concrete recovery/setup/admin health files while marking other admin routes as later migration candidates. Verification rerun: rg checks confirmed the added sections, git diff --check passed for the doc and task file, and awk line-length scan still only reports the canonical state Markdown table rows.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -10,7 +10,7 @@ labels:
 - security
 priority: high
 references:
-- TASK-12969
+- TASK-15261
 - Docs/superpowers/specs/2026-07-14-web-scraping-phase-3-governed-preflight-package-design.md
 - Docs/Design/WebScraping_Refactor_Import_Inventory.md
 documentation:

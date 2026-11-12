@@ -27,16 +27,14 @@ Reduce the standalone tldw-frontend TypeScript baseline after clearing the UI pa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Switched launcher rows from NavLink to Link and preserved current-route indication with explicit aria-current from HeaderShortcuts own isCurrentShortcutRoute check. Frontend tsc dropped from 14 to 12 diagnostics with no HeaderShortcuts/NavLink diagnostics remaining. UI package tsc remains clean. Bandit is not applicable for this JS/TS-only touched scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Reduced the standalone tldw-frontend TypeScript baseline by removing the HeaderShortcuts NavLink end prop mismatch while preserving launcher navigation and current-route semantics. Verification: frontend tsc now reports the remaining 12 e2e diagnostics; UI package tsc exits 0; HeaderShortcuts.test.tsx passed.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

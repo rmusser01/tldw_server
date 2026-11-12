@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     check_evaluation_rate_limit,
@@ -322,6 +323,9 @@ async def create_run(
                         return RunResponse(**existing)
             except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
                 logger.debug("evaluations_crud: run idempotency lookup failed")
+        # Usage quotas (LLM usage accounting spec §4a): a run's samples are LLM calls, made in a task
+        # started from this request, so the run is checked here and then runs to completion.
+        await enforce_llm_quota(getattr(current_user, "id", None))
         target_model = request.target_model
         # Allow free-form config; convert Pydantic models if provided in future
         config = model_dump_compat(request.config) if hasattr(request.config, 'model_dump') else (request.config or {})

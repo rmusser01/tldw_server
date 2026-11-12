@@ -23,12 +23,10 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 User accidentally merged PR #2596 into main after the release branch had been rebased from dev. Corrective goal: keep main as the release branch and dev as the forward working branch by merging origin/main back into current origin/dev, preserving dev-only PR #2653 and main release commits without rewriting either remote branch.
 Merged origin/main into the dev sync branch with no content conflicts, preserving dev-only PR #2653 and absorbing the main release merge from PR #2596 plus main-only #2624 node_modules cleanup. Validation: git diff --cached --check passed; release docs and PyPI workflow contract tests passed 17/17.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

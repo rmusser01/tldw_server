@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_rate_limiter_dep,
     get_request_user,
     rbac_rate_limit,
+    require_expected_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.notes_sync_errors import (
@@ -303,7 +304,7 @@ async def list_tasks(
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task list failed")
 
 
-@router.post("/tasks/status", response_model=TaskStatusBatchResponse, tags=["notes"])
+@router.post("/tasks/status", response_model=TaskStatusBatchResponse, tags=["notes"], dependencies=[Depends(require_expected_user)])
 async def set_task_status(
     request: TaskStatusBatchRequest,
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -338,7 +339,7 @@ async def set_task_status(
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task status update failed")
 
 
-@router.get("/tasks/activity", response_model=TaskActivityListResponse, tags=["notes"])
+@router.get("/tasks/activity", response_model=TaskActivityListResponse, tags=["notes"], dependencies=[Depends(require_expected_user)])
 async def list_task_activity(
     limit: int = Query(50, ge=1, le=200),
     note_id: str | None = Query(None, min_length=1),
@@ -365,7 +366,7 @@ async def list_task_activity(
     raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Task activity list failed")
 
 
-@router.patch("/tasks/activity/{event_id}", response_model=TaskActivityStateResponse, tags=["notes"])
+@router.patch("/tasks/activity/{event_id}", response_model=TaskActivityStateResponse, tags=["notes"], dependencies=[Depends(require_expected_user)])
 async def update_task_activity_state(
     event_id: str,
     request: TaskActivityPatchRequest,
@@ -675,7 +676,7 @@ def _list_note_tasks_response(
     )
 
 
-@router.get("/{note_id}/tasks", response_model=TaskListResponse, tags=["notes"])
+@router.get("/{note_id}/tasks", response_model=TaskListResponse, tags=["notes"], dependencies=[Depends(require_expected_user)])
 async def list_note_tasks(
     note_id: str,
     limit: int = Query(100, ge=1, le=500),

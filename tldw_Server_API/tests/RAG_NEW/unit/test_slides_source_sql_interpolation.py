@@ -95,3 +95,31 @@ async def test_slides_source_sql_actually_interpolates_the_source_expression() -
     assert "COALESCE(n.content" in db.captured_sql, (
         "the source-text expression was not interpolated into the PostgreSQL SQL"
     )
+
+
+class _FailingChaChaDB:
+    """Stand-in ChaChaNotes DB whose driver rejects every query."""
+
+    backend_type = BackendType.POSTGRESQL
+
+    def execute_query(self, sql: str, params: Any, **_kwargs: Any) -> Any:
+        raise SyntaxError("syntax error at or near '{' -- SELECT secret_sql_text")
+
+
+async def test_slides_source_db_error_names_backend_and_cause() -> None:
+    """A failure must say which backend failed and why, without leaking the SQL."""
+    from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
+
+    retriever = NotesDBRetriever(db_path=None, chacha_db=_FailingChaChaDB())
+
+    with pytest.raises(RAGDatabaseError) as exc_info:
+        await retriever.retrieve_slides_source_candidates_v1(
+            query="quarterly report",
+            owner_user_id="user-1",
+            top_k=5,
+        )
+
+    message = str(exc_info.value)
+    assert "postgresql" in message
+    assert "SyntaxError" in message
+    assert "secret_sql_text" not in message

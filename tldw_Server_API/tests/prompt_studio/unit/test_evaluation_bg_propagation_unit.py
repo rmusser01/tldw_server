@@ -27,7 +27,7 @@ def _install_owned_worker_cancellation_ack(
     monkeypatch: pytest.MonkeyPatch,
 ) -> asyncio.Event:
     """Expose when cancellation has entered the owned-worker drain path."""
-    from tldw_Server_API.app.core.Chat import bounded_daemon
+    from tldw_Server_API.app.core.LLM_Calls import bounded_daemon
 
     drain_entered = asyncio.Event()
     original = bounded_daemon._drain_owned_task
@@ -1224,6 +1224,10 @@ class _StubDB:
     def get_prompt(prompt_id: int) -> dict[str, Any]:
         return {"id": prompt_id, "project_id": 1, "deleted": False}
 
+    @staticmethod
+    def create_evaluation(**_kwargs: Any) -> dict[str, Any]:
+        return {"id": 1, "uuid": "00000000-0000-0000-0000-000000000001"}
+
     def get_connection(self):
         return _StubConn()
 
@@ -1449,13 +1453,24 @@ class _SnapshotDb:
         return [{"id": 1, "inputs": {}, "expected_outputs": {}}]
 
     def get_evaluation(self, _evaluation_id: int) -> dict[str, Any]:
-        return {"id": 17, "uuid": "00000000-0000-0000-0000-000000000017"}
+        # The repository returns JSON columns decoded.
+        return {
+            "id": 17,
+            "uuid": "00000000-0000-0000-0000-000000000017",
+            "project_id": 1,
+            "prompt_id": 1,
+            "test_case_ids": [1],
+            "model_configs": [{"model_name": "model-a"}],
+        }
 
     def create_evaluation(self, **_kwargs: Any) -> dict[str, Any]:
         return {"id": 17, "uuid": "00000000-0000-0000-0000-000000000017"}
 
     def update_evaluation(self, _evaluation_id: int, _updates: dict[str, Any]) -> None:
         return None
+
+    def cancel_evaluation_if_active(self, _evaluation_id: int, _message: str) -> bool:
+        return True
 
 
 class _CapturedBackgroundTasks:
@@ -1536,7 +1551,7 @@ async def test_evaluation_endpoint_retries_explicit_false_provider_mark(
         "provider_requires_api_key",
         lambda _provider: False,
     )
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
     monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-1")
     monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")
@@ -1745,7 +1760,7 @@ async def test_prompt_studio_sync_cancellation_stops_before_next_provider_call(m
     monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
     monkeypatch.setattr(eval_endpoint, "derive_trusted_credential_scope", lambda *_args: (1, [], [], False))
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
 
     task = asyncio.create_task(
         eval_endpoint.create_evaluation(
@@ -1835,7 +1850,7 @@ async def test_prompt_studio_background_cancellation_stops_before_next_provider_
 
     monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
 
     task = asyncio.create_task(
         eval_endpoint.run_evaluation_async(
@@ -1992,7 +2007,7 @@ async def test_prompt_studio_bedrock_auth_contract(
     monkeypatch.setattr(eval_endpoint, "EvaluationManager", _Manager)
     monkeypatch.setattr(eval_endpoint, "derive_trusted_credential_scope", lambda *_args: (1, [], [], False))
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
@@ -2137,7 +2152,7 @@ async def test_prompt_studio_keeps_request_snapshot_at_adapter_boundary(
         raising=False,
     )
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: False)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
     monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-1")
     monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")
@@ -2318,7 +2333,7 @@ async def test_prompt_studio_concurrent_adapter_snapshots_remain_isolated(
         lambda *_args: (1, [], [], False),
     )
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: True)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(evaluation_manager, "is_test_mode", lambda: False)
     monkeypatch.setattr(
         evaluation_manager,
@@ -2469,7 +2484,7 @@ async def test_prompt_studio_timeout_drains_adapter_before_runtime_close_without
         lambda *_args: (1, [], [], False),
     )
     monkeypatch.setattr(eval_endpoint, "provider_requires_api_key", lambda _provider: False)
-    monkeypatch.setattr(eval_endpoint, "_is_prompt_studio_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     monkeypatch.setattr(eval_endpoint, "is_test_mode", lambda: False)
     monkeypatch.setattr(eval_endpoint, "ensure_request_id", lambda _request: "req-timeout")
     monkeypatch.setattr(eval_endpoint, "ensure_traceparent", lambda _request: "")
@@ -3576,15 +3591,10 @@ async def test_prompt_studio_background_sanitizes_failure_log_and_record(
     )()
     runtime = _TrackingPromptRuntime(events, handle)
 
-    class _RecordingCursor(_SnapshotCursor):
-        def execute(self, query: str, *args: Any) -> None:
-            if "SET status = 'failed'" in query:
-                failed_messages.append(str(args[0][0]))
-            super().execute(query, *args)
-
-    class _RecordingConnection(_SnapshotConnection):
-        def __init__(self) -> None:
-            self.cursor_instance = _RecordingCursor()
+    class _RecordingDb(_SnapshotDb):
+        def update_evaluation(self, _evaluation_id: int, updates: dict[str, Any]) -> None:
+            if updates.get("status") == "failed":
+                failed_messages.append(str(updates.get("error_message")))
 
     class _FailingManager:
         def __init__(self, _db: object) -> None:
@@ -3593,8 +3603,7 @@ async def test_prompt_studio_background_sanitizes_failure_log_and_record(
         async def run_evaluation_with_existing_record(self, **_kwargs: Any) -> dict[str, Any]:
             raise RuntimeError(sentinel)
 
-    db = _SnapshotDb()
-    db.connection = _RecordingConnection()
+    db = _RecordingDb()
     monkeypatch.setattr(eval_endpoint, "EvaluationManager", _FailingManager)
     sink_id = logger.add(logs.append, format="{message}")
     try:

@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
 import { webcrypto } from "node:crypto"
 import { afterAll, afterEach, beforeAll, vi } from "vitest"
+import { cleanupStaticRoots, restoreStaticRootRenderer } from "./vitest-static-roots"
 
 const originalGetComputedStyle = window.getComputedStyle.bind(window)
 const originalConsoleLog = console.log.bind(console)
@@ -274,12 +275,17 @@ beforeAll(() => {
   ensureMutationObserver()
 })
 
-afterAll(() => {
-  console.log = originalConsoleLog
-  console.debug = originalConsoleDebug
-  console.info = originalConsoleInfo
-  console.warn = originalConsoleWarn
-  console.error = originalConsoleError
+afterAll(async () => {
+  try {
+    await cleanupStaticRoots()
+  } finally {
+    restoreStaticRootRenderer()
+    console.log = originalConsoleLog
+    console.debug = originalConsoleDebug
+    console.info = originalConsoleInfo
+    console.warn = originalConsoleWarn
+    console.error = originalConsoleError
+  }
 })
 
 const evaluateMediaQuery = (query: string): boolean => {
@@ -317,10 +323,31 @@ if (typeof window.ResizeObserver === "undefined") {
   ;(globalThis as any).ResizeObserver = ResizeObserverMock
 }
 
-afterEach(() => {
+// Notes keeps unsaved edits in an offline draft queue when the editor unmounts
+// (#3102 NS-01). Drop the queue after each test so one test's leftover draft
+// is never restored into the next test's editor.
+const NOTES_OFFLINE_DRAFT_QUEUE_PREFIX = "tldw:notesOfflineDraftQueue:"
+
+const clearNotesOfflineDraftQueues = () => {
+  try {
+    const storage = window.localStorage
+    const keys: string[] = []
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index)
+      if (key?.startsWith(NOTES_OFFLINE_DRAFT_QUEUE_PREFIX)) keys.push(key)
+    }
+    for (const key of keys) storage.removeItem(key)
+  } catch {
+    // Storage may be unavailable or replaced by a test.
+  }
+}
+
+afterEach(async () => {
   if (vi.isFakeTimers()) {
     vi.useRealTimers()
   }
   ensureMutationObserver()
   cleanup()
+  await cleanupStaticRoots()
+  clearNotesOfflineDraftQueues()
 })

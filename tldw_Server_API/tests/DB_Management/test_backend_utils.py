@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from tldw_Server_API.app.core.DB_Management.backends import query_utils
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (
     convert_sqlite_placeholders_to_postgres,
@@ -17,6 +18,25 @@ def test_normalise_params_handles_sequences_and_scalars():
     assert normalise_params([1, 2]) == (1, 2)
     assert normalise_params({"a": 1}) == {"a": 1}
     assert normalise_params(5) == (5,)
+
+
+def test_repeated_sql_preparation_reuses_rewrite_work_but_keeps_fresh_parameters(monkeypatch):
+    original = query_utils._replace_boolean_comparisons
+    rewrites = []
+
+    def observe(sql):
+        rewrites.append(sql)
+        return original(sql)
+
+    monkeypatch.setattr(query_utils, '_replace_boolean_comparisons', observe)
+    sql = 'SELECT uuid FROM Media WHERE deleted = 0 AND id = ? /* repeated email preparation */'
+    for identity in range(20):
+        prepared, params = prepare_backend_statement(
+            BackendType.POSTGRESQL, sql, [identity], apply_default_transform=True,
+        )
+        assert prepared == 'SELECT uuid FROM Media WHERE deleted = FALSE AND id = %s /* repeated email preparation */'
+        assert params == (identity,)
+    assert len(rewrites) == 1
 
 
 def test_convert_sqlite_placeholders_to_postgres_preserves_literals():

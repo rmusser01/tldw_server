@@ -1516,3 +1516,134 @@ def test_candidate_replay_acquires_sync_fence_before_canonical_lock(
         sync.store.get_dataset(dataset_id), source, sync.store, exchange=_exchange
     )
     assert replay.expected_remote_envelope_id == conflict.expected_remote_envelope_id
+
+
+# --- Mixed notes + Personal Context batches (TASK-13349) ------------------------------
+# Moved from test_sync_v2_personal_context_exchange_gate.py, whose fixtures inserted
+# Personal Context conflicts by hand with a remote_envelope_id that named no stored
+# envelope. The product only creates such a conflict through _attach_candidate, which
+# stores the remote candidate first; here the conflict comes from a real push.
+
+
+def _notes_conflict(linked: LinkedRuntime, conflict_id: str) -> None:
+    """A notes conflict: unlike Personal Context, it carries no remote candidate."""
+    from tldw_Server_API.app.core.Sync.v2.models import SyncConflictCreate
+
+    _canonical, sync, dataset_id, _exchange, _record = linked
+    stored = sync.store.insert_envelope(
+        SyncEnvelopeCreate(
+            dataset_id=dataset_id,
+            client_envelope_id=f"client-envelope-{conflict_id}",
+            device_id=_DEVICE_ID,
+            domain="notes.note",
+            operation="upsert",
+            object_id=f"note-{conflict_id}",
+            payload={"title": "Note", "content": "body"},
+            payload_hash=f"sha256:{conflict_id}",
+            apply_status="conflict",
+        )
+    )
+    sync.store.insert_conflict(
+        SyncConflictCreate(
+            conflict_id=conflict_id,
+            dataset_id=dataset_id,
+            domain="notes.note",
+            object_id=stored.object_id,
+            conflict_type="revision_mismatch",
+            local_envelope_id=stored.client_envelope_id,
+            remote_envelope_id=None,
+            server_sequence=stored.server_cursor,
+        )
+    )
+
+
+def _notes_resolution_envelope(linked: LinkedRuntime, conflict_id: str, action: str) -> SyncEnvelopeCreate:
+    _canonical, _sync, dataset_id, _exchange, _record = linked
+    return SyncEnvelopeCreate(
+        dataset_id=dataset_id,
+        client_envelope_id=f"resolution-envelope-{conflict_id}",
+        device_id=_DEVICE_ID,
+        domain="notes.note",
+        operation="upsert",
+        object_id=(f"renamed-note-{conflict_id}" if action == "duplicate_rename" else f"note-{conflict_id}"),
+        payload={"title": "Resolved", "content": action},
+        payload_hash=f"sha256:resolution-{conflict_id}",
+    )
+
+
+def test_mixed_selected_conflicts_with_exact_proof_resolve_in_request_order(linked: LinkedRuntime) -> None:
+    _canonical, sync, dataset_id, exchange, _record = linked
+    personal, _envelope_sent = _conflict(linked)
+    _notes_conflict(linked, "mixed-exact-note")
+
+    resolved, rejected, proof = sync.resolve_conflicts_batch(
+        user_id=_USER_ID,
+        dataset_id=dataset_id,
+        device_id=_DEVICE_ID,
+        personal_context_exchange=exchange,
+        resolutions=[
+            ("mixed-exact-note", "skip", None, None, None, None),
+            (
+                personal.conflict_id,
+                "skip",
+                None,
+                personal.expected_local_envelope_id,
+                personal.expected_remote_envelope_id,
+                "idempotency-mixed-exact-personal",
+            ),
+        ],
+    )
+
+    assert rejected == []
+    assert [conflict.conflict_id for _index, conflict in resolved] == ["mixed-exact-note", personal.conflict_id]
+    assert proof == exchange
+    assert [sync.store.get_conflict(item).status for item in ("mixed-exact-note", personal.conflict_id)] == [
+        "dismissed",
+        "dismissed",
+    ]
+
+
+@pytest.mark.parametrize("notes_action", ["overwrite", "duplicate_rename"])
+def test_mixed_exact_proof_preserves_native_notes_resolution_actions(
+    linked: LinkedRuntime, notes_action: str
+) -> None:
+    from tldw_Server_API.tests.Sync.test_sync_v2_service import _OutcomeMaterializer
+
+    _canonical, sync, dataset_id, exchange, _record = linked
+    sync.materializers["notes.note"] = _OutcomeMaterializer()
+    note_id = f"mixed-{notes_action}-note"
+    personal, _envelope_sent = _conflict(linked)
+    _notes_conflict(linked, note_id)
+
+    resolved, rejected, _proof = sync.resolve_conflicts_batch(
+        user_id=_USER_ID,
+        dataset_id=dataset_id,
+        device_id=_DEVICE_ID,
+        personal_context_exchange=exchange,
+        resolutions=[
+            (note_id, notes_action, _notes_resolution_envelope(linked, note_id, notes_action), None, None, None),
+            (
+                personal.conflict_id,
+                "skip",
+                None,
+                personal.expected_local_envelope_id,
+                personal.expected_remote_envelope_id,
+                f"idempotency-{note_id}",
+            ),
+        ],
+    )
+
+    assert rejected == []
+    assert [conflict.conflict_id for _index, conflict in resolved] == [note_id, personal.conflict_id]
+    assert [sync.store.get_conflict(item).status for item in (note_id, personal.conflict_id)] == [
+        "resolved",
+        "dismissed",
+    ]
+    resolved_note = sync.store.get_conflict(note_id)
+    stored_resolution = sync.store.get_envelope_by_client_id(dataset_id, f"resolution-envelope-{note_id}")
+    assert stored_resolution is not None
+    assert resolved_note.resolved_by_envelope_id == stored_resolution.envelope_id
+    assert stored_resolution.apply_status == "applied"
+    assert stored_resolution.object_id == (
+        f"renamed-note-{note_id}" if notes_action == "duplicate_rename" else f"note-{note_id}"
+    )

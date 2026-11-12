@@ -4,6 +4,8 @@ import { toAllowedPath } from "@/services/tldw/path-utils";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import type { PersonaVisualAsset } from "@/types/persona-visuals";
 
+type AssetUrlInput = Pick<PersonaVisualAsset, "id" | "url" | "mime_type">;
+
 // Only server-owned relative paths use credential-bearing transport.
 const isProtectedAsset = (url: string) =>
   /^\/api\/v1\/(?:persona\/[^?#]+|buddies\/[^/?#]+)\/assets\/[^/?#]+\/content$/.test(url);
@@ -12,8 +14,8 @@ const MAX_CACHED_FRAMES = 8;
 const MAX_CACHED_BYTES = 16 * 1024 * 1024;
 
 export const usePersonaVisualAssetUrls = (
-  assets: Record<string, PersonaVisualAsset>,
-  activeAsset: PersonaVisualAsset | null,
+  assets: Record<string, AssetUrlInput>,
+  activeAsset: AssetUrlInput | null,
 ) => {
   const key = JSON.stringify(
     Object.values(assets)
@@ -113,7 +115,7 @@ export const usePersonaVisualAssetUrls = (
     return () => controller.abort();
   }, [key, path, mimeType]);
 
-  return (asset: PersonaVisualAsset): string | null | undefined =>
+  return (asset: AssetUrlInput): string | null | undefined =>
     isProtectedAsset(asset.url)
       ? loaded.key === key
         ? loaded.urls[asset.url]

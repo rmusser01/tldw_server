@@ -9,19 +9,18 @@ from uuid import uuid4
 
 import pytest
 
-from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPSandboxConfig
-from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPRunnerConfig
-from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
+from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPRunnerConfig, ACPSandboxConfig
+from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient, ActivePrompt
 from tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client import (
     ACPSandboxRunnerManager,
     SandboxSessionHandle,
     _is_self_referential_agent_command,
 )
-from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage
-from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
+from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage, ACPResponseError, ACPStdioClient
+from tldw_Server_API.app.core.Agent_Client_Protocol.stream_client import ACPStreamClient
 from tldw_Server_API.app.core.Sandbox.models import RuntimeType
-from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.core.Sandbox.runners.lima_runner import LimaRunner
+from tldw_Server_API.app.core.Sandbox.runtime_capabilities import RuntimePreflightResult
 from tldw_Server_API.app.services.acp_runtime_policy_service import (
     ACPRuntimePolicySnapshot,
 )
@@ -34,6 +33,18 @@ def _standard_runner_config(**overrides: Any) -> ACPRunnerConfig:
     }
     config.update(overrides)
     return ACPRunnerConfig(**config)
+
+
+def _bind_permission_source(manager, session_id):
+    """Admit this policy unit test's real stream source before its request."""
+    async def discard(_data):
+        pass
+    client = ACPStreamClient(send_bytes=discard)
+    manager._sessions[session_id] = SandboxSessionHandle(
+        session_id, 55, "policy-test", "policy-test-run", client, asyncio.current_task(),
+    )
+    manager._active_prompts[session_id] = ActivePrompt(source_client=client, task=asyncio.current_task())
+    return client
 
 
 @pytest.mark.unit
@@ -100,8 +111,8 @@ def test_is_self_referential_agent_command_detects_runner_binary() -> None:
 
 @pytest.mark.unit
 def test_permission_policy_tier_resolution_matches_standard_runner(monkeypatch) -> None:
-    from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
     import tldw_Server_API.app.services.admin_acp_sessions_service as store_src
+    from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import ACPRunnerClient
 
     class _PolicyStore:
         def resolve_permission_tier(self, tool_name: str) -> str | None:
@@ -435,11 +446,17 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
         def __init__(self, result: dict[str, object]) -> None:
             self.result = result
 
-    class _FakeClient:
+    class _FakeClient(ACPStdioClient):
         is_running = True
 
         def __init__(self) -> None:
+            super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
+            self.unregistered: list[str] = []
+
+        async def _unregister_permission_session(self, session_id: str) -> None:
+            self.unregistered.append(session_id)
+            await super()._unregister_permission_session(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))
@@ -449,6 +466,7 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
 
     runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
     fake_client = _FakeClient()
+    fake_client._register_permission_session("session-close")
     runner._client = fake_client
     runner._updates["session-close"] = asyncio.Queue()
     runner._session_owners["session-close"] = 7
@@ -460,6 +478,9 @@ async def test_standard_runner_close_session_uses_standard_acp_close() -> None:
     ]
     assert "session-close" not in runner._updates
     assert "session-close" not in runner._session_owners
+    assert "session-close" not in fake_client._permission_sessions
+
+    assert fake_client.unregistered == ["session-close"]  # nosec B101 -- exactly one permission-session release.
 
 
 @pytest.mark.unit
@@ -469,11 +490,17 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
         def __init__(self, result: dict[str, object]) -> None:
             self.result = result
 
-    class _FakeClient:
+    class _FakeClient(ACPStdioClient):
         is_running = True
 
         def __init__(self) -> None:
+            super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
+            self.unregistered: list[str] = []
+
+        async def _unregister_permission_session(self, session_id: str) -> None:
+            self.unregistered.append(session_id)
+            await super()._unregister_permission_session(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))
@@ -485,6 +512,7 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
 
     runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
     fake_client = _FakeClient()
+    fake_client._register_permission_session("session-close-legacy")
     runner._client = fake_client
 
     await runner.close_session("session-close-legacy")
@@ -493,6 +521,9 @@ async def test_standard_runner_close_session_falls_back_to_private_runner_close(
         ("session/close", {"sessionId": "session-close-legacy"}),
         ("_tldw/session/close", {"sessionId": "session-close-legacy"}),
     ]
+    assert "session-close-legacy" not in fake_client._permission_sessions
+
+    assert fake_client.unregistered == ["session-close-legacy"]  # nosec B101 -- exactly one permission-session release.
 
 
 @pytest.mark.unit
@@ -502,11 +533,17 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
         def __init__(self, result: dict[str, object]) -> None:
             self.result = result
 
-    class _FakeClient:
+    class _FakeClient(ACPStdioClient):
         is_running = True
 
         def __init__(self) -> None:
+            super().__init__(command="echo", args=[])
             self.calls: list[tuple[str, dict[str, object]]] = []
+            self.unregistered: list[str] = []
+
+        async def _unregister_permission_session(self, session_id: str) -> None:
+            self.unregistered.append(session_id)
+            await super()._unregister_permission_session(session_id)
 
         async def call(self, method: str, payload: dict[str, object]):
             self.calls.append((method, payload))
@@ -518,6 +555,7 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
 
     runner = ACPRunnerClient(ACPRunnerConfig(command="echo"))
     fake_client = _FakeClient()
+    fake_client._register_permission_session("session-close-code")
     runner._client = fake_client
 
     await runner.close_session("session-close-code")
@@ -526,6 +564,9 @@ async def test_standard_runner_close_session_falls_back_on_json_rpc_method_not_f
         ("session/close", {"sessionId": "session-close-code"}),
         ("_tldw/session/close", {"sessionId": "session-close-code"}),
     ]
+    assert "session-close-code" not in fake_client._permission_sessions
+
+    assert fake_client.unregistered == ["session-close-code"]  # nosec B101 -- exactly one permission-session release.
 
 
 @pytest.mark.unit
@@ -654,6 +695,7 @@ async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch)
             if method == "initialize":
                 return _CallResult({"agentCapabilities": {}})
             if method == "session/new":
+                capture["session_wire"] = payload
                 return _CallResult({"sessionId": "acp-session-env"})
             if method == "_tldw/session/close":
                 return _CallResult({})
@@ -678,6 +720,7 @@ async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch)
         cwd="/workspace",
         user_id=7,
         session_env={"WORKSPACE_TOKEN": session_workspace_auth_value},
+        mcp_servers=[{"name": "public", "type": "stdio", "command": "/usr/bin/python3"}],
     )
 
     assert session_id == "acp-session-env"
@@ -687,6 +730,10 @@ async def test_sandbox_create_session_merges_config_and_session_env(monkeypatch)
         "CONFIG_ONLY": "yes",
         "WORKSPACE_TOKEN": session_workspace_auth_value,
     }
+
+    assert capture["session_wire"]["mcpServers"] == [  # nosec B101 -- sandbox uses the same complete ACP configuration.
+        {"name": "public", "type": "stdio", "command": "/usr/bin/python3", "args": [], "env": []},
+    ]
 
 
 @pytest.mark.unit
@@ -709,6 +756,22 @@ async def test_create_session_persists_stream_backed_control_for_vz_linux(monkey
     monkeypatch.setenv("TLDW_SANDBOX_VZ_LINUX_TEMPLATE_READY", "1")
 
     import tldw_Server_API.app.core.Agent_Client_Protocol.sandbox_runner_client as src
+
+    # The real vz_linux preflight needs a macOS/Apple Silicon host plus the
+    # virtualization helper; this test is about session-control persistence,
+    # so stub the preflight like the other runtime tests in this file.
+    monkeypatch.setattr(
+        src,
+        "collect_runtime_preflights",
+        lambda *, network_policy=None: {
+            RuntimeType.vz_linux: RuntimePreflightResult(
+                runtime=RuntimeType.vz_linux,
+                available=True,
+                supported_trust_levels=["standard"],
+                enforcement_ready={"deny_all": True, "allowlist": False},
+            )
+        },
+    )
 
     class _Obj:
         def __init__(self, obj_id: str) -> None:
@@ -929,7 +992,6 @@ async def test_create_session_propagates_non_root_read_only_and_internal_ssh_por
         pytest.fail(f"Expected acp-session-hardened, got {session_id!r}")
 
     session_spec = capture.get("session_spec")
-    run_spec = capture.get("run_spec")
     if session_spec is None:
         pytest.fail("Expected sandbox session spec capture")
 
@@ -971,6 +1033,7 @@ async def test_sandbox_permission_request_denies_tool_from_runtime_snapshot(monk
         return None
 
     monkeypatch.setattr(manager, "check_permission_governance", _fake_check_permission_governance, raising=False)
+    source = _bind_permission_source(manager, "sandbox-session")
 
     response = await manager._handle_request(
         ACPMessage(
@@ -981,7 +1044,8 @@ async def test_sandbox_permission_request_denies_tool_from_runtime_snapshot(monk
                 "sessionId": "sandbox-session",
                 "tool": {"name": "exec.run", "input": {"command": "whoami"}},
             },
-        )
+        ),
+        source_client=source,
     )
 
     assert response.result == {
@@ -1004,6 +1068,7 @@ async def test_sandbox_permission_request_refreshes_runtime_snapshot_when_policy
         )
     )
     session_id = "sandbox-refresh-policy"
+    source = _bind_permission_source(manager, session_id)
     policy_state = {"allowed_tools": ["web.search"], "fingerprint": "sandbox-allow"}
     call_count = {"build_snapshot": 0}
 
@@ -1085,7 +1150,8 @@ async def test_sandbox_permission_request_refreshes_runtime_snapshot_when_policy
                 "sessionId": session_id,
                 "tool": {"name": "web.search", "input": {"query": "opa"}},
             },
-        )
+        ),
+        source_client=source,
     )
     assert allowed_response.result == {"outcome": {"outcome": "approved"}}
 
@@ -1101,7 +1167,8 @@ async def test_sandbox_permission_request_refreshes_runtime_snapshot_when_policy
                 "sessionId": session_id,
                 "tool": {"name": "web.search", "input": {"query": "opa"}},
             },
-        )
+        ),
+        source_client=source,
     )
     assert denied_response.result == {
         "outcome": {
@@ -1124,6 +1191,7 @@ async def test_low_risk_permission_reuses_cached_runtime_snapshot(monkeypatch) -
         )
     )
     session_id = "sandbox-refresh-cache"
+    source = _bind_permission_source(manager, session_id)
     policy_state = {"allowed_tools": ["web.search"], "fingerprint": "sandbox-cache"}
     call_count = {"build_snapshot": 0}
 
@@ -1204,7 +1272,8 @@ async def test_low_risk_permission_reuses_cached_runtime_snapshot(monkeypatch) -
                 "sessionId": session_id,
                 "tool": {"name": "web.search", "input": {"query": "opa"}},
             },
-        )
+        ),
+        source_client=source,
     )
     assert first.result == {"outcome": {"outcome": "approved"}}
     assert call_count["build_snapshot"] == 1
@@ -1221,7 +1290,8 @@ async def test_low_risk_permission_reuses_cached_runtime_snapshot(monkeypatch) -
                 "sessionId": session_id,
                 "tool": {"name": "web.search", "input": {"query": "opa"}},
             },
-        )
+        ),
+        source_client=source,
     )
     assert second.result == {"outcome": {"outcome": "approved"}}
     assert call_count["build_snapshot"] == 1

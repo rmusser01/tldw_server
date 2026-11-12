@@ -38,7 +38,7 @@ describe.each(["password", "magic-link"])("%s login workspace publication", meth
     await login(new TldwAuthService(), method)
     expect(mocks.snapshots.map(config => config.orgId)).toEqual([2])
     const finalScope = buildChatSurfaceScopeKeyFromConfig(mocks.snapshots[0])
-    expect(mocks.snapshots.map(buildChatSurfaceScopeKeyFromConfig)).toEqual([finalScope])
+    expect(mocks.snapshots.map(config => buildChatSurfaceScopeKeyFromConfig(config))).toEqual([finalScope])
     expect(mocks.bgRequest.mock.calls.some(([request]) => request.path === "/api/v1/orgs")).toBe(false)
   })
 

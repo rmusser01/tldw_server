@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import types
 from typing import Any
 
 import pytest
@@ -9,7 +10,11 @@ from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistConten
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.Watchlists import pipeline as wl_pipeline
-from tldw_Server_API.app.core.Watchlists.content_alerts import _match_rule, evaluate_content_alert_rules_for_item
+from tldw_Server_API.app.core.Watchlists.content_alerts import (
+    _match_rule,
+    _source_constraints_match,
+    evaluate_content_alert_rules_for_item,
+)
 
 
 pytestmark = pytest.mark.unit
@@ -384,3 +389,89 @@ async def test_pipeline_content_alert_failure_is_noncritical(monkeypatch, tmp_pa
     assert result["items_ingested"] == 1
     assert total == 1
     assert items[0].status == "ingested"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("manual_refresh", [True, False])
+async def test_source_refresh_alerts_use_source_memberships_and_monitor_keeps_its_scope(
+    monkeypatch, tmp_path, manual_refresh
+):
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
+    monkeypatch.setenv("JOBS_DB_URL", "sqlite:///" + str(tmp_path / "jobs.db"))
+    monkeypatch.setenv("TEST_MODE", "0")
+    monkeypatch.setenv("TLDW_TEST_MODE", "0")
+    monkeypatch.setenv("MONITORING_NOTIFY_ENABLED", "false")
+    db = WatchlistsDatabase.for_user(9703)
+    owned = [db.create_watchlist(name=name) for name in ("Rowan", "Shared Rowan", "Unrelated")]
+    source = db.create_source(
+        name="Rowan feed",
+        url="https://example.test/feed.xml",
+        source_type="rss",
+        watchlist_id=owned[0].id,
+        settings_json=json.dumps({"rss": {"use_feed_content_if_available": True, "feed_content_min_chars": 0}}),
+    )
+    db.add_source_to_watchlist(owned[1].id, source.id)
+    rules = [
+        db.create_content_alert_rule(watchlist_id=w.id, name="Selene", rule_kind="keyword", pattern="Selene")
+        for w in owned
+    ]
+    job = db.create_job(
+        name="[System] Manual Source Refresh" if manual_refresh else "Rowan monitor",
+        description=None,
+        scope_json=json.dumps({"sources": [source.id]}),
+        schedule_expr=None,
+        schedule_timezone="UTC",
+        active=False,
+        max_concurrency=1,
+        per_host_delay_ms=0,
+        retry_policy_json=None,
+        output_prefs_json=json.dumps({"ingest": {"persist_to_media_db": False}}),
+        watchlist_id=None if manual_refresh else owned[0].id,
+    )
+
+    async def feed(_url, **kwargs):
+        if kwargs.get("etag"):
+            return {"status": 304, "items": []}
+        return {
+            "status": 200,
+            "etag": '"rowan"',
+            "items": [
+                {
+                    "guid": "rowan-1",
+                    "url": "https://example.test/items/1",
+                    "title": "Selene tours",
+                    "summary": "Selene observatory tours start on Saturday.",
+                }
+            ],
+        }
+
+    async def no_embeddings(**kwargs):
+        return None
+
+    monkeypatch.setattr(wl_pipeline, "fetch_rss_feed_history", feed)
+    monkeypatch.setattr(wl_pipeline, "enqueue_embeddings_job_for_item", no_embeddings)
+    overrides = {"source_ids_override": [source.id]} if manual_refresh else {}
+    first = await wl_pipeline.run_watchlist_job(9703, job.id, **overrides)
+    expected = [1, int(manual_refresh), 0]
+    counts = [db.list_content_alerts(w.id, limit=50, offset=0)[1] for w in owned]
+    assert first["items_ingested"] == 1  # nosec B101 - Real pipeline ingestion regression.
+    assert counts == expected  # nosec B101 - Source refresh must retain actual Watchlist rule scope.
+    for watchlist, rule, count in zip(owned, rules, expected):
+        alerts, _ = db.list_content_alerts(watchlist.id, limit=50, offset=0)
+        if count:
+            assert (alerts[0].rule_id, alerts[0].run_id, alerts[0].source_id) == (rule.id, first["run_id"], source.id)  # nosec B101 - Alert provenance contract.
+    second = await wl_pipeline.run_watchlist_job(9703, job.id, **overrides)
+    assert second["items_ingested"] == 0  # nosec B101 - Unchanged refresh does not ingest again.
+    assert [db.list_content_alerts(w.id, limit=50, offset=0)[1] for w in owned] == expected  # nosec B101 - No duplicate alerts.
+    other = WatchlistsDatabase.for_user(9704)
+    with pytest.raises(KeyError, match="watchlist_not_found"):
+        other.list_content_alerts(owned[0].id, limit=50, offset=0)
+
+
+def test_source_tag_constraints_compare_tag_identities() -> None:
+    rule: Any = types.SimpleNamespace(source_constraints_json=json.dumps({"source_tags": ["STRASSE"]}))
+    tagged: Any = types.SimpleNamespace(id=1, source_type="rss", url="https://example.com/a.xml", tags=["Straße"])
+    untagged: Any = types.SimpleNamespace(id=2, source_type="rss", url="https://example.com/b.xml", tags=["Other"])
+
+    assert _source_constraints_match(rule, tagged)
+    assert not _source_constraints_match(rule, untagged)

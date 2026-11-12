@@ -38,11 +38,12 @@ async def _persist(
     *,
     service: WebScrapingService | None = None,
     keywords: str = "",
+    user_id: int | None = 7,
 ) -> dict[str, Any]:
     return await (service or WebScrapingService())._store_persistent(
         result={"method": "Individual URLs", "articles": articles},
         keywords=keywords,
-        user_id=7,
+        user_id=user_id,
         perform_chunking=False,
         chunking_mode=None,
         auto_chunking_goal="balanced",
@@ -92,6 +93,15 @@ def _captured_logs() -> Iterator[list[str]]:
         logger.remove(sink_id)
 
 
+# The user-visible wording, written out independently of the service's table.
+_PUBLIC_FAILURE_MESSAGES = {
+    "source_access_denied": "Source access was blocked by the website or outbound access policy.",
+    "empty_extraction": "No readable content was extracted from the source.",
+    "extraction_timeout": "Source extraction timed out.",
+    "extraction_failed": "Source extraction failed. Check the server logs for details.",
+}
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -121,7 +131,9 @@ async def test_persistence_reports_safe_extraction_failure_without_storing(
             **failure,
         )
     ])
-    assert response["extraction_failures"] == [{"code": code}]
+    # Users need to see which source failed: host plus path, never the query.
+    assert response["extraction_failures"] == [{"code": code, "source": "example.com/private"}]
+    assert response["errors"] == [f"example.com/private: {_PUBLIC_FAILURE_MESSAGES[code]}"]
     assert response["stored_articles"] == 0
     assert "private-secret" not in str(response)
     assert "<html>" not in str(response)
@@ -135,7 +147,7 @@ async def test_persistence_classifies_empty_success_payload_without_storing(
 ):
     _patch_db(monkeypatch)
     response = await _persist([_article(content=" \n\t")])
-    assert response["extraction_failures"] == [{"code": "empty_extraction"}]
+    assert response["extraction_failures"] == [{"code": "empty_extraction", "source": "example.com/a"}]
     assert response["stored_articles"] == 0
 
 
@@ -155,7 +167,7 @@ async def test_queued_timeout_reaches_persistence_with_its_safe_category(monkeyp
     try:
         articles = await scraper.scrape_multiple(["https://example.com/article"])
         response = await _persist(articles)
-        assert response["extraction_failures"] == [{"code": "extraction_timeout"}]
+        assert response["extraction_failures"] == [{"code": "extraction_timeout", "source": "example.com/article"}]
         assert response["stored_articles"] == 0
         assert all(job.status == scraper_mod.JobStatus.FAILED for job in scraper.job_queue._completed_jobs.values())
     finally:
@@ -285,7 +297,7 @@ async def test_enhanced_webscraping_persist_does_not_infer_duplicate_from_error_
 
     assert response["status"] == "persist-ok"
     assert response["duplicate_articles"] == 0
-    assert response["errors"] == ["Source extraction failed. Check the server logs for details."]
+    assert response["errors"] == ["example.com/unavailable: Source extraction failed. Check the server logs for details."]
 
 
 @pytest.mark.integration
@@ -367,7 +379,7 @@ async def test_enhanced_webscraping_persist_mixed_duplicate_and_failure_retains_
     assert response["stored_articles"] == 0
     assert response["skipped_articles"] == 1
     assert response["duplicate_articles"] == 1
-    assert response["errors"] == ["Source extraction failed. Check the server logs for details."]
+    assert response["errors"] == ["example.com/b: Source extraction failed. Check the server logs for details."]
 
 
 @pytest.mark.integration
@@ -447,3 +459,52 @@ async def test_enhanced_webscraping_persist_redacts_storage_exception_from_logs(
 
     assert response["errors"] == ["Storage failed for article"]
     assert secret not in "\n".join(records)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend_name", ["sqlite", pytest.param("postgres", marks=pytest.mark.postgres)])
+@pytest.mark.parametrize("user_id,effective_owner", [(2, 2), (None, 1)])
+async def test_persisted_web_article_is_searchable_only_by_its_effective_owner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    user_id: int | None,
+    effective_owner: int,
+    backend_name: str,
+    request: pytest.FixtureRequest,
+):
+    from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    backend = request.getfixturevalue("pg_restricted_backend") if backend_name == "postgres" else None
+    if backend is not None:
+        @contextmanager
+        def postgres_manager(**kwargs: Any):
+            with managed_media_database(**kwargs, backend=backend) as db:
+                yield db
+        monkeypatch.setattr(svc_mod, "managed_media_database", postgres_manager)
+    _patch_real_db_path(monkeypatch, tmp_path)
+    with scoped_context(user_id=effective_owner):
+        response = await _persist([
+            _article(title="Owned searchable article", content="A05SearchOwnerBoundary article body."),
+        ], user_id=user_id)
+        media_id = response["media_ids"][0]
+        with managed_media_database(
+            client_id=str(effective_owner), db_path=str(tmp_path / "media_test.db"),
+            backend=backend, initialize=False, existing_only=True,
+        ) as db:
+            stored_owner = db.get_media_by_id(media_id)["owner_user_id"]
+            own_rows, own_total = search_media(db, "A05SearchOwnerBoundary", search_fields=["title", "content"])
+    with scoped_context(user_id=effective_owner + 1):
+        with managed_media_database(
+            client_id=str(effective_owner + 1), db_path=str(tmp_path / "media_test.db"),
+            backend=backend, initialize=False, existing_only=True,
+        ) as db:
+            foreign_rows, foreign_total = search_media(db, "A05SearchOwnerBoundary", search_fields=["title", "content"])
+    assert (stored_owner, [row["id"] for row in own_rows], own_total, foreign_rows, foreign_total) == (  # nosec B101 - Real persistence/search owner-isolation regression oracle.
+        effective_owner,
+        [media_id],
+        1,
+        [],
+        0,
+    )

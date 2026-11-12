@@ -39,14 +39,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task525-tsc-final.txt`: package `tsc` reported four diagnostics where flashcard component test `Deck` fixtures were missing the required `review_prompt_side` field.
 - Root cause was stale test fixture data only. The `Deck` type now requires `review_prompt_side`, and nearby flashcard tests already use the default `"front"` value.
 - Added `review_prompt_side: "front"` to the four affected deck fixtures without changing component behavior or assertions.
 - Focused verification: `bunx vitest run src/components/Flashcards/components/__tests__/FlashcardDocumentRow.test.tsx src/components/Flashcards/components/__tests__/FlashcardDocumentRow.image-insert.test.tsx src/components/Flashcards/components/__tests__/FlashcardEditDrawer.image-insert.test.tsx src/components/Flashcards/components/__tests__/FlashcardEditDrawer.reset-scheduling.test.tsx` passed: 6 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task526-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 46 in `/tmp/task525-tsc-final.txt` to 42 in `/tmp/task526-tsc-final.txt`; searching for the four flashcard paths and `review_prompt_side` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

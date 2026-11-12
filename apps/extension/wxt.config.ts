@@ -62,11 +62,19 @@ export default defineConfig({
       {
         resources: ["pdf.worker.min.mjs"],
         matches: ["<all_urls>"]
+      },
+      {
+        // Lazily-imported heavy chunks for the every-page content scripts
+        // (WXT builds content scripts as IIFE, so these MUST be separate
+        // web-accessible files to avoid inlining into every page).
+        resources: ["copilot-popup-main.js", "parser-main.js"],
+        matches: ["http://*/*", "https://*/*"]
       }
     ]
   },
   vite: () => ({
     resolve: {
+      dedupe: ["react", "react-dom"],
       alias: {
         "@": sharedRoot,
         "~": sharedRoot,

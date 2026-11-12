@@ -31,7 +31,7 @@ Address Image Generation module review findings: SwarmUI URL/token leakage, bloc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan: IMPLEMENTATION_PLAN_image_generation_hardening_2414.md
 
 Implemented shared Image Generation request validation for workflows and file artifacts, shared image output byte/magic validation, SwarmUI same-origin URL enforcement before authenticated image fetches, workflow off-event-loop backend generation, stable-diffusion log/error redaction, default inline byte cap enforcement, and reference image listing file-size/header optimizations.
@@ -49,7 +49,9 @@ Worktree PR prep verification on branch codex/image-generation-hardening-2414 at
 - Workflow/FileArtifacts/files endpoint/config/reference capability suite: 38 passed.
 - git diff --check: passed.
 - Bandit touched source scope: 0 findings.
-<!-- SECTION:NOTES:END -->
+
+PR #2462 rebase/review update: rebased codex/image-generation-hardening-2414 onto latest origin/dev (46595e31c) and removed unrelated Claims Extraction docs commit from the PR branch. Addressed unresolved Gemini/Qodo review threads: data URL base64 whitespace handling, bounded streaming remote image fetch without relying on Content-Length, workflow falsy numeric parameter validation, shared cfg_scale finite/positive validation, and inline Bandit suppression justifications. Verification: focused regression tests 6 passed; Image Generation provider/reference suite 36 passed; workflow/FileArtifacts/files/config/reference suite 38 passed; git diff --check passed; Bandit touched source scope 0 findings.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -66,9 +68,3 @@ Hardened Image Generation review findings end to end: unsafe SwarmUI authenticat
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR #2462 rebase/review update: rebased codex/image-generation-hardening-2414 onto latest origin/dev (46595e31c) and removed unrelated Claims Extraction docs commit from the PR branch. Addressed unresolved Gemini/Qodo review threads: data URL base64 whitespace handling, bounded streaming remote image fetch without relying on Content-Length, workflow falsy numeric parameter validation, shared cfg_scale finite/positive validation, and inline Bandit suppression justifications. Verification: focused regression tests 6 passed; Image Generation provider/reference suite 36 passed; workflow/FileArtifacts/files/config/reference suite 38 passed; git diff --check passed; Bandit touched source scope 0 findings.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

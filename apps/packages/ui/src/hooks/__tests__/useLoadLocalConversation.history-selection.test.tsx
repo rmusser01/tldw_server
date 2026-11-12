@@ -1,11 +1,15 @@
 import React from "react"
-import { act, renderHook } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
+import type { HistoryLoadReceipt } from "@/hooks/chat/useHistorySelection"
 const mocks = vi.hoisted(() => ({
+  selection: null as any,
+  modelPreference: vi.fn(async () => false),
   history: vi.fn(),
   details: vi.fn(),
   files: vi.fn(),
-  prompt: vi.fn()
+  prompt: vi.fn(),
+  loadSnapshot: vi.fn(async () => ({ requestScope: {}, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() }))
 }))
 vi.mock("@/db/dexie/chat", () => ({
   PageAssistDatabase: class {
@@ -20,13 +24,20 @@ vi.mock("@/db/dexie/helpers", () => ({
   getSessionFiles: mocks.files
 }))
 vi.mock("@/services/model-settings", () => ({
-  lastUsedChatModelEnabled: async () => false
+  lastUsedChatModelEnabled: () => mocks.modelPreference()
 }))
 vi.mock("@/utils/update-page-title", () => ({ updatePageTitle: vi.fn() }))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: mocks.loadSnapshot,
+  resolveServicePromptScope: async () => ({}),
+  subscribeToServicePromptConfigChanges: () => () => {}
+}))
+vi.mock("@/db/dexie/server-chat-mirror", () => ({ serverChatMirrorOwnerKey: () => "scope" }))
 vi.mock("@/hooks/chat/useHistorySelection", () => ({
-  useHistorySelectionContext: () => null
+  useHistorySelectionContext: () => mocks.selection
 }))
 import { useLoadLocalConversation } from "../useLoadLocalConversation"
+import { updatePageTitle } from "@/utils/update-page-title"
 const deferred = () => {
   let resolve!: (value: any) => void
   const promise = new Promise((r) => {
@@ -35,7 +46,11 @@ const deferred = () => {
   return { promise, resolve }
 }
 beforeEach(() => {
-  mocks.details.mockResolvedValue({})
+  vi.clearAllMocks()
+  mocks.selection = null
+  mocks.modelPreference.mockReset().mockResolvedValue(false)
+  mocks.loadSnapshot.mockReset().mockResolvedValue({ requestScope: {}, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() })
+  mocks.details.mockResolvedValue({ server_scope_key: "scope" })
   mocks.files.mockResolvedValue([])
 })
 it("does not install an older conversation after a new navigation finishes", async () => {
@@ -60,7 +75,7 @@ it("does not install an older conversation after a new navigation finishes", asy
     )
     return { rows, load }
   })
-  let pending!: Promise<void>
+  let pending!: ReturnType<typeof result.current.load>
   act(() => {
     pending = result.current.load("old")
   })
@@ -72,6 +87,71 @@ it("does not install an older conversation after a new navigation finishes", asy
     await pending
   })
   expect(result.current.rows).toEqual([{ id: "new" }])
+})
+
+it("does not restart an accepted effect load when its setters render the loaded messages", async () => {
+  mocks.history.mockImplementation(async (id: string) => [{ id }])
+  const attempts = vi.fn()
+  const { result, unmount } = renderHook(() => {
+    const [rows, setRows] = React.useState<unknown[]>([])
+    const load = useLoadLocalConversation(
+      {
+        setServerChatId: () => {},
+        setHistoryId: () => {},
+        setHistory: () => {},
+        setMessages: setRows,
+        setSelectedModel: () => {},
+        setSelectedSystemPrompt: () => {},
+        setSystemPrompt: () => {},
+        setContextFiles: () => {}
+      },
+      { t: (key) => key, errorLogPrefix: "load", errorDefaultMessage: "failed" }
+    )
+    React.useEffect(() => {
+      // Bound the broken implementation so this regression cannot exhaust a worker.
+      if (attempts.mock.calls.length >= 2) return
+      attempts()
+      void load("owned")
+    }, [load])
+    return rows
+  })
+  try {
+    await waitFor(() => expect(result.current).toEqual([{ id: "owned" }]))
+    await act(async () => { await Promise.resolve() })
+    expect(attempts).toHaveBeenCalledTimes(1)
+  } finally {
+    unmount()
+  }
+})
+
+it("uses the current message setter for a deliberate load after rerender", async () => {
+  mocks.history.mockResolvedValue([{ id: "owned" }])
+  const first = vi.fn<(rows: unknown[]) => void>()
+  const second = vi.fn<(rows: unknown[]) => void>()
+  const { result, rerender, unmount } = renderHook(({ sink }) =>
+    useLoadLocalConversation(
+      {
+        setServerChatId: () => {},
+        setHistoryId: () => {},
+        setHistory: () => {},
+        setMessages: sink,
+        setSelectedModel: () => {},
+        setSelectedSystemPrompt: () => {},
+        setSystemPrompt: () => {},
+        setContextFiles: () => {}
+      },
+      { t: (key) => key, errorLogPrefix: "load", errorDefaultMessage: "failed" }
+    ),
+    { initialProps: { sink: first } }
+  )
+  try {
+    rerender({ sink: second })
+    await act(async () => { await result.current("owned") })
+    expect(second).toHaveBeenCalledWith([{ id: "owned" }])
+    expect(first).not.toHaveBeenCalled()
+  } finally {
+    unmount()
+  }
 })
 
 // Delay actual dynamic-module imports while mounting the production controller
@@ -113,7 +193,9 @@ const mountNativeImportRace = async () => {
   )
   const admission = vi.fn()
   const provider = vi.fn()
+  const onCapture = vi.fn()
   vi.doMock("@/db/dexie/history-selection", () => ({
+    bindUnboundLocalHistory: vi.fn(async () => { throw new Error("unexpected_binding") }),
     ensureLocalProfileId: async () => "profile",
     loadHistoryBookmark: async () => null,
     saveHistoryBookmark: async () => {},
@@ -135,6 +217,7 @@ const mountNativeImportRace = async () => {
     tldwChat: { streamMessage: provider }
   }))
   vi.doMock("@/services/service-prompts", () => ({
+    loadServicePromptSnapshot: mocks.loadSnapshot,
     resolveServicePromptScope: async ({ signal }: any) => {
       if (signal.aborted) throw new Error("aborted")
       return {}
@@ -164,7 +247,7 @@ const mountNativeImportRace = async () => {
     setContextFiles: vi.fn()
   }
   const mounted = renderHook(() => {
-    const selection = useHistorySelection()
+    const selection = useHistorySelection({ onCapture })
     currentController = selection
     const load = useActualLoader(deps, {
       t: (key) => key,
@@ -173,8 +256,150 @@ const mountNativeImportRace = async () => {
     })
     return { selection, load }
   })
-  return { ...mounted, deps, captures, admission, provider }
+  return { ...mounted, deps, captures, admission, provider, onCapture }
 }
+
+it("reopens an intentional profile-only fork when account scope is unavailable", async () => {
+  const mounted = await mountNativeImportRace()
+  const { useStoreMessageOption } = await import("@/store/option");
+  useStoreMessageOption.getState().startNewChatDraft();
+  mocks.loadSnapshot.mockRejectedValue(new Error("account_scope_unavailable"))
+  mocks.details.mockResolvedValue({ id: "A", local_owner_key: "local-A", last_used_prompt: { prompt_content: "Local fork prompt" } })
+  mocks.history.mockResolvedValue([])
+  mocks.files.mockResolvedValue([{ id: "local-file" }])
+  await act(async () => { expect(await mounted.result.current.load("A")).toBe(true) })
+  expect(mocks.loadSnapshot).not.toHaveBeenCalled()
+  expect(mounted.result.current.selection.getCurrent()).toMatchObject({
+    status: "ready", owner: { kind: "local", conversation_id: "A" }
+  })
+  expect(mounted.onCapture).toHaveBeenCalledOnce()
+  expect(mounted.deps.setHistoryId).toHaveBeenCalledWith("A")
+  const { useStoreMessageOption: actualOption } = await import("@/store/option");
+  expect(actualOption.getState().chatDraftAddress).toEqual({ kind: "local", id: "A", profileId: "profile" });
+  expect(mounted.deps.setSystemPrompt).toHaveBeenCalledWith("Local fork prompt")
+  expect(mounted.deps.setContextFiles).toHaveBeenCalledWith([{ id: "local-file" }])
+  expect(mounted.admission).not.toHaveBeenCalled()
+  expect(mounted.provider).not.toHaveBeenCalled()
+})
+
+it("switches the private draft locator for a deliberate history that requires review", async () => {
+  const mounted = await mountNativeImportRace()
+  const { useStoreMessageOption } = await import("@/store/option")
+  useStoreMessageOption.getState().startNewChatDraft()
+  const source = useStoreMessageOption.getState().chatDraftAddress
+  mocks.details.mockResolvedValue({ id: "review-B", local_owner_key: "local-review-B" })
+  mocks.history.mockResolvedValue([])
+  const capture = mounted.captures.getMockImplementation()!
+  mounted.captures.mockImplementationOnce(async (...args) => ({
+    ...await capture(...args), status: "legacy_review_required", code: "legacy_review_required"
+  }))
+  await act(async () => { expect(await mounted.result.current.load("review-B")).toBe(true) })
+  expect(mounted.result.current.selection.getCurrent().status).toBe("legacy_review_required")
+  const target = useStoreMessageOption.getState().chatDraftAddress
+  expect(target).toMatchObject({ kind: "local", id: "review-B", profileId: "profile" })
+  expect(useStoreMessageOption.getState().chatDraftTransition).toMatchObject({ kind: "switch", sourceAddress: source })
+  await act(async () => { await mounted.result.current.selection.refresh() })
+  expect(useStoreMessageOption.getState().chatDraftAddress).toBe(target)
+  expect(mounted.admission).not.toHaveBeenCalled()
+  expect(mounted.provider).not.toHaveBeenCalled()
+  mounted.unmount()
+})
+
+it("does not publish held history after the source saving mode changes", async () => {
+  const mounted = await mountNativeImportRace()
+  const { useStoreMessageOption } = await import("@/store/option")
+  useStoreMessageOption.getState().startNewChatDraft()
+  mocks.details.mockResolvedValue({ id: "B", local_owner_key: "local-B" })
+  mocks.history.mockResolvedValue([])
+  const held = deferred()
+  const capture = mounted.captures.getMockImplementation()!
+  mounted.captures.mockImplementationOnce(async (...args) => {
+    await held.promise
+    return capture(...args)
+  })
+  let pending!: Promise<boolean>
+  act(() => { pending = mounted.result.current.load("B") })
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+  act(() => { useStoreMessageOption.getState().setTemporaryChat(true) })
+  const source = useStoreMessageOption.getState().chatDraftAddress
+  await act(async () => { held.resolve(undefined); expect(await pending).toBe(false) })
+  expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source)
+  expect(mounted.deps.setHistoryId).not.toHaveBeenCalled()
+  expect(mounted.onCapture).not.toHaveBeenCalled()
+  mounted.unmount()
+})
+
+it.each([
+  { id: "A", server_scope_key: "scope", local_owner_key: "local-A" },
+  { id: "A", server_scope_key: "foreign", local_owner_key: "local-A" },
+  { id: "A", server_chat_id: "A", local_owner_key: "local-A" },
+  { id: "A", message_source: "server", local_owner_key: "local-A" },
+  { id: "A" },
+  null
+])("keeps non-profile caches closed while account scope is unavailable: %j", async (details) => {
+  const mounted = await mountNativeImportRace()
+  mocks.loadSnapshot.mockRejectedValue(new Error("account_scope_unavailable"))
+  mocks.details.mockResolvedValue(details && { ...details, last_used_prompt: { prompt_content: "Private cache prompt" } })
+  mocks.history.mockResolvedValue([{ content: "Private cache transcript" }])
+  await act(async () => { expect(await mounted.result.current.load("A")).toBe(false) })
+  expect(mounted.captures).not.toHaveBeenCalled()
+  expect(mounted.onCapture).not.toHaveBeenCalled()
+  expect(mounted.deps.setHistoryId).not.toHaveBeenCalled()
+  expect(mounted.deps.setSystemPrompt).not.toHaveBeenCalled()
+  expect(mounted.deps.setMessages).not.toHaveBeenCalled()
+})
+
+it.each(["principal", "navigation"])("fences profile-only metadata completion after %s changes", async (boundary) => {
+  const mounted = await mountNativeImportRace()
+  const started = deferred(), finish = deferred()
+  mocks.details.mockImplementationOnce(() => { started.resolve(undefined); return finish.promise })
+  mocks.history.mockResolvedValue([])
+  await act(async () => {
+    const pending = mounted.result.current.load("A")
+    await started.promise
+    if (boundary === "principal") window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    else {
+      mocks.details.mockResolvedValue({ id: "B", local_owner_key: "local-B" })
+      expect(await mounted.result.current.load("B")).toBe(true)
+    }
+    finish.resolve({ id: "A", local_owner_key: "local-A", last_used_prompt: { prompt_content: "Stale fork prompt" } })
+    expect(await pending).toBe(false)
+  })
+  expect(mounted.captures.mock.calls.some(([owner]) => owner.conversation_id === "A")).toBe(false)
+  expect(mounted.deps.setHistoryId).not.toHaveBeenCalledWith("A")
+  expect(mounted.deps.setSystemPrompt).not.toHaveBeenCalledWith("Stale fork prompt")
+})
+
+it.each(["account-local", "profile-fork", "native"])(
+  "does not publish a held %s navigation capture after restore cancellation",
+  async (kind) => {
+    const mounted = await mountNativeImportRace()
+    mocks.details.mockResolvedValue({ id: "A", ...(kind === "profile-fork"
+      ? { local_owner_key: "local-A" }
+      : { server_scope_key: "scope", ...(kind === "native" ? { server_chat_id: "A" } : {}) }) })
+    mocks.history.mockResolvedValue([])
+    const started = deferred()
+    const finish = deferred()
+    const capture = mounted.captures.getMockImplementation()!
+    mounted.captures.mockImplementationOnce(async (...args) => {
+      started.resolve(undefined)
+      await finish.promise
+      return capture(...args)
+    })
+    const { usePlaygroundSessionStore } = await import("@/store/playground-session")
+    await act(async () => {
+      const pending = mounted.result.current.load("A")
+      await started.promise
+      usePlaygroundSessionStore.getState().clearSession()
+      finish.resolve(undefined)
+      expect(await pending).toBe(false)
+    })
+    expect(mounted.onCapture).not.toHaveBeenCalled()
+    expect(mounted.result.current.selection.getCurrent().capture).toBeNull()
+    expect(mounted.deps.setHistoryId).not.toHaveBeenCalled()
+    expect(mounted.deps.setSystemPrompt).not.toHaveBeenCalled()
+  }
+)
 
 it.each(["beginLoad", "ready-local-B"])(
   "rejects stale native import completion after %s navigation",
@@ -194,7 +419,7 @@ it.each(["beginLoad", "ready-local-B"])(
     mocks.details.mockImplementation(async (id: string) =>
       id === "A"
         ? { id, server_chat_id: "A", server_scope_key: "scope" }
-        : { id }
+        : { id, local_owner_key: `local-${id}` }
     )
     mocks.history.mockImplementation((id: string) =>
       id === "B" && navigation === "beginLoad"
@@ -249,12 +474,13 @@ it("a superseded service-module import cannot install a subscription or resolve 
     entered.resolve(undefined)
     await moduleGate.promise
     return {
+      loadServicePromptSnapshot: mocks.loadSnapshot,
       resolveServicePromptScope: resolveScope,
       subscribeToServicePromptConfigChanges: staleSubscribe
     }
   })
   mocks.details.mockImplementation(async (id: string) =>
-    id === "A" ? { id, server_chat_id: "A", server_scope_key: "scope" } : { id }
+    id === "A" ? { id, server_chat_id: "A", server_scope_key: "scope" } : { id, local_owner_key: `local-${id}` }
   )
   mocks.history.mockResolvedValue([])
   const receipt = vi.fn()
@@ -277,4 +503,47 @@ it("a superseded service-module import cannot install a subscription or resolve 
   })
   expect(mounted.admission).not.toHaveBeenCalled()
   expect(mounted.provider).not.toHaveBeenCalled()
+})
+
+
+it("explicit imported local consent resumes verified readable rows and all metadata", async () => {
+  let bound = false
+  let target: any
+  mocks.details.mockImplementation(async () => ({ id: "imported", title: "Imported title", ...(bound ? { local_owner_key: "browser-profile" } : {}), model_id: "vision-model", last_used_prompt: { prompt_id: "saved-prompt" } }))
+  mocks.history.mockResolvedValue([{ id: "image-question", images: ["http://asset.test/missing.png"], content: "Imported question" }])
+  mocks.modelPreference.mockResolvedValue(true)
+  mocks.prompt.mockResolvedValue({ id: "saved-prompt", content: "Saved prompt" })
+  mocks.files.mockResolvedValue([{ id: "saved-file" }])
+  const owner = { kind: "local" as const, profile_id: "profile", owner_key: "browser-profile", conversation_id: "imported" }
+  const view = { view_session_id: "imported-consent-view", owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+    selection_revision: 1, interpretation: { kind: "parent_graph_v1" }, cursor: { kind: "after_message", message_id: "image-question" } } satisfies HistoryLoadReceipt["view"]
+  mocks.selection = {
+    beginLoad: vi.fn(), fence: () => () => true,
+    loadConversation: vi.fn(async (value: any, _reference: unknown, opened?: (receipt: { owner: typeof owner; view: typeof view }) => void) => {
+      target = value
+      if (bound) opened?.({ owner, view })
+      return true
+    }),
+    getCurrent: () => bound ? { owner, view, capture: { status: "unsupported_history_capability", code: "unsupported_local_message_assets" } } : { owner: { kind: "unavailable", code: "unbound_local_history" } }
+  }
+  const deps = { setServerChatId: vi.fn(), setHistoryId: vi.fn(), setHistory: vi.fn(), setMessages: vi.fn(), setSelectedModel: vi.fn(), setSelectedSystemPrompt: vi.fn(), setSystemPrompt: vi.fn(), setContextFiles: vi.fn() }
+  const { result, unmount } = renderHook(() => useLoadLocalConversation(deps, { t: key => key, errorLogPrefix: "load", errorDefaultMessage: "failed" }))
+  await act(async () => { expect(await result.current("imported")).toBe(false) })
+  expect(mocks.selection.loadConversation).toHaveBeenCalled()
+  expect(deps.setMessages).not.toHaveBeenCalled()
+  expect(mocks.history).not.toHaveBeenCalled()
+  const resume = target.resumeAfterBind
+  expect(typeof resume).toBe("function")
+  bound = true
+  await act(async () => { expect(await resume()).toBe(true) })
+  expect(deps.setHistoryId).toHaveBeenCalledWith("imported")
+  expect(deps.setServerChatId).toHaveBeenCalledWith(null)
+  expect(deps.setMessages).toHaveBeenCalledWith([{ id: "image-question", images: ["http://asset.test/missing.png"], content: "Imported question" }])
+  expect(deps.setSelectedModel).toHaveBeenCalledWith("vision-model")
+  expect(deps.setSelectedSystemPrompt).toHaveBeenCalledWith("saved-prompt")
+  expect(deps.setSystemPrompt).toHaveBeenCalledWith("Saved prompt")
+  expect(deps.setContextFiles).toHaveBeenCalledWith([{ id: "saved-file" }])
+  expect(mocks.loadSnapshot).not.toHaveBeenCalled()
+  expect(updatePageTitle).toHaveBeenCalledWith("Imported title")
+  unmount()
 })

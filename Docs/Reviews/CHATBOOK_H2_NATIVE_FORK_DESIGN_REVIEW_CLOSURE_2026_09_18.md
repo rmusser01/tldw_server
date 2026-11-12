@@ -1,6 +1,6 @@
 # H2 native fork design review closure — 2026-09-18
 
-Task: TASK-13261.2. Scope: source audit, [focused design](../Design/2026-09-18-chatbook-h2-native-fork-design.md) and [five-stage implementation plan](../../IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md). H1 PR [#2968](https://github.com/rmusser01/tldw_server/pull/2968) remains separate at `ac76c4bc5b035561bf816009c1326a114e87def9`; this continuation is on `codex/chatbook-h2-native-fork`.
+Task: TASK-13261.2. Scope: source audit, [focused design](../Design/2026-09-18-chatbook-h2-native-fork-design.md) and [five-stage implementation plan](../Plans/IMPLEMENTATION_PLAN_chatbook_h2_native_fork.md). H1 PR [#2968](https://github.com/rmusser01/tldw_server/pull/2968) remains separate at `ac76c4bc5b035561bf816009c1326a114e87def9`; this continuation is on `codex/chatbook-h2-native-fork`.
 
 The lifecycle review and independent plan review each identified three P2 findings and no P1. Their follow-up reviews closed all six. Two minor plan corrections were also applied. This is readiness to implement the bounded design, not runtime or full-parity acceptance.
 

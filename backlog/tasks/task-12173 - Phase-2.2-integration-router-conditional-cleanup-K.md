@@ -51,7 +51,7 @@ Move only the covered integration-style content router specs onto the shared laz
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "integration_router_attr_lookup" -q` failed before implementation because Slack, Discord, Telegram, and Meetings router attributes were resolved during spec construction.
 - Green focused check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "integration_router_attr_lookup" -q` passed with `1 passed`.
 - Green full/adjacent checks: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q` passed with `51 passed`; `python -m pytest tldw_Server_API/tests/Services/test_main_router_contract.py -q` passed with `6 passed`; `python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py -q` passed with `69 passed`.
@@ -59,7 +59,7 @@ Move only the covered integration-style content router specs onto the shared laz
 - Rebased onto `fe21a86f61` after #1256 merged; kept both the output-router lazy test from #1256 and this tranche's integration-router lazy test. Rebased verification: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q` passed with `52 passed`; `python -m pytest tldw_Server_API/tests/Services/test_main_router_contract.py -q` passed with `6 passed`; `python -m pytest tldw_Server_API/tests/Services/test_openapi_contracts.py -q` passed with `69 passed`; `python -m bandit -r tldw_Server_API/app/api/v1/router_groups/content.py -f json -o /tmp/bandit_phase2_2_integration_router_conditionals_k_rebased.json` reported `0 results` and `0 errors`; `git diff --check HEAD` passed.
 - Documentation: no user-facing docs required for this internal router registration refactor.
 - Known skips or blockers: none.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

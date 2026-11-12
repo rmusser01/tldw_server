@@ -34,9 +34,9 @@ Implement Stage 5 of the OpenWebUI attachment hydration implementation plan: exp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 5 API slice: added OpenWebUI hydration request/response schemas, preview endpoint, job create/status endpoints, chatbooks Jobs helper, safe preview normalization, recursive path redaction for job result/error values, and focused API tests. Multi-user non-admin callers are denied for server-local hydration; single-user and admin principals are allowed. Worker-side root/authorization revalidation remains in Stage 6. Verification: focused API tests 7 passed; broader OpenWebUI hydration/import suite 47 passed; chatbooks path traversal suite 3 passed; git diff --check clean; Bandit report /tmp/bandit_openwebui_hydration_api.json has 0 findings and 0 errors. Known non-gating check: combining test_chatbooks_api_path_guard.py with path traversal timed out in full app.main TestClient teardown after unrelated lifespan workers started.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

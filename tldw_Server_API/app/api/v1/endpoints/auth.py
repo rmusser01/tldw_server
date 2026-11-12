@@ -70,9 +70,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
 from tldw_Server_API.app.core.AuthNZ.auth_governor import get_auth_governor
-from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
-    global_settings as _csrf_globals,
-)
+from tldw_Server_API.app.core.AuthNZ.auth_principal_resolver import bearer_credential
 from tldw_Server_API.app.core.AuthNZ.csrf_protection import (
     resolve_effective_csrf_enabled,
 )
@@ -108,6 +106,7 @@ from tldw_Server_API.app.core.AuthNZ.lockout_tracker import (
 )
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_memberships_for_user
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.identity_provider_repo import IdentityProviderRepo
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
@@ -128,7 +127,7 @@ from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _env_flag_enabled,
 )
 from tldw_Server_API.app.core.testing import (
-    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+    is_test_context,
 )
 from tldw_Server_API.app.core.testing import (
     is_test_mode as _is_test_mode,
@@ -140,6 +139,7 @@ from tldw_Server_API.app.services.auth_service import (
     apply_password_reset as _svc_apply_password_reset,
 )
 from tldw_Server_API.app.services.auth_service import (
+    consume_magic_link,
     fetch_active_user_by_id,
     fetch_user_by_login_identifier,
     update_user_last_login,
@@ -164,6 +164,7 @@ from tldw_Server_API.app.services.auth_service import (
     verify_user_email_once as _svc_verify_user_email_once,
 )
 from tldw_Server_API.app.services.registration_service import RegistrationService
+from tldw_Server_API.app.services.storage_quota_service import resolved_storage_quota_mb
 
 _AUTH_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -204,19 +205,6 @@ router = APIRouter(
 )
 _AUTH_ENDPOINT_RG_LOCK: Optional[asyncio.Lock] = None
 _AUTH_RG_DIAGNOSTICS_SHIM_LOGGED: set[str] = set()
-
-def _extract_bearer_token(auth_header: Optional[str]) -> str:
-    """Parse Authorization header and return Bearer token (case-insensitive)."""
-    if not auth_header:
-        return ""
-    try:
-        scheme, _, credential = auth_header.strip().partition(" ")
-        if scheme.lower() != "bearer" or not credential.strip():
-            return ""
-        return credential.strip()
-    except _AUTH_NONCRITICAL_EXCEPTIONS:
-        return ""
-
 
 def _legacy_user_me_enabled() -> bool:
     raw = os.getenv("ENABLE_LEGACY_USER_ME_ENDPOINTS", "true")
@@ -686,7 +674,9 @@ async def federation_callback(
         mapped_claims=mapped_claims,
     )
     db_pool = await get_db_pool()
-    async with db_pool.transaction() as db:
+    # Autocommit, like get_login_db_connection: the session manager writes on
+    # its own connection, which a SQLite BEGIN IMMEDIATE here would block.
+    async with db_pool.acquire_statement_autocommit() as db:
         return await _issue_multi_user_tokens(
             request=request,
             db=db,
@@ -715,7 +705,7 @@ def _current_user_id(user: Any) -> Optional[int]:
 
 
 _PLATFORM_ADMIN_ROLES = frozenset({"admin"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _normalized_claim_values(values: Any) -> set[str]:
@@ -825,8 +815,17 @@ async def _fetch_user_by_email_for_verification(db: Any, email: str) -> dict[str
     return await _svc_fetch_user_by_email_for_verification(db, email)
 
 
-async def _mark_user_verified(db: Any, user_id: int, now_utc: datetime) -> None:
-    await _svc_mark_user_verified(db, user_id, now_utc)
+async def _mark_user_verified(user_id: int, now_utc: datetime) -> None:
+    """Mark the user verified in its own short, committed transaction.
+
+    The versioned users gateway locks the user row ``FOR UPDATE``. Doing that
+    inside the request-scoped transaction and then creating the session / org
+    membership on other pool connections (whose FKs need ``KEY SHARE`` on the
+    same row) self-deadlocks on PostgreSQL until the pool times out.
+    """
+    pool = await get_db_pool()
+    async with pool.transaction() as conn:
+        await _svc_mark_user_verified(conn, user_id, now_utc)
 
 
 def _current_user_username(user: Any) -> str:
@@ -957,41 +956,38 @@ async def _ensure_user_org_membership(user_id: int, username: Optional[str] = No
 
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-        from tldw_Server_API.app.core.AuthNZ.orgs_teams import create_organization
+        from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+            TrustedMembershipReason,
+            TrustedMembershipWriteContext,
+        )
         from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 
+        pool = await get_db_pool()
+        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
+        context = TrustedMembershipWriteContext(
+            trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+        )
         org = None
         for attempt in range(3):
             name = base_name if attempt == 0 else f"{base_name}-{secrets.token_hex(2)}"
             try:
-                org = await create_organization(name=name, owner_user_id=int(user_id))
+                org = await repo.create_organization_with_owner_membership(
+                    name=name,
+                    owner_user_id=int(user_id),
+                    context=context,
+                )
                 break
             except DuplicateOrganizationError:
                 continue
 
         if not org:
             return
-
-        pool = await get_db_pool()
-        repo = AuthnzOrgsTeamsRepo(db_pool=pool)
-        await repo.add_org_member(org_id=org["id"], user_id=int(user_id), role="owner")
     except Exception as exc:
         # Best-effort bootstrap: org creation failures must not block login flows.
-        logger.warning("Org bootstrap failed for user {}: {}", user_id, exc)
-
-def _is_pytest_context() -> bool:
-    """Return True when running under pytest or explicit test-mode flags."""
-    try:
-        if _is_explicit_pytest_runtime():
-            return True
-        if _is_test_mode():
-            return True
-        if _env_flag_enabled("TESTING"):
-            return True
-    except _AUTH_NONCRITICAL_EXCEPTIONS:
-        return False
-    return False
-
+        logger.bind(error_type=type(exc).__name__).warning(
+            "Org bootstrap failed for user_id={}",
+            user_id,
+        )
 
 def _is_enterprise_admin_ui_mode() -> bool:
     raw_value = os.getenv("ADMIN_UI_ENTERPRISE_MODE", "")
@@ -1063,6 +1059,11 @@ def _auth_rg_policy_defined(request: Request, policy_id: str, governor: Any) -> 
 
 
 async def _get_auth_endpoint_rg_governor(request: Request) -> Optional[Any]:
+    from tldw_Server_API.app.core.config import rg_enabled as _rg_enabled_flag
+
+    if not bool(_rg_enabled_flag(True)):
+        return None
+
     try:
         app = request.app
         state = getattr(app, "state", None)
@@ -1114,6 +1115,20 @@ async def _reserve_auth_rg_requests(
 
     rg_entity = entity or f"ip:{_auth_request_client_ip(request)}"
 
+    # Skip only when ingress already charged this exact entity to this policy.
+    # rg_ingress_entity is set only after an allowed ingress reservation, so a fail-open
+    # ingress never skips. Any other ingress entity must not stand in for this one: a
+    # user:/api_key: bucket is per account, so a caller rotating several valid accounts
+    # would get a fresh bucket each time and evade the per-IP limit on entity-scoped
+    # sensitive policies; a tenant: bucket is shared by the tenant, not one IP. When AuthNZ
+    # and RG derive different IPs (TASK-13144) the request is charged twice, never zero.
+    # Reservations keyed on some other entity (a per-email throttle, or the per-user MFA
+    # limit when ingress charged the IP) still apply.
+    state = getattr(request, "state", None)
+    ingress_entity = getattr(state, "rg_ingress_entity", None)
+    if getattr(state, "rg_policy_id", None) == policy_id and ingress_entity and rg_entity == ingress_entity:
+        return True, None
+
     governor = await _get_auth_endpoint_rg_governor(request)
     if governor is None:
         _log_auth_rg_diagnostics_only_shim(reason="governor_unavailable", policy_id=policy_id)
@@ -1142,7 +1157,7 @@ async def _reserve_auth_rg_requests(
             op_id=op_id,
         )
         if handle_id:
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 await governor.commit(handle_id, actuals={"requests": 1}, op_id=op_id)
         if decision.allowed:
             return True, None
@@ -1154,7 +1169,7 @@ async def _reserve_auth_rg_requests(
 
 async def _ensure_mfa_cache_available(session_manager: SessionManager, settings: Settings) -> None:
     """Ensure MFA ephemeral storage is backed by Redis (mandatory for MFA flows)."""
-    test_context = _is_pytest_context()
+    test_context = is_test_context()
 
     def _supports_ephemeral_stub(sm: SessionManager) -> bool:
         return callable(getattr(sm, "store_ephemeral_value", None)) and callable(
@@ -1357,8 +1372,8 @@ async def _build_scope_claims(user_id: int) -> dict[str, Any]:
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         return {}
 
-    team_ids = sorted({m.get("team_id") for m in memberships if m.get("team_id") is not None})
-    org_ids = sorted({m.get("org_id") for m in memberships if m.get("org_id") is not None})
+    team_ids = sorted({m["team_id"] for m in memberships if m.get("team_id") is not None})
+    org_ids = sorted({m["org_id"] for m in memberships if m.get("org_id") is not None})
 
     claims: dict[str, Any] = {}
     if team_ids:
@@ -1391,9 +1406,8 @@ async def _register_runtime_diag(request: Request, response: Response):
         db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
         response.headers["X-TLDW-DB"] = db_backend
 
-        # Reflect runtime CSRF state exposed via global settings
-        csrf_enabled = _csrf_globals.get("CSRF_ENABLED", None)
-        response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(csrf_enabled) else "false"
+        # Reflect the effective CSRF state
+        response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
     finally:
         # Use a background callback via request.state to add duration later
         request.state._register_diag_start = start_ts
@@ -1425,8 +1439,7 @@ async def _login_runtime_diag(request: Request, response: Response):
         pool = await get_db_pool()
         db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
         response.headers["X-TLDW-DB"] = db_backend
-        csrf_enabled = _csrf_globals.get("CSRF_ENABLED", None)
-        response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(csrf_enabled) else "false"
+        response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
     finally:
         request.state._login_diag_start = _t.perf_counter()
 
@@ -1661,7 +1674,7 @@ async def login(
 
             log_counter("auth_login_user_not_found")
             # finalize diag headers in test mode for visibility
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 _finalize_login_diag(request, response)
             extra_headers = {"WWW-Authenticate": "Bearer"}
             if _is_test_mode():
@@ -1723,7 +1736,7 @@ async def login(
                     needs_rehash = needs_rehash2
                     password_service = fresh_ps
                     # annotate header to indicate re-verify succeeded
-                    with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                         response.headers["X-TLDW-Login-Reverify"] = "ok"
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 # fall back to original result
@@ -1773,7 +1786,7 @@ async def login(
             logger.info(f"Remaining login attempts: {remaining}")
 
             log_counter("auth_login_invalid_password")
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 _finalize_login_diag(request, response)
             extra_headers = {"WWW-Authenticate": "Bearer"}
             if _is_test_mode():
@@ -1898,7 +1911,7 @@ async def login(
                     ) from exc
                 response.status_code = status.HTTP_202_ACCEPTED
                 log_counter("auth_login_mfa_required")
-                with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                     _finalize_login_diag(request, response)
                 return MFAChallengeResponse(
                     session_token=session_token,
@@ -1971,7 +1984,7 @@ async def login(
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         )
-        with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
             _finalize_login_diag(request, response)
         return result
 
@@ -2049,8 +2062,7 @@ async def logout(
             message = f"Logged out from {count} device(s)"
         else:
             # Revoke current access token and session.
-            auth_header = request.headers.get("Authorization", "") if request is not None else ""
-            token = _extract_bearer_token(auth_header)
+            token = bearer_credential(request.headers.get("Authorization")) if request is not None else None
             if not token:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -2319,9 +2331,8 @@ async def refresh_token(
                 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool as _get_pool
                 pool = await _get_pool()
                 db_backend = "postgres" if getattr(pool, "pool", None) is not None else "sqlite"
-                from tldw_Server_API.app.core.AuthNZ.csrf_protection import global_settings as _csrf_globals
                 response.headers["X-TLDW-DB"] = db_backend
-                response.headers["X-TLDW-CSRF-Enabled"] = "true" if bool(_csrf_globals.get("CSRF_ENABLED", None)) else "false"
+                response.headers["X-TLDW-CSRF-Enabled"] = "true" if resolve_effective_csrf_enabled() else "false"
             except _AUTH_NONCRITICAL_EXCEPTIONS:
                 pass
 
@@ -2372,8 +2383,8 @@ async def refresh_token(
                 raise InvalidTokenError("Refresh token has been revoked")
 
             # JWT standard uses 'sub' for subject (user ID)
-            user_id = token_payload.get("sub") or token_payload.get("user_id")
-            if not user_id:
+            raw_user_id = token_payload.get("sub") or token_payload.get("user_id")
+            if not raw_user_id:
                 if _is_test_mode():
                     try:
                         response.headers["X-TLDW-Refresh-Stage"] = "decode"
@@ -2384,7 +2395,7 @@ async def refresh_token(
 
             # Convert to int if it's a string
             try:
-                user_id = int(user_id)
+                user_id = int(raw_user_id)
             except (ValueError, TypeError):
                 if _is_test_mode():
                     try:
@@ -2418,7 +2429,7 @@ async def refresh_token(
 
         # Attach user_id for middleware that binds CSRF tokens on refresh responses.
         try:
-            http_request.state.user_id = int(user.get("id")) if isinstance(user, dict) else None
+            http_request.state.user_id = int(user["id"]) if isinstance(user, dict) else None
         except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("Failed to set request.state.user_id during refresh: {}", exc)
 
@@ -2439,13 +2450,11 @@ async def refresh_token(
             add_claims = dict(scope_claims)
             if session_id:
                 add_claims["session_id"] = session_id
-            if not add_claims:
-                add_claims = None
             new_access_token = jwt_service.create_access_token(
                 user_id=user['id'],
                 username=user['username'],
                 role=user['role'],
-                additional_claims=add_claims
+                additional_claims=add_claims or None
             )
             # Rotate refresh token if enabled
             new_refresh_token = payload.refresh_token
@@ -2495,7 +2504,7 @@ async def refresh_token(
             except asyncio.CancelledError:
                 raise
             except _AUTH_NONCRITICAL_EXCEPTIONS as _bl_e:
-                with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                     logger.debug(f"Refresh: blacklist prior token best-effort failed: {_bl_e}")
 
         if settings.PII_REDACT_LOGS:
@@ -2507,7 +2516,7 @@ async def refresh_token(
         log_histogram("auth_refresh_duration", time.perf_counter() - start_time)
         # TEST_MODE: include simple duration metric header (non-breaking)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Refresh-Duration-ms"] = str(int((time.perf_counter() - start_time) * 1000))
         return TokenResponse(
             access_token=new_access_token,
@@ -2774,7 +2783,7 @@ async def verify_email(
             ) from None
 
         try:
-            user_id = int(payload.get("sub"))
+            user_id = int(payload["sub"])
             email = str(payload.get("email") or "").strip()
             if not email:
                 raise ValueError("Missing email claim")
@@ -2892,12 +2901,12 @@ async def request_magic_link(
 
     email = _normalize_magic_email(data.email)
     if not email:
-        return MessageResponse(message="If the account exists, a sign-in link has been sent")
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
     try:
         validator = get_input_validator()
         is_valid, _error_msg = validator.validate_email(email)
         if not is_valid:
-            return MessageResponse(message="If the account exists, a sign-in link has been sent")
+            return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
     except _AUTH_NONCRITICAL_EXCEPTIONS:
         # Never fail the request on validation errors; keep response generic
         pass
@@ -2911,7 +2920,7 @@ async def request_magic_link(
         tags={"auth_endpoint": "magic_link_request", "scope": "ip"},
     )
     if not ip_allowed:
-        return MessageResponse(message="If the account exists, a sign-in link has been sent")
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
     email_allowed, _retry_after = await _reserve_auth_rg_requests(
         request,
         policy_id="authnz.magic_link.email",
@@ -2919,14 +2928,14 @@ async def request_magic_link(
         tags={"auth_endpoint": "magic_link_request", "scope": "email"},
     )
     if not email_allowed:
-        return MessageResponse(message="If the account exists, a sign-in link has been sent")
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
     user = await fetch_user_by_login_identifier(db, email)
     user_id = int(user["id"]) if user and user.get("id") is not None else None
 
     # If registration is disabled and user doesn't exist, do not send an email.
     if not user and not settings.ENABLE_REGISTRATION:
-        return MessageResponse(message="If the account exists, a sign-in link has been sent")
+        return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
     try:
         token = jwt_service.create_magic_link_token(
@@ -2949,7 +2958,7 @@ async def request_magic_link(
             detail="Failed to send magic link email",
         ) from exc
 
-    return MessageResponse(message="If the account exists, a sign-in link has been sent")
+    return MessageResponse(message="If the account exists, a sign-in link has been sent", details=None)
 
 
 @router.post(
@@ -3022,7 +3031,7 @@ async def request_admin_reauth(
             detail="Failed to send admin reauthentication email",
         ) from exc
 
-    return MessageResponse(message="Admin reauthentication link sent")
+    return MessageResponse(message="Admin reauthentication link sent", details=None)
 
 
 @router.post(
@@ -3033,12 +3042,16 @@ async def request_admin_reauth(
 async def verify_magic_link(
     data: MagicLinkVerifyRequest,
     request: Request,
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
     registration_service: RegistrationService = Depends(get_registration_service_dep),
 ) -> TokenResponse:
-    """Verify a magic link token and return access/refresh tokens."""
+    """Redeem a one-time sign-in link for access and refresh tokens.
+
+    An already consumed link returns 400. If storage cannot confirm consumption,
+    the server returns 503. Request a fresh link if sign-in fails after consumption.
+    """
     settings = get_settings()
     if settings.AUTH_MODE != "multi_user":
         raise HTTPException(
@@ -3093,13 +3106,39 @@ async def verify_magic_link(
     if not user and email:
         user = await fetch_user_by_login_identifier(db, email)
 
-    if not user:
-        if not settings.ENABLE_REGISTRATION:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Registration is disabled",
-            )
+    if not user and not settings.ENABLE_REGISTRATION:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registration is disabled",
+        )
+    if user and user.get("is_active") in (False, 0):
+        raise HTTPException(status_code=401, detail="Invalid or inactive user")
 
+    jti, expiry = payload.get("jti"), payload.get("exp")
+    try:
+        if (
+            not isinstance(jti, str) or not jti.strip() or len(jti) > 255
+            or (type(expiry) is not int and type(expiry) is not float)
+        ):
+            raise ValueError("Invalid redemption claims")
+        expires_at = datetime.fromtimestamp(expiry, tz=timezone.utc)
+        if expires_at <= datetime.now(timezone.utc):
+            raise ValueError("Expired redemption claim")
+    except (ValueError, OverflowError, OSError):
+        raise HTTPException(status_code=400, detail="Invalid magic link token") from None
+
+    try:
+        claimed = await consume_magic_link(
+            db, jti=jti, expires_at=expires_at, actor_id=int(user["id"]) if user else None,
+            ip_address=_auth_request_client_ip(request),
+        )
+    except Exception:  # a failed or unconfirmed claim must never grant credentials
+        logger.error("Could not persist magic-link consumption")
+        raise HTTPException(status_code=503, detail="Magic link sign-in is temporarily unavailable") from None
+    if not claimed or expires_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Invalid magic link token")
+
+    if not user:
         # Create a new user on first magic-link sign-in
         username_base = _derive_username_from_email(email or "user")
         password = registration_service.password_service.generate_secure_password(
@@ -3130,7 +3169,7 @@ async def verify_magic_link(
         if not user and user_info:
             user_id = int(user_info["user_id"])
             # Mark user verified (magic link serves as email verification)
-            await _mark_user_verified(db, user_id, datetime.utcnow())
+            await _mark_user_verified(user_id, datetime.utcnow())
             user = await fetch_active_user_by_id(db, user_id)
 
     if not user:
@@ -3147,7 +3186,7 @@ async def verify_magic_link(
     # If an existing account wasn't verified, magic link serves as verification
     try:
         if user.get("is_verified") is False:
-            await _mark_user_verified(db, int(user["id"]), datetime.utcnow())
+            await _mark_user_verified(int(user["id"]), datetime.utcnow())
             user["is_verified"] = True
     except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Magic link verification: failed to mark user verified: {}", exc)
@@ -3189,30 +3228,6 @@ async def verify_magic_link(
     )
 
     await update_user_last_login(db, int(user["id"]), datetime.utcnow())
-
-    # Blacklist the magic link token after use (one-time)
-    try:
-        jti = payload.get("jti")
-        raw_exp = payload.get("exp")
-        exp_dt = None
-        if isinstance(raw_exp, (int, float)):
-            exp_dt = datetime.fromtimestamp(raw_exp, tz=timezone.utc)
-        elif isinstance(raw_exp, datetime):
-            exp_dt = raw_exp
-        if jti and exp_dt:
-            from tldw_Server_API.app.core.AuthNZ.token_blacklist import get_token_blacklist
-            bl = get_token_blacklist()
-            await bl.revoke_token(
-                jti=jti,
-                expires_at=exp_dt,
-                user_id=int(user["id"]),
-                token_type="magic_link",
-                reason="magic_link_used",
-                revoked_by=int(user["id"]),
-                ip_address=_auth_request_client_ip(request),
-            )
-    except _AUTH_NONCRITICAL_EXCEPTIONS as exc:
-        logger.debug("Magic link token blacklist failed: {}", exc)
 
     return TokenResponse(
         access_token=access_token,
@@ -3481,7 +3496,7 @@ async def mfa_login(
     data: MFALoginRequest,
     request: Request,
     response: Response,
-    db=Depends(get_db_transaction),
+    db=Depends(get_login_db_connection),
     jwt_service: JWTService = Depends(get_jwt_service_dep),
     session_manager: SessionManager = Depends(get_session_manager_dep),
     rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
@@ -3643,7 +3658,7 @@ async def mfa_login(
             except _AUTH_NONCRITICAL_EXCEPTIONS as rl_exc:
                 logger.debug(f"rate_limiter.reset_failed_attempts failed: {rl_exc}")
 
-        with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
             await session_manager.delete_ephemeral_value(cache_key)
 
         log_counter("auth_login_success")
@@ -3682,7 +3697,7 @@ async def register(
     response: Response,
     _diag=Depends(_register_runtime_diag),  # noqa: B008
     registration_service: RegistrationService = Depends(get_registration_service_dep)
-) -> RegistrationResponse:
+) -> RegistrationResponse | Response:
     """
     Register a new user
 
@@ -3824,7 +3839,7 @@ async def register(
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         # Attach diagnostics (if enabled)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "duplicate-user"
         _finalize_register_diag(http_request, response)
         detail = "Username or email already exists."
@@ -3843,7 +3858,7 @@ async def register(
         log_counter("auth_register_weak_password")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "weak-password"
         _finalize_register_diag(http_request, response)
         raise HTTPException(
@@ -3855,19 +3870,30 @@ async def register(
         log_counter("auth_register_invalid_code")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "invalid-registration-code"
         _finalize_register_diag(http_request, response)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid registration code."
         ) from e
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as e:
+        logger.warning("Registration deferred because the authentication database is busy")
+        log_counter("auth_register_database_busy")
+        log_histogram("auth_register_duration", time.perf_counter() - start_time)
+        _finalize_register_diag(http_request, response)
+        raise _authnz_busy_http_exception() from e
     except RegistrationError as e:
         logger.error(f"Registration error: {e}")
         log_counter("auth_register_error")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "registration-error"
         _finalize_register_diag(http_request, response)
         raise HTTPException(
@@ -3884,7 +3910,7 @@ async def register(
         log_counter("auth_register_unexpected_error")
         log_histogram("auth_register_duration", time.perf_counter() - start_time)
         if _is_test_mode():
-            with contextlib.suppress(_AUTH_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_AUTH_NONCRITICAL_EXCEPTIONS):
                 response.headers["X-TLDW-Register-Error"] = "internal-error"
         duration = time.perf_counter() - start_time
         _finalize_register_diag(http_request, response)
@@ -3900,7 +3926,7 @@ async def register(
                 content={"detail": "An error occurred during registration"},
                 headers={
                     "X-TLDW-DB": db_backend,
-                    "X-TLDW-CSRF-Enabled": "true" if bool(_csrf_globals.get("CSRF_ENABLED", None)) else "false",
+                    "X-TLDW-CSRF-Enabled": "true" if resolve_effective_csrf_enabled() else "false",
                     "X-TLDW-Register-Error": "internal-error",
                     "X-TLDW-Register-Duration-ms": str(int(duration * 1000)),
                 },
@@ -3917,9 +3943,9 @@ async def register(
 
 @router.get("/me", response_model=DeprecatedUserResponse, deprecated=True)
 async def get_current_user_info(
+    response: Response,
     current_user: AuthPrincipal = Depends(get_auth_principal),
-    response: Response = None,
-) -> DeprecatedUserResponse:
+) -> DeprecatedUserResponse | Response:
     """
     Deprecated: use /api/v1/users/me/profile.
 
@@ -3947,6 +3973,8 @@ async def get_current_user_info(
             detail="Invalid credentials",
         )
 
+    from tldw_Server_API.app.services.storage_quota_service import get_storage_service
+    storage_status = await (await get_storage_service()).user_quota_status(user_id)
     return DeprecatedUserResponse(
         warning="deprecated_endpoint",
         successor=successor,
@@ -3959,8 +3987,8 @@ async def get_current_user_info(
         is_verified=bool(_current_user_value(current_user, "is_verified", True)),
         created_at=_current_user_value(current_user, "created_at", datetime.utcnow()),
         last_login=_current_user_value(current_user, "last_login"),
-        storage_quota_mb=_current_user_value(current_user, "storage_quota_mb", 1000),
-        storage_used_mb=_current_user_value(current_user, "storage_used_mb", 0.0),
+        storage_quota_mb=await resolved_storage_quota_mb(user_id),
+        storage_used_mb=storage_status["used_mb"],
     )
 
 

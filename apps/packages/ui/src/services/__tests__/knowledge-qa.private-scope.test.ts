@@ -9,6 +9,8 @@ vi.mock("@/utils/safe-storage", () => ({
 vi.mock("@/services/tldw/runtime-auth-override", () => ({ getRuntimeSingleUserApiKeyOverride: () => null, isCookieSessionConfigInvalidated: () => false }))
 import { TldwApiClient, tldwClient } from "../tldw/TldwApiClient"
 import { submitExplicitFeedback } from "../feedback"
+import { createKnowledgeQaClient } from "@/components/Option/KnowledgeQA/knowledgeQaClient"
+import type { ServicePromptSnapshot } from "../service-prompts"
 
 const config = (user = 1, serverUrl = "https://qa.test") => ({
   serverUrl, authMode: "multi-user" as const,
@@ -43,7 +45,10 @@ describe("Knowledge QA real outbound owner checks", () => {
     client = new TldwApiClient()
     vi.spyOn(tldwClient, "initialize").mockResolvedValue(undefined)
     vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue(config())
-    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     boundary.get.mockImplementation(async (key: string) => key === "tldwConfig" ? config() : null)
     boundary.fetch.mockImplementation(async () => new Response('{"type":"contexts","contexts":[],"id":"owned"}\n', {
       status: 200, headers: { "Content-Type": "application/json" },
@@ -51,6 +56,29 @@ describe("Knowledge QA real outbound owner checks", () => {
     vi.stubGlobal("fetch", boundary.fetch)
   })
   afterEach(() => vi.unstubAllGlobals())
+
+  it.each([
+    ["tag-read", "/api/v1/chat/conversations/owned", "GET"],
+    ["context", "/api/v1/chat/messages/answer/rag-context", "POST"],
+  ] as const)("normalizes server owner denial for QA %s", async (_name, path, method) => {
+    vi.spyOn(tldwClient, "ensureConfigForRequest").mockResolvedValue(config())
+    boundary.fetch.mockResolvedValue(new Response(JSON.stringify({ detail: { code: "request_config_scope_changed", message: "Account changed." } }), { status: 412, headers: { "Content-Type": "application/json" } }))
+    const controller = new AbortController()
+    const qa = createKnowledgeQaClient({ requestScope: options.requestScope, scopeSignal: controller.signal } as ServicePromptSnapshot, () => true)
+    await expect(qa.fetchWithAuth(path, { method })).rejects.toMatchObject({ status: 412, details: { detail: { code: "request_config_scope_changed" } } })
+    expect(boundary.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([412, 503])("preserves an unrelated server %s response for QA optional metadata", async status => {
+    vi.spyOn(tldwClient, "ensureConfigForRequest").mockResolvedValue(config())
+    const data = { detail: { code: "metadata_unavailable", message: "Metadata unavailable." } }
+    boundary.fetch.mockResolvedValue(new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } }))
+    const controller = new AbortController()
+    const qa = createKnowledgeQaClient({ requestScope: options.requestScope, scopeSignal: controller.signal } as ServicePromptSnapshot, () => true)
+    const result = await qa.fetchWithAuth("/api/v1/chat/conversations/owned")
+    expect(result).toMatchObject({ ok: false, status })
+    expect(await result.json()).toEqual(data)
+  })
 
   it("does not send prior QA feedback if the account changes during client initialization", async () => {
     let release!: () => void

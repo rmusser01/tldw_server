@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react"
+import { isEditableTarget } from "@/utils/editable-target"
 
 interface KeyboardShortcutActions {
   onOpenCommandPalette: () => void
@@ -7,15 +8,6 @@ interface KeyboardShortcutActions {
   onRefresh: () => void
   onFocusSearch: () => void
   onShowHelp: () => void
-}
-
-const isInputFocused = (): boolean => {
-  const el = document.activeElement
-  if (!el) return false
-  const tag = el.tagName.toLowerCase()
-  if (tag === "input" || tag === "textarea" || tag === "select") return true
-  if ((el as HTMLElement).isContentEditable) return true
-  return false
 }
 
 export const useWatchlistsKeyboardShortcuts = (
@@ -36,7 +28,7 @@ export const useWatchlistsKeyboardShortcuts = (
       }
 
       // Skip remaining shortcuts when typing in inputs
-      if (isInputFocused()) return
+      if (isEditableTarget(document.activeElement)) return
 
       // 1/2/3 — switch primary tabs
       if (event.key >= "1" && event.key <= "3" && !metaOrCtrl && !event.altKey) {

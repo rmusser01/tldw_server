@@ -39,7 +39,7 @@ documented legacy exceptions and migration notes.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote Docs/superpowers/specs/2026-05-06-design-system-product-state-guard-design.md
 in clean worktree .worktrees/design-system-product-state-guard-spec. Spec review
 loop took three passes: first review found baseline identity, owner metadata,
@@ -61,7 +61,7 @@ and added stale-baseline reporting so removed violations do not leave dead debt.
 The follow-up spec review approved those changes; it added one advisory schema
 clarification, now applied, that baseline entry states should be limited to
 allowed_legacy_exception and active_migration_target.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

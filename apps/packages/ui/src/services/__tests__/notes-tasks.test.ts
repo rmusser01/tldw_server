@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { ServicePromptTargetConfig } from "@/services/tldw/TldwApiClient"
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn()
@@ -20,6 +21,7 @@ import {
   setNoteTaskStatus,
   updateNoteTask
 } from "@/services/notes-tasks"
+import type { NoteTaskStatusUpdate } from "@/services/notes-tasks"
 
 describe("notes task API helpers", () => {
   beforeEach(() => {
@@ -143,4 +145,50 @@ describe("notes task API helpers", () => {
       body: { dismissed: true }
     })
   })
+})
+
+describe("Notes checkbox original ownership", () => {
+  it("forwards the captured owner and signal without changing task or note CAS", async () => {
+    const controller = new AbortController()
+    const config: ServicePromptTargetConfig = {
+      serverUrl: "https://notes.example.test", authMode: "multi-user", expectedUserId: 1
+    }
+    const options = {
+      servicePromptConfig: config, abortSignal: controller.signal,
+      headers: { "X-TLDW-Expected-User-ID": "1" }
+    }
+    const updates: NoteTaskStatusUpdate[] = [
+      { task_id: "task-1", status: "done", expected_task_version: 5, expected_note_version: 2 }
+    ]
+    await setNoteTaskStatus(updates, options)
+    expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+      ...options, path: "/api/v1/notes/tasks/status", method: "POST", body: { updates }
+    })
+    expect(controller.signal.aborted).toBe(false)
+  })
+})
+
+describe("Notes activity original ownership", () => {
+  it.each([{ read: true }, { dismissed: true }])(
+    "forwards the original encoded event, body and owned options for %j",
+    async (body) => {
+      const controller = new AbortController()
+      const config: ServicePromptTargetConfig = {
+        serverUrl: "https://notes.example.test", authMode: "multi-user", expectedUserId: 1
+      }
+      const headers = { "X-TLDW-Expected-User-ID": "1" }
+      await markTaskActivityRead("event/one ?#", body, {
+        servicePromptConfig: config, headers, abortSignal: controller.signal
+      })
+      expect(mocks.bgRequest).toHaveBeenLastCalledWith({
+        path: "/api/v1/notes/tasks/activity/event%2Fone%20%3F%23", method: "PATCH", body,
+        servicePromptConfig: config, headers, abortSignal: controller.signal
+      })
+      const request = mocks.bgRequest.mock.calls.at(-1)?.[0]
+      expect(request.servicePromptConfig).toBe(config)
+      expect(request.headers).toBe(headers)
+      expect(request.abortSignal).toBe(controller.signal)
+      expect(request.body).toBe(body)
+    }
+  )
 })

@@ -25,7 +25,7 @@ from tldw_Server_API.app.core.Notes.attachment_policy import (
     validate_note_attachment_content_type,
     validate_note_attachment_original_file_name,
 )
-from tldw_Server_API.app.core.Sync.v2.models import normalize_sync_timestamp
+from tldw_Server_API.app.core.Sync_Contracts.models import normalize_sync_timestamp
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB

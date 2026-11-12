@@ -35,7 +35,7 @@ Follow-up review-fix task for PR #1425. Scope is limited to the Gemini inline co
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review surface: three unresolved Gemini inline comments on PR #1425. Addressed buffer-copy optimization, failed import-commit retry, and terminal commit-refresh disabling.
 
 RED: bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx failed on the new terminal refresh-disabled assertions before implementation.
@@ -49,7 +49,7 @@ HYGIENE: git diff --check passed.
 TSC: bunx tsc --noEmit --pretty false still exits 2 on existing repo-wide diagnostics; filtered /tmp/persona-visual-import-tsc-review.log showed no diagnostics for the touched VisualPackEditor, VisualPackEditor test, persona-visuals service, or persona-visuals types files.
 
 BANDIT: not applicable; touched production code is frontend TypeScript only. No docs change required for these review fixes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

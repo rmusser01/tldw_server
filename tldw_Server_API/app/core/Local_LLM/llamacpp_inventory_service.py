@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.llamacpp_admin_schemas import (
+from tldw_Server_API.app.core.Local_LLM.llamacpp_admin_schemas import (
     LlamaCppAsset,
     LlamaCppAssetImportPreviewResponse,
     LlamaCppAssetMetadata,

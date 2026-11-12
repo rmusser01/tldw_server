@@ -178,7 +178,7 @@ async def test_authoritative_keyless_tts_snapshot_never_uses_cached_adapter_or_f
             return SimpleNamespace()
 
         def _convert_request(self, _request):
-            return SimpleNamespace(extra_params={})
+            return SimpleNamespace(extra_params={}, backend=None)
 
         def _resolve_observability_context(self, _request, *, explicit_request_id=None):
             return explicit_request_id or "request-id", None

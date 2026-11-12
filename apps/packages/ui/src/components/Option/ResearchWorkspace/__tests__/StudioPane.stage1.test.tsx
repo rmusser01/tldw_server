@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import type { AudioGenerationSettings, WorkspaceSource } from "@/types/workspace"
@@ -246,6 +246,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 vi.mock("@/services/tldw", () => ({
   tldwModels: {
     getChatModels: mockGetChatModels,
+    clearCache: vi.fn(async () => undefined),
     getModel: mockGetModel,
     getProviderDisplayName: (provider: string) => provider
   }
@@ -264,9 +265,10 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  hasResearchWorkspaceMigrationTombstone: () => false,
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), { getState: () => workspaceStoreState })
 }))
 
 vi.mock("antd", async () => {
@@ -409,7 +411,8 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
               ? {
                   ...artifact,
                   status,
-                  ...updates
+                  ...updates,
+                  ...(status === "completed" ? { completedAt: updates.completedAt ?? new Date() } : {})
                 }
               : artifact
         )
@@ -1532,18 +1535,25 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockRagSearch).not.toHaveBeenCalled()
   })
 
-  it("completes slides artifacts from usable markdown fallback text", async () => {
-    mockGenerateSlidesFromMedia.mockRejectedValue(new Error("Slides API unavailable"))
+  it.each([404, 405, 501])(
+  "completes slides artifacts from usable markdown when the API is unsupported (%s)",
+  async (status) => {
+    mockGenerateSlidesFromMedia.mockRejectedValue(
+      Object.assign(new Error("Slides API unavailable"), {
+        status,
+        details: { detail: "Not Found" },
+      }),
+    )
     mockGetMediaDetails.mockResolvedValue({
       source: { title: "DSPy Prompting Talk" },
       content: {
-        text: "Project Falcon launched in March 2026 and improved retention by 18 percent."
-      }
+        text: "Project Falcon launched in March 2026 and improved retention by 18 percent.",
+      },
     })
     mockCreateChatCompletion.mockResolvedValue(
       createChatCompletionResponse(
-        "# Project Falcon Review\n\n## Slide 1: Overview\n- Project Falcon launched in March 2026.\n\n## Slide 2: Outcomes\n- Retention improved by 18 percent."
-      )
+        "# Project Falcon Review\n\n## Slide 1: Overview\n- Project Falcon launched in March 2026.\n\n## Slide 2: Outcomes\n- Retention improved by 18 percent.",
+      ),
     )
 
     renderStudioPane()
@@ -1556,10 +1566,10 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
 
     const slidesRequest = mockCreateChatCompletion.mock.calls[0]?.[0]
     expect(slidesRequest).toMatchObject({
-      model: "gpt-4o-mini"
+      model: "gpt-4o-mini",
     })
     expect(slidesRequest.messages?.[0]?.content).toContain(
-      "source-grounded presentation writer"
+      "source-grounded presentation writer",
     )
     expect(slidesRequest.messages?.[1]?.content).toContain("Project Falcon")
     expect(slidesRequest.messages?.[1]?.content).toContain("March 2026")
@@ -1569,10 +1579,11 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       "completed",
       expect.objectContaining({
         content: expect.stringContaining("# Project Falcon"),
-        presentationId: undefined
-      })
+        presentationId: undefined,
+      }),
     )
-  })
+  },
+)
 
   it("falls back to the default summary instruction when no custom prompt is set", async () => {
     messageOptionStoreState.ragAdvancedOptions = {
@@ -1751,6 +1762,79 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     })
   })
 
+  it.each(["llama:", "tldw:llama.cpp:"])(
+    "allows the configured repo model selected with provider prefix %s",
+    async (prefix) => {
+      const model = "unsloth/Qwen3.8-27B-GGUF:Q8_0"
+      messageOptionStoreState.selectedModel = prefix + model
+      mockGetChatModels.mockResolvedValue([
+        {
+          id: model,
+          name: model,
+          provider: "llama",
+          chatProvider: "llama.cpp",
+          type: "chat",
+          isConfigured: true,
+          providerEnabled: true,
+          availability: "enabled"
+        }
+      ])
+      renderStudioPane()
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Slides" })).toBeEnabled()
+      )
+      fireEvent.click(screen.getByRole("button", { name: "Slides" }))
+
+      await waitFor(() =>
+        expect(mockGenerateSlidesFromMedia).toHaveBeenCalledWith(
+          101,
+          expect.objectContaining({ model, provider: "llama.cpp" })
+        )
+      )
+      expect(
+        screen.queryByText(/not available in the current chat model catalog/i)
+      ).not.toBeInTheDocument()
+    }
+  )
+
+  it.each(["unsloth/Qwen3.8-27B-GGUF:Q8_0", "gemma3"])(
+    "does not borrow another provider's configured repo model %s",
+    async (model) => {
+      messageOptionStoreState.selectedModel = "ollama:" + model
+      mockGetChatModels.mockResolvedValue([
+        {
+          id: model,
+          name: model,
+          provider: "llama",
+          chatProvider: "llama.cpp",
+          type: "chat",
+          isConfigured: true,
+          providerEnabled: true,
+          availability: "enabled"
+        }
+      ])
+      renderStudioPane()
+      await act(async () => {
+        await Promise.resolve()
+      })
+      await waitFor(() =>
+        expect(
+          screen.getByText(/not available in the current chat model catalog/i)
+        ).toBeInTheDocument()
+      )
+
+      const slides = screen.getByRole("button", { name: "Slides" })
+      expect(slides).toBeDisabled()
+      fireEvent.click(slides)
+      expect(mockGenerateSlidesFromMedia).not.toHaveBeenCalled()
+      expect(mockAddArtifact).not.toHaveBeenCalled()
+    }
+  )
+
   it("uses chatProvider and raw model id for provider-qualified llama.cpp selections", async () => {
     messageOptionStoreState.selectedModel =
       "llama.cpp:gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf"
@@ -1817,7 +1901,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     })
   })
 
-  it("passes the selected model runtime through to slides generation", async () => {
+  it("passes the selected model runtime and token budget through to slides generation", async () => {
     messageOptionStoreState.selectedModel = "llama-3.1-8b"
     chatModelSettingsStoreState.apiProvider = "ollama"
 
@@ -1831,7 +1915,8 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
         expect.objectContaining({
           model: "llama-3.1-8b",
           provider: "ollama",
-          temperature: 0.7
+          temperature: 0.7,
+          maxTokens: 800
         })
       )
     })
@@ -2114,7 +2199,8 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       expect(mockGenerateFlashcardsService).toHaveBeenCalledWith(
         expect.objectContaining({
           text: expect.stringContaining("DSPy Prompting Talk")
-        })
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       )
     })
 
@@ -2250,4 +2336,174 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
       )
     })
   })
+  it.each(["failure", "cancel", "unmount", "early-cancel"])("retains saved slides when replacement ends in %s", async (outcome) => {
+    const original = {
+      id: "artifact-saved-slides",
+      type: "slides",
+      title: "Saved Rowan slides",
+      status: "completed",
+      content: "# Rowan\nOpened in 2019.",
+      presentationId: "saved-presentation",
+      presentationVersion: 4,
+      exportRefs: [{ format: "json", url: "/saved-export" }],
+      data: { saved: "exact original payload" },
+      createdAt: new Date("2026-02-18T10:00:00.000Z"),
+      completedAt: new Date("2026-02-18T10:01:00.000Z")
+    }
+    workspaceStoreState.generatedArtifacts = [original]
+    let resolve!: (value: unknown) => void
+    const pending = new Promise((done) => { resolve = done })
+    mockGenerateSlidesFromMedia.mockReturnValueOnce(pending)
+    const view = renderStudioPane()
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Regenerate options" }))
+      fireEvent.click(await screen.findByText("Replace existing"))
+      if (outcome !== "early-cancel") {
+        await waitFor(() => expect(mockGenerateSlidesFromMedia).toHaveBeenCalledTimes(1))
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+        await waitFor(() => expect(workspaceStoreState.isGeneratingOutput).toBe(false))
+        expect(mockGenerateSlidesFromMedia).not.toHaveBeenCalled()
+      }
+      if (outcome === "cancel") fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }))
+      if (outcome === "unmount") view.unmount()
+      await act(async () => {
+        resolve({
+          id: "late-presentation",
+          title: "Late replacement",
+          theme: "black",
+          version: 1,
+          slides: outcome === "failure" ? [] : [{ order: 0, layout: "title", title: "Late", content: "Replacement" }]
+        })
+        await pending
+      })
+      await waitFor(() => expect(workspaceStoreState.generatedArtifacts[0]).toMatchObject(original))
+      if (outcome === "unmount") expect(workspaceStoreState.isGeneratingOutput).toBe(false)
+      expect(mockMessageSuccess).not.toHaveBeenCalled()
+    } finally {
+      resolve({ id: "unused", slides: [] })
+      view.unmount()
+    }
+  })
+
+  it.each([401, 403, 422, 429, 500, 0, undefined])(
+  "preserves saved slides without another inference after API status %s",
+  async (status) => {
+    const original = {
+      id: "artifact-policy-slides",
+      type: "slides",
+      title: "Saved Rowan slides",
+      status: "completed",
+      content: "# Rowan\nOpened in 2019.",
+      presentationId: "saved-presentation",
+      presentationVersion: 4,
+      createdAt: new Date("2026-02-18T10:00:00.000Z"),
+      completedAt: new Date("2026-02-18T10:01:00.000Z"),
+    }
+    workspaceStoreState.generatedArtifacts = [original]
+    mockGenerateSlidesFromMedia.mockReset()
+    mockGenerateSlidesFromMedia.mockRejectedValue(
+      Object.assign(new Error("Refused slide generation"), { status }),
+    )
+    mockCreateChatCompletion.mockRejectedValue(new Error("Unexpected fallback"))
+    const view = renderStudioPane()
+    try {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Regenerate options" }),
+      )
+      fireEvent.click(await screen.findByText("Replace existing"))
+      await waitFor(() => expect(mockMessageError).toHaveBeenCalled())
+      expect(workspaceStoreState.generatedArtifacts[0]).toMatchObject(original)
+      expect(mockGenerateSlidesFromMedia).toHaveBeenCalledTimes(1)
+      expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+      expect(mockMessageSuccess).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+    }
+  },
+)
+
+  it.each(["visual_style_not_found", "media_not_found", undefined])(
+  "does not turn a domain or unclassified 404 (%s) into a differently styled outline",
+  async (detail) => {
+    mockGenerateSlidesFromMedia.mockReset()
+    mockGenerateSlidesFromMedia.mockRejectedValue(
+      Object.assign(new Error("Missing requested presentation input"), {
+        status: 404,
+        details: detail ? { detail } : undefined,
+      }),
+    )
+    mockGetMediaDetails.mockResolvedValue({
+      source: { title: "Readable Rowan source" },
+      content: {
+        text: "Rowan Observatory opened in 2019. Its telescope is Selene.",
+      },
+    })
+    mockCreateChatCompletion.mockRejectedValue(new Error("Unexpected fallback"))
+    const view = renderStudioPane()
+    try {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Slides", exact: true }),
+      )
+      await waitFor(() => expect(mockMessageError).toHaveBeenCalled())
+      expect(mockGenerateSlidesFromMedia).toHaveBeenCalledTimes(1)
+      expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+      expect(mockMessageSuccess).not.toHaveBeenCalled()
+    } finally {
+      view.unmount()
+    }
+  },
+)
+
+  it("retires the original Generate click when the authenticated account changes during capability refresh", async () => {
+    let finish!: (value: unknown) => void
+    const refresh = vi.fn(() => new Promise<ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>>((resolve) => { finish = resolve }))
+    renderStudioPane({ onRefreshResearchWorkspaceCapabilities: refresh })
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+      finish(buildUnknownResearchWorkspaceCapabilities())
+    })
+    expect(mockGetMediaDetails).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+  })
+
+  it("retires a held Generate capability refresh when Studio unmounts", async () => {
+    let finish!: (value: ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>) => void
+    const refresh = vi.fn(() => new Promise<ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>>(resolve => { finish = resolve }))
+    const view = renderStudioPane({ onRefreshResearchWorkspaceCapabilities: refresh })
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+    view.unmount()
+    await act(async () => { finish(buildUnknownResearchWorkspaceCapabilities()) })
+    expect(mockAddArtifact).not.toHaveBeenCalled()
+    expect(mockGetMediaDetails).not.toHaveBeenCalled()
+    expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it("retires a held Generate click across a workspace A-B-A round trip", async () => {
+    let finish!: (value: ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>) => void
+    const refresh = vi.fn(() => new Promise<ReturnType<typeof buildUnknownResearchWorkspaceCapabilities>>(resolve => { finish = resolve }))
+    Object.assign(workspaceStoreState, { workspaceId: "click-workspace-a" })
+    try {
+      const props = { onRefreshResearchWorkspaceCapabilities: refresh }
+      const view = renderStudioPane(props)
+      fireEvent.click(screen.getByRole("button", { name: "Summary" }))
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      Object.assign(workspaceStoreState, { workspaceId: "click-workspace-b" })
+      view.rerender(<StudioPane {...props} />)
+      Object.assign(workspaceStoreState, { workspaceId: "click-workspace-a" })
+      view.rerender(<StudioPane {...props} />)
+      await act(async () => { finish(buildUnknownResearchWorkspaceCapabilities()) })
+      expect(mockAddArtifact).not.toHaveBeenCalled()
+      expect(mockGetMediaDetails).not.toHaveBeenCalled()
+      expect(mockCreateChatCompletion).not.toHaveBeenCalled()
+    } finally {
+      Reflect.deleteProperty(workspaceStoreState, "workspaceId")
+    }
+  })
+
 })

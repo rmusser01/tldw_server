@@ -48,11 +48,11 @@ Create the implementation plan for the approved Research Studio UX remediation d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote implementation plan at `Docs/superpowers/plans/2026-05-12-research-studio-ux-remediation-implementation-plan.md`. Local self-review caught and fixed incorrect relative `cd` paths in verification commands. `git diff --check` passes for the plan file.
 
 Definition of Done notes: verification was `git diff --check -- Docs/superpowers/plans/2026-05-12-research-studio-ux-remediation-implementation-plan.md`; documentation artifact is the implementation plan itself; Bandit not run because this task changed planning/task documentation only and no backend Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

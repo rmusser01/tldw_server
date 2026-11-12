@@ -149,8 +149,7 @@ def _apply_defaults(config: dict[str, Any]) -> dict[str, Any]:
                     'evaluations_per_minute': 10,
                     'evaluations_per_day': 100,
                     'total_tokens_per_day': 100000,
-                    'burst_size': 5,
-                    'max_cost_per_day': 1.0
+                    'burst_size': 5
                 }
             }
         },

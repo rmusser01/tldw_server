@@ -2230,8 +2230,9 @@ async def test_tts_worker_returns_cleanly_when_sdk_stops_before_stop_event(
         def __init__(self, _manager, _config):
             return None
 
-        async def run(self, *, handler):
+        async def run(self, *, handler, job_type=None):
             assert handler is tts_jobs_worker._handle_tts_job
+            assert job_type == tts_jobs_worker.TTS_JOB_TYPE
 
         def stop(self):
             return None

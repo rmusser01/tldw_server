@@ -36,9 +36,9 @@ Replace the MediaLibraryStatsPanel storage unavailable fallback label with the c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented MediaLibraryStatsPanel unavailable fallback through getDesignSystemState('unavailable').label. Added focused test coverage using a partial design-system mock. Removed canonical-state-label baseline entry for src/components/Media/MediaLibraryStatsPanel.tsx:Unavailable. Bandit skipped because touched code is UI-only TypeScript/JSON/Backlog markdown with no Python execution surface.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

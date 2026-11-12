@@ -31,11 +31,11 @@ Use the approved Service Prompt brainstorming and design workflow documented in 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Recreated on the current dev base because the original planning branch task ID collided with a task allocated on dev. Historical review decisions remain captured in the linked design specification.
 
 Final verification on the current dev base: approved design artifact present; downstream planning and inventory artifacts use collision-free IDs; no Python changed, so Bandit is not applicable; full CI shards were intentionally skipped for planning-only work at requester direction.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

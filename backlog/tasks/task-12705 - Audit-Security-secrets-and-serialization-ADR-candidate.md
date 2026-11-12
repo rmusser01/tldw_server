@@ -3,21 +3,21 @@ id: TASK-12705
 title: Audit Security secrets and serialization ADR candidate
 status: Done
 assignee: []
-created_date: '2026-06-07 21:10'
-updated_date: '2026-06-07 21:14'
+created_date: 2026-06-07 21:10
+updated_date: 2026-06-07 21:14
 labels:
-  - docs
-  - process
-  - adr
-  - security
+- docs
+- process
+- adr
+- security
 dependencies:
-  - TASK-2247
+- TASK-15024
 references:
-  - Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md
-  - tldw_Server_API/app/core/Security/README.md
-  - tldw_Server_API/app/core/Security/secret_manager.py
-  - tldw_Server_API/app/core/Security/crypto.py
-  - tldw_Server_API/app/core/Security/safe_pickle.py
+- Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md
+- tldw_Server_API/app/core/Security/README.md
+- tldw_Server_API/app/core/Security/secret_manager.py
+- tldw_Server_API/app/core/Security/crypto.py
+- tldw_Server_API/app/core/Security/safe_pickle.py
 ---
 
 ## Description
@@ -37,7 +37,7 @@ Create a focused adoption audit for the remaining secrets/serialization portion 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a focused Security secrets/serialization adoption audit for INV-029. The audit records helper availability for SecretManager, Security crypto, and safe_pickle; bounded consumer adoption for AES-GCM JSON envelopes and restricted legacy pickle compatibility; and insufficient repository-wide SecretManager/serialization adoption for an accepted ADR. Updated the main decision inventory and Security confirmation audit to keep the slice inventory-only for now.
 
 Verification recorded on 2026-06-07:
@@ -46,7 +46,7 @@ Verification recorded on 2026-06-07:
 - Portability artifact scan: no developer-machine absolute paths or temporary Bandit report artifact names found in touched docs/task files.
 
 Bandit: not run because this branch only touches Markdown ADR inventory/audit and Backlog task records; no Python files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

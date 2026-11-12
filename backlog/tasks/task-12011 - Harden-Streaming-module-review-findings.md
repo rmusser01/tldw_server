@@ -30,7 +30,6 @@ Address the accepted code review findings for `tldw_Server_API/app/core/Streamin
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Manual Backlog task file created because the Backlog MCP was unavailable and the CLI hung on search/list/create operations. The user approved a manual task-file exception for this review fix.
 
@@ -50,7 +49,6 @@ PR review follow-up:
 - Broadened already-accepted WebSocket RuntimeError detection while preserving propagation for generic accept failures.
 - Reworked new tests to add docstrings/return annotations, avoid new direct action-helper coverage where public `run_speech_chat_turn` can verify behavior, and use event-driven ping waiting.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

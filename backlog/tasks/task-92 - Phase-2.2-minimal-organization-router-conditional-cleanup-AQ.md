@@ -39,7 +39,7 @@ Convert the minimal-test orgs and org_invites optional router block from eager t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline before edits: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -q passed 101 tests. RED before production edits: focused selector -k 'minimal_optional_router_specs and org' failed on the three new organization tests because orgs and org_invites imported eagerly and did not expose named lazy specs.
 
 Implemented orgs and org_invites as ImportedRouterSpec entries using default precise optional-missing exceptions. Verification after implementation: focused org tests 3 passed; full router group contract 104 passed; main router contract 6 passed; OpenAPI contract 69 passed; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported zero findings; git diff --check passed.
@@ -47,7 +47,7 @@ Implemented orgs and org_invites as ImportedRouterSpec entries using default pre
 Opened PR https://github.com/rmusser01/tldw_server/pull/1333 against dev for this slice.
 
 Review follow-up: documented the later-phase unblocker explicitly. This AQ slice removes another minimal-test eager import island so later router extraction and optional-registration hardening can proceed without preserving organization import-time side effects.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

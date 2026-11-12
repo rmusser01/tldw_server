@@ -55,11 +55,11 @@ Baseline verification before edits: `python -m pytest tldw_Server_API/tests/Prot
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented in isolated worktree `.worktrees/prototype-risk-gate-1-auth-invariants` on branch `codex/prototype-risk-gate-1-auth-invariants`. Added RED tests for revoked and expired external shared actors submitting promotion requests with still-signed session tokens; initial run failed with a server error for revoked actors and 201 for expired actors. Added endpoint guard so promotion submission revalidates active session/shared-actor state before creating promotion requests.
 
 Verification: focused RED command failed as expected before implementation; focused GREEN command passed after implementation. Full Risk Gate 1 backend set passed: `python -m pytest tldw_Server_API/tests/PrototypeWorkspaces/test_service_authorization.py tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_link_exchange.py tldw_Server_API/tests/PrototypeWorkspaces/test_prototype_endpoints.py -q` -> 41 passed, 5 warnings. Bandit passed with zero findings for `tldw_Server_API/app/api/v1/endpoints/prototype_workspaces.py`; JSON written to `/tmp/bandit_prototype_risk_gate_1.json`. `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

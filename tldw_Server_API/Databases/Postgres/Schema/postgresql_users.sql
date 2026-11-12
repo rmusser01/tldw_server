@@ -75,6 +75,24 @@ CREATE TABLE IF NOT EXISTS public.team_members (
     PRIMARY KEY (team_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS public.storage_quotas (
+    id SERIAL PRIMARY KEY,
+    org_id INTEGER REFERENCES public.organizations(id) ON DELETE CASCADE,
+    team_id INTEGER REFERENCES public.teams(id) ON DELETE CASCADE,
+    quota_mb INTEGER NOT NULL DEFAULT 10240,
+    used_mb DOUBLE PRECISION DEFAULT 0,
+    soft_limit_pct INTEGER DEFAULT 80,
+    hard_limit_pct INTEGER DEFAULT 100,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    CHECK (org_id IS NULL OR team_id IS NULL)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_quotas_org_unique
+    ON public.storage_quotas(org_id) WHERE org_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_storage_quotas_team_unique
+    ON public.storage_quotas(team_id) WHERE team_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS public.user_config_overrides (
     user_id INTEGER NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     key TEXT NOT NULL,
@@ -133,3 +151,23 @@ CREATE INDEX IF NOT EXISTS idx_teams_org ON public.teams(org_id);
 CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_hash ON audio_studio_media_tickets(token_hash);
 CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_expiry ON audio_studio_media_tickets(expires_at);
 CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_artifact ON audio_studio_media_tickets(user_id, project_id, artifact_id);
+
+-- Native retained chat accounting; released keys remain terminal.
+CREATE TABLE IF NOT EXISTS native_chat_quota_reservations (
+            user_id BIGINT NOT NULL,
+            user_uuid TEXT NOT NULL,
+            owner_key TEXT NOT NULL,
+            candidate_key TEXT NOT NULL,
+            scope_type TEXT NOT NULL CHECK (scope_type IN ('global', 'workspace')),
+            workspace_id TEXT,
+            org_id BIGINT,
+            team_id BIGINT,
+            size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0),
+            state TEXT NOT NULL CHECK (state IN ('active', 'released')),
+            PRIMARY KEY (user_id, candidate_key),
+            CHECK (team_id IS NULL OR org_id IS NOT NULL),
+            CHECK ((scope_type = 'global' AND workspace_id IS NULL) OR (scope_type = 'workspace' AND workspace_id IS NOT NULL))
+        );
+CREATE INDEX IF NOT EXISTS native_chat_quota_user ON native_chat_quota_reservations(user_id, user_uuid, state);
+CREATE INDEX IF NOT EXISTS native_chat_quota_org ON native_chat_quota_reservations(org_id, state);
+CREATE INDEX IF NOT EXISTS native_chat_quota_team ON native_chat_quota_reservations(team_id, state);

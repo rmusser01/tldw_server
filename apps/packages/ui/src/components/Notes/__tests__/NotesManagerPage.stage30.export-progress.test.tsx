@@ -122,10 +122,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
-  default: ({ onExportAllMd, exportProgress }: any) => (
+  default: ({ onExportAllMd, onCancelExport, exportProgress }: any) => (
     <div>
       <button data-testid="trigger-export-md" onClick={() => onExportAllMd()}>
         Export MD
+      </button>
+      <button data-testid="trigger-export-cancel" onClick={() => onCancelExport?.()}>
+        Cancel export
       </button>
       <div data-testid="notes-export-progress-prop">
         {exportProgress
@@ -197,21 +200,22 @@ describe("NotesManagerPage stage 30 export progress", () => {
         }
       }
       if (!path.startsWith("/api/v1/notes/?")) return {}
+      // list_notes pages with limit/offset and reports pagination.total.
       const params = new URL(`https://example.local${path}`).searchParams
-      const page = Number(params.get("page") || "1")
-      const pageSize = Number(params.get("results_per_page") || "20")
-      if (pageSize === 20) {
-        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      const limit = Number(params.get("limit") || "100")
+      const offset = Number(params.get("offset") || "0")
+      if (limit !== 100) {
+        return { items: [], pagination: { limit, offset, total: 0 } }
       }
-      if (pageSize === 100 && page === 1) {
-        return { items: makeNotes(100, 0), pagination: { total_items: 120, total_pages: 2 } }
+      if (offset === 0) {
+        return { items: makeNotes(100, 0), pagination: { limit, offset, total: 120 } }
       }
-      if (pageSize === 100 && page === 2) {
+      if (offset === 100) {
         return await new Promise((resolve) => {
           resolvePage2 = resolve
         })
       }
-      return { items: [], pagination: { total_items: 120, total_pages: 2 } }
+      return { items: [], pagination: { limit, offset, total: 120 } }
     })
 
     renderPage()
@@ -223,7 +227,7 @@ describe("NotesManagerPage stage 30 export progress", () => {
 
     resolvePage2?.({
       items: makeNotes(20, 100),
-      pagination: { total_items: 120, total_pages: 2 }
+      pagination: { limit: 100, offset: 100, total: 120 }
     })
 
     await waitFor(() => {
@@ -249,18 +253,18 @@ describe("NotesManagerPage stage 30 export progress", () => {
       }
       if (!path.startsWith("/api/v1/notes/?")) return {}
       const params = new URL(`https://example.local${path}`).searchParams
-      const page = Number(params.get("page") || "1")
-      const pageSize = Number(params.get("results_per_page") || "20")
-      if (pageSize === 20) {
-        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      const limit = Number(params.get("limit") || "100")
+      const offset = Number(params.get("offset") || "0")
+      if (limit !== 100) {
+        return { items: [], pagination: { limit, offset, total: 0 } }
       }
-      if (pageSize === 100 && page === 1) {
-        return { items: makeNotes(100, 0), pagination: { total_items: 200, total_pages: 3 } }
+      if (offset === 0) {
+        return { items: makeNotes(100, 0), pagination: { limit, offset, total: 200 } }
       }
-      if (pageSize === 100 && page === 2) {
+      if (offset === 100) {
         throw new Error("batch timeout")
       }
-      return { items: [], pagination: { total_items: 200, total_pages: 3 } }
+      return { items: [], pagination: { limit, offset, total: 200 } }
     })
 
     renderPage()
@@ -273,5 +277,63 @@ describe("NotesManagerPage stage 30 export progress", () => {
     })
     expect(screen.getByTestId("notes-export-progress-prop")).toHaveTextContent("idle")
     expect(mockMessageSuccess).toHaveBeenCalled()
+  })
+
+  it("Cancel aborts the in-flight batch and stops the export without a download (NL-02)", async () => {
+    let page2Signal: AbortSignal | undefined
+    mockBgRequest.mockImplementation(
+      async (request: { path?: string; method?: string; abortSignal?: AbortSignal }) => {
+        const path = String(request.path || "")
+        const method = String(request.method || "GET").toUpperCase()
+        if (path === "/api/v1/admin/notes/title-settings" && method === "GET") {
+          return {
+            llm_enabled: false,
+            default_strategy: "heuristic",
+            effective_strategy: "heuristic",
+            strategies: ["heuristic"]
+          }
+        }
+        if (!path.startsWith("/api/v1/notes/?")) return {}
+        const params = new URL(`https://example.local${path}`).searchParams
+        const limit = Number(params.get("limit") || "100")
+        const offset = Number(params.get("offset") || "0")
+        if (limit !== 100) {
+          return { items: [], pagination: { limit, offset, total: 0 } }
+        }
+        if (offset === 0) {
+          return { items: makeNotes(100, 0), pagination: { limit, offset, total: 500 } }
+        }
+        page2Signal = request.abortSignal
+        return await new Promise((_resolve, reject) => {
+          request.abortSignal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError"))
+          )
+        })
+      }
+    )
+    const exportRequests = () =>
+      mockBgRequest.mock.calls.filter(([request]) =>
+        String(request?.path || "").includes("limit=100")
+      ).length
+
+    renderPage()
+    fireEvent.click(screen.getByTestId("trigger-export-md"))
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-export-progress-prop")).toHaveTextContent("md:1:100:0")
+    })
+    await waitFor(() => {
+      expect(exportRequests()).toBe(2)
+    })
+
+    fireEvent.click(screen.getByTestId("trigger-export-cancel"))
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-export-progress-prop")).toHaveTextContent("idle")
+    })
+    expect(page2Signal?.aborted).toBe(true)
+    expect(exportRequests()).toBe(2)
+    expect(mockMessageInfo).toHaveBeenCalledWith("Export cancelled")
+    expect(mockMessageSuccess).not.toHaveBeenCalled()
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
   })
 })

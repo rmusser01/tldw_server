@@ -35,9 +35,15 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     list_org_memberships_for_user,
     list_team_members,
 )
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, is_single_user_principal
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS, PLATFORM_ADMIN_ROLES
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.Usage.quota_resolver import invalidate_all as invalidate_all_quotas
 from tldw_Server_API.app.core.UserProfiles.bulk_command_service import ProfileBulkCommandService
 from tldw_Server_API.app.core.UserProfiles.command_service import ProfileCommandService
 from tldw_Server_API.app.core.UserProfiles.contracts import (
@@ -45,6 +51,7 @@ from tldw_Server_API.app.core.UserProfiles.contracts import (
     ProfileReadRequest,
     ProfileUpdateCommand,
 )
+from tldw_Server_API.app.core.UserProfiles.overrides_repo import OrgProfileOverridesRepo, TeamProfileOverridesRepo
 from tldw_Server_API.app.core.UserProfiles.query_service import ProfileQueryService
 from tldw_Server_API.app.core.UserProfiles.response_mappers import (
     LegacyProfileCommandResult,
@@ -53,14 +60,16 @@ from tldw_Server_API.app.core.UserProfiles.service import UserProfileService
 from tldw_Server_API.app.core.UserProfiles.update_service import (
     ProfileUpdateScope,
     UserProfileUpdateService,
+    _validate_value,
 )
 from tldw_Server_API.app.core.UserProfiles.user_profile_catalog import load_user_profile_catalog
 from tldw_Server_API.app.services import admin_scope_service
 
 REQUIRED_ADMIN_RANK = ROLE_HIERARCHY.get("admin", 3)
 REQUIRED_TEAM_ADMIN_RANK = ROLE_HIERARCHY.get("lead", 2)
-_PLATFORM_ADMIN_ROLES = frozenset({"admin", "owner", "super_admin"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+# Imported, not restated: see AuthNZ/platform_admin.py for why there is one copy.
+_PLATFORM_ADMIN_ROLES = PLATFORM_ADMIN_ROLES
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _role_rank(role: str | None) -> int:
@@ -202,7 +211,7 @@ async def _build_bulk_update_before_values(
         "identity.is_verified",
         "identity.is_locked",
     }
-    needs_user_record = bool(key_set & (identity_keys | {"limits.storage_quota_mb"}))
+    needs_user_record = bool(key_set & identity_keys)
     user_row: dict[str, Any] | None = None
     if needs_user_record:
         user = await user_repo.get_user_by_id(int(user_id))
@@ -228,14 +237,6 @@ async def _build_bulk_update_before_values(
                     key,
                     value,
                 )
-
-    if user_row and "limits.storage_quota_mb" in key_set:
-        before["limits.storage_quota_mb"] = _mask_profile_diff_value(
-            profile_service,
-            catalog_map,
-            "limits.storage_quota_mb",
-            user_row.get("storage_quota_mb"),
-        )
 
     if any(key.startswith("memberships.") for key in key_set):
         org_memberships = await list_org_memberships_for_user(user_id)
@@ -294,10 +295,7 @@ async def _build_bulk_update_before_values(
                     )
 
     needs_effective = any(
-        key not in identity_keys
-        and not key.startswith("memberships.")
-        and key != "limits.storage_quota_mb"
-        for key in key_set
+        key not in identity_keys and not key.startswith("memberships.") for key in key_set
     )
     if needs_effective:
         effective = await profile_service._build_effective_config(
@@ -356,7 +354,10 @@ class _ProfileAdminScope:
 
 async def _get_profile_admin_scope(principal: AuthPrincipal) -> _ProfileAdminScope:
     """Resolve the principal's organization/team admin scope."""
-    if is_single_user_principal(principal) or admin_scope_service.is_platform_admin(principal):
+    # is_platform_admin() already grants single-user principals outside enterprise
+    # mode; checking is_single_user_principal() here too would bypass its
+    # enterprise-mode denial.
+    if admin_scope_service.is_platform_admin(principal):
         return _ProfileAdminScope(
             org_admin_ids=None,
             team_admin_ids=set(),
@@ -890,6 +891,14 @@ async def bulk_update_user_profiles(
     user_repo = await AuthnzUsersRepo.from_pool()
     roles = _derive_profile_update_roles(principal)
     updates = [(entry.key, entry.value) for entry in payload.updates]
+    contains_membership_updates = any(
+        entry.key.startswith("memberships.") for entry in payload.updates
+    )
+    transaction_acquire_timeout_seconds = (
+        None
+        if payload.dry_run
+        else get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+    )
     results: list[UserProfileBulkUpdateUserResult] = []
     updated_count = 0
     skipped_count = 0
@@ -936,12 +945,22 @@ async def bulk_update_user_profiles(
                     ),
                 )
             else:
-                async with db_pool.transaction() as conn:
-                    await profile_service.get_profile_version(
-                        user_id=int(user_id),
-                        db_conn=conn,
-                        lock_user=True,
-                    )
+                async with db_pool.transaction(
+                    acquire_timeout_seconds=transaction_acquire_timeout_seconds,
+                ) as conn:
+                    if contains_membership_updates:
+                        await profile_service.lock_profile_users(
+                            user_ids=tuple(
+                                sorted({int(principal.user_id), int(user_id)})
+                            ),
+                            db_conn=conn,
+                        )
+                    else:
+                        await profile_service.get_profile_version(
+                            user_id=int(user_id),
+                            db_conn=conn,
+                            lock_user=True,
+                        )
                     result = await update_service.apply_updates(
                         user_id=int(user_id),
                         updates=updates,
@@ -1050,5 +1069,75 @@ async def bulk_update_user_profiles(
         "resource_id": None,
         "action": "user_profile.bulk_preview" if payload.dry_run else "user_profile.bulk_update",
         "metadata": audit_metadata,
+    }
+    return response, audit_info
+
+
+async def set_group_limit_override(
+    *,
+    scope: str,
+    group_id: int,
+    key: str,
+    value: Any,
+    principal: AuthPrincipal,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Set (or, with value None, remove) a team/org ``limits.*`` override (spec 2 §3).
+
+    Platform admins only: a customer's org admin must not lift their own members.
+    The value is each member's allowance: a team or org
+    ``limits.storage_quota_mb`` override is each member's personal storage
+    allowance, separate from the team/org's own shared storage pool.
+    """
+    # is_platform_admin() already grants single-user principals outside enterprise
+    # mode; an extra `is_single_user_principal(...) or` here would bypass its
+    # enterprise-mode denial.
+    if not admin_scope_service.is_platform_admin(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Platform admin required")
+    entry = {e.key: e for e in load_user_profile_catalog().entries}.get(key)
+    if entry is None or not key.startswith("limits."):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error": "unsupported_key", "key": key})
+    normalized = None
+    if value is not None:
+        ok, normalized, err = _validate_value(entry, value)
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail={"error": err or "invalid_value", "key": key})
+
+    pool = await get_db_pool()
+    memberships = AuthnzOrgsTeamsRepo(db_pool=pool)
+    if scope == "org":
+        # get_organization_metadata() returns None both for a missing org and for one
+        # with no metadata set (its own docstring says so) -- list_organizations() checks
+        # existence by row, not by the (usually-NULL) metadata column.
+        org_rows, _ = await memberships.list_organizations(org_ids=[group_id])
+        group_exists = bool(org_rows)
+    else:
+        group_exists = bool(await memberships.get_team(group_id))
+    if not group_exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{scope} {group_id} not found")
+
+    if scope == "org":
+        repo = OrgProfileOverridesRepo(pool)
+        await repo.ensure_tables()
+        if value is None:
+            await repo.delete_override(org_id=group_id, key=key)
+        else:
+            await repo.upsert_override(org_id=group_id, key=key, value=normalized, updated_by=principal.user_id)
+    else:
+        repo = TeamProfileOverridesRepo(pool)
+        await repo.ensure_tables()
+        if value is None:
+            await repo.delete_override(team_id=group_id, key=key)
+        else:
+            await repo.upsert_override(team_id=group_id, key=key, value=normalized, updated_by=principal.user_id)
+    invalidate_all_quotas()
+
+    response = {"scope": scope, "id": group_id, "key": key, "value": normalized}
+    audit_info = {
+        "event_type": "data.update",
+        "category": "data_modification",
+        "resource_type": f"{scope}_profile_override",
+        "resource_id": f"{group_id}:{key}",
+        "action": f"{scope}_profile_override.{'delete' if value is None else 'set'}",
+        "metadata": {"key": key, "value": normalized},
     }
     return response, audit_info

@@ -35,13 +35,13 @@ Implement GitHub issue #1493 as the next Phase 3 Persona/Buddy visual-pack reuse
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a Persona Garden Visual Pack reuse decision panel backed by existing editor controls. Added focused panel and editor integration tests for create-draft focus routing, personal-library routing, import archive routing, duplicate target routing, disabled duplicate/import empty states, and no marketplace/VN/CYOA wording. Verification: bun run test src/components/PersonaGarden/__tests__/VisualPackReusePanel.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx passed with 25 tests. Bandit: not applicable because this slice touches TypeScript and Markdown only.
 
 Review-fix pass for PR #1494: Qodo reported one actionable requirement gap in VisualPackReusePanel empty library copy. Reopening task for the review fix before editing files.
 
 Review fix applied for PR #1494: adjusted the empty personal-library copy to avoid the contradictory 'Use one...' follow-up when there are no saved packs. Added regression assertions in VisualPackReusePanel and VisualPackEditor tests. Verification: bun run test src/components/PersonaGarden/__tests__/VisualPackReusePanel.test.tsx src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx passed with 25 tests; git diff --check passed. Bandit remains not applicable for TypeScript/Markdown-only changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

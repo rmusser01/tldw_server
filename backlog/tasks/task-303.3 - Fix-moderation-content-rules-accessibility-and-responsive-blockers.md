@@ -39,11 +39,11 @@ Implement Stage 3 of the moderation review/rules remediation plan. The /moderati
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 3 accessibility/responsive remediation for /moderation/rules: accessible names and labels, radio semantics, keyboard tab handling, focus return paths, live regions, internal table overflow containment, and layout min-width fixes for WebLayout and shared Layout.
 Verification: Vitest moderation suite passed 20 files / 217 tests; Playwright/CDP moderation responsive + route suite passed 7 tests; git diff --check passed.
 Known blocker: full tsc remains blocked by unrelated baseline errors in EmbeddingsModelSelectionConfig.tsx, persona-visuals.ts, and lib/api/vnPlay.ts. Bandit skipped because touched files are TS/TSX/tests/docs/backlog only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

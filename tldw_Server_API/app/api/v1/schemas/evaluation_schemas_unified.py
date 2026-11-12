@@ -19,7 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
     default_cursor_pagination_aliases,
 )
-from tldw_Server_API.app.core.Evaluations.run_state import normalize_run_status
+from tldw_Server_API.app.core.Evaluations.run_state import RunStatus, normalize_run_status
 
 try:
     import bleach
@@ -121,15 +121,6 @@ class EvaluationType(str, Enum):
     CUSTOM = "custom"
 
 
-class RunStatus(str, Enum):
-    """Run status values"""
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
-
-
 class WebhookEventType(str, Enum):
     """Webhook event types"""
     EVALUATION_STARTED = "evaluation.started"
@@ -155,6 +146,10 @@ class EvaluationMetric(BaseModel):
 
 class EvaluationSpec(BaseModel):
     """Evaluation specification"""
+    case_sensitive: bool = Field(
+        default=False,
+        description="Preserve letter case for exact_match and includes comparisons",
+    )
     # Optional sub_type for model_graded evaluations
     sub_type: Optional[Literal['summarization', 'rag', 'response_quality', 'rag_pipeline']] = Field(
         default=None,
@@ -322,6 +317,13 @@ class RunProgress(BaseModel):
     percent_complete: float = Field(0.0, ge=0.0, le=100.0)
     current_sample: Optional[int] = None
     estimated_completion: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _derive_missing_percentage(self) -> "RunProgress":
+        """Derive omitted percentages from validated sample counts."""
+        if "percent_complete" not in self.model_fields_set and self.total_samples > 0:
+            self.percent_complete = min(self.completed_samples, self.total_samples) * 100 / self.total_samples
+        return self
 
 
 class RunResponse(BaseModel):
@@ -970,9 +972,9 @@ class WebhookTestResponse(BaseModel):
 class RateLimitStatusResponse(BaseModel):
     """Rate limit status response"""
     tier: str
-    limits: dict[str, int]
+    limits: dict[str, Optional[int]]
     usage: dict[str, int]
-    remaining: dict[str, int]
+    remaining: dict[str, Optional[int]]
     reset_at: datetime
 
 

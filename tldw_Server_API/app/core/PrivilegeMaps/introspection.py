@@ -10,6 +10,7 @@ from fastapi.routing import APIRoute
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.privilege_catalog import PrivilegeCatalog
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 @dataclass(frozen=True)
@@ -82,9 +83,19 @@ def _extract_scope_matches(callable_obj: object, known_scopes: set[str]) -> tupl
     return matches, unknown
 
 
-def _extract_rate_limit_resources(callable_obj: object) -> set[str]:
-    value = getattr(callable_obj, "_tldw_rate_limit_resource", None)
-    return {value} if isinstance(value, str) and value else set()
+def _extract_rate_limit_resources(callable_obj: object) -> tuple[str, ...]:
+    resources: list[str] = []
+    singular = getattr(callable_obj, "_tldw_rate_limit_resource", None)
+    if isinstance(singular, str) and singular:
+        resources.append(singular)
+    plural = getattr(callable_obj, "_tldw_rate_limit_resources", ())
+    if isinstance(plural, (list, tuple)):
+        resources.extend(
+            resource
+            for resource in plural
+            if isinstance(resource, str) and resource
+        )
+    return tuple(dict.fromkeys(resources))
 
 
 def collect_privilege_route_registry(
@@ -100,12 +111,15 @@ def collect_privilege_route_registry(
     registry: dict[str, dict[tuple[str, tuple[str, ...]], RouteMetadata]] = {}
     unknown_scope_refs: set[tuple[str, str, str]] = set()
 
-    for route in app.routes:
+    # Walk served routes: FastAPI >= 0.137 hides included routers from app.routes, and
+    # their include-time dependencies (where most scopes live) only on the effective route.
+    for served in iter_served_routes(app.routes):
+        route = served.route
         if not isinstance(route, APIRoute):
             continue
 
-        dependant_deps = getattr(route.dependant, "dependencies", []) or []
-        explicit_deps = list(getattr(route, "dependencies", []) or [])
+        dependant_deps = getattr(served.dependant, "dependencies", []) or []
+        explicit_deps = list(served.dependencies)
         aggregated_deps = list(dependant_deps) + explicit_deps
         if not aggregated_deps:
             # Even if no dependencies, there might still be catalog mappings via tags or other mechanisms.
@@ -148,15 +162,15 @@ def collect_privilege_route_registry(
             scope_matches.update(matches)
             if unknown:
                 for scope_id in unknown:
-                    unknown_scope_refs.add((scope_id, qualified, route.path))
+                    unknown_scope_refs.add((scope_id, qualified, served.path))
 
         if not scope_matches:
             continue
 
-        tags = tuple(route.tags or ())
-        methods = tuple(sorted(route.methods or []))
+        tags = served.tags
+        methods = tuple(sorted(served.methods))
         metadata = RouteMetadata(
-            path=route.path,
+            path=served.path,
             methods=methods,
             name=route.name or "",
             tags=tags,

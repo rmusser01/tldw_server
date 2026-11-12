@@ -2,23 +2,27 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, Response, UploadFile, status
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequireApiKeyScope,
     RequirePermission,
     User,
     get_request_user,
     rbac_rate_limit,
     require_expected_user,
 )
-from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
+from tldw_Server_API.app.api.v1.API_Deps.billing_deps import propagate_billing_headers, require_within_limit
+from tldw_Server_API.app.api.v1.API_Deps.content_org_deps import select_content_org
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_add_deps import get_add_media_form
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_CREATE
 from tldw_Server_API.app.core.Billing.enforcement import LimitCategory
@@ -43,7 +47,9 @@ router = APIRouter()
     dependencies=[
         Depends(require_expected_user),
         Depends(RequirePermission(MEDIA_CREATE)),
+        Depends(RequireApiKeyScope("write")),
         Depends(rbac_rate_limit("media.create")),
+        Depends(select_content_org),
         Depends(guard_storage_quota),
         Depends(require_within_limit(LimitCategory.STORAGE_MB, 1)),
         Depends(require_within_limit(LimitCategory.API_CALLS_DAY, 1)),
@@ -54,6 +60,7 @@ router = APIRouter()
 async def add_media(
     request: Request,
     background_tasks: BackgroundTasks,
+    response: Response,
     form_data: AddMediaForm = Depends(get_add_media_form),
     files: list[UploadFile] | None = File(
         None,
@@ -73,9 +80,13 @@ async def add_media(
     helper.
     """
 
+    if media_analysis_requested(form_data):
+        # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
+        await enforce_llm_quota(current_user.id)
+
     if is_research_discovery_handoff(form_data):
         try:
-            return await add_research_discovery_pdfs(
+            result = await add_research_discovery_pdfs(
                 background_tasks=background_tasks,
                 form_data=form_data,
                 files=files,
@@ -89,16 +100,24 @@ async def add_media(
         except ResearchDiscoveryValidationError as exc:
             raise HTTPException(status_code=422, detail=exc.public_detail) from exc
 
-    return await add_media_persist(
-        background_tasks=background_tasks,
-        form_data=form_data,
-        files=files,
-        db=db,
-        current_user=current_user,
-        usage_log=usage_log,
-        response=None,
-        request=request,
-    )
+    else:
+        result = await add_media_persist(
+            background_tasks=background_tasks,
+            form_data=form_data,
+            files=files,
+            db=db,
+            current_user=current_user,
+            usage_log=usage_log,
+            response=None,
+            request=request,
+        )
+
+    if isinstance(result, Response):
+        propagate_billing_headers(response, result)
+        storage_warning = response.headers.get("X-Storage-Warning")
+        if storage_warning is not None:
+            result.headers["X-Storage-Warning"] = storage_warning
+    return result
 
 
 __all__ = ["router"]

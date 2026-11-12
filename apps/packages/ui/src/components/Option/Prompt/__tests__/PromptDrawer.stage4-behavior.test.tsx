@@ -78,7 +78,7 @@ describe("PromptDrawer stage 4 behavior", () => {
     render(<PromptDrawer {...baseProps} mode="create" />)
 
     const createCall = hookSpies.useFormDraftMock.mock.calls.at(-1)?.[0] as any
-    expect(createCall.storageKey).toBe("tldw-prompt-drawer-draft-create-new")
+    expect(createCall.storageKey).toBe(`tldw-prompt-drawer-draft-${JSON.stringify(["local", "create", "new"])}`)
     expect(createCall.editId).toBeUndefined()
 
     render(
@@ -90,7 +90,7 @@ describe("PromptDrawer stage 4 behavior", () => {
     )
 
     const editCall = hookSpies.useFormDraftMock.mock.calls.at(-1)?.[0] as any
-    expect(editCall.storageKey).toBe("tldw-prompt-drawer-draft-edit-prompt-123")
+    expect(editCall.storageKey).toBe(`tldw-prompt-drawer-draft-${JSON.stringify(["local", "edit", "prompt-123"])}`)
     expect(editCall.editId).toBe("prompt-123")
   }, 15000)
 

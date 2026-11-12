@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "Conflito na transferência de mídia",
+    "conflict": "O campo de mensagem já contém um rascunho. Insira a fonte de mídia, substitua seu rascunho ou cancele a importação.",
+    "insert": "Inserir fonte de mídia",
+    "replace": "Substituir rascunho atual",
+    "cancel": "Cancelar importação"
+  },
   "formError": {
     "noModel": "Por favor, selecione um modelo",
     "noEmbeddingModel": "Por favor, configure um modelo de incorporação na página Configurações > Conhecimento"

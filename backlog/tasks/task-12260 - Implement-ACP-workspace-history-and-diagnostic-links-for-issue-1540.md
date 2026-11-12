@@ -48,7 +48,7 @@ Stages:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created isolated worktree .worktrees/acp-workspace-history-diagnostic-links-1540 from origin/dev after PR #1627 merged. TASK-318 covers #1540 Slice 4: workspace history and diagnostic links.
 
 Implemented WorkspaceACPHistoryModal and WorkspaceHeader menu wiring for ACP run history. The modal reuses Agent Orchestration projects/tasks/task-detail data, filters by canonical workspace id, and links to Agent Tasks plus ACP Playground session/diagnostics/artifacts/audit views.
@@ -60,7 +60,7 @@ Bandit: skipped because this slice changes TypeScript UI, tests, docs, and Backl
 Known skips/blockers: no Python files were touched, so Bandit was not run. Merge readiness still depends on the repository AI-generated PR policy requiring a human-authored Change summary before merge.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/1643
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

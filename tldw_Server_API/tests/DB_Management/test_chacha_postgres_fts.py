@@ -309,6 +309,40 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
         assert "selected-k" in params
 
 
+@pytest.mark.parametrize("counting", [False, True])
+def test_postgres_notes_all_tags_subquery_keeps_owner_and_deleted_filters(monkeypatch, counting):
+    """NL-N1: the 'all tags' subquery filters its own keyword alias by owner and deletion."""
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    store = NoteStore(db)
+    statements = []
+
+    def selected_owner(owner_client_id, alias=""):
+        return f" AND {alias}.client_id = ?", (f"selected-{alias}",)
+
+    def execute(query, params):
+        statements.append((query, params))
+        return SimpleNamespace(fetchall=lambda: [], fetchone=lambda: {"cnt": 0})
+
+    monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
+    monkeypatch.setattr(db, "execute_query", execute)
+    monkeypatch.setattr(db, "_map_table_for_backend", lambda name: name)
+    if counting:
+        store.count_notes_matching_keywords(None, ["Rag", "baking", "rag"], match="all")
+    else:
+        store.search_notes_with_keywords(None, ["Rag", "baking", "rag"], limit=3, offset=0, match="all")
+    query, params = statements[-1]
+    assert "LOWER(k.keyword) IN (?, ?)" in query
+    assert "LIKE" not in query
+    assert "k2.deleted = FALSE AND k2.client_id = ?" in " ".join(query.split())
+    assert "HAVING COUNT(DISTINCT LOWER(k2.keyword)) = ?" in query
+    assert "selected-k2" in params
+    # Duplicate tokens collapse, so the note needs both distinct tags.
+    assert params.count("rag") == 2 and params.count("baking") == 2
+    assert 2 in params
+
+
 @pytest.mark.parametrize(
     ("query", "expected"),
     [
@@ -443,3 +477,16 @@ def test_postgres_note_keyword_queries_filter_both_endpoints(postgres_db, operat
             assert [row["id"] for row in store.get_notes_for_keyword(1)] == ["own"]
         else:
             assert store.get_notes_for_keyword(2) == []
+
+
+def test_postgres_question_search_preserves_owner_and_matches_literal_terms(monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
+
+    db = _make_postgres_db()
+    db.execute_query = MagicMock(return_value=_CursorStub([{"id": "owned-note"}]))
+    store = NoteStore(db)
+
+    assert store.search_notes("Vega? next review date", limit=3, match_any=True) == [{"id": "owned-note"}]
+    sql, params = db.execute_query.call_args[0]
+    assert "n.client_id = ?" in sql and "n.deleted = FALSE" in sql
+    assert params == ("'Vega' | 'next' | 'review' | 'date'", "pg-test", "'Vega' | 'next' | 'review' | 'date'", 3, 0)

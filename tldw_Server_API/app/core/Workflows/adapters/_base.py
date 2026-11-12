@@ -5,6 +5,7 @@ This module defines the base Pydantic models and type aliases used by adapters.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from typing import Any, Callable
 
 from pydantic import BaseModel, Field
@@ -48,8 +49,8 @@ class BaseAdapterConfig(BaseModel):
 
 
 # Type aliases for adapter signatures
-AdapterFunc = Callable[[dict[str, Any], dict[str, Any]], Any]
-"""Type alias for adapter function signature: async (config, context) -> result"""
-
 AdapterResult = dict[str, Any]
 """Type alias for adapter return value"""
+
+AdapterFunc = Callable[[dict[str, Any], dict[str, Any]], Awaitable[AdapterResult]]
+"""Type alias for adapter function signature: async (config, context) -> result"""

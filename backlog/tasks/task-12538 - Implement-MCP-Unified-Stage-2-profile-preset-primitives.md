@@ -36,7 +36,7 @@ documentation:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan: Docs/superpowers/plans/2026-05-27-mcp-unified-profile-presets-implementation-plan.md
 
 Implemented package-local MCP profile preset primitives:
@@ -69,7 +69,7 @@ Review follow-up verification:
 - python -m mypy mcp_unified --config-file pyproject.toml -> passed
 - python -m bandit -r mcp_unified -f json -o /tmp/bandit_mcp_unified_profile_presets.json -> 0 findings
 - git diff --check -> clean
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

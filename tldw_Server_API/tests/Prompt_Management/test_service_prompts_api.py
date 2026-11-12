@@ -459,7 +459,7 @@ def test_web_settings_save_pair_atomically_and_reset_deployment_defaults(
     api_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Web instructions share atomic updates and expose the deployed article defaults."""
-    from tldw_Server_API.app.core.Utils import prompt_loader
+    from tldw_Server_API.app.core.Context_Integrity import prompt_loader
 
     (tmp_path / "webscraping.prompts.yaml").write_text(
         "article_summary_system: Deployment system\narticle_summary_user: Deployment summary\n"
@@ -512,7 +512,7 @@ def test_audio_settings_save_pair_atomically_and_reset_deployment_defaults(
     api_context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Partial writes cannot replace either half; reset returns effective audio file defaults."""
-    from tldw_Server_API.app.core.Utils import prompt_loader
+    from tldw_Server_API.app.core.Context_Integrity import prompt_loader
 
     (tmp_path / "audio.prompts.yaml").write_text(
         "system_prompt: Deployment system\ntranscription_analysis_summary: Deployment user\n"

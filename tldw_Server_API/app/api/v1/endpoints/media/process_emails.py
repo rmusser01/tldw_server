@@ -10,18 +10,20 @@ from loguru import logger
 from starlette.responses import JSONResponse
 
 import tldw_Server_API.app.core.Ingestion_Media_Processing.Email.Email_Processing_Lib as email_lib  # type: ignore
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
     get_process_emails_form,
+    media_analysis_requested,
 )
 from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
     media_create_dependencies,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessEmailsForm
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     apply_chunking_template_if_any,
     async_resolve_chunking_for_result,
@@ -31,6 +33,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
+    first_saved_filename,
     save_uploaded_files,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.pipeline import (
@@ -90,6 +93,10 @@ async def process_emails_endpoint(
         )
 
     logger.info("Request received for /process-emails (no persistence).")
+
+    if media_analysis_requested(form_data):
+        # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
+        await enforce_llm_quota(current_user.id)
 
     system_prompt = form_data.system_prompt
     if form_data.perform_analysis and form_data.api_name and system_prompt is None:
@@ -234,6 +241,9 @@ async def process_emails_endpoint(
                             system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
+                            extract_attachments=form_data.extract_attachments,
+                            attachment_mime_allowlist=form_data.attachment_mime_allowlist,
+                            attachment_mime_denylist=form_data.attachment_mime_denylist,
                             max_depth=form_data.max_depth,
                         )
                         res_list = await loop.run_in_executor(None, processor)
@@ -269,6 +279,9 @@ async def process_emails_endpoint(
                             system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
+                            extract_attachments=form_data.extract_attachments,
+                            attachment_mime_allowlist=form_data.attachment_mime_allowlist,
+                            attachment_mime_denylist=form_data.attachment_mime_denylist,
                             max_depth=form_data.max_depth,
                         )
                         res_list = await loop.run_in_executor(None, processor)
@@ -306,6 +319,9 @@ async def process_emails_endpoint(
                             system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
+                            extract_attachments=form_data.extract_attachments,
+                            attachment_mime_allowlist=form_data.attachment_mime_allowlist,
+                            attachment_mime_denylist=form_data.attachment_mime_denylist,
                             max_depth=form_data.max_depth,
                         )
                         res_list = await loop.run_in_executor(None, processor)
@@ -340,6 +356,9 @@ async def process_emails_endpoint(
                             system_prompt=system_prompt,
                             summarize_recursively=form_data.summarize_recursively,
                             ingest_attachments=form_data.ingest_attachments,
+                            extract_attachments=form_data.extract_attachments,
+                            attachment_mime_allowlist=form_data.attachment_mime_allowlist,
+                            attachment_mime_denylist=form_data.attachment_mime_denylist,
                             max_depth=form_data.max_depth,
                         )
                         res = await loop.run_in_executor(None, processor)
@@ -397,10 +416,8 @@ async def process_emails_endpoint(
     try:
         if form_data.perform_chunking:
             # Build chunk options once using shared helper + templates.
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0].get("original_filename")
+                first_filename = first_saved_filename(saved_files_info)
             except Exception:
                 logger.debug("Could not determine first filename")
                 first_filename = None
@@ -421,6 +438,7 @@ async def process_emails_endpoint(
                     form_data=form_data,
                     db=db,
                     chunking_options_dict=chunk_options_dict,
+                    owner_user_id=getattr(current_user, "id", None),
                     TemplateClassifier=TemplateClassifier,
                     first_url=None,
                     first_filename=first_filename,

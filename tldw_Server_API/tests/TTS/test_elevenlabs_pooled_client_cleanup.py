@@ -87,7 +87,7 @@ async def test_owned_client_is_closed() -> None:
     leaks these. Ownership has to be tracked, not assumed.
     """
     adapter = _adapter(ElevenLabsAdapter)
-    adapter._owns_http_client = True
+    adapter._owns_client = True
     client = adapter.client
 
     await adapter._cleanup_resources()
@@ -98,7 +98,7 @@ async def test_owned_client_is_closed() -> None:
 
 async def test_pooled_client_is_not_closed() -> None:
     adapter = _adapter(ElevenLabsAdapter)
-    adapter._owns_http_client = False
+    adapter._owns_client = False
     client = adapter.client
 
     await adapter._cleanup_resources()
@@ -115,7 +115,7 @@ async def test_unknown_ownership_defaults_to_not_closing() -> None:
     ownership recorded, take the second.
     """
     adapter = _adapter(ElevenLabsAdapter)
-    client = adapter.client  # no _owns_http_client attribute set at all
+    client = adapter.client  # no _owns_client attribute set at all
 
     await adapter._cleanup_resources()
 

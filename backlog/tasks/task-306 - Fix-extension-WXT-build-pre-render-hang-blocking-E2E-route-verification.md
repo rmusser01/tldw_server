@@ -48,11 +48,11 @@ The /knowledge parity slice is blocked from browser-level extension verification
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resolved the WXT build/pre-render hang by replacing the static copilot content-script re-export with a WXT defineContentScript wrapper that dynamically imports @tldw/ui/entries/copilot-popup.content from main(). Root cause: WXT imports JS entrypoints during metadata discovery before applying filtered entrypoint builds, so the static shared copilot import could hold the build/pre-render process open even for unrelated options/background filters.
 
 Verification on 2026-05-12: bun test tests/unit/copilot-entrypoint-lazy-import.test.ts passed; bun run compile passed; bun run build:chrome:prod completed and wrote .output/chrome-mv3 manifest/assets; bun run dev -- --host 127.0.0.1 --port 17311 reached WXT dev/pre-render and was stopped; targeted Playwright knowledge route run reached browser phase. Bandit skipped because touched implementation is TypeScript/Playwright, not Python.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

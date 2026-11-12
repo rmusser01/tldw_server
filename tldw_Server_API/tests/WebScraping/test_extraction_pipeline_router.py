@@ -126,6 +126,9 @@ def test_custom_pipeline_filters_only_llm_when_disallowed(
         strategy_order=custom_order,
         allow_llm_extraction=allow_llm_extraction,
         fallback_extractor=fake_extractor,
+        # Name the provider: otherwise it comes from [RAG] default_llm_provider,
+        # which the shipped config.txt leaves blank (llm_provider_missing).
+        llm_settings={"provider": "openai"},
     )
 
     expected_order = custom_order if allow_llm_extraction else ["trafilatura"]

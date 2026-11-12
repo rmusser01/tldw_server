@@ -1468,5 +1468,20 @@
   },
   "actor_templateMode_ignore": {
     "message": "Ignora quando i template sono attivi"
+  },
+  "mediaHandoff_conflictLabel": {
+    "message": "Conflitto nel trasferimento dei media"
+  },
+  "mediaHandoff_conflict": {
+    "message": "Il campo del messaggio contiene già una bozza. Inserisci la fonte multimediale, sostituisci la bozza o annulla l'importazione."
+  },
+  "mediaHandoff_insert": {
+    "message": "Inserisci fonte multimediale"
+  },
+  "mediaHandoff_replace": {
+    "message": "Sostituisci la bozza attuale"
+  },
+  "mediaHandoff_cancel": {
+    "message": "Annulla l'importazione"
   }
 }

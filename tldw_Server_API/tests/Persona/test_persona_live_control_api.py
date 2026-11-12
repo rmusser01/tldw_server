@@ -162,6 +162,7 @@ def _recv_until(client, predicate, timeout=2.0):
 def _install_persona_stream_test_stubs(
     monkeypatch,
     manager: SessionManager,
+    persona_db: CharactersRAGDB,
     *,
     user_id: str = "1",
     persisted_turns: list[dict[str, object]] | None = None,
@@ -185,7 +186,10 @@ def _install_persona_stream_test_stubs(
         )
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve_authenticated_user_id)
-    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: None)
+    monkeypatch.setattr(
+        persona_ep, "_open_persona_ws_db",
+        lambda user_id: CharactersRAGDB(str(persona_db.db_path), client_id=str(user_id)),
+    )
     monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
     monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
     monkeypatch.setattr(persona_ep, "retrieve_top_memories", lambda **kwargs: [])
@@ -822,9 +826,8 @@ def test_persona_stream_voice_commit_records_bounded_client_message_id(monkeypat
     monkeypatch.setattr(persona_ep, "_generate_persona_live_tts_audio", unavailable_test_audio)
     manager = SessionManager()
     persisted_turns: list[dict[str, object]] = []
-    _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
+    _install_persona_stream_test_stubs(monkeypatch, manager, persona_db, persisted_turns=persisted_turns)
     session_id = "sess-voice-commit-ws"
-    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
     _create_profile(persona_db, user_id="1", persona_id="research_assistant")
     _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)
 
@@ -1088,7 +1091,7 @@ def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
 ):
     manager = SessionManager()
     persisted_turns: list[dict[str, object]] = []
-    _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
+    _install_persona_stream_test_stubs(monkeypatch, manager, persona_db, persisted_turns=persisted_turns)
     _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
     session_id = "sess-user-message-ws"
     _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)
@@ -1101,7 +1104,7 @@ def test_persona_stream_user_message_marks_live_session_connected_and_cleanup(
                     {
                         "type": "user_message",
                         "session_id": session_id,
-                        "text": "What should I focus on next?",
+                        "text": "Find notes about what I should focus on next.",
                         "client_message_id": f" {'u' * 140} ",
                     }
                 )
@@ -1131,8 +1134,7 @@ def test_persona_stream_user_message_rejects_stopped_session(
 ):
     manager = SessionManager()
     persisted_turns: list[dict[str, object]] = []
-    _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
-    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
+    _install_persona_stream_test_stubs(monkeypatch, manager, persona_db, persisted_turns=persisted_turns)
     _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
     session_id = "sess-stopped-user-message"
     _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id, status="closed")
@@ -1167,8 +1169,7 @@ def test_persona_stream_voice_commit_rejects_stopped_session_before_commit_side_
 ):
     manager = SessionManager()
     persisted_turns: list[dict[str, object]] = []
-    _install_persona_stream_test_stubs(monkeypatch, manager, persisted_turns=persisted_turns)
-    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
+    _install_persona_stream_test_stubs(monkeypatch, manager, persona_db, persisted_turns=persisted_turns)
     _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
     session_id = "sess-stopped-voice-commit"
     _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id, status="closed")
@@ -1206,8 +1207,7 @@ def test_persona_stream_user_message_preserves_private_live_control_preferences(
 
     _stub_persona_conversation(monkeypatch)
     manager = SessionManager()
-    _install_persona_stream_test_stubs(monkeypatch, manager)
-    monkeypatch.setattr(persona_ep, "_open_persona_ws_db", lambda _user_id: persona_db)
+    _install_persona_stream_test_stubs(monkeypatch, manager, persona_db)
     _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
 
     with _client_for_user(1, persona_db) as client:
@@ -1252,7 +1252,7 @@ def test_persona_stream_voice_config_marks_live_session_connected_and_cleanup(
     persona_db: CharactersRAGDB,
 ):
     manager = SessionManager()
-    _install_persona_stream_test_stubs(monkeypatch, manager)
+    _install_persona_stream_test_stubs(monkeypatch, manager, persona_db)
     _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
     session_id = "sess-voice-config-ws"
     _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)
@@ -1290,7 +1290,7 @@ def test_persona_stream_presence_refcounts_multiple_websockets_on_same_session(
     persona_db: CharactersRAGDB,
 ):
     manager = SessionManager()
-    _install_persona_stream_test_stubs(monkeypatch, manager)
+    _install_persona_stream_test_stubs(monkeypatch, manager, persona_db)
     _create_profile(persona_db, user_id="1", persona_id="research_assistant", name="Research Assistant")
     session_id = "sess-two-websockets"
     _create_session(persona_db, user_id="1", persona_id="research_assistant", session_id=session_id)

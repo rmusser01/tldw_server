@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import get_prompt_st
 from tldw_Server_API.app.api.v1.schemas.prompt_studio_base import SecurityConfig
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
+from tldw_Server_API.tests.prompt_studio.db_stub_contract import unservable_stub_methods
 
 ########################################################################################################################
 # Test Client Setup
@@ -144,6 +145,9 @@ async def test_list_evaluations_honors_non_multiple_offset() -> None:
         def __init__(self) -> None:
             self.calls: list[dict[str, int | None]] = []
 
+        def get_project(self, project_id):
+            return {"id": project_id, "user_id": "pagination-owner"}
+
         def list_evaluations(self, *, project_id, prompt_id=None, status=None, page=1, per_page=20):
             self.calls.append(
                 {
@@ -173,7 +177,7 @@ async def test_list_evaluations_honors_non_multiple_offset() -> None:
         limit=3,
         offset=4,
         db=db,
-        user_context={},
+        user_context={"user_id": "pagination-owner", "is_admin": False},
     )
 
     assert [item.id for item in response["evaluations"]] == [4, 5, 6]
@@ -223,7 +227,7 @@ def test_db():
 def auth_headers():
     """Create authentication headers for testing."""
     return {
-        "Authorization": "Bearer test-token",
+        "X-API-KEY": get_auth_settings().SINGLE_USER_API_KEY,
         "Content-Type": "application/json"
     }
 
@@ -369,6 +373,7 @@ async def test_list_optimizations_safely_defaults_missing_pagination() -> None:
         def list_optimizations(self, *_args, **_kwargs):
             return {"optimizations": []}
 
+    assert not unservable_stub_methods(_OptimizationDbWithoutPagination)
     response = await prompt_studio_optimization.list_optimizations(
         project_id=123,
         page=2,
@@ -384,6 +389,26 @@ async def test_list_optimizations_safely_defaults_missing_pagination() -> None:
     assert response.pagination.mode == "page"
     assert response.pagination.page == 2
     assert response.pagination.has_more is False
+
+
+def test_list_optimizations_endpoint_against_real_sqlite_db(client, test_db, prompt_resources) -> None:
+    """TASK-13290: GET /optimizations/list/{project_id} returned 500 on every SQLite deployment
+    because the SQLite backend lacked list_optimizations; stub DBs hid it. Drive the real DB."""
+    created = test_db.create_optimization(
+        project_id=prompt_resources.project_id,
+        name="Real SQLite optimization",
+        initial_prompt_id=prompt_resources.prompt_id,
+        optimizer_type="iterative",
+        optimization_config={"target_metric": "accuracy"},
+        max_iterations=5,
+    )
+
+    response = client.get(f"/api/v1/prompt-studio/optimizations/list/{prompt_resources.project_id}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["id"] for item in body["data"]] == [created["id"]]
+    assert body["metadata"]["total"] == 1
 
 
 @pytest.mark.asyncio
@@ -1440,7 +1465,7 @@ class TestEvaluationEndpoints:
             async def close(self):
                 return None
 
-        monkeypatch.setattr(ps_eval, "_is_prompt_studio_test_mode", lambda: False)
+        monkeypatch.setattr(ps_eval, "is_test_context", lambda: False)
         monkeypatch.setattr(ps_eval, "ProviderCredentialRuntime", lambda **_kwargs: _MissingRuntime())
 
         with patch('tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps.get_current_active_user', return_value=mock_user):
@@ -1720,9 +1745,11 @@ class TestWebSocketEndpoints:
 class TestErrorHandling:
     """Test API error handling."""
 
-    def test_unauthorized_access(self, client):
+    def test_unauthorized_access(self, client, monkeypatch):
 
         """Test accessing endpoints without authentication."""
+        monkeypatch.setenv("TEST_MODE", "false")
+        monkeypatch.setenv("TLDW_TEST_MODE", "false")
         response = client.get("/api/v1/prompt-studio/projects")
         assert response.status_code == 401
 

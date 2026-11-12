@@ -30,17 +30,15 @@ Rebase PR #2397 onto latest dev, address review comments from Gemini, Qodo, and 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Rebased the PR branch onto origin/dev at 5a8317aa4968f06652abde6b08a0c1a1fc0063bd using a scoped rebase that dropped the temporary stacked base.
 - Resolved Chatbook conflicts against dev, keeping OpenWebUI hydration/preview behavior and Chatbook v1.1 format-version forwarding.
 - Dropped the Explainer-specific Chatbook v1.1 producer/test/docs slice because latest dev does not contain the Explainer modules or content type; kept generic v1.1 helpers, preview, inventory, and import validation behavior.
 - Addressed review comments: explicit file_path preference for required import payloads and conversation attachments, timezone-aware core job timestamps, specific nosec rationale, module/helper docstrings, typed format-version validator, off-thread file inventory hashing, schema-required file_inventory, test markers, Pydantic ValidationError coverage, and v1.1 preview manifest filtering from the rebased branch.
 - Verification before commit: Chatbook focused suite passed 64 tests, JSON schema parsed with python -m json.tool, git diff --check passed, and Bandit on touched Python scope reported errors=[] and results=[].
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Pushed the rebased branch to codex/chatbook-v1-1-rollout-pr, confirmed PR #2397 baseRefName=dev, and resolved all live review threads after they became outdated on the rebased head. GitHub Actions were triggered by the pushed head; use the live PR rollup for the current queued/in-progress/pass/fail state.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

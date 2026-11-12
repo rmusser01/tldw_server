@@ -686,15 +686,7 @@ export const SourceForm: React.FC<SourceFormProps> = ({ mode, source, preset }) 
             variant="info"
             title={t("sources:form.archiveHint", "Upload archive after creation")}
           />
-        ) : (
-          <DesignSystemAlert
-            variant="info"
-            title={t(
-              "sources:form.gitRepositoryHint",
-              "Git repository details are configured below."
-            )}
-          />
-        )}
+        ) : null}
 
         <div className="pt-4">
           <Button

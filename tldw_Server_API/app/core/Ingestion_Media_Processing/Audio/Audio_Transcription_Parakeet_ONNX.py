@@ -17,7 +17,8 @@
 
 import json
 import os
-from pathlib import Path, PureWindowsPath
+import threading
+from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
 import numpy as np
@@ -40,6 +41,9 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_execution_con
     require_local_execution_route,
     validate_stt_loaded_runtime,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
+    is_explicit_local_model_path as _is_explicit_local_model_path,
+)
 
 try:
     import onnxruntime as ort
@@ -53,8 +57,11 @@ except ImportError:
     snapshot_download = None
     logger.warning("huggingface_hub not installed. Install with: pip install huggingface_hub")
 
-# Global cache for model and tokenizer
+# Global cache for model and tokenizer. Loads run under the lock so concurrent
+# misses on one key load once; cached hits skip the lock.
+# ponytail: one module lock serialises loads of different models too; per-key locks if that matters.
 _onnx_model_cache: dict[str, Any] = {}
+_onnx_model_cache_lock = threading.Lock()
 _PARAKEET_ONNX_ALLOW_PATTERNS = [
     "*.onnx",
     "**/*.onnx",
@@ -579,15 +586,6 @@ def _config_declares_parakeet_tdt(model_dir: Path) -> bool:
     return isinstance(config, dict) and config.get("model_type") == "nemo-conformer-tdt"
 
 
-def _is_explicit_local_model_path(model_path: str) -> bool:
-    """Recognize unambiguous local paths without requiring them to exist."""
-    return bool(
-        Path(model_path).expanduser().is_absolute()
-        or PureWindowsPath(model_path).is_absolute()
-        or model_path.startswith(("./", "../", ".\\", "..\\", "~/", "~\\"))
-    )
-
-
 def _load_parakeet_features_size(config_path: Path, model_dir: Path) -> int | None:
     """Read the positive integer feature count required by onnx-asr."""
     try:
@@ -767,8 +765,6 @@ def load_parakeet_onnx_model(
     Returns:
         Tuple of (ONNX session, tokenizer) or (None, None) if loading fails
     """
-    global _onnx_model_cache
-
     global ort
     planned = execution_route is not None
     if ort is None or not hasattr(ort, 'InferenceSession'):
@@ -832,21 +828,44 @@ def load_parakeet_onnx_model(
     )
 
     cache_key = f"{model_path}_{revision or ''}_{device}"
-    if cache_key in _onnx_model_cache:
-        logger.debug(
-            "Using cached planned local ONNX model"
-            if planned
-            else f"Using cached ONNX model: {model_path}"
-        )
-        cached_session, cached_tokenizer = _onnx_model_cache[cache_key]
-        if execution_route is None:
-            return cached_session, cached_tokenizer
-        return _onnx_loaded_runtime(
-            execution_route,
-            cached_session,
-            cached_tokenizer,
-        )
+    if cache_key not in _onnx_model_cache:
+        with _onnx_model_cache_lock:
+            if cache_key not in _onnx_model_cache:
+                return _load_parakeet_onnx_uncached(
+                    model_path,
+                    device,
+                    cache_key=cache_key,
+                    revision=revision,
+                    allow_download=allow_download,
+                    planned=planned,
+                    execution_route=execution_route,
+                )
+    logger.debug(
+        "Using cached planned local ONNX model"
+        if planned
+        else f"Using cached ONNX model: {model_path}"
+    )
+    cached_session, cached_tokenizer = _onnx_model_cache[cache_key]
+    if execution_route is None:
+        return cached_session, cached_tokenizer
+    return _onnx_loaded_runtime(
+        execution_route,
+        cached_session,
+        cached_tokenizer,
+    )
 
+
+def _load_parakeet_onnx_uncached(
+    model_path: str,
+    device: str,
+    *,
+    cache_key: str,
+    revision: Optional[str],
+    allow_download: bool,
+    planned: bool,
+    execution_route: SttExecutionRoute | None,
+) -> tuple[Any, Any] | SttLoadedRuntime:
+    """Load and cache the ONNX bundle; caller holds _onnx_model_cache_lock."""
     try:
         # Check if it's a local path or HuggingFace repo
         model_dir = Path(model_path).expanduser()

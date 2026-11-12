@@ -1,3 +1,4 @@
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({ useQuickIngestAuthority: () => 'verified-fixture', quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-fixture', requestScope: { config: { serverUrl: 'http://localhost:8000', authMode: 'multi-user' }, userId: 'fixture' }, isCurrent: () => true }) } }))
 import React from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -6,6 +7,7 @@ import axe from 'axe-core'
 import ViewMediaPage from '../ViewMediaPage'
 
 const mocks = vi.hoisted(() => ({
+  queryClient: { removeQueries: vi.fn() },
   queryData: [] as Array<any>,
   detailSequencesById: {} as Record<string, Array<{ ok: boolean; value: any }>>,
   refetch: vi.fn(),
@@ -40,7 +42,9 @@ vi.mock('@tanstack/react-query', () => ({
     refetch: mocks.refetch,
     isLoading: false,
     isFetching: false
-  })
+  }),
+  // useMediaSearch drops its cached results through the client on account changes.
+  useQueryClient: () => ({ removeQueries: vi.fn() })
 }))
 
 vi.mock('@plasmohq/storage', () => ({

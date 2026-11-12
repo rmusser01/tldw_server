@@ -9,10 +9,11 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.endpoints import notes_graph_suggestions as endpoint
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware, chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Notes_Graph import suggestion_api, suggestion_provider
 from tldw_Server_API.app.core.Sync.v2 import notes_link_coordinator, server_origin
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -34,6 +35,7 @@ def fresh_suggestions(request, tmp_path, monkeypatch):
     monkeypatch.setattr(suggestion_provider, "get_default_model_for_provider", lambda _provider: None)
     monkeypatch.delenv("NOTES_GRAPH_SUGGESTIONS_WORKER_ENABLED", raising=False)
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(endpoint.router, prefix="/api/v1/notes")
     app.dependency_overrides[endpoint.get_request_user] = lambda: SimpleNamespace(id=1, id_str="1")
     app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: db
@@ -41,7 +43,7 @@ def fresh_suggestions(request, tmp_path, monkeypatch):
     app.dependency_overrides[endpoint._require_suggestion_permissions] = lambda: AuthPrincipal(
         kind="user", user_id=1, roles=["admin"], permissions=[], is_admin=True
     )
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         for dep in getattr(getattr(route, "dependant", None), "dependencies", []):
             if getattr(dep.call, "_tldw_token_scope", False) or getattr(dep.call, "_tldw_rate_limit_resource", None):
                 app.dependency_overrides[dep.call] = lambda: None

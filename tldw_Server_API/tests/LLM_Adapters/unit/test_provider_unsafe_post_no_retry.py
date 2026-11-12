@@ -45,7 +45,7 @@ def test_provider_post_is_not_replayed_after_ambiguous_dispatch(
 ) -> None:
     """Provider POSTs stay single-attempt for both request facade branches."""
     from tldw_Server_API.app.core import http_client
-    from tldw_Server_API.app.core.LLM_Calls import chat_calls, http_helpers
+    from tldw_Server_API.app.core.LLM_Calls import http_helpers
 
     calls = {"n": 0}
     sentinel = f"private-{provider}-{failure}-failure"
@@ -91,12 +91,11 @@ def test_provider_post_is_not_replayed_after_ambiguous_dispatch(
         clients.append(client)
         return client
 
+    # The production session: streaming delegates to the legacy facade (its own
+    # client, closed with the session); non-streaming borrows the shared cached
+    # client, which the session must not close.
     monkeypatch.setattr(http_helpers, "_hc_create_client", _create_client)
-    monkeypatch.setattr(
-        chat_calls,
-        "create_session_with_retries",
-        http_helpers.create_session_with_retries,
-    )
+    monkeypatch.setattr(http_client, "_get_httpx_client", lambda **_kwargs: _create_client())
     monkeypatch.setattr(
         http_client,
         "_validate_egress_or_raise",
@@ -127,4 +126,12 @@ def test_provider_post_is_not_replayed_after_ambiguous_dispatch(
         exc_info.value.__context__,
         client.stream_context_exits,
         client.close_calls,
-    ) == (1, expected_status, True, None, None, int(streaming), 1)
+    ) == (1, expected_status, True, None, None, int(streaming), int(streaming))
+
+
+@pytest.mark.unit
+def test_session_factory_returns_the_production_shim_under_pytest() -> None:
+    """Tests must exercise the object production uses, not a pytest-only facade."""
+    from tldw_Server_API.app.core.LLM_Calls import chat_calls
+
+    assert isinstance(chat_calls.create_session_with_retries(total=1), chat_calls._SessionShim)

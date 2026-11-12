@@ -1,39 +1,183 @@
 import { browser } from "wxt/browser"
 
 import {
-  getRecentChatFromCopilot
+  getRecentChatFromCopilot,
+  getFullChatData
 } from "@/db/dexie/helpers"
 import { copilotResumeLastChat } from "@/services/app"
 import {
   getChatSettingsForKey,
   resolveChatSettingsKey
 } from "@/services/chat-settings"
-import type { SidepanelChatSnapshot, SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
+import { useSidepanelChatTabsStore, type SidepanelChatSnapshot, type SidepanelChatTab } from "@/store/sidepanel-chat-tabs"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { createSafeStorage } from "@/utils/safe-storage"
+import { isChatDraftHandle } from "@/utils/chat-draft-address"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import {
   getSidepanelDraftStorageKey,
   getSidepanelOverlayResumeMarkerKey
 } from "@/utils/sidepanel-overlay-resume"
-import type { ChatHistory, Message as ChatMessage } from "~/store/option"
 
-export type LegacySidepanelChatSnapshot = {
-  history: ChatHistory
-  messages: ChatMessage[]
-  chatMode: "normal" | "rag" | "vision"
-  historyId: string | null
-}
-
-type SidepanelTabsState = {
+export type SidepanelTabsState = {
+  version: 2
+  ownerKey: string
   tabs: SidepanelChatTab[]
   activeTabId: string | null
   snapshotsById: Record<string, SidepanelChatSnapshot>
 }
 
-export const getTabsStorageKey = (id: number | null | undefined) =>
-  id != null ? `sidepanelChatTabsState:tab-${id}` : "sidepanelChatTabsState"
+export const getTabsStorageKey = (id: number | null | undefined, ownerKey: string) =>
+  `sidepanelChatTabsState:v2:${encodeURIComponent(ownerKey)}:${id !== null && id !== undefined ? `tab-${id}` : "global"}`
 
-export const getLegacyStorageKey = (id: number | null | undefined) =>
-  id != null ? `sidepanelChatState:tab-${id}` : "sidepanelChatState"
+/** Durable tabs retain setup, draft locators and owned Temporary transcripts. */
+export const durableSidepanelTabs = (
+  state: SidepanelTabsState,
+  ownerHash: string,
+  newChatLabel = "New chat"
+): SidepanelTabsState => {
+  const snapshotsById: SidepanelTabsState["snapshotsById"] = {}
+  const tabs = state.tabs.map((tab) => {
+    const snapshot = state.snapshotsById[tab.id]
+    if (!snapshot) return { ...tab }
+    const handle =
+      isChatDraftHandle(snapshot.chatDraftHandle) &&
+      snapshot.chatDraftHandle.ownerHash === ownerHash &&
+      (snapshot.chatDraftHandle.address.kind !== "fresh" ||
+        snapshot.chatDraftHandle.address.temporary ===
+          snapshot.temporaryChat) &&
+      (!snapshot.temporaryChat ||
+        snapshot.chatDraftHandle.address.kind === "fresh")
+        ? snapshot.chatDraftHandle
+        : null
+    const fresh = handle?.address.kind === "fresh"
+    const clearHistory = snapshot.temporaryChat || fresh
+    const retainTemporary =
+      snapshot.temporaryChat &&
+      fresh &&
+      !snapshot.serverChatId &&
+      (snapshot.historyId === null || snapshot.historyId === "temp") &&
+      Array.isArray(snapshot.history) &&
+      Array.isArray(snapshot.messages) &&
+      snapshot.history.every(
+        (row) =>
+          row &&
+          ["user", "assistant", "system"].includes(row.role) &&
+          typeof row.content === "string"
+      ) &&
+      snapshot.messages.every(
+        (row) =>
+          row &&
+          typeof row.isBot === "boolean" &&
+          typeof row.name === "string" &&
+          typeof row.message === "string"
+      )
+    snapshotsById[tab.id] = {
+      ...snapshot,
+      selectedQuickPrompt: null,
+      chatDraftAddress: null,
+      chatDraftHandle: handle,
+      ...(clearHistory
+        ? {
+            history: [],
+            messages: [],
+            historyId: null,
+            serverChatId: null,
+            historySelectionReference: null,
+            serverChatState: null,
+            serverChatTopic: null,
+            serverChatClusterId: null,
+            serverChatSource: null,
+            serverChatExternalRef: null
+          }
+        : handle?.address.kind === "native"
+          ? { historyId: null }
+          : {}),
+      ...(retainTemporary
+        ? { history: snapshot.history, messages: snapshot.messages }
+        : {}),
+      ...(snapshot.temporaryChat ? { queuedMessages: [] } : {})
+    }
+    return {
+      ...tab,
+      ...(clearHistory
+        ? { historyId: null, serverChatId: null, serverChatTopic: null }
+        : handle?.address.kind === "native"
+          ? { historyId: null }
+          : {}),
+      ...(snapshot.temporaryChat
+        ? { label: newChatLabel, labelSource: "auto" as const }
+        : {})
+    }
+  })
+  return { ...state, tabs, snapshotsById }
+}
+
+/** Recover a completed durable reply when its tab snapshot still has a stream cursor. */
+const recoverCompletedSnapshotReplies = async (
+  snapshot: SidepanelChatSnapshot,
+  ownerKey: string,
+  isCurrent: () => boolean
+): Promise<SidepanelChatSnapshot> => {
+  const pending = snapshot.messages?.filter(message => message.isBot && message.id &&
+    !message.serverMessageId && message.message.endsWith("▋")) || []
+  if (!snapshot.historyId || pending.length === 0 || !isCurrent()) return snapshot
+  try {
+    const saved = await getFullChatData(snapshot.historyId)
+    if (!isCurrent() || !saved || saved.historyInfo.id !== snapshot.historyId ||
+        saved.historyInfo.server_scope_key !== ownerKey ||
+        (saved.historyInfo.server_chat_id ?? null) !== snapshot.serverChatId) return snapshot
+    const messages = snapshot.messages.map(message => {
+      if (!pending.includes(message)) return message
+      const matches = saved.messages.filter(row => row.id === message.id &&
+        row.history_id === snapshot.historyId && row.role === "assistant" &&
+        (row.parent_message_id ?? null) === (message.parentMessageId ?? null))
+      const completed = matches.length === 1 ? matches[0] : undefined
+      if (!completed || !completed.content.trim() || completed.content.endsWith("▋") ||
+          !completed.content.startsWith(message.message.slice(0, -1))) return message
+      return { ...message, message: completed.content,
+        reasoning_time_taken: completed.reasoning_time_taken ?? message.reasoning_time_taken,
+        serverMessageId: completed.serverMessageId ?? message.serverMessageId,
+        serverMessageVersion: completed.serverMessageVersion ?? message.serverMessageVersion }
+    })
+    return { ...snapshot, messages }
+  } catch {
+    // The recoverable tab snapshot remains usable if the local mirror is unavailable.
+    return snapshot
+  }
+}
+
+/** Ownerless legacy keys are deliberately left untouched and never adopted. */
+export const readSidepanelTabs = async (
+  storage: Pick<ReturnType<typeof createSafeStorage>, "get">,
+  tabId: number | null,
+  ownerKey: string,
+  isCurrent: () => boolean,
+  ownerHash: string
+): Promise<SidepanelTabsState | null> => {
+  const keys = [getTabsStorageKey(tabId, ownerKey)]
+  if (tabId !== null) keys.push(getTabsStorageKey(null, ownerKey))
+  for (const key of keys) {
+    if (!isCurrent()) return null
+    const candidate = await storage.get<SidepanelTabsState>(key)
+    if (!isCurrent()) return null
+    if (candidate?.version === 2 && candidate.ownerKey === ownerKey &&
+        Array.isArray(candidate.tabs) && candidate.snapshotsById &&
+        typeof candidate.snapshotsById === "object" &&
+        candidate.tabs.every(tab => typeof tab?.id === "string")) {
+      const normalized = durableSidepanelTabs(candidate, ownerHash)
+      const snapshotsById = normalized.snapshotsById
+      for (const tab of normalized.tabs) {
+        if (!isCurrent()) return null
+        const snapshot = snapshotsById[tab.id]
+        if (snapshot) snapshotsById[tab.id] = await recoverCompletedSnapshotReplies(snapshot, ownerKey, isCurrent)
+      }
+      return isCurrent() ? { ...normalized, snapshotsById } : null
+    }
+  }
+  return null
+}
 
 export const readSidepanelRuntimeTabId = async (): Promise<number | null> => {
   try {
@@ -82,6 +226,8 @@ const hasRestorableSnapshot = async (
     return false
   }
 
+  if (isChatDraftHandle(snapshot.chatDraftHandle)) return true
+
   if (
     snapshot.history.length > 0 ||
     snapshot.messages.length > 0 ||
@@ -99,54 +245,31 @@ const hasRestorableSnapshot = async (
 }
 
 export const hasResumableSidepanelChat = async (): Promise<boolean> => {
+  const revision = useSidepanelChatTabsStore.getState().revision
+  let snapshot: ServicePromptSnapshot | undefined
   try {
+    snapshot = await loadServicePromptSnapshot([])
+    const lease = snapshot
+    const current = () => !lease.scopeSignal.aborted && !lease.scopeInvalidatedSignal.aborted &&
+      useSidepanelChatTabsStore.getState().revision === revision
+    if (!current()) return false
     const tabId = await readSidepanelRuntimeTabId()
-    const storage = createSafeStorage({
-      area: "local"
-    })
-
-    const keysToTry: string[] = [getTabsStorageKey(tabId)]
-    if (tabId != null) {
-      keysToTry.push(getTabsStorageKey(null))
+    const storage = createSafeStorage({ area: "local" })
+    const tabs = await readSidepanelTabs(storage, tabId, serverChatMirrorOwnerKey(snapshot), current, chatDraftOwnerKey(snapshot.requestScope))
+    if (!current()) return false
+    if (tabs) {
+      const restorable = await Promise.all(tabs.tabs.map(tab =>
+        hasRestorableSnapshot(tabs.snapshotsById[tab.id], tab, storage)))
+      if (!current()) return false
+      if (restorable.some(Boolean)) return true
     }
-
-    for (const key of keysToTry) {
-      // eslint-disable-next-line no-await-in-loop
-      const candidate = (await storage.get(key)) as SidepanelTabsState | null
-      if (
-        candidate &&
-        Array.isArray(candidate.tabs) &&
-        (await Promise.all(
-          candidate.tabs.map((tab) =>
-            hasRestorableSnapshot(candidate.snapshotsById?.[tab.id], tab, storage)
-          )
-        )).some(Boolean)
-      ) {
-        return true
-      }
-    }
-
-    const legacyKeysToTry: string[] = [getLegacyStorageKey(tabId)]
-    if (tabId != null) {
-      legacyKeysToTry.push(getLegacyStorageKey(null))
-    }
-
-    for (const key of legacyKeysToTry) {
-      // eslint-disable-next-line no-await-in-loop
-      const candidate = (await storage.get(key)) as
-        | LegacySidepanelChatSnapshot
-        | null
-      if (candidate && Array.isArray(candidate.messages)) {
-        return true
-      }
-    }
-
-    const isEnabled = await copilotResumeLastChat()
-    if (!isEnabled) return false
-
-    const recentChat = await getRecentChatFromCopilot()
-    return Boolean(recentChat)
+    const enabled = await copilotResumeLastChat()
+    if (!current() || !enabled) return false
+    const recentChat = await getRecentChatFromCopilot(snapshot)
+    return current() && Boolean(recentChat)
   } catch {
     return false
+  } finally {
+    snapshot?.release()
   }
 }

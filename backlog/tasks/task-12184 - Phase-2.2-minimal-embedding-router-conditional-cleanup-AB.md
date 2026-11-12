@@ -32,9 +32,9 @@ Continue issue #1116 Phase 2.2 by converting the minimal-test app optional vecto
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a narrow lazy-router tranche for minimal vector/embedding routers. Added red/green router-group coverage that proves vector_stores_openai, embeddings_v5_production_enhanced, and media_embeddings defer module import and router attribute access until ImportedRouterSpec resolution. Updated an adjacent older test expectation so those modules are no longer treated as unrelated eager imports.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

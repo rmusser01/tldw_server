@@ -53,12 +53,12 @@ Note: Backlog MCP `task_view` returned `TASK_NOT_FOUND` for `TASK-145.2`; this w
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - TDD red run: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Evaluations/test_recipe_embeddings_retrieval.py -q` failed with 4 expected failures for missing guided manifest metadata, missing `run_config` validation support, and incomplete recommendation metadata.
 - Green verification: focused pytest passed with 8 tests.
 - Security verification: `python -m bandit -r tldw_Server_API/app/core/Evaluations/recipes/embeddings_retrieval.py -f json -o /tmp/bandit_embeddings_recipe_task1.json` completed with zero findings.
 - Hygiene verification: `git diff --check` completed with no output.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

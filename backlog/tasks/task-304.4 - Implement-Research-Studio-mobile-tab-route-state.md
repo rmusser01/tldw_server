@@ -43,7 +43,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a focused Research Studio route-state helper for tab parsing and fallback behavior, then wired WorkspacePlayground initial activeTab to ?tab route state. The component now initializes mobile tabs from ?tab=sources|chat|studio and applies first-load pane focus on desktop for sources or studio without changing the desktop multi-pane layout.
 
 TDD notes: helper tests first caught accepted and invalid tab parsing. Responsive tests failed before implementation because ?tab=studio still opened Chat and desktop ?tab=studio did not uncollapse/focus Studio. After wiring the helper into WorkspacePlayground, the same tests passed.
@@ -56,7 +56,7 @@ Verification run:
 - git diff --check -> clean.
 
 Bandit was not run because this slice touched only frontend TypeScript, frontend tests, and Backlog metadata; no Python/backend code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

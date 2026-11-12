@@ -15,6 +15,8 @@ import {
   type AudioStudioTrack,
 } from "@/store/audio-studio";
 
+import { useAudioStudioSession } from "./AudioStudioSession";
+
 const { Text } = Typography;
 
 type ClipDraft = {
@@ -191,6 +193,7 @@ const triggerBrowserDownload = (url: string, filename?: string | null) => {
 export const TimelineEditor: React.FC<TimelineEditorProps> = ({
   artifacts = EMPTY_ARTIFACTS,
 }) => {
+  const session = useAudioStudioSession();
   const activeProject = useAudioStudioStore((state) => state.activeProject);
   const clips = activeProject?.clips ?? EMPTY_CLIPS;
   const tracks = activeProject?.tracks ?? EMPTY_TRACKS;
@@ -308,7 +311,9 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
       ? fetchAudioStudioArtifactBlob(
           activeProject.project_id,
           selectedArtifact,
+          session?.options,
         ).then((blob) => {
+          session?.options.assertCurrent?.();
           if (
             cancelled ||
             previewStateKeyRef.current !== selectedPreviewKey
@@ -322,10 +327,12 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
           activeProject.project_id,
           selectedArtifact.artifact_id,
           "playback",
+          session?.options,
         ).then((ticket) => ticket.ticket_url);
 
     void loadPreview
       .then((url) => {
+        session?.options.assertCurrent?.();
         if (!url || cancelled) return;
         previewStateKeyRef.current = selectedPreviewKey;
         ticketRetryKeyRef.current = null;
@@ -350,6 +357,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
       }
     };
   }, [
+    session,
     activeProject?.project_id,
     selectedArtifact,
     selectedArtifactCanUseBlob,
@@ -440,8 +448,10 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
       activeProject.project_id,
       selectedArtifact.artifact_id,
       "playback",
+      session?.options,
     )
       .then((ticket) => {
+        session?.options.assertCurrent?.();
         if (previewStateKeyRef.current !== selectedPreviewKey) return;
         const ticketUrl = ticket.ticket_url;
         setPreviewUrl(ticketUrl);
@@ -479,10 +489,12 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
         activeProject.project_id,
         selectedArtifact.artifact_id,
         "download",
+        session?.options,
       );
       if (downloadStateKeyRef.current !== downloadStateKey) {
         return;
       }
+      session?.options.assertCurrent?.();
       triggerBrowserDownload(ticket.ticket_url, downloadFilename);
     } catch {
       if (downloadStateKeyRef.current === downloadStateKey) {
@@ -543,7 +555,7 @@ export const TimelineEditor: React.FC<TimelineEditorProps> = ({
             onClick={() => setIsPreviewing((current) => !current)}
             disabled={clips.length === 0}
           >
-            {isPreviewing ? "Pause timeline preview" : "Play timeline preview"}
+            {isPreviewing ? "Pause playhead animation" : "Animate playhead"}
           </Button>
           <Text className="text-xs tabular-nums">
             {formatSeconds(playheadMs)} / {formatSeconds(timelineEndMs)}

@@ -11,8 +11,8 @@ from typing import Any, Protocol
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media.document_outline import (
     MAX_OUTLINE_FILE_SIZE,
@@ -36,6 +36,8 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_document_version,
     get_latest_transcription,
     get_media_transcripts,
+    list_chunk_metadata,
+    list_document_structure_headings,
     lookup_section_by_heading,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
@@ -333,11 +335,6 @@ def _to_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-
-
-def _is_postgres_backend(db: MediaNavigationDb) -> bool:
-    backend_type = str(getattr(db, "backend_type", "")).lower()
-    return "postgres" in backend_type
 
 
 def _normalize_section_path(path_value: Any) -> list[str]:
@@ -740,15 +737,8 @@ def _extract_document_structure_nodes(
     media_id: int,
     db: MediaNavigationDb,
 ) -> list[dict[str, Any]]:
-    bool_false = False if _is_postgres_backend(db) else 0
-    query = """
-        SELECT id, parent_id, level, title, start_char, end_char, order_index, path
-        FROM DocumentStructureIndex
-        WHERE media_id = ? AND deleted = ? AND kind IN ('section', 'header')
-        ORDER BY COALESCE(level, 0) ASC, COALESCE(order_index, 2147483647) ASC, start_char ASC, id ASC
-    """
     try:
-        rows = db.execute_query(query, (media_id, bool_false)).fetchall() or []
+        rows = list_document_structure_headings(db, media_id)
     except Exception:
         logger.warning("Navigation source document_structure_index query failed")
         return []
@@ -1043,15 +1033,8 @@ def _extract_chunk_metadata_nodes(
     media_id: int,
     db: MediaNavigationDb,
 ) -> list[dict[str, Any]]:
-    bool_false = False if _is_postgres_backend(db) else 0
-    query = """
-        SELECT chunk_index, start_char, end_char, metadata
-        FROM UnvectorizedMediaChunks
-        WHERE media_id = ? AND deleted = ? AND metadata IS NOT NULL
-        ORDER BY chunk_index ASC, id ASC
-    """
     try:
-        rows = db.execute_query(query, (media_id, bool_false)).fetchall() or []
+        rows = list_chunk_metadata(db, media_id)
     except Exception:
         logger.warning("Navigation source chunk_metadata query failed")
         return []

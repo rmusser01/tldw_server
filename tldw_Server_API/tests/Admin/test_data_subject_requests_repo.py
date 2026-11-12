@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
-import uuid
 
 import pytest
+
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 
 def _setup_env(tmp_path) -> None:
@@ -16,70 +17,45 @@ def _setup_env(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_repo_create_request_is_idempotent(tmp_path):
+async def test_repo_create_request_is_idempotent(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        1,
-        "admin_requester",
-        "admin_requester@example.com",
-        "hash",
-        "admin",
-        1,
-        str(uuid.uuid4()),
-    )
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        7,
-        "subject_user",
-        "subject_user@example.com",
-        "hash",
-        "user",
-        1,
-        str(uuid.uuid4()),
-    )
+    admin_id = await ensure_test_user(pool, "admin_requester", "admin_requester@example.com", role="admin")
+    subject_id = await ensure_test_user(pool, "subject_user", "subject_user@example.com")
     repo = AuthnzDataSubjectRequestsRepo(db_pool=pool)
     await repo.ensure_schema()
 
     first = await repo.create_or_get_request(
         client_request_id="dsr-1",
         requester_identifier="user@example.com",
-        resolved_user_id=7,
+        resolved_user_id=subject_id,
         request_type="export",
         status="recorded",
         selected_categories=["media_records"],
         preview_summary=[{"key": "media_records", "count": 3}],
         coverage_metadata={"supported": ["media_records"]},
-        requested_by_user_id=1,
+        requested_by_user_id=admin_id,
         notes=None,
     )
     second = await repo.create_or_get_request(
         client_request_id="dsr-1",
         requester_identifier="user@example.com",
-        resolved_user_id=7,
+        resolved_user_id=subject_id,
         request_type="export",
         status="recorded",
         selected_categories=["media_records"],
         preview_summary=[{"key": "media_records", "count": 3}],
         coverage_metadata={"supported": ["media_records"]},
-        requested_by_user_id=1,
+        requested_by_user_id=admin_id,
         notes=None,
     )
 
@@ -97,16 +73,15 @@ async def test_repo_create_request_is_idempotent(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch):
+async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()
@@ -124,58 +99,21 @@ async def test_repo_ensure_schema_surfaces_sqlite_failures(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_repo_list_requests_scopes_by_org_ids(tmp_path):
+async def test_repo_list_requests_scopes_by_org_ids(tmp_path, fresh_services):
     _setup_env(tmp_path)
 
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
         AuthnzDataSubjectRequestsRepo,
     )
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
 
     pool = await get_db_pool()
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        1,
-        "admin_requester",
-        "admin_requester@example.com",
-        "hash",
-        "admin",
-        1,
-        str(uuid.uuid4()),
-    )
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        7,
-        "subject_user_one",
-        "subject_user_one@example.com",
-        "hash",
-        "user",
-        1,
-        str(uuid.uuid4()),
-    )
-    await pool.execute(
-        """
-        INSERT INTO users (id, username, email, password_hash, role, is_active, uuid)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        8,
-        "subject_user_two",
-        "subject_user_two@example.com",
-        "hash",
-        "user",
-        1,
-        str(uuid.uuid4()),
-    )
+    admin_id = await ensure_test_user(pool, "admin_requester", "admin_requester@example.com", role="admin")
+    subject_id = await ensure_test_user(pool, "subject_user_one", "subject_user_one@example.com")
+    subject_two_id = await ensure_test_user(pool, "subject_user_two", "subject_user_two@example.com")
 
     repo = AuthnzDataSubjectRequestsRepo(db_pool=pool)
     await repo.ensure_schema()
@@ -184,40 +122,44 @@ async def test_repo_list_requests_scopes_by_org_ids(tmp_path):
         "INSERT INTO organizations (name, slug, owner_user_id) VALUES (?, ?, ?)",
         "Scoped Org",
         "scoped-org",
-        1,
+        admin_id,
     )
     org_row = await pool.fetchone("SELECT id FROM organizations WHERE slug = ?", "scoped-org")
     org_id = int(org_row["id"])
-    await pool.execute(
-        "INSERT INTO org_members (org_id, user_id, role, status) VALUES (?, ?, ?, ?)",
-        org_id,
-        7,
-        "member",
-        "active",
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _execute_membership_scope_sql,
     )
+
+    async with pool.transaction() as conn:
+        await _execute_membership_scope_sql(
+            conn,
+            "INSERT INTO org_members (org_id, user_id, role, status) VALUES (?, ?, ?, ?)",
+            (org_id, subject_id, "member", "active"),
+            backend="sqlite",
+        )
 
     await repo.create_or_get_request(
         client_request_id="dsr-org-1",
         requester_identifier="subject_user_one@example.com",
-        resolved_user_id=7,
+        resolved_user_id=subject_id,
         request_type="access",
         status="recorded",
         selected_categories=["media_records"],
         preview_summary=[{"key": "media_records", "count": 1}],
         coverage_metadata={"supported": ["media_records"]},
-        requested_by_user_id=1,
+        requested_by_user_id=admin_id,
         notes=None,
     )
     await repo.create_or_get_request(
         client_request_id="dsr-org-2",
         requester_identifier="subject_user_two@example.com",
-        resolved_user_id=8,
+        resolved_user_id=subject_two_id,
         request_type="access",
         status="recorded",
         selected_categories=["media_records"],
         preview_summary=[{"key": "media_records", "count": 2}],
         coverage_metadata={"supported": ["media_records"]},
-        requested_by_user_id=1,
+        requested_by_user_id=admin_id,
         notes=None,
     )
 

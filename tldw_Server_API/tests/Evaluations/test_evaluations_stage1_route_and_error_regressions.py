@@ -15,6 +15,7 @@ from tldw_Server_API.app.core import config as config_mod
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 @contextmanager
@@ -89,7 +90,7 @@ def _reload_main_app(
 def _route_method_count(app: FastAPI, path: str, method: str) -> int:
     method_upper = method.upper()
     count = 0
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         route_path = getattr(route, "path", None)
         route_methods = getattr(route, "methods", set()) or set()
         if route_path == path and method_upper in route_methods:
@@ -99,7 +100,7 @@ def _route_method_count(app: FastAPI, path: str, method: str) -> int:
 
 def test_main_mounts_evaluations_routes_in_minimal_startup(monkeypatch):
     app = _reload_main_app(monkeypatch, minimal=True)
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    paths = {route.path for route in iter_served_routes(app.routes) if hasattr(route, "path")}
     assert "/api/v1/evaluations/geval" in paths
     assert "/api/v1/evaluations/rate-limits" in paths
     assert "/api/v1/evaluations/embeddings/abtest" in paths
@@ -107,7 +108,7 @@ def test_main_mounts_evaluations_routes_in_minimal_startup(monkeypatch):
 
 def test_main_mounts_evaluations_routes_in_full_startup(monkeypatch):
     app = _reload_main_app(monkeypatch, minimal=False)
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    paths = {route.path for route in iter_served_routes(app.routes) if hasattr(route, "path")}
     assert "/api/v1/evaluations/geval" in paths
     assert "/api/v1/evaluations/rag" in paths
     assert "/api/v1/evaluations/embeddings/abtest" in paths
@@ -120,7 +121,7 @@ def test_main_omits_evaluations_routes_in_minimal_startup_when_disabled(monkeypa
         routes_enable=None,
         routes_disable="research,evaluations",
     )
-    paths = {route.path for route in app.routes if hasattr(route, "path")}
+    paths = {route.path for route in iter_served_routes(app.routes) if hasattr(route, "path")}
     assert "/api/v1/evaluations/geval" not in paths
     assert "/api/v1/evaluations/rag" not in paths
     assert "/api/v1/evaluations/embeddings/abtest" not in paths
@@ -145,7 +146,7 @@ def test_main_has_no_duplicate_method_path_pairs_in_full_startup(monkeypatch):
     allowed_methods = {"GET", "POST", "PUT", "PATCH", "DELETE"}
     path_prefix = "/api/v1/evaluations/"
 
-    for route in app.routes:
+    for route in iter_served_routes(app.routes):
         path = getattr(route, "path", None)
         methods = getattr(route, "methods", None) or set()
         if not path or not str(path).startswith(path_prefix):
@@ -241,7 +242,6 @@ def test_geval_capacity_exhaustion_returns_detached_503_and_closes_runtime(
     monkeypatch.setattr(service_module, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     monkeypatch.setattr(ms_g_eval, "run_geval", _forbidden_geval)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: _WebhookManager())
     monkeypatch.setattr(
@@ -438,7 +438,6 @@ def test_sync_evaluation_capacity_exhaustion_is_detached_503(
     monkeypatch.setattr(rag_evaluator, "analyze", forbidden_analyze)
     monkeypatch.setattr(response_quality_evaluator, "analyze", forbidden_analyze)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: WebhookManager())
     monkeypatch.setattr(
@@ -597,7 +596,6 @@ def test_response_quality_capacity_failure_drains_admitted_siblings_before_runti
     monkeypatch.setattr(response_quality_evaluator, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(response_quality_evaluator, "analyze", blocking_analyze)
     monkeypatch.setattr(eval_unified, "_build_eval_credential_runtime", lambda **_kwargs: runtime)
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: AllowLimiter())
     monkeypatch.setattr(eval_unified, "_get_webhook_manager_for_user", lambda _uid: WebhookManager())
     monkeypatch.setattr(
@@ -940,7 +938,6 @@ def test_batch_geval_uses_stable_and_webhook_user_identity(monkeypatch):
                 "results": {"metrics": {"coherence": 0.9}},
             }
 
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(
         eval_unified,
         "_build_eval_credential_runtime",
@@ -980,6 +977,164 @@ def test_batch_geval_uses_stable_and_webhook_user_identity(monkeypatch):
     assert captured["requested_model"] is None
     assert captured["marked_handle"] is credential_handle
     assert captured["runtime_closed"] is True
+
+
+_LLM_EVAL_BODIES = {
+    "geval": {
+        "source_text": "source text long enough",
+        "summary": "summary text long enough",
+        "metrics": ["coherence"],
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+    "rag": {
+        "query": "What is context precision?",
+        "retrieved_contexts": ["Precision measures retrieved relevance."],
+        "generated_response": "It measures retrieved relevance.",
+        "metrics": ["context_precision"],
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+    "response-quality": {
+        "prompt": "What is RAG?",
+        "response": "RAG retrieves context.",
+        "api_name": "openai",
+        "model": "gpt-eval-test",
+    },
+}
+
+
+@pytest.mark.parametrize("route", ["geval", "rag", "response-quality"])
+def test_sync_evaluation_llm_quota_refuses_before_the_rate_limiter(monkeypatch, route):
+    """An over-quota user gets the 402 before the per-user rate limiter reserves anything."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    app = _build_eval_only_app(monkeypatch)
+
+    def _limiter_must_not_run(_uid):
+        raise AssertionError("the limiter ran")
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", _limiter_must_not_run)
+    refuse_llm_work(monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.post(f"/api/v1/evaluations/{route}", json=_LLM_EVAL_BODIES[route])
+
+    assert_llm_quota_402(response)
+
+
+def test_batch_evaluation_llm_quota_refuses_llm_types_and_admits_propositions(monkeypatch):
+    """A geval batch is refused with the 402; a propositions batch makes no LLM call and is not."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    app = _build_eval_only_app(monkeypatch)
+
+    class _AllowLimiter:
+        async def check_rate_limit(self, *_args, **_kwargs):
+            return True, {}
+
+    class _PropositionsService:
+        async def evaluate_propositions(self, **_kwargs):
+            return {"evaluation_id": "eval_props_1", "results": {"score": 1.0}}
+
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", lambda _uid: _AllowLimiter())
+    monkeypatch.setattr(
+        eval_unified, "get_unified_evaluation_service_for_user", lambda _uid: _PropositionsService()
+    )
+    refuse_llm_work(monkeypatch)
+
+    with TestClient(app) as client:
+        refused = client.post(
+            "/api/v1/evaluations/batch",
+            json={"evaluation_type": "geval", "parallel_workers": 1, "items": [_LLM_EVAL_BODIES["geval"]]},
+        )
+        admitted = client.post(
+            "/api/v1/evaluations/batch",
+            json={
+                "evaluation_type": "propositions",
+                "parallel_workers": 1,
+                "items": [{"extracted": ["Claim A"], "reference": ["Claim A"], "method": "jaccard", "threshold": 0.5}],
+            },
+        )
+
+    assert_llm_quota_402(refused)
+    assert admitted.status_code != 402, admitted.text
+
+
+def _past_the_limit_on_own_keys(monkeypatch, own: set[str]) -> tuple[list[str], list[bool]]:
+    """An over-limit user with their own key for the providers in ``own``; the rate limiter, next after
+    the quota check, answers 418 and records whether the request was marked admitted."""
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    asked: list[str] = []
+    marked: list[bool] = []
+
+    async def _own_key(_uid, provider):
+        """Stands in for the lookup (the boundary is under test)."""
+        asked.append(provider)
+        return provider in own
+
+    def _limiter_reached(_uid):
+        marked.append(current_llm_call_context().prechecked)
+        raise HTTPException(status_code=418, detail="the quota check let the request through")
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    monkeypatch.setattr(eval_unified, "get_user_rate_limiter_for_user", _limiter_reached)
+    refuse_llm_work(monkeypatch)
+    return asked, marked
+
+
+@pytest.mark.parametrize("route", ["geval", "rag", "response-quality"])
+def test_sync_evaluation_admits_an_over_limit_user_whose_judge_runs_on_their_own_key(monkeypatch, route):
+    """Past a limit, an evaluation whose judge provider is the user's own key goes on, unmarked (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    app = _build_eval_only_app(monkeypatch)
+    asked, marked = _past_the_limit_on_own_keys(monkeypatch, {"openai"})
+
+    with TestClient(app) as client:
+        admitted = client.post(f"/api/v1/evaluations/{route}", json=_LLM_EVAL_BODIES[route])
+        refused = client.post(f"/api/v1/evaluations/{route}", json={**_LLM_EVAL_BODIES[route], "api_name": "anthropic"})
+
+    assert admitted.status_code == 418, admitted.text
+    assert marked == [False]
+    assert_llm_quota_402(refused)
+    assert asked == ["openai", "anthropic"]
+
+
+@pytest.mark.parametrize(
+    ("second_provider", "admitted", "looked_up"),
+    [
+        ("groq", True, ["openai", "groq"]),
+        ("anthropic", False, ["openai", "anthropic"]),
+        (None, True, ["openai"]),  # an item without api_name is judged by OpenAI, so it is looked up once
+    ],
+    ids=["groq", "anthropic", "default"],
+)
+def test_batch_evaluation_admits_an_over_limit_user_only_when_every_items_judge_is_their_own_key(
+    monkeypatch, second_provider, admitted, looked_up
+):
+    """A batch names each item's provider; one item off the user's own keys refuses the batch (TASK-13956)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    app = _build_eval_only_app(monkeypatch)
+    asked, marked = _past_the_limit_on_own_keys(monkeypatch, {"openai", "groq"})
+    second = {**_LLM_EVAL_BODIES["geval"], "api_name": second_provider}
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/evaluations/batch",
+            json={"evaluation_type": "geval", "parallel_workers": 1, "items": [_LLM_EVAL_BODIES["geval"], second]},
+        )
+
+    if admitted:
+        assert response.status_code == 418, response.text
+        assert marked == [False]
+    else:
+        assert_llm_quota_402(response)
+    assert asked == looked_up
 
 
 def test_batch_client_teardown_poison_isolated_before_next_credential_resolution(
@@ -1030,7 +1185,6 @@ def test_batch_client_teardown_poison_isolated_before_next_credential_resolution
             }
 
     monkeypatch.setattr(llm_provider_overrides, "get_db_pool", _blocking_get_db_pool)
-    monkeypatch.setattr(eval_unified, "_is_eval_test_mode", lambda: True)
     monkeypatch.setattr(
         eval_unified,
         "_build_eval_credential_runtime",

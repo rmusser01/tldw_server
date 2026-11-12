@@ -83,3 +83,57 @@ def test_error_code_change_restarts_streak_without_quarantining_postgres(
         job_type="presentation.generate",
     )
     assert stats and stats[0]["quarantined"] == 0
+
+
+@pytest.mark.parametrize(
+    ("quarantine_kwargs", "expected_status"),
+    [({"quarantine": False}, "queued"), ({}, "quarantined")],
+    ids=["quarantine-off", "default"],
+)
+def test_fail_job_without_quarantine_keeps_retrying_postgres(monkeypatch, jobs_pg_dsn, quarantine_kwargs, expected_status):
+    monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", "2")
+    jm = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job = jm.create_job(domain="test", queue="default", job_type="t", payload={}, owner_user_id="u")
+    for _ in range(2):
+        with psycopg.connect(jobs_pg_dsn) as connection, connection.cursor() as cursor:
+            cursor.execute("UPDATE jobs SET available_at = NULL WHERE id = %s", (int(job["id"]),))
+        acquired = jm.acquire_next_job(domain="test", queue="default", lease_seconds=5, worker_id="w")
+        assert acquired and acquired["id"] == job["id"]
+        assert jm.fail_job(
+            int(job["id"]),
+            error="slow down",
+            retryable=True,
+            backoff_seconds=1,
+            worker_id="w",
+            lease_id=str(acquired["lease_id"]),
+            error_code="rate_limit",
+            **quarantine_kwargs,
+        )
+    stored = jm.get_job(int(job["id"])) or {}
+    assert (stored["status"], stored["retry_count"], stored["failure_streak_count"]) == (expected_status, 2, 2)
+
+
+@pytest.mark.parametrize(
+    "configured, backoff, first_failure_quarantined",
+    [
+        (None, 0, False),
+        ("1", 0, False),
+        ("1", 10, True),
+        ("2", 10, False),
+    ],
+)
+def test_retry_quarantine_cutoff_preserves_postgres_test_policy(
+    monkeypatch,
+    jobs_pg_dsn,
+    configured,
+    backoff,
+    first_failure_quarantined,
+):
+    """PostgreSQL retains its zero-backoff test exemption even with an explicit cutoff."""
+    monkeypatch.setenv("TEST_MODE", "true")
+    if configured is None:
+        monkeypatch.delenv("JOBS_QUARANTINE_THRESHOLD", raising=False)
+    else:
+        monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", configured)
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    assert (manager.retry_quarantine_threshold(backoff_seconds=backoff) <= 1) is first_failure_quarantined  # nosec B101 - pytest regression assertion.

@@ -39,11 +39,9 @@ Docs/superpowers/plans/2026-05-28-chat-green-path-proof.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started TASK-535 after TASK-534 packaged sidepanel proof. Scope is a focused real-server /chat green-path suite and refreshed evidence only; route-only extension handoff remains covered by TASK-534 and draft/page/thread transfer stays out of scope.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

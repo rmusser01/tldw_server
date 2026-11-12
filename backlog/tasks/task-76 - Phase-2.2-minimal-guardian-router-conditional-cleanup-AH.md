@@ -41,11 +41,11 @@ Continue issue #1116 Phase 2.2 after PR #1307. Convert the next small minimal-te
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1307 merge was verified at merge commit 6242560e22a4d9fce2b5d74679ce0f467943bd22. Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/phase2-2-minimal-guardian-router-conditionals-ah. Branch: codex/phase2-2-minimal-guardian-router-conditionals-ah. Baseline full test_router_groups_contract.py passed with 77 tests before edits.
 
 Implemented the guardian/safety minimal router tranche. Added red/green focused contract coverage proving guardian_controls, family_wizard, and self_monitoring defer module import/router attribute lookup until registration and preserve broad skip_exceptions=(Exception,) behavior for RuntimeError import failures. Converted only those three eager try/import RouterSpec blocks to ImportedRouterSpec-backed lazy specs while preserving prefixes, tags, route_key, and default_stable behavior. Verification: focused selection guardian_safety_attr_lookup or guardian_safety_runtime_import_failures failed red before the source change and passed after implementation; full test_router_groups_contract.py passed with 79 tests; test_main_router_contract.py passed with 6 tests; Bandit on minimal.py reported 0 results and 0 errors; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

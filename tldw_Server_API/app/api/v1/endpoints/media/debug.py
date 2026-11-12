@@ -7,6 +7,7 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.media_response_models import DebugSchemaResponse
+from tldw_Server_API.app.core.DB_Management.media_db.api import describe_media_schema
 
 router = APIRouter()
 
@@ -28,39 +29,7 @@ async def debug_schema(
     through the modular `media` package.
     """
     try:
-        with db.get_connection() as conn:
-            cursor = conn.cursor()
-
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-            tables: list[str] = [row[0] for row in cursor.fetchall()]
-
-            def _table_columns(name: str) -> list[str]:
-                try:
-                    cursor.execute(f"PRAGMA table_info({name})")
-                    return [col[1] for col in cursor.fetchall()]
-                except Exception as exc:  # pragma: no cover - defensive path
-                    logger.warning(
-                        "Failed to introspect columns for table {}: {}",
-                        name,
-                        exc,
-                    )
-                    return []
-
-            media_columns = _table_columns("Media")
-            media_mods_columns = _table_columns("MediaModifications")
-
-            cursor.execute(
-                "SELECT COUNT(*) FROM Media WHERE system_operation_id IS NULL"
-            )
-            media_count_row = cursor.fetchone()
-            media_count = int(media_count_row[0]) if media_count_row else 0
-
-        return DebugSchemaResponse(
-            tables=tables,
-            media_columns=media_columns,
-            media_mods_columns=media_mods_columns,
-            media_count=media_count,
-        )
+        return DebugSchemaResponse(**describe_media_schema(db))
     except HTTPException:
         raise
     except Exception as exc:

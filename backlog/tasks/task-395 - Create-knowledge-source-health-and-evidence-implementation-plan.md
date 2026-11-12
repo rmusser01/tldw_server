@@ -44,7 +44,7 @@ Create a staged implementation plan for the approved /knowledge source health an
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created `Docs/superpowers/plans/2026-05-16-knowledge-source-health-evidence-controls-plan.md` from the approved `/knowledge` source health and evidence controls design spec.
 
 The plan keeps `/knowledge` QA-only, excludes source CRUD/import and durable evidence persistence, separates pre-query source health from existing post-query `metadata.source_status`, and decomposes the work into backend contract, frontend normalization, provider/source-picker UI, evidence/trust UI, recovery/parity, and final verification tasks.
@@ -54,7 +54,7 @@ Local review found and corrected a backend implementation risk in the first draf
 Verification recorded for this planning-only task: `git diff --check` passed; targeted `rg` checks confirmed the obsolete `media:read` permission string was removed and the old `*_path` key names only remain in the explicit warning text. Bandit is not applicable because this task changed only docs and Backlog task metadata.
 
 The plan-document-reviewer subagent was not dispatched because current session tool policy only permits delegated subagents when the user explicitly asks for them. A code-grounded local critique pass was performed instead, including checks against current RAG `DataSource`, `MultiDatabaseRetriever`, auth permission, and frontend `RagSource` contracts.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

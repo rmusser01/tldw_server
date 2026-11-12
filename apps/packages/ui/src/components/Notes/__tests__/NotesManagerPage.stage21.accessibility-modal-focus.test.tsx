@@ -2,6 +2,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import { ConfigProvider } from "antd"
 import NotesManagerPage from "../NotesManagerPage"
 
 const {
@@ -207,9 +208,15 @@ const renderPage = () => {
       mutations: { retry: false }
     }
   })
+  // The notes overlay host stays mounted once opened (AX-09), so a closed
+  // dialog leaves the DOM only after its close animation. jsdom never ends
+  // that animation; turning motion off closes dialogs in the same pass, as a
+  // browser does once the animation finishes.
   return render(
     <QueryClientProvider client={queryClient}>
-      <NotesManagerPage />
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <NotesManagerPage />
+      </ConfigProvider>
     </QueryClientProvider>
   )
 }
@@ -227,6 +234,13 @@ const seedAndSaveNote = async () => {
   await waitFor(() => {
     expect(screen.getByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 1")
   })
+}
+
+// Connections load on demand (bc6c86498e): the collapsed section must be
+// opened before the "Open graph view" entry point renders.
+const openConnections = async () => {
+  fireEvent.click(screen.getByTestId("notes-section-connections-toggle"))
+  await screen.findByTestId("notes-graph-relation-panels")
 }
 
 describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff", () => {
@@ -355,6 +369,7 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
     expect(screen.getByTestId("notes-view-mode-graph")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }))
+    await openConnections()
     const openGraphButton = await screen.findByTestId("notes-open-graph-view")
     openGraphButton.focus()
     fireEvent.click(openGraphButton)
@@ -396,6 +411,7 @@ describe("NotesManagerPage stage 21 accessibility overlay and view focus handoff
     })
 
     fireEvent.click(screen.getByRole("button", { name: "Split" }))
+    await openConnections()
     fireEvent.click(await screen.findByTestId("notes-open-graph-view"))
     await screen.findByTestId("notes-graph-canvas")
     const boundaryCallIndex = mockBgRequest.mock.calls.length

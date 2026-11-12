@@ -44,6 +44,28 @@ def _extract_opml_urls(xml_text: str) -> list[str]:
     return urls
 
 
+def test_opml_export_group_tag_filter_matches_tag_identity(client_with_user: TestClient):
+    c = client_with_user
+    group = c.post("/api/v1/watchlists/groups", json={"name": "Identity Group"})
+    assert group.status_code == 200, group.text
+    group_id = group.json()["id"]
+    source = c.post(
+        "/api/v1/watchlists/sources",
+        json={
+            "name": "Sharp",
+            "url": "https://example.com/sharp-s.xml",
+            "source_type": "rss",
+            "tags": ["Straße"],
+            "group_ids": [group_id],
+        },
+    )
+    assert source.status_code == 200, source.text
+
+    r = c.get("/api/v1/watchlists/sources/export", params={"type": "rss", "group": [group_id], "tag": ["STRASSE"]})
+    assert r.status_code == 200, r.text
+    assert "https://example.com/sharp-s.xml" in _extract_opml_urls(r.text)
+
+
 def test_opml_export_tag_filter_case_insensitive(client_with_user: TestClient):
     c = client_with_user
     # Create two RSS sources with tags 'News' and 'news'

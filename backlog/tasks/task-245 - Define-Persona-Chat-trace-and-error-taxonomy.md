@@ -55,7 +55,7 @@ Define Slice 1 for Stage 2 Persona Chat quality work from GitHub issue #1546. Pr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/Reviews/PERSONA_CHAT_TRACE_ERROR_TAXONOMY_2026_05_10.md. Rechecked ordinary persona-backed chat identity, conversation response fields, frontend create/reuse/restore paths, memory mode UI, runtime exemplar guidance, prompt assembly, retrieval, memory writeback, telemetry, backend tests, frontend tests, and dialogue-tree robustness reports from source. The artifact documents why synthetic fixtures are the right first pass, defines 20 representative ordinary Persona Chat fixture cases, maps failure labels to deterministic/judge-candidate/human-review handling, identifies backend/frontend deterministic fixture surfaces, and names the next PR/task as Stage 2: Add deterministic Persona Chat quality fixtures.
 
 Verification: taxonomy doc marker scan returned no matches and git diff --check passed. Runtime tests were not run because this slice changes docs/Backlog only. Bandit is not applicable because no Python files changed.
@@ -67,7 +67,7 @@ PR #1551 review-fix pass started: verify and address unresolved taxonomy comment
 Review edits applied: canonicalized fixture case_id casing to PC-CASE-###, aligned the fixture example labels with PC-CASE-001, updated the prompt-reveal evidence line to chat.py:3375, defined PC-UX-001, and restated #1510/#1391 tracker boundaries in the taxonomy and task.
 
 Review verification: git diff --check passed; rg found no stale lowercase pc-case ids or chat.py:3387 evidence reference; label consistency script reported missing= with no undefined labels. Bandit remains skipped because this review pass changed docs and Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -255,8 +255,9 @@ def override_get_media_db_for_user_dependency(db_fixture):
     return _override
 
 @pytest.fixture(scope="function")
-def test_api_client(client_user_only, db_session_scope):  # Depends on the FUNCTION-scoped DB fixture now
-    """Provides a shared authenticated TestClient with a per-test Media DB override."""
+def test_api_client(db_session_scope, request: pytest.FixtureRequest):
+    """Keep the temporary Media DB alive until the authenticated client stops."""
+    client_user_only = request.getfixturevalue("client_user_only")
     logger.debug(f"Setting up test_api_client fixture for FUNCTION (DB: {db_session_scope.db_path_str})...")
 
     # --- File Existence Checks (Keep these or adapt as needed) ---
@@ -283,6 +284,8 @@ def test_api_client(client_user_only, db_session_scope):  # Depends on the FUNCT
         else:
             app.dependency_overrides[get_media_db_for_user] = original_db_override
         logger.info("Restored dependency override for get_media_db_for_user (FUNCTION scope teardown)")
+        # Lifespan shutdown runs on the portal thread and cannot close this thread's handle.
+        db_session_scope.backend.get_pool().clear_thread_local_connection()
 
 @pytest.fixture
 def dummy_headers():
@@ -1041,7 +1044,10 @@ def test_add_media_single_file_upload_success(test_api_client, db_session, creat
             perform_chunking=False,
         )
     else:
-        form_data = create_add_media_form_data(media_type=media_type)
+        # No analysis provider is configured here; since 4e697b467c requesting
+        # analysis without one yields a "Warning" result, so keep this upload
+        # plumbing test on the analysis-free path.
+        form_data = create_add_media_form_data(media_type=media_type, perform_analysis=False)
 
     # --- CORRECTED TestClient Call ---
     # Pass form data via `data` and files via `files` in the same call
@@ -1080,11 +1086,17 @@ def test_add_media_single_file_upload_success(test_api_client, db_session, creat
     if response.status_code != expected_code:
         logger.error(f"File upload test ({sample_path.name}) failed. Status: {response.status_code}, Expected: {expected_code}, Text: {response.text}")
 
-    assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS]
+    if media_type == "video":
+        assert response.status_code in [status.HTTP_200_OK, status.HTTP_207_MULTI_STATUS]
+    else:
+        assert response.status_code == status.HTTP_200_OK
     data = check_batch_response(response, response.status_code, expected_processed=1, expected_errors=0, check_results_len=1)
 
     result = data["results"][0]
-    assert result["status"] in ["Success", "Warning"]
+    if media_type == "video":
+        assert result["status"] in ["Success", "Warning"]
+    else:
+        assert result["status"] == "Success"
     check_media_item_result(result, result["status"], expected_media_type=media_type)
     assert result["input_ref"] == sample_path.name
     # Processing source might be a temp path, check its name matches
@@ -1101,6 +1113,57 @@ def test_add_media_single_file_upload_success(test_api_client, db_session, creat
     # Check DB insertion
     assert isinstance(result.get("db_id"), int), f"Expected integer db_id for {media_type} upload, got {result.get('db_id')}"
     assert "added" in result.get("db_message", "").lower() or "updated" in result.get("db_message", "").lower()
+
+
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.Plaintext.Plaintext_Files.analyze")
+def test_add_media_requested_analysis_without_provider_preserves_source(
+    mock_analyze: MagicMock,
+    test_api_client: Any,
+    db_session: MediaDatabase,
+    create_upload_file: Any,
+    dummy_headers: dict[str, str],
+) -> None:
+    """Missing provider selection warns without dropping the uploaded source."""
+    from tldw_Server_API.app.core.DB_Management.media_db.api import get_document_version
+
+    form_data = create_add_media_form_data(
+        media_type="document",
+        perform_analysis=True,
+        api_name=None,
+    )
+    response = test_api_client.post(
+        ADD_MEDIA_ENDPOINT,
+        data=form_data,
+        files={"files": create_upload_file(SAMPLE_TXT_PATH)},
+        headers=dummy_headers,
+    )
+    data = check_batch_response(
+        response,
+        status.HTTP_207_MULTI_STATUS,
+        expected_processed=0,
+        expected_errors=0,
+        expected_warnings=1,
+        check_results_len=1,
+    )
+    result = data["results"][0]
+    check_media_item_result(result, "Warning", expected_media_type="document")
+    assert result["warnings"] == ["Analysis was not run: choose an analysis provider."]
+    assert result["input_ref"] == SAMPLE_TXT_PATH.name
+    assert Path(result["processing_source"]).name == SAMPLE_TXT_PATH.name
+    assert result["source_format"] == "txt"
+    source_text = SAMPLE_TXT_PATH.read_text(encoding="utf-8").strip()
+    assert source_text in result["content"]
+    assert result["chunks"]
+    assert all(chunk["metadata"].get("analysis") is None for chunk in result["chunks"])
+    assert result["analysis"] is None
+    assert result["summary"] is None
+    assert isinstance(result["db_id"], int)
+    assert "added" in result["db_message"].lower()
+    stored = db_session.get_media_by_id(result["db_id"])
+    assert stored["content"] == result["content"]
+    version = get_document_version(db_session, result["db_id"])
+    assert version["analysis_content"] is None
+    mock_analyze.assert_not_called()
 
 
 # === Mixed Success/Failure Tests ===
@@ -1350,7 +1413,7 @@ def test_add_media_file_save_error(mock_save_files, test_api_client, db_session,
 
 # Use the provided TempDirManager class in the endpoint now
 # @patch('tempfile.TemporaryDirectory') # No longer need to mock tempfile directly
-@patch("tldw_Server_API.app.api.v1.endpoints.media.TempDirManager")
+@patch("tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing.TempDirManager")
 def test_add_media_temp_dir_creation_error(mock_temp_dir_manager_class, test_api_client, db_session, create_upload_file, dummy_headers): # Added db_session
     """Test failure during temporary directory creation using TempDirManager."""
     if not SAMPLE_AUDIO_PATH.exists(): pytest.skip(f"Test file not found: {SAMPLE_AUDIO_PATH}")
@@ -1735,3 +1798,72 @@ def test_process_document_with_analysis_mocked(mock_analyze, test_api_client, db
 # ##################################################################################################################
 # End of remodeled test_add_media_endpoint.py
 # ##################################################################################################################
+
+
+def test_media_add_fixtures_close_request_handles_before_temp_cleanup(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+    create_upload_file: Any,
+    dummy_headers: dict[str, str],
+) -> None:
+    """A temporary Media DB must outlive its client and executor-backed writes."""
+    import sqlite3
+    import tempfile
+    import threading
+
+    from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteConnectionPool
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
+
+    held_handles: list[tuple[str, int, sqlite3.Connection]] = []
+    worker_threads: set[int] = set()
+    closed_before_cleanup: list[bool] = []
+    db_path: Path | None = None
+    create_connection = SQLiteConnectionPool._create_connection
+    cleanup_directory = tempfile.TemporaryDirectory.cleanup
+    persist_in_worker = persistence._with_media_db_session
+
+    def hold_connection(pool: SQLiteConnectionPool) -> sqlite3.Connection:
+        connection = create_connection(pool)
+        held_handles.append((pool.db_path, threading.get_ident(), connection))
+        return connection
+
+    def observe_worker(**kwargs: Any) -> Any:
+        worker_threads.add(threading.get_ident())
+        return persist_in_worker(**kwargs)
+
+    def observe_cleanup(directory: tempfile.TemporaryDirectory) -> None:
+        if db_path is not None and Path(directory.name).resolve() == db_path.parent:
+            for path, _, connection in held_handles:
+                if Path(path).resolve() != db_path:
+                    continue
+                try:
+                    connection.execute("SELECT 1")
+                except sqlite3.ProgrammingError:
+                    closed_before_cleanup.append(True)
+                else:
+                    closed_before_cleanup.append(False)
+        cleanup_directory(directory)
+
+    def verify_released_handles() -> None:
+        assert len(closed_before_cleanup) >= 2
+        assert all(closed_before_cleanup), "Media DB handles remain open at temporary directory cleanup"
+
+    monkeypatch.setattr(SQLiteConnectionPool, "_create_connection", hold_connection)
+    monkeypatch.setattr(persistence, "_with_media_db_session", observe_worker)
+    monkeypatch.setattr(tempfile.TemporaryDirectory, "cleanup", observe_cleanup)
+    # Added before acquiring the fixtures so this check runs after their teardown.
+    request.addfinalizer(verify_released_handles)
+    client = request.getfixturevalue("test_api_client")
+    db = request.getfixturevalue("db_session_scope")
+    db_path = Path(db.db_path_str).resolve()
+    response = client.post(
+        ADD_MEDIA_ENDPOINT,
+        data=create_add_media_form_data(media_type="document", perform_analysis=False),
+        files={"files": create_upload_file(SAMPLE_TXT_PATH)},
+        headers=dummy_headers,
+    )
+    data = check_batch_response(response, 200, expected_processed=1, expected_errors=0, check_results_len=1)
+    assert data["results"][0]["status"] == "Success"
+    assert db.get_media_by_id(data["results"][0]["db_id"])["content"] == data["results"][0]["content"]
+    assert threading.get_ident() not in worker_threads
+    assert any(path == str(db_path) and thread in worker_threads for path, thread, _ in held_handles)

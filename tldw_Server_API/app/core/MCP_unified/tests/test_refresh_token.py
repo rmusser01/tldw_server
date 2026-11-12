@@ -122,3 +122,22 @@ async def test_refresh_token_rejects_a_public_peer(
         )
 
     assert excinfo.value.status_code == 403, excinfo.value.status_code
+
+
+@pytest.mark.asyncio
+async def test_refresh_is_refused_without_a_configured_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Demo auth enabled but with a secret below the 16-char minimum is not usable."""
+    monkeypatch.setenv("MCP_ENABLE_DEMO_AUTH", "1")
+    monkeypatch.setenv("MCP_DEMO_AUTH_SECRET", "short")
+    monkeypatch.setenv("TEST_MODE", "true")
+    mgr = get_jwt_manager()
+    refresh, token_id = mgr.create_refresh_token(subject="u4")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await refresh_endpoint(
+            auth_request=AuthRefreshRequest(refresh_token=refresh, token_id=token_id),
+            request=_loopback_request(),
+        )
+    assert exc_info.value.status_code == 501, exc_info.value.status_code

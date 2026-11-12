@@ -30,7 +30,7 @@ Fix the /chat first-run readiness contradiction where the empty-state setup bann
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: focused cockpit regression failed because the runtime rail rendered Ready when provider status reported OpenAI unconfigured.
 
 Implemented mergeChatProviderStatusIntoModels so chat readiness consumers enrich model catalog rows with provider configured state before evaluating usability.
@@ -46,7 +46,7 @@ Verification passed: focused readiness suite, 102 tests; status-strip suite, 24 
 Type-check note: frontend tsc still fails only on pre-existing unrelated CharacterListContent.design-system.test.tsx GalleryCardDensity mismatch.
 
 Bandit skipped because this slice touched only TypeScript and TSX frontend files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

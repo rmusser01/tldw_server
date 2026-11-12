@@ -21,7 +21,7 @@ Navigation:
   - `tldw_Server_API/app/core/Chatbooks/chatbook_service.py:1` — orchestrates export/import/preview, per‑user storage, job rows, signed URLs.
   - `tldw_Server_API/app/core/Chatbooks/chatbook_models.py:1` — dataclasses/enums: manifest, content items, relationships, ExportJob/ImportJob + statuses.
   - `tldw_Server_API/app/core/Chatbooks/chatbook_validators.py:1` — centralized filename/archive validation and sanitization.
-  - `tldw_Server_API/app/core/Chatbooks/quota_manager.py:1` — per-user quotas for storage, file size, daily ops, concurrent jobs.
+  - `tldw_Server_API/app/core/Chatbooks/quota_manager.py:1` — the quota off switch and the fixed 100 MB file-size cap (no tiers).
   - `tldw_Server_API/app/core/Chatbooks/exceptions.py:1` — domain exceptions.
 - API surface
   - Router: `tldw_Server_API/app/api/v1/endpoints/chatbooks.py:1`
@@ -51,7 +51,7 @@ Navigation:
   - `ChatbookService(user_id, CharactersRAGDB, user_id_int)` creates a secure per‑user storage root under `USER_DB_BASE_DIR/<user_id>/chatbooks/{exports,imports,temp}`.
   - Base path selection: `USER_DB_BASE_DIR` (from `tldw_Server_API.app.core.config`) defaults to `Databases/user_databases/` under the project root. Override via environment variable or `Config_Files/config.txt` as needed.
 - Export (sync)
-  - Validate metadata and quotas → collect selected content → write `manifest.json` + content tree → zip to `exports/` → persist completed ExportJob with `download_url` + `expires_at`.
+  - Validate metadata → check job admission (`limits.chatbooks_*`) → collect selected content → write `manifest.json` + content tree → zip to `exports/` → persist completed ExportJob with `download_url` + `expires_at`.
 - Export (async)
   - Create ExportJob `pending` → enqueue via core Jobs; worker completes and fills `output_path`, `download_url`, `expires_at`.
 - Import (sync)
@@ -89,11 +89,12 @@ Navigation:
   - Expiry enforced when `CHATBOOKS_ENFORCE_EXPIRY=true`.
 - Upload hardening:
   - Per‑user temp directory under `USER_DB_BASE_DIR/<user_id>/chatbooks/temp`; sanitizes `user.id` and filenames; rejects symlinks and traversal. Preview/import delete temp files on completion.
-- Rate limits: RG ingress policies + per-user quotas. Defaults live in RG policy config (export/import 5/min, preview 10/min, download 20/min).
+- Rate limits: RG ingress policies. Usage quotas are separate (see Quotas below). Defaults live in RG policy config (export/import 5/min, preview 10/min, download 20/min).
 
 **Quotas**
-- Managed by `QuotaManager` with tiered limits (free/premium/enterprise): storage (MB), daily exports/imports, max concurrent jobs, file size caps, chatbook count.
-- Quota checks occur in the endpoints before dispatching to the service.
+- There are no tiers. Daily exports, daily imports and concurrent jobs are per-user `limits.chatbooks_exports_per_day`, `limits.chatbooks_imports_per_day` and `limits.chatbooks_concurrent_jobs` values. They are unlimited unless a platform admin sets them and `USAGE_QUOTAS_ENABLED` is on. See `Docs/Operations/Usage_Quotas.md`.
+- They are enforced in `chatbook_service._check_chatbook_job_admission`, which `create_chatbook` and `import_chatbook` call; a refusal is a `QuotaExceededError` (HTTP 429).
+- `QuotaManager` (`quota_manager.py`) keeps only the off switch (`CHATBOOKS_DISABLE_QUOTAS` or usage quotas off) and `check_file_size`, the fixed 100 MB cap the upload endpoints apply.
 
 **Working With Chatbooks in Code**
 - Get the service in endpoints via DI: `get_chatbook_service()` → `ChatbookService` with user‑scoped `CharactersRAGDB`.
@@ -166,7 +167,7 @@ Navigation:
 
 **Where To Extend**
 - Add new content collectors/importers in `chatbook_service.py` alongside existing `_collect_*` helpers and manifest population.
-- Augment validation in `chatbook_validators.py` and quotas in `quota_manager.py`.
+- Augment validation in `chatbook_validators.py` and, for job limits, `_check_chatbook_job_admission` in `chatbook_service.py`.
 - Expose new controls in `chatbook_schemas.py` and surface via `endpoints/chatbooks.py`.
 - If adding new job workflows, ensure `core_jobs_worker.py` maps payloads and status transitions appropriately.
 

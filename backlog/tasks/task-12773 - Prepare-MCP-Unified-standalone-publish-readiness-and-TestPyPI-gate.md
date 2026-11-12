@@ -31,13 +31,13 @@ Harden the standalone MCP Unified package for publish-readiness after the intern
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented publish-ready metadata, package-local LICENSE handling, guarded publish-plan support in Helper_Scripts/mcp_unified_rc.py, Makefile dry-run target, manual-only publish workflow, package docs, and focused regression coverage. Validation: focused pytest suite reported 73 passed; Ruff reported all checks passed; compileall completed; Bandit wrote /tmp/bandit_mcp_unified_publish_readiness.json with exit 0; make mcp-unified-rc reported RC status ok; make mcp-unified-publish-dry-run reported RC status ok for build and publish-plan.
 
 Reopened after PR review on 2026-06-23. Actionable items to verify/fix: direct run_publish_plan unit coverage, publish upload jobs depend on publish-plan, functional dry-run CLI semantics, single wheel+sdist invariant for publish plans, TypeError handling in package metadata AST extraction, and defensive evidence recording if publish upload execution raises unexpectedly.
 
 PR review fixes completed after rebase onto origin/dev (ee7a73c9c1): added direct run_publish_plan dry-run/error coverage, made --dry-run a BooleanOptionalAction with --no-dry-run support, enforced exactly one wheel and one sdist for publish plans, added publish job needs: publish-plan, caught TypeError during metadata literal extraction, and recorded unexpected upload runner failures as evidence. Validation after fixes: targeted review tests 6 passed; focused MCP RC/package-boundary suite 78 passed; Ruff all checks passed; compileall passed; Bandit exit 0 with /tmp/bandit_mcp_unified_publish_readiness_review_fixes.json; make mcp-unified-rc RC status ok; make mcp-unified-publish-dry-run RC status ok.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

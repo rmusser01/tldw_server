@@ -41,7 +41,7 @@ Continue TASK-45.44.3 by replacing Watchlists AlertsTab AntD Alert product-state
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added RED coverage in AlertsTab.test.tsx for boundary guidance and load-error callouts requiring the design-system Alert marker; focused test failed while the component still rendered the AntD Alert mock.
 - Migrated AlertsTab boundary guidance to Alert variant="info" and load-error messaging to Alert variant="error" with the existing refresh action preserved.
 - Removed the two AlertsTab Alert entries from design-system-product-state-baseline.json.
@@ -53,7 +53,7 @@ Continue TASK-45.44.3 by replacing Watchlists AlertsTab AntD Alert product-state
 
 - PR review follow-up: removed the duplicate FINAL_SUMMARY end marker, added a focused retry loading assertion, and kept the load-error Alert visible with a busy Refresh action while retry requests are pending.
 - Review verification: focused AlertsTab Vitest passed 4 tests; product-state guard passed 54 tests; verify:design-system-state passed with 251 total exceptions and 18 Jobs/Scheduler/Watchlists exceptions; git diff --check passed; TypeScript still exits 2 with 347 existing diagnostics and no touched-file matches.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

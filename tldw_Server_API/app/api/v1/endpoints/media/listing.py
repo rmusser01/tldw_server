@@ -33,15 +33,18 @@ from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.permissions import MEDIA_DELETE
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
+    count_trashed_media,
     fetch_keywords_for_media_batch,
     get_paginated_files,
     get_paginated_trash_files,
+    list_trashed_media_ids,
     search_media,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
     DatabaseError,
     InputError,
 )
+from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadata
 
 from .....core.DB_Management.media_db.legacy_maintenance import (
@@ -84,16 +87,7 @@ except AttributeError:  # Starlette < 0.27
     HTTP_422_UNPROCESSABLE = status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
-def _is_test_mode() -> bool:
-    try:
-        from tldw_Server_API.app.core.testing import is_test_mode as _is_test_mode_impl
-
-        return bool(_is_test_mode_impl())
-    except _MEDIA_LISTING_NONCRITICAL_EXCEPTIONS:
-        return False
-
-
-_SEARCH_RATE_LIMIT = "600/minute" if _is_test_mode() else "30/minute"
+_SEARCH_RATE_LIMIT = "600/minute" if is_test_mode() else "30/minute"
 
 _EMAIL_MEDIA_SEARCH_DELEGATION_MODES = {"opt_in", "auto_email"}
 
@@ -325,7 +319,7 @@ async def list_media_endpoint(
     try:
         # TEST_MODE diagnostics (headers + log messages)
         try:
-            if _is_test_mode():
+            if is_test_mode():
                 db_path = getattr(db, "db_path_str", getattr(db, "db_path", "?"))
                 headers = getattr(request, "headers", {}) or {}
                 logger.warning(
@@ -347,7 +341,7 @@ async def list_media_endpoint(
 
         # Additional TEST_MODE summary + headers
         try:
-            if _is_test_mode():
+            if is_test_mode():
                 logger.warning(
                     "TEST_MODE: list_media summary page={} rpp={} total_items={} rows_returned={}",
                     page,
@@ -509,7 +503,7 @@ async def list_media_trash_endpoint(
     """
     try:
         try:
-            if _is_test_mode():
+            if is_test_mode():
                 db_path = getattr(db, "db_path_str", getattr(db, "db_path", "?"))
                 headers = getattr(request, "headers", {}) or {}
                 logger.warning(
@@ -530,7 +524,7 @@ async def list_media_trash_endpoint(
         )
 
         try:
-            if _is_test_mode():
+            if is_test_mode():
                 logger.warning(
                     "TEST_MODE: list_media_trash summary page={} rpp={} total_items={} rows_returned={}",
                     page,
@@ -674,12 +668,7 @@ async def empty_media_trash_endpoint(
     Permanently delete all items currently in trash.
     """
     try:
-        cursor = db.execute_query(
-            "SELECT id FROM Media "
-            "WHERE deleted = 0 AND is_trash = 1 AND system_operation_id IS NULL"
-        )
-        rows = cursor.fetchall()
-        media_ids = [row["id"] for row in rows] if rows else []
+        media_ids = list_trashed_media_ids(db)
 
         deleted_count = 0
         failed_ids: list[int] = []
@@ -701,12 +690,7 @@ async def empty_media_trash_endpoint(
 
         remaining_count = -1
         try:
-            count_cursor = db.execute_query(
-                "SELECT COUNT(*) AS total_items FROM Media "
-                "WHERE deleted = 0 AND is_trash = 1 AND system_operation_id IS NULL"
-            )
-            count_row = count_cursor.fetchone()
-            remaining_count = count_row["total_items"] if count_row else 0
+            remaining_count = count_trashed_media(db)
         except _MEDIA_LISTING_NONCRITICAL_EXCEPTIONS:
             pass
 

@@ -27,8 +27,19 @@ async def _fetch_notes_suggestion_grants(pool) -> set[tuple[str, str]]:
     }
 
 
+# Run pooled bootstrap and the live refresh service on the client's event loop.
 @pytest.mark.asyncio
 async def test_postgres_fresh_seed_matches_migration_94_and_is_idempotent(
+    isolated_test_environment,
+) -> None:
+    client, _db_name = isolated_test_environment
+    client.portal.call(
+        _exercise_postgres_fresh_seed_matches_migration_94_and_is_idempotent,
+        isolated_test_environment,
+    )
+
+
+async def _exercise_postgres_fresh_seed_matches_migration_94_and_is_idempotent(
     isolated_test_environment,
 ) -> None:
     _client, _db_name = isolated_test_environment
@@ -114,6 +125,16 @@ async def test_postgres_fresh_seed_matches_migration_94_and_is_idempotent(
 async def test_postgres_repeated_bootstrap_preserves_revoked_notes_suggestion_grants(
     isolated_test_environment,
 ) -> None:
+    client, _db_name = isolated_test_environment
+    client.portal.call(
+        _exercise_postgres_repeated_bootstrap_preserves_revoked_notes_suggestion_grants,
+        isolated_test_environment,
+    )
+
+
+async def _exercise_postgres_repeated_bootstrap_preserves_revoked_notes_suggestion_grants(
+    isolated_test_environment,
+) -> None:
     _client, _db_name = isolated_test_environment
 
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
@@ -174,6 +195,16 @@ async def test_postgres_repeated_bootstrap_preserves_revoked_notes_suggestion_gr
 
 @pytest.mark.asyncio
 async def test_mcp_seed_failure_rolls_back_catalog_then_retry_grants_defaults(
+    isolated_test_environment,
+) -> None:
+    client, _db_name = isolated_test_environment
+    client.portal.call(
+        _exercise_mcp_seed_failure_rolls_back_catalog_then_retry_grants_defaults,
+        isolated_test_environment,
+    )
+
+
+async def _exercise_mcp_seed_failure_rolls_back_catalog_then_retry_grants_defaults(
     isolated_test_environment,
 ) -> None:
     _client, _db_name = isolated_test_environment

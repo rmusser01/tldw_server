@@ -36,9 +36,9 @@ Continue #1116 Phase 2.2 with a content-tail learning/writing tranche. Scope is 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: focused red failed on origin/dev with eager attr lookup for translate/slides/flashcards/quizzes/study_suggestions/writing/writing_manuscripts; focused green passed after patch (1 passed, 61 deselected); full router groups passed (62 passed); main router contract passed (6 passed); OpenAPI contracts passed (69 passed); Bandit on content.py reported 0 results and 0 errors; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

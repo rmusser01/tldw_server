@@ -53,14 +53,19 @@ vi.mock("@/hooks/useFeedback", () => ({
   })
 }))
 
-vi.mock("@/hooks/useImplicitFeedback", () => ({
-  useImplicitFeedback: () => ({
+const implicitFeedbackMock = vi.hoisted(() =>
+  vi.fn((_options: { enabled?: boolean }) => ({
     trackCopy: vi.fn(),
     trackSourcesExpanded: vi.fn(),
     trackSourceClick: vi.fn(),
     trackCitationUsed: vi.fn(),
     trackDwellTime: vi.fn()
-  })
+  }))
+)
+
+vi.mock("@/hooks/useImplicitFeedback", () => ({
+  useImplicitFeedback: (options: { enabled?: boolean }) =>
+    implicitFeedbackMock(options)
 }))
 
 vi.mock("@/hooks/useServerCapabilities", () => ({
@@ -183,6 +188,40 @@ describe("visual identity message state", () => {
 
     expect(result.current.portraitImage).toBe(
       "/api/v1/visual-identities/packs/1/assets/2/content"
+    )
+  })
+})
+
+describe("implicit feedback in temporary mode", () => {
+  const renderServerMessage = (temporaryChat: boolean) =>
+    renderHook(() =>
+      useMessageState({
+        message: "Rome.",
+        isBot: true,
+        name: "Assistant",
+        currentMessageIndex: 0,
+        totalMessages: 1,
+        isProcessing: false,
+        isStreaming: false,
+        serverChatId: "chat-1",
+        serverMessageId: "message-1",
+        temporaryChat,
+        onRegenerate: vi.fn(),
+        onEditFormSubmit: vi.fn()
+      } as any)
+    )
+
+  it("does not send passive feedback while reading a saved chat in temporary mode", () => {
+    renderServerMessage(true)
+    expect(implicitFeedbackMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: false })
+    )
+  })
+
+  it("keeps passive feedback on for saved sessions", () => {
+    renderServerMessage(false)
+    expect(implicitFeedbackMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ enabled: true })
     )
   })
 })

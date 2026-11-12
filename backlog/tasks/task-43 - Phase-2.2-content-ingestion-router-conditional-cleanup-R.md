@@ -30,7 +30,7 @@ Continue #1116 Phase 2.2 by deferring a medium conservative content ingestion/ad
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting from stacked branch codex/phase2-2-content-ingestion-router-conditionals-r at local Q commit f58e634321; this branch will be rebased/PR'd after the earlier Phase 2.2 stack lands or kept stacked until then.
 
 Verification: baseline full router group contract passed 58 before edits. Red focused ingestion/adapters laziness test failed before implementation because scoped router attrs were eagerly resolved. Green focused rerun passed 1 selected; full router group contract passed 59; main router contract passed 6; OpenAPI contract suite passed 69; Bandit content router group source reported 0 results and 0 errors; git diff --check passed.
@@ -38,7 +38,7 @@ Verification: baseline full router group contract passed 58 before edits. Red fo
 After PR #1271 merged first, rebased this tranche onto origin/dev and removed the already-landed audiobook coverage from this task/test scope. The updated PR now covers connectors, ingestion_sources, web_scraping, and reading_highlights only.
 
 Post-rebase verification: focused ingestion/adapters laziness test passed 1 selected; full router group contract passed 60; main router contract passed 6; OpenAPI contract suite passed 69; Bandit content router group source reported 0 results and 0 errors; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

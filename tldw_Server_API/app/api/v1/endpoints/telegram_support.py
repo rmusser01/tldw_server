@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import ValidationError
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import _authnz_busy_http_exception
 from tldw_Server_API.app.api.v1.schemas.telegram_schemas import (
     TELEGRAM_WEBHOOK_SECRET_MIN_LENGTH,
     TelegramBotConfigResponse,
@@ -23,27 +24,42 @@ from tldw_Server_API.app.api.v1.schemas.telegram_schemas import (
     TelegramWebhookUpdate,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
-    AuthnzOrgProviderSecretsRepo,
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
+    DatabaseLockError,
 )
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipScopeNotFound,
+)
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.telegram_approvals_repo import (
     get_telegram_approvals_repo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.telegram_runtime_repo import (
     get_telegram_runtime_repo,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import (
+    AuthnzOrgProviderSecretsRepo,
+)
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     decrypt_byok_payload,
     dumps_envelope,
     encrypt_byok_payload,
     key_hint_for_api_key,
     loads_envelope,
 )
-from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Telegram.session_mapper import (
     build_telegram_session_key,
     derive_telegram_assistant_conversation_id,
+)
+from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc as _coerce_datetime
+from tldw_Server_API.app.services.admin_byok_service import (
+    _shared_key_control_http_exception,
 )
 from tldw_Server_API.app.services.mcp_hub_approval_service import (
     _scope_key_for_tool_call,
@@ -117,24 +133,6 @@ def _collect_scope_ids(values: list[int] | None) -> list[int]:
         except (TypeError, ValueError):
             continue
     return sorted(out)
-
-
-def _coerce_datetime(value: Any) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            return None
-        if parsed.tzinfo is None:
-            return parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-    return None
 
 
 async def build_telegram_approval_callback_data(
@@ -1103,6 +1101,12 @@ async def telegram_admin_put_bot_impl(
     get_org_secret_repo: Callable[[], Awaitable[Any]] = _get_org_secret_repo,
     encrypt_telegram_payload: Callable[[dict[str, Any]], str] = _encrypt_telegram_payload,
 ) -> TelegramBotConfigResponse:
+    if principal is None or type(principal.user_id) is not int or principal.user_id <= 0:
+        raise _shared_key_control_http_exception(MembershipAuthorizationError())
+    authorization_context = ActorMembershipWriteContext(
+        actor_user_id=principal.user_id,
+        required_authority=MembershipAuthority.PLATFORM_ADMIN,
+    )
     bot_token = _coerce_nonempty_string(payload.bot_token)
     webhook_secret = _coerce_nonempty_string(payload.webhook_secret)
     if not bot_token or not webhook_secret:
@@ -1121,24 +1125,33 @@ async def telegram_admin_put_bot_impl(
         }
     )
 
-    repo = await get_org_secret_repo()
-    now = datetime.now(timezone.utc)
-    actor_user_id = _coerce_int(principal.user_id)
-    await repo.upsert_secret(
-        scope_type=scope.scope_type,
-        scope_id=scope.scope_id,
-        provider=_PROVIDER,
-        encrypted_blob=encrypt_telegram_payload(config_payload),
-        key_hint=key_hint_for_api_key(bot_token),
-        metadata={
-            "bot_username": config_payload["bot_username"],
-            "enabled": config_payload["enabled"],
-            "credential_version": _CREDENTIAL_VERSION,
-        },
-        updated_at=now,
-        created_by=actor_user_id,
-        updated_by=actor_user_id,
-    )
+    try:
+        repo = await get_org_secret_repo()
+        await repo.upsert_secret(
+            scope_type=scope.scope_type,
+            scope_id=scope.scope_id,
+            provider=_PROVIDER,
+            encrypted_blob=encrypt_telegram_payload(config_payload),
+            key_hint=key_hint_for_api_key(bot_token),
+            metadata={
+                "bot_username": config_payload["bot_username"],
+                "enabled": config_payload["enabled"],
+                "credential_version": _CREDENTIAL_VERSION,
+            },
+            updated_at=datetime.now(timezone.utc),
+            created_by=principal.user_id,
+            updated_by=principal.user_id,
+            authorization_context=authorization_context,
+        )
+    except (MembershipAuthorizationError, MembershipScopeNotFound) as exc:
+        raise _shared_key_control_http_exception(exc) from None
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ):
+        raise _authnz_busy_http_exception() from None
     return _public_bot_config_record(config_payload, scope=scope)
 
 

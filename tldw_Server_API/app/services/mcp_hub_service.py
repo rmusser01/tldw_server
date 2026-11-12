@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections import deque
-from datetime import datetime, timezone
 import inspect
 import json
 import os
+from collections import deque
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 from loguru import logger
 
@@ -20,10 +22,6 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
-from tldw_Server_API.app.core.exceptions import (
-    BadRequestError,
-    ResourceNotFoundError,
-)
 from tldw_Server_API.app.core.AuthNZ.repos.managed_secret_refs_repo import (
     ManagedSecretRefsRepo,
 )
@@ -31,21 +29,26 @@ from tldw_Server_API.app.core.AuthNZ.repos.mcp_hub_repo import (
     McpHubRepo,
     encode_managed_secret_credential_ref,
 )
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.exceptions import (
+    BadRequestError,
+    ResourceNotFoundError,
+    raise_detached_error,
+)
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     build_secret_payload,
     dumps_envelope,
     encrypt_byok_payload,
     key_hint_for_api_key,
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
-from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
-    McpHubExternalLegacyInventoryService,
-)
 from tldw_Server_API.app.services.mcp_hub_external_access_resolver import (
     McpHubExternalAccessResolver,
 )
 from tldw_Server_API.app.services.mcp_hub_external_auth_service import (
     ManagedExternalAuthBridge,
+)
+from tldw_Server_API.app.services.mcp_hub_external_legacy_inventory import (
+    McpHubExternalLegacyInventoryService,
 )
 from tldw_Server_API.app.services.mcp_hub_workspace_root_resolver import (
     McpHubWorkspaceRootResolver,
@@ -56,6 +59,18 @@ async def _await_if_needed(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
     return value
+
+
+def _encrypt_external_secret(payload: dict[str, Any]) -> dict[str, Any]:
+    """Reject unusable encryption configuration before writing credential data."""
+    try:
+        return encrypt_byok_payload(payload)
+    except ValueError:
+        raise_detached_error(
+            BadRequestError(
+                "Configure a valid BYOK_ENCRYPTION_KEY (a base64-encoded 32-byte key) before saving MCP credentials"
+            )
+        )
 
 
 class McpHubEventBus:
@@ -137,6 +152,7 @@ class McpHubEventBus:
 
 _mcp_hub_event_bus: McpHubEventBus | None = None
 _mcp_hub_event_bus_lock = asyncio.Lock()
+_mcp_hub_discovery_locks: WeakValueDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = WeakValueDictionary()
 
 
 async def get_mcp_hub_event_bus() -> McpHubEventBus:
@@ -2132,6 +2148,7 @@ class McpHubService:
         *,
         actor_id: int | None,
     ) -> bool:
+        owner = await self.repo.get_workspace_set_object(workspace_set_object_id)
         deleted = await self.repo.delete_workspace_set_member(workspace_set_object_id, workspace_id)
         if deleted:
             await _await_if_needed(
@@ -3028,6 +3045,47 @@ class McpHubService:
         )
         return row
 
+    async def refresh_external_server_discovery(
+        self,
+        server_id: str | None,
+        executor: Callable[[str | None], Awaitable[dict[str, Any]]],
+    ) -> dict[str, Any]:
+        """Serialize worker-local catalog publication and persist config-bound outcomes."""
+        loop = asyncio.get_running_loop()
+        lock = _mcp_hub_discovery_locks.setdefault(loop, asyncio.Lock())
+        async with lock:
+            rows = [
+                row
+                for row in await self.repo.list_external_servers()
+                if (server_id is None or row["id"] == server_id)
+                and row.get("server_source") == "managed"
+                and row.get("enabled")
+                and not row.get("superseded_by_server_id")
+            ]
+            try:
+                result = await executor(server_id)
+            except Exception:
+                for row in rows:
+                    await self.repo.record_external_server_discovery(
+                        row["id"], expected_updated_at=row["updated_at"], failed=True
+                    )
+                raise
+            errors = dict(result.get("errors") or {})
+            server_ids = {row["id"] for row in rows}
+            incomplete = int(result.get("refreshed_servers") or 0) < len(server_ids - errors.keys())
+            global_failure = bool(errors.keys() - server_ids) or incomplete
+            conflict = False
+            for row in rows:
+                recorded = await self.repo.record_external_server_discovery(
+                    row["id"],
+                    expected_updated_at=row["updated_at"],
+                    failed=global_failure or row["id"] in errors,
+                )
+                conflict = conflict or not recorded
+            if conflict:
+                raise McpHubConflictError("External server configuration changed during discovery; refresh again")
+            return result
+
     async def list_external_servers(
         self,
         *,
@@ -3226,7 +3284,7 @@ class McpHubService:
         if not secret:
             raise BadRequestError("Secret value is required")
         secret_payload = build_secret_payload(secret)
-        envelope = encrypt_byok_payload(secret_payload)
+        envelope = _encrypt_external_secret(secret_payload)
         stored = await self.repo.upsert_external_server_slot_secret(
             server_id=server_id,
             slot_name=slot_name,
@@ -3645,6 +3703,7 @@ class McpHubService:
             default_slot = await self.repo.get_external_server_default_slot(server_id=server_id)
             if default_slot is None:
                 raise BadRequestError("Server-level secret alias is only valid for default-slot servers")
+            envelope = _encrypt_external_secret(build_secret_payload(secret))
             slot_row = await self.set_external_server_slot_secret(
                 server_id=server_id,
                 slot_name=str(default_slot.get("slot_name") or ""),
@@ -3653,7 +3712,7 @@ class McpHubService:
             )
             stored = await self.repo.upsert_external_secret(
                 server_id=server_id,
-                encrypted_blob=dumps_envelope(encrypt_byok_payload(build_secret_payload(secret))),
+                encrypted_blob=dumps_envelope(envelope),
                 key_hint=key_hint_for_api_key(secret),
                 actor_id=actor_id,
             )
@@ -3666,7 +3725,7 @@ class McpHubService:
             }
 
         secret_payload = build_secret_payload(secret)
-        envelope = encrypt_byok_payload(secret_payload)
+        envelope = _encrypt_external_secret(secret_payload)
         stored = await self.repo.upsert_external_secret(
             server_id=server_id,
             encrypted_blob=dumps_envelope(envelope),

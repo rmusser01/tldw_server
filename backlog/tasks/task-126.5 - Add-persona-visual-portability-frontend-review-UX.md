@@ -39,7 +39,7 @@ Add the first frontend review surface for PR1135-aligned persona visual pack por
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added persona visual frontend portability types and service helpers for export start/status, authenticated archive download, import-preview upload, and import-preview status.
 
 Extended VisualPackEditor with a Portability panel that queues export jobs, refreshes export status, downloads completed archives through fetchWithAuth as arrayBuffer data, uploads .tldw-persona-vpack archives for import preview, and displays review-only summary/warnings/conflicts/proposed plan output.
@@ -53,7 +53,7 @@ Regression verification passed: cd apps/packages/ui && bunx vitest run src/compo
 git diff --check passed with no output.
 
 Bandit is not applicable for this frontend-only slice because no Python production code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

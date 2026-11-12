@@ -12,7 +12,7 @@ from tldw_Server_API.app.api.v1.endpoints import flashcards as endpoint
 from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackSummaryResponse
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware, chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
@@ -29,6 +29,7 @@ def pack_api(request, tmp_path):
     # redirecting this independent, real local Jobs store.
     jobs = JobManager(db_path=tmp_path / "jobs.db", backend="sqlite")
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(endpoint.router, prefix="/api/v1")
     app.dependency_overrides[endpoint.get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[endpoint.get_job_manager] = lambda: jobs

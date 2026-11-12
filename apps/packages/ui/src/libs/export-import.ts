@@ -11,13 +11,17 @@ import {
   importPromptsV2
 } from "@/db/dexie/helpers"
 import { db } from "@/db/dexie/schema"
+import { capturePromptOwnerScope } from "@/services/prompt-local-owner"
 
 export const exportPageAssistData = async () => {
+  const ownerScope = await capturePromptOwnerScope()
+  try {
   const chat = await exportChatHistory()
-  const prompts = await exportPrompts()
+  const prompts = await exportPrompts(ownerScope.ownerId)
   const oaiConfigs = await exportOAIConfigs()
   const nicknames = await exportNicknames()
   const models = await exportModels()
+  ownerScope.assertCurrent()
 
   const data = {
     chat,
@@ -37,32 +41,39 @@ export const exportPageAssistData = async () => {
   a.download = `page-assist-${new Date().toISOString()}.json`
   a.click()
   URL.revokeObjectURL(url)
+  } finally { ownerScope.release() }
 }
 
 export const importPageAssistData = async (file: File) => {
+  const ownerScope = await capturePromptOwnerScope()
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = async () => {
       try {
+        ownerScope.assertCurrent()
         const data = JSON.parse(reader.result as string)
         const options = {}
+        const promptOptions = { ownerScope }
         await db.transaction(
           "rw",
           [
             db.chatHistories,
             db.messages,
+            db.compareStates,
             db.prompts,
             db.sessionFiles,
             db.modelNickname,
             db.customModels
           ],
           async () => {
+            ownerScope.assertCurrent()
             if (data?.chat && Array.isArray(data.chat)) {
               await importChatHistoryV2(data.chat, options)
             }
 
             if (data?.prompts && Array.isArray(data.prompts)) {
-              await importPromptsV2(data.prompts, options)
+              ownerScope.assertCurrent()
+              await importPromptsV2(data.prompts, promptOptions)
             }
 
             if (data?.nicknames && Array.isArray(data.nicknames)) {
@@ -72,6 +83,7 @@ export const importPageAssistData = async (file: File) => {
             if (data?.models && Array.isArray(data.models)) {
               await importModelsV2(data.models, options)
             }
+            ownerScope.assertCurrent()
 
             if (
               data?.oaiConfigs &&
@@ -89,10 +101,12 @@ export const importPageAssistData = async (file: File) => {
       } catch (e) {
         console.error(e)
         reject(e)
+      } finally {
+        ownerScope.release()
       }
     }
 
-    reader.onerror = () => reject(reader.error)
+    reader.onerror = () => { ownerScope.release(); reject(reader.error) }
     reader.readAsText(file)
   })
 }

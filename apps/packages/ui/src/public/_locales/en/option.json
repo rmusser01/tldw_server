@@ -1,4 +1,28 @@
 {
+  "quickIngest_invalidUrl": {
+    "message": "Invalid URL format. Enter one HTTP(S) URL per line. Separate pasted URLs with a comma and a space."
+  },
+  "quickIngest_configureEligibleCount": {
+    "message": "{{count}} eligible items in this run"
+  },
+  "quickIngest_queueInvalidExcluded": {
+    "message": "Invalid — excluded"
+  },
+  "quickIngest_queueUnselected": {
+    "message": "Not selected — excluded"
+  },
+  "quickIngest_queueDuplicateExcluded": {
+    "message": "Already queued — excluded"
+  },
+  "quickIngest_processAgain": {
+    "message": "Process again"
+  },
+  "quickIngest_captureRestricted": {
+    "message": "This tab cannot be captured. Open an HTTP or HTTPS page, or paste its URL here."
+  },
+  "quickIngest_captureCurrentTab": {
+    "message": "Capture current tab"
+  },
   "newChat": {
     "message": "New Chat"
   },
@@ -42,7 +66,7 @@
     "message": "Reading first-run readiness from the server"
   },
   "connectionCard_headlineMissing": {
-    "message": "Connect tldw Assistant to your server"
+    "message": "Connect to your server to start chatting"
   },
   "connectionCard_headlineSearching": {
     "message": "Searching for your tldw server…"
@@ -432,7 +456,7 @@
     "message": "Enter a new title"
   },
   "temporaryChat": {
-    "message": "Temporary chat (not saved)"
+    "message": "Temporary chat (on this device)"
   },
   "more_copy_group": {
     "message": "Copy"
@@ -591,7 +615,7 @@
     "message": "Store after review"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Review before saving"
+    "message": "Review extracted content before saving"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Process now, then edit drafts locally before committing to your server."
@@ -678,7 +702,7 @@
     "message": "Language (e.g., en)"
   },
   "quickIngest_audioDiarizationHelp": {
-    "message": "Turn on to separate speakers in transcripts; applies to new audio items."
+    "message": "Separate speakers in audio transcripts for this run."
   },
   "quickIngest_documentOptions": {
     "message": "Document options"
@@ -687,7 +711,7 @@
     "message": "Video options"
   },
   "quickIngest_captionsHelp": {
-    "message": "Include timestamps/captions for new video items; helpful for search and summaries."
+    "message": "Include available timestamps/captions for video items in this run."
   },
   "quickIngest_cancel": {
     "message": "Cancel"
@@ -876,7 +900,7 @@
     "message": "URLs to ingest"
   },
   "quickIngest_urlsPlaceholder": {
-    "message": "https://example.com, https://..."
+    "message": "https://example.com/article\nhttps://youtube.com/watch?v=..."
   },
   "quickIngest_urlsInputAria": {
     "message": "Paste URLs input"
@@ -1157,6 +1181,12 @@
   "notes": {
     "message": "Notes"
   },
+  "notesSearch_editingManual": {
+    "message": "Editing: Manual"
+  },
+  "notesSearch_latestAssistPrefix": {
+    "message": "Latest AI assist"
+  },
   "notesSearch_placeholder": {
     "message": "Search titles and contents"
   },
@@ -1236,10 +1266,10 @@
     "message": "Showing {{start}}-{{end}} of {{total}}"
   },
   "notesSearch_expandSidebar": {
-    "message": "Expand sidebar"
+    "message": "Expand notes sidebar"
   },
   "notesSearch_collapseSidebar": {
-    "message": "Collapse sidebar"
+    "message": "Collapse notes sidebar"
   },
   "notesSearch_titlePlaceholder": {
     "message": "Title"
@@ -2645,11 +2675,11 @@
   "dictionariesList_stepPreviewBody": {
     "message": "— paste sample text to see the rules in action before going live."
   },
-  "dictionariesList_stepAssignTitle": {
-    "message": "Assign to chats"
+  "dictionariesList_savedChatLinksTitle": {
+    "message": "Inspect saved chat links"
   },
-  "dictionariesList_stepAssignBody": {
-    "message": "— link the dictionary to chat sessions so rules apply automatically."
+  "dictionariesList_savedChatLinksBody": {
+    "message": "— existing links are references. Saved chat assignment is unavailable in this server version."
   },
   "dictionariesList_searchPlaceholder": {
     "message": "Search dictionaries by name, description, category, or tags"
@@ -2681,8 +2711,8 @@
   "dictionariesList_emptyTitle": {
     "message": "No dictionaries yet"
   },
-  "dictionariesList_emptyDescription": {
-    "message": "Create your first dictionary to transform text consistently across chats."
+  "dictionariesList_previewEmptyDescription": {
+    "message": "Create a dictionary and preview its text transformations. Saved chat assignment is unavailable in this server version."
   },
   "dictionariesList_emptyExampleMedical": {
     "message": "Medical abbreviations (e.g., BP -> blood pressure)"
@@ -2802,10 +2832,10 @@
     "message": "Characters"
   },
   "quickIngest_defaultsForNewItems": {
-    "message": "Defaults apply only to items added after you change them."
+    "message": "Settings apply to all eligible items in this run. Saved preset defaults are managed in Quick Ingest settings for future runs."
   },
   "quickIngest_ocrHelp": {
-    "message": "OCR helps extract text from scanned PDFs or images; applies to new document/PDF items."
+    "message": "Extract text from scanned PDFs or images for this run."
   },
   "quickIngest_localFilesWarning": {
     "message": "Local files are kept only while this dialog is open. Complete your ingest run before closing, or reattach files when you return."
@@ -6328,5 +6358,680 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "Offline saving is unavailable until your account and local storage are confirmed. Your changes remain unsaved."
+  },
+  "quickIngest_wizard_results_batchAccounting": {
+    "message": "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled"
+  },
+  "quickIngest_wizard_results_reviewSaved": {
+    "message": "Review these {{count}} saved items"
+  },
+  "quickIngest_wizard_results_savedState": {
+    "message": "Saved"
+  },
+  "quickIngest_wizard_results_extractedState": {
+    "message": "Extracted content; not saved"
+  },
+  "quickIngest_wizard_results_knowledgeUnconfirmed": {
+    "message": "Knowledge readiness unconfirmed"
+  },
+  "quickIngest_wizard_results_reattach": {
+    "message": "Reattach {{name}}"
+  },
+  "quickIngest_wizard_results_reattachMismatch": {
+    "message": "Choose the original file with the same name and size."
+  },
+  "quickIngest_wizard_results_correct": {
+    "message": "Correct settings"
+  },
+  "quickIngest_wizard_results_correctItem": {
+    "message": "Correct settings for {{name}}"
+  },
+  "quickIngest_wizard_results_excludedSection": {
+    "message": "Excluded inputs"
+  },
+  "quickIngest_wizard_results_invalidExcluded": {
+    "message": "Invalid input. Correct it before processing."
+  },
+  "quickIngest_wizard_results_unselectedExcluded": {
+    "message": "Not selected for this run."
+  },
+  "quickIngest_wizard_results_savedReviewFailed": {
+    "message": "Unable to open saved items. Try again."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
+  },
+  "quickIngest_review_replacementAllowed": {
+    "message": "Replacement allowed: matching saved sources may be replaced. Affected saved items have not been confirmed."
+  },
+  "quickIngest_review_replacementDisabled": {
+    "message": "Replacement disabled: existing saved sources are preserved."
+  },
+  "promptInsert_reviewDescription": {
+    "message": "Your draft remains here. Review this prompt, then overwrite your message, append it, or cancel."
+  },
+  "promptInsert_preview": {
+    "message": "Prompt preview"
+  },
+  "header_showPages": {
+    "message": "Show pages"
+  },
+  "header_hidePages": {
+    "message": "Hide pages"
+  },
+  "header_pageNavigator": {
+    "message": "Pages"
+  },
+  "assistant_trackedPersonaUnavailable": {
+    "message": "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat."
+  },
+  "assistant_usePersonaOverlay": {
+    "message": "Use a persona prompt overlay"
+  },
+  "assistant_trackedModelsLoading": {
+    "message": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
+  },
+  "notesSearch_controlsMoreBelow": {
+    "message": "More filters below"
+  },
+  "notesSearch_editorDraftHint": {
+    "message": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note."
+  },
+  "notesSearch_moodboardCreateAction": {
+    "message": "New collection"
+  },
+  "notesSearch_moodboardChoosePrompt": {
+    "message": "Choose a collection above to see its notes."
+  },
+  "notesSearch_moodboardFirstPrompt": {
+    "message": "A collection is a group of notes you pick by hand. Create one, then add notes to it."
+  },
+  "notesSearch_moodboardEmptyHowToAdd": {
+    "message": "Open a note from the List view, then come back here and choose Add open note."
+  },
+  "notesSearch_moodboardAddOpenNote": {
+    "message": "Add open note"
+  },
+  "notesSearch_moodboardAddOpenNoteNeedsNote": {
+    "message": "Open a note first"
+  },
+  "notesSearch_moodboardAddOpenNoteAlreadyIn": {
+    "message": "The open note is already in this collection"
+  },
+  "notesSearch_moodboardAddOpenNoteSuccess": {
+    "message": "Added to \"{{name}}\""
+  },
+  "notesSearch_moodboardAddOpenNoteError": {
+    "message": "Could not add the note to this collection"
+  },
+  "notesSearch_taskChipLabel": {
+    "message": "Tasks {{done}}/{{total}}"
+  },
+  "notesSearch_taskChipTooltip": {
+    "message": "Open the list to check off tasks. Changes update the note text and your task list."
+  },
+  "notesSearch_closeMobileSidebar": {
+    "message": "Close notes list"
+  },
+  "notesSearch_listRowKeyboardHint": {
+    "message": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin."
+  },
+  "notesSearch_tagFilterNoMatch": {
+    "message": "No tag named \"{{query}}\""
+  },
+  "notesSearch_tagFilterNoTags": {
+    "message": "No tags yet"
+  },
+  "notesSearch_headerLoading": {
+    "message": "Loading…"
+  },
+  "notesSearch_loadErrorUnreachable": {
+    "message": "Could not reach the notes server."
+  },
+  "notesSearch_loadErrorDetails": {
+    "message": "Details"
+  },
+  "notesSearch_serverUnavailableTitle": {
+    "message": "Notes server unavailable"
+  },
+  "notesSearch_serverUnavailableDescription": {
+    "message": "You can keep writing. Your edits are kept on this device and saved when the server is back."
+  },
+  "notesSearch_moveToTrashConfirmTitle": {
+    "message": "Move to Trash?"
+  },
+  "notesSearch_moveToTrashConfirmOk": {
+    "message": "Move to Trash"
+  },
+  "notesSearch_moveToTrashConfirmNamed": {
+    "message": "Move \"{{title}}\" to Trash? You can restore it from Trash."
+  },
+  "notesSearch_moveToTrashConfirmUnnamed": {
+    "message": "Move this note to Trash? You can restore it from Trash."
+  },
+  "notesSearch_moveToTrashLinkedOne": {
+    "message": "This note is linked from 1 other note. That link will not work while the note is in Trash."
+  },
+  "notesSearch_moveToTrashLinkedMany": {
+    "message": "This note is linked from {{count}} other notes. Those links will not work while the note is in Trash."
+  },
+  "notesSearch_trashHeaderLabel": {
+    "message": "Trash"
+  },
+  "notesSearch_trashGuidanceTitle": {
+    "message": "Trash"
+  },
+  "notesSearch_trashGuidanceDescription": {
+    "message": "Deleted notes wait here. Choose Restore next to a note to put it back with your notes."
+  },
+  "notesSearch_trashGuidanceShowList": {
+    "message": "Show Trash"
+  },
+  "notesSearch_trashGuidanceBack": {
+    "message": "Back to notes"
+  },
+  "notesSearch_assistKeywordsSource": {
+    "message": "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add."
+  },
+  "notesSearch_shortcutFocusSearchDescription": {
+    "message": "Focus the search input."
+  },
+  "notesSearch_shortcutCommandPaletteDescription": {
+    "message": "Open the command palette."
+  },
+  "repo2txt_cancel": {
+    "message": "Cancel"
+  },
+  "repo2txt_status_cancelled": {
+    "message": "Cancelled. No output was generated."
+  },
+  "repo2txt_status_generatedBounded": {
+    "message": "Generated {{count}} files; {{bytes}} UTF-8 output bytes ({{tokenCount}} tokens)."
+  },
+  "repo2txt_selectionPolicy": {
+    "message": "Only checked files are exported. Search filters this list only; .gitignore is not applied. UTF-8 text only: 1 MiB per file, 10 MiB selected text/ZIP, 5,000 entries. Binary files and symbolic links are rejected."
+  },
+  "dictionariesList_stepAssignTitle": {
+    "message": "Assign to chats"
+  },
+  "dictionariesList_stepAssignBody": {
+    "message": "— link the dictionary to chat sessions so rules apply automatically."
+  },
+  "dictionariesList_emptyDescription": {
+    "message": "Create your first dictionary to transform text consistently across chats."
+  },
+  "header_notifications": {
+    "message": "Notifications"
+  },
+  "header_notificationsActiveName": {
+    "message": "Notifications, {count} unread"
+  },
+  "header_notificationsUnreadDescription": {
+    "message": "{count, plural, one {# unread notification.} other {# unread notifications.}}"
+  },
+  "header_notificationsCaughtUp": {
+    "message": "You are caught up."
+  },
+  "header_notificationsActiveAnnouncement": {
+    "message": "Notifications are active"
+  },
+  "header_notificationsConnectingName": {
+    "message": "Notifications, connecting"
+  },
+  "header_notificationsConnectingTitle": {
+    "message": "Notifications are connecting"
+  },
+  "header_notificationsConnectingDescription": {
+    "message": "Checking for new notifications."
+  },
+  "header_notificationsConnectingAnnouncement": {
+    "message": "Notifications are connecting"
+  },
+  "header_notificationsReconnectingName": {
+    "message": "Notifications, reconnecting"
+  },
+  "header_notificationsReconnectingTitle": {
+    "message": "Notifications are reconnecting"
+  },
+  "header_notificationsReconnectingDescription": {
+    "message": "Recent notifications may be delayed while the connection recovers."
+  },
+  "header_notificationsReconnectingAnnouncement": {
+    "message": "Notifications are reconnecting"
+  },
+  "header_notificationsSignInName": {
+    "message": "Notifications, sign-in required"
+  },
+  "header_notificationsSignInTitle": {
+    "message": "Sign in required"
+  },
+  "header_notificationsSignInDescription": {
+    "message": "Sign in again to resume personal notifications."
+  },
+  "header_notificationsSignInAnnouncement": {
+    "message": "Notifications require sign in"
+  },
+  "header_notificationsUnavailableName": {
+    "message": "Notifications unavailable for this account"
+  },
+  "header_notificationsUnavailableTitle": {
+    "message": "Notifications unavailable for this account"
+  },
+  "header_notificationsUnavailableDescription": {
+    "message": "Notifications are not available for this account."
+  },
+  "header_notificationsUnavailableAnnouncement": {
+    "message": "Notifications are unavailable"
+  },
+  "header_notificationsTryAgain": {
+    "message": "Try again"
+  },
+  "header_notificationsOpen": {
+    "message": "Open notifications"
+  },
+  "quickIngest_analysisProvider_label": {
+    "message": "Analysis provider"
+  },
+  "quickIngest_analysisProvider_help": {
+    "message": "Configured providers are suggestions. This choice is only for this ingest."
+  },
+  "quickIngest_analysisProvider_placeholder": {
+    "message": "Choose or enter a provider"
+  },
+  "quickIngest_analysisProvider_loading": {
+    "message": "Loading configured providers…"
+  },
+  "quickIngest_analysisProvider_empty": {
+    "message": "No configured providers found. Enter a provider name."
+  },
+  "quickIngest_analysisProvider_required": {
+    "message": "Choose an analysis provider before running ingest analysis."
+  },
+  "notesSearch_graphSimilarContent": {
+    "message": "Similar content"
+  },
+  "notesSearch_semanticIndex": {
+    "message": "Semantic index"
+  },
+  "notesSearch_semanticState_off": {
+    "message": "Off"
+  },
+  "notesSearch_semanticState_preparing": {
+    "message": "Preparing"
+  },
+  "notesSearch_semanticState_ready": {
+    "message": "Ready"
+  },
+  "notesSearch_semanticState_updating": {
+    "message": "Updating"
+  },
+  "notesSearch_semanticState_needs_attention": {
+    "message": "Needs attention"
+  },
+  "notesSearch_semanticStatusAnnouncement": {
+    "message": "Semantic index {{state}}. {{detail}}"
+  },
+  "notesSearch_semanticProvider": {
+    "message": "Provider"
+  },
+  "notesSearch_semanticModel": {
+    "message": "Model"
+  },
+  "notesSearch_semanticExecutionBoundary": {
+    "message": "Embedding execution"
+  },
+  "notesSearch_semanticStorageBoundary": {
+    "message": "Vector storage"
+  },
+  "notesSearch_semanticBoundary_external": {
+    "message": "External"
+  },
+  "notesSearch_semanticBoundary_local": {
+    "message": "Local"
+  },
+  "notesSearch_semanticBoundary_unavailable": {
+    "message": "Unavailable"
+  },
+  "notesSearch_semanticOutboundData": {
+    "message": "Data sent for indexing"
+  },
+  "notesSearch_semanticOutbound_note_content_chunks": {
+    "message": "Note body chunks"
+  },
+  "notesSearch_semanticOutbound_note_title": {
+    "message": "Note titles"
+  },
+  "notesSearch_semanticActiveNotes": {
+    "message": "{{count}} active Notes"
+  },
+  "notesSearch_semanticEstimate": {
+    "message": "About {{chunks}} chunks across {{runs}} runs"
+  },
+  "notesSearch_semanticProgress": {
+    "message": "{{indexed}} of {{total}} Notes indexed"
+  },
+  "notesSearch_semanticLoading": {
+    "message": "Loading semantic index details."
+  },
+  "notesSearch_semanticLoadFailed": {
+    "message": "Semantic index details are unavailable."
+  },
+  "notesSearch_semanticUnavailable": {
+    "message": "Semantic indexing is unavailable with the current server configuration."
+  },
+  "notesSearch_semanticPermissionReadOnly": {
+    "message": "You can view similar content, but you do not have permission to manage the semantic index."
+  },
+  "notesSearch_semanticOffline": {
+    "message": "Semantic index management is unavailable while offline."
+  },
+  "notesSearch_semanticShowEdges": {
+    "message": "Show similar-content relationships"
+  },
+  "notesSearch_semanticEnable": {
+    "message": "Enable semantic index"
+  },
+  "notesSearch_semanticRebuild": {
+    "message": "Rebuild index"
+  },
+  "notesSearch_semanticRetry": {
+    "message": "Retry failed Notes"
+  },
+  "notesSearch_semanticCancel": {
+    "message": "Cancel indexing"
+  },
+  "notesSearch_semanticDelete": {
+    "message": "Disable and delete index"
+  },
+  "notesSearch_semanticDetail_building": {
+    "message": "The first semantic index is being built."
+  },
+  "notesSearch_semanticDetail_degraded": {
+    "message": "Some Notes could not be indexed. Retry failed Notes or rebuild the index."
+  },
+  "notesSearch_semanticDetail_stale_configuration": {
+    "message": "The embedding configuration changed. Review the current disclosure and renew consent before rebuilding."
+  },
+  "notesSearch_semanticDetail_consent_required": {
+    "message": "Indexing requires renewed consent before work can continue."
+  },
+  "notesSearch_semanticDetail_cleanup_pending": {
+    "message": "Indexed data is being removed."
+  },
+  "notesSearch_semanticDetail_cleanup_stalled": {
+    "message": "Indexed data cleanup needs attention."
+  },
+  "notesSearch_semanticDetail_unavailable": {
+    "message": "The configured embedding service is unavailable."
+  },
+  "notesSearch_semanticConfirm_enable_title": {
+    "message": "Enable semantic indexing?"
+  },
+  "notesSearch_semanticConfirm_enable_body": {
+    "message": "Notes will be indexed using the provider and data boundaries shown above."
+  },
+  "notesSearch_semanticConfirm_enable_confirm": {
+    "message": "Enable"
+  },
+  "notesSearch_semanticConfirm_rebuild_title": {
+    "message": "Rebuild the semantic index?"
+  },
+  "notesSearch_semanticConfirm_rebuild_body": {
+    "message": "A new generation will replace the currently published index when it is ready."
+  },
+  "notesSearch_semanticConfirm_rebuild_confirm": {
+    "message": "Rebuild"
+  },
+  "notesSearch_semanticConfirm_retry_title": {
+    "message": "Retry failed Notes?"
+  },
+  "notesSearch_semanticConfirm_retry_body": {
+    "message": "Only Notes that failed during the current generation will be retried."
+  },
+  "notesSearch_semanticConfirm_retry_confirm": {
+    "message": "Retry"
+  },
+  "notesSearch_semanticConfirm_cancel_title": {
+    "message": "Cancel semantic indexing?"
+  },
+  "notesSearch_semanticConfirm_cancel_body": {
+    "message": "The active run will stop. The last published graph remains available."
+  },
+  "notesSearch_semanticConfirm_cancel_confirm": {
+    "message": "Cancel indexing"
+  },
+  "notesSearch_semanticConfirm_deleteIndex_title": {
+    "message": "Disable and delete the semantic index?"
+  },
+  "notesSearch_semanticConfirm_deleteIndex_body": {
+    "message": "Published vectors and semantic relationships will be removed. Ordinary graph relationships are not affected. Offline backups may retain derived vectors until normal backup retention expires."
+  },
+  "notesSearch_semanticConfirm_deleteIndex_confirm": {
+    "message": "Delete index"
+  },
+  "notesSearch_semanticEnableStarted": {
+    "message": "Semantic indexing started."
+  },
+  "notesSearch_semanticRebuildStarted": {
+    "message": "Semantic index rebuild started."
+  },
+  "notesSearch_semanticRetryStarted": {
+    "message": "Failed Notes are being retried."
+  },
+  "notesSearch_semanticCancelRequested": {
+    "message": "Semantic indexing cancellation requested."
+  },
+  "notesSearch_semanticDeleteStarted": {
+    "message": "Semantic index deletion started."
+  },
+  "notesSearch_semanticActionFailed": {
+    "message": "The semantic index action failed. Try again."
+  },
+  "notesSearch_semanticDimensionProbeDisclosure": {
+    "message": "A fixed non-user probe will resolve dimensions after you consent and before any Note text is read or transferred."
+  },
+  "notesSearch_semanticTechnicalDetails": {
+    "message": "Technical details"
+  },
+  "notesSearch_semanticVectorBackend": {
+    "message": "Vector backend"
+  },
+  "notesSearch_semanticDimensions": {
+    "message": "Dimensions"
+  },
+  "notesSearch_semanticDimensionsPending": {
+    "message": "Pending probe"
+  },
+  "notesSearch_semanticMetric": {
+    "message": "Similarity metric"
+  },
+  "notesSearch_semanticMetricValue_cosine": {
+    "message": "Cosine"
+  },
+  "notesSearch_semanticConfigurationRevision": {
+    "message": "Configuration revision"
+  },
+  "notesSearch_semanticIndexRevision": {
+    "message": "Semantic index revision"
+  },
+  "notesSearch_semanticPublishedChunks": {
+    "message": "Published chunks"
+  },
+  "notesSearch_semanticError_permission": {
+    "message": "Your semantic-index management permission changed. Refresh; contact an administrator if access is still needed."
+  },
+  "notesSearch_semanticError_refresh": {
+    "message": "Semantic index details changed. Refresh and try again."
+  },
+  "notesSearch_semanticError_writerConflict": {
+    "message": "Another semantic-index operation is active. Wait for it to finish, then try again."
+  },
+  "notesSearch_semanticError_quota": {
+    "message": "The semantic-index quota is reached. Wait for capacity or ask an administrator to review limits."
+  },
+  "notesSearch_semanticError_unavailable": {
+    "message": "Semantic indexing is temporarily unavailable. Check the configured provider and worker, then try again."
+  },
+  "notesSearch_semanticRenewConsent": {
+    "message": "Review consent and rebuild"
+  },
+  "notesSearch_semanticDetail_generic": {
+    "message": "Semantic index details changed. Review the current status."
+  },
+  "notesSearch_semanticConfirm_renew_title": {
+    "message": "Review consent and rebuild?"
+  },
+  "notesSearch_semanticConfirm_renew_body": {
+    "message": "Review the current provider, model, data boundaries, and outbound data above before renewing consent."
+  },
+  "notesSearch_semanticConfirm_renew_confirm": {
+    "message": "Renew consent and rebuild"
+  },
+  "notesSearch_semanticRenewStarted": {
+    "message": "Consent renewed and semantic index rebuild started."
+  },
+  "notesSearch_semanticEndpoint": {
+    "message": "Endpoint destination"
+  },
+  "notesSearch_semanticDetail_rebuild_required": {
+    "message": "The current semantic index does not match this configuration. Rebuild it before using similar-content relationships."
+  },
+  "notesSearch_semanticBackendChangeRequiresDelete": {
+    "message": "Vector storage changed. Delete the existing index before setting it up again."
+  },
+  "notesSearch_semanticError_backendChangeRequiresDelete": {
+    "message": "Vector storage changed. Delete the existing index before setting it up again."
+  },
+  "notesSearch_graphEdgeType_semantic": {
+    "message": "Similar content"
+  },
+  "notesSearch_graphCanvasAria": {
+    "message": "Notes relationship graph"
+  },
+  "notesSearch_graphEdgeLegend": {
+    "message": "Relationship line styles"
+  },
+  "notesSearch_graphLegendAuthoritative": {
+    "message": "Authoritative"
+  },
+  "notesSearch_graphPassageSimilarityShort": {
+    "message": "passage similarity"
+  },
+  "notesSearch_graphSemanticNeighbors": {
+    "message": "Neighbors"
+  },
+  "notesSearch_graphSemanticThreshold": {
+    "message": "Minimum passage similarity"
+  },
+  "notesSearch_graphSemanticReset": {
+    "message": "Reset Similar content controls"
+  },
+  "notesSearch_graphSemanticFocusRequired": {
+    "message": "Focus a Note to load similar content."
+  },
+  "notesSearch_graphPassageSimilarity": {
+    "message": "Passage similarity: {{value}}"
+  },
+  "notesSearch_graphSimilarityBand_low": {
+    "message": "Low similarity"
+  },
+  "notesSearch_graphSimilarityBand_moderate": {
+    "message": "Moderate similarity"
+  },
+  "notesSearch_graphSimilarityBand_high": {
+    "message": "High similarity"
+  },
+  "notesSearch_graphSimilarityBand_very_high": {
+    "message": "Very high similarity"
+  },
+  "notesSearch_graphSemanticProvider": {
+    "message": "Provider and model"
+  },
+  "notesSearch_graphSemanticProviderModel": {
+    "message": "{{provider}} / {{model}}"
+  },
+  "notesSearch_graphSemanticFreshness": {
+    "message": "Content freshness"
+  },
+  "notesSearch_graphSemanticVersions": {
+    "message": "Source v{{source}}, target v{{target}}"
+  },
+  "notesSearch_graphSemanticGenerationLabel": {
+    "message": "Generation"
+  },
+  "notesSearch_graphSemanticGeneration": {
+    "message": "Generation {{generation}}"
+  },
+  "notesSearch_graphSemanticIndexVersion": {
+    "message": "Index versions"
+  },
+  "notesSearch_graphSemanticIndexVersionValue": {
+    "message": "Index {{index}}, configuration {{configuration}}"
+  },
+  "notesSearch_graphEvidenceOmitted": {
+    "message": "Matched excerpts were omitted because the graph response reached its evidence limit."
+  },
+  "notesSearch_graphSemanticTruncated": {
+    "message": "Some similar relationships or matched excerpts were omitted because the graph reached a server limit."
+  },
+  "notesSearch_graphCreateManualLink": {
+    "message": "Create manual link"
+  },
+  "notesSearch_graphManualLinkCreated": {
+    "message": "Manual link created."
+  },
+  "notesSearch_graphManualLinkFailed": {
+    "message": "The manual link could not be created. Try again."
+  },
+  "notesSearch_graphSemanticModelRevision": {
+    "message": "Model revision"
+  },
+  "notesSearch_graphSemanticNormalizationVersion": {
+    "message": "Normalization version"
+  },
+  "notesSearch_graphSemanticChunkerVersion": {
+    "message": "Chunker version"
+  },
+  "notesSearch_graphSemanticVersionUnavailable": {
+    "message": "Unavailable"
+  },
+  "notesSearch_tagMatchLabel": {
+    "message": "Show notes with"
+  },
+  "notesSearch_tagMatchAll": {
+    "message": "All these tags"
+  },
+  "notesSearch_tagMatchAny": {
+    "message": "Any of these tags"
+  },
+  "notesSearch_resultsRegionLabel": {
+    "message": "Notes results"
+  },
+  "notesSearch_shortcutGroupList": {
+    "message": "Notes list"
+  },
+  "notesSearch_shortcutListMoveDescription": {
+    "message": "Move between notes in the list."
+  },
+  "notesSearch_shortcutListOpenDescription": {
+    "message": "Open the focused note."
+  },
+  "notesSearch_shortcutListSelectDescription": {
+    "message": "Select or clear the focused note."
+  },
+  "notesSearch_shortcutListPinDescription": {
+    "message": "Pin or unpin the focused note."
+  },
+  "notesSearch_shortcutListAdjacentDescription": {
+    "message": "Open the previous or next note."
+  },
+  "notesSearch_shortcutListReturnDescription": {
+    "message": "Return to the notes list."
+  },
+  "header_browsePages": {
+    "message": "Browse pages"
+  },
+  "header_closePageLauncher": {
+    "message": "Close page launcher"
   }
 }

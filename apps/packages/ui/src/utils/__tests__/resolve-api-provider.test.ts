@@ -29,6 +29,66 @@ describe("resolveApiProviderForModel", () => {
     inferProviderFromModelMock.mockReturnValue(null)
   })
 
+  it.each(["poe", "minimax", "tabby"])(
+    "recognizes the deployed provider %s",
+    (provider) => {
+      expect(
+        parseProviderQualifiedModelSelection(`${provider}:Vendor/Model`)
+      ).toMatchObject({
+        provider: provider === "tabby" ? "tabbyapi" : provider,
+        modelId: "Vendor/Model",
+        isProviderQualified: true
+      })
+    }
+  )
+
+  it.each([3, 9, 10, 99])(
+    "recognizes supported custom provider slot %i without changing model case or suffix",
+    (slot) => {
+      expect(
+        parseProviderQualifiedModelSelection(
+          `custom-openai-api-${slot}:Vendor/Model:Q4`
+        )
+      ).toMatchObject({
+        provider: `custom-openai-api-${slot}`,
+        modelId: "Vendor/Model:Q4",
+        isProviderQualified: true
+      })
+    }
+  )
+
+  it.each([
+    { alias: "custom_openai_api2", canonical: "custom-openai-api-2" },
+    { alias: "custom_openai_api_3", canonical: "custom-openai-api-3" },
+    { alias: "custom_openai3_api", canonical: "custom-openai-api-3" },
+    { alias: "openai-compatible-99", canonical: "custom-openai-api-99" }
+  ])(
+    "resolves the deployed custom provider alias %j",
+    ({ alias, canonical }) => {
+      expect(
+        parseProviderQualifiedModelSelection(`${alias}:Vendor/Model`)
+      ).toMatchObject({
+        provider: canonical,
+        modelId: "Vendor/Model",
+        isProviderQualified: true
+      })
+    }
+  )
+
+  it.each([
+    "custom-openai-api-0",
+    "custom-openai-api-100",
+    "custom-openai-api-3-other"
+  ])(
+    'does not parse unsupported custom prefix "%s" as a provider',
+    (provider) => {
+      expect(
+        parseProviderQualifiedModelSelection(`${provider}:Vendor/Model`)
+          .isProviderQualified
+      ).toBe(false)
+    }
+  )
+
   it("uses the explicit provider as the primary selection", async () => {
     await expect(
       resolveApiProviderForModel({
@@ -122,6 +182,11 @@ describe("resolveApiProviderForModel", () => {
 })
 
 describe("parseProviderQualifiedModelSelection", () => {
+  it("recognizes the local key committed by the existing catalog selector", () => {
+    expect(parseProviderQualifiedModelSelection("local:Gemma:Q4")).toMatchObject({ modelId: "Gemma:Q4", provider: "local-llm", isProviderQualified: true })
+    expect(resolveExplicitProviderForSelectedModel({ currentSelectedModel: "local:Gemma:Q4", requestedSelectedModel: "local:Gemma:Q4" })).toBe("local-llm")
+  })
+
   it.each(["llama", "llama.cpp", "llama-cpp", "llama_cpp", "llamacpp"])("preserves the full model suffix for known %s aliases", provider => {
     const modelId = "../../../models/Gemma:Q4.gguf"
     for (const prefix of ["", "tldw:"]) {

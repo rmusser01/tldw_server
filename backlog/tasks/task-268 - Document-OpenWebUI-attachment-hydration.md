@@ -35,9 +35,9 @@ Implement Stage 8 of the OpenWebUI attachment hydration plan: document the user 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Completed Stage 8 documentation for OpenWebUI attachment hydration. Verification run: docs pytest 6 passed; focused backend pytest 65 passed; focused frontend Vitest 13 passed; Bandit reported 0 findings and 0 errors; git diff --check passed before task finalization.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

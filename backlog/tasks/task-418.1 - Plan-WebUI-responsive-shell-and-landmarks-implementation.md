@@ -43,7 +43,7 @@ Documentation-only child implementation plan for the approved WebUI/extension UX
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Created Docs/superpowers/plans/2026-05-17-webui-responsive-landmarks-implementation-plan.md.
 - Reused the approved parent plan and remediation spec as the source of scope.
 - Route rows covered by the plan are /chat, /media, /settings, /settings/model, /prompts, /workspace-playground, /setup, /sources, /mcp-hub, /stt, /tts, and /chat-workspace.
@@ -52,7 +52,7 @@ Documentation-only child implementation plan for the approved WebUI/extension UX
 - Bandit was not run because this task changed only Markdown planning and Backlog task files.
 
 - Node coverage check confirmed required route, finding, file, and test tokens are present.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

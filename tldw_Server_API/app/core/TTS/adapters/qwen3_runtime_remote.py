@@ -28,6 +28,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager
 from .base import AudioFormat, TTSCapabilities, TTSRequest, TTSResponse
+from tldw_Server_API.app.core.Utils.http_status_extraction import is_http_status_error
 
 if TYPE_CHECKING:
     from .qwen3_tts_adapter import Qwen3TTSAdapter
@@ -128,9 +129,13 @@ class RemoteQwenRuntime:
         return module.startswith("httpx")
 
     def _is_http_status_error(self, exc: Exception) -> bool:
-        if not self._is_httpx_exception(exc):
-            return False
-        return exc.__class__.__name__ == "HTTPStatusError"
+        """Delegate to the shared classifier.
+
+        This copy recognised only httpx; the shared one also recognises
+        requests.HTTPError, so an adapter moved onto a requests-based transport
+        would no longer silently misclassify a status-bearing failure.
+        """
+        return is_http_status_error(exc)
 
     def _is_timeout_error(self, exc: Exception) -> bool:
         if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
@@ -337,6 +342,10 @@ class RemoteQwenRuntime:
     def _build_stream_retry_policy(self) -> RetryPolicy:
         return RetryPolicy(attempts=1)
 
+    def _request_timeout(self) -> float:
+        """The configured ``timeout`` (default 60 s), the value the timeout errors report."""
+        return float(self.config.get("timeout") or 60)
+
     async def _stream_audio(
         self,
         headers: dict[str, str],
@@ -351,6 +360,7 @@ class RemoteQwenRuntime:
                     client=self.client,
                     headers=headers,
                     json=payload,
+                    timeout=self._request_timeout(),
                     retry=self._build_stream_retry_policy(),
                     chunk_size=1024,
                     sensitive_observability=True,
@@ -370,6 +380,7 @@ class RemoteQwenRuntime:
             client=self.client,
             headers=headers,
             json=payload,
+            timeout=self._request_timeout(),
             sensitive_observability=True,
         )
         response.raise_for_status()

@@ -6,9 +6,14 @@ Helpers and FastAPI dependencies for deriving Resource Governor entity keys.
 Preference order:
   1) Auth scopes (request.state.user_id → user:{id})
   2) API key scope (request.state.api_key_id → api_key:{id})
-  3) API key header (X-API-KEY → api_key:{hmac})
-  4) Authorization: Bearer ... (treated as api_key hash if present)
-  5) IP scope (trusted header via RG_CLIENT_IP_HEADER else request.client.host)
+  3) IP scope (trusted header via RG_CLIENT_IP_HEADER else request.client.host)
+
+Unvalidated credentials (a raw X-API-KEY or Authorization header that auth has
+not yet populated request.state for) are never hashed into their own bucket
+here: that would let a rotating fake key mint unlimited fresh buckets. Ingress
+identity for those cases is resolved by RGSimpleMiddleware._principal_entity,
+which validates the credential (or falls back to the IP) before this function
+ever runs.
 """
 
 import os
@@ -18,7 +23,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Security.trusted_proxy import resolve_trusted_client_ip
 
-from .tenant import TenantScopeConfig, get_tenant_id, hash_entity, parse_tenant_config
+from .tenant import TenantScopeConfig, get_tenant_id, parse_tenant_config
 
 _RG_DEPS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -65,8 +70,14 @@ def derive_client_ip(request: Request) -> str:
     return resolved or "unknown"
 
 
-def _tenant_claims_from_state(request: Request) -> dict[str, object]:
-    """Extract tenant-related claims from trusted request state/auth context."""
+def tenant_claims_from_state(request: Request) -> dict[str, object]:
+    """Extract tenant-related claims from trusted request state/auth context.
+
+    ``tenant_id`` is the caller's own tenant: ``tenant_id`` on request state, else the
+    active org, else the org (for an API key, its scoped org or first org). RG ingress
+    calls this too, so ingress and endpoint reservations agree on a caller's tenant
+    (TASK-13402); the ``tenant.jwt_claim`` setting does not change it.
+    """
     claims: dict[str, object] = {}
     for attr in ("tenant_id", "active_org_id", "org_id"):
         try:
@@ -84,12 +95,22 @@ def _tenant_claims_from_state(request: Request) -> dict[str, object]:
                 claims.setdefault(attr, value)
     except _RG_DEPS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("RG tenant claims: auth principal lookup failed; continuing with request.state claims: {}", exc)
-    if "tenant_id" not in claims:
-        for fallback in ("active_org_id", "org_id"):
-            if fallback in claims:
-                claims["tenant_id"] = claims[fallback]
-                break
+    for attr in ("tenant_id", "active_org_id", "org_id"):
+        if attr in claims:
+            claims["tenant_id"] = claims[attr]
+            break
     return claims
+
+
+def _member_tenant_ids(request: Request, claims: dict[str, object]) -> set[str]:
+    """Tenants the validated principal on request state belongs to: its org ids and claims."""
+    ids = {str(value) for value in claims.values()}
+    auth = getattr(request.state, "auth", None)
+    for source in (request.state, getattr(auth, "principal", None)):
+        org_ids = getattr(source, "org_ids", None)
+        if isinstance(org_ids, (list, tuple, set)):
+            ids.update(str(org_id) for org_id in org_ids)
+    return ids
 
 
 def _tenant_config_from_request(request: Request) -> TenantScopeConfig | None:
@@ -112,7 +133,13 @@ def derive_entity_key(request: Request, tenant_config: TenantScopeConfig | None 
         tenant_config = _tenant_config_from_request(request)
     if tenant_config and tenant_config.enabled:
         try:
-            tenant_id = get_tenant_id(request.headers, claims=_tenant_claims_from_state(request), config=tenant_config)
+            claims = tenant_claims_from_state(request)
+            tenant_id = get_tenant_id(
+                request.headers,
+                own_tenant=claims.get("tenant_id"),
+                config=tenant_config,
+                member_of=_member_tenant_ids(request, claims),
+            )
             if tenant_id:
                 return f"tenant:{tenant_id}"
         except _RG_DEPS_NONCRITICAL_EXCEPTIONS as exc:
@@ -131,24 +158,6 @@ def derive_entity_key(request: Request, tenant_config: TenantScopeConfig | None 
         kid = getattr(request.state, "api_key_id", None)
         if kid is not None:
             return f"api_key:{kid}"
-    except _RG_DEPS_NONCRITICAL_EXCEPTIONS:
-        pass
-
-    # Header-based API key fallback (hashed)
-    try:
-        raw = request.headers.get("X-API-KEY")
-        if raw:
-            return f"api_key:{hash_entity(raw)}"
-    except _RG_DEPS_NONCRITICAL_EXCEPTIONS:
-        pass
-
-    # Authorization bearer fallback (hashed as api_key)
-    try:
-        auth = request.headers.get("Authorization") or ""
-        if auth.lower().startswith("bearer "):
-            token = auth[len("Bearer "):].strip()
-            if token:
-                return f"api_key:{hash_entity(token)}"
     except _RG_DEPS_NONCRITICAL_EXCEPTIONS:
         pass
 

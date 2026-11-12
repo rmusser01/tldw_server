@@ -1,6 +1,8 @@
+import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { requestScopeFields } from "./service-prompts"
 import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest } from "@/services/background-proxy"
+import { requestOwnedPrompt } from "@/services/prompt-owner-request"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
 import { buildQuery } from "../client-utils"
 import type {
@@ -78,8 +80,8 @@ export const collectionsMethods = {
       ...(options?.signal ? { abortSignal: options.signal } : {}),
       path: "/api/v1/notes/",
       method: "POST",
-      headers: { "Content-Type": "application/json", ...scopeFields.headers },
-      body: { content, ...metadata }
+      headers: { "Content-Type": "application/json", ...scopeFields.headers, ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}) },
+      body: { ...metadata, content: retainKnowledgeNoteProvenance(content, metadata), ...knowledgeNoteWriteFields(content, metadata, { create: true }) }
     })
   },
 
@@ -112,17 +114,26 @@ export const collectionsMethods = {
     })
   },
 
-  async searchNotes(this: TldwApiClientCore, query: string): Promise<any> {
+  async searchNotes(
+    this: TldwApiClientCore,
+    query: string,
+    params?: { limit?: number; offset?: number },
+    options?: ScopedRequestOptions,
+  ): Promise<any> {
     const normalized = query.trim()
     if (!normalized) {
-      return await this.listNotes()
+      return await this.listNotes(params, options)
     }
     const queryString = buildQuery({
-      query: normalized
+      query: normalized,
+      limit: params?.limit,
+      offset: params?.offset,
     })
     return await bgRequest<any>({
+      ...requestScopeFields(options?.requestScope),
       path: `/api/v1/notes/search/${queryString}`,
-      method: "GET"
+      method: "GET",
+      abortSignal: options?.signal,
     })
   },
 
@@ -136,17 +147,18 @@ export const collectionsMethods = {
     return await bgRequest<any>({ path: path as any, method: "GET" })
   },
 
-  async searchPrompts(query: string): Promise<any> {
+  async searchPrompts(query: string, options?: { expectedOwnerId?: string | null }): Promise<any> {
     // TODO: confirm trailing slash per OpenAPI (`/api/v1/prompts/search` exists without slash)
-    return await bgRequest<any>({
+    const request = {
       path: "/api/v1/prompts/search",
-      method: "POST",
+      method: "POST" as const,
       headers: { "Content-Type": "application/json" },
       body: { query }
-    })
+    }
+    return options?.expectedOwnerId !== undefined ? await requestOwnedPrompt({ ...request, path: "/api/v1/prompts/search" }, options.expectedOwnerId) : await bgRequest<any>({ ...request, path: "/api/v1/prompts/search" })
   },
 
-  async createPrompt(this: TldwApiClientCore, payload: PromptPayload): Promise<any> {
+  async createPrompt(this: TldwApiClientCore, payload: PromptPayload, options?: { expectedOwnerId?: string | null }): Promise<any> {
     const name = payload.name || payload.title || "Untitled"
     const system_prompt = payload.system_prompt ?? (payload.is_system ? payload.content : undefined)
     const user_prompt = payload.user_prompt ?? (!payload.is_system ? payload.content : undefined)
@@ -168,18 +180,20 @@ export const collectionsMethods = {
       "/api/v1/prompts",
       "/api/v1/prompts/"
     ])
-    return await bgRequest<any>({
+    const request = {
       path: path as any,
-      method: "POST",
+      method: "POST" as const,
       headers: { "Content-Type": "application/json" },
       body: normalized
-    })
+    }
+    return options?.expectedOwnerId !== undefined ? await requestOwnedPrompt(request, options.expectedOwnerId) : await bgRequest<any>(request)
   },
 
   async updatePrompt(
     this: TldwApiClientCore,
     id: string | number,
-    payload: PromptPayload
+    payload: PromptPayload,
+    options?: { expectedOwnerId?: string | null }
   ): Promise<any> {
     const pid = String(id)
     const name = payload.name || payload.title || "Untitled"
@@ -201,12 +215,13 @@ export const collectionsMethods = {
     })
 
     // Path per OpenAPI: /api/v1/prompts/{prompt_identifier}
-    return await bgRequest<any>({
-      path: `/api/v1/prompts/${pid}`,
-      method: "PUT",
+    const request = {
+      path: `/api/v1/prompts/${pid}` as const,
+      method: "PUT" as const,
       headers: { "Content-Type": "application/json" },
       body: normalized
-    })
+    }
+    return options?.expectedOwnerId !== undefined ? await requestOwnedPrompt(request, options.expectedOwnerId) : await bgRequest<any>(request)
   },
 
   // ── Items ──

@@ -214,6 +214,39 @@ def test_active_rows_reject_but_stopped_failed_text_is_retained():
         assert projected.retained_context_digest
 
 
+@pytest.mark.parametrize("generation_status", ["complete", "stopped", "interrupted", "length", "error"])
+def test_server_settled_generation_metadata_is_retained(generation_status):
+    generation = {
+        "generation_status": generation_status,
+        "model_id": "gpt-4o-mini",
+        "provider": "openai",
+        "finish_reason": "stop",
+        "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+    }
+    retained = project_native_fork_messages((row(extra={"sender_role": "assistant", **generation}),))
+    extra = dict(retained[0]["extra_metadata"])
+    assert dict(extra.pop("usage")) == generation["usage"]
+    assert extra == {"sender_role": "assistant", **{k: v for k, v in generation.items() if k != "usage"}}
+    assert project_native_fork_context(
+        neutral(), (row(extra={"sender_role": "assistant", **generation}),), ()
+    ).retained_context_digest
+
+
+@pytest.mark.parametrize(
+    "generation",
+    [
+        {"generation_status": "streaming"},
+        {"model_id": ""},
+        {"provider": {"name": "openai"}},
+        {"usage": {"prompt_tokens": "3"}},
+        {"usage": {"prompt_tokens": 3, "cost_usd": 1}},
+    ],
+)
+def test_invalid_generation_metadata_rejects(generation):
+    with pytest.raises(HistorySelectionError, match="unsupported_native_fork_metadata"):
+        project_native_fork_context(neutral(), (row(extra=generation),), ())
+
+
 def test_incomplete_tool_replay_rejects_and_complete_group_has_inventory():
     call = row(tools=[{"id": "call1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}])
     with pytest.raises(HistorySelectionError, match="incomplete_tool_replay"):
@@ -243,7 +276,7 @@ def test_unknown_behavior_settings_fail_closed():
 
 
 def test_shared_fixed_tuple_vectors():
-    for vector in json.loads(FIXTURE.read_text())["vectors"]:
+    for vector in json.loads(FIXTURE.read_text(encoding="utf-8"))["vectors"]:
         request = NativeForkRequestV1.model_validate(vector["request"])
         assert native_fork_request_tuple(request) == vector["tuple"]
         assert native_fork_request_digest(request) == vector["digest"]
@@ -251,7 +284,7 @@ def test_shared_fixed_tuple_vectors():
 
 @given(st.text(min_size=1, max_size=80).filter(lambda value: not any(0xD800 <= ord(c) <= 0xDFFF for c in value)))
 def test_exact_unicode_titles_change_semantic_digest(title):
-    body = deepcopy(json.loads(FIXTURE.read_text())["vectors"][0]["request"])
+    body = deepcopy(json.loads(FIXTURE.read_text(encoding="utf-8"))["vectors"][0]["request"])
     before = native_fork_request_digest(NativeForkRequestV1.model_validate(body))
     body["child_title"] = title
     after = native_fork_request_digest(NativeForkRequestV1.model_validate(body))
@@ -260,7 +293,7 @@ def test_exact_unicode_titles_change_semantic_digest(title):
 
 @pytest.mark.parametrize("change", ["unknown", "send", "owner", "comparison", "title", "duplicate"])
 def test_strict_request_rejects_ambiguous_or_unbounded_input(change):
-    body = deepcopy(json.loads(FIXTURE.read_text())["vectors"][0]["request"])
+    body = deepcopy(json.loads(FIXTURE.read_text(encoding="utf-8"))["vectors"][0]["request"])
     if change == "unknown":
         body["new_field"] = True
     elif change == "send":
@@ -340,7 +373,7 @@ def test_raw_source_row_revision_is_not_a_retained_semantic_revision():
 
 
 def test_request_serialization_has_only_semantic_contract_fields():
-    body = json.loads(FIXTURE.read_text())["vectors"][0]["request"]
+    body = json.loads(FIXTURE.read_text(encoding="utf-8"))["vectors"][0]["request"]
     request = NativeForkRequestV1.model_validate(body)
     assert set(request.model_dump(mode="json")) == set(body)
 
@@ -438,6 +471,31 @@ def test_unknown_nested_prompt_carrier_rejects(accepted_state):
         project_native_fork_context(state, (), ())
 
 
+@pytest.mark.parametrize("generation", [{"temperature": "0.9", "stopStrings": ["END"]}, {"future_effect": True}])
+def test_native_fork_generation_extension_preserves_sampling_or_rejects_unknown_effect(accepted_state, generation):
+    state = accepted_state.state
+    payload = state["behavior_snapshot"]["payload"]
+    participant = payload["participants"][0]
+    participant["prompt"]["prompt_relevant_extensions"]["character_extensions"] = {"tldw": {"generation": generation}}
+    participant["generation_defaults"]["sampling"] = {"temperature": 0.25, "stop": ["SAVED"]}
+    snapshot = build_behavior_snapshot(payload)
+    state["behavior_snapshot"].update(payload=snapshot.payload, digest=snapshot.digest)
+    values = state["settings"]["roleplayBehaviorV1"]["values"]
+    values["base_snapshot"]["digest"] = snapshot.digest
+    state["settings"]["roleplayBehaviorV1"] = build_materialized_behavior_settings(values)
+
+    if "future_effect" in generation:
+        with pytest.raises(HistorySelectionError, match="prompt_extensions"):
+            project_native_fork_context(state, (), ())
+    else:
+        result = project_native_fork_context(state, (), ())
+        retained = json.loads(result.snapshot_json)
+        assert retained["participants"][0]["generation_defaults"]["sampling"] == {
+            "temperature": 0.25,
+            "stop": ["SAVED"],
+        }
+
+
 def test_tool_arguments_cannot_retain_source_credentials():
     tools = [{"id": "c", "type": "function", "function": {"name": "fetch", "arguments": '{"api_key":"source-secret"}'}}]
     rows = (row(tools=tools), row("b", role="tool", extra={"tool_call_id": "c"}))
@@ -501,7 +559,7 @@ def test_scope_rejects_noncanonical_shapes(invalid):
 
 
 def test_asset_missing_marker_requires_explicit_review_and_known_role():
-    body = json.loads(FIXTURE.read_text())["vectors"][-1]["request"]
+    body = json.loads(FIXTURE.read_text(encoding="utf-8"))["vectors"][-1]["request"]
     body["fidelity"] = "strict"
     with pytest.raises(ValidationError):
         NativeForkRequestV1.model_validate(body)
@@ -699,7 +757,7 @@ def test_accepted_character_sender_is_retained_as_assistant(accepted_state):
     ],
 )
 def test_changed_semantic_tuple_members_change_digest(field):
-    body = json.loads(FIXTURE.read_text())["vectors"][0]["request"]
+    body = json.loads(FIXTURE.read_text(encoding="utf-8"))["vectors"][0]["request"]
     before = native_fork_request_digest(NativeForkRequestV1.model_validate(body))
     selection = body["input"]["selection"]
     if field == "operation_id":
@@ -726,7 +784,7 @@ def test_changed_semantic_tuple_members_change_digest(field):
 
 
 def test_asset_order_and_each_reference_member_are_semantic():
-    body = json.loads(FIXTURE.read_text())["vectors"][-2]["request"]
+    body = json.loads(FIXTURE.read_text(encoding="utf-8"))["vectors"][-2]["request"]
     asset = body["asset_manifest"][0]
     body["asset_manifest"].append({**asset, "reference_id": "second"})
     before = native_fork_request_digest(NativeForkRequestV1.model_validate(body))
@@ -849,3 +907,83 @@ def test_unprotected_snapshot_identity_cannot_impersonate_native_child(accepted_
 def test_placeholder_metadata_cannot_hide_retained_text_without_closed_replay(reason):
     with pytest.raises(HistorySelectionError, match="unsupported_native_fork_tool_replay"):
         project_native_fork_context(neutral(), (row(extra={"content_placeholder_reason": reason}),), ())
+
+
+def test_original_empty_tool_result_retains_empty_text_and_closed_inventory():
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text="[empty tool result]",
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": 1,
+    }
+    projected = project_native_fork_context(neutral(), (call, result), ())
+    assert "tool_replay" in projected.required_effects
+    assert project_native_fork_messages((call, result))[1]["message"] == ""
+
+
+@pytest.mark.parametrize("content", ["Edited result", "[empty tool result]"])
+def test_edited_empty_tool_result_is_not_erased(content):
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text=content,
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": 2,
+    }
+    assert project_native_fork_messages((call, result))[1]["message"] == content
+
+
+@pytest.mark.parametrize("version", [None, 0, True, "1"])
+def test_empty_tool_result_requires_a_valid_physical_revision(version):
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text="[empty tool result]",
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": version,
+    }
+    with pytest.raises(HistorySelectionError, match="tool_replay_placeholder"):
+        project_native_fork_messages((call, result))

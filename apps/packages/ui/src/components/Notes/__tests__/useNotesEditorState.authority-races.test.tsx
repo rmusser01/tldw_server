@@ -4,13 +4,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useNotesEditorState, type UseNotesEditorStateDeps } from '../hooks/useNotesEditorState'
 
+import { createNotesGraphAuthorityScope } from '../hooks/useNotesGraphAuthorityScope'
+
+const connectionConfig = { serverUrl: 'https://notes.example.test', authMode: 'multi-user' as const }
+const aliceScope = createNotesGraphAuthorityScope(connectionConfig.serverUrl, 1)
+const bobScope = createNotesGraphAuthorityScope(connectionConfig.serverUrl, 2)
 const mocks = vi.hoisted(() => ({ request: vi.fn(), tasks: vi.fn(), activity: vi.fn(), error: vi.fn() }))
 vi.mock('@/services/background-proxy', () => ({ bgRequest: mocks.request }))
 vi.mock('@/services/notes-tasks', () => ({
   listNoteTasks: mocks.tasks, listTaskActivity: mocks.activity,
   markTaskActivityRead: vi.fn(), setNoteTaskStatus: vi.fn()
 }))
-vi.mock('@/services/tldw/TldwAuth', () => ({ tldwAuth: { getCurrentUser: vi.fn(async () => null) } }))
+vi.mock('@/services/tldw/TldwAuth', () => ({ tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true })) } }))
 vi.mock('@/services/settings/registry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/settings/registry')>(),
   getSetting: vi.fn(async () => null), setSetting: vi.fn(async () => undefined), clearSetting: vi.fn()
@@ -26,7 +31,7 @@ const deferred = <T,>() => {
 const renderEditor = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const deps: UseNotesEditorStateDeps = {
-    authorityScope: 'alice', isOnline: false, isMobileViewport: false,
+    authorityScope: aliceScope, connectionConfig, isOnline: false, isMobileViewport: false,
     message: { error: mocks.error } as unknown as UseNotesEditorStateDeps['message'],
     confirmDanger: vi.fn(async () => true), queryClient, t: (key) => key,
     listMode: 'active', setListMode: vi.fn(), data: [], refetch: vi.fn(async () => undefined),
@@ -35,8 +40,11 @@ const renderEditor = () => {
     setEditorKeywords: vi.fn(), keywordSuggestionReturnFocusRef: { current: null },
     setKeywordSuggestionOptions: vi.fn(), setKeywordSuggestionSelection: vi.fn(), editorDisabled: false
   }
-  return renderHook(({ scope }) => useNotesEditorState({ ...deps, authorityScope: scope }), {
-    initialProps: { scope: 'alice' },
+  return renderHook(({ scope }) => {
+    const [keywords, setKeywords] = React.useState<string[]>([])
+    return useNotesEditorState({ ...deps, authorityScope: scope, editorKeywords: keywords, setEditorKeywords: setKeywords })
+  }, {
+    initialProps: { scope: aliceScope },
     wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   })
 }
@@ -44,8 +52,45 @@ const renderEditor = () => {
 describe('Notes editor authority races', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     mocks.tasks.mockResolvedValue({ tasks: [], reconciliation: null })
     mocks.activity.mockResolvedValue({ events: [] })
+  })
+
+  it('keeps the old note immutable while the newly selected detail is pending', async () => {
+    const next = deferred<unknown>()
+    mocks.request.mockImplementation(({ path }: { path: string }) => path.endsWith('/next')
+      ? next.promise : Promise.resolve({ id: 'old', title: 'Old note', content: 'Old body' }))
+    const view = renderEditor()
+    await act(async () => { await view.result.current.loadDetail('old') })
+    let loading!: Promise<boolean>
+    act(() => { loading = view.result.current.loadDetail('next') })
+    act(() => { view.result.current.setTitle('Title intended for next') })
+    expect(view.result.current.title).toBe('Old note')
+    act(() => { view.result.current.setContentDirty('Edit intended for next') })
+    expect(view.result.current.content).toBe('Old body')
+    await act(async () => {
+      next.resolve({ id: 'next', title: 'Next note', content: 'Next body' })
+      await loading
+    })
+    expect(view.result.current.selectedId).toBe('next')
+    expect(view.result.current.content).toBe('Next body')
+  })
+
+  it('refuses an old-note save until the selected detail resolves', async () => {
+    const next = deferred<unknown>()
+    mocks.request.mockImplementation(({ path }: { path: string }) => path.endsWith('/next')
+      ? next.promise : Promise.resolve({ id: 'old', title: 'Old note', content: 'Old body' }))
+    const view = renderEditor()
+    await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
+    await act(async () => { await view.result.current.loadDetail('old') })
+    let loading!: Promise<boolean>
+    act(() => { loading = view.result.current.loadDetail('next') })
+    let saved!: boolean
+    await act(async () => { saved = await view.result.current.saveNote({ showSuccessMessage: false }) })
+    expect(saved).toBe(false)
+    expect(view.result.current.offlineDraftQueue).toEqual({})
+    await act(async () => { next.resolve({ id: 'next', content: 'Next body' }); await loading })
   })
 
   it('ignores an old detail response after Alice → Bob → Alice', async () => {
@@ -55,8 +100,8 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     act(() => { loading = view.result.current.loadDetail('old') })
-    view.rerender({ scope: 'bob' })
-    view.rerender({ scope: 'alice' })
+    view.rerender({ scope: bobScope })
+    view.rerender({ scope: aliceScope })
     await act(async () => { await view.result.current.loadDetail('new') })
     await act(async () => {
       old.resolve({ id: 'old', title: 'Stale note', content: 'Stale content' })
@@ -71,7 +116,7 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     act(() => { void view.result.current.loadDetail('old') })
     expect(view.result.current.loadingDetail).toBe(true)
-    view.rerender({ scope: 'bob' })
+    view.rerender({ scope: bobScope })
     expect(view.result.current.loadingDetail).toBe(false)
     await act(async () => { old.resolve({ id: 'old' }) })
   })
@@ -99,7 +144,7 @@ describe('Notes editor authority races', () => {
   it('keeps an offline edit dirty when scoped draft persistence throws', async () => {
     const view = renderEditor()
     await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => {
       throw new Error('storage unavailable')
     })
     try {
@@ -124,7 +169,7 @@ describe('Notes editor authority races', () => {
   it('does not acknowledge an offline draft unless scoped storage retains it', async () => {
     const view = renderEditor()
     await waitFor(() => expect(view.result.current.offlineDraftQueueHydrated).toBe(true))
-    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => undefined)
+    const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage), 'setItem').mockImplementation(() => undefined)
     try {
       act(() => {
         view.result.current.setTitle('Draft without a retained write')
@@ -151,7 +196,7 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     act(() => { loading = view.result.current.loadDetail('old') })
-    view.rerender({ scope: 'bob' })
+    view.rerender({ scope: bobScope })
     act(() => { void view.result.current.loadDetail('new') })
     await act(async () => { old.reject(new Error('Old failure')); await loading })
     expect({ errors: mocks.error.mock.calls, loading: view.result.current.loadingDetail }).toEqual({ errors: [], loading: true })
@@ -166,12 +211,14 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     await act(async () => { loading = view.result.current.loadDetail('old') })
-    view.rerender({ scope: 'bob' })
-    view.rerender({ scope: 'alice' })
+    await waitFor(() => expect(mocks.tasks).toHaveBeenCalledWith('old', { limit: 500 }, expect.any(Object)))
+    view.rerender({ scope: bobScope })
+    view.rerender({ scope: aliceScope })
     await act(async () => { await view.result.current.loadDetail('new') })
     await act(async () => { old.resolve({ tasks: [{ id: 'stale-task' }], reconciliation: null }); await loading })
     expect(view.result.current.noteTasks.map((task) => task.id)).toEqual(['current-task'])
     expect(mocks.activity).not.toHaveBeenCalledWith({ note_id: 'old', limit: 50 })
+    expect(mocks.activity.mock.calls.some(([params]) => params.note_id === 'old')).toBe(false)
   })
 
   it.each(['resolve', 'reject'] as const)('ignores delayed activity %s after Alice → Bob → Alice', async (settle) => {
@@ -182,8 +229,9 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     await act(async () => { loading = view.result.current.loadDetail('old') })
-    view.rerender({ scope: 'bob' })
-    view.rerender({ scope: 'alice' })
+    await waitFor(() => expect(mocks.activity).toHaveBeenCalledWith({ note_id: 'old', limit: 50 }, expect.any(Object)))
+    view.rerender({ scope: bobScope })
+    view.rerender({ scope: aliceScope })
     await act(async () => { await view.result.current.loadDetail('new') })
     await act(async () => {
       if (settle === 'resolve') old.resolve({ events: [{ id: 'stale-event', note_id: 'old' }] })
@@ -192,4 +240,20 @@ describe('Notes editor authority races', () => {
     })
     expect(view.result.current.taskActivityEvents.map((event) => event.id)).toEqual(['current-event'])
   })
+})
+
+it.each(["active", "deleted"])("opens independent %s history after the marker is removed", async state => {
+  const history = { origin: "knowledge_qa", trust_state: "uncited_degraded_answer", question: "Original question" }
+  mocks.request.mockResolvedValue({ id: "owned", content: "Edited answer", version: 9,
+    knowledge_provenance_state: state, knowledge_provenance_version: 4,
+    knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+    knowledge_provenance: state === "active" ? history : null,
+  })
+  const view = renderEditor()
+  await act(async () => { await view.result.current.loadDetail("owned") })
+  expect(view.result.current.originalMetadata).toMatchObject({
+    knowledge_provenance_state: state, knowledge_provenance_version: 4,
+    knowledge_provenance: state === "active" ? history : null,
+  })
+  expect(view.result.current.content).toBe("Edited answer")
 })

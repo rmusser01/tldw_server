@@ -201,6 +201,37 @@ def test_rag_batch_resume_respects_query_indices(client_with_overrides, monkeypa
     assert status_map.get(2) == "ok"
 
 
+def test_rag_batch_resume_with_generation_refuses_an_over_quota_owner(client_with_overrides, monkeypatch, tmp_path):
+    """A resumed batch whose saved request generates answers is refused with the 402 before any query runs."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
+    manager = cp_mod.CheckpointManager()
+
+    queries = ["alpha", "beta"]
+    checkpoint = manager.create(
+        "rag_batch",
+        total_items=len(queries),
+        config={"queries": queries, "max_concurrent": 2, "enable_generation": True},
+    )
+
+    import tldw_Server_API.app.core.RAG.rag_service.unified_pipeline as up
+
+    calls: list[str] = []
+
+    async def recording_pipeline(query: str, **kwargs):  # noqa: ARG001
+        calls.append(query)
+        return up.UnifiedSearchResult(documents=[], query=query, errors=[])
+
+    monkeypatch.setattr(up, "unified_rag_pipeline", recording_pipeline)
+    refuse_llm_work(monkeypatch)
+
+    resp = client_with_overrides.post(f"/api/v1/rag/batch/resume/{checkpoint.checkpoint_id}")
+
+    assert_llm_quota_402(resp)
+    assert calls == []
+
+
 def test_rag_batch_resume_records_errors(client_with_overrides, monkeypatch, tmp_path):
     cp_mod = _set_checkpoint_dir(monkeypatch, tmp_path)
     manager = cp_mod.CheckpointManager()

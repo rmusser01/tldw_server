@@ -30,7 +30,7 @@ Fix the PR #2133 full-suite Audio test failure where the heartbeat create_task f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 CI evidence from PR #2133 Full Suite Ubuntu/Python 3.11 showed `test_audio_transcriptions_sanitizes_heartbeat_task_start_failure_log` failing in the Audio module because the test-injected `asyncio.create_task` error reached AuthNZ database pool initialization. Updated `_setup_stubbed_audio_app` to override `get_auth_principal` and `get_db_transaction`, matching the existing retention/redaction audio endpoint test helper so the test remains focused on the endpoint heartbeat branch.
 
 Local verification:
@@ -46,7 +46,7 @@ Additional local verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/Audio/test_audio_transcriptions_hotwords.py::test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log` passed.
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest -q tldw_Server_API/tests/Audio/test_audio_transcriptions_hotwords.py` passed: 23 tests.
 - Bandit ran on touched Admin/Audio files; remaining findings are low-severity test assert usage only, with no B106 or medium/high findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

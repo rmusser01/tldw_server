@@ -32,6 +32,32 @@ export const MANUAL_SESSION_KEY = "tldwManualSessionApiKey"
 export const REFRESH_ROTATION_KEY = "tldwRefreshRotation"
 export const REFRESH_SESSION_INVALIDATION_PREFIX = "tldwInvalidRefreshSession:"
 
+export const getBuildTimeApiKey = (): string | null => {
+  try {
+    const env = (import.meta.env || {}) as {
+      VITE_TLDW_API_KEY?: string
+      VITE_TLDW_DEFAULT_API_KEY?: string
+    }
+    const raw = env.VITE_TLDW_API_KEY ?? env.VITE_TLDW_DEFAULT_API_KEY ??
+      (typeof process === "undefined" ? undefined : process.env?.NEXT_PUBLIC_X_API_KEY)
+    return typeof raw === "string" ? raw.trim() || null : null
+  } catch {
+    return null
+  }
+}
+
+/** Compare decoded session records by the credential and its binding metadata. */
+export const manualSessionCredentialsMatch = (
+  previous: Partial<TldwConfig> | null | undefined,
+  current: Partial<TldwConfig> | null | undefined
+): boolean => {
+  const key = (value: typeof current) => typeof value?.apiKey === "string" ? value.apiKey.trim() : null
+  return key(previous) === key(current) &&
+    previous?.credentialSource === current?.credentialSource &&
+    previous?.apiKeyPersistence === current?.apiKeyPersistence &&
+    previous?.apiKeyServerOrigin === current?.apiKeyServerOrigin
+}
+
 /**
  * A possibly-untrusted request-scope target (e.g. parsed from a runtime
  * message). Fields are `unknown` on purpose: the helpers below only ever
@@ -160,8 +186,10 @@ export const hasInvalidatedRefreshSession = async (
 /** An immutable marker cannot overwrite another tab's login or successful rotation. */
 export const invalidateRefreshSessionIfCurrent = async (
   persistent: CredentialStorage,
-  checked: TldwConfig
+  checked: TldwConfig,
+  assertCurrent?: () => void
 ): Promise<boolean> => {
+  assertCurrent?.()
   const key = refreshSessionInvalidationKey(checked)
   if (!key) return false
   const currentKey = async () => {
@@ -172,6 +200,7 @@ export const invalidateRefreshSessionIfCurrent = async (
     ))
   }
   if (await currentKey() !== key) return false
+  assertCurrent?.()
   await persistent.set(key, true)
   const invalidated = await currentKey() === key
   if (invalidated && typeof window !== "undefined") {
@@ -285,8 +314,10 @@ export const storeRefreshRotationIfCurrent = async (
   persistent: CredentialStorage,
   checked: ServicePromptTargetLock & Readonly<{ accessToken?: unknown }>,
   expectedRefreshToken: string,
-  tokens: Readonly<{ accessToken: string; refreshToken: string }>
+  tokens: Readonly<{ accessToken: string; refreshToken: string }>,
+  assertCurrent?: () => void
 ): Promise<boolean> => {
+  assertCurrent?.()
   const expected = nonEmptySecret(expectedRefreshToken)
   const accessToken = nonEmptySecret(tokens.accessToken)
   const refreshToken = nonEmptySecret(tokens.refreshToken)
@@ -320,6 +351,7 @@ export const storeRefreshRotationIfCurrent = async (
     !sourceRefreshToken
   ) return false
 
+  assertCurrent?.()
   await persistent.set<RefreshRotationRecord>(REFRESH_ROTATION_KEY, {
     version: 1,
     ...(nonEmptySecret(stored.serverUrl)
@@ -333,6 +365,7 @@ export const storeRefreshRotationIfCurrent = async (
     accessToken,
     refreshToken
   })
+  assertCurrent?.()
   return true
 }
 
@@ -366,6 +399,20 @@ const isCompleteSessionRecord = (
   )
 }
 
+export const resolveManualSessionCredential = (
+  config: TldwConfig | null | undefined,
+  record: unknown
+): string | null => {
+  if (
+    config?.authMode !== "single-user" ||
+    config.credentialSource !== "manual" ||
+    config.apiKeyPersistence !== "session"
+  ) return null
+  const origin = normalizeServerOrigin(config.serverUrl)
+  if (!origin || origin !== config.apiKeyServerOrigin) return null
+  return isCompleteSessionRecord(record, origin) ? nonEmptySecret(record.apiKey) : null
+}
+
 export const resolveManualCredential = async (
   config: TldwConfig | null | undefined,
   stores: { session: CredentialStorage }
@@ -386,9 +433,7 @@ export const resolveManualCredential = async (
   const record = await stores.session
     .get<ManualSessionCredential>(MANUAL_SESSION_KEY)
     .catch(() => null)
-  return isCompleteSessionRecord(record, origin)
-    ? nonEmptySecret(record.apiKey)
-    : null
+  return resolveManualSessionCredential(config, record)
 }
 
 export const resolveEffectiveTldwConfig = async (

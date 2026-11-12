@@ -1,10 +1,13 @@
 import { act, renderHook } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useComposerAttachments } from "../hooks/useComposerAttachments"
+import { toBase64 } from "~/libs/to-base64"
 
 vi.mock("~/libs/to-base64", () => ({
   toBase64: vi.fn(async (file: File) => `data:${file.type};base64,ZmFrZQ==`),
 }))
+
+const decodeImage = vi.fn<() => Promise<void>>()
 
 const makeImageFile = () =>
   new File(["fake"], "photo.png", { type: "image/png" })
@@ -38,12 +41,127 @@ const makeEvent = (file: File) =>
 describe("useComposerAttachments", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    decodeImage.mockReset().mockResolvedValue(undefined)
+    vi.stubGlobal("Image", class { src = ""; decode = decodeImage })
   })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("rejects an undecodable image without accepting bytes or its filename", async () => {
+    decodeImage.mockRejectedValueOnce(new Error("Invalid image"))
+    const setImageField = vi.fn(),
+      onImageAccepted = vi.fn(),
+      onImageReadError = vi.fn()
+    const { result } = renderHook(() =>
+      useComposerAttachments({
+        chatMode: "normal",
+        setImageField,
+        onImageAccepted,
+        onImageReadError,
+        captureImageOwnership: () => () => true
+      })
+    )
+    const event = makeEvent(makeImageFile())
+    await act(async () => result.current.onInputChange(event))
+    expect(setImageField).not.toHaveBeenCalled()
+    expect(onImageAccepted).not.toHaveBeenCalled()
+    expect(onImageReadError).toHaveBeenCalledTimes(1)
+    expect(event.target.value).toBe("")
+  })
+
+  it("rejects an image whose owner changes during decoding", async () => {
+    let finishDecode: () => void
+    decodeImage.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishDecode = resolve
+        })
+    )
+    let current = true
+    const setImageField = vi.fn()
+    const { result } = renderHook(() =>
+      useComposerAttachments({
+        chatMode: "normal",
+        setImageField,
+        captureImageOwnership: () => () => current
+      })
+    )
+    let pending: Promise<void>
+    await act(async () => {
+      pending = result.current.onInputChange(makeImageFile())
+      await Promise.resolve()
+    })
+    current = false
+    await act(async () => {
+      finishDecode!()
+      await pending!
+    })
+    expect(setImageField).not.toHaveBeenCalled()
+  })
+
+  it.each(["older-first", "newer-first"])(
+    "publishes only the latest selected image when reads finish %s",
+    async (order) => {
+      let finishOld: (value: string) => void, finishNew: (value: string) => void
+      vi.mocked(toBase64)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishOld = resolve
+            })
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              finishNew = resolve
+            })
+        )
+      const setImageField = vi.fn(),
+        onImageAccepted = vi.fn()
+      const { result } = renderHook(() =>
+        useComposerAttachments({
+          chatMode: "normal",
+          setImageField,
+          onImageAccepted,
+          captureImageOwnership: () => () => true
+        })
+      )
+      const older = new File(["old"], "old.png", { type: "image/png" })
+      const newer = new File(["new"], "new.png", { type: "image/png" })
+      let oldRead: Promise<void>, newRead: Promise<void>
+      act(() => {
+        oldRead = result.current.onInputChange(older)
+        newRead = result.current.onInputChange(newer)
+      })
+      const oldDone = async () => {
+        finishOld!("data:image/png;base64,b2xk")
+        await oldRead!
+      }
+      const newDone = async () => {
+        finishNew!("data:image/png;base64,bmV3")
+        await newRead!
+      }
+      await act(async () => {
+        if (order === "older-first") {
+          await oldDone()
+          await newDone()
+        } else {
+          await newDone()
+          await oldDone()
+        }
+      })
+      expect(setImageField).toHaveBeenCalledTimes(1)
+      expect(setImageField).toHaveBeenCalledWith("data:image/png;base64,bmV3")
+      expect(onImageAccepted).toHaveBeenCalledTimes(1)
+      expect(onImageAccepted).toHaveBeenCalledWith(newer)
+    }
+  )
 
   it("reads an image file to base64 and writes it to the form", async () => {
     const setImageField = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField,
       })
@@ -62,6 +180,7 @@ describe("useComposerAttachments", () => {
     const onImageAccepted = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField: vi.fn(),
         onImageAccepted,
@@ -81,6 +200,7 @@ describe("useComposerAttachments", () => {
     const onNonImageRejected = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField,
         onNonImageRejected,
@@ -102,6 +222,7 @@ describe("useComposerAttachments", () => {
     const onNonImageRejected = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField,
         onNonImageRejected,
@@ -122,6 +243,7 @@ describe("useComposerAttachments", () => {
     const onUnsupportedType = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField,
         onUnsupportedType,
@@ -143,6 +265,7 @@ describe("useComposerAttachments", () => {
     const onUnsupportedType = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField,
         onUnsupportedType,
@@ -163,6 +286,7 @@ describe("useComposerAttachments", () => {
     const onUnsupportedType = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField,
         onUnsupportedType,
@@ -184,6 +308,7 @@ describe("useComposerAttachments", () => {
 
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "rag",
         setImageField,
         ragBlocksImages: true,
@@ -203,6 +328,7 @@ describe("useComposerAttachments", () => {
     const onDocumentUpload = vi.fn(async () => undefined)
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField: vi.fn(),
         onDocumentUpload,
@@ -222,6 +348,7 @@ describe("useComposerAttachments", () => {
     const setImageField = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField,
         onNonImageRejected,
@@ -242,6 +369,7 @@ describe("useComposerAttachments", () => {
     const setImageField = vi.fn()
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField,
         onUnsupportedType,
@@ -260,6 +388,7 @@ describe("useComposerAttachments", () => {
   it("clears the input value after a ChangeEvent-triggered upload", async () => {
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField: vi.fn(),
       })
@@ -276,6 +405,7 @@ describe("useComposerAttachments", () => {
   it("handleImageUpload clicks the image input ref", () => {
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField: vi.fn(),
       })
@@ -294,6 +424,7 @@ describe("useComposerAttachments", () => {
   it("handleDocumentUpload clicks the file input ref", () => {
     const { result } = renderHook(() =>
       useComposerAttachments({
+        captureImageOwnership: () => () => true,
         chatMode: "normal",
         setImageField: vi.fn(),
       })

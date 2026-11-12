@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.RPG.context import SessionContext
 from tldw_Server_API.app.core.RPG.rules.answering import RulesAnswerOptions
 from tldw_Server_API.app.core.RPG.rules.content_packs import RuleLookupResult
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.main import app
 from tldw_Server_API.tests.PrivilegeCatalog.test_endpoint_scope_catalog_sync import load_catalog_scope_ids
 
@@ -48,8 +49,8 @@ def _create_campaign_and_session(client: TestClient, prefix: str) -> tuple[int, 
 def _route_permissions(method: str, path: str) -> set[str]:
     route = next(
         route
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.path == path and method.upper() in route.methods
+        for route in iter_served_routes(app.routes)
+        if isinstance(route.route, APIRoute) and route.path == path and method.upper() in route.methods
     )
     permissions: set[str] = set()
     for dependency in route.dependant.dependencies:
@@ -67,8 +68,8 @@ def _route_permissions(method: str, path: str) -> set[str]:
 def _route_dependency_calls(method: str, path: str) -> set[object]:
     route = next(
         route
-        for route in app.routes
-        if isinstance(route, APIRoute) and route.path == path and method.upper() in route.methods
+        for route in iter_served_routes(app.routes)
+        if isinstance(route.route, APIRoute) and route.path == path and method.upper() in route.methods
     )
     calls: set[object] = set()
 

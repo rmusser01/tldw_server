@@ -1,0 +1,14 @@
+{
+  "backend": "postgresql",
+  "revision": "aac02e68e8",
+  "sqlstate": "53100",
+  "failed_phase": "pre_measurement_exact_body_version_parity",
+  "timing_started": false,
+  "container_shared_memory_bytes": 67108864,
+  "parallel_hash_join_nodes": 2,
+  "gather_workers": 2,
+  "segment_growth_bytes": 16777216,
+  "outbound_attempts": 0,
+  "model_attempts": 0,
+  "resolution": "Serial full verification transaction; timed resource budget restored."
+}

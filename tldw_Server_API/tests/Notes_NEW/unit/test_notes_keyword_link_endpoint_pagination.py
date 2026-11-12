@@ -25,22 +25,17 @@ class _User:
 class _KeywordLinkDB:
     client_id = "test-client"
 
-    def execute_query(self, sql: str, params: tuple[object, ...] = ()) -> _Cursor:
-        if "collection_keywords" in sql:
-            return _Cursor(
-                [
-                    {"collection_id": 10, "keyword_id": 1},
-                    {"collection_id": 11, "keyword_id": 2},
-                ]
-            )
-        if "conversation_keywords" in sql:
-            return _Cursor(
-                [
-                    {"conversation_id": "conv-a", "keyword_id": 1},
-                    {"conversation_id": "conv-b", "keyword_id": 2},
-                ]
-            )
-        raise AssertionError(f"Unexpected SQL: {sql}")
+    def list_collection_keyword_links(self, limit: int, offset: int) -> list[dict[str, object]]:
+        return [
+            {"collection_id": 10, "keyword_id": 1},
+            {"collection_id": 11, "keyword_id": 2},
+        ]
+
+    def list_conversation_keyword_links(self, limit: int, offset: int) -> list[dict[str, object]]:
+        return [
+            {"conversation_id": "conv-a", "keyword_id": 1},
+            {"conversation_id": "conv-b", "keyword_id": 2},
+        ]
 
     def count_collection_keyword_links(self) -> int:
         return 3
@@ -51,6 +46,7 @@ class _KeywordLinkDB:
 
 class _NotesForKeywordDB:
     client_id = "test-client"
+    owner_user_id = "test-client"
 
     def get_keyword_by_id(self, keyword_id: int) -> dict[str, object]:
         assert keyword_id == 7

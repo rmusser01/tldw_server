@@ -189,6 +189,7 @@ const normalizePromptDraftSnapshot = (values: {
 }
 
 interface PromptDrawerProps {
+  draftScopeKey?: string
   open: boolean
   onClose: () => void
   mode: "create" | "edit"
@@ -233,6 +234,7 @@ interface PromptDrawerProps {
 
 export const PromptDrawer: React.FC<PromptDrawerProps> = ({
   open,
+  draftScopeKey = "local",
   onClose,
   mode,
   initialValues,
@@ -275,8 +277,8 @@ export const PromptDrawer: React.FC<PromptDrawerProps> = ({
     return undefined
   }, [mode, initialValues?.id, initialValues?.serverId])
   const draftStorageKey = React.useMemo(
-    () => `tldw-prompt-drawer-draft-${mode}-${draftEditId || "new"}`,
-    [mode, draftEditId]
+    () => `tldw-prompt-drawer-draft-${JSON.stringify([draftScopeKey, mode, draftEditId || "new"])}`,
+    [draftScopeKey, mode, draftEditId]
   )
   const initialSnapshot = React.useMemo(
     () => normalizePromptDraftSnapshot(initialValues || {}),

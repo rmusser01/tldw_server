@@ -6,6 +6,7 @@ type OutputPanelProps = {
   canGenerate: boolean
   onGenerate: () => void | Promise<void>
   onCopy: () => void | Promise<void>
+  onCancel: () => void
   onDownload: () => void
 }
 
@@ -15,7 +16,8 @@ export function OutputPanel({
   canGenerate,
   onGenerate,
   onCopy,
-  onDownload
+  onDownload,
+  onCancel
 }: OutputPanelProps) {
   const { t } = useTranslation(["option"])
 
@@ -33,11 +35,20 @@ export function OutputPanel({
         >
           {t("option:repo2txt.generate", { defaultValue: "Generate Output" })}
         </button>
+        {busy && (
+          <button
+            type="button"
+            className="rounded border px-3 py-1.5 text-sm"
+            onClick={onCancel}
+          >
+            {t("option:repo2txt.cancel", { defaultValue: "Cancel" })}
+          </button>
+        )}
         <button
           type="button"
           className="rounded border px-3 py-1.5 text-sm"
           onClick={() => void onCopy()}
-          disabled={output.trim().length === 0}
+          disabled={busy || output.trim().length === 0}
         >
           {t("option:repo2txt.copy", { defaultValue: "Copy" })}
         </button>
@@ -45,7 +56,7 @@ export function OutputPanel({
           type="button"
           className="rounded border px-3 py-1.5 text-sm"
           onClick={onDownload}
-          disabled={output.trim().length === 0}
+          disabled={busy || output.trim().length === 0}
         >
           {t("option:repo2txt.download", { defaultValue: "Download" })}
         </button>
@@ -54,7 +65,7 @@ export function OutputPanel({
         value={output}
         readOnly
         rows={14}
-        className="w-full rounded border p-3 text-xs"
+        className="w-full rounded border border-border bg-surface p-3 text-xs text-text"
         aria-label={t("option:repo2txt.outputPreviewAria", {
           defaultValue: "Repo2txt output preview"
         })}

@@ -1,3 +1,6 @@
+import { captureNormalChatPreparation, runChatModeWithHistory, type HistoryChatModeParams } from "./normalChatMode"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import type { ActorSceneRead } from "@/services/actor-settings"
 import {
   type ChatHistory,
   type Message,
@@ -15,15 +18,10 @@ import { coerceBooleanOrNull } from "@/services/settings/registry"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { ActorSettings } from "@/types/actor"
 import { maybeInjectActorMessage } from "@/utils/actor"
-import {
-  parseProviderQualifiedModelSelection,
-  resolveApiProviderForModel
-} from "@/utils/resolve-api-provider"
 import type { ChatModelSettings } from "@/store/model"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
   getRequiredServicePrompt,
-  runChatPipeline,
   type ChatModeContext,
   type ChatModeDefinition
 } from "./chatModePipeline"
@@ -230,7 +228,7 @@ type RagSourceEntry = {
   metadata: RagDocumentMetadata
 }
 
-type RagModeParams = {
+type RagModeParams = HistoryChatModeParams & {
   selectedModel: string
   useOCR: boolean
   selectedKnowledge: Knowledge | null
@@ -255,6 +253,8 @@ type RagModeParams = {
   ragSources: string[]
   ragAdvancedOptions?: Record<string, unknown>
   systemPromptAppendix?: string
+  actorSceneSend?: ActorSceneSend
+  actorScene?: ActorSceneRead
   actorSettings?: ActorSettings
   clusterId?: string
   userMessageType?: string
@@ -294,19 +294,7 @@ const getMetadataString = (
   return typeof value === "string" && value.trim() ? value.trim() : ""
 }
 
-const getGeneratedRagAnswer = (ragRes: RagResponse | null | undefined) =>
-  typeof ragRes?.generated_answer === "string"
-    ? ragRes.generated_answer.trim()
-    : ""
-
-const buildSelectedSourceNoEvidenceText = (
-  ragRes: RagResponse | null | undefined
-) => {
-  const generatedAnswer = getGeneratedRagAnswer(ragRes)
-  if (generatedAnswer) {
-    return `${generatedAnswer}\n\nI did not send this as general chat because selected-source answers must be grounded in retrieved source evidence.`
-  }
-
+const buildSelectedSourceNoEvidenceText = () => {
   return "I couldn't find supporting evidence in the selected sources for that question. I did not send this as general chat because selected-source answers must be grounded in retrieved source evidence. Try rephrasing the question, selecting more ready sources, or checking ingestion and indexing status."
 }
 
@@ -389,6 +377,7 @@ const resolveRagQuery = async (
   ctx: ChatModeContext<RagModeParams>,
   promptForQuestion: string | null
 ) => {
+  ctx.assertPreparationCurrent?.()
   if (!promptForQuestion) return ctx.message
   const questionOllama = await pageAssistModel({
     model: ctx.selectedModel,
@@ -397,6 +386,7 @@ const resolveRagQuery = async (
     saveToDb: false,
     requestScope: ctx.servicePromptSnapshot?.requestScope
   })
+  ctx.assertPreparationCurrent?.()
   const questionMessage = await humanMessageFormatter({
     content: [
       {
@@ -407,10 +397,12 @@ const resolveRagQuery = async (
     model: ctx.selectedModel,
     useOCR: ctx.useOCR
   })
+  ctx.assertPreparationCurrent?.()
   const response = await questionOllama.invoke(
     [questionMessage],
     { signal: ctx.signal }
   )
+  ctx.assertPreparationCurrent?.()
   return removeReasoning(response.content.toString())
 }
 
@@ -427,36 +419,19 @@ const buildRagOptions = async (
   )
   // Precedence for top_k: (1) ctx.ragTopK if valid > 0, (2) ragOptions.top_k if valid > 0,
   // (3) defaultTopK fallback. ctx.ragSearchMode always overrides ragOptions.search_mode.
-  // ctx.ragEnableGeneration/citations control presence of their flags, even if set.
+  // Chat generates its answer through the streaming completion below. RAG is
+  // retrieval only here; requesting another answer delays evidence and the
+  // backend answer is never consumed by this path.
   if (typeof ctx.ragTopK === "number" && ctx.ragTopK > 0) {
     ragOptions.top_k = ctx.ragTopK
   } else if (ragOptions.top_k == null) {
     ragOptions.top_k = top_k
   }
   ragOptions.search_mode = ctx.ragSearchMode
-  // Delete false flags so the backend can apply its default behavior.
-  if (ctx.ragEnableGeneration) {
-    ragOptions.enable_generation = true
-    const rawSelectedGenerationModel = ctx.selectedModel?.trim()
-    const selectedModelSelection = parseProviderQualifiedModelSelection(
-      rawSelectedGenerationModel
-    )
-    const selectedGenerationModel = (
-      selectedModelSelection.modelId || rawSelectedGenerationModel
-    )?.trim()
-    if (selectedGenerationModel) {
-      ragOptions.generation_model = selectedGenerationModel
-    }
-    const selectedGenerationProvider = await resolveApiProviderForModel({
-      modelId: rawSelectedGenerationModel,
-      explicitProvider: ctx.currentChatModelSettings?.apiProvider
-    })
-    if (selectedGenerationProvider) {
-      ragOptions.generation_provider = selectedGenerationProvider
-    }
-  } else {
-    delete ragOptions.enable_generation
-  }
+  ragOptions.enable_generation = false
+  delete ragOptions.generation_model
+  delete ragOptions.generation_provider
+  delete ragOptions.generation_prompt
   if (ctx.ragEnableCitations) {
     ragOptions.enable_citations = true
   } else {
@@ -485,11 +460,17 @@ const prepareRagRetrieval = async (
   ctx: ChatModeContext<RagModeParams>,
   rewritePrompt: string | null
 ): Promise<PreparedRagRetrieval> => {
+  ctx.assertPreparationCurrent?.()
   const query = await resolveRagQuery(ctx, rewritePrompt)
+  ctx.assertPreparationCurrent?.()
   await tldwClient.initialize()
+  ctx.assertPreparationCurrent?.()
   const defaultTopK = await getNoOfRetrievedDocs()
+  ctx.assertPreparationCurrent?.()
   const ragOptions = await buildRagOptions(ctx, defaultTopK)
+  ctx.assertPreparationCurrent?.()
   const ragRes = (await tldwClient.ragSearch(query, ragOptions)) as RagResponse
+  ctx.assertPreparationCurrent?.()
   const docs = getRagDocuments(ragRes)
   const context = formatDocs(
     docs.map((doc) => ({
@@ -555,17 +536,19 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
 
     try {
       const retrieval = await prepareRagRetrieval(ctx, null)
+      ctx.assertPreparationCurrent?.()
       if (retrieval.source.length > 0) {
         selectedSourceRetrievalCache.set(ctx, retrieval)
         return null
       }
 
       return buildSelectedSourceGroundingResponse(
-        buildSelectedSourceNoEvidenceText(retrieval.rawResponse),
+        buildSelectedSourceNoEvidenceText(),
         "selected_source_evidence_not_found",
         retrieval.rawResponse
       )
     } catch (error) {
+      ctx.assertPreparationCurrent?.()
       if (ctx.signal.aborted || isRequestConfigScopeChangedError(error)) {
         throw error
       }
@@ -578,6 +561,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
     }
   },
   preparePrompt: async (ctx) => {
+    ctx.assertPreparationCurrent?.()
     const answerPrompt = getRequiredServicePrompt(
       ctx.servicePromptSnapshot,
       "chat.rag.answer"
@@ -593,12 +577,14 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       }
       const retrieval =
         cachedRetrieval || (await prepareRagRetrieval(ctx, rewritePrompt))
+      ctx.assertPreparationCurrent?.()
       context = retrieval.context
       source = retrieval.source
       if (hasSelectedMediaSources(ctx) && source.length === 0) {
-        throw new Error(buildSelectedSourceNoEvidenceText(retrieval.rawResponse))
+        throw new Error(buildSelectedSourceNoEvidenceText())
       }
     } catch (e) {
+      ctx.assertPreparationCurrent?.()
       if (ctx.signal.aborted || isRequestConfigScopeChangedError(e)) throw e
       if (hasSelectedMediaSources(ctx)) {
         throw e
@@ -629,6 +615,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       model: ctx.selectedModel,
       useOCR: ctx.useOCR
     })
+    ctx.assertPreparationCurrent?.()
 
     let applicationChatHistory = generateHistory(
       ctx.historyForModel ?? ctx.history,
@@ -641,6 +628,7 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       ctx.actorSettings || null,
       templatesActive
     )
+    ctx.assertPreparationCurrent?.()
 
     return {
       chatHistory: applicationChatHistory,
@@ -660,28 +648,31 @@ export const ragMode = async (
   params: RagModeParams
 ): Promise<ChatSubmitResult> => {
   console.log("Using ragMode")
+  const historyPreparation = params.historySelection
+    ? params.historyPreparation ?? captureNormalChatPreparation(params)
+    : undefined
   const ownsServicePromptSnapshot = !params.servicePromptSnapshot
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
     (await loadServicePromptSnapshot(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
-      { signal }
+      { signal, requestScope: params.actorSceneSend?.requestScope }
     ))
-  const executionSignal = servicePromptSnapshot.scopeSignal
   const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
   try {
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.question_rewrite")
-    return await runChatPipeline(
+    return await runChatModeWithHistory(
       ragModeDefinition,
       message,
       image,
       isRegenerate,
       messages,
       history,
-      executionSignal,
+      signal,
       {
         ...params,
+        historyPreparation,
         servicePromptSnapshot,
         discardCurrentTurnOnAbort: () =>
           scopeInvalidatedSignal.aborted,

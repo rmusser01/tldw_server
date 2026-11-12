@@ -6,6 +6,7 @@ import {
   invalidateRefreshSessionIfCurrent,
   storeRefreshRotationIfCurrent
 } from "@/services/tldw/single-user-credential"
+import { requestSettingsNavigation, SETTINGS_NAVIGATION_REQUEST_EVENT, type SettingsNavigationRequestDetail } from "@/utils/settings-return"
 import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
 
 vi.mock("@web/lib/i18n-web", () => ({}))
@@ -68,7 +69,7 @@ const mockRouter = {
 const mockGetConfig = vi.fn()
 const mockGetCurrentUser = vi.fn()
 const mockLogout = vi.fn()
-const firstRun = vi.hoisted(() => ({ realGate: false, profiles: vi.fn() }))
+const firstRun = vi.hoisted(() => ({ realGate: false, realReadiness: false, profiles: vi.fn() }))
 let mockLogoutAvailable = true
 let currentConfig: Record<string, unknown> | null = null
 let useCanonicalAuthStorage = false
@@ -83,6 +84,10 @@ const buddyLifetime = vi.hoisted(() => ({
 }))
 vi.mock("next/dynamic", () => ({
   default: (loader: () => unknown) => {
+    if (loader.toString().includes("ChatServerSetupDialog"))
+      return ({ open, onClose, beginInitialSetup }: { open: boolean; onClose: () => void; beginInitialSetup?: () => unknown }) => open ? (
+        <div role="dialog" aria-label="Server settings"><button onClick={onClose}>Return to chat</button><button onClick={() => beginInitialSetup?.()}>Capture fresh setup</button></div>
+      ) : null
     if (loader.toString().includes("IndependentBuddyHost"))
       return function BuddyHostProbe() {
         const [draft, setDraft] = React.useState("")
@@ -130,15 +135,12 @@ vi.mock("next/dynamic", () => ({
 
 vi.mock("@web/components/AppProviders", () => ({
   AppProviders: ({
-    children,
-    enableNotifications
+    children
   }: {
     children: React.ReactNode
-    enableNotifications?: boolean
   }) => (
     <div
       data-testid="app-providers"
-      data-enable-notifications={String(Boolean(enableNotifications))}
     >
       {children}
     </div>
@@ -153,22 +155,18 @@ vi.mock("@/components/Common/PageAssistLoader", () => ({
   )
 }))
 
-vi.mock("@web/components/networking/ServerReadinessGate", () => ({
-  ServerReadinessGate: ({
-    children,
-    allowDegraded
-  }: {
-    children: React.ReactNode
-    allowDegraded?: boolean
-  }) => (
-    <div
-      data-testid="server-readiness-gate"
-      data-allow-degraded={String(Boolean(allowDegraded))}
-    >
-      {children}
-    </div>
-  )
-}))
+vi.mock("@web/components/networking/ServerReadinessGate", async (original) => {
+  const actual = await original<typeof import("@web/components/networking/ServerReadinessGate")>()
+  return {
+    warmServerReadinessHealth: vi.fn((...args: Parameters<typeof actual.warmServerReadinessHealth>) =>
+      firstRun.realReadiness ? actual.warmServerReadinessHealth(...args) : undefined),
+    ServerReadinessGate: (props: React.ComponentProps<typeof actual.ServerReadinessGate>) =>
+    firstRun.realReadiness ? <actual.ServerReadinessGate {...props} /> : (
+      <div data-testid="server-readiness-gate" data-allow-degraded={String(Boolean(props.allowDegraded))}>
+        {props.children}
+      </div>
+    ) }
+})
 
 vi.mock("@/services/tldw/request-core", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/tldw/request-core")>()
@@ -245,6 +243,7 @@ const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 
 beforeEach(() => {
   firstRun.realGate = false
+  firstRun.realReadiness = false
   firstRun.profiles.mockReset().mockResolvedValue({ ok: true, data: [{}] })
   buddyLifetime.mounted.mockClear()
   buddyLifetime.unmounted.mockClear()
@@ -276,6 +275,117 @@ afterAll(() => {
 })
 
 describe("App layout routing", () => {
+  describe("actual chat readiness presentation", () => {
+    const DraftPage = () => {
+      const [text, setText] = React.useState("")
+      return <textarea aria-label="Chat draft probe" value={text} onChange={event => setText(event.target.value)} />
+    }
+    const mountDraftPage = () => {
+      firstRun.realReadiness = true
+      firstRun.realGate = true
+      firstRun.profiles.mockResolvedValue({ ok: true, data: [] })
+      mockRouter.pathname = "/chat"
+      mockRouter.asPath = "/chat"
+      return render(<App Component={DraftPage} pageProps={{}} />)
+    }
+    it("mounts an unconfigured chat immediately while the real health request stalls", async () => {
+      const health = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}))
+      try {
+        mountDraftPage()
+        const editor = await screen.findByRole("textbox", { name: "Chat draft probe" })
+        fireEvent.change(editor, { target: { value: "Keep this idea" } })
+        expect(editor).toHaveValue("Keep this idea")
+        expect(health).toHaveBeenCalled()
+        expect(mockRouter.push).not.toHaveBeenCalledWith("/login")
+      } finally { health.mockRestore() }
+    })
+    it("preserves the editor after failed health, retry and degraded recovery", async () => {
+      const health = vi.spyOn(globalThis, "fetch").mockResolvedValue({ status: 503, json: async () => ({ status: "unhealthy" }) } as Response)
+      try {
+        currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "single-user", apiKey: "test-key" }
+        vi.useFakeTimers()
+        await act(async () => { mountDraftPage() })
+        const editor = screen.getByRole("textbox", { name: "Chat draft probe" })
+        fireEvent.change(editor, { target: { value: "Do not remount me" } })
+        await act(async () => { await vi.advanceTimersByTimeAsync(16_000) })
+        expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
+        health.mockResolvedValue({ status: 206, json: async () => ({ status: "degraded", checks: { rag: { status: "unavailable" } } }) } as Response)
+        fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+        await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+        expect(editor).toHaveValue("Do not remount me")
+        expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
+        expect(screen.getByText("Server partially degraded")).toBeInTheDocument()
+      } finally { vi.useRealTimers(); health.mockRestore() }
+    })
+    it("opens setup without route navigation or remounting the original Chat editor", async () => {
+      const health = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}))
+      try {
+        mountDraftPage()
+        const editor = await screen.findByRole("textbox", { name: "Chat draft probe" })
+        fireEvent.change(editor, { target: { value: "SETUP ORIGINAL\nKEEP SECOND LINE" } })
+        let permitted = true
+        act(() => { permitted = requestSettingsNavigation("/settings/tldw") })
+        expect(permitted).toBe(false)
+        expect(screen.getByRole("dialog", { name: "Server settings" })).toBeInTheDocument()
+        expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
+        fireEvent.click(screen.getByRole("button", { name: "Return to chat" }))
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+        expect(editor).toHaveValue("SETUP ORIGINAL\nKEEP SECOND LINE")
+        expect(mockRouter.push).not.toHaveBeenCalledWith("/settings/tldw")
+      } finally { health.mockRestore() }
+    })
+    it.each(["before", "after"])("collects the mounted composer factory when its listener runs %s the App listener", async order => {
+      const factory = vi.fn(() => null)
+      const attach = (event: Event) => { (event as CustomEvent<SettingsNavigationRequestDetail>).detail.beginInitialSetup = factory }
+      if (order === "before") window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, attach)
+      try {
+        mountDraftPage()
+        await screen.findByRole("textbox", { name: "Chat draft probe" })
+        if (order === "after") window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, attach)
+        await act(async () => { requestSettingsNavigation("/settings/tldw") })
+        fireEvent.click(screen.getByRole("button", { name: "Capture fresh setup" }))
+        expect(factory).toHaveBeenCalledOnce()
+      } finally { window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, attach) }
+    })
+    it("keeps only the latest setup request's factory", async () => {
+      mountDraftPage()
+      await screen.findByRole("textbox", { name: "Chat draft probe" })
+      const first = vi.fn(() => null)
+      const second = vi.fn(() => null)
+      await act(async () => {
+        for (const beginInitialSetup of [first, second]) window.dispatchEvent(new CustomEvent(SETTINGS_NAVIGATION_REQUEST_EVENT,
+          { cancelable: true, detail: { destination: "/settings/tldw", beginInitialSetup } }))
+      })
+      fireEvent.click(screen.getByRole("button", { name: "Capture fresh setup" }))
+      expect(first).not.toHaveBeenCalled()
+      expect(second).toHaveBeenCalledOnce()
+    })
+    it("opens recovery diagnostics separately while keeping the original Chat editor", async () => {
+      const health = vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}))
+      const diagnostics = vi.spyOn(window, "open").mockReturnValue(null)
+      try {
+        mountDraftPage()
+        const editor = await screen.findByRole("textbox", { name: "Chat draft probe" })
+        fireEvent.change(editor, { target: { value: "DIAGNOSTICS DRAFT" } })
+        let permitted = true
+        act(() => { permitted = requestSettingsNavigation("/settings/health") })
+        expect(permitted).toBe(false)
+        expect(diagnostics).toHaveBeenCalledWith(expect.stringContaining("/settings/health"), "_blank", "noopener")
+        expect(screen.getByRole("textbox", { name: "Chat draft probe" })).toBe(editor)
+        expect(editor).toHaveValue("DIAGNOSTICS DRAFT")
+      } finally { health.mockRestore(); diagnostics.mockRestore() }
+    })
+    it("keeps signed-out multi-user private chat hidden without relying on health", async () => {
+      currentConfig = { serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", accessToken: "" }
+      const health = vi.spyOn(globalThis, "fetch")
+      try {
+        mountDraftPage()
+        await screen.findByRole("heading", { name: "Signed out" })
+        expect(screen.queryByRole("textbox", { name: "Chat draft probe" })).not.toBeInTheDocument()
+        expect(health).not.toHaveBeenCalled()
+      } finally { health.mockRestore() }
+    })
+  })
   describe("UAT159 actual first-run request boundary", () => {
     beforeEach(() => { firstRun.realGate = true })
 
@@ -422,10 +532,7 @@ describe("App layout routing", () => {
         })
         expect((await cachedClient.getConfig())?.accessToken).toBeUndefined()
         await expectHeader(false)
-        expect(screen.getByTestId("app-providers")).toHaveAttribute(
-          "data-enable-notifications",
-          "true"
-        )
+
         expect(screen.getByLabelText("Settings draft")).toHaveValue(
           "unsaved timeout and server settings"
         )
@@ -456,10 +563,7 @@ describe("App layout routing", () => {
       })
       await expectHeader(true)
       expect(screen.queryByTestId("persistent-buddy")).toBeNull()
-      expect(screen.getByTestId("app-providers")).toHaveAttribute(
-        "data-enable-notifications",
-        "false"
-      )
+
       await act(async () =>
         nativeConfigWrite({
           ...signedIn,
@@ -492,10 +596,7 @@ describe("App layout routing", () => {
         await act(async () => finish())
         await expectHeader(true)
         expect(mockLogout).not.toHaveBeenCalled()
-        expect(screen.getByTestId("app-providers")).toHaveAttribute(
-          "data-enable-notifications",
-          "false"
-        )
+
       }
     )
 
@@ -537,10 +638,7 @@ describe("App layout routing", () => {
 
       await expectHeader(false)
       expect(mockLogout).not.toHaveBeenCalled()
-      expect(screen.getByTestId("app-providers")).toHaveAttribute(
-        "data-enable-notifications",
-        "true"
-      )
+
       expect(
         (await storage.get<typeof signedIn>("tldwConfig"))?.accessToken
       ).toBe("bob-new-access")
@@ -580,10 +678,7 @@ describe("App layout routing", () => {
 
         await expectHeader(true)
         expect(mockGetCurrentUser).not.toHaveBeenCalled()
-        expect(screen.getByTestId("app-providers")).toHaveAttribute(
-          "data-enable-notifications",
-          "false"
-        )
+
       } finally {
         getSpy.mockRestore()
       }
@@ -606,10 +701,7 @@ describe("App layout routing", () => {
       await act(async () => storage.remove(COOKIE_SESSION_CONFIG_KEY))
       await expectHeader(true)
       expect(mockGetCurrentUser).not.toHaveBeenCalled()
-      expect(screen.getByTestId("app-providers")).toHaveAttribute(
-        "data-enable-notifications",
-        "false"
-      )
+
     })
   })
 
@@ -996,23 +1088,13 @@ describe("App layout routing", () => {
       expect(layout).toHaveAttribute("data-hide-header", "true")
     })
     expect(layout).toHaveAttribute("data-hide-sidebar", "true")
-    expect(screen.getByTestId("app-providers")).toHaveAttribute(
-      "data-enable-notifications",
-      "false"
-    )
+
   })
 
-  it("enables notification startup after auth resolves on app routes", async () => {
+  it("enables the authenticated layout after auth resolves on app routes", async () => {
     process.env.NEXT_PUBLIC_X_API_KEY = "env-api-key"
-
     renderApp("/media")
-
-    await waitFor(() => {
-      expect(screen.getByTestId("app-providers")).toHaveAttribute(
-        "data-enable-notifications",
-        "true"
-      )
-    })
+    await waitFor(() => expect(screen.getByTestId("option-layout")).toHaveAttribute("data-hide-header", "false"))
   })
 
   it("refreshes nav visibility when auth config updates", async () => {

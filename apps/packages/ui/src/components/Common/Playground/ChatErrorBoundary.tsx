@@ -2,7 +2,8 @@ import React from "react"
 import { AlertTriangle } from "lucide-react"
 
 interface ChatErrorBoundaryProps extends React.PropsWithChildren {
-  onRetry?: () => void
+  onRetry?: () => void;
+  fallback?: React.ReactNode;
 }
 
 interface ChatErrorBoundaryState {
@@ -42,6 +43,8 @@ export class ChatErrorBoundary extends React.Component<
     if (!this.state.hasError) {
       return <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>
     }
+
+    if (this.props.fallback) return this.props.fallback;
 
     return (
       <div

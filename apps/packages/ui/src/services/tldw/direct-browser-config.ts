@@ -2,12 +2,10 @@ import { createSafeStorage } from "@/utils/safe-storage"
 import { COOKIE_SESSION_CONFIG_KEY } from "@/services/tldw/browser-networking"
 import { isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override"
 import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential"
+import type { CredentialStorage } from "@/services/tldw/single-user-credential"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 
-export type DirectRuntimeStorage = Pick<
-  ReturnType<typeof createSafeStorage>,
-  "get" | "set" | "remove"
->
+export type DirectRuntimeStorage = CredentialStorage
 
 const getQuickstartWebUiCookie = async (
   storage: DirectRuntimeStorage

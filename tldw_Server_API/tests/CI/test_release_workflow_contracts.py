@@ -1,7 +1,12 @@
+import os
+import subprocess  # nosec B404 -- Execute trusted CI shell against disposable filesystem shims.
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
+
+from tldw_Server_API.tests.CI.test_merge_queue_gate_workflows import _evaluate
 
 
 def _load(path: str) -> dict:
@@ -152,6 +157,100 @@ def test_container_build_check_covers_workers_without_publishing_images() -> Non
     assert build["with"]["load"] == "${{ matrix.backend }}"
 
 
+def test_worker_container_build_has_a_finite_cold_image_budget() -> None:
+    """Cold worker image loading gets headroom without widening other jobs."""
+    workflow = _load(".github/workflows/container-build-check.yml")
+    job = workflow["jobs"]["build"]
+    matrix = job["strategy"]["matrix"]["include"]
+
+    assert job["timeout-minutes"] == "${{ matrix.timeout_minutes || 30 }}"
+    assert {entry["name"]: entry.get("timeout_minutes", 30) for entry in matrix} == {
+        "app": 30,
+        "worker": 45,
+        "audio-worker": 30,
+        "webui": 30,
+        "admin-ui": 30,
+    }
+
+
+
+@pytest.mark.parametrize(
+    "image,should_prepare",
+    [("worker", True), ("audio-worker", True), ("app", False), ("webui", False),
+     ("admin-ui", False), ("other-worker", False)],
+)
+def test_worker_disk_preparation_precedes_builder_and_keeps_other_images_scoped(
+    image: str, should_prepare: bool,
+) -> None:
+    """Prepare both worker images while preserving all other runner SDKs."""
+    workflow = _load(".github/workflows/container-build-check.yml")
+    job = workflow["jobs"]["build"]
+    steps = job["steps"]
+    preparation = _get_step(steps, "Reclaim unused worker runner SDKs")
+
+    assert job["runs-on"] == "ubuntu-latest"  # nosec B101 -- This cleanup belongs to the disposable hosted runner.
+    assert _evaluate(preparation["if"], {"matrix.name": image}) is should_prepare  # nosec B101 -- Select only the two worker images.
+    assert steps.index(_get_step(steps, "Checkout")) < steps.index(preparation)  # nosec B101 -- Checkout is preserved.
+    assert steps.index(preparation) < steps.index(_get_step(steps, "Set up Docker Buildx"))  # nosec B101 -- Reclaim capacity before builder storage exists.
+    assert not preparation.get("continue-on-error", False)  # nosec B101 -- Failed cleanup must fail the worker job.
+
+
+@pytest.mark.parametrize("cleanup_exit", [0, 73])
+def test_worker_disk_preparation_reclaims_only_unused_sdks_and_propagates_errors(
+    tmp_path: Path, cleanup_exit: int,
+) -> None:
+    """Execute the real shell, replacing only privileged deletion with a private filesystem."""
+    steps = _load(".github/workflows/container-build-check.yml")["jobs"]["build"]["steps"]
+    preparation = _get_step(steps, "Reclaim unused worker runner SDKs")
+    for name in ("dotnet", "android"):
+        directory = tmp_path / name
+        directory.mkdir()
+        (directory / "sdk.bin").write_bytes(b"unused hosted SDK")
+    preserved = tmp_path / "checkout-and-docker-data"
+    preserved.write_bytes(b"required build inputs")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    sudo = bin_dir / "sudo"
+    sudo.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, shutil, sys\n"
+        "expected = ['rm', '-rf', '--', '/usr/share/dotnet', '/usr/local/lib/android']\n"
+        "if sys.argv[1:] != expected:\n"
+        "    raise SystemExit(91)\n"
+        "failure = int(os.environ['WORKER_CLEANUP_EXIT'])\n"
+        "if failure:\n"
+        "    raise SystemExit(failure)\n"
+        "root = pathlib.Path(os.environ['WORKER_CLEANUP_ROOT'])\n"
+        "for name in ('dotnet', 'android'):\n"
+        "    shutil.rmtree(root / name)\n",
+        encoding="utf-8",
+    )
+    sudo.chmod(0o700)
+    df_calls = tmp_path / "df-calls"
+    df = bin_dir / "df"
+    df.write_text('#!/bin/sh\nprintf "df\\n" >> "$WORKER_DF_CALLS"\n', encoding="utf-8")
+    df.chmod(0o700)
+    result = subprocess.run(  # nosec B603, B607 -- Trusted checked-in shell; sudo is a bounded private filesystem shim.
+        ["bash", "-e", "-o", "pipefail", "-c", preparation["run"]],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+            "WORKER_CLEANUP_ROOT": str(tmp_path),
+            "WORKER_CLEANUP_EXIT": str(cleanup_exit),
+            "WORKER_DF_CALLS": str(df_calls),
+        },
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert df_calls.read_text().splitlines() == ["df"] * (1 if cleanup_exit else 2)  # nosec B101 -- Refusal stops before the post-cleanup report.
+    assert result.returncode == cleanup_exit, result.stderr  # nosec B101 -- Cleanup refusal must not be swallowed.
+    assert (tmp_path / "dotnet").exists() == bool(cleanup_exit)  # nosec B101 -- Successful preparation actually frees SDK storage.
+    assert (tmp_path / "android").exists() == bool(cleanup_exit)  # nosec B101 -- Both unused SDK trees are removed.
+    assert preserved.read_bytes() == b"required build inputs"  # nosec B101 -- Build inputs are never cleaned.
+
 def test_container_backend_smoke_uses_the_built_image_and_isolated_imports() -> None:
     """Backend packaging omissions must fail before the matrix result is green."""
     workflow = _load(".github/workflows/container-build-check.yml")
@@ -176,11 +275,11 @@ def test_frontend_required_enforces_shared_hooks_and_preserves_full_lint() -> No
     workflow = _load(".github/workflows/frontend-required.yml")
     steps = workflow["jobs"]["frontend-required"]["steps"]
     lint = _get_step(steps, "Run frontend lint")
-    hooks = _get_step(steps, "Run shared UI hook enforcement")
+    hooks = _get_step(steps, "Run shared UI lint and hook enforcement")
 
     assert lint["run"] == "bun run lint"
     assert lint["working-directory"] == "apps/tldw-frontend"
     assert hooks["if"] == lint["if"]
     assert hooks["working-directory"] == "apps/tldw-frontend"
-    assert hooks["run"] == "bun scripts/check-shared-hooks.mjs"
+    assert hooks["run"] == "node scripts/check-shared-hooks.mjs"
     assert not hooks.get("continue-on-error", False)

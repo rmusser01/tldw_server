@@ -84,12 +84,27 @@ export const useNotesGraphAuthorityScope = ({
   const boundaryOrigin = boundary?.origin ?? null
   const [resolution, setResolution] =
     React.useState<NotesGraphAuthorityResolution | null>(null)
+  const hasVerifiedAuthority = resolution?.boundaryKey === boundaryKey
   const [revision, setRevision] = React.useState(0)
   const epochRef = React.useRef(0)
+  const verificationFailedRef = React.useRef(false)
+  const recoveryConfigRef = React.useRef(config)
+
+  React.useEffect(() => {
+    const previous = recoveryConfigRef.current
+    recoveryConfigRef.current = config
+    if (!loading && !hasVerifiedAuthority && verificationFailedRef.current && previous && config &&
+      connectionAuthoritiesMatch(config, previous) &&
+      config.accessToken !== previous.accessToken) {
+      verificationFailedRef.current = false
+      setRevision((current) => current + 1)
+    }
+  }, [config, hasVerifiedAuthority, loading])
 
   React.useEffect(() => {
     const epoch = ++epochRef.current
     setResolution(null)
+    verificationFailedRef.current = false
     if (loading || !boundaryKey || !boundaryOrigin) return
 
     void tldwAuth
@@ -97,14 +112,20 @@ export const useNotesGraphAuthorityScope = ({
       .then((user) => {
         if (epoch !== epochRef.current) return
         const principalId = String(user?.id ?? "").trim()
-        if (!principalId || user?.is_active !== true) return
+        if (!principalId || user?.is_active !== true) {
+          verificationFailedRef.current = true
+          return
+        }
         setResolution({
           boundaryKey,
           scope: createNotesGraphAuthorityScope(boundaryOrigin, principalId)
         })
       })
       .catch(() => {
-        if (epoch === epochRef.current) setResolution(null)
+        if (epoch === epochRef.current) {
+          verificationFailedRef.current = true
+          setResolution(null)
+        }
       })
 
     return () => {
@@ -114,6 +135,7 @@ export const useNotesGraphAuthorityScope = ({
 
   React.useEffect(() => {
     const invalidate = () => {
+      verificationFailedRef.current = false
       epochRef.current += 1
       setResolution(null)
       setRevision((current) => current + 1)
@@ -130,7 +152,7 @@ export const useNotesGraphAuthorityScope = ({
         authorityChanged?: boolean
         refreshSessionInvalidated?: boolean
       }>).detail
-      if (detail?.authorityChanged !== false || detail.refreshSessionInvalidated) invalidate()
+      if (detail?.authorityChanged !== false || detail.refreshSessionInvalidated || !hasVerifiedAuthority) invalidate()
     }
     window.addEventListener("tldw:config-updated", configChanged)
     window.addEventListener("tldw:auth-principal-changed", invalidate)
@@ -151,7 +173,7 @@ export const useNotesGraphAuthorityScope = ({
       )
       epochRef.current += 1
     }
-  }, [boundary?.isCookieSession])
+  }, [boundary?.isCookieSession, hasVerifiedAuthority])
 
   if (loading || !boundary || resolution?.boundaryKey !== boundary.key) {
     return null

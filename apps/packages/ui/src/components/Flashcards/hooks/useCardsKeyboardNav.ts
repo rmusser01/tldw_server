@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react"
+import { isEditableTarget } from "@/utils/editable-target"
 
 export interface CardsKeyboardNavOptions {
   /** Whether navigation is enabled */
@@ -116,12 +117,7 @@ export function useCardsKeyboardNav({
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       // Don't trigger shortcuts when typing in inputs
-      const target = e.target as HTMLElement
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      ) {
+      if (isEditableTarget(e.target)) {
         return
       }
 

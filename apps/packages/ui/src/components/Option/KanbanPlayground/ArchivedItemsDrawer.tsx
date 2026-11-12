@@ -1,19 +1,9 @@
-import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Drawer, Button, Popconfirm, Empty, Spin, Collapse, message } from "antd"
 import { Archive, RotateCcw, Trash2 } from "lucide-react"
 
-import {
-  listBoards,
-  getBoard,
-  unarchiveBoard,
-  deleteBoard,
-  unarchiveList,
-  deleteList,
-  unarchiveCard,
-  deleteCard
-} from "@/services/kanban"
-import type { Board, KanbanList, Card, BoardWithLists } from "@/types/kanban"
+import { useKanbanScope } from "./KanbanScope"
+import type { KanbanList, Card } from "@/types/kanban"
 
 interface ArchivedItemsDrawerProps {
   open: boolean
@@ -27,10 +17,12 @@ export const ArchivedItemsDrawer = ({
   boardId
 }: ArchivedItemsDrawerProps) => {
   const queryClient = useQueryClient()
+  const { api, key, isActive } = useKanbanScope()
+  const { listBoards, getBoard, unarchiveBoard, deleteBoard, unarchiveList, deleteList, unarchiveCard, deleteCard } = api
 
   // Fetch all boards including archived
   const { data: boardsData, isLoading: boardsLoading } = useQuery({
-    queryKey: ["kanban-boards-archived"],
+    queryKey: key("kanban-boards-archived"),
     queryFn: () => listBoards({ limit: 200, includeArchived: true }),
     enabled: open,
     staleTime: 15 * 1000
@@ -38,7 +30,7 @@ export const ArchivedItemsDrawer = ({
 
   // Fetch board data WITH archived items included
   const { data: boardWithArchived, isLoading: boardArchiveLoading } = useQuery({
-    queryKey: ["kanban-board-archived", boardId],
+    queryKey: key("kanban-board-archived", boardId),
     queryFn: () => getBoard(boardId!, { includeArchived: true }),
     enabled: open && boardId != null,
     staleTime: 15 * 1000
@@ -62,11 +54,13 @@ export const ArchivedItemsDrawer = ({
   const restoreBoardMutation = useMutation({
     mutationFn: (boardId: number) => unarchiveBoard(boardId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Board restored")
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards"] })
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards-archived"] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards") })
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards-archived") })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to restore. Please try again.")
     }
   })
@@ -74,29 +68,33 @@ export const ArchivedItemsDrawer = ({
   const deleteBoardMutation = useMutation({
     mutationFn: (boardId: number) => deleteBoard(boardId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Board deleted")
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards"] })
-      queryClient.invalidateQueries({ queryKey: ["kanban-boards-archived"] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards") })
+      queryClient.invalidateQueries({ queryKey: key("kanban-boards-archived") })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete. Please try again.")
     }
   })
 
   const invalidateBoardQueries = () => {
     if (boardId != null) {
-      queryClient.invalidateQueries({ queryKey: ["kanban-board", boardId] })
-      queryClient.invalidateQueries({ queryKey: ["kanban-board-archived", boardId] })
+      queryClient.invalidateQueries({ queryKey: key("kanban-board", boardId) })
+      queryClient.invalidateQueries({ queryKey: key("kanban-board-archived", boardId) })
     }
   }
 
   const restoreListMutation = useMutation({
     mutationFn: (listId: number) => unarchiveList(listId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("List restored")
       invalidateBoardQueries()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to restore. Please try again.")
     }
   })
@@ -104,10 +102,12 @@ export const ArchivedItemsDrawer = ({
   const deleteListMutation = useMutation({
     mutationFn: (listId: number) => deleteList(listId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("List deleted")
       invalidateBoardQueries()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete. Please try again.")
     }
   })
@@ -115,10 +115,12 @@ export const ArchivedItemsDrawer = ({
   const restoreCardMutation = useMutation({
     mutationFn: (cardId: number) => unarchiveCard(cardId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Card restored")
       invalidateBoardQueries()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to restore. Please try again.")
     }
   })
@@ -126,10 +128,12 @@ export const ArchivedItemsDrawer = ({
   const deleteCardMutation = useMutation({
     mutationFn: (cardId: number) => deleteCard(cardId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Card deleted")
       invalidateBoardQueries()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete. Please try again.")
     }
   })
@@ -262,7 +266,7 @@ export const ArchivedItemsDrawer = ({
       }
       open={open}
       onClose={onClose}
-      width={400}
+      size={400}
     >
       {boardsLoading || boardArchiveLoading ? (
         <div className="flex justify-center py-10">

@@ -24,6 +24,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import Response
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_expected_user
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     PromptStudioDatabase,
     SecurityConfig,
@@ -54,20 +55,9 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_test import (
     TestCaseImportRequest,
     TestCaseResponse,
     TestCaseUpdate,
+    TestRunHistoryResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCredentialRuntime,
-    configured_provider_model_from_snapshot,
-    mark_provider_credential_used,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import ConflictError, DatabaseError, InputError
 from tldw_Server_API.app.core.exceptions import raise_detached_error
@@ -80,6 +70,19 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_generator import TestCaseGenerator
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_io import TestCaseIO
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.test_case_manager import TestCaseManager
+from tldw_Server_API.app.core.Prompt_Management.structured_prompts import StructuredPromptAssemblyError
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+    configured_provider_model_from_snapshot,
+    mark_provider_credential_used,
+)
 from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
 
 PROMPT_STUDIO_TEST_CASE_EXCEPTIONS = (
@@ -122,6 +125,43 @@ router = APIRouter(
         429: {"description": "Rate limit exceeded"}
     }
 )
+
+
+@router.get("/runs", response_model=PageListResponse, dependencies=[Depends(require_expected_user)])
+async def list_test_runs(
+    project_id: int = Query(..., ge=1),
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    db: PromptStudioDatabase = Depends(get_prompt_studio_db),
+    user_context: dict = Depends(get_prompt_studio_user),
+) -> PageListResponse:
+    """Read saved execution history after authorizing its actual project."""
+    await require_project_access(project_id, user_context=user_context, db=db)
+    try:
+        result = db.list_test_runs(project_id, page=page, per_page=per_page)
+        pagination = result["pagination"]
+        return PageListResponse(success=True,
+            data=[TestRunHistoryResponse(**row) for row in result["test_runs"]], metadata=pagination,
+            pagination=build_page_pagination_meta(**pagination))
+    except DatabaseError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to read test run history") from exc
+
+
+@router.get("/runs/{run_id}", response_model=StandardResponse, dependencies=[Depends(require_expected_user)])
+async def get_test_run(
+    run_id: int = Path(..., ge=1),
+    db: PromptStudioDatabase = Depends(get_prompt_studio_db),
+    user_context: dict = Depends(get_prompt_studio_user),
+) -> StandardResponse:
+    """Open one immutable snapshot; the caller cannot substitute its project."""
+    try:
+        row = db.get_test_run(run_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Test run not found")
+        await require_project_access(row["project_id"], user_context=user_context, db=db)
+        return StandardResponse(success=True, data=TestRunHistoryResponse(**row))
+    except DatabaseError as exc:
+        raise map_db_error_to_http(exc, default_detail="Failed to read test run") from exc
 
 ########################################################################################################################
 # Test Case CRUD Endpoints
@@ -1026,6 +1066,18 @@ async def run_test_cases_simple(
             on_provider_success=_mark_provider_success,
         )
         return {"results": results}
+    except StructuredPromptAssemblyError as exc:
+        if exc.code != "missing_required_variable":
+            raise
+        raise_detached_error(
+            HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "missing_required_variable",
+                    "message": "Required prompt inputs are missing or empty.",
+                },
+            )
+        )
     finally:
         await await_owned_worker(credential_runtime.close())
 

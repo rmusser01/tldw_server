@@ -84,6 +84,7 @@ export function usePdfSearch(
   const [isIndexing, setIsIndexing] = useState(false)
   const [debouncedQuery, setDebouncedQuery] = useState("")
   const highlightedElementsRef = useRef<HTMLElement[]>([])
+  const pendingScrollPageRef = useRef<number | null>(null)
 
   const searchOpen = useDocumentWorkspaceStore((s) => s.searchOpen)
   const searchQuery = useDocumentWorkspaceStore((s) => s.searchQuery)
@@ -190,48 +191,10 @@ export function usePdfSearch(
   )
 
   /**
-   * Navigate to a specific search result.
-   */
-  const navigateToResult = useCallback(
-    (index: number) => {
-      if (index < 0 || index >= searchResults.length) return
-
-      const result = searchResults[index]
-      setActiveSearchIndex(index)
-      setCurrentPage(result.page)
-
-      // Scroll to the result after a short delay to allow page render
-      setTimeout(() => {
-        highlightMatches(searchQuery, index)
-      }, 100)
-    },
-    [searchResults, setActiveSearchIndex, setCurrentPage, searchQuery]
-  )
-
-  /**
-   * Go to next search result.
-   */
-  const goToNextResult = useCallback(() => {
-    if (searchResults.length === 0) return
-    const nextIndex = (activeSearchIndex + 1) % searchResults.length
-    navigateToResult(nextIndex)
-  }, [activeSearchIndex, searchResults.length, navigateToResult])
-
-  /**
-   * Go to previous search result.
-   */
-  const goToPreviousResult = useCallback(() => {
-    if (searchResults.length === 0) return
-    const prevIndex =
-      activeSearchIndex === 0 ? searchResults.length - 1 : activeSearchIndex - 1
-    navigateToResult(prevIndex)
-  }, [activeSearchIndex, searchResults.length, navigateToResult])
-
-  /**
    * Highlight matching text spans in the PDF text layer.
    */
   const highlightMatches = useCallback(
-    (query: string, activeIndex: number = -1) => {
+    (query: string, activeIndex: number = -1, scrollToActive = true) => {
       // Clear previous highlights
       highlightedElementsRef.current.forEach((el) => {
         el.classList.remove("pdf-search-match", "pdf-search-match-active")
@@ -274,7 +237,10 @@ export function usePdfSearch(
             const activeSpan = spans[0]
             if (activeSpan) {
               activeSpan.classList.add("pdf-search-match-active")
-              activeSpan.scrollIntoView({ behavior: "smooth", block: "center" })
+              if (scrollToActive) {
+                pendingScrollPageRef.current = null
+                activeSpan.scrollIntoView({ behavior: "smooth", block: "center" })
+              }
             }
           }
         }
@@ -283,15 +249,51 @@ export function usePdfSearch(
     [searchResults, searchMatchCase, searchWordBoundary]
   )
 
-  /**
-   * Clear all highlights.
-   */
+  /** Navigate immediately if the layer is ready, otherwise on its render event. */
+  const navigateToResult = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= searchResults.length) return
+      const result = searchResults[index]
+      pendingScrollPageRef.current = result.page
+      setActiveSearchIndex(index)
+      setCurrentPage(result.page)
+      highlightMatches(searchQuery, index)
+    },
+    [searchResults, setActiveSearchIndex, setCurrentPage, highlightMatches, searchQuery]
+  )
+
+  const goToNextResult = useCallback(() => {
+    if (searchResults.length === 0) return
+    navigateToResult((activeSearchIndex + 1) % searchResults.length)
+  }, [activeSearchIndex, searchResults.length, navigateToResult])
+
+  const goToPreviousResult = useCallback(() => {
+    if (searchResults.length === 0) return
+    navigateToResult(activeSearchIndex === 0 ? searchResults.length - 1 : activeSearchIndex - 1)
+  }, [activeSearchIndex, searchResults.length, navigateToResult])
+
+  /** Clear all highlights. */
   const clearHighlights = useCallback(() => {
     highlightedElementsRef.current.forEach((el) => {
       el.classList.remove("pdf-search-match", "pdf-search-match-active")
     })
     highlightedElementsRef.current = []
   }, [])
+
+  // Virtual pages create their text layers after navigation/search effects.
+  // Reapply highlights when rendering finishes, without jumping on user scroll.
+  useEffect(() => {
+    if (!searchOpen) return
+    const onTextLayerReady = (event: Event) => {
+      const page = Number((event.target as HTMLElement).dataset.pageNumber)
+      highlightMatches(searchQuery, activeSearchIndex, pendingScrollPageRef.current === page)
+    }
+    document.addEventListener("pdf-text-layer-rendered", onTextLayerReady)
+    return () => {
+      document.removeEventListener("pdf-text-layer-rendered", onTextLayerReady)
+      clearHighlights()
+    }
+  }, [searchOpen, searchQuery, activeSearchIndex, highlightMatches, clearHighlights])
 
   /**
    * Open search overlay.

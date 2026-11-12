@@ -195,7 +195,7 @@ class TestEvaluationIntegration:
                 )
 
                 assert result["method"] == "llm"
-                assert result["score"] == 0.8  # 4/5
+                assert result["score"] == 0.75  # (4-1)/4; was 0.8 under the old raw/5.0
 
     @pytest.mark.asyncio
     async def test_concurrent_evaluations(self, evaluation_manager):
@@ -449,7 +449,7 @@ class TestAuthentication:
             assert exc_info.value.detail["error"]["code"] == "inactive_user"
 
     @pytest.mark.asyncio
-    async def test_single_user_auth_respects_ip_allowlist(self, mock_settings, setup_auth_db):
+    async def test_single_user_auth_respects_ip_allowlist(self, mock_settings, setup_auth_db, monkeypatch):
         """Single-user auth should enforce SINGLE_USER_ALLOWED_IPS."""
         from fastapi import HTTPException
         from starlette.requests import Request
@@ -459,6 +459,7 @@ class TestAuthentication:
         mock_settings.AUTH_MODE = "single_user"
         mock_settings.SINGLE_USER_API_KEY = "test-api-key-abcdefghijklmnopqrstuvwxyz"
         mock_settings.SINGLE_USER_ALLOWED_IPS = ["203.0.113.10"]
+        monkeypatch.setenv("SINGLE_USER_API_KEY", mock_settings.SINGLE_USER_API_KEY)
 
         with patch('tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth.get_settings') as mock_get_settings:
             mock_get_settings.return_value = mock_settings

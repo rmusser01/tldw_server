@@ -2841,6 +2841,64 @@ def test_first_run_state_persists_allowed_public_step_data(
     assert providers_data["default_model"] == "gpt-4.1-mini"
 
 
+
+@pytest.mark.parametrize("base_url", [None, "http://127.0.0.1:8010/v1", "https://example.invalid/api/v1"])
+def test_provider_endpoint_draft_roundtrips_without_acknowledging(monkeypatch, tmp_path, setup_client, base_url):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    data = {
+        "acknowledged": False,
+        "default_provider": "llamacpp",
+        "default_model": "working-model",
+        "default_base_url": base_url,
+        "default_provider_credential_configured": False,
+    }
+    response = setup_client.post("/api/v1/setup/first-run/state", json={"step": "providers", "data": data})
+    assert response.status_code == 200  # nosec B101 - pytest verifies the public draft write.
+    assert response.json()["step_data"]["providers"] == data  # nosec B101 - pytest verifies nonsecret draft data.
+    resumed = setup_client.get("/api/v1/setup/first-run/state")
+    assert resumed.status_code == 200  # nosec B101 - pytest verifies the resume response.
+    assert resumed.json()["step_data"]["providers"] == data  # nosec B101 - pytest verifies the retained endpoint.
+    assert "providers" not in resumed.json()["completed_steps"]  # nosec B101 - pytest enforces the acknowledgement gate.
+
+
+@pytest.mark.parametrize("base_url", [
+    "http://user:synthetic-value@localhost:8010/v1",
+    "http://localhost:8010/v1?api_key=synthetic-value",
+    "http://localhost:8010/v1#synthetic-value",
+    "not-a-url", "file:///tmp/provider", "http://localhost:invalid/v1", "http:///v1",
+    ["http://localhost:8010/v1"], {"url": "http://localhost:8010/v1"},
+])
+def test_provider_endpoint_draft_rejects_unsafe_values(monkeypatch, tmp_path, setup_client, base_url):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    response = setup_client.post("/api/v1/setup/first-run/state", json={
+        "step": "providers", "data": {"default_provider": "llamacpp", "default_base_url": base_url}
+    })
+    assert response.status_code == 400  # nosec B101 - pytest checks unsafe metadata rejection.
+    assert response.json()["detail"] == "unsupported_first_run_step_data"  # nosec B101 - pytest checks the retained error contract.
+    assert "default_base_url" not in FirstRunStateStore(state_path).load().step_data.get("providers", {})  # nosec B101 - pytest verifies no unsafe write.
+
+
+@pytest.mark.parametrize("base_url", [
+    "http://user:synthetic-value@localhost:8010/v1",
+    "http://localhost:8010/v1?api_key=synthetic-value",
+    "http://localhost:8010/v1#synthetic-value",
+    "not-a-url", "file:///tmp/provider", "http://localhost:invalid/v1", "http:///v1",
+    ["http://localhost:8010/v1"], {"url": "http://localhost:8010/v1"},
+])
+def test_provider_endpoint_draft_hides_unsafe_stored_values(monkeypatch, tmp_path, setup_client, base_url):
+    state_path = tmp_path / "first_run_state.json"
+    monkeypatch.setattr(setup_endpoint, "FIRST_RUN_STATE_PATH", state_path, raising=False)
+    _setup_needs_setup(monkeypatch)
+    FirstRunStateStore(state_path).update_step("providers", {"default_provider": "llamacpp", "default_base_url": base_url})
+    response = setup_client.get("/api/v1/setup/first-run/state")
+    assert response.status_code == 200  # nosec B101 - pytest verifies public reads remain available.
+    assert "default_base_url" not in response.json()["step_data"]["providers"]  # nosec B101 - pytest enforces secret/type filtering on stored data.
+
+
 def test_first_run_state_persists_provider_credential_configured_marker(
     monkeypatch,
     tmp_path,

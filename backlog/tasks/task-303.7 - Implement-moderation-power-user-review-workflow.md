@@ -35,11 +35,11 @@ Stage 7 of the moderation remediation plan. Add efficient repeat-review workflow
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 7 implementation added multi-select queue rows, BulkDecisionBar, partial-failure display, local filter presets, scoped keyboard shortcuts, and review-complete state. Focused component verification: vitest BulkDecisionBar.test.tsx ModerationReviewShell.test.tsx => 12 passed. Browser power-user spec added for Stage 8 verification.
 
 Stage 7 touched frontend and E2E files only; Bandit is not applicable for this task. Playwright power-user verification is intentionally deferred to Stage 8 final route suite.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

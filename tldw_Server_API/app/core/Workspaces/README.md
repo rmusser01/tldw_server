@@ -155,7 +155,7 @@ passes.
 - `app/api/v1/endpoints/workspace_migrations.py` exposes workspace migration routes.
 - `app/api/v1/endpoints/workspace_eligibility.py` exposes the active-context
   eligibility contract.
-- `app/api/v1/schemas/workspace_schemas.py` defines workspace request and response models.
+- `app/api/v1/schemas/workspace_schemas.py` defines workspace request and response models. The assistant-default, operation and artifact models it re-exports live in `core/Workspaces/workspace_schemas.py`; `ChatSessionCreate` lives in `core/Workspaces/chat_session_schemas.py`.
 - ChaChaNotes workspace tables store workspace metadata, persisted `workspace_profile`, project roots, sources, notes, and artifact references.
 - Jobs, Media DB, and RAG/indexing state feed `status_projection.py`.
 - Sync domain adapters and artifact promotion flows consume workspace export/status behavior.

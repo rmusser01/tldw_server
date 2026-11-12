@@ -1,0 +1,28 @@
+--- a/lib/jsdom/living/helpers/style-rules.js
++++ b/lib/jsdom/living/helpers/style-rules.js
+@@ -259,0 +260,21 @@
++// Backported from jsdom v29.1.1; retain the jsdom 28 CSS engine.
++// https://github.com/jsdom/jsdom/blob/v29.1.1/lib/jsdom/living/css/helpers/computed-style.js
++function ruleMightMatchElement(rule, elementImpl) {
++  const document = elementImpl._ownerDocument;
++  // The selector extractor normalizes HTML tag names; keep XML and quirks
++  // selectors on the existing matcher to preserve their case semantics.
++  if (document.contentType !== "text/html" || document.compatMode !== "CSS1Compat") {
++    return true;
++  }
++  // extractSubjects caches by selector text, so selectorText mutations remain safe.
++  const subjects = document._domSelector.extractSubjects(rule.selectorText);
++  const id = elementImpl.getAttributeNS(null, "id");
++  const { classList } = elementImpl;
++  const tag = elementImpl._localName.toLowerCase();
++  return subjects.length === 0 || subjects.some(keys =>
++    (!keys.id || keys.id === id) &&
++    (!keys.className || classList.contains(keys.className)) &&
++    (!keys.tag || keys.tag.toLowerCase() === tag)
++  );
++}
++
+@@ -261,0 +283,3 @@
++    if (!ruleMightMatchElement(rule, elementImpl)) {
++      return { match: false };
++    }

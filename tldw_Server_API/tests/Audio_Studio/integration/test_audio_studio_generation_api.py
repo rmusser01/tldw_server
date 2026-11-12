@@ -142,3 +142,105 @@ def test_provider_and_artifact_listing_do_not_expose_secrets(
     assert [row["provider_id"] for row in providers.json()["providers"]] == ["tts", "ace_step"]
     assert "secret-provider-key" not in json.dumps(providers.json())
     assert artifacts.json() == {"artifacts": [], "limit": 100, "offset": 0}
+
+
+def _b06_queued_speech(client):
+    project, section = _create_project_and_section(client)
+    path = f"/api/v1/audio-studio/projects/{project['project_id']}"
+    accepted = client.post(path + "/generations", json={
+        "kind": "speech", "provider": "tts", "target_resource_kind": "section",
+        "target_resource_id": "sec_001", "target_revision_id": section["current_revision_id"],
+        "idempotency_key": "b06-real-queued-generation", "options": {"model": "pocket-tts", "voice": "reference", "format": "wav"},
+    })
+    assert accepted.status_code == 202  # nosec B101 - Real Jobs admission, not a fake worker result.
+    return path, accepted.json()["job_id"]
+
+
+def test_b06_generation_status_uses_actual_jobs_state(client_audio_studio_generation):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    client = client_audio_studio_generation
+    path, job_id = _b06_queued_speech(client)
+    jm = JobManager()
+    row = jm.get_job_by_uuid(job_id)
+    assert jm.cancel_job(row["id"], expected_uuid=job_id, expected_domain="audio_studio", expected_job_type="audio_studio_generate")  # nosec B101 - Guarded real Jobs cancellation.
+    response = client.get(path + "/generations/" + job_id)
+    assert response.status_code == 200  # nosec B101 - Owned status endpoint.
+    assert response.json()["status"] == "cancelled"  # nosec B101 - A stale domain index must not claim queued after actual cancellation.
+
+
+def test_b06_project_jobs_reopen_without_cross_project_or_owner_rows(client_audio_studio_generation):
+    client = client_audio_studio_generation
+    path, job_id = _b06_queued_speech(client)
+    _other_path, other_job_id = _b06_queued_speech(client)
+    response = client.get(path + "/jobs")
+    assert response.status_code == 200  # nosec B101 - Project job discovery survives page reload.
+    assert [row["job_id"] for row in response.json()["jobs"]] == [job_id]  # nosec B101 - No other project job or payload.
+    assert other_job_id not in response.text  # nosec B101 - Exact foreign UUID exclusion.
+    async def ordinary_other():
+        return User(id=2, username="other", email="other@example.com", is_active=True, is_admin=False)
+    client.app.dependency_overrides[get_request_user] = ordinary_other
+    assert client.get(path + "/jobs").status_code == 404  # nosec B101 - Preserve owner admission before Jobs lookup.
+
+
+def test_b06_ordinary_owner_can_cancel_queued_job_without_admin_access(client_audio_studio_generation):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    client = client_audio_studio_generation
+    path, job_id = _b06_queued_speech(client)
+    async def ordinary_owner():
+        return User(id=1, username="ordinary", email="ordinary@example.com", is_active=True, is_admin=False)
+    client.app.dependency_overrides[get_request_user] = ordinary_owner
+    response = client.post(path + "/jobs/" + job_id + "/cancel")
+    assert response.status_code == 200  # nosec B101 - Owner cancellation is not an admin route.
+    assert response.json()["status"] == "cancelled"  # nosec B101 - Real queued work is terminally cancelled before provider execution.
+    assert JobManager().get_job_by_uuid(job_id)["status"] == "cancelled"  # nosec B101 - Actual manager state, not UI-only cancellation.
+
+
+def test_b06_cancel_race_cannot_revoke_running_worker_lease(client_audio_studio_generation, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    client = client_audio_studio_generation
+    path, job_id = _b06_queued_speech(client)
+    cancel = JobManager.cancel_job
+    acquired = []
+    def race(self, job_row_id, **kwargs):
+        job = self.acquire_next_job(domain="audio_studio", queue="default", lease_seconds=60, worker_id="b06-racing-worker", owner_user_id="1")
+        acquired.append(job)
+        return cancel(self, job_row_id, **kwargs)
+    monkeypatch.setattr(JobManager, "cancel_job", race)
+    response = client.post(path + "/jobs/" + job_id + "/cancel")
+    assert response.status_code == 409  # nosec B101 - Queued-only cancellation must refuse the acquisition race.
+    actual = JobManager().get_job_by_uuid(job_id)
+    assert (actual["status"], actual["worker_id"], actual["lease_id"]) == ("processing", acquired[0]["worker_id"], acquired[0]["lease_id"])  # nosec B101 - Preserve exact running incarnation/lease.
+
+
+def test_b06_foreign_owner_cannot_cancel_or_read_generation(client_audio_studio_generation):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    client = client_audio_studio_generation
+    path, job_id = _b06_queued_speech(client)
+    async def other_owner():
+        return User(id=2, username="other", email="other@example.com", is_active=True, is_admin=False)
+    client.app.dependency_overrides[get_request_user] = other_owner
+    assert client.post(path + "/jobs/" + job_id + "/cancel").status_code == 404  # nosec B101 - Known UUID cannot bypass project ownership.
+    assert client.get(path + "/generations/" + job_id).status_code == 404  # nosec B101 - No foreign generation state disclosure.
+    assert JobManager().get_job_by_uuid(job_id)["status"] == "queued"  # nosec B101 - Refused cancellation leaves the actual row intact.
+
+
+def test_b06_jobs_cursor_keeps_all_rows_without_duplicates(client_audio_studio_generation):
+    client = client_audio_studio_generation
+    project, section = _create_project_and_section(client)
+    path = "/api/v1/audio-studio/projects/" + project["project_id"]
+    expected = []
+    for number in range(3):
+        response = client.post(path + "/generations", json={"kind": "speech", "provider": "tts", "target_resource_kind": "section", "target_resource_id": "sec_001", "target_revision_id": section["current_revision_id"], "idempotency_key": f"b06-cursor-generation-{number}", "options": {}})
+        assert response.status_code == 202  # nosec B101 - Real distinct accepted jobs, with actual timestamp ties when present.
+        expected.append(response.json()["job_id"])
+    params = {"limit": 1}
+    seen = []
+    for _ in range(4):
+        response = client.get(path + "/jobs", params=params)
+        assert response.status_code == 200  # nosec B101 - Both cursor timestamp/id accepted through public validation.
+        page = response.json()
+        seen.extend(row["job_id"] for row in page["jobs"])
+        if page["next_before_id"] is None:
+            break
+        params.update(before_id=page["next_before_id"], created_before=page["next_created_before"])
+    assert len(seen) == len(set(seen)) == len(expected) and set(seen) == set(expected)  # nosec B101 - Stable complete boundary, including equal-created-time id ordering.

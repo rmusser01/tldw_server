@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundChat } from "../PlaygroundChat"
+
+const deleteCallbacks = vi.hoisted(() => new Map<string, () => unknown>())
 
 const useMessageOptionState = vi.hoisted(() => ({
   value: {
@@ -111,9 +113,15 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] })
-}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return {
+    ...actual,
+    useQueryClient: () => queryClient,
+    useQuery: () => ({ data: [] })
+  }
+})
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [false]
@@ -145,17 +153,29 @@ vi.mock("./PlaygroundEmpty", () => ({
 }))
 
 vi.mock("@/components/Common/Playground/Message", () => ({
-  PlaygroundMessage: (props: { message: string; onNewBranch?: () => void }) => (
-    <div data-testid="playground-message-mock">
-      {props.message}
-      <button onClick={props.onNewBranch}>Fork this message</button>
-    </div>
-  )
+  PlaygroundMessage: (props: {
+    message: string
+    onNewBranch?: () => void
+    onDeleteMessage?: () => unknown
+  }) => {
+    if (props.onDeleteMessage)
+      deleteCallbacks.set(props.message, props.onDeleteMessage)
+    return (
+      <div data-testid="playground-message-mock">
+        {props.message}
+        <button onClick={props.onNewBranch}>Fork this message</button>
+      </div>
+    )
+  }
 }))
 
 const getCardElements = async (modelKey: "model-a" | "model-b") => {
+  // The compare cluster is a lazy chunk; its first cold import can outlast
+  // findBy's 1s default on a loaded machine.
   const identity = await screen.findByTestId(
-    `compare-model-identity-cluster-1-${modelKey}`
+    `compare-model-identity-cluster-1-${modelKey}`,
+    {},
+    { timeout: 5_000 }
   )
   const card = identity.closest('[role="article"]') as HTMLElement | null
   if (!card) {
@@ -292,3 +312,28 @@ it("child receipt callback leaves comparison mode without changing source split 
   expect(useMessageOptionState.value.setCompareMode).toHaveBeenCalledWith(false)
   expect(useMessageOptionState.value.setCompareSplitChat).not.toHaveBeenCalled()
 })
+
+
+it.each(["Compare these two answers", "Model A response", "Model B response"])(
+  "message confirmation retains the pending Delete outcome for %s",
+  async (text) => {
+    vi.clearAllMocks()
+    deleteCallbacks.clear()
+    let release!: (value: boolean) => void
+    useMessageOptionState.value.deleteMessage.mockImplementation(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve
+        })
+    )
+    render(<PlaygroundChat />)
+    await waitFor(() =>
+      expect(deleteCallbacks.get(text)).toBeTypeOf("function")
+    )
+    const callback = deleteCallbacks.get(text)
+    const pending = callback!()
+    expect(pending).toBeInstanceOf(Promise)
+    release(false)
+    await expect(pending).resolves.toBe(false)
+  }
+)

@@ -39,12 +39,12 @@ Address actionable review comments on PR 1571 for the VN scripted generation run
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Addressed PR 1571 review comments for generated profile snapshot lineage, generated-choice branch response schemas, conflict mapping, checkpoint active-generation restore validation, publish idempotency matching, capabilities gating, null-safe setup metadata, duplicate-choice parser error codes, brittle test IDs, portable Backlog verification commands, raw-debug reveal authorization, stale generation status regression, and helper return typing.
 - Verification: .venv/bin/python -m pytest tldw_Server_API/tests/VN_Scripts tldw_Server_API/tests/VN_Play tldw_Server_API/tests/VN_Platform -q --tb=short -> 258 passed, 8 warnings.
 - Verification: compileall on touched VN endpoint/schema/repository/runtime files -> exit 0; git diff --check -> exit 0.
 - Bandit: .venv/bin/python -m bandit -r touched VN backend files -f json -o /tmp/bandit_vn_scripted_generation_review_fixes.json -> 0 results, 0 errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

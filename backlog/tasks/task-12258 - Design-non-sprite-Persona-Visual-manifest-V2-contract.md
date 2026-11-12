@@ -39,9 +39,9 @@ Create the design slice for issue #1623 under the Persona/Buddy epic. Define a n
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created GitHub issue #1623 and draft PR #1624. Added the Manifest V2 contract design doc and linked it from the renderer/provider evaluation and Persona Visual Packs PRD. Verification: git diff --check passed. Tests and Bandit skipped because this is docs-only plus Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

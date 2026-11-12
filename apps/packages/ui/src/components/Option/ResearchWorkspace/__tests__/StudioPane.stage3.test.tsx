@@ -1,5 +1,7 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { ConfigProvider } from "antd"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fetchTldwVoiceCatalog } from "@/services/tldw/audio-voices"
 import { inferTldwProviderFromModel } from "@/services/tts-provider"
@@ -7,6 +9,18 @@ import { StudioPane, estimateGenerationSeconds } from "../StudioPane"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 import { createGroundedClaimVerification } from "./studio-test-fixtures"
 
+const storedAudioRead = vi.hoisted(() => vi.fn())
+vi.mock("@/services/workspace-artifact-audio", () => ({ readStoredWorkspaceAudio: storedAudioRead }))
+const mediaSave = vi.hoisted(() => vi.fn(async artifact => artifact))
+vi.mock("@/services/workspace-artifact-persistence", () => ({
+  persistWorkspaceArtifact: mediaSave, hasCanonicalArtifactWorkspace: () => false,
+}))
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async (_ids: unknown, options: { signal: AbortSignal }) => ({
+    scopeKey: "stage3:alice", requestScope: { config: { serverUrl: "https://owned.test" }, userId: "alice" },
+    scopeSignal: options.signal, scopeInvalidatedSignal: options.signal, release: vi.fn(),
+  }),
+}))
 const {
   mockRagSearch,
   mockSynthesizeSpeech,
@@ -313,6 +327,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     ragSearch: mockRagSearch,
     synthesizeSpeech: mockSynthesizeSpeech,
     generateSlidesFromMedia: mockGenerateSlidesFromMedia,
+    getWorkspaceSources: async (workspaceId: string) => workspaceStoreState.sources.map(source => ({
+      id: source.id, media_id: source.mediaId, title: source.title, workspace_id: workspaceId,
+    })),
     submitWorkspaceOutput: mockSubmitWorkspaceOutput,
     getWorkspaceOutputStatus: mockGetWorkspaceOutputStatus,
     getMediaDetails: mockGetMediaDetails,
@@ -343,9 +360,10 @@ vi.mock("@/store/model", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
+  hasResearchWorkspaceMigrationTombstone: () => false,
+  useWorkspaceStore: Object.assign((
     selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  ) => selector(workspaceStoreState), { getState: () => workspaceStoreState, subscribe: () => () => {} })
 }))
 
 vi.mock("@/components/Common/Mermaid", () => ({
@@ -571,6 +589,106 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     ])
   })
 
+
+
+  it("closes saved ACP provenance when its workspace changes", async () => {
+    const originalWorkspace = workspaceStoreState.workspaceId
+    workspaceStoreState.generatedArtifacts = [{
+      id: "acp-run-1-v1", type: "report", title: "Saved ACP result",
+      status: "completed", content: "Selene tours start Friday at 18:00.",
+      createdAt: new Date("2026-10-30T00:00:00Z"),
+      producerMetadata: { producerType: "acp_agent_task", sessionId: "owned-session", runId: "1" },
+    }]
+    const tree = () => <ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><StudioPane /></MemoryRouter></ConfigProvider>
+    const view = render(tree())
+    try {
+      expandGeneratedOutputsSection()
+      fireEvent.click(screen.getByRole("button", { name: "View" }))
+      const dialog = await screen.findByRole("dialog")
+      await waitFor(() => expect(within(dialog).getByText("Selene tours start Friday at 18:00.", { exact: true })).toBeVisible())
+      workspaceStoreState.workspaceId = "different-owned-workspace"
+      view.rerender(tree())
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    } finally {
+      workspaceStoreState.workspaceId = originalWorkspace
+    }
+  })
+
+  it.each(["account", "unmount"] as const)("retires saved ACP provenance and watchers on %s", async reason => {
+    workspaceStoreState.generatedArtifacts = [{
+      id: "acp-run-1-v1", type: "report", title: "Saved ACP result",
+      status: "completed", content: "Selene tours start Friday at 18:00.",
+      createdAt: new Date("2026-10-30T00:00:00Z"),
+      producerMetadata: { producerType: "acp_agent_task", sessionId: "owned-session", runId: "1" },
+    }]
+    const added = vi.spyOn(window, "addEventListener")
+    const removed = vi.spyOn(window, "removeEventListener")
+    const view = render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><StudioPane /></MemoryRouter></ConfigProvider>)
+    try {
+      expandGeneratedOutputsSection()
+      const mountedListenerCount = added.mock.calls.length
+      fireEvent.click(screen.getByRole("button", { name: "View" }))
+      const dialog = await screen.findByRole("dialog")
+      await waitFor(() => expect(within(dialog).getByText("Selene tours start Friday at 18:00.", { exact: true })).toBeVisible())
+      const watchers = added.mock.calls.slice(reason === "account" ? mountedListenerCount : 0).filter(([name]) => name === "tldw:auth-principal-changed").map(([, listener]) => listener)
+      expect(watchers.length).toBeGreaterThan(0)
+      if (reason === "account") fireEvent(window, new Event("tldw:auth-principal-changed"))
+      else view.unmount()
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+      for (const listener of watchers) expect(removed).toHaveBeenCalledWith("tldw:auth-principal-changed", listener)
+    } finally { view.unmount(); added.mockRestore(); removed.mockRestore() }
+  })
+
+  it("opens a stored audio file in the contextual viewer and aborts it on close", async () => {
+    const audio = {
+      id: "saved-audio", type: "audio_overview", title: "Saved audio", status: "completed", content: "Selene tours.",
+      createdAt: new Date("2026-10-30T00:00:00Z"), audioFormat: "wav",
+      exportRefs: [{ sourceType: "storage_file", fileId: 47, format: "wav", status: "ready" }],
+    }
+    workspaceStoreState.generatedArtifacts = [audio]
+    storedAudioRead.mockResolvedValue(new Blob(["audio"], { type: "audio/wav" }))
+    const StandardURL = URL
+    const revoke = vi.fn()
+    class AudioURL extends StandardURL { static createObjectURL = () => "blob:saved-audio"; static revokeObjectURL = revoke }
+    vi.stubGlobal("URL", AudioURL)
+    const view = render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><StudioPane /></MemoryRouter></ConfigProvider>)
+    try {
+      expandGeneratedOutputsSection()
+      fireEvent.click(screen.getByRole("button", { name: "View" }))
+      const player = await screen.findByLabelText("Saved Audio Summary")
+      await waitFor(() => expect(player).toBeVisible())
+      expect(player).toHaveAttribute("src", "blob:saved-audio")
+      expect(storedAudioRead).toHaveBeenCalledWith(audio, expect.objectContaining({ workspaceId: "workspace-a" }))
+      const signal = storedAudioRead.mock.calls[0][1].signal as AbortSignal
+      const dialog = screen.getByRole("dialog")
+      fireEvent.click(within(dialog).getByRole("button", { name: "OK" }))
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+      expect(signal.aborted).toBe(true)
+      expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:saved-audio")
+    } finally { view.unmount(); vi.unstubAllGlobals() }
+  })
+
+  it("opens saved ACP provenance in the current router context", async () => {
+    workspaceStoreState.generatedArtifacts = [{
+      id: "acp-run-1-v1", type: "report", title: "Saved ACP result",
+      status: "completed", content: "Selene tours start Friday at 18:00.",
+      createdAt: new Date("2026-10-30T00:00:00Z"),
+      producerMetadata: { producerType: "acp_agent_task", sessionId: "owned-session", runId: "1" },
+      data: { acpRun: { runId: 1, sessionId: "owned-session", status: "completed" } },
+    }]
+    render(<ConfigProvider theme={{ token: { motion: false } }}><MemoryRouter><StudioPane /></MemoryRouter></ConfigProvider>)
+    expandGeneratedOutputsSection()
+    fireEvent.click(screen.getByRole("button", { name: "View" }))
+    const dialog = await screen.findByRole("dialog")
+    expect(dialog.querySelector(".ant-modal-title")).toHaveTextContent("Saved ACP result")
+    await waitFor(() => expect(within(dialog).getByText("Selene tours start Friday at 18:00.", { exact: true })).toBeVisible())
+    expect(within(dialog).getByRole("link", { name: /session/i })).toHaveAttribute(
+      "href", "/acp-playground?session=owned-session"
+    )
+    fireEvent.click(within(dialog).getByRole("button", { name: "OK" }))
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+  })
+
   it("shows primary and secondary output actions with description tooltips", async () => {
     renderExpandedStudioPane()
 
@@ -683,11 +801,13 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
             model: "gpt-4o-mini",
             title_hint: "Workspace A"
           })
-        })
+        }),
+        expect.objectContaining({ requestScope: expect.objectContaining({ userId: "alice" }) })
       )
     })
     await waitFor(() => {
-      expect(mockGetWorkspaceOutputStatus).toHaveBeenCalledWith("workspace-a", 22)
+      expect(mockGetWorkspaceOutputStatus).toHaveBeenCalledWith("workspace-a", 22,
+        expect.objectContaining({ requestScope: expect.objectContaining({ userId: "alice" }) }))
     })
     expect(mockUpdateArtifactStatus).toHaveBeenCalledWith(
       expect.stringMatching(/^artifact-/),
@@ -1006,14 +1126,15 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
           model: "gpt-4o-mini",
           provider: "openai",
           text: expect.stringContaining("DSPy Prompting Talk")
-        })
+        }),
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
       )
     })
 
     expect(mockUpsertWorkspace).toHaveBeenCalledWith("workspace-a", {
       name: "Workspace A",
       study_materials_policy: "workspace"
-    })
+    }, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(mockCreateDeck).toHaveBeenCalledWith(
       expect.objectContaining({
         name: expect.stringContaining("Workspace A"),
@@ -1090,7 +1211,8 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
       expect.objectContaining({
         num_cards: 8,
         difficulty: "easy"
-      })
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
     expect(mockCreateFlashcardsBulk).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -1335,7 +1457,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     renderExpandedStudioPane()
 
     await waitFor(() => {
-      expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("kitten_tts")
+      expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("kitten_tts", undefined)
       expect(mockSetAudioSettings).toHaveBeenCalledWith(
         expect.objectContaining({ voice: "Bella" })
       )
@@ -1356,7 +1478,7 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     renderExpandedStudioPane()
     await Promise.resolve()
 
-    expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("kitten_tts")
+    expect(fetchTldwVoiceCatalog).toHaveBeenCalledWith("kitten_tts", undefined)
     expect(mockSetAudioSettings).not.toHaveBeenCalled()
   })
 
@@ -1431,12 +1553,12 @@ describe("StudioPane Stage 3 information architecture and UX polish", () => {
     }
     expect(searchModeInput).toBeDisabled()
 
-    const enableGenerationRow = screen.getByText("Enable generation").closest("div")
-    const generationSwitch = enableGenerationRow?.querySelector(
-      "button[role='switch']"
-    ) as HTMLButtonElement | null
-    expect(generationSwitch).toBeTruthy()
-    expect(generationSwitch).toBeDisabled()
+    expect(screen.queryByText("Enable generation")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Studio outputs generate an answer using the selected model and generation settings."
+      )
+    ).toBeInTheDocument()
 
     const enableCitationsRow = screen.getByText("Enable citations").closest("div")
     const citationsSwitch = enableCitationsRow?.querySelector(

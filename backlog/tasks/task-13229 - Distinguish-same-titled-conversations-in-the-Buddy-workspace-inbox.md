@@ -40,7 +40,7 @@ PR2934 Qodo follow-up: reuse shared localized conversation labels in Buddy Manag
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented shared duplicate-title context across picker/results/transcript/reply/status/speech, using localized created_at with stable-ID fallback for missing/null/equal dates; API Buddy summaries now expose nullable timestamps and dedicated frontend type. Saved title and all routing/ack IDs unchanged. Failure-first regressions cover long titles, null timestamps, equal/prefix-collision IDs and order stability. Final UI94passed and backend58passed1Postgresunavailable skip; focused changed-entrypoint typecheck0diagnostics; productionBandit0findings. Independent review's nullable-date finding fixed and re-reviewed. Existing ADR-005 applies; user/API docs and follow-up evidence updated. PR2934.
 Reopened for PR2934 Qodo frontend review. Official MCP task_view hung and was stopped before mutation; repository AGENTS.md permits CLI fallback. Existing historical qualification evidence remains unchanged; follow-up work is tracked separately.
 
@@ -49,7 +49,7 @@ Review scope also includes bounded concrete type annotations in IndependentBuddy
 PR2934 frontend follow-up implemented: BuddyManagementModal now reuses shared active-locale labels for duplicate-title choices while retaining exact option/attachment IDs. BuddyInteraction memoizes label inputs/callbacks, declares effect dependencies, and reads current labels after deferred authorization without interrupting active speech. Bounded touched-test annotations close historical lint warnings; removed an unsupported existing Testing Library exact option. Failure-first run: 5 failed / 20 passed (raw /private/tmp/tldw-task13229-qodo-ui-red.log); green focused run: 43 passed across management/interaction/host/label-helper tests (raw /private/tmp/tldw-task13229-qodo-ui-green.log). After the final type-only test correction, management rerun: 14 passed (/private/tmp/tldw-task13229-qodo-management-final.log). Configured ESLint reports 0 errors / 0 warnings for both components and all three touched tests (/private/tmp/tldw-task13229-qodo-ui-lint-configured-summary.log); shared UI formatter and whitespace checks pass. Focused typecheck has 0 diagnostics in five touched files and 15 dependency diagnostics outside them (/private/tmp/tldw-task13229-qodo-ui-typecheck-final.log); not a full project typecheck pass. ADR-005 applies; no new ADR or Python/Bandit work is required for this TypeScript-only follow-up. Historical evidence unchanged. Root owns combined qualification gate/build and final follow-up evidence; task remains In Progress until those finish.
 
 Root final review: the seven-file Buddy UI gate passed 99 tests; five touched UI component/test files have zero configured lint warnings/errors and no direct TypeScript diagnostics (15 external dependency diagnostics remain). The final Chrome production build passed in 48.9 s with six source-hashed overlays, 11 verified manifest targets and 1,378-file ZIP integrity. Shared setup labels and pending/queued speech updates preserve exact target IDs and do not restart active playback. Separate review receipts are retained in Docs/Reviews/artifacts/buddy-pr2934-qodo; original captures remain historical. ADR-005 remains applicable; native/audio qualification stays open under TASK13227.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

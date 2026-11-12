@@ -20,13 +20,13 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import (
     ConfidenceSummary,
     RecommendationSlot,
     RecipeRunRecord,
     ReviewState,
 )
-from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import RunStatus
+from tldw_Server_API.app.core.Evaluations.run_state import RunStatus
 from tldw_Server_API.app.core.config import load_comprehensive_config
 
 # Backend abstraction (optional) for PostgreSQL support
@@ -208,6 +208,64 @@ class _EvaluationsBackendConnection:
 
     def close(self) -> None:
         return None
+
+def to_unix_timestamp(value: Any, *, fallback_now: bool = False) -> Optional[int]:
+    """Convert various timestamp representations to a Unix epoch int.
+
+    Supports:
+    - datetime instances (including tz-aware)
+    - numeric (int/float) epoch values
+    - strings in ISO8601 (with optional 'Z') or '%Y-%m-%d %H:%M:%S'
+    Returns None when unparsable unless fallback_now=True, in which case 'now'.
+    """
+    def _utc_now_epoch() -> int:
+        return int(datetime.now(timezone.utc).timestamp())
+
+    def _to_epoch(dt: datetime) -> int:
+        # A naive datetime here is UTC: SQLite writes CURRENT_TIMESTAMP as naive
+        # UTC, and datetime.strptime/fromisoformat return naive for such input.
+        # Calling .timestamp() on it would interpret it in the HOST's local zone,
+        # putting `created` out by the host UTC offset -- an ADR-014 violation
+        # invisible to UTC CI.
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return int(dt.timestamp())
+
+    if value is None:
+        return _utc_now_epoch() if fallback_now else None
+    # Already numeric
+    if isinstance(value, (int, float)):
+        try:
+            return int(value)
+        except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
+            return _utc_now_epoch() if fallback_now else None
+    # datetime instance
+    if isinstance(value, datetime):
+        try:
+            return _to_epoch(value)
+        except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
+            return _utc_now_epoch() if fallback_now else None
+    # string inputs
+    if isinstance(value, str):
+        s = value.strip()
+        try:
+            # Fast path: numeric string
+            if s.isdigit():
+                return int(s)
+            # Try ISO8601, tolerate trailing 'Z'
+            try:
+                dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            except ValueError:
+                # Try legacy SQLite format (naive UTC)
+                dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+            return _to_epoch(dt)
+        except _EVAL_DB_NONCRITICAL_EXCEPTIONS as e:
+            logger.debug(f"Failed to parse timestamp value: value={value!r}, error={e}")
+            return _utc_now_epoch() if fallback_now else None
+    # Unknown type
+    logger.debug(f"Unsupported timestamp type: {type(value)} value={value!r}")
+    return _utc_now_epoch() if fallback_now else None
+
 
 class EvaluationsDatabase:
     """Database manager for evaluations system (SQLite or PostgreSQL)."""
@@ -2004,15 +2062,48 @@ class EvaluationsDatabase:
             conn.commit()
             return cursor.rowcount > 0
 
-    def update_run_progress(self, run_id: str, progress: dict[str, Any]) -> bool:
-        """Update run progress"""
+    def record_webhook_failure(self, run_id: str, eval_id: str) -> bool:
+        """Append a sanitized delivery warning without rewriting the terminal outcome."""
+        warning = (
+            "Webhook delivery failed. Evaluation results are unchanged. "
+            "Check the webhook URL and receiver before starting a new run."
+        )
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 UPDATE evaluation_runs
-                SET progress = ?
-                WHERE id = ?
-            """, (json.dumps(progress), run_id))
+                SET error_message = CASE
+                    WHEN error_message IS NULL OR error_message = '' THEN ?
+                    ELSE error_message || ?
+                END
+                WHERE id = ? AND eval_id = ?
+                  AND status IN ('completed', 'failed', 'cancelled')
+                  AND (error_message IS NULL OR error_message NOT LIKE ?)
+            """, (warning, "\n" + warning, run_id, eval_id, "%" + warning + "%"))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_run_progress(
+        self, run_id: str, progress: dict[str, Any], *,
+        results: Optional[dict[str, Any]] = None,
+        usage: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """Update progress, atomically retaining completed batches for an active run."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if results is not None:
+                cursor.execute("""
+                    UPDATE evaluation_runs
+                    SET progress = ?, results = ?, usage = ?
+                    WHERE id = ? AND status = 'running'
+                """, (json.dumps(progress), json.dumps(results),
+                      json.dumps(usage) if usage else None, run_id))
+            else:
+                cursor.execute("""
+                    UPDATE evaluation_runs
+                    SET progress = ?
+                    WHERE id = ?
+                """, (json.dumps(progress), run_id))
             conn.commit()
             return cursor.rowcount > 0
 
@@ -2479,48 +2570,7 @@ class EvaluationsDatabase:
         return int(dt.timestamp())
 
     def _ensure_unix_timestamp(self, value: Any, *, fallback_now: bool = False) -> Optional[int]:
-        """Convert various timestamp representations to a Unix epoch int.
-
-        Supports:
-        - datetime instances, tz-aware or naive (naive is interpreted as UTC)
-        - numeric (int/float) epoch values
-        - strings in ISO8601 (with optional 'Z') or '%Y-%m-%d %H:%M:%S'
-        Returns None when unparsable unless fallback_now=True, in which case 'now'.
-        """
-        if value is None:
-            return int(datetime.now().timestamp()) if fallback_now else None
-        # Already numeric
-        if isinstance(value, (int, float)):
-            try:
-                return int(value)
-            except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
-                return int(datetime.now().timestamp()) if fallback_now else None
-        # datetime instance
-        if isinstance(value, datetime):
-            try:
-                return self._utc_epoch(value)
-            except _EVAL_DB_NONCRITICAL_EXCEPTIONS:
-                return int(datetime.now().timestamp()) if fallback_now else None
-        # string inputs
-        if isinstance(value, str):
-            s = value.strip()
-            try:
-                # Fast path: numeric string
-                if s.isdigit():
-                    return int(s)
-                # Try ISO8601, tolerate trailing 'Z'
-                try:
-                    dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-                except ValueError:
-                    # Try legacy SQLite format
-                    dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-                return self._utc_epoch(dt)
-            except _EVAL_DB_NONCRITICAL_EXCEPTIONS as e:
-                logger.debug(f"Failed to parse timestamp value: value={value!r}, error={e}")
-                return int(datetime.now().timestamp()) if fallback_now else None
-        # Unknown type
-        logger.debug(f"Unsupported timestamp type: {type(value)} value={value!r}")
-        return int(datetime.now().timestamp()) if fallback_now else None
+        return to_unix_timestamp(value, fallback_now=fallback_now)
 
     def _coerce_datetime_filter(self, value: Optional[Any]) -> Optional[str]:
         """Coerce date filter inputs into ISO-like strings for SQL comparisons."""

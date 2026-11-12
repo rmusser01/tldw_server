@@ -29,7 +29,6 @@ Protected manifest SHA-256: `bfd14b9e3fb5efa6ecbe54c2e27267cd4958b51881aad9cd3e1
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Historical execution notes: earlier source digests, pending approvals and CI diagnoses below describe their checkpoint only. Use the current source authority in the description and the latest approved recovery state in the release plan.
 
@@ -78,12 +77,11 @@ PR2971 recovery validation found one dev-only direct AuthNZ.conftest plugin regi
 
 PR2971 recovery sync verified: plugin-isolation6passed; combined AuthNZ/Admin_Webhooks/Ingestion_Sources collection2559tests without errors; SQLite webhook delivery behavior15passed/3PostgreSQLcases deselected; Ruff/diff checks pass. Scoped Bandit retains exactly2preexisting synthetic-fixture B105 findings and0new findings/errors; Ingestion Sources scope clean. Exact comparison against prior sync head proves four one-line fixture-bridge substitutions are the only executable-source changes, with application/package/version/legal inputs unchanged. Main recovery merges cleanly retaining task history. Ready to commit/push2971 update; required exact-head CI and requester-written Change summary remain pending, no2971merge or waiver authorized.
 Requester explicitly approved PR2972 release and PR2971 sync, their PR-specific human-summary waivers, release_date2026-09-20 and Countdown2028-09-20T12:00:00Z, GitHub tag/release, server-only PyPI and three GHCR images. Candidate5828de69a6fc96bd0bd4525cc9850d6e3c255001 passed73checks/36skips and13 final protected-source tests. PR2972 merged c2bab8a56a9483bbfea637677bb234cd16ae8590 with identical tree; annotatedv0.1.43 and GitHub release published. PyPI35570985611 succeeded; registry wheel/sdist match Actions10626445257 byte-for-byte, registry digests/Twine/backend-only checks pass. Sync merges releasedmain with record-only conflict resolutions; all executable/protected/license/workflow files exactly equal main. Fresh61workflow/licensing contracts pass including13explicit protected-source checks. Container verification and final syncCI/merge remain pending.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Post-publication inventory correction: originalPR2761 and recovery2973 have zero unresolved threads; four additional2974 comments and six2972 comments were discovered in final recheck (2972 created07:08UTC after merge). TASK13263.3 in a separate follow-up branch owns minimal fixes and evidence-backed dispositions. Coverage/full-suite suggestion answered/resolved against explicit bounded-gate approval. Do not claim all newly posted threads closed until follow-up finishes. Published0.1.43 immutable; main-to-dev sync retains exact released executable/source/legal files. Local61workflow/licensing and52docs/refresh tests pass; doc/source conflicts resolved only in records.
 
 0.1.43 PUBLICATION VERIFIED: GitHub tag c2bab8a56a9483bbfea637677bb234cd16ae8590; PyPI run35570985611 and GHCR run35571016884 succeed. Wheel c2836bf424ca201756b155cfff5638d2c80b423b12a5654400d92960b5b6d74d; sdist a3c54d14db9ddb69a69001414b8ad93164d4cf02bec1b4e2ac981e63def46bbe match Actions/PyPI. Image app e23841f4cfdd2a7ee1155acad81ceed06320807aa926d618ca78389e80d9347e; worker efb0799d68e145e49567e9bba95cf83a3ad9185d5cb7c95dd1a6a852dbeda40c; audio4261d5defeb7e743f35b71ee961d7ff2cbe4a16087628ca465bb385ba1bcef30. All registry tag digests/signatures/source/tag/run identities verified. Evidence Docs/Development/releases/0.1.43-publication-verification.json. Approved sync final push/CI/merge remains; newly posted review follow-up TASK13263.3 separate.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

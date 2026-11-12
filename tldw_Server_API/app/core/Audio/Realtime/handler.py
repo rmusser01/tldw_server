@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Audio.Realtime.models import (
 )
 from tldw_Server_API.app.core.Audio.Realtime.protocol import parse_client_event, to_openai_server_event
 from tldw_Server_API.app.core.Audio.Realtime.session import RealtimeSession
+from tldw_Server_API.app.core.AuthNZ.websocket_principal import auth_subprotocol
 from tldw_Server_API.app.core.Usage import audio_quota
 
 PipelineFactory = Callable[..., Any]
@@ -66,7 +67,8 @@ async def handle_realtime_websocket(
             persistence_adapter=persistence_factory(),
         )
         limits = RealtimeLimits()
-        await websocket.accept()
+        # Echo the bearer marker a browser offered with its credential, or its handshake fails.
+        await websocket.accept(subprotocol=auth_subprotocol(websocket))
         await _send_session_start(websocket, session)
         await _run_realtime_loop(websocket, session, limits)
     except WebSocketDisconnect:

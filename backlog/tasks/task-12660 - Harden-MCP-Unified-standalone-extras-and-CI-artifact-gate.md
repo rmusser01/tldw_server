@@ -40,9 +40,9 @@ Docs/superpowers/plans/2026-06-03-mcp-unified-standalone-extras-ci-gate-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review follow-up complete: verified Qodo, CodeRabbit, and Gemini comments against current PR code. Implemented still-valid fixes for mandatory artifact gate build-tool assertions, shared artifact build fixture, structured workflow YAML assertions, null-safe Provides-Extra handling, explicit importlib.util import, and workflow-file existence guard.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Literal
 
-from tldw_Server_API.app.api.v1.schemas.document_upload_processing import (
+from tldw_Server_API.app.core.Ingestion_Media_Processing.document_upload_processing import (
     DocumentModeCapability,
     DocumentProcessingMode,
     DocumentProcessingStatus,

@@ -20,15 +20,16 @@ import numpy as np
 from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as sgl
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
     await_bounded_daemon_with_timeout,
     await_bounded_sync_call,
     await_owned_worker,
+)
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_likert
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
 )
 from tldw_Server_API.app.core.testing import is_test_mode
 
@@ -79,7 +80,7 @@ except ImportError:
 
 from tldw_Server_API.app.core.Claims_Extraction.claims_engine import ClaimsEngine
 from tldw_Server_API.app.core.Evaluations.circuit_breaker import CircuitOpenError, llm_circuit_breaker
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
     SummaryProviderError,
 )
@@ -359,7 +360,7 @@ class RAGEvaluator:
                 probe_name = metric_names.pop(probe_index)
                 try:
                     probe_result: Any = await probe_factory()
-                except (SummaryProviderError, DaemonCapacityError):
+                except (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError):
                     raise
                 except Exception as exc:  # noqa: BLE001 - preserve per-metric partial results
                     probe_result = exc
@@ -381,7 +382,7 @@ class RAGEvaluator:
             )
             for i, result in enumerate(metric_results):
                 if isinstance(result, Exception):
-                    if isinstance(result, (SummaryProviderError, DaemonCapacityError)):
+                    if isinstance(result, (SummaryProviderError, DaemonCapacityError, LLMQuotaExceededError)):
                         raise result
                     # Log the failure but continue with other metrics
                     metric_name = metric_names[i] if i < len(metric_names) else f"metric_{i}"
@@ -562,7 +563,7 @@ class RAGEvaluator:
             )
 
             raw = float(score_str.strip())
-            llm_score = raw / 5.0  # Normalize to 0-1
+            llm_score = normalize_likert(raw)
 
             # Clamp heuristics for obvious mismatches/strong matches to stabilize outputs
             # Only apply when we have enough lexical signal (>=3 distinct tokens)
@@ -641,7 +642,7 @@ class RAGEvaluator:
             )
 
             raw = float(score_str.strip())
-            llm_score = raw / 5.0
+            llm_score = normalize_likert(raw)
 
             # Clamp for obvious hallucinations (very low coverage) / strong coverage
             score = llm_score
@@ -821,7 +822,7 @@ class RAGEvaluator:
                 provider_credentials=self.provider_credentials,
             )
 
-            score = float((score_str or "").strip()) / 5.0
+            score = normalize_likert(float((score_str or "").strip()))
 
             return ("answer_similarity", {
                 "name": "answer_similarity",
@@ -868,7 +869,7 @@ class RAGEvaluator:
                     provider_credentials=self.provider_credentials,
                 )
 
-                relevance_scores.append(float(score_str.strip()) / 5.0)
+                relevance_scores.append(normalize_likert(float(score_str.strip())))
 
             except DaemonCapacityError:
                 raise
@@ -926,7 +927,7 @@ class RAGEvaluator:
                 # Parse score and handle invalid responses
                 try:
                     score = float((score_str or "").strip())
-                    relevance_scores.append(score / 5.0)
+                    relevance_scores.append(normalize_likert(score))
                 except (ValueError, AttributeError):
                     # Invalid response format - treat as 0.0
                     logger.warning("Invalid score format from evaluation provider")
@@ -991,7 +992,7 @@ class RAGEvaluator:
                 provider_credentials=self.provider_credentials,
             )
 
-            score = float(score_str.strip()) / 5.0
+            score = normalize_likert(float(score_str.strip()))
 
             return ("context_recall", {
                 "name": "context_recall",
@@ -1043,10 +1044,9 @@ class RAGEvaluator:
         Returns:
             Normalized score on 0-1 scale
         """
-        # Clamp score to 1-5 range
-        score = max(1, min(5, score))
-        # Normalize to 0-1
-        return (score - 1) / 4
+        # Delegates to the one normalizer; this method always implemented the correct
+        # affine mapping but had zero production callers while 11 sites inlined raw/5.0.
+        return normalize_likert(score)
 
     def _calculate_overall_score(self, metrics: dict[str, dict], weights: Optional[dict[str, float]] = None) -> float:
         """

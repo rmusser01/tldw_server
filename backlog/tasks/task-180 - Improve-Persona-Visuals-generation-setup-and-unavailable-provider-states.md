@@ -46,7 +46,7 @@ Implement GitHub issue #1431 for the Persona/Buddy visual-pack system. Make asse
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the Persona Visuals generation readiness slice for issue #1431 in worktree .worktrees/persona-visual-generation-readiness. Added a pack-scoped backend readiness endpoint, WebUI service/type support, a tested readiness classifier, and VisualPackEditor setup-state rendering/gating for disabled Jobs worker and missing image provider states.
 
 Verification: Vitest focused Persona visual suite passed (VisualPackEditor, personaVisualGenerationReadiness, personaVisualDiagnostics, SpriteFrameRenderer): 34 tests passed. Pytest Persona visual API suite passed: 24 tests passed. Bandit on touched backend endpoint/schema files reported zero findings. Package-wide tsc currently fails on existing unrelated baseline errors; grep of tsc output for touched files found no errors in VisualPackEditor/persona-visuals/personaVisualGenerationReadiness.
@@ -56,7 +56,7 @@ PR review follow-up: addressed Qodo and Gemini comments by checking adapter inst
 Review verification: Vitest focused Persona visual suite passed (VisualPackEditor, personaVisualGenerationReadiness, personaVisualDiagnostics, SpriteFrameRenderer): 36 tests passed. Pytest Persona visual API suite passed: 25 tests passed. Bandit on touched backend endpoint/schema files reported zero findings. git diff --check passed. The package-wide TypeScript baseline still reports an unrelated PersonaGarden/MCPExternalCatalog.tsx error; touched Persona Visuals files were clean in the grep-filtered output.
 
 Second review follow-up: addressed CodeRabbit's fail-closed readiness comment by returning a deterministic non-sensitive `dependency_check_failed` readiness payload when image generation registry checks fail, and by classifying that reason separately in the WebUI instead of presenting it as a missing provider.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

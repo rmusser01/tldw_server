@@ -20,17 +20,20 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     attach_chunking_plan_to_result,
 )
-from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
+from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
+    redact_url_for_log,
+    url_hint_for_display,
+)
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import is_content_page
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 
@@ -45,6 +48,7 @@ from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import (
 
 # Import existing components
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 _WEB_SCRAPE_CONFIG_PARSE_EXCEPTIONS = (TypeError, ValueError)
 _EXTRACTION_FAILURE_MESSAGES = {
@@ -53,6 +57,27 @@ _EXTRACTION_FAILURE_MESSAGES = {
     "extraction_timeout": "Source extraction timed out.",
     "extraction_failed": "Source extraction failed. Check the server logs for details.",
 }
+
+
+def _record_extraction_failure(
+    errors: list[str],
+    extraction_failures: list[dict[str, str]],
+    code: str,
+    url: object,
+) -> None:
+    """Record a failed source by category, naming it by host and path tail only.
+
+    Users need to know which source failed; the full URL may carry tokens in
+    its query, fragment or credentials, so only url_hint_for_display is shown.
+    """
+    failure = {"code": code}
+    message = _EXTRACTION_FAILURE_MESSAGES[code]
+    source = url_hint_for_display(url)
+    if source:
+        failure["source"] = source
+        message = f"{source}: {message}"
+    errors.append(message)
+    extraction_failures.append(failure)
 
 
 def _classify_extraction_failure(article: Mapping[str, Any]) -> str:
@@ -90,7 +115,7 @@ _WEB_SCRAPE_NONCRITICAL_EXCEPTIONS = (
     json.JSONDecodeError,
 )
 _PLATFORM_ADMIN_ROLES = frozenset({"admin"})
-_ADMIN_CLAIM_PERMISSIONS = frozenset({"*", "system.configure"})
+_ADMIN_CLAIM_PERMISSIONS = PLATFORM_ADMIN_PERMISSIONS  # see core/AuthNZ/platform_admin.py
 
 
 def _web_chunking_form(
@@ -708,7 +733,8 @@ class WebScrapingService:
                 system_prompt or load_prompt("webscraping", "article_summary_system")
                 or "You are a professional summarizer."
             )
-            summary = analyze(
+            summary = await asyncio.to_thread(
+                analyze,
                 input_data=content,
                 custom_prompt_arg=custom_prompt,
                 api_name=api_name or "openai",
@@ -772,7 +798,7 @@ class WebScrapingService:
         effective_user_id = user_id if user_id is not None else 1
         db_path = get_user_media_db_path(effective_user_id)
         with managed_media_database(
-            client_id=f"webscraping_service_{effective_user_id}",
+            client_id=str(effective_user_id),
             db_path=db_path,
             initialize=False,
         ) as db:
@@ -813,12 +839,10 @@ class WebScrapingService:
                         )
                         continue
                     failure_code = _classify_extraction_failure(article)
-                    error_msg = _EXTRACTION_FAILURE_MESSAGES[failure_code]
                     logger.warning(
                         f"Failed to extract: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
                     )
-                    errors.append(error_msg)
-                    extraction_failures.append({"code": failure_code})
+                    _record_extraction_failure(errors, extraction_failures, failure_code, article.get("url"))
                     continue
 
                 content_text = article.get("content")
@@ -828,12 +852,10 @@ class WebScrapingService:
                     else content_text
                 )
                 if not isinstance(body_text, str) or not body_text.strip():
-                    error_msg = _EXTRACTION_FAILURE_MESSAGES["empty_extraction"]
                     logger.warning(
                         f"No extracted content: {redact_url_for_log(article.get('url', 'Unknown URL'))}"
                     )
-                    errors.append(error_msg)
-                    extraction_failures.append({"code": "empty_extraction"})
+                    _record_extraction_failure(errors, extraction_failures, "empty_extraction", article.get("url"))
                     continue
 
                 try:
@@ -997,6 +1019,7 @@ class WebScrapingService:
                         author=article.get("author", None),
                         ingestion_date=None,  # Will use current time
                         overwrite=False,
+                        owner_user_id=effective_user_id,
                         chunks=chunks_for_sql,
                     )
                     _dt = max(0.0, time.perf_counter() - _t0)

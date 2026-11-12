@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -681,3 +682,156 @@ def test_workspace_blob_download_is_dataset_scoped_not_uploader_scoped(tmp_path:
     assert manifest.availability == "available"
     assert manifest.payload_hash == _sha256(payload)
     assert downloaded == payload
+
+
+def test_abandoned_upload_sessions_do_not_permanently_disable_attachments(
+    tmp_path: Path,
+) -> None:
+    """Eight failed uploads used to disable attachment upload for good.
+
+    Sessions are capped at max_active_blob_uploads and summarize_blob_quota counted
+    every row with status created/uploading. expires_at defaulted to None, was never
+    set at insert and appeared in no WHERE clause anywhere, and no reaper existed. The
+    upload_id is minted server-side and never returned to the client, so the cancel
+    endpoint could not reach an orphan either: a flaky network on one large attachment,
+    eight times, and that user could never attach a file again through this API or the
+    Notes API, with no self-service recovery. Each orphan also held its
+    reserved_quota_bytes.
+    """
+    service = _attachment_blob_service(tmp_path)
+    service.settings = replace(service.settings, max_active_blob_uploads=3)
+    payload = b"abandoned-payload"
+
+    # Three uploads that are started and then abandoned mid-flight.
+    for attempt in range(3):
+        _create_attachment_session(
+            service,
+            payload,
+            metadata=_attachment_intent(),
+            idempotency_key=f"abandoned-{attempt}",
+        )
+
+    quota = service.store.summarize_blob_quota("user-1", dataset_id="dataset-1")
+    assert quota.active_upload_count == 3
+    with pytest.raises(SyncStoreError, match="active upload limit"):
+        _create_attachment_session(
+            service,
+            payload,
+            metadata=_attachment_intent(),
+            idempotency_key="blocked",
+        )
+
+    # Every session now carries an expiry, which is what makes recovery possible.
+    sessions = service.store.db.execute(
+        "SELECT upload_id, expires_at FROM sync_blob_upload_sessions"
+    )
+    assert sessions
+    assert all(row["expires_at"] for row in sessions)
+
+    # Once they age out, the retention pass releases the slots and reserved quota.
+    service.store.db.execute(
+        "UPDATE sync_blob_upload_sessions SET expires_at = ?",
+        ("2000-01-01T00:00:00+00:00",),
+    )
+
+    released = service.store.summarize_blob_quota("user-1", dataset_id="dataset-1")
+    assert released.active_upload_count == 0
+    assert released.reserved_blob_bytes == 0
+
+    expired = len(service.store.expire_blob_upload_sessions(dataset_id="dataset-1"))
+    assert expired == 3
+
+    # The next upload succeeds, which is the whole point.
+    blob = _complete_attachment_blob(service, payload, idempotency_key="after-recovery")
+    assert blob is not None
+
+
+def test_expiry_reaper_leaves_live_and_legacy_sessions_alone(tmp_path: Path) -> None:
+    """Only timed-out sessions are reaped.
+
+    Rows with no expires_at predate the TTL; releasing them here would be a silent
+    change of meaning rather than a repair, so they keep their slot.
+    """
+    service = _attachment_blob_service(tmp_path)
+    payload = b"live-payload"
+
+    live = _create_attachment_session(
+        service,
+        payload,
+        metadata=_attachment_intent(),
+        idempotency_key="live",
+    )
+    legacy = _create_attachment_session(
+        service,
+        payload,
+        metadata=_attachment_intent(),
+        idempotency_key="legacy",
+    )
+    service.store.db.execute(
+        "UPDATE sync_blob_upload_sessions SET expires_at = NULL WHERE upload_id = ?",
+        (legacy.upload_id,),
+    )
+
+    assert service.store.expire_blob_upload_sessions(dataset_id="dataset-1") == []
+
+    quota = service.store.summarize_blob_quota("user-1", dataset_id="dataset-1")
+    assert quota.active_upload_count == 2
+
+    rows = {
+        row["upload_id"]: row["status"]
+        for row in service.store.db.execute(
+            "SELECT upload_id, status FROM sync_blob_upload_sessions"
+        )
+    }
+    assert rows[live.upload_id] in {"created", "uploading"}
+    assert rows[legacy.upload_id] in {"created", "uploading"}
+
+
+def test_retention_sweep_expires_abandoned_sessions_and_discards_staged_chunks(
+    tmp_path: Path,
+) -> None:
+    """TASK-13321: at the default cap of 8, abandoned sessions blocked every upload,
+    and the sweep marked them expired but left their staged chunk files on disk."""
+    service = _attachment_blob_service(tmp_path)
+    cap = service.settings.max_active_blob_uploads
+    assert cap == 8
+    payload = b"abandoned-payload"
+
+    abandoned = []
+    for attempt in range(cap):
+        session = _create_attachment_session(
+            service,
+            payload,
+            metadata=_attachment_intent(),
+            idempotency_key=f"abandoned-{attempt}",
+        )
+        service.upload_blob_chunk(
+            user_id="user-1",
+            dataset_id="dataset-1",
+            upload_id=session.upload_id,
+            chunk_index=0,
+            offset_bytes=0,
+            chunk_payload=payload,
+            chunk_hash=_sha256(payload),
+        )
+        abandoned.append(session.upload_id)
+    staged = [tmp_path / "attachment-blobs" / "_uploads" / upload_id for upload_id in abandoned]
+    assert all(path.is_dir() for path in staged)
+    with pytest.raises(SyncStoreError, match="active upload limit"):
+        _create_attachment_session(
+            service, payload, metadata=_attachment_intent(), idempotency_key="blocked"
+        )
+
+    service.store.db.execute(
+        "UPDATE sync_blob_upload_sessions SET expires_at = ?",
+        ("2000-01-01T00:00:00+00:00",),
+    )
+    service.retention_compact(user_id="user-1", dataset_id="dataset-1", confirm=True)
+
+    statuses = {
+        row["upload_id"]: row["status"]
+        for row in service.store.db.execute("SELECT upload_id, status FROM sync_blob_upload_sessions")
+    }
+    assert {statuses[upload_id] for upload_id in abandoned} == {"expired"}
+    assert not any(path.exists() for path in staged)
+    assert _complete_attachment_blob(service, payload, idempotency_key="after-sweep") is not None

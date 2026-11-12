@@ -483,7 +483,10 @@ export const fetchWatchlistsOverviewData = async (
   )
   const activeJobs = jobs.filter((job) => job.active).length
   const jobsWithoutSchedule = jobs.filter(
-    (job) => job.active && parseEpochMs(job.next_run_at) == null
+    (job) =>
+      job.active &&
+      Boolean(job.schedule_expr?.trim() || job.wf_schedule_id?.trim()) &&
+      parseEpochMs(job.next_run_at) == null
   ).length
   const recentFailed = (Array.isArray(failedResult.items) ? failedResult.items : [])
     .slice(0, 5)

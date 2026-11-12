@@ -180,7 +180,7 @@ def test_installer_config_uses_custom_build_output_and_backend(tmp_path, monkeyp
         ["--build-dir", "custom-build", "--backend", "metal", "--config-path", str(config), "--patch-config"]
     )
     provider = yaml.safe_load(config.read_text())["providers"]["audio_cpp"]
-    assert provider["binary_path"] == "custom-build/bin/audiocpp_server"
+    assert provider["binary_path"] == f"custom-build/bin/{installer.default_binary_name()}"
     assert provider["backend"] == "metal"
     assert provider["extra_params"]["server"]["backend"] == "metal"
     assert provider["extra_params"]["server"]["model"]["default_voice_preset"] == {"voice_id": "alba"}

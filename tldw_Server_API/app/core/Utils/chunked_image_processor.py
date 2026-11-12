@@ -9,7 +9,12 @@ from collections.abc import AsyncIterator
 from typing import Optional
 
 from loguru import logger
-from tldw_Server_API.app.core.Utils.image_validation import validate_mime_type
+
+from tldw_Server_API.app.core.Utils.image_validation import (
+    MAX_IMAGE_PIXELS,
+    validate_image_pixel_limit,
+    validate_mime_type,
+)
 
 try:
     from PIL import Image
@@ -24,7 +29,6 @@ except ImportError:
 
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 MAX_IMAGE_DIMENSION = 4096  # Maximum width or height
-MAX_IMAGE_PIXELS = 16777216  # 16 megapixels max
 
 #######################################################################################################################
 #
@@ -54,6 +58,7 @@ async def process_image_chunked(
 
     try:
         # Load image with PIL for processing
+        validate_image_pixel_limit(image_data)
         image = Image.open(io.BytesIO(image_data))
         original_width, original_height = image.width, image.height
         original_pixels = original_width * original_height
@@ -208,6 +213,7 @@ async def validate_and_process_image_stream(
         # Validate image if PIL available
         if PIL_AVAILABLE:
             try:
+                validate_image_pixel_limit(image_data)
                 img = Image.open(io.BytesIO(image_data))
                 img.verify()  # Verify it's a valid image
             except Exception as e:
@@ -290,6 +296,7 @@ class StreamingImageProcessor:
                 if PIL_AVAILABLE:
                     try:
                         # Validate decoded payload is actually a parseable image.
+                        validate_image_pixel_limit(image_data)
                         with Image.open(io.BytesIO(image_data)) as img:
                             img.verify()
                     except Exception as e:

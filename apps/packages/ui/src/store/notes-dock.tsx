@@ -1,5 +1,6 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 
 export type NotesDockPosition = { x: number; y: number }
 export type NotesDockSize = { width: number; height: number }
@@ -20,6 +21,8 @@ export type NotesDockNote = {
   version?: number | null
   snapshot: NoteSnapshot | null
   isDirty: boolean
+  /** In-memory owner of the accepted server response; never persisted. */
+  requestScope?: ServicePromptRequestScope
 }
 
 type NotesDockState = {
@@ -33,10 +36,10 @@ type NotesDockState = {
   setPosition: (position: NotesDockPosition) => void
   setSize: (size: NotesDockSize) => void
   createDraft: () => NotesDockNote
-  openNote: (note: Omit<NotesDockNote, "localId" | "snapshot" | "isDirty">) => void
+  openNote: (note: Omit<NotesDockNote, "localId" | "snapshot" | "isDirty">) => NotesDockNote
   setActiveNote: (localId: string | null) => void
   updateNote: (localId: string, patch: Partial<Omit<NotesDockNote, "localId" | "snapshot" | "isDirty">>) => void
-  markSaved: (localId: string, saved: NoteSnapshot & { id?: number; version?: number | null }) => void
+  markSaved: (localId: string, saved: NoteSnapshot & { id?: number; version?: number | null; requestScope?: ServicePromptRequestScope }) => NotesDockNote | null
   discardNoteChanges: (localId: string) => void
   removeNote: (localId: string) => void
   discardAll: () => void
@@ -108,6 +111,7 @@ export const useNotesDockStore = createWithEqualityFn<NotesDockState>()(
         return note
       },
       openNote: (noteInput) => {
+        let accepted!: NotesDockNote
         set((state) => {
           const existingIndex = noteInput.id
             ? state.notes.findIndex((note) => note.id === noteInput.id)
@@ -127,6 +131,7 @@ export const useNotesDockStore = createWithEqualityFn<NotesDockState>()(
               snapshot,
               isDirty: false
             }
+            accepted = updated
             const nextNotes = [...state.notes]
             nextNotes[existingIndex] = updated
             return { notes: nextNotes, activeNoteId: existing.localId }
@@ -140,13 +145,16 @@ export const useNotesDockStore = createWithEqualityFn<NotesDockState>()(
             keywords: noteInput.keywords ?? [],
             version: noteInput.version ?? null,
             snapshot,
-            isDirty: false
+            isDirty: false,
+            requestScope: noteInput.requestScope
           }
+          accepted = newNote
           return {
             notes: [...state.notes, newNote],
             activeNoteId: newNote.localId
           }
         })
+        return accepted
       },
       setActiveNote: (localId) => set({ activeNoteId: localId }),
       updateNote: (localId, patch) =>
@@ -162,7 +170,8 @@ export const useNotesDockStore = createWithEqualityFn<NotesDockState>()(
           })
           return { notes: nextNotes }
         }),
-      markSaved: (localId, saved) =>
+      markSaved: (localId, saved) => {
+        let accepted: NotesDockNote | null = null
         set((state) => {
           const nextNotes = state.notes.map((note) => {
             if (note.localId !== localId) return note
@@ -180,12 +189,16 @@ export const useNotesDockStore = createWithEqualityFn<NotesDockState>()(
               keywords: saved.keywords ?? [],
               version: saved.version ?? note.version,
               snapshot,
-              isDirty: false
+              isDirty: false,
+              requestScope: saved.requestScope ?? note.requestScope
             }
+            accepted = updated
             return updated
           })
           return { notes: nextNotes }
-        }),
+        })
+        return accepted
+      },
       discardNoteChanges: (localId) =>
         set((state) => {
           const target = state.notes.find((note) => note.localId === localId)

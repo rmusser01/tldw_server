@@ -7,11 +7,14 @@ function table<T extends { id: string }>(rows: Map<string, T>) { return {
   get: async (id: string) => rows.get(id),
   add: async (row: T) => { if (rows.has(row.id)) throw new Error("duplicate primary key"); rows.set(row.id, structuredClone(row)); return row.id },
   put: async (row: T) => { await state.beforeMessagePut(row); rows.set(row.id, structuredClone(row)); return row.id },
+  bulkPut: async (list: T[]) => { for (const row of list) { await state.beforeMessagePut(row); rows.set(row.id, structuredClone(row)) } },
+  bulkGet: async (ids: string[]) => ids.map(id => rows.get(id)),
   update: async (id: string, changes: Partial<T>) => { if (!rows.has(id)) return 0; rows.set(id, { ...rows.get(id)!, ...changes }); return 1 },
   where: (field: string) => ({ equals: (value: unknown) => ({ toArray: async () => [...rows.values()].filter(row => (row as Record<string, unknown>)[field] === value) }) })
 } }
 vi.mock("@/db/dexie/schema", () => ({ db: {
   chatHistories: table(state.histories), messages: table(state.messages), modelNickname: {}, sessionFiles: {},
+  searchTokens: { bulkPut: async () => undefined },
   transaction: async (_mode: string, _tables: unknown[], operation: (transaction: { abort: () => void }) => Promise<unknown>) => operation({ abort: vi.fn() })
 } }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: state.request, bgStream: vi.fn() }))
@@ -163,7 +166,7 @@ describe("real adapter → loader → mirror → formatter reload", () => {
       if (change === "history") useStoreMessageOption.getState().setHistoryId("replacement", { preserveServerChatId: true })
       if (change === "stream") useStoreMessageOption.setState({ streaming: true })
       if (change === "account") state.controller.abort()
-      useStoreMessageOption.setState({ messages: [{ id: "replacement", name: "You", isBot: false, role: "user", message: "Current work" }], history: [{ role: "user", content: "Current work" }] })
+      useStoreMessageOption.setState({ messages: [{ id: "replacement", name: "You", isBot: false, role: "user", message: "Current work" , sources: [] }], history: [{ role: "user", content: "Current work" }] })
     })
     await act(async () => { finish(); await pending; await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(useStoreMessageOption.getState().messages.map(message => message.message)).toEqual(["Current work"])

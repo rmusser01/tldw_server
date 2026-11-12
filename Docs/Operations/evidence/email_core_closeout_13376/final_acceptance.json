@@ -1,0 +1,31 @@
+{
+  "measured_postgres_source": "880d690a932629c49dd5fd2ebc94fea97e9f6324",
+  "stable_measured_files": 23,
+  "same_source_for_postgres_http_and_search": true,
+  "postgres_search_gate": true,
+  "postgres_search_warm": {
+    "count": 200,
+    "min_ms": 16.181375016458333,
+    "max_ms": 519.4040420465171,
+    "avg_ms": 217.3616243840661,
+    "p50_ms": 220.92387499287724,
+    "p95_ms": 495.4912910470739
+  },
+  "postgres_http_gate": true,
+  "postgres_http_request_messages_per_second": 61.714936774323,
+  "postgres_http_request_seconds": 61.57342450006399,
+  "postgres_http_all_batches_diagnostic": false,
+  "postgres_http_batches_below_target": 3,
+  "postgres_runtime_settings": {
+    "work_mem": "64MB",
+    "shared_buffers": "128MB",
+    "hash_mem_multiplier": "2",
+    "max_parallel_workers_per_gather": "2",
+    "row_security": "on"
+  },
+  "postgres_shm_bytes": 268435456,
+  "outbound_and_model_attempts": 0,
+  "cleanup_verified": true,
+  "optional_live_gmail": "deferred; independent of core gate",
+  "optional_real_pst_fixture_skips": 2
+}

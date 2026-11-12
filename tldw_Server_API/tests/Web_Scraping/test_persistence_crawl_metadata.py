@@ -22,12 +22,17 @@ class _MetricsStub:
 class _FakeDB:
     def __init__(self):
         self.calls: list[dict] = []
+        self.reprocess_updates: list[tuple] = []
         self.closed = False
 
     def add_media_with_keywords(self, **kwargs):
         self.calls.append(kwargs)
         idx = len(self.calls)
         return idx, f"uuid-{idx}", "ok"
+
+    def update_media_reprocess_state(self, media_id, **kwargs):
+        # 4e697b467c: perform_chunking=False marks chunking as skipped.
+        self.reprocess_updates.append((media_id, kwargs))
 
     def close_connection(self):
         self.closed = True
@@ -276,13 +281,23 @@ async def test_store_persistent_skips_articles_without_body_content(monkeypatch)
     assert fake_db.calls[2]["content"].count("[METADATA]") == 1
     assert "Wrapped body" in fake_db.calls[2]["content"]
     assert '"source":"old"' not in fake_db.calls[2]["content"]
-    assert persisted["errors"] == [
-        "No extracted content: https://example.com/missing",
-        "No extracted content: https://example.com/non-string",
-        "No extracted content: https://user:password@example.com/blank?token=secret#fragment",
-        "No extracted content: https://example.com/envelope",
-        "No extracted content: https://example.com/crafted-envelope",
+    # Each failure names its source by host and path only (#3050), never the
+    # query, fragment or credentials (55fd3c977e).
+    sources = [
+        "example.com/missing",
+        "example.com/non-string",
+        "example.com/blank",
+        "example.com/envelope",
+        "example.com/crafted-envelope",
     ]
+    assert persisted["errors"] == [
+        f"{source}: No readable content was extracted from the source." for source in sources
+    ]
+    assert persisted["extraction_failures"] == [
+        {"code": "empty_extraction", "source": source} for source in sources
+    ]
+    for secret in ("password", "token=secret", "#fragment"):
+        assert secret not in str(persisted)
     warning_text = "\n".join(logger_stub.warnings)
     assert "password" not in warning_text
     assert "token=secret" not in warning_text

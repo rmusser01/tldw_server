@@ -68,6 +68,8 @@ try:
     from phonemizer.backend.espeak.wrapper import EspeakWrapper  # type: ignore
 except (ImportError, OSError) as exc:  # pragma: no cover
     _log_optional_dependency_fallback("phonemizer", exc)
+    # `exc` is unbound once this block exits; the wrapper methods run later.
+    _phonemizer_error = exc
     phonemizer = types.SimpleNamespace(
         backend=types.SimpleNamespace(
             EspeakBackend=_missing_dependency_type("phonemizer", "phonemizer backend", exc)
@@ -78,14 +80,14 @@ except (ImportError, OSError) as exc:  # pragma: no cover
         @staticmethod
         def set_library(_path: str) -> None:
             raise ImportError(
-                f"phonemizer is required for KittenTTS eSpeak wrapper setup: {exc}"
-            ) from exc
+                f"phonemizer is required for KittenTTS eSpeak wrapper setup: {_phonemizer_error}"
+            ) from _phonemizer_error
 
         @staticmethod
         def set_data_path(_path: str) -> None:
             raise ImportError(
-                f"phonemizer is required for KittenTTS eSpeak wrapper setup: {exc}"
-            ) from exc
+                f"phonemizer is required for KittenTTS eSpeak wrapper setup: {_phonemizer_error}"
+            ) from _phonemizer_error
 
 
 try:

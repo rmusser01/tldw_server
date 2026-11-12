@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
+from tldw_Server_API.app.core.Character_Chat import chacha_db_provider
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
@@ -81,7 +82,8 @@ def test_real_v67_upgrade_preserves_rows_and_scopes_only_the_name_key(real_v67, 
         assert _rows(backend) == before
         assert _version(backend) == 68
         assert _name_constraints(backend) == [{"columns": ["client_id", "name"]}]
-        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION == 69  # Independent SQLite history-projection schema.
+        # Independent SQLite ladder (history projection v69, since advanced to 73 by 76c5167b35 and later).
+        assert CharactersRAGDB._CURRENT_SCHEMA_VERSION >= 69
     finally:
         upgraded.close_all_connections()
 
@@ -191,7 +193,7 @@ def test_concurrent_actual_default_bootstrap_respects_owner_names(pg_backend, tm
 
     def ensure(db):
         try:
-            return deps._ensure_default_character(db)
+            return chacha_db_provider.ensure_default_character(db)
         finally:
             db.close_connection()
 

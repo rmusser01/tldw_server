@@ -44,7 +44,7 @@ Migrate the Knowledge QA low-quality answer recovery banner from bespoke recover
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the LowQualityRecoveryBanner migration to the shared RecoveryCallout primitive. Added a focused test that first failed because no data-ds-component marker existed, then replaced the bespoke warning panel and custom buttons with RecoveryCallout primary/secondary actions while preserving refine, enable web, select sources, and dismiss callbacks. Removed the stale local-recovery-banner baseline entry for LowQualityRecoveryBanner.
 
 Verification: RED run of bunx vitest run src/components/Option/KnowledgeQA/__tests__/LowQualityRecoveryBanner.test.tsx --reporter=dot failed the new RecoveryCallout marker assertion because closest([data-ds-component]) returned null. GREEN/final run passed 6/6. bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 52/52. bun run verify:design-system-state passed with Baseline exceptions: 509 and local-recovery-banner: 2. git diff --check passed. bunx tsc --noEmit --pretty false exited 2 with 236 lines of existing unrelated UI type errors; touched-file filter for LowQualityRecoveryBanner, design-system-product-state-baseline, product-state-guard, RecoveryCallout, and task-45.33 returned no diagnostics. Bandit skipped because touched files are UI TS/TSX, JSON baseline, and Markdown task metadata only.
@@ -52,7 +52,7 @@ Verification: RED run of bunx vitest run src/components/Option/KnowledgeQA/__tes
 PR review follow-up: Qodo flagged that the RecoveryCallout migration dropped the prior live-region status semantics and the dismiss action's specific accessible name. Gemini also requested reducing repeated action-label markup. Reopening the task to address those review comments before re-verifying and pushing.
 
 Review fix implementation: added regression tests proving the RecoveryCallout banner exposes role=status with polite/atomic live-region semantics and that the dismiss action keeps the visible label "Dismiss" while exposing the accessible name "Dismiss recovery suggestions". Added StatePanel live-region passthrough props, StateAction ariaLabel passthrough through ActionGroup, and a local ActionLabel helper to remove repeated icon label markup.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

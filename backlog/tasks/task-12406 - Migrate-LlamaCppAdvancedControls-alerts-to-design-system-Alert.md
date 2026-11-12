@@ -30,13 +30,9 @@ Migrate the llama.cpp advanced controls grammar-support and extra-body-conflict 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented test-first: the LlamaCppAdvancedControls regression renders mocked llama.cpp provider metadata and failed on zero canonical Alert markers before replacing the AntD Alerts.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

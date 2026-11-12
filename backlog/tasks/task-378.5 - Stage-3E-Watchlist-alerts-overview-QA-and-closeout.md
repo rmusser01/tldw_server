@@ -35,7 +35,7 @@ Integrate content alert and health summaries into Overview, run focused verifica
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 3E after Stage 3D commit 1a8378570. Scope: add Overview separation for unread content alerts versus health issues, run focused backend/frontend verification, Bandit, git diff check, and CDP desktop/mobile smoke.
 
 Implemented Overview alert/health separation: unread content alerts now load from the content-alerts API and render separately from health issues with actions to Alerts and Activity.
@@ -51,7 +51,7 @@ Real API probes: /api/v1/watchlists/3/alerts?status=unread returned total=1; /ap
 CDP smoke: node /private/tmp/watchlists-real-cdp-smoke.cjs passed against live WebUI and live FastAPI. Screenshots: /tmp/watchlists-stage3-alerts-desktop-cdp.png and /tmp/watchlists-stage3-alerts-mobile-cdp.png.
 
 Verification: focused Stage 3E Vitest passed 4 files / 13 tests; option-watchlists route-state test passed 4 tests; git diff --check passed; filtered tsc for Watchlists/option-watchlists paths had no output. Earlier Stage 3 backend tests passed 43 tests and Bandit exited 0 with only existing nosec B608 warnings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

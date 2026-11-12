@@ -17,17 +17,17 @@ Security
 
 import asyncio
 import json
-import os
 import uuid
 from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
-from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_expected_user
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     get_prompt_studio_db,
     get_prompt_studio_user,
+    require_project_access,
     require_project_write_access,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
@@ -41,31 +41,30 @@ from tldw_Server_API.app.api.v1.schemas.prompt_studio_schemas import (
     EvaluationResponse,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-    ProviderCredentialRuntime,
-    mark_provider_credential_used,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.streaming_utils import sanitized_provider_stream_exception
-from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError, PromptStudioDatabase
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.evaluation_manager import EvaluationManager
-from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+    mark_provider_credential_used,
+)
+from tldw_Server_API.app.core.testing import is_test_context, is_test_mode
 
 router = APIRouter(prefix="/api/v1/prompt-studio", tags=["prompt-studio"])
 
@@ -95,10 +94,6 @@ _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     json.JSONDecodeError,
 )
-
-
-def _is_prompt_studio_test_mode() -> bool:
-    return is_test_mode() or os.getenv("PYTEST_CURRENT_TEST") is not None
 
 
 def _prompt_studio_credential_http_exception(exc: ByokResolutionError) -> HTTPException:
@@ -344,7 +339,7 @@ async def create_evaluation(
                 provider_key,
                 provider_credentials,
             )
-            and not _is_prompt_studio_test_mode()
+            and not is_test_context()
         ):
             record_byok_missing_credentials(provider_key, operation="prompt_studio")
             raise HTTPException(
@@ -360,32 +355,18 @@ async def create_evaluation(
 
         if getattr(evaluation, 'run_async', False):
             # Create a pending evaluation record tied to this request
-            eval_uuid = str(uuid.uuid4())
-            conn = db.get_connection()
-            cursor = conn.cursor()
-            model_configs = json.dumps(configs_list)
-            started_ts = datetime.utcnow()
-            cursor.execute(
-                """
-                INSERT INTO prompt_studio_evaluations (
-                    uuid, project_id, prompt_id, name, description,
-                    test_case_ids, model_configs, status, client_id, started_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?)
-                """,
-                (
-                    eval_uuid,
-                    project_id,
-                    evaluation.prompt_id,
-                    evaluation.name or "Evaluation",
-                    evaluation.description or "",
-                    json.dumps(test_case_ids),
-                    model_configs,
-                    user_context.get("client_id", "api"),
-                    started_ts,
-                ),
+            created_record = db.create_evaluation(
+                prompt_id=evaluation.prompt_id,
+                project_id=project_id,
+                model_configs=configs_list,
+                status="running",
+                test_case_ids=test_case_ids,
+                client_id=user_context.get("client_id", "api"),
+                name=evaluation.name or "Evaluation",
+                description=evaluation.description or "",
             )
-            eval_id = cursor.lastrowid
-            conn.commit()
+            eval_id = created_record["id"]
+            eval_uuid = created_record["uuid"]
 
             # In test environments, run inline to ensure timely completion for polling tests
             import os as _os
@@ -461,6 +442,8 @@ async def create_evaluation(
                 provider_credentials=provider_credentials,
                 timeout_seconds=timeout_seconds,
                 on_provider_success=_mark_provider_success,
+                name=evaluation.name or "Evaluation",
+                description=evaluation.description or "",
             )
 
             return EvaluationResponse(
@@ -511,7 +494,78 @@ async def create_evaluation(
         if credential_runtime is not None and not credential_runtime_transferred:
             await await_owned_worker(credential_runtime.close())
 
-@router.get("/evaluations", response_model=EvaluationList, openapi_extra={
+def _public_evaluation_response(record: dict[str, Any], *, project_id: int | None = None) -> dict[str, Any]:
+    """Project recorded read metadata without exposing execution secrets or rerunning it."""
+    # Older synchronous producers stored one dict; asynchronous producers
+    # stored a list. Keep only recorded public names/parameters, never keys,
+    # endpoints or arbitrary historical execution configuration.
+    configs = record.get("model_configs")
+    if isinstance(configs, str):
+        try:
+            configs = json.loads(configs)
+        except (json.JSONDecodeError, TypeError):
+            configs = None
+    if isinstance(configs, dict):
+        configs = [configs]
+    public_configs = None
+    if isinstance(configs, list) and all(isinstance(item, dict) for item in configs):
+        string_fields = {"provider", "api_name", "model", "model_name"}
+        numeric_fields = {"temperature", "max_tokens", "top_p", "frequency_penalty",
+                          "presence_penalty", "timeout_seconds", "retry_count", "parallel_requests"}
+        public_configs = [{key: value for key, value in item.items()
+                           if (key in string_fields and isinstance(value, str))
+                           or (key in numeric_fields and type(value) in (int, float))}
+                          for item in configs]
+
+    # Normalize metrics
+    agg = record.get("aggregate_metrics")
+    if isinstance(agg, str) and agg:
+        try:
+            metrics_obj = json.loads(agg)
+        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+            metrics_obj = {}
+    elif isinstance(agg, dict):
+        metrics_obj = agg
+    else:
+        metrics_obj = {}
+
+    # Normalize timestamps to strings
+    def _ts(val):
+        try:
+            import datetime as _dt
+            if isinstance(val, (_dt.datetime, _dt.date)):
+                return val.isoformat()
+        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+            pass
+        return val
+
+    # Derive status fallback: if pending but started_at set, treat as running
+    status_val = record.get("status", "pending")
+    if status_val == "pending" and record.get("started_at"):
+        status_val = "running"
+
+    return {
+        "id": int(record["id"]),
+        "uuid": str(record.get("uuid", "")),
+        "project_id": int(record.get("project_id", project_id or 0)),
+        "prompt_id": int(record.get("prompt_id", 0)) if record.get("prompt_id") is not None else 0,
+        "name": record.get("name"),
+        "description": record.get("description"),
+        "status": status_val,
+        "created_at": _ts(record.get("created_at", "")),
+        "completed_at": _ts(record.get("completed_at")),
+        "metrics": metrics_obj,
+        "config": public_configs[0] if public_configs else {},
+        "model_configs": public_configs,
+        "test_case_ids": record.get("test_case_ids"),
+        "test_run_ids": record.get("test_run_ids"),
+        "aggregate_metrics": metrics_obj if agg is not None else None,
+        "error_message": record.get("error_message"),
+        "tags": []
+    }
+
+
+@router.get("/evaluations", response_model=EvaluationList, dependencies=[Depends(require_expected_user)], openapi_extra={
     "responses": {"200": {"description": "Evaluations", "content": {"application/json": {"examples": {"list": {"summary": "Eval list", "value": [{"id": 501, "project_id": 1, "prompt_id": 12, "status": "running"}]}}}}}}
 })
 async def list_evaluations(
@@ -537,6 +591,7 @@ async def list_evaluations(
     Returns:
         List of evaluations
     """
+    await require_project_access(project_id, user_context=user_context, db=db)
     try:
         # Use EvaluationManager to list evaluations
         eval_manager = EvaluationManager(db)
@@ -566,18 +621,7 @@ async def list_evaluations(
         # Convert to response format
         evaluations = []
         for eval_data in evaluation_rows:
-            evaluations.append(EvaluationResponse(
-                id=eval_data["id"],
-                uuid=eval_data.get("uuid", ""),
-                project_id=project_id,  # Add project_id since it might not be in the result
-                prompt_id=eval_data["prompt_id"],
-                name=eval_data.get("prompt_name", "Evaluation"),
-                description="",  # Not returned by manager
-                status=eval_data.get("status", "pending"),
-                created_at=eval_data.get("created_at", ""),
-                completed_at=eval_data.get("completed_at"),
-                metrics=eval_data.get("aggregate_metrics") or {},
-            ))
+            evaluations.append(EvaluationResponse(**_public_evaluation_response(eval_data, project_id=project_id)))
 
         pagination_data = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
         total = int(pagination_data.get("total", result.get("total", len(evaluations))))
@@ -626,6 +670,7 @@ async def list_evaluations(
 @router.get(
     "/evaluations/{evaluation_id}",
     response_model=EvaluationResponse,
+    dependencies=[Depends(require_expected_user)],
     openapi_extra={
         "responses": {
             "200": {
@@ -667,70 +712,13 @@ async def get_evaluation(
         Evaluation details
     """
     try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT id, uuid, project_id, prompt_id, name, description,
-                   status, started_at, created_at, completed_at, aggregate_metrics
-            FROM prompt_studio_evaluations
-            WHERE id = ?
-        """, (evaluation_id,))
-
-        row = cursor.fetchone()
-        if not row:
+        eval_dict = db.get_evaluation(evaluation_id)
+        if not eval_dict:
             raise HTTPException(status_code=404, detail="Evaluation not found")
 
-        # Build a plain dict using sqlite3.Row mapping support
-        try:
-            keys = row.keys() if hasattr(row, 'keys') else [d[0] for d in cursor.description]
-            eval_dict = {k: row[k] if hasattr(row, 'keys') else row[i] for i, k in enumerate(keys)}
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-            # Final fallback: zip description to row tuple
-            cols = [d[0] for d in cursor.description]
-            eval_dict = {c: row[idx] for idx, c in enumerate(cols)}
+        await require_project_access(eval_dict["project_id"], user_context=user_context, db=db)
 
-        # Normalize metrics
-        agg = eval_dict.get("aggregate_metrics")
-        if isinstance(agg, str) and agg:
-            try:
-                metrics_obj = json.loads(agg)
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                metrics_obj = {}
-        elif isinstance(agg, dict):
-            metrics_obj = agg
-        else:
-            metrics_obj = {}
-
-        # Normalize timestamps to strings
-        def _ts(val):
-            try:
-                import datetime as _dt
-                if isinstance(val, (_dt.datetime, _dt.date)):
-                    return val.isoformat()
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                pass
-            return val
-
-        # Derive status fallback: if pending but started_at set, treat as running
-        status_val = eval_dict.get("status", "pending")
-        if status_val == "pending" and eval_dict.get("started_at"):
-            status_val = "running"
-
-        return {
-            "id": int(eval_dict["id"]),
-            "uuid": str(eval_dict.get("uuid", "")),
-            "project_id": int(eval_dict.get("project_id", 0)),
-            "prompt_id": int(eval_dict.get("prompt_id", 0)) if eval_dict.get("prompt_id") is not None else 0,
-            "name": eval_dict.get("name", ""),
-            "description": eval_dict.get("description", ""),
-            "status": status_val,
-            "created_at": _ts(eval_dict.get("created_at", "")),
-            "completed_at": _ts(eval_dict.get("completed_at")),
-            "metrics": metrics_obj,
-            "config": {},
-            "tags": []
-        }
+        return _public_evaluation_response(eval_dict)
 
     except HTTPException:
         raise
@@ -784,43 +772,8 @@ async def delete_evaluation(
         Success message
     """
     try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
-
-        supports_soft_delete = False
-        try:
-            if db.backend_type == BackendType.POSTGRESQL and db.backend is not None:
-                table_info = db.backend.get_table_info(
-                    "prompt_studio_evaluations",
-                    connection=conn.raw_connection,
-                )
-                columns = {info.get("name") for info in table_info}
-            else:
-                cursor.execute("PRAGMA table_info(prompt_studio_evaluations)")
-                columns = {row[1] for row in cursor.fetchall()}
-            supports_soft_delete = "deleted" in columns and "deleted_at" in columns
-        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-            logger.debug("Failed to check prompt_studio_evaluations columns")
-
-        if supports_soft_delete:
-            cursor.execute(
-                """
-                UPDATE prompt_studio_evaluations
-                SET deleted = 1, deleted_at = ?
-                WHERE id = ?
-                """,
-                (datetime.utcnow(), evaluation_id),
-            )
-        else:
-            cursor.execute(
-                "DELETE FROM prompt_studio_evaluations WHERE id = ?",
-                (evaluation_id,),
-            )
-
-        if cursor.rowcount == 0:
+        if not db.delete_evaluation(evaluation_id):
             raise HTTPException(status_code=404, detail="Evaluation not found")
-
-        conn.commit()
 
         return {"message": f"Evaluation {evaluation_id} deleted successfully"}
 
@@ -875,7 +828,10 @@ async def _complete_ping(ping_id: str):
 @router.post("/background/ping", openapi_extra={
     "responses": {"200": {"description": "Ping scheduled", "content": {"application/json": {"examples": {"scheduled": {"value": {"id": "abc123", "status": "processing", "created_at": "2024-09-21T12:00:00"}}}}}}}
 })
-async def background_ping(background_tasks: BackgroundTasks) -> dict[str, Any]:
+async def background_ping(
+    background_tasks: BackgroundTasks,
+    _user: dict = Depends(get_prompt_studio_user),
+) -> dict[str, Any]:
     """Schedule a trivial background task to verify background execution works."""
     pid = str(uuid.uuid4())
     _BG_PINGS[pid] = {"id": pid, "status": "processing", "created_at": datetime.now().isoformat()}
@@ -886,7 +842,10 @@ async def background_ping(background_tasks: BackgroundTasks) -> dict[str, Any]:
 @router.get("/background/pings/{ping_id}", openapi_extra={
     "responses": {"200": {"description": "Ping status", "content": {"application/json": {"examples": {"done": {"value": {"id": "abc123", "status": "completed", "completed_at": "2024-09-21T12:00:01"}}}}}}, "404": {"description": "Not found"}}
 })
-async def get_ping_status(ping_id: str) -> dict[str, Any]:
+async def get_ping_status(
+    ping_id: str,
+    _user: dict = Depends(get_prompt_studio_user),
+) -> dict[str, Any]:
     if ping_id not in _BG_PINGS:
         raise HTTPException(status_code=404, detail="Ping not found")
     return _BG_PINGS[ping_id]
@@ -912,11 +871,8 @@ async def run_evaluation_async(
     """
     import json as _json
 
-    conn = None
-    cursor = None
+    record_loaded = False
     try:
-        conn = db.get_connection()
-        cursor = conn.cursor()
         with log_context(
             request_id=request_id,
             traceparent=traceparent,
@@ -927,37 +883,26 @@ async def run_evaluation_async(
                 evaluation_id,
             )
 
-            cursor.execute(
-                """
-                SELECT id, project_id, prompt_id, test_case_ids, model_configs
-                FROM prompt_studio_evaluations
-                WHERE id = ?
-                """,
-                (evaluation_id,),
-            )
-            row = cursor.fetchone()
-            if not row:
+            record = db.get_evaluation(evaluation_id)
+            if not record:
                 raise RuntimeError("Evaluation not found")
+            record_loaded = True
+            db.update_evaluation(evaluation_id, {"status": "running", "started_at": datetime.utcnow()})
 
-            cursor.execute(
-                """
-                UPDATE prompt_studio_evaluations
-                SET status = 'running', started_at = ?
-                WHERE id = ?
-                """,
-                (datetime.utcnow(), evaluation_id),
-            )
-            conn.commit()
-
-            _id, _project_id, prompt_id, tc_ids_json, model_cfg_json = row
-            try:
-                test_case_ids = _json.loads(tc_ids_json) if tc_ids_json else []
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                test_case_ids = []
-            try:
-                cfg_raw = _json.loads(model_cfg_json) if model_cfg_json else {}
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                cfg_raw = {}
+            prompt_id = record.get("prompt_id")
+            # The repository decodes JSON columns; tolerate a raw string from older rows.
+            test_case_ids = record.get("test_case_ids") or []
+            cfg_raw = record.get("model_configs") or {}
+            for name, value in (("test_case_ids", test_case_ids), ("model_configs", cfg_raw)):
+                if isinstance(value, str):
+                    try:
+                        decoded = _json.loads(value)
+                    except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+                        decoded = [] if name == "test_case_ids" else {}
+                    if name == "test_case_ids":
+                        test_case_ids = decoded
+                    else:
+                        cfg_raw = decoded
 
             if isinstance(cfg_raw, list) and cfg_raw:
                 cfg = cfg_raw[0]
@@ -1020,7 +965,7 @@ async def run_evaluation_async(
                     provider_key,
                     provider_credentials,
                 )
-                and not _is_prompt_studio_test_mode()
+                and not is_test_context()
             ):
                 raise RuntimeError(f"Provider '{provider_name}' requires an API key.")
 
@@ -1059,23 +1004,23 @@ async def run_evaluation_async(
             "PS evaluation.async.cancelled evaluation_id={}",
             evaluation_id,
         )
-        if cursor is not None and conn is not None:
+        if record_loaded:
             try:
-                cursor.execute(
-                    """
-                    UPDATE prompt_studio_evaluations
-                    SET status = 'cancelled', error_message = ?, completed_at = ?
-                    WHERE id = ? AND status IN ('pending', 'running')
-                    """,
-                    ("Evaluation cancelled", datetime.utcnow(), evaluation_id),
-                )
-                conn.commit()
+                db.cancel_evaluation_if_active(evaluation_id, "Evaluation cancelled")
             except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
                 cancellation_log.warning(
                     "PS evaluation.async.cancel_persist_failed evaluation_id={}",
                     evaluation_id,
                 )
         raise
+    except LLMQuotaExceededError:
+        # EvaluationManager has marked the record failed with llm_quota_exceeded.
+        get_ps_logger(
+            request_id=request_id,
+            ps_component="evaluation_bg",
+            ps_job_kind="evaluations",
+            traceparent=traceparent,
+        ).info("PS evaluation.async.refused evaluation_id={}", evaluation_id)
     except (ByokResolutionError, *_PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS) as e:
         safe_error = sanitized_provider_stream_exception(e)
         get_ps_logger(
@@ -1084,17 +1029,9 @@ async def run_evaluation_async(
             ps_job_kind="evaluations",
             traceparent=traceparent,
         ).error("Failed to run async evaluation error_code={}", safe_error.code)
-        if cursor is not None and conn is not None:
+        if record_loaded:
             try:
-                cursor.execute(
-                    """
-                    UPDATE prompt_studio_evaluations
-                    SET status = 'failed', error_message = ?
-                    WHERE id = ?
-                    """,
-                    (str(safe_error), evaluation_id),
-                )
-                conn.commit()
+                db.update_evaluation(evaluation_id, {"status": "failed", "error_message": str(safe_error)})
             except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
                 pass
     finally:

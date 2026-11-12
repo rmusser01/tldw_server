@@ -16,6 +16,8 @@ export function useDictionariesManagerState(): DictionariesManagerState {
   const environment = useDictionaryManagerEnvironment()
 
   const dataFlows = useDictionaryManagerDataFlows({
+    owner: environment.owner,
+    onOpenChat: environment.openChatContextFromDictionary,
     isOnline: environment.isOnline,
     dictionarySearch: environment.dictionarySearch,
     dictionaryCategoryFilter: environment.dictionaryCategoryFilter,
@@ -51,7 +53,7 @@ export function useDictionariesManagerState(): DictionariesManagerState {
     capsLoading: environment.capsLoading,
     capabilities: environment.capabilities,
     useMobileEntriesDrawer: environment.useMobileEntriesDrawer,
-    openChatContextFromDictionary: environment.openChatContextFromDictionary,
+    openChatContextFromDictionary: dataFlows.openLinkedDictionaryChat,
     openDictionaryEntriesPanel: dataFlows.openDictionaryEntriesPanel,
   })
 

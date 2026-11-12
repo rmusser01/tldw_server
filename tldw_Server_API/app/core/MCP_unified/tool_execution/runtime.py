@@ -512,11 +512,29 @@ class ToolExecutionRuntime:
                             execution_args = dict(admitted_tool_args)
                             execution_args["idempotencyKey"] = normalized_idempotency_key
                         module_invoked = True
-                        return await module.execute_tool(
-                            tool_name,
-                            execution_args,
-                            context,
-                        )
+                        from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+                        from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+                        from tldw_Server_API.app.core.Usage.quota_checks import as_quota_user_id
+
+                        # MCP authentication sets no content scope, so name the caller for the
+                        # tool's LLM calls (ADR-067). llm_call_context, not llm_call_root: an admitted
+                        # request that runs this tool keeps its admission (LLM usage accounting spec §4a).
+                        # records_itself is cleared: a caller that records itself (the chat pipeline)
+                        # records only its own chat call, not this tool's calls (ADR-075).
+                        llm_user = as_quota_user_id(context.user_id)
+                        user = {} if llm_user is None else {"user_id": llm_user}
+                        with llm_call_context(records_itself=False, **user):
+                            try:
+                                return await module.execute_tool(
+                                    tool_name,
+                                    execution_args,
+                                    context,
+                                )
+                            except LLMQuotaExceededError:
+                                # One user's limit, not a module fault: the breaker ignores it (spec §4b).
+                                raise ExpectedToolFailure(
+                                    ExpectedToolFailureReason.LLM_QUOTA_EXCEEDED,
+                                ) from None
 
                     result = await module.execute_with_circuit_breaker(
                         AdmittedModuleOperation(

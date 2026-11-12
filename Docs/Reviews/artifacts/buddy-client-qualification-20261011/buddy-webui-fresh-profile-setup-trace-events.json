@@ -1,0 +1,6125 @@
+{
+  "source_trace_sha256": "f1943cb23bac5354bb92e59977b140e0e388e1a2befaf070deed57a990e5c27f",
+  "retained_events": [
+    {
+      "version": 8,
+      "type": "context-options",
+      "origin": "testRunner",
+      "browserName": "",
+      "playwrightVersion": "1.58.0",
+      "options": {},
+      "platform": "darwin",
+      "wallTime": 1791759413109,
+      "monotonicTime": 22132.51,
+      "sdkLanguage": "javascript"
+    },
+    {
+      "type": "before",
+      "callId": "hook@1",
+      "stepId": "hook@1",
+      "startTime": 22132.944,
+      "class": "Test",
+      "method": "hook",
+      "title": "Before Hooks",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "after",
+      "callId": "hook@1",
+      "endTime": 22135.036,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@22",
+      "stepId": "pw:api@22",
+      "startTime": 22139.168,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Create context",
+      "params": {
+        "selectorEngines": "[]",
+        "testIdAttributeName": "data-testid",
+        "acceptDownloads": "accept",
+        "bypassCSP": "false",
+        "colorScheme": "light",
+        "deviceScaleFactor": "1",
+        "hasTouch": "false",
+        "ignoreHTTPSErrors": "false",
+        "isMobile": "false",
+        "javaScriptEnabled": "true",
+        "locale": "en-US",
+        "offline": "false",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36",
+        "viewport": "Object",
+        "serviceWorkers": "allow",
+        "noDefaultViewport": "false",
+        "extraHTTPHeaders": "undefined",
+        "storageState": "undefined",
+        "reducedMotion": "undefined",
+        "forcedColors": "undefined",
+        "contrast": "undefined",
+        "clientCertificates": "undefined"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 527,
+          "column": 21
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@22",
+      "endTime": 22142.587,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@23",
+      "stepId": "pw:api@23",
+      "startTime": 22144.272,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Create page",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 528,
+          "column": 32
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@23",
+      "endTime": 22191.278,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@24",
+      "stepId": "pw:api@24",
+      "startTime": 22194.702,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Add init script",
+      "params": {
+        "source": "(cfg => {\n    const readStorageValue = key => {\n      try {\n        const raw = localStorage.getItem(key);\n        if (raw == null) return undefined;\n        return JSON.parse(raw);\n      } catch {\n        var _localStorage$getItem;\n        return (_localStorage$getItem = localStorage.getItem(key)) !== null && _localStorage$getItem !== void 0 ? _localStorage$getItem : undefined;\n      }\n    };\n    const writeStorageValue = (key, value) => {\n      try {\n        localStorage.setItem(key, JSON.stringify(value));\n      } catch {}\n    };\n    const installChromeStorageShim = () => {\n      const globalWindow = window;\n      const listeners = new Set();\n      const emitChanges = (changes, area) => {\n        for (const listener of listeners) {\n          try {\n            listener(changes, area);\n          } catch {}\n        }\n      };\n      const areaApi = {\n        get: async (keys, callback) => {\n          let result;\n          if (keys == null) {\n            const out = {};\n            for (let idx = 0; idx < localStorage.length; idx += 1) {\n              const key = localStorage.key(idx);\n              if (!key) continue;\n              out[key] = readStorageValue(key);\n            }\n            result = out;\n          } else if (typeof keys === \"string\") {\n            result = {\n              [keys]: readStorageValue(keys)\n            };\n          } else if (Array.isArray(keys)) {\n            result = keys.reduce((acc, key) => {\n              acc[key] = readStorageValue(key);\n              return acc;\n            }, {});\n          } else {\n            result = Object.entries(keys).reduce((acc, [key, fallback]) => {\n              const current = readStorageValue(key);\n              acc[key] = typeof current === \"undefined\" ? fallback : current;\n              return acc;\n            }, {});\n          }\n          if (typeof callback === \"function\") {\n            try {\n              callback(result);\n            } catch {}\n          }\n          return result;\n        },\n        set: async (items, callback) => {\n          const changes = {};\n          for (const [key, value] of Object.entries(items || {})) {\n            const oldValue = readStorageValue(key);\n            writeStorageValue(key, value);\n            changes[key] = {\n              oldValue,\n              newValue: value\n            };\n          }\n          if (Object.keys(changes).length > 0) {\n            emitChanges(changes, \"sync\");\n          }\n          if (typeof callback === \"function\") {\n            try {\n              callback();\n            } catch {}\n          }\n        },\n        remove: async (keys, callback) => {\n          const values = Array.isArray(keys) ? keys : [keys];\n          const changes = {};\n          for (const key of values) {\n            const oldValue = readStorageValue(key);\n            try {\n              localStorage.removeItem(key);\n            } catch {}\n            changes[key] = {\n              oldValue,\n              newValue: undefined\n            };\n          }\n          if (Object.keys(changes).length > 0) {\n            emitChanges(changes, \"sync\");\n          }\n          if (typeof callback === \"function\") {\n            try {\n              callback();\n            } catch {}\n          }\n        },\n        clear: async callback => {\n          const changes = {};\n          for (let idx = 0; idx < localStorage.length; idx += 1) {\n            const key = localStorage.key(idx);\n            if (!key) continue;\n            changes[key] = {\n              oldValue: readStorageValue(key),\n              newValue: undefined\n            };\n          }\n          try {\n            localStorage.clear();\n          } catch {}\n          if (Object.keys(changes).length > 0) {\n            emitChanges(changes, \"sync\");\n          }\n          if (typeof callback === \"function\") {\n            try {\n              callback();\n            } catch {}\n          }\n        },\n        getBytesInUse: async (_keys, callback) => {\n          if (typeof callback === \"function\") {\n            try {\n              callback(0);\n            } catch {}\n          }\n          return 0;\n        }\n      };\n      if (!globalWindow.chrome) {\n        globalWindow.chrome = {};\n      }\n      const chromeLike = globalWindow.chrome;\n      // Seed storage without manufacturing extension identity in WebUI tests.\n\n      const storageShim = {\n        sync: areaApi,\n        local: areaApi,\n        managed: areaApi,\n        onChanged: {\n          addListener: fn => listeners.add(fn),\n          removeListener: fn => listeners.delete(fn)\n        }\n      };\n      chromeLike.storage = storageShim;\n      if (!globalWindow.browser) {\n        globalWindow.browser = {};\n      }\n      const browserLike = globalWindow.browser;\n      browserLike.storage = storageShim;\n    };\n    installChromeStorageShim();\n    const authConfig = {\n      serverUrl: cfg.serverUrl,\n      authMode: 'single-user',\n      authSource: 'manual',\n      credentialSource: 'manual',\n      apiKeyPersistence: 'device',\n      apiKeyServerOrigin: new URL(cfg.serverUrl).origin,\n      apiKey: cfg.apiKey\n    };\n    try {\n      localStorage.setItem('tldwConfig', JSON.stringify(authConfig));\n    } catch {}\n    try {\n      var _chromeLike$storage, _chromeLike$storage$s, _chromeLike$storage2, _chromeLike$storage2$, _chromeLike$storage3, _chromeLike$storage3$, _chromeLike$storage4, _chromeLike$storage4$;\n      const chromeLike = window.chrome;\n      chromeLike === null || chromeLike === void 0 || (_chromeLike$storage = chromeLike.storage) === null || _chromeLike$storage === void 0 || (_chromeLike$storage = _chromeLike$storage.sync) === null || _chromeLike$storage === void 0 || (_chromeLike$storage$s = _chromeLike$storage.set) === null || _chromeLike$storage$s === void 0 || _chromeLike$storage$s.call(_chromeLike$storage, {\n        tldwConfig: authConfig\n      });\n      chromeLike === null || chromeLike === void 0 || (_chromeLike$storage2 = chromeLike.storage) === null || _chromeLike$storage2 === void 0 || (_chromeLike$storage2 = _chromeLike$storage2.local) === null || _chromeLike$storage2 === void 0 || (_chromeLike$storage2$ = _chromeLike$storage2.set) === null || _chromeLike$storage2$ === void 0 || _chromeLike$storage2$.call(_chromeLike$storage2, {\n        tldwConfig: authConfig\n      });\n      chromeLike === null || chromeLike === void 0 || (_chromeLike$storage3 = chromeLike.storage) === null || _chromeLike$storage3 === void 0 || (_chromeLike$storage3 = _chromeLike$storage3.sync) === null || _chromeLike$storage3 === void 0 || (_chromeLike$storage3$ = _chromeLike$storage3.set) === null || _chromeLike$storage3$ === void 0 || _chromeLike$storage3$.call(_chromeLike$storage3, {\n        isMigrated: true\n      });\n      chromeLike === null || chromeLike === void 0 || (_chromeLike$storage4 = chromeLike.storage) === null || _chromeLike$storage4 === void 0 || (_chromeLike$storage4 = _chromeLike$storage4.local) === null || _chromeLike$storage4 === void 0 || (_chromeLike$storage4$ = _chromeLike$storage4.set) === null || _chromeLike$storage4$ === void 0 || _chromeLike$storage4$.call(_chromeLike$storage4, {\n        isMigrated: true\n      });\n    } catch {}\n    try {\n      localStorage.setItem(\"isMigrated\", \"true\");\n    } catch {}\n    try {\n      localStorage.setItem('__tldw_first_run_complete', 'true');\n    } catch {}\n    try {\n      localStorage.setItem('assistant_setup_dismissed', 'true');\n      // Authenticated workflow fixtures begin after onboarding. Notes starts\n      // its own tour after one second unless this shared-storage flag is set.\n      writeStorageValue('notes-tutorial-shown', '1');\n    } catch {}\n    try {\n      if (cfg.allowOffline) {\n        localStorage.setItem('__tldw_allow_offline', 'true');\n      } else {\n        localStorage.removeItem('__tldw_allow_offline');\n      }\n    } catch {}\n    try {\n      localStorage.setItem(\"serverUrl\", cfg.serverUrl);\n      localStorage.setItem(\"tldwServerUrl\", cfg.serverUrl);\n      localStorage.setItem(\"tldw-api-host\", cfg.serverUrl);\n      localStorage.setItem(\"authMode\", \"single-user\");\n      localStorage.setItem(\"apiKey\", cfg.apiKey);\n    } catch {}\n    // Suppress connection error modals by setting test bypass\n    try {\n      localStorage.setItem('__tldw_test_bypass', 'true');\n    } catch {}\n  })({\"serverUrl\":\"http://127.0.0.1:54314\",\"apiKey\":\"buddy-qualification-synthetic-key\",\"webUrl\":\"http://localhost:8080\",\"allowOffline\":false})"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/tldw-frontend/e2e/utils/helpers.ts",
+          "line": 70,
+          "column": 3,
+          "function": "seedAuth"
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@24",
+      "endTime": 22195.745,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@25",
+      "stepId": "pw:api@25",
+      "startTime": 22196.407,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Route requests",
+      "params": {
+        "patterns": "[Object]"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/tldw-frontend/e2e/utils/helpers.ts",
+          "line": 299,
+          "column": 16,
+          "function": "seedAuth"
+        }
+      ],
+      "group": "route"
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@25",
+      "endTime": 22197.089,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@26",
+      "stepId": "pw:api@26",
+      "startTime": 22197.53,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Navigate to \"/workspaces\"",
+      "params": {
+        "url": "http://127.0.0.1:18180/workspaces",
+        "waitUntil": "domcontentloaded",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 556,
+          "column": 20
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@26",
+      "endTime": 23942.885,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@27",
+      "stepId": "pw:api@27",
+      "startTime": 23943.497,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('button', { name: 'Buddy & Persona', exact: true }).first()",
+      "params": {
+        "selector": "internal:role=button[name=\"Buddy & Persona\"s] >> nth=0",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 280,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@27",
+      "endTime": 27448.503,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@28",
+      "stepId": "expect@28",
+      "startTime": 27449.146,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBeVisible\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 286,
+          "column": 5,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@28",
+      "endTime": 27457.059,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@29",
+      "stepId": "pw:api@29",
+      "startTime": 27457.584,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Use Fixture Buddy\"i]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 287,
+          "column": 71,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@29",
+      "endTime": 27515.092,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@30",
+      "stepId": "pw:api@30",
+      "startTime": 27515.833,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Scope', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Scope\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 290,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@30",
+      "endTime": 27527.131,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@31",
+      "stepId": "pw:api@31",
+      "startTime": 27527.594,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Conversation location', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Conversation location\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 293,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@31",
+      "endTime": 27536.665,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@32",
+      "stepId": "pw:api@32",
+      "startTime": 27537.23,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Conversation', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Conversation\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 296,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@32",
+      "endTime": 27573.115,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@33",
+      "stepId": "pw:api@33",
+      "startTime": 27573.649,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Apply', exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Apply\"s]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 297,
+          "column": 72,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "before",
+      "callId": "expect@34",
+      "stepId": "expect@34",
+      "startTime": 27923.649,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 153,
+          "column": 39,
+          "function": "Server.<anonymous>"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@34",
+      "endTime": 27923.714,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@33",
+      "endTime": 27924.552,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@35",
+      "stepId": "expect@35",
+      "startTime": 27924.954,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toHaveCount\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 298,
+          "column": 28,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@35",
+      "endTime": 28864.656,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@36",
+      "stepId": "expect@36",
+      "startTime": 28865.143,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBeVisible\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 299,
+          "column": 55,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@36",
+      "endTime": 28874.09,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@37",
+      "stepId": "expect@37",
+      "startTime": 28874.456,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toEqual\"",
+      "params": {
+        "expected": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 300,
+          "column": 41,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@37",
+      "endTime": 28874.626,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@38",
+      "stepId": "expect@38",
+      "startTime": 28874.881,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBeNull\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 305,
+          "column": 45,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@38",
+      "endTime": 28874.956,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@39",
+      "stepId": "pw:api@39",
+      "startTime": 28875.337,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('button', { name: 'Open Fixture Buddy \u2014 Qualification conversation', exact: true })",
+      "params": {
+        "selector": "internal:role=button[name=\"Open Fixture Buddy \u2014 Qualification conversation\"s]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 311,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@39",
+      "endTime": 28915.619,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@40",
+      "stepId": "pw:api@40",
+      "startTime": 28916.717,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Get attribute \"open\" getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification conversation' }).getByText('Buddy options', { exact: true }).locator('..')",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification conversation\"i] >> internal:text=\"Buddy options\"s >> ..",
+        "name": "open",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 252,
+          "column": 36,
+          "function": "openBuddyOptions"
+        }
+      ],
+      "group": "getter"
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@40",
+      "endTime": 28923.302,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@41",
+      "stepId": "pw:api@41",
+      "startTime": 28924.121,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification conversation' }).getByText('Buddy options', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification conversation\"i] >> internal:text=\"Buddy options\"s",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 253,
+          "column": 19,
+          "function": "openBuddyOptions"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@41",
+      "endTime": 28968.708,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@42",
+      "stepId": "pw:api@42",
+      "startTime": 28969.193,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification conversation' }).getByLabel('Expressions', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification conversation\"i] >> internal:label=\"Expressions\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 318,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@42",
+      "endTime": 28975.28,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@43",
+      "stepId": "expect@43",
+      "startTime": 28975.925,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"poll toBe\"",
+      "params": {
+        "expected": "static"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 319,
+          "column": 55,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "before",
+      "callId": "expect@44",
+      "stepId": "expect@44",
+      "parentId": "expect@43",
+      "startTime": 28976.229,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {
+        "expected": "static"
+      },
+      "stack": []
+    },
+    {
+      "type": "after",
+      "callId": "expect@44",
+      "endTime": 28977.828,
+      "annotations": [],
+      "error": {
+        "name": "",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m\"\u001b[7mstat\u001b[27mic\"\u001b[39m\nReceived: \u001b[31m\"\u001b[7mdynam\u001b[27mic\"\u001b[39m",
+        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: \u001b[32m\"\u001b[7mstat\u001b[27mic\"\u001b[39m\nReceived: \u001b[31m\"\u001b[7mdynam\u001b[27mic\"\u001b[39m"
+      }
+    },
+    {
+      "type": "before",
+      "callId": "expect@45",
+      "stepId": "expect@45",
+      "startTime": 28979.374,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {
+        "expected": "1"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 144,
+          "column": 39,
+          "function": "Server.<anonymous>"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@45",
+      "endTime": 28979.415,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@46",
+      "stepId": "expect@46",
+      "parentId": "expect@43",
+      "startTime": 29078.756,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {
+        "expected": "static"
+      },
+      "stack": []
+    },
+    {
+      "type": "after",
+      "callId": "expect@46",
+      "endTime": 29078.793,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "expect@43",
+      "endTime": 29078.813,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@47",
+      "stepId": "pw:api@47",
+      "startTime": 29079.571,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Screenshot",
+      "params": {
+        "path": "/private/tmp/buddy-client-final-green-results-20261011/buddy-independent-setup-in-0c3db-y-webui-fresh-profile-setup-chromium-extension/static-conversation.png",
+        "mask": "undefined",
+        "timeout": "0",
+        "type": "png"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 320,
+          "column": 14,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@47",
+      "endTime": 29187.102,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@48",
+      "stepId": "pw:api@48",
+      "startTime": 29188.223,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification conversation' }).getByRole('button', { name: 'Close', exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification conversation\"i] >> internal:role=button[name=\"Close\"s]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 323,
+          "column": 70,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@48",
+      "endTime": 29299.568,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@49",
+      "stepId": "pw:api@49",
+      "startTime": 29300.157,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('button', { name: 'Buddy & Persona', exact: true }).first()",
+      "params": {
+        "selector": "internal:role=button[name=\"Buddy & Persona\"s] >> nth=0",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 327,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@49",
+      "endTime": 29660.261,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@50",
+      "stepId": "pw:api@50",
+      "startTime": 29660.748,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Scope', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Scope\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 330,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@50",
+      "endTime": 29681.131,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@51",
+      "stepId": "pw:api@51",
+      "startTime": 29681.811,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Workspace', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Workspace\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 333,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@51",
+      "endTime": 29692.383,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@52",
+      "stepId": "expect@52",
+      "startTime": 29692.818,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toHaveValue\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 338,
+          "column": 26,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@52",
+      "endTime": 29706.79,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@53",
+      "stepId": "pw:api@53",
+      "startTime": 29707.267,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Default Persona for new conversations', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Default Persona for new conversations\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 339,
+          "column": 18,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@53",
+      "endTime": 29715.049,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@54",
+      "stepId": "pw:api@54",
+      "startTime": 29715.78,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Cancel', exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Cancel\"s]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 340,
+          "column": 73,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@54",
+      "endTime": 29748.496,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@55",
+      "stepId": "expect@55",
+      "startTime": 29749.004,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 341,
+          "column": 68,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@55",
+      "endTime": 29749.041,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@56",
+      "stepId": "pw:api@56",
+      "startTime": 29749.556,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('button', { name: 'Buddy & Persona', exact: true }).first()",
+      "params": {
+        "selector": "internal:role=button[name=\"Buddy & Persona\"s] >> nth=0",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 347,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@56",
+      "endTime": 29834.275,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@57",
+      "stepId": "pw:api@57",
+      "startTime": 29834.801,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Scope', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Scope\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 350,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@57",
+      "endTime": 29848.156,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@58",
+      "stepId": "pw:api@58",
+      "startTime": 29848.701,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Workspace', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Workspace\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 353,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@58",
+      "endTime": 29857.145,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@59",
+      "stepId": "pw:api@59",
+      "startTime": 29857.669,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Default Persona for new conversations', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Default Persona for new conversations\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 354,
+          "column": 18,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@59",
+      "endTime": 29867.804,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@60",
+      "stepId": "pw:api@60",
+      "startTime": 29868.422,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Apply', exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Apply\"s]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 355,
+          "column": 72,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "before",
+      "callId": "expect@61",
+      "stepId": "expect@61",
+      "startTime": 30260.614,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {
+        "expected": "1"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 197,
+          "column": 30,
+          "function": "Server.<anonymous>"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@61",
+      "endTime": 30260.651,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@60",
+      "endTime": 30262.863,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@62",
+      "stepId": "expect@62",
+      "startTime": 30263.333,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toHaveCount\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 356,
+          "column": 28,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "before",
+      "callId": "expect@63",
+      "stepId": "expect@63",
+      "startTime": 30266.34,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {
+        "expected": "1"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 153,
+          "column": 39,
+          "function": "Server.<anonymous>"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@63",
+      "endTime": 30266.376,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "expect@62",
+      "endTime": 30276.595,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@64",
+      "stepId": "expect@64",
+      "startTime": 30276.999,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toEqual\"",
+      "params": {
+        "expected": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 357,
+          "column": 41,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@64",
+      "endTime": 30277.061,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@65",
+      "stepId": "expect@65",
+      "startTime": 30277.317,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toEqual\"",
+      "params": {
+        "expected": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 362,
+          "column": 48,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@65",
+      "endTime": 30277.349,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@66",
+      "stepId": "pw:api@66",
+      "startTime": 30277.709,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('button', { name: 'Open Fixture Buddy \u2014 Qualification workspace', exact: true })",
+      "params": {
+        "selector": "internal:role=button[name=\"Open Fixture Buddy \u2014 Qualification workspace\"s]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 375,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@66",
+      "endTime": 30337.692,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@67",
+      "stepId": "pw:api@67",
+      "startTime": 30338.243,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Get attribute \"open\" getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByText('Buddy options', { exact: true }).locator('..')",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:text=\"Buddy options\"s >> ..",
+        "name": "open",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 252,
+          "column": 36,
+          "function": "openBuddyOptions"
+        }
+      ],
+      "group": "getter"
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@67",
+      "endTime": 30342.495,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@68",
+      "stepId": "pw:api@68",
+      "startTime": 30343.012,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Select option getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByLabel('Expressions', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:label=\"Expressions\"s",
+        "options": "[Object]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 382,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "before",
+      "callId": "expect@69",
+      "stepId": "expect@69",
+      "startTime": 30352.025,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {
+        "expected": "2"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 144,
+          "column": 39,
+          "function": "Server.<anonymous>"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@69",
+      "endTime": 30352.059,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@68",
+      "endTime": 30352.673,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@70",
+      "stepId": "expect@70",
+      "startTime": 30353.041,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"poll toBe\"",
+      "params": {
+        "expected": "dynamic"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 383,
+          "column": 55,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "before",
+      "callId": "expect@71",
+      "stepId": "expect@71",
+      "parentId": "expect@70",
+      "startTime": 30353.252,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {
+        "expected": "dynamic"
+      },
+      "stack": []
+    },
+    {
+      "type": "after",
+      "callId": "expect@71",
+      "endTime": 30353.273,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "expect@70",
+      "endTime": 30353.291,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@72",
+      "stepId": "pw:api@72",
+      "startTime": 30353.676,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByRole('button', { name: 'Close', exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:role=button[name=\"Close\"s]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 386,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@72",
+      "endTime": 30393.177,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@73",
+      "stepId": "pw:api@73",
+      "startTime": 30394.099,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Reload",
+      "params": {
+        "waitUntil": "domcontentloaded",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 387,
+          "column": 14,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@73",
+      "endTime": 32344.419,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@74",
+      "stepId": "expect@74",
+      "startTime": 32344.915,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBeVisible\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 393,
+          "column": 5,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@74",
+      "endTime": 36397.152,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@75",
+      "stepId": "pw:api@75",
+      "startTime": 36397.704,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('button', { name: 'Open Fixture Buddy \u2014 Qualification workspace', exact: true })",
+      "params": {
+        "selector": "internal:role=button[name=\"Open Fixture Buddy \u2014 Qualification workspace\"s]",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 399,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@75",
+      "endTime": 36425.722,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@76",
+      "stepId": "pw:api@76",
+      "startTime": 36426.715,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Get attribute \"open\" getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByText('Buddy options', { exact: true }).locator('..')",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:text=\"Buddy options\"s >> ..",
+        "name": "open",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 252,
+          "column": 36,
+          "function": "openBuddyOptions"
+        }
+      ],
+      "group": "getter"
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@76",
+      "endTime": 36432.229,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@77",
+      "stepId": "pw:api@77",
+      "startTime": 36433.003,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByText('Buddy options', { exact: true })",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:text=\"Buddy options\"s",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 253,
+          "column": 19,
+          "function": "openBuddyOptions"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@77",
+      "endTime": 36477.847,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@78",
+      "stepId": "expect@78",
+      "startTime": 36478.384,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toHaveValue\"",
+      "params": {
+        "expected": "dynamic"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 403,
+          "column": 5,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@78",
+      "endTime": 36483.749,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@79",
+      "stepId": "expect@79",
+      "startTime": 36485.118,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBeVisible\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 406,
+          "column": 5,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@79",
+      "endTime": 36490.071,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@80",
+      "stepId": "pw:api@80",
+      "startTime": 36490.702,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Screenshot",
+      "params": {
+        "path": "/private/tmp/buddy-client-final-green-results-20261011/buddy-independent-setup-in-0c3db-y-webui-fresh-profile-setup-chromium-extension/dynamic-workspace-after-reload.png",
+        "mask": "undefined",
+        "timeout": "0",
+        "type": "png"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 407,
+          "column": 14,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@80",
+      "endTime": 36602.049,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "test.attach@81",
+      "stepId": "test.attach@81",
+      "startTime": 36603.139,
+      "class": "Test",
+      "method": "test.attach",
+      "title": "Attach \"state-and-writes.json\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 410,
+          "column": 21,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "test.attach@81",
+      "endTime": 36603.315,
+      "attachments": [
+        {
+          "name": "state-and-writes.json",
+          "contentType": "application/json",
+          "sha1": "0f85ce6bd130f8ed5608919cf0fc86ec4b629608"
+        }
+      ],
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@82",
+      "stepId": "pw:api@82",
+      "startTime": 37091.616,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Close context",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 560,
+          "column": 9
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@82",
+      "endTime": 37095.47,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "hook@83",
+      "stepId": "hook@83",
+      "startTime": 37095.806,
+      "class": "Test",
+      "method": "hook",
+      "title": "After Hooks",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@88",
+      "stepId": "fixture@88",
+      "parentId": "hook@83",
+      "startTime": 37096.37,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"userAgent\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@88",
+      "endTime": 37096.376,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@90",
+      "stepId": "fixture@90",
+      "parentId": "hook@83",
+      "startTime": 37096.492,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"viewport\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@90",
+      "endTime": 37096.496,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@97",
+      "stepId": "fixture@97",
+      "parentId": "hook@83",
+      "startTime": 37096.905,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"isMobile\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@97",
+      "endTime": 37096.908,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@101",
+      "stepId": "fixture@101",
+      "parentId": "hook@83",
+      "startTime": 37097.14,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"hasTouch\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@101",
+      "endTime": 37097.144,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@103",
+      "stepId": "fixture@103",
+      "parentId": "hook@83",
+      "startTime": 37097.257,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"deviceScaleFactor\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@103",
+      "endTime": 37097.26,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "hook@83",
+      "endTime": 37098.041,
+      "annotations": []
+    },
+    {
+      "version": 8,
+      "type": "context-options",
+      "origin": "library",
+      "browserName": "chromium",
+      "playwrightVersion": "1.58.0",
+      "options": {
+        "noDefaultViewport": false,
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "ignoreHTTPSErrors": false,
+        "javaScriptEnabled": true,
+        "bypassCSP": false,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36",
+        "locale": "en-US",
+        "offline": false,
+        "deviceScaleFactor": 1,
+        "isMobile": false,
+        "hasTouch": false,
+        "colorScheme": "light",
+        "acceptDownloads": "accept",
+        "serviceWorkers": "allow",
+        "selectorEngines": [],
+        "testIdAttributeName": "data-testid"
+      },
+      "platform": "darwin",
+      "wallTime": 1791759413120,
+      "monotonicTime": 22143.525,
+      "sdkLanguage": "javascript",
+      "testIdAttributeName": "data-testid",
+      "contextId": "browser-context@b29bcf1df04f570372dc3261f1fd9834",
+      "title": "buddy-independent-setup.spec.ts:427 \u203a independent Buddy webui fresh profile setup"
+    },
+    {
+      "type": "before",
+      "callId": "call@278",
+      "startTime": 22144.376,
+      "class": "BrowserContext",
+      "method": "newPage",
+      "params": {},
+      "stepId": "pw:api@23"
+    },
+    {
+      "type": "after",
+      "callId": "call@278",
+      "endTime": 22190.755,
+      "result": {
+        "page": "<Page>"
+      }
+    },
+    {
+      "type": "before",
+      "callId": "call@280",
+      "startTime": 22194.954,
+      "class": "Page",
+      "method": "addInitScript",
+      "params": {
+        "source": "(cfg => {\n    const readStorageValue = key => {\n      try {\n        const raw = localStorage.getItem(key);\n        if (raw == null) return undefined;\n        return JSON.parse(raw);\n      } catch {\n        var _localStorage$getItem;\n        return (_localStorage$getItem = localStorage.getItem(key)) !== null && _localStorage$getItem !== void 0 ? _localStorage$getItem : undefined;\n      }\n    };\n    const writeStorageValue = (key, value) => {\n      try {\n        localStorage.setItem(key, JSON.stringify(value));\n      } catch {}\n    };\n    const installChromeStorageShim = () => {\n      const globalWindow = window;\n      const listeners = new Set();\n      const emitChanges = (changes, area) => {\n        for (const listener of listeners) {\n          try {\n            listener(changes, area);\n          } catch {}\n        }\n      };\n      const areaApi = {\n        get: async (keys, callback) => {\n          let result;\n          if (keys == null) {\n            const out = {};\n            for (let idx = 0; idx < localStorage.length; idx += 1) {\n              const key = localStorage.key(idx);\n              if (!key) continue;\n              out[key] = readStorageValue(key);\n            }\n            result = out;\n          } else if (typeof keys === \"string\") {\n            result = {\n              [keys]: readStorageValue(keys)\n            };\n          } else if (Array.isArray(keys)) {\n            result = keys.reduce((acc, key) => {\n              acc[key] = readStorageValue(key);\n              return acc;\n            }, {});\n          } else {\n            result = Object.entries(keys).reduce((acc, [key, fallback]) => {\n              const current = readStorageValue(key);\n              acc[key] = typeof current === \"undefined\" ? fallback : current;\n              return acc;\n            }, {});\n          }\n          if (typeof callback === \"function\") {\n            try {\n              callback(result);\n            } catch {}\n          }\n          return result;\n        },\n        set: async (items, callback) => {\n          const changes = {};\n          for (const [key, value] of Object.entries(items || {})) {\n            const oldValue = readStorageValue(key);\n            writeStorageValue(key, value);\n            changes[key] = {\n              oldValue,\n              newValue: value\n            };\n          }\n          if (Object.keys(changes).length > 0) {\n            emitChanges(changes, \"sync\");\n          }\n          if (typeof callback === \"function\") {\n            try {\n              callback();\n            } catch {}\n          }\n        },\n        remove: async (keys, callback) => {\n          const values = Array.isArray(keys) ? keys : [keys];\n          const changes = {};\n          for (const key of values) {\n            const oldValue = readStorageValue(key);\n            try {\n              localStorage.removeItem(key);\n            } catch {}\n            changes[key] = {\n              oldValue,\n              newValue: undefined\n            };\n          }\n          if (Object.keys(changes).length > 0) {\n            emitChanges(changes, \"sync\");\n          }\n          if (typeof callback === \"function\") {\n            try {\n              callback();\n            } catch {}\n          }\n        },\n        clear: async callback => {\n          const changes = {};\n          for (let idx = 0; idx < localStorage.length; idx += 1) {\n            const key = localStorage.key(idx);\n            if (!key) continue;\n            changes[key] = {\n              oldValue: readStorageValue(key),\n              newValue: undefined\n            };\n          }\n          try {\n            localStorage.clear();\n          } catch {}\n          if (Object.keys(changes).length > 0) {\n            emitChanges(changes, \"sync\");\n          }\n          if (typeof callback === \"function\") {\n            try {\n              callback();\n            } catch {}\n          }\n        },\n        getBytesInUse: async (_keys, callback) => {\n          if (typeof callback === \"function\") {\n            try {\n              callback(0);\n            } catch {}\n          }\n          return 0;\n        }\n      };\n      if (!globalWindow.chrome) {\n        globalWindow.chrome = {};\n      }\n      const chromeLike = globalWindow.chrome;\n      // Seed storage without manufacturing extension identity in WebUI tests.\n\n      const storageShim = {\n        sync: areaApi,\n        local: areaApi,\n        managed: areaApi,\n        onChanged: {\n          addListener: fn => listeners.add(fn),\n          removeListener: fn => listeners.delete(fn)\n        }\n      };\n      chromeLike.storage = storageShim;\n      if (!globalWindow.browser) {\n        globalWindow.browser = {};\n      }\n      const browserLike = globalWindow.browser;\n      browserLike.storage = storageShim;\n    };\n    installChromeStorageShim();\n    const authConfig = {\n      serverUrl: cfg.serverUrl,\n      authMode: 'single-user',\n      authSource: 'manual',\n      credentialSource: 'manual',\n      apiKeyPersistence: 'device',\n      apiKeyServerOrigin: new URL(cfg.serverUrl).origin,\n      apiKey: cfg.apiKey\n    };\n    try {\n      localStorage.setItem('tldwConfig', JSON.stringify(authConfig));\n    } catch {}\n    try {\n      var _chromeLike$storage, _chromeLike$storage$s, _chromeLike$storage2, _chromeLike$storage2$, _chromeLike$storage3, _chromeLike$storage3$, _chromeLike$storage4, _chromeLike$storage4$;\n      const chromeLike = window.chrome;\n      chromeLike === null || chromeLike === void 0 || (_chromeLike$storage = chromeLike.storage) === null || _chromeLike$storage === void 0 || (_chromeLike$storage = _chromeLike$storage.sync) === null || _chromeLike$storage === void 0 || (_chromeLike$storage$s = _chromeLike$storage.set) === null || _chromeLike$storage$s === void 0 || _chromeLike$storage$s.call(_chromeLike$storage, {\n        tldwConfig: authConfig\n      });\n      chromeLike === null || chromeLike === void 0 || (_chromeLike$storage2 = chromeLike.storage) === null || _chromeLike$storage2 === void 0 || (_chromeLike$storage2 = _chromeLike$storage2.local) === null || _chromeLike$storage2 === void 0 || (_chromeLike$storage2$ = _chromeLike$storage2.set) === null || _chromeLike$storage2$ === void 0 || _chromeLike$storage2$.call(_chromeLike$storage2, {\n        tldwConfig: authConfig\n      });\n      chromeLike === null || chromeLike === void 0 || (_chromeLike$storage3 = chromeLike.storage) === null || _chromeLike$storage3 === void 0 || (_chromeLike$storage3 = _chromeLike$storage3.sync) === null || _chromeLike$storage3 === void 0 || (_chromeLike$storage3$ = _chromeLike$storage3.set) === null || _chromeLike$storage3$ === void 0 || _chromeLike$storage3$.call(_chromeLike$storage3, {\n        isMigrated: true\n      });\n      chromeLike === null || chromeLike === void 0 || (_chromeLike$storage4 = chromeLike.storage) === null || _chromeLike$storage4 === void 0 || (_chromeLike$storage4 = _chromeLike$storage4.local) === null || _chromeLike$storage4 === void 0 || (_chromeLike$storage4$ = _chromeLike$storage4.set) === null || _chromeLike$storage4$ === void 0 || _chromeLike$storage4$.call(_chromeLike$storage4, {\n        isMigrated: true\n      });\n    } catch {}\n    try {\n      localStorage.setItem(\"isMigrated\", \"true\");\n    } catch {}\n    try {\n      localStorage.setItem('__tldw_first_run_complete', 'true');\n    } catch {}\n    try {\n      localStorage.setItem('assistant_setup_dismissed', 'true');\n      // Authenticated workflow fixtures begin after onboarding. Notes starts\n      // its own tour after one second unless this shared-storage flag is set.\n      writeStorageValue('notes-tutorial-shown', '1');\n    } catch {}\n    try {\n      if (cfg.allowOffline) {\n        localStorage.setItem('__tldw_allow_offline', 'true');\n      } else {\n        localStorage.removeItem('__tldw_allow_offline');\n      }\n    } catch {}\n    try {\n      localStorage.setItem(\"serverUrl\", cfg.serverUrl);\n      localStorage.setItem(\"tldwServerUrl\", cfg.serverUrl);\n      localStorage.setItem(\"tldw-api-host\", cfg.serverUrl);\n      localStorage.setItem(\"authMode\", \"single-user\");\n      localStorage.setItem(\"apiKey\", cfg.apiKey);\n    } catch {}\n    // Suppress connection error modals by setting test bypass\n    try {\n      localStorage.setItem('__tldw_test_bypass', 'true');\n    } catch {}\n  })({\"serverUrl\":\"http://127.0.0.1:54314\",\"apiKey\":\"buddy-qualification-synthetic-key\",\"webUrl\":\"http://localhost:8080\",\"allowOffline\":false})"
+      },
+      "stepId": "pw:api@24",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0"
+    },
+    {
+      "type": "after",
+      "callId": "call@280",
+      "endTime": 22195.575
+    },
+    {
+      "type": "before",
+      "callId": "call@282",
+      "startTime": 22196.52,
+      "title": "Route requests",
+      "class": "Page",
+      "method": "setNetworkInterceptionPatterns",
+      "params": {
+        "patterns": [
+          {
+            "glob": "**/api/v1/admin/notes/title-settings"
+          }
+        ]
+      },
+      "stepId": "pw:api@25",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0"
+    },
+    {
+      "type": "after",
+      "callId": "call@282",
+      "endTime": 22196.981
+    },
+    {
+      "type": "before",
+      "callId": "call@284",
+      "startTime": 22197.66,
+      "class": "Frame",
+      "method": "goto",
+      "params": {
+        "url": "http://127.0.0.1:18180/workspaces",
+        "timeout": 0,
+        "waitUntil": "domcontentloaded"
+      },
+      "stepId": "pw:api@26",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@284"
+    },
+    {
+      "type": "log",
+      "callId": "call@284",
+      "time": 22199.572,
+      "message": "navigating to \"http://127.0.0.1:18180/workspaces\", waiting until \"domcontentloaded\""
+    },
+    {
+      "type": "after",
+      "callId": "call@284",
+      "endTime": 23334.103,
+      "result": {
+        "response": "<Response>"
+      },
+      "afterSnapshot": "after@call@284"
+    },
+    {
+      "type": "before",
+      "callId": "call@286",
+      "startTime": 23945.05,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=button[name=\"Buddy & Persona\"s] >> nth=0",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@27",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@286"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 23947.451,
+      "message": "waiting for getByRole('button', { name: 'Buddy & Persona', exact: true }).first()"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27393.549,
+      "message": "  locator resolved to <button type=\"button\" class=\"inline-flex items-center gap-1 rounded-md px-2 py-2 text-sm font-medium text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27394.119,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27394.138,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27400.913,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27400.926,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27403.918,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27409.221,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27442.932,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27442.959,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@286",
+      "time": 27444.052,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@286",
+      "endTime": 27444.123,
+      "point": {
+        "x": 854.73,
+        "y": 288
+      },
+      "afterSnapshot": "after@call@286"
+    },
+    {
+      "type": "before",
+      "callId": "call@288",
+      "startTime": 27449.905,
+      "title": "Expect \"toBeVisible\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Use Fixture Buddy\"i]",
+        "expression": "to.be.visible",
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@28",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@288"
+    },
+    {
+      "type": "log",
+      "callId": "call@288",
+      "time": 27453.129,
+      "message": "Expect \"toBeVisible\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@288",
+      "time": 27453.134,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })"
+    },
+    {
+      "type": "log",
+      "callId": "call@288",
+      "time": 27455.37,
+      "message": "  locator resolved to <button type=\"button\" aria-pressed=\"false\" aria-label=\"Use Fixture Buddy\" class=\"min-w-0 rounded-md border p-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary border-border bg-surface\">\u2026</button>"
+    },
+    {
+      "type": "after",
+      "callId": "call@288",
+      "endTime": 27455.435,
+      "result": {
+        "matches": true,
+        "received": {
+          "s": "visible"
+        }
+      },
+      "afterSnapshot": "after@call@288"
+    },
+    {
+      "type": "before",
+      "callId": "call@290",
+      "startTime": 27457.724,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Use Fixture Buddy\"i]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@29",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@290"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27459.682,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27462.594,
+      "message": "  locator resolved to <button type=\"button\" aria-pressed=\"false\" aria-label=\"Use Fixture Buddy\" class=\"min-w-0 rounded-md border p-3 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary border-border bg-surface\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27463.012,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27463.029,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27506.862,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27506.891,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27507.073,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27509.455,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27513.519,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27513.545,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@290",
+      "time": 27513.718,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@290",
+      "endTime": 27513.762,
+      "point": {
+        "x": 762.93,
+        "y": 293.8
+      },
+      "afterSnapshot": "after@call@290"
+    },
+    {
+      "type": "before",
+      "callId": "call@292",
+      "startTime": 27516.007,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Scope\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "conversation"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@30",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@292"
+    },
+    {
+      "type": "log",
+      "callId": "call@292",
+      "time": 27517.077,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Scope', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@292",
+      "time": 27518.898,
+      "message": "  locator resolved to <select aria-label=\"Scope\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@292",
+      "time": 27519.226,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@292",
+      "time": 27520.408,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@292",
+      "time": 27524.901,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@292",
+      "endTime": 27524.98,
+      "result": {
+        "values": [
+          "conversation"
+        ]
+      },
+      "afterSnapshot": "after@call@292"
+    },
+    {
+      "type": "before",
+      "callId": "call@294",
+      "startTime": 27527.706,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Conversation location\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": ""
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@31",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@294"
+    },
+    {
+      "type": "log",
+      "callId": "call@294",
+      "time": 27528.695,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Conversation location', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@294",
+      "time": 27530.548,
+      "message": "  locator resolved to <select aria-label=\"Conversation location\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@294",
+      "time": 27531.082,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@294",
+      "time": 27532.008,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@294",
+      "time": 27534.729,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@294",
+      "endTime": 27534.82,
+      "result": {
+        "values": [
+          ""
+        ]
+      },
+      "afterSnapshot": "after@call@294"
+    },
+    {
+      "type": "before",
+      "callId": "call@296",
+      "startTime": 27537.373,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Conversation\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "buddy-qualification-conversation"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@32",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@296"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27538.294,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Conversation', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27539.994,
+      "message": "  locator resolved to <select aria-label=\"Conversation\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27541.828,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27542.937,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27543.509,
+      "message": "  did not find some options"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27543.519,
+      "message": "retrying select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27544.296,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27544.738,
+      "message": "  did not find some options"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27544.749,
+      "message": "retrying select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27544.752,
+      "message": "  waiting 20ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27568.475,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@296",
+      "time": 27570.939,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@296",
+      "endTime": 27571.083,
+      "result": {
+        "values": [
+          "buddy-qualification-conversation"
+        ]
+      },
+      "afterSnapshot": "after@call@296"
+    },
+    {
+      "type": "before",
+      "callId": "call@298",
+      "startTime": 27573.772,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Apply\"s]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@33",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@298"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27574.74,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Apply', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27576.157,
+      "message": "  locator resolved to <button type=\"button\" aria-label=\"Apply\" class=\"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r1 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27576.496,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27576.522,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27630.315,
+      "message": "  element is not stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27630.33,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27630.353,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27708.25,
+      "message": "  element is not stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27708.266,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27708.269,
+      "message": "  waiting 20ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27729.888,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27779.844,
+      "message": "  element is not stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27779.859,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27779.862,
+      "message": "  waiting 100ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27881.828,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27912.836,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27912.855,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27913.639,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27916.097,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27922.459,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27922.473,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@298",
+      "time": 27922.697,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@298",
+      "endTime": 27922.78,
+      "point": {
+        "x": 960.92,
+        "y": 634
+      },
+      "afterSnapshot": "after@call@298"
+    },
+    {
+      "type": "before",
+      "callId": "call@300",
+      "startTime": 27925.469,
+      "title": "Expect \"toHaveCount\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i]",
+        "expression": "to.have.count",
+        "expectedNumber": 0,
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@35",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@300"
+    },
+    {
+      "type": "log",
+      "callId": "call@300",
+      "time": 27926.706,
+      "message": "Expect \"toHaveCount\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@300",
+      "time": 27926.711,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' })"
+    },
+    {
+      "type": "log",
+      "callId": "call@300",
+      "time": 27927.892,
+      "message": "  locator resolved to 1 element"
+    },
+    {
+      "type": "log",
+      "callId": "call@300",
+      "time": 27927.903,
+      "message": "  unexpected value \"1\""
+    },
+    {
+      "type": "log",
+      "callId": "call@300",
+      "time": 27928.838,
+      "message": "  locator resolved to 1 element"
+    },
+    {
+      "type": "log",
+      "callId": "call@300",
+      "time": 27928.847,
+      "message": "  unexpected value \"1\""
+    },
+    {
+      "type": "log",
+      "callId": "call@300",
+      "time": 28861.746,
+      "message": "  locator resolved to 0 elements"
+    },
+    {
+      "type": "after",
+      "callId": "call@300",
+      "endTime": 28861.841,
+      "result": {
+        "matches": true,
+        "received": {
+          "n": 0
+        }
+      },
+      "afterSnapshot": "after@call@300"
+    },
+    {
+      "type": "before",
+      "callId": "call@302",
+      "startTime": 28865.595,
+      "title": "Expect \"toBeVisible\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:testid=[data-testid=\"independent-buddy\"s]",
+        "expression": "to.be.visible",
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@36",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@302"
+    },
+    {
+      "type": "log",
+      "callId": "call@302",
+      "time": 28866.742,
+      "message": "Expect \"toBeVisible\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@302",
+      "time": 28866.746,
+      "message": "waiting for getByTestId('independent-buddy')"
+    },
+    {
+      "type": "log",
+      "callId": "call@302",
+      "time": 28871.803,
+      "message": "  locator resolved to <div data-testid=\"independent-buddy\" class=\"fixed z-40 flex w-32 flex-col items-center\">\u2026</div>"
+    },
+    {
+      "type": "after",
+      "callId": "call@302",
+      "endTime": 28871.847,
+      "result": {
+        "matches": true,
+        "received": {
+          "s": "visible"
+        }
+      },
+      "afterSnapshot": "after@call@302"
+    },
+    {
+      "type": "before",
+      "callId": "call@304",
+      "startTime": 28875.645,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=button[name=\"Open Fixture Buddy \u2014 Qualification conversation\"s]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@39",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@304"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28881.043,
+      "message": "waiting for getByRole('button', { name: 'Open Fixture Buddy \u2014 Qualification conversation', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28884.828,
+      "message": "  locator resolved to <button type=\"button\" aria-label=\"Open Fixture Buddy \u2014 Qualification conversation\" class=\"flex min-h-24 w-28 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28886.717,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28886.75,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28901.136,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28901.151,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28901.407,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28903.627,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28908.815,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28908.83,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@304",
+      "time": 28909.752,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@304",
+      "endTime": 28909.801,
+      "point": {
+        "x": 1184,
+        "y": 144
+      },
+      "afterSnapshot": "after@call@304"
+    },
+    {
+      "type": "before",
+      "callId": "call@306",
+      "startTime": 28917.155,
+      "class": "Frame",
+      "method": "getAttribute",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification conversation\"i] >> internal:text=\"Buddy options\"s >> ..",
+        "strict": true,
+        "name": "open",
+        "timeout": 0
+      },
+      "stepId": "pw:api@40",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@306"
+    },
+    {
+      "type": "log",
+      "callId": "call@306",
+      "time": 28918.504,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification conversation' }).getByText('Buddy options', { exact: true }).locator('..')"
+    },
+    {
+      "type": "log",
+      "callId": "call@306",
+      "time": 28920.955,
+      "message": "  locator resolved to <details class=\"border-t border-border pt-3 text-sm text-text\">\u2026</details>"
+    },
+    {
+      "type": "after",
+      "callId": "call@306",
+      "endTime": 28921.026,
+      "result": {},
+      "afterSnapshot": "after@call@306"
+    },
+    {
+      "type": "before",
+      "callId": "call@308",
+      "startTime": 28924.546,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification conversation\"i] >> internal:text=\"Buddy options\"s",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@41",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@308"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28926.021,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification conversation' }).getByText('Buddy options', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28928.887,
+      "message": "  locator resolved to <summary class=\"cursor-pointer font-medium\">Buddy options</summary>"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28929.646,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28929.664,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28961.643,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28961.657,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28962.675,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28965.758,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28967.377,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28967.388,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@308",
+      "time": 28967.534,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@308",
+      "endTime": 28967.569,
+      "point": {
+        "x": 1075.2,
+        "y": 232.8
+      },
+      "afterSnapshot": "after@call@308"
+    },
+    {
+      "type": "before",
+      "callId": "call@310",
+      "startTime": 28969.294,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification conversation\"i] >> internal:label=\"Expressions\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "static"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@42",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@310"
+    },
+    {
+      "type": "log",
+      "callId": "call@310",
+      "time": 28970.241,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification conversation' }).getByLabel('Expressions', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@310",
+      "time": 28971.69,
+      "message": "  locator resolved to <select id=\":r71:\" class=\"rounded border border-border bg-surface p-2\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@310",
+      "time": 28972.08,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@310",
+      "time": 28972.999,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@310",
+      "time": 28974.035,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@310",
+      "endTime": 28974.082,
+      "result": {
+        "values": [
+          "static"
+        ]
+      },
+      "afterSnapshot": "after@call@310"
+    },
+    {
+      "type": "before",
+      "callId": "call@312",
+      "startTime": 29079.734,
+      "class": "Page",
+      "method": "screenshot",
+      "params": {
+        "timeout": 0,
+        "type": "png"
+      },
+      "stepId": "pw:api@47",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@312"
+    },
+    {
+      "type": "log",
+      "callId": "call@312",
+      "time": 29081.395,
+      "message": "taking page screenshot"
+    },
+    {
+      "type": "log",
+      "callId": "call@312",
+      "time": 29082.316,
+      "message": "waiting for fonts to load..."
+    },
+    {
+      "type": "log",
+      "callId": "call@312",
+      "time": 29082.965,
+      "message": "fonts loaded"
+    },
+    {
+      "type": "after",
+      "callId": "call@312",
+      "endTime": 29185.158,
+      "result": {
+        "binary": "<Buffer>"
+      },
+      "afterSnapshot": "after@call@312"
+    },
+    {
+      "type": "before",
+      "callId": "call@314",
+      "startTime": 29188.315,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification conversation\"i] >> internal:role=button[name=\"Close\"s]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@48",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@314"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29189.31,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification conversation' }).getByRole('button', { name: 'Close', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29191.078,
+      "message": "  locator resolved to <button type=\"button\" aria-label=\"Close\" class=\"ant-modal-close\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29191.676,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29191.705,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29242.498,
+      "message": "  element is not stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29242.516,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29242.539,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29288.095,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29288.109,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29288.936,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29291.008,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29298.096,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29298.107,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@314",
+      "time": 29298.393,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@314",
+      "endTime": 29298.452,
+      "point": {
+        "x": 922,
+        "y": 52
+      },
+      "afterSnapshot": "after@call@314"
+    },
+    {
+      "type": "before",
+      "callId": "call@316",
+      "startTime": 29300.288,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=button[name=\"Buddy & Persona\"s] >> nth=0",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@49",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@316"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29301.223,
+      "message": "waiting for getByRole('button', { name: 'Buddy & Persona', exact: true }).first()"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29303.224,
+      "message": "  locator resolved to <button type=\"button\" class=\"inline-flex items-center gap-1 rounded-md px-2 py-2 text-sm font-medium text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29303.565,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29303.58,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29330.957,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29330.969,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29332.895,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29335.527,
+      "message": "  <div class=\"ant-modal-wrap\">\u2026</div> from <div id=\"tldw-portal-root\">\u2026</div> subtree intercepts pointer events"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29335.536,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29335.55,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29371.714,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29371.735,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29372.366,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29374.444,
+      "message": "  <div class=\"ant-modal-wrap\">\u2026</div> from <div id=\"tldw-portal-root\">\u2026</div> subtree intercepts pointer events"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29374.456,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29374.459,
+      "message": "  waiting 20ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29395.803,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29469.967,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29469.985,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29471.152,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29473.489,
+      "message": "  <div class=\"ant-modal-wrap\">\u2026</div> from <div id=\"tldw-portal-root\">\u2026</div> subtree intercepts pointer events"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29473.498,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29473.5,
+      "message": "  waiting 100ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29574.786,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29633.801,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29633.822,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29636.142,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29638.672,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29655.284,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29655.308,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@316",
+      "time": 29656.462,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@316",
+      "endTime": 29656.537,
+      "point": {
+        "x": 746.73,
+        "y": 28
+      },
+      "afterSnapshot": "after@call@316"
+    },
+    {
+      "type": "before",
+      "callId": "call@318",
+      "startTime": 29660.893,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Scope\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "workspace"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@50",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@318"
+    },
+    {
+      "type": "log",
+      "callId": "call@318",
+      "time": 29663.397,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Scope', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@318",
+      "time": 29668.983,
+      "message": "  locator resolved to <select aria-label=\"Scope\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@318",
+      "time": 29670.293,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@318",
+      "time": 29672.978,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@318",
+      "time": 29675.809,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@318",
+      "endTime": 29675.904,
+      "result": {
+        "values": [
+          "workspace"
+        ]
+      },
+      "afterSnapshot": "after@call@318"
+    },
+    {
+      "type": "before",
+      "callId": "call@320",
+      "startTime": 29681.972,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Workspace\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "buddy-qualification-workspace"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@51",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@320"
+    },
+    {
+      "type": "log",
+      "callId": "call@320",
+      "time": 29683.305,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Workspace', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@320",
+      "time": 29684.879,
+      "message": "  locator resolved to <select aria-label=\"Workspace\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@320",
+      "time": 29685.391,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@320",
+      "time": 29686.878,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@320",
+      "time": 29689.858,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@320",
+      "endTime": 29689.991,
+      "result": {
+        "values": [
+          "buddy-qualification-workspace"
+        ]
+      },
+      "afterSnapshot": "after@call@320"
+    },
+    {
+      "type": "before",
+      "callId": "call@322",
+      "startTime": 29693.41,
+      "title": "Expect \"toHaveValue\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Default Persona for new conversations\"s",
+        "expression": "to.have.value",
+        "expectedText": [
+          {
+            "string": ""
+          }
+        ],
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@52",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@322"
+    },
+    {
+      "type": "log",
+      "callId": "call@322",
+      "time": 29700.059,
+      "message": "Expect \"toHaveValue\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@322",
+      "time": 29700.065,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Default Persona for new conversations', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@322",
+      "time": 29704.885,
+      "message": "  locator resolved to <select aria-label=\"Default Persona for new conversations\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "after",
+      "callId": "call@322",
+      "endTime": 29704.938,
+      "result": {
+        "matches": true,
+        "received": {
+          "s": ""
+        }
+      },
+      "afterSnapshot": "after@call@322"
+    },
+    {
+      "type": "before",
+      "callId": "call@324",
+      "startTime": 29707.391,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Default Persona for new conversations\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "research_assistant"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@53",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@324"
+    },
+    {
+      "type": "log",
+      "callId": "call@324",
+      "time": 29708.489,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Default Persona for new conversations', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@324",
+      "time": 29709.987,
+      "message": "  locator resolved to <select aria-label=\"Default Persona for new conversations\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@324",
+      "time": 29710.336,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@324",
+      "time": 29711.374,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@324",
+      "time": 29713.516,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@324",
+      "endTime": 29713.608,
+      "result": {
+        "values": [
+          "research_assistant"
+        ]
+      },
+      "afterSnapshot": "after@call@324"
+    },
+    {
+      "type": "before",
+      "callId": "call@326",
+      "startTime": 29715.93,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Cancel\"s]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@54",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@326"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29717.465,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Cancel', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29719.022,
+      "message": "  locator resolved to <button type=\"button\" class=\"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r1 ant-btn-default ant-btn-color-default ant-btn-variant-outlined\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29719.382,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29719.398,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29739.022,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29739.036,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29739.277,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29741.79,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29747.154,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29747.166,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@326",
+      "time": 29747.445,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@326",
+      "endTime": 29747.503,
+      "point": {
+        "x": 855.79,
+        "y": 528.63
+      },
+      "afterSnapshot": "after@call@326"
+    },
+    {
+      "type": "before",
+      "callId": "call@328",
+      "startTime": 29749.712,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=button[name=\"Buddy & Persona\"s] >> nth=0",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@56",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@328"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29750.663,
+      "message": "waiting for getByRole('button', { name: 'Buddy & Persona', exact: true }).first()"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29753.171,
+      "message": "  locator resolved to <button type=\"button\" class=\"inline-flex items-center gap-1 rounded-md px-2 py-2 text-sm font-medium text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29753.541,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29753.562,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29812.223,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29812.238,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29812.516,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29814.642,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29829.47,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29829.487,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@328",
+      "time": 29830.285,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@328",
+      "endTime": 29830.328,
+      "point": {
+        "x": 746.73,
+        "y": 28
+      },
+      "afterSnapshot": "after@call@328"
+    },
+    {
+      "type": "before",
+      "callId": "call@330",
+      "startTime": 29834.931,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Scope\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "workspace"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@57",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@330"
+    },
+    {
+      "type": "log",
+      "callId": "call@330",
+      "time": 29838.352,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Scope', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@330",
+      "time": 29839.9,
+      "message": "  locator resolved to <select aria-label=\"Scope\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@330",
+      "time": 29840.366,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@330",
+      "time": 29841.57,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@330",
+      "time": 29843.863,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@330",
+      "endTime": 29843.937,
+      "result": {
+        "values": [
+          "workspace"
+        ]
+      },
+      "afterSnapshot": "after@call@330"
+    },
+    {
+      "type": "before",
+      "callId": "call@332",
+      "startTime": 29848.849,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Workspace\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "buddy-qualification-workspace"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@58",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@332"
+    },
+    {
+      "type": "log",
+      "callId": "call@332",
+      "time": 29850.188,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Workspace', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@332",
+      "time": 29851.869,
+      "message": "  locator resolved to <select aria-label=\"Workspace\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@332",
+      "time": 29852.279,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@332",
+      "time": 29853.327,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@332",
+      "time": 29855.687,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@332",
+      "endTime": 29855.751,
+      "result": {
+        "values": [
+          "buddy-qualification-workspace"
+        ]
+      },
+      "afterSnapshot": "after@call@332"
+    },
+    {
+      "type": "before",
+      "callId": "call@334",
+      "startTime": 29857.792,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:label=\"Default Persona for new conversations\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "research_assistant"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@59",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@334"
+    },
+    {
+      "type": "log",
+      "callId": "call@334",
+      "time": 29861.11,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByLabel('Default Persona for new conversations', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@334",
+      "time": 29862.556,
+      "message": "  locator resolved to <select aria-label=\"Default Persona for new conversations\" class=\"block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@334",
+      "time": 29863.015,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@334",
+      "time": 29864.321,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@334",
+      "time": 29866.255,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@334",
+      "endTime": 29866.316,
+      "result": {
+        "values": [
+          "research_assistant"
+        ]
+      },
+      "afterSnapshot": "after@call@334"
+    },
+    {
+      "type": "before",
+      "callId": "call@336",
+      "startTime": 29868.584,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Apply\"s]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@60",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@336"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29869.808,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Apply', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29871.39,
+      "message": "  locator resolved to <button type=\"button\" aria-label=\"Apply\" class=\"ant-btn css-dev-only-do-not-override-3uaqrl css-var-r1 ant-btn-primary ant-btn-color-primary ant-btn-variant-solid\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29871.744,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29871.784,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29889.499,
+      "message": "  element is not stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29889.514,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29889.632,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29957.837,
+      "message": "  element is not stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29957.853,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29957.856,
+      "message": "  waiting 20ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 29978.71,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30008.329,
+      "message": "  element is not stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30008.347,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30008.349,
+      "message": "  waiting 100ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30109.498,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30124.107,
+      "message": "  element is not stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30124.124,
+      "message": "retrying click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30124.126,
+      "message": "  waiting 100ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30225.768,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30250.089,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30250.107,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30250.378,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30253.06,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30260.075,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30260.091,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@336",
+      "time": 30260.914,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@336",
+      "endTime": 30260.957,
+      "point": {
+        "x": 960.92,
+        "y": 634
+      },
+      "afterSnapshot": "after@call@336"
+    },
+    {
+      "type": "before",
+      "callId": "call@338",
+      "startTime": 30264.314,
+      "title": "Expect \"toHaveCount\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i]",
+        "expression": "to.have.count",
+        "expectedNumber": 0,
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@62",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@338"
+    },
+    {
+      "type": "log",
+      "callId": "call@338",
+      "time": 30265.593,
+      "message": "Expect \"toHaveCount\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@338",
+      "time": 30265.596,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' })"
+    },
+    {
+      "type": "log",
+      "callId": "call@338",
+      "time": 30266.937,
+      "message": "  locator resolved to 1 element"
+    },
+    {
+      "type": "log",
+      "callId": "call@338",
+      "time": 30266.947,
+      "message": "  unexpected value \"1\""
+    },
+    {
+      "type": "log",
+      "callId": "call@338",
+      "time": 30271.286,
+      "message": "  locator resolved to 0 elements"
+    },
+    {
+      "type": "after",
+      "callId": "call@338",
+      "endTime": 30271.357,
+      "result": {
+        "matches": true,
+        "received": {
+          "n": 0
+        }
+      },
+      "afterSnapshot": "after@call@338"
+    },
+    {
+      "type": "before",
+      "callId": "call@340",
+      "startTime": 30278.112,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=button[name=\"Open Fixture Buddy \u2014 Qualification workspace\"s]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@66",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@340"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30279.37,
+      "message": "waiting for getByRole('button', { name: 'Open Fixture Buddy \u2014 Qualification workspace', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30312.176,
+      "message": "  locator resolved to <button type=\"button\" aria-label=\"Open Fixture Buddy \u2014 Qualification workspace\" class=\"flex min-h-24 w-28 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30312.951,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30312.968,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30326.728,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30326.744,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30326.988,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30329.603,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30334.148,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30334.164,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@340",
+      "time": 30336.347,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@340",
+      "endTime": 30336.417,
+      "point": {
+        "x": 1184,
+        "y": 144
+      },
+      "afterSnapshot": "after@call@340"
+    },
+    {
+      "type": "before",
+      "callId": "call@342",
+      "startTime": 30338.376,
+      "class": "Frame",
+      "method": "getAttribute",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:text=\"Buddy options\"s >> ..",
+        "strict": true,
+        "name": "open",
+        "timeout": 0
+      },
+      "stepId": "pw:api@67",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@342"
+    },
+    {
+      "type": "log",
+      "callId": "call@342",
+      "time": 30339.345,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByText('Buddy options', { exact: true }).locator('..')"
+    },
+    {
+      "type": "log",
+      "callId": "call@342",
+      "time": 30341.443,
+      "message": "  locator resolved to <details open=\"\" class=\"border-t border-border pt-3 text-sm text-text\">\u2026</details>"
+    },
+    {
+      "type": "after",
+      "callId": "call@342",
+      "endTime": 30341.477,
+      "result": {
+        "value": ""
+      },
+      "afterSnapshot": "after@call@342"
+    },
+    {
+      "type": "before",
+      "callId": "call@344",
+      "startTime": 30343.324,
+      "class": "Frame",
+      "method": "selectOption",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:label=\"Expressions\"s",
+        "strict": true,
+        "options": [
+          {
+            "valueOrLabel": "dynamic"
+          }
+        ],
+        "timeout": 0
+      },
+      "stepId": "pw:api@68",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@344"
+    },
+    {
+      "type": "log",
+      "callId": "call@344",
+      "time": 30344.82,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByLabel('Expressions', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@344",
+      "time": 30346.331,
+      "message": "  locator resolved to <select id=\":r71:\" class=\"rounded border border-border bg-surface p-2\">\u2026</select>"
+    },
+    {
+      "type": "log",
+      "callId": "call@344",
+      "time": 30346.663,
+      "message": "attempting select option action"
+    },
+    {
+      "type": "log",
+      "callId": "call@344",
+      "time": 30348.726,
+      "message": "  waiting for element to be visible and enabled"
+    },
+    {
+      "type": "log",
+      "callId": "call@344",
+      "time": 30350.146,
+      "message": "  selected specified option(s)"
+    },
+    {
+      "type": "after",
+      "callId": "call@344",
+      "endTime": 30350.288,
+      "result": {
+        "values": [
+          "dynamic"
+        ]
+      },
+      "afterSnapshot": "after@call@344"
+    },
+    {
+      "type": "before",
+      "callId": "call@346",
+      "startTime": 30353.835,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:role=button[name=\"Close\"s]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@72",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@346"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30358.005,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByRole('button', { name: 'Close', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30360.847,
+      "message": "  locator resolved to <button type=\"button\" aria-label=\"Close\" class=\"ant-modal-close\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30363.168,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30363.196,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30382.476,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30382.515,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30383.719,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30386.118,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30391.201,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30391.213,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@346",
+      "time": 30391.901,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@346",
+      "endTime": 30391.996,
+      "point": {
+        "x": 1131.6,
+        "y": 125.6
+      },
+      "afterSnapshot": "after@call@346"
+    },
+    {
+      "type": "before",
+      "callId": "call@348",
+      "startTime": 30394.273,
+      "class": "Page",
+      "method": "reload",
+      "params": {
+        "timeout": 0,
+        "waitUntil": "domcontentloaded"
+      },
+      "stepId": "pw:api@73",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@348"
+    },
+    {
+      "type": "log",
+      "callId": "call@348",
+      "time": 30396.308,
+      "message": "waiting for navigation until \"domcontentloaded\""
+    },
+    {
+      "type": "log",
+      "callId": "call@348",
+      "time": 30416.5,
+      "message": "  navigated to \"http://127.0.0.1:18180/workspaces\""
+    },
+    {
+      "type": "after",
+      "callId": "call@348",
+      "endTime": 31754.264,
+      "result": {
+        "response": "<Response>"
+      },
+      "afterSnapshot": "after@call@348"
+    },
+    {
+      "type": "before",
+      "callId": "call@350",
+      "startTime": 32346.505,
+      "title": "Expect \"toBeVisible\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:role=button[name=\"Open Fixture Buddy \u2014 Qualification workspace\"s]",
+        "expression": "to.be.visible",
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@74",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@350"
+    },
+    {
+      "type": "log",
+      "callId": "call@350",
+      "time": 32348.91,
+      "message": "Expect \"toBeVisible\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@350",
+      "time": 32348.915,
+      "message": "waiting for getByRole('button', { name: 'Open Fixture Buddy \u2014 Qualification workspace', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@350",
+      "time": 36392.098,
+      "message": "  locator resolved to <button type=\"button\" aria-label=\"Open Fixture Buddy \u2014 Qualification workspace\" class=\"flex min-h-24 w-28 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</button>"
+    },
+    {
+      "type": "after",
+      "callId": "call@350",
+      "endTime": 36392.222,
+      "result": {
+        "matches": true,
+        "received": {
+          "s": "visible"
+        }
+      },
+      "afterSnapshot": "after@call@350"
+    },
+    {
+      "type": "before",
+      "callId": "call@352",
+      "startTime": 36398.178,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=button[name=\"Open Fixture Buddy \u2014 Qualification workspace\"s]",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@75",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@352"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36399.556,
+      "message": "waiting for getByRole('button', { name: 'Open Fixture Buddy \u2014 Qualification workspace', exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36401.449,
+      "message": "  locator resolved to <button type=\"button\" aria-label=\"Open Fixture Buddy \u2014 Qualification workspace\" class=\"flex min-h-24 w-28 items-center justify-center rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36401.933,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36401.956,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36408.537,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36408.55,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36408.7,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36411.364,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36416.922,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36416.931,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@352",
+      "time": 36421.645,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@352",
+      "endTime": 36421.734,
+      "point": {
+        "x": 1184,
+        "y": 144
+      },
+      "afterSnapshot": "after@call@352"
+    },
+    {
+      "type": "before",
+      "callId": "call@354",
+      "startTime": 36426.97,
+      "class": "Frame",
+      "method": "getAttribute",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:text=\"Buddy options\"s >> ..",
+        "strict": true,
+        "name": "open",
+        "timeout": 0
+      },
+      "stepId": "pw:api@76",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@354"
+    },
+    {
+      "type": "log",
+      "callId": "call@354",
+      "time": 36428.185,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByText('Buddy options', { exact: true }).locator('..')"
+    },
+    {
+      "type": "log",
+      "callId": "call@354",
+      "time": 36430.66,
+      "message": "  locator resolved to <details class=\"border-t border-border pt-3 text-sm text-text\">\u2026</details>"
+    },
+    {
+      "type": "after",
+      "callId": "call@354",
+      "endTime": 36430.711,
+      "result": {},
+      "afterSnapshot": "after@call@354"
+    },
+    {
+      "type": "before",
+      "callId": "call@356",
+      "startTime": 36433.157,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:text=\"Buddy options\"s",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@77",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@356"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36434.747,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByText('Buddy options', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36437.438,
+      "message": "  locator resolved to <summary class=\"cursor-pointer font-medium\">Buddy options</summary>"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36438.021,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36438.048,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36467.995,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36468.01,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36469.803,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36474.108,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36475.839,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36475.851,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@356",
+      "time": 36476.171,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@356",
+      "endTime": 36476.224,
+      "point": {
+        "x": 1075.2,
+        "y": 172.39
+      },
+      "afterSnapshot": "after@call@356"
+    },
+    {
+      "type": "before",
+      "callId": "call@358",
+      "startTime": 36479.06,
+      "title": "Expect \"toHaveValue\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Fixture Buddy \u2014 Qualification workspace\"i] >> internal:label=\"Expressions\"s",
+        "expression": "to.have.value",
+        "expectedText": [
+          {
+            "string": "dynamic"
+          }
+        ],
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@78",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@358"
+    },
+    {
+      "type": "log",
+      "callId": "call@358",
+      "time": 36480.372,
+      "message": "Expect \"toHaveValue\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@358",
+      "time": 36480.376,
+      "message": "waiting for getByRole('dialog', { name: 'Fixture Buddy \u2014 Qualification workspace' }).getByLabel('Expressions', { exact: true })"
+    },
+    {
+      "type": "log",
+      "callId": "call@358",
+      "time": 36481.863,
+      "message": "  locator resolved to <select id=\":r6t:\" class=\"rounded border border-border bg-surface p-2\">\u2026</select>"
+    },
+    {
+      "type": "after",
+      "callId": "call@358",
+      "endTime": 36481.92,
+      "result": {
+        "matches": true,
+        "received": {
+          "s": "dynamic"
+        }
+      },
+      "afterSnapshot": "after@call@358"
+    },
+    {
+      "type": "before",
+      "callId": "call@360",
+      "startTime": 36486.085,
+      "title": "Expect \"toBeVisible\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:testid=[data-testid=\"independent-buddy\"s] >> internal:testid=[data-testid=\"persona-visual-frame\"s]",
+        "expression": "to.be.visible",
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@79",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@360"
+    },
+    {
+      "type": "log",
+      "callId": "call@360",
+      "time": 36487.954,
+      "message": "Expect \"toBeVisible\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@360",
+      "time": 36487.958,
+      "message": "waiting for getByTestId('independent-buddy').getByTestId('persona-visual-frame')"
+    },
+    {
+      "type": "log",
+      "callId": "call@360",
+      "time": 36488.825,
+      "message": "  locator resolved to <img width=\"1\" height=\"1\" draggable=\"false\" alt=\"Fixture Buddy\" data-visual-state=\"idle\" data-testid=\"persona-visual-frame\" class=\"max-h-28 max-w-28 object-contain\" src=\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=\"/>"
+    },
+    {
+      "type": "after",
+      "callId": "call@360",
+      "endTime": 36488.856,
+      "result": {
+        "matches": true,
+        "received": {
+          "s": "visible"
+        }
+      },
+      "afterSnapshot": "after@call@360"
+    },
+    {
+      "type": "before",
+      "callId": "call@362",
+      "startTime": 36490.845,
+      "class": "Page",
+      "method": "screenshot",
+      "params": {
+        "timeout": 0,
+        "type": "png"
+      },
+      "stepId": "pw:api@80",
+      "pageId": "page@64cda74fc9c900dcac63b500faa589a0",
+      "beforeSnapshot": "before@call@362"
+    },
+    {
+      "type": "log",
+      "callId": "call@362",
+      "time": 36492.378,
+      "message": "taking page screenshot"
+    },
+    {
+      "type": "log",
+      "callId": "call@362",
+      "time": 36493.804,
+      "message": "waiting for fonts to load..."
+    },
+    {
+      "type": "log",
+      "callId": "call@362",
+      "time": 36494.556,
+      "message": "fonts loaded"
+    },
+    {
+      "type": "after",
+      "callId": "call@362",
+      "endTime": 36599.958,
+      "result": {
+        "binary": "<Buffer>"
+      },
+      "afterSnapshot": "after@call@362"
+    }
+  ],
+  "api_network": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/profiles",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:54.923Z",
+      "time_ms": 68.449,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/profiles",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:54.923Z",
+      "time_ms": 68.152,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/health/live",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:57.220Z",
+      "time_ms": 123.529,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:57.220Z",
+      "time_ms": 63.833,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/rag/health",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:57.866Z",
+      "time_ms": 99.834,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/buddy-qualification-workspace/context",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:57.866Z",
+      "time_ms": 99.87299999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:57.882Z",
+      "time_ms": 1.9060000000000001,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:57.882Z",
+      "time_ms": 2.6399999999999997,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:57.882Z",
+      "time_ms": 2.971,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:57.883Z",
+      "time_ms": 4.656000000000001,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.408Z",
+      "time_ms": 2.742,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/?limit=100&offset=0&scope_type=global",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.408Z",
+      "time_ms": 2.737,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.409Z",
+      "time_ms": 2.788,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/visual-starter-packs",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.409Z",
+      "time_ms": 3.9659999999999997,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/catalog",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.409Z",
+      "time_ms": 4.029999999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/?limit=100&offset=0&scope_type=workspace&workspace_id=buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.420Z",
+      "time_ms": 2.4669999999999996,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/?limit=100&offset=0&scope_type=global",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.512Z",
+      "time_ms": 2.042,
+      "postData": null
+    },
+    {
+      "method": "PUT",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.899Z",
+      "time_ms": 3.58,
+      "postData": {
+        "mimeType": "application/json",
+        "text": "",
+        "params": [],
+        "_sha1": "a51e721768a39408daac79f6879b2b8ddc424bf1.json"
+      }
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.917Z",
+      "time_ms": 2.479,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.917Z",
+      "time_ms": 2.57,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/conversations?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:58.921Z",
+      "time_ms": 1.6260000000000001,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.839Z",
+      "time_ms": 908.076,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.840Z",
+      "time_ms": 908.4929999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.840Z",
+      "time_ms": 908.4399999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.840Z",
+      "time_ms": 908.488,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.840Z",
+      "time_ms": 904.0949999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.843Z",
+      "time_ms": 2.166,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.843Z",
+      "time_ms": 2.201,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.843Z",
+      "time_ms": 2.447,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/conversations?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.848Z",
+      "time_ms": 2.7439999999999998,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.848Z",
+      "time_ms": 2.8960000000000004,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.848Z",
+      "time_ms": 2.988,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.849Z",
+      "time_ms": 3.4829999999999997,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.850Z",
+      "time_ms": 3.889,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.850Z",
+      "time_ms": 3.955,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.850Z",
+      "time_ms": 4.989,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.857Z",
+      "time_ms": 1.545,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.859Z",
+      "time_ms": 1.888,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.860Z",
+      "time_ms": 1.97,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.860Z",
+      "time_ms": 2.213,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.886Z",
+      "time_ms": 3.133,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.895Z",
+      "time_ms": 3.324,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.895Z",
+      "time_ms": 3.422,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.895Z",
+      "time_ms": 3.4930000000000003,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/buddy-qualification-conversation?scope_type=global",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.902Z",
+      "time_ms": 2.95,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/buddy-qualification-conversation/messages?scope_type=global&limit=100&order=desc",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.906Z",
+      "time_ms": 1.547,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/conversation-targets/buddy-qualification-conversation/reply-settings?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.908Z",
+      "time_ms": 1.186,
+      "postData": null
+    },
+    {
+      "method": "PATCH",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/fixture-buddy",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.955Z",
+      "time_ms": 5.798,
+      "postData": {
+        "mimeType": "application/json",
+        "text": "",
+        "params": [],
+        "_sha1": "3a3adf284182310d1f4adae5944022faf9544ffd.json"
+      }
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.967Z",
+      "time_ms": 1.4849999999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.970Z",
+      "time_ms": 4.266,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/conversations?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.975Z",
+      "time_ms": 1.341,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.981Z",
+      "time_ms": 1.484,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.987Z",
+      "time_ms": 5.291,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.987Z",
+      "time_ms": 5.452,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.988Z",
+      "time_ms": 5.887,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/buddy-qualification-conversation?scope_type=global",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.990Z",
+      "time_ms": 1.043,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/buddy-qualification-conversation/messages?scope_type=global&limit=100&order=desc",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.992Z",
+      "time_ms": 1.0779999999999998,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/conversation-targets/buddy-qualification-conversation/reply-settings?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:56:59.994Z",
+      "time_ms": 1.2109999999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.275Z",
+      "time_ms": 3.017,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.311Z",
+      "time_ms": 2.367,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.311Z",
+      "time_ms": 2.353,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.311Z",
+      "time_ms": 2.396,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.627Z",
+      "time_ms": 3.122,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/?limit=100&offset=0&scope_type=global",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.628Z",
+      "time_ms": 3.299,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.628Z",
+      "time_ms": 3.3409999999999997,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/visual-starter-packs",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.628Z",
+      "time_ms": 3.318,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/catalog",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.628Z",
+      "time_ms": 3.328,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/?limit=100&offset=0&scope_type=workspace&workspace_id=buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.633Z",
+      "time_ms": 2.277,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.668Z",
+      "time_ms": 2.125,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.803Z",
+      "time_ms": 3.447,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/?limit=100&offset=0&scope_type=global",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.803Z",
+      "time_ms": 3.589,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.803Z",
+      "time_ms": 3.515,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/visual-starter-packs",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.803Z",
+      "time_ms": 3.558,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/catalog",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.803Z",
+      "time_ms": 3.642,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/chats/?limit=100&offset=0&scope_type=workspace&workspace_id=buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.807Z",
+      "time_ms": 2.444,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:00.833Z",
+      "time_ms": 1.583,
+      "postData": null
+    },
+    {
+      "method": "PATCH",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/buddy-qualification-workspace",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.236Z",
+      "time_ms": 3.08,
+      "postData": {
+        "mimeType": "application/json",
+        "text": "",
+        "params": [],
+        "_sha1": "ad3b1a999b1ca023968301753f518e83d1fbcee7.json"
+      }
+    },
+    {
+      "method": "PUT",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.242Z",
+      "time_ms": 3.89,
+      "postData": {
+        "mimeType": "application/json",
+        "text": "",
+        "params": [],
+        "_sha1": "3c1aed113e8539956020d3c3194c90f519a32572.json"
+      }
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.255Z",
+      "time_ms": 3.664,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.255Z",
+      "time_ms": 3.596,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/conversations?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.262Z",
+      "time_ms": 1.99,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.273Z",
+      "time_ms": 3.166,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.273Z",
+      "time_ms": 3.344,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.273Z",
+      "time_ms": 3.3329999999999997,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.273Z",
+      "time_ms": 3.394,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.273Z",
+      "time_ms": 3.391,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.277Z",
+      "time_ms": 2.267,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.277Z",
+      "time_ms": 2.447,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.277Z",
+      "time_ms": 2.071,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/conversations?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.279Z",
+      "time_ms": 2.784,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.281Z",
+      "time_ms": 3.136,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.280Z",
+      "time_ms": 3.4859999999999998,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.281Z",
+      "time_ms": 3.6900000000000004,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.281Z",
+      "time_ms": 3.7649999999999997,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.281Z",
+      "time_ms": 3.798,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.281Z",
+      "time_ms": 5.774,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.287Z",
+      "time_ms": 1.633,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.290Z",
+      "time_ms": 2.41,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.291Z",
+      "time_ms": 2.504,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.291Z",
+      "time_ms": 2.505,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.311Z",
+      "time_ms": 1.967,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.315Z",
+      "time_ms": 3.835,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.315Z",
+      "time_ms": 3.901,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.316Z",
+      "time_ms": 4.5,
+      "postData": null
+    },
+    {
+      "method": "PATCH",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/fixture-buddy",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.328Z",
+      "time_ms": 2.408,
+      "postData": {
+        "mimeType": "application/json",
+        "text": "",
+        "params": [],
+        "_sha1": "3807c37bfc9d47a8763b8e01554c9fcf5d98035a.json"
+      }
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.334Z",
+      "time_ms": 2.3289999999999997,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.334Z",
+      "time_ms": 2.362,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/conversations?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.341Z",
+      "time_ms": 3.224,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.347Z",
+      "time_ms": 1.879,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.351Z",
+      "time_ms": 3.051,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.352Z",
+      "time_ms": 3.421,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.353Z",
+      "time_ms": 3.947,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.368Z",
+      "time_ms": 2.079,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.385Z",
+      "time_ms": 4.425,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.385Z",
+      "time_ms": 4.426,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:01.385Z",
+      "time_ms": 4.714,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/profiles",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:03.324Z",
+      "time_ms": 87.71199999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/persona/profiles",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:03.325Z",
+      "time_ms": 89.361,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/health/live",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.366Z",
+      "time_ms": 200.189,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/rag/health",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.524Z",
+      "time_ms": 19.897,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.544Z",
+      "time_ms": 9.902,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.545Z",
+      "time_ms": 10.654,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.545Z",
+      "time_ms": 10.703,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.545Z",
+      "time_ms": 10.565,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/conversations?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.549Z",
+      "time_ms": 1.805,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies?limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.564Z",
+      "time_ms": 4.207,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.564Z",
+      "time_ms": 4.486000000000001,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.565Z",
+      "time_ms": 7.394,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.565Z",
+      "time_ms": 9.854,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.575Z",
+      "time_ms": 9.019,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.575Z",
+      "time_ms": 9.054,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.575Z",
+      "time_ms": 9.199,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/conversations?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.576Z",
+      "time_ms": 2.763,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.578Z",
+      "time_ms": 3.38,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.577Z",
+      "time_ms": 3.8680000000000003,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.578Z",
+      "time_ms": 3.9850000000000003,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.583Z",
+      "time_ms": 2.158,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.587Z",
+      "time_ms": 2.015,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.587Z",
+      "time_ms": 2.102,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.587Z",
+      "time_ms": 6.859999999999999,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:06.664Z",
+      "time_ms": 12.109,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/workspaces/buddy-qualification-workspace/context",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:07.205Z",
+      "time_ms": 112.497,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment?client_slot=default",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:07.393Z",
+      "time_ms": 2.048,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:07.400Z",
+      "time_ms": 3.101,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/turns?client_slot=default&limit=100&offset=0&status=active",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:07.400Z",
+      "time_ms": 3.29,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:54314/api/v1/buddies/attachment/activity?client_slot=default&limit=100&offset=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:57:07.401Z",
+      "time_ms": 3.443,
+      "postData": null
+    }
+  ],
+  "excluded": "compiled app/assets and DOM snapshots; full raw trace remains in the original private test-output directory"
+}

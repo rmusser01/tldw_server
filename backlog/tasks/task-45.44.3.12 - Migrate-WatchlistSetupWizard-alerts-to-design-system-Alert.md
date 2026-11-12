@@ -45,7 +45,7 @@ Continue TASK-45.44.3 by replacing Watchlists SetupWizard AntD Alert callouts wi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - RED: focused WatchlistSetupWizard test failed on both new `[data-ds-component="Alert"]` assertions because the collection guidance and validation error still rendered through the AntD Alert mock.
 - Migrated WatchlistSetupWizard collection-scope guidance and validation error callouts from AntD Alert props to the shared design-system Alert primitive while preserving copy and wizard behavior.
 - Removed the two WatchlistSetupWizard Alert entries from the product-state baseline.
@@ -58,7 +58,7 @@ Continue TASK-45.44.3 by replacing Watchlists SetupWizard AntD Alert callouts wi
 - TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` exits 2 with 347 existing diagnostics; no diagnostics mention WatchlistSetupWizard, its tests, the product-state baseline, or this task.
 - Bandit skipped: UI-only TypeScript/JSON/backlog changes; no Python touched.
 - PR: https://github.com/rmusser01/tldw_server/pull/2039
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

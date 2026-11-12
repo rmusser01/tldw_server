@@ -112,12 +112,7 @@ const extractStudyAssistantContext = (value: unknown): StudyAssistantContextResp
   return null
 }
 
-const isConflictError = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  "response" in error &&
-  typeof (error as { response?: { status?: unknown } }).response?.status === "number" &&
-  (error as { response?: { status?: number } }).response?.status === 409
+const isConflictError = (error: unknown): boolean => extractHttpStatus(error) === 409
 
 const ACTION_LABELS: Record<StudyAssistantAction, string> = {
   explain: "Explain",

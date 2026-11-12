@@ -37,7 +37,7 @@ Add explicit operator-owned launchd scaffolding for the macOS VZ helper lifecycl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-05-13-vz-helper-launchd-operator.md
 
 Verification: python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k 'launchd' -q -> 6 passed, 93 deselected; python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q -> 98 passed, 1 skipped; git diff --check -> clean; Bandit script/tests -> empty errors/results.
@@ -45,7 +45,7 @@ Verification: python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py 
 PR review pass: reopened to address live PR #1636 review findings from CodeRabbit/Qodo/Gemini.
 
 Review-fix verification: red tests confirmed the directory existence, launchctl availability, CLI portability, and custom-label status issues; after fixes, python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -k 'launchd or custom_launchd_label' -q -> 9 passed, 93 deselected; python -m pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q -> 101 passed, 1 skipped; git diff --check -> clean; Bandit script/tests -> empty errors/results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

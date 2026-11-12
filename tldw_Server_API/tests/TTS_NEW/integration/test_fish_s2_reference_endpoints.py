@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_voices
 from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     FishS2ReferenceDeleteResponse,
@@ -34,9 +35,9 @@ def client(monkeypatch):
 
 
 def _find_route(app: FastAPI, method: str, path: str) -> APIRoute:
-    for route in app.routes:
-        if isinstance(route, APIRoute) and route.path == path and method.upper() in route.methods:
-            return route
+    for route in iter_served_routes(app.routes):
+        if isinstance(route.route, APIRoute) and route.path == path and method.upper() in route.methods:
+            return route.route
     raise AssertionError(f"Route not found: {method} {path}")
 
 

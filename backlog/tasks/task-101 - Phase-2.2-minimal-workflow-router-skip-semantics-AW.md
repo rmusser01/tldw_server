@@ -39,7 +39,7 @@ Narrow minimal workflow router optional skip behavior after PR #1347 merged. The
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline focused selector passed before edits: minimal workflow tests 2 passed, confirming current broad skip behavior is covered.
 
 TDD RED after test update failed as intended: workflow specs still reported Exception and runtime import failures were skipped. GREEN focused selector passed after removing workflow broad skip overrides: 3 passed.
@@ -49,7 +49,7 @@ Broader validation passed: router groups 120 passed, lifecycle 54 passed, OpenAP
 Scope note: remaining skip_exceptions=(Exception,) occurrences are in non-workflow minimal groups and should be handled in later narrow slices.
 
 Opened PR https://github.com/rmusser01/tldw_server/pull/1348 against dev for this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -139,6 +139,20 @@ describe("NotesEditorHeader stage 2 touch layout", () => {
     expect(menuItem).toHaveClass("ant-dropdown-menu-item-disabled")
   })
 
+  it("keeps Create study pack a secondary button so Save stays the one primary action (NE-08)", () => {
+    responsiveState.isMobile = false
+    renderHeader({
+      isDirty: true,
+      canCreateStudyPack: true,
+      onCreateStudyPack: () => undefined
+    })
+
+    expect(screen.getByTestId("notes-save-button")).toHaveClass("ant-btn-primary")
+    expect(screen.getByTestId("notes-create-study-pack-button")).not.toHaveClass(
+      "ant-btn-primary"
+    )
+  })
+
   it("keeps create study pack in the desktop toolbar and mobile overflow menu", async () => {
     const onCreateStudyPack = vi.fn()
 

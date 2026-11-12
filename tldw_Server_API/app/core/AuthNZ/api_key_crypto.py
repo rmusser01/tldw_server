@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import secrets
+from tldw_Server_API.app.core.Utils.base64url import decode_canonical_segment
 
 API_KEY_PREFIX = "tldw_"
 API_KEY_SEPARATOR = "."
@@ -75,6 +76,12 @@ def kdf_hash_api_key(
     return f"{API_KEY_KDF_SCHEME}${iterations}${salt_b64}${derived_b64}"
 
 
+# Bounds for a stored hash. Generous relative to what kdf_hash_api_key produces
+# (a 32-byte digest and a 16-byte salt), tight enough to refuse a corrupted row.
+_MAX_KDF_ITERATIONS = 10_000_000
+_MAX_HASH_SEGMENT_LEN = 512
+
+
 def verify_kdf_hash(api_key: str, encoded: str) -> bool:
     """Verify an API key against a PBKDF2-HMAC-SHA256 encoded hash."""
     try:
@@ -90,19 +97,35 @@ def verify_kdf_hash(api_key: str, encoded: str) -> bool:
     except ValueError:
         return False
 
+    # A stored iteration count is attacker-influenced only via a corrupted row, but an
+    # unbounded one is a hang rather than a False, and a non-positive one is nonsense.
+    if not 1 <= iterations <= _MAX_KDF_ITERATIONS:
+        return False
+
     try:
         salt = _b64decode(salt_b64)
         expected = _b64decode(derived_b64)
     except Exception:
         return False
 
-    derived = hashlib.pbkdf2_hmac(
-        "sha256",
-        api_key.encode("utf-8"),
-        salt,
-        iterations,
-        dklen=len(expected),
-    )
+    # dklen=0 raises. Guarding here rather than relying on the try below keeps the
+    # intent explicit: a stored hash with an empty digest is malformed, not an error.
+    if not salt or not expected:
+        return False
+
+    try:
+        derived = hashlib.pbkdf2_hmac(
+            "sha256",
+            api_key.encode("utf-8"),
+            salt,
+            iterations,
+            dklen=len(expected),
+        )
+    except (ValueError, OverflowError, MemoryError):
+        # Previously OUTSIDE the try: a malformed stored hash escaped verify_kdf_hash as
+        # an exception, so the auth path returned 500 instead of 401 for every request
+        # presenting that key.
+        return False
     return hmac.compare_digest(derived, expected)
 
 
@@ -116,8 +139,14 @@ def _b64encode(raw: bytes) -> str:
 
 
 def _b64decode(encoded: str) -> bytes:
-    padding = "=" * (-len(encoded) % 4)
-    return base64.urlsafe_b64decode(encoded + padding)
+    """Decode one segment of a stored API-key hash.
+
+    Uses the shared canonical decoder: alphabet-validated, length-bounded, and
+    canonical-form enforcing. The previous bare urlsafe_b64decode silently DISCARDED
+    out-of-alphabet characters, so a corrupted segment decoded to different valid bytes
+    instead of raising.
+    """
+    return decode_canonical_segment(encoded, max_encoded_len=_MAX_HASH_SEGMENT_LEN)
 
 
 __all__ = [

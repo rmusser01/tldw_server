@@ -33,20 +33,9 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-    refresh_llm_provider_overrides,
-    shutdown_llm_provider_override_recovery,
-    start_llm_provider_override_refresh_service,
-)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     list_active_team_memberships_for_user,
     list_org_memberships_for_user,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCredentialRuntime,
-    mark_provider_credential_used,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
@@ -65,7 +54,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
@@ -84,6 +73,17 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_studio.job_processor impo
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.quota_config import (
     apply_prompt_studio_quota_defaults,
     apply_prompt_studio_quota_policy,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+    refresh_llm_provider_overrides,
+    shutdown_llm_provider_override_recovery,
+    start_llm_provider_override_refresh_service,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+    mark_provider_credential_used,
 )
 
 _PROMPT_STUDIO_DOMAIN = "prompt_studio"
@@ -645,6 +645,8 @@ async def _owner_membership_scope(user_id: int) -> tuple[list[int], list[int]]:
 def _bounded_optimization_error(exc: BaseException) -> PromptStudioJobError:
     if isinstance(exc, PromptStudioJobError):
         return exc
+    if isinstance(exc, LLMQuotaExceededError):
+        return PromptStudioJobError("LLM quota exceeded", retryable=False, failure_code=exc.failure_code)
     if isinstance(exc, ByokResolutionError):
         code = str(getattr(exc, "policy_code", None) or exc.code)
         return PromptStudioJobError(

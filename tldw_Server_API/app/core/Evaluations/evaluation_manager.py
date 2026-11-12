@@ -16,10 +16,10 @@ import json
 import os
 import sqlite3
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -33,8 +33,10 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
 from tldw_Server_API.app.core.DB_Management.migrations import migrate_evaluations_database
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlite_connection
 from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
+from tldw_Server_API.app.core.Evaluations.scoring import normalize_judge_score
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 # Evaluations SQLite connections wait this long for a lock before failing.
 _SQLITE_BUSY_TIMEOUT_MS = 10_000
@@ -180,10 +182,10 @@ class EvaluationManager:
             error_msg = f"CRITICAL: Failed to apply database migrations to {self.db_path}: {e}"
             logger.critical(error_msg)
 
-            # Check if we're in a production environment
-            env = os.getenv('ENVIRONMENT', 'development').lower()
+            # Production (runtime_environment) or an ENVIRONMENT=staging tier
+            staging = os.getenv("ENVIRONMENT", "").strip().lower() == "staging"
 
-            if env in ['production', 'staging']:
+            if is_production_like_env() or staging:
                 # Fail loudly in production/staging
                 raise RuntimeError(error_msg) from e
             else:
@@ -555,16 +557,23 @@ class EvaluationManager:
         """Evaluate using custom metric definition"""
         runtime_input_data = dict(input_data)
         if self._contains_model_response_placeholder(runtime_input_data):
-            model_response = await self._generate_model_response(
+            model_call = self._generate_model_response(
                 input_data=runtime_input_data,
                 api_name=api_name,
                 api_key=api_key,
             )
+            try:
+                model_response = await model_call
+            except LLMQuotaExceededError:
+                raise  # the user's limit is not an unscored item
+            except Exception as e:  # a model call that raised (provider error, timeout, rate limit) is unscored too
+                model_response = f"Error: {e}"
             if isinstance(model_response, str) and model_response.startswith("Error:"):
                 logger.error(f"Model response generation failed for metric '{metric_name}': {model_response}")
+                # score None is "no score": the callers count the item unscored, in no average (owner, 2026-11-10)
                 return {
                     "metric_name": metric_name,
-                    "score": 0.0,
+                    "score": None,
                     "explanation": model_response,
                     "raw_output": None,
                 }
@@ -591,8 +600,15 @@ class EvaluationManager:
                 full_prompt,
                 api_key,
                 temp=0.3,
-                system_message="You are an expert evaluator. Provide scores and detailed explanations."
+                system_message="You are an expert evaluator. Provide scores and detailed explanations.",
+                input_is_literal_text=True,
             )
+
+            # A failed judge call (provider error, timeout, rate limit, truncated or empty reply)
+            # is unscored with the error, as for the model's own answer above; not a silent 0.5.
+            if isinstance(response, str) and response.startswith("Error:"):
+                logger.error(f"Judge call failed for metric '{metric_name}': {response}")
+                return {"metric_name": metric_name, "score": None, "explanation": response, "raw_output": None}
 
             # Parse response with strict validation
             import json as json_module
@@ -608,31 +624,41 @@ class EvaluationManager:
                 if isinstance(parsed, dict):
                     if 'score' in parsed:
                         raw_score = parsed['score']
-                        # Validate score is a number between 0 and 10
+                        # The prompt asks for 1-10, so 1 is the worst rating (-> 0.0). A value
+                        # in [0, 1) is a judge that already normalized; it passes through
+                        # rather than being rescaled (0.8 must not become 0.08).
                         if isinstance(raw_score, (int, float)) and 0 <= raw_score <= 10:
-                            score = float(raw_score) / 10.0
+                            score = normalize_judge_score(raw_score, scale_min=1.0, scale_max=10.0)
                     if 'explanation' in parsed:
                         explanation = str(parsed['explanation'])
             except (json_module.JSONDecodeError, ValueError):
                 # Fallback to regex parsing with strict validation
                 # Only accept scores that are clearly delimited (e.g., "Score: 8")
                 score_patterns = [
+                    # the labelled "SCORE: 8" (also "**SCORE:** 8") wins over prose such as "Score 10 for a correct answer"
+                    r'score[*_\s]*:[*_\s]*(\d+(?:\.\d+)?)\s*(?:/\s*10)?',
                     r'[Ss]core[:\s]+(\d+(?:\.\d+)?)\s*(?:/\s*10)?',  # Score: 8 or Score: 8/10
                     r'(\d+(?:\.\d+)?)\s*(?:/\s*10)\s+points?',  # 8/10 points
                     r'^(\d+(?:\.\d+)?)\s*$'  # Just a number on its own line
                 ]
 
                 for pattern in score_patterns:
-                    match = re.search(pattern, response, re.MULTILINE)
+                    match = re.search(pattern, response, re.MULTILINE | re.IGNORECASE)  # benchmarks ask "SCORE:"
                     if match:
                         try:
                             raw_score = float(match.group(1))
-                            # Validate range
+                            # Same 1-10 contract as the JSON branch above.
                             if 0 <= raw_score <= 10:
-                                score = raw_score / 10.0 if raw_score > 1 else raw_score
+                                score = normalize_judge_score(raw_score, scale_min=1.0, scale_max=10.0)
                                 break
                         except (ValueError, IndexError):
                             continue
+
+                # SimpleQA's grader answers with a grade (simpleqa_eval.parse_grading_response); it decides.
+                # Only a prompt that asks for a GRADE reads one ("Grade: ..." elsewhere is prose).
+                grade = re.search(r'GRADE[*_\s]*:[*_\s\[]*(correct|incorrect|not_attempted)\b', response, re.IGNORECASE)
+                if grade and "GRADE:" in evaluation_prompt:
+                    score = 1.0 if grade.group(1).lower() == "correct" else 0.0
 
                 # Extract explanation (everything after first score mention or first newline)
                 if '\n' in response:
@@ -641,10 +667,9 @@ class EvaluationManager:
                     explanation_lines = [l for l in lines if not re.match(r'^\s*\d+(?:\.\d+)?\s*(?:/\s*10)?\s*$', l)]
                     explanation = '\n'.join(explanation_lines).strip()
 
-            # Default to 0.5 if no valid score found
+            # No valid score found: the item is unscored (None), not a 0.5 placeholder
             if score is None:
                 logger.warning(f"Could not parse valid score from response: {response[:100]}...")
-                score = 0.5
 
             return {
                 "metric_name": metric_name,
@@ -653,11 +678,13 @@ class EvaluationManager:
                 "raw_output": response
             }
 
+        except LLMQuotaExceededError:
+            raise  # the user's limit is not a 0.0 score
         except Exception as e:
             logger.error(f"Custom metric evaluation failed: {e}")
             return {
                 "metric_name": metric_name,
-                "score": 0.0,
+                "score": None,
                 "explanation": f"Evaluation failed: {str(e)}",
                 "raw_output": None
             }

@@ -7,11 +7,13 @@ from statistics import mean, quantiles
 from time import perf_counter
 
 import pytest
+from sqlglot import exp
 from sqlglot import logger as sqlglot_logger
 
 from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
     ProfileUserWriteRejected,
     _active_capability_count,
+    _bootstrap_simple_constraint_is_canonical,
     _classification_cache_clear,
     _classification_cache_info,
     _classify_sql,
@@ -28,6 +30,27 @@ from tldw_Server_API.app.core.DB_Management.Users_DB import (
 )
 
 pytestmark = pytest.mark.unit
+
+
+def test_sqlite_autoincrement_does_not_depend_on_standalone_rendering(monkeypatch) -> None:
+    # sqlglot30.20 suppresses rendering outside an INTEGER PRIMARY KEY column.
+    monkeypatch.setattr(exp.AutoIncrementColumnConstraint, "sql", lambda *_args, **_kwargs: "")
+    assert _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(), backend="sqlite"
+    )
+
+
+@pytest.mark.parametrize("arguments", [{"this": True}, {"this": False}, {"this": None}, {"unknown": "option"}])
+def test_sqlite_autoincrement_rejects_noncanonical_arguments(arguments) -> None:
+    assert not _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(**arguments), backend="sqlite"
+    )
+
+
+def test_postgres_does_not_accept_sqlite_autoincrement() -> None:
+    assert not _bootstrap_simple_constraint_is_canonical(  # nosec B101
+        exp.AutoIncrementColumnConstraint(), backend="postgres"
+    )
 
 
 @pytest.mark.parametrize(
@@ -114,6 +137,107 @@ def test_raw_protected_users_writes_fail_closed(
 @pytest.mark.parametrize(
     ("backend", "statement"),
     [
+        ("sqlite", "DELETE FROM org_members WHERE org_id = ?"),
+        ("sqlite", "UPDATE team_members SET role = ? WHERE team_id = ?"),
+        (
+            "postgres",
+            "INSERT INTO public.org_members (org_id, user_id, role) "
+            "VALUES ($1, $2, $3)",
+        ),
+        ("postgres", "DELETE FROM public.team_members WHERE team_id = $1"),
+        ("sqlite", "DELETE FROM organizations WHERE id = ?"),
+        ("postgres", "DELETE FROM public.teams WHERE id = $1"),
+        (
+            "postgres",
+            "COPY public.org_members (org_id, user_id, role) FROM STDIN",
+        ),
+        (
+            "postgres",
+            "COPY public.team_members (team_id, user_id, role) FROM STDIN",
+        ),
+    ],
+)
+def test_raw_membership_and_scope_deletion_writes_fail_closed(
+    backend: str,
+    statement: str,
+) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend=backend,
+            connection_identity=object(),
+            operation="execute",
+        )
+
+
+@pytest.mark.parametrize(
+    ("backend", "statement"),
+    [
+        ("sqlite", "DELETE FROM main.org_members WHERE org_id = ?"),
+        ("postgres", "DELETE FROM public.team_members WHERE team_id = $1"),
+        ("sqlite", "DELETE FROM main.organizations WHERE id = ?"),
+        ("postgres", "DELETE FROM public.teams WHERE id = $1"),
+    ],
+)
+def test_membership_scope_capability_is_connection_bound_and_consumed_once(
+    backend: str,
+    statement: str,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import (
+        _mint_membership_scope_sql,
+        _revoke_membership_scope_sql,
+    )
+
+    connection = object()
+    capability = _mint_membership_scope_sql(
+        statement,
+        backend=backend,
+        connection_identity=connection,
+        execution_mode="execute",
+    )
+
+    try:
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend=backend,
+                connection_identity=object(),
+                operation="execute",
+            )
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend=backend,
+                connection_identity=connection,
+                operation="execute",
+            )
+        # A mismatched attempt burns the receipt; success needs a fresh one.
+        capability = _mint_membership_scope_sql(
+            statement,
+            backend=backend,
+            connection_identity=connection,
+            execution_mode="execute",
+        )
+        assert _guard_sql(
+            capability,
+            backend=backend,
+            connection_identity=connection,
+            operation="execute",
+        ) == statement
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend=backend,
+                connection_identity=connection,
+                operation="execute",
+            )
+    finally:
+        _revoke_membership_scope_sql(capability)
+
+
+@pytest.mark.parametrize(
+    ("backend", "statement"),
+    [
         ("sqlite", "SELECT id, email FROM users WHERE id = ?"),
         ("sqlite", "UPDATE users SET password_hash = ? WHERE id = ?"),
         ("sqlite", "UPDATE users SET totp_secret = ? WHERE id = ?"),
@@ -125,7 +249,16 @@ def test_raw_protected_users_writes_fail_closed(
         ),
         ("postgres", "ALTER TABLE users ADD COLUMN nickname TEXT"),
         ("postgres", "COPY users TO STDOUT"),
+        ("postgres", "COPY public.org_members TO STDOUT"),
+        ("postgres", "COPY team_members TO STDOUT"),
         ("postgres", "UPDATE api_keys SET status = $1 WHERE id = $2"),
+        ("postgres", "SAVEPOINT __asyncpg_savepoint_a1__;"),
+        ("postgres", "RELEASE SAVEPOINT __asyncpg_savepoint_a1__;"),
+        ("postgres", "ROLLBACK TO __asyncpg_savepoint_a1__;"),
+        ("postgres", "ROLLBACK;"),
+        ("postgres", "ROLLBACK TO application_savepoint;"),
+        ("sqlite", "ROLLBACK;"),
+        ("sqlite", "ROLLBACK TO application_savepoint;"),
     ],
 )
 def test_unprotected_concrete_sql_is_returned_unchanged(
@@ -141,6 +274,43 @@ def test_unprotected_concrete_sql_is_returned_unchanged(
         )
         == statement
     )
+
+
+def test_postgres_in_clause_helper_output_passes_guard() -> None:
+    """sqlglot cannot tokenize adjacent '$1,$2'; generated SQL must stay parseable."""
+    from tldw_Server_API.app.core.AuthNZ.database import build_postgres_in_clause
+
+    placeholders, _ = build_postgres_in_clause(["a", "b", "c"], start_param=2)
+    statement = f"SELECT id FROM tool_catalogs WHERE org_id = $1 AND team_id IN ({placeholders})"  # nosec B608
+    assert (
+        _guard_sql(
+            statement,
+            backend="postgres",
+            connection_identity=object(),
+            operation="fetch",
+        )
+        == statement
+    )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SAVEPOINT arbitrary_name;",
+        "SAVEPOINT __asyncpg_savepoint_a1__",
+        "SAVEPOINT __asyncpg_savepoint_a1__; DELETE FROM public.org_members;",
+        "RELEASE SAVEPOINT __asyncpg_savepoint_not_hex__;",
+        "ROLLBACK TO __asyncpg_savepoint_a1__; UPDATE public.team_members SET role = 'owner';",
+    ],
+)
+def test_noncanonical_postgres_savepoint_commands_fail_closed(statement: str) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend="postgres",
+            connection_identity=object(),
+            operation="execute",
+        )
 
 
 def test_unknown_users_update_column_fails_closed() -> None:
@@ -584,8 +754,6 @@ def test_profile_anchor_ddl_requires_one_shot_capability(statement: str) -> None
         )
 
 
-
-
 def test_the_sqlite_users_bootstrap_is_canonical() -> None:
     """The exact DDL Users_DB runs on SQLite must pass the guard.
 
@@ -607,6 +775,96 @@ def test_the_sqlite_users_bootstrap_rejects_autoincrement_off_the_id_column() ->
     )
     assert moved != _SQLITE_USERS_BOOTSTRAP
     assert not _is_canonical_users_bootstrap_sql(moved, backend="sqlite")
+
+
+@pytest.fixture
+def canonical_sqlite_users_bootstrap() -> str:
+    return _SQLITE_USERS_BOOTSTRAP
+
+
+def test_sqlite_users_bootstrap_requires_exact_one_shot_capability(
+    canonical_sqlite_users_bootstrap: str,
+) -> None:
+    connection = object()
+    statement = canonical_sqlite_users_bootstrap
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement,
+            backend="sqlite",
+            connection_identity=connection,
+            operation="execute",
+        )
+
+    capability = _mint_profile_user_sql(
+        statement,
+        backend="sqlite",
+        connection_identity=connection,
+        operation="create",
+        columns=(),
+    )
+    try:
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=object(),
+                operation="execute",
+            )
+        # A boundary mismatch consumes the receipt; success needs a fresh one.
+        capability = _mint_profile_user_sql(
+            statement,
+            backend="sqlite",
+            connection_identity=connection,
+            operation="create",
+            columns=(),
+        )
+        assert (
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=connection,
+                operation="execute",
+            )
+            == statement
+        )
+        with pytest.raises(ProfileUserWriteRejected):
+            _guard_sql(
+                capability,
+                backend="sqlite",
+                connection_identity=connection,
+                operation="execute",
+            )
+    finally:
+        _revoke_profile_user_sql(capability)
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement"),
+    [
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "TEXT PRIMARY KEY AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY DESC AUTOINCREMENT"),
+        ("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY AUTOINCREMENT AUTOINCREMENT"),
+        ("username TEXT UNIQUE NOT NULL", "username TEXT UNIQUE NOT NULL AUTOINCREMENT"),
+        ("main.users", "temp.users"),
+        ("is_superuser INTEGER NOT NULL DEFAULT 0", "is_superuser INTEGER NOT NULL DEFAULT 1"),
+        ("ON DELETE SET NULL", "ON DELETE CASCADE"),
+    ],
+)
+def test_sqlite_users_bootstrap_rejects_noncanonical_contracts(
+    canonical_sqlite_users_bootstrap: str,
+    original: str,
+    replacement: str,
+) -> None:
+    with pytest.raises(ProfileUserWriteRejected):
+        _mint_profile_user_sql(
+            canonical_sqlite_users_bootstrap.replace(original, replacement, 1),
+            backend="sqlite",
+            connection_identity=object(),
+            operation="create",
+            columns=(),
+        )
 
 
 def test_users_bootstrap_requires_exact_one_shot_capability() -> None:
@@ -1070,3 +1328,95 @@ def test_profile_user_capability_cannot_be_constructed_directly() -> None:
         )
     with pytest.raises(TypeError):
         _ProfileUserSql()
+
+
+def test_sqlite_users_bootstrap_autoincrement_is_judged_structurally(monkeypatch) -> None:
+    """A bare AUTOINCREMENT constraint must stay canonical however sqlglot renders it.
+
+    sqlglot 30.20 renders a standalone AUTOINCREMENT as "" (it emits it only next to an
+    INTEGER PRIMARY KEY). The guard compared rendered SQL, so the canonical SQLite users
+    bootstrap was rejected and every users table creation failed. Simulate that renderer.
+    """
+    from sqlglot import exp
+
+    from tldw_Server_API.app.core.AuthNZ import profile_user_write_guard as guard
+
+    real_sql = exp.Expression.sql
+
+    def render_bare_autoincrement_as_empty(self, *args, **kwargs):
+        if isinstance(self, exp.AutoIncrementColumnConstraint):
+            return ""
+        return real_sql(self, *args, **kwargs)
+
+    monkeypatch.setattr(exp.Expression, "sql", render_bare_autoincrement_as_empty)
+    assert guard._bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(), backend="sqlite"
+    )
+    assert not guard._bootstrap_simple_constraint_is_canonical(
+        exp.AutoIncrementColumnConstraint(start=exp.Literal.number(5)), backend="sqlite"
+    )
+
+
+@pytest.mark.parametrize("command", ["SAVEPOINT", "RELEASE SAVEPOINT"])
+@pytest.mark.parametrize("identifier", ["1", "a", "10", "deadbeef"])
+def test_guard_accepts_exact_asyncpg_savepoint_commands(command: str, identifier: str) -> None:
+    """Native nested transactions use an isolated hexadecimal driver identifier."""
+    statement = f"{command} __asyncpg_savepoint_{identifier}__;"
+    assert _guard_sql(
+        statement, backend="postgres", connection_identity=object(), operation="execute",
+    ) == statement
+
+
+@pytest.mark.parametrize("backend", ["sqlite", "postgres"])
+@pytest.mark.parametrize("statement", [
+    "SAVEPOINT arbitrary;", "RELEASE SAVEPOINT arbitrary;",
+    "SAVEPOINT __asyncpg_savepoint_0__;", "SAVEPOINT __asyncpg_savepoint_g__;",
+    "SAVEPOINT __asyncpg_statement_1__;", "SAVEPOINT __asyncpg_savepoint_01__;",
+    'SAVEPOINT "__asyncpg_savepoint_1__";', "savepoint __asyncpg_savepoint_1__;",
+    "SAVEPOINT __asyncpg_savepoint_1__; -- comment",
+    "SAVEPOINT __asyncpg_savepoint_1__;;",
+    "SAVEPOINT __asyncpg_savepoint_1__; UPDATE users SET role = 'admin'",
+    "RELEASE SAVEPOINT __asyncpg_savepoint_1__; UPDATE users SET role = 'admin'",
+    "SAVEPOINT __asyncpg_savepoint_1__; COMMIT;",
+])
+def test_guard_rejects_noncanonical_asyncpg_savepoint_commands(backend: str, statement: str) -> None:
+    """The driver exception must not admit aliases, suffixes or managed writes."""
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(statement, backend=backend, connection_identity=object(), operation="execute")
+
+
+@pytest.mark.parametrize("command", ["SAVEPOINT", "RELEASE SAVEPOINT"])
+def test_guard_rejects_postgres_asyncpg_savepoint_commands_on_sqlite(command: str) -> None:
+    """A PostgreSQL driver command does not enlarge the SQLite SQL language."""
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(f"{command} __asyncpg_savepoint_a__;", backend="sqlite", connection_identity=object(), operation="execute")
+
+
+@pytest.mark.parametrize("command", ["SAVEPOINT", "RELEASE SAVEPOINT", "ROLLBACK TO"])
+@pytest.mark.parametrize("identifier", ["0", "01"])
+def test_all_driver_savepoint_commands_reject_noncanonical_identifiers(
+    command: str, identifier: str,
+) -> None:
+    """Every driver command must require the same positive canonical hex id."""
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            f"{command} __asyncpg_savepoint_{identifier}__;",
+            backend="postgres",
+            connection_identity=object(),
+            operation="execute",
+        )
+
+
+@pytest.mark.parametrize("statement", [
+    "rollback to __asyncpg_savepoint_1__;",
+    "ROLLBACK TO __ASYNCPG_SAVEPOINT_1__;",
+    'ROLLBACK TO "__asyncpg_savepoint_1__";',
+    "ROLLBACK TO SAVEPOINT __asyncpg_savepoint_1__;",
+    "ROLLBACK TO __asyncpg_savepoint_1__",
+])
+def test_driver_rollback_aliases_do_not_bypass_exact_command_check(statement: str) -> None:
+    """Parsed rollback aliases cannot bypass the closed driver command syntax."""
+    with pytest.raises(ProfileUserWriteRejected):
+        _guard_sql(
+            statement, backend="postgres", connection_identity=object(), operation="execute",
+        )

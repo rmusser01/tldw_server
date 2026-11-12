@@ -21,7 +21,12 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from pathlib import Path
 
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import (
+    ChatbookJobLimits,
+    ChatbookService,
+    _ACCOUNT_RESTORE_PAYLOAD_KEY,
+    _build_import_result,
+)
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ChatbookManifest,
     ChatbookContent,
@@ -210,9 +215,9 @@ class TestChatbookService:
         assert result["job_id"] == job_id
         assert result["status"] == "pending"
 
-        # Check job was saved - looking for INSERT OR REPLACE
+        # Check the job was saved with the shared conflict-update contract.
         call_args = mock_db.execute_query.call_args[0]
-        assert "INSERT OR REPLACE INTO export_jobs" in call_args[0]
+        assert "INSERT INTO export_jobs" in call_args[0] and "ON CONFLICT(job_id) DO UPDATE SET" in call_args[0]
 
     @pytest.mark.asyncio
     async def test_create_chatbook_sync_wrapper_reraises_cancelled_error(self, service):
@@ -864,6 +869,12 @@ class TestChatbookService:
         db = CharactersRAGDB(db_path=str(tmp_path / "quota.db"), client_id="quota-test")
         service = ChatbookService(user_id="123", db=db, user_tier="free")
 
+        async def _fixed_limits() -> ChatbookJobLimits:
+            """This user's resolved concurrency cap (spec 2 §4), fixed for the test."""
+            return ChatbookJobLimits(concurrent_jobs=2)
+
+        monkeypatch.setattr(service, "_resolve_job_limits", _fixed_limits)
+
         for index in range(2):
             service._save_export_job(
                 ExportJob(
@@ -899,6 +910,12 @@ class TestChatbookService:
 
         db = CharactersRAGDB(db_path=str(tmp_path / "sync-quota.db"), client_id="sync-quota-test")
         service = ChatbookService(user_id="123", db=db, user_tier="free")
+
+        async def _fixed_limits() -> ChatbookJobLimits:
+            """This user's resolved concurrency cap (spec 2 §4), fixed for the test."""
+            return ChatbookJobLimits(concurrent_jobs=2)
+
+        monkeypatch.setattr(service, "_resolve_job_limits", _fixed_limits)
 
         for index in range(2):
             service._save_export_job(
@@ -964,12 +981,17 @@ class TestChatbookService:
                 status=ExportStatus.PENDING,
                 chatbook_name="New export",
                 created_at=datetime.now(timezone.utc),
-            )
+            ),
+            ChatbookJobLimits(),
         )
 
         queries = [call[0] for call in db.calls]
         lock_index = next(index for index, query in enumerate(queries) if "pg_advisory_xact_lock" in query)
-        insert_index = next(index for index, query in enumerate(queries) if "INSERT OR REPLACE INTO export_jobs" in query)
+        insert_index = next(
+            index
+            for index, query in enumerate(queries)
+            if "INSERT INTO export_jobs" in query and "ON CONFLICT(job_id) DO UPDATE SET" in query
+        )
         assert lock_index < insert_index
 
     def test_import_skips_media_when_restore_flag_is_false(self, service, tmp_path):
@@ -1177,7 +1199,7 @@ class TestChatbookService:
         sample_path = service.import_dir / "openwebui.json"
         sample_path.write_text("[]", encoding="utf-8")
         saved_jobs = []
-        service._save_import_job_with_quota = saved_jobs.append
+        service._save_import_job_with_quota = lambda job, _limits=None: saved_jobs.append(job)
         service._core_jobs = MagicMock()
         service._core_jobs.create_job.return_value = {"id": 1}
 
@@ -1204,7 +1226,7 @@ class TestChatbookService:
 
         service._core_jobs = _CoreJobs()
 
-        def _capture_job(job: ImportJob) -> None:
+        def _capture_job(job: ImportJob, _limits: ChatbookJobLimits | None = None) -> None:
             captured["job"] = job
 
         with patch.object(service, "_save_import_job_with_quota", side_effect=_capture_job):
@@ -1957,3 +1979,34 @@ class TestGap6BinaryLimitTruncationMetadata:
         trunc = manifest.truncation["embeddings"]
         assert trunc["truncated"] is True
         assert "big_col" in trunc.get("binary_limited_collections", [])
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("total", "successful", "failed", "skipped", "expected"),
+    [
+        (2, 1, 1, 0, (False, "Import incomplete: 1/2 items failed; 1 imported, 0 skipped")),
+        (2, 2, 0, 0, (True, "Successfully imported 2/2 items")),
+        (0, 0, 0, 0, (True, "Import completed: No items to import")),
+        (2, 0, 0, 2, (True, "Import completed: All 2 items were skipped")),
+        (2, 0, 0, 0, (False, "No items were imported")),
+    ],
+)
+def test_import_result_preserves_partial_counts_and_private_finalize_payload(total, successful, failed, skipped, expected):
+    job = ImportJob(
+        job_id="result", user_id="test_user", status=ImportStatus.PENDING, chatbook_path="local",
+        total_items=total, processed_items=total, successful_items=successful, failed_items=failed,
+        skipped_items=skipped, warnings=["retained"],
+    )
+    imported = {"notes": successful}
+    inventory = {"total": total}
+    non_restorable = {"source_files": 1}
+    private = {"preferences": {"retained_for_finalize": True}}
+    ok, message, result = _build_import_result(job, imported, inventory, non_restorable, private)
+    assert (ok, message) == expected  # nosec B101 -- Failed items outrank successes; empty/skipped outcomes retain their messages.
+    assert result == {  # nosec B101 -- Partial counts and the private finalize payload must survive this internal result.
+        "imported_items": imported, "warnings": ["retained"], "total_items": total, "processed_items": total,
+        "successful_items": successful, "failed_items": failed, "skipped_items": skipped,
+        "inventory_summary": inventory, "skipped_non_restorable": non_restorable,
+        _ACCOUNT_RESTORE_PAYLOAD_KEY: private,
+    }
+    assert result["warnings"] is not job.warnings  # nosec B101 -- Result consumers must not mutate the job's warning list.

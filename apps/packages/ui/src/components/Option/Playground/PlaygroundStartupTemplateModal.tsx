@@ -1,5 +1,7 @@
 import React from "react"
 import { Modal } from "antd"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { isProtectedTrackedPersonaUnavailable } from "@/types/assistant-selection"
 import { ModalFooter } from "@/components/ui/layout"
 import {
   describeRolePlaySetupPreview,
@@ -18,6 +20,7 @@ export interface PlaygroundStartupTemplateModalProps {
   onClose: () => void
   onDelete: (id: string) => void
   onApply: () => void
+  busy?: boolean
   promptDescription: string | null
   promptResolution: { source?: string } | null
   preset: ParameterPreset | undefined
@@ -35,11 +38,15 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
       onClose,
       onDelete,
       onApply,
+      busy = false,
       promptDescription,
       promptResolution,
       preset,
       t
     } = props
+    const historySelection = useHistorySelectionContext()
+    const personaGuidanceId = React.useId()
+    const personaUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection), preview?.rolePlay?.identity?.kind, null)
     const rolePlayPreview =
       preview && isRolePlayRelevantBundle(preview)
         ? describeRolePlaySetupPreview(preview)
@@ -69,7 +76,7 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
                   if (!preview) return
                   onDelete(preview.id)
                 },
-                disabled: !preview,
+                disabled: !preview || busy,
                 danger: true
               }
             ]}
@@ -80,8 +87,10 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
                 "playground:composer.startupTemplateApply",
                 "Apply template"
               ),
-              onClick: onApply,
-              disabled: !preview
+              onClick: () => { if (!personaUnavailable) onApply() },
+              "aria-describedby": personaUnavailable ? personaGuidanceId : undefined,
+              loading: busy,
+              disabled: !preview || busy || personaUnavailable
             }}
           />
         }
@@ -94,6 +103,11 @@ export const PlaygroundStartupTemplateModal: React.FC<PlaygroundStartupTemplateM
                 "Review active context that will be applied before your next send."
               )}
             </p>
+            {personaUnavailable && (
+              <p id={personaGuidanceId} role="status" className="text-sm text-text-muted">
+                {t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.")}
+              </p>
+            )}
             {rolePlayPreview ? (
               <div className="grid gap-2 text-xs text-text sm:grid-cols-2">
                 <div className="rounded-md border border-border bg-surface px-2 py-2">

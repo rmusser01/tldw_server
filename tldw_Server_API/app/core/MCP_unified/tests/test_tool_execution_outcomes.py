@@ -52,6 +52,11 @@ def test_expected_tool_failure_reason_catalog_is_fixed_and_bounded() -> None:
             "A required tool dependency is temporarily unavailable.",
             outcomes.BreakerAction.RECORD_FAILURE,
         ),
+        "LLM_QUOTA_EXCEEDED": (
+            "llm_quota_exceeded",
+            "The LLM usage limit for this account has been reached.",
+            outcomes.BreakerAction.IGNORE,
+        ),
     }
 
     assert {

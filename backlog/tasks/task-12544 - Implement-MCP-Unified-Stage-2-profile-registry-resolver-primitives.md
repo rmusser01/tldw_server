@@ -35,7 +35,7 @@ Implement the next narrow MCP Unified Stage 2 slice after built-in profile prese
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Plan: Docs/superpowers/plans/2026-05-27-mcp-unified-profile-registry-resolver-implementation-plan.md
 - Added package-local InMemoryProfileStore plus ProfileStoreUnavailableError for explicit fail-closed availability handling.
 - Added StoreBackedProfileResolver for explicit/default profile lookup, disabled/missing fail-closed behavior, and copy-isolated returns.
@@ -46,7 +46,7 @@ Implement the next narrow MCP Unified Stage 2 slice after built-in profile prese
 - Verification: Mypy passed for mcp_unified/profiles, mcp_unified/interfaces/storage.py, and the new test.
 - Verification: runtime Bandit scan passed with 0 findings for mcp_unified/profiles and mcp_unified/interfaces/storage.py. Full touched-scope Bandit produced only pytest assert B101 findings in the new test file.
 - Verification: git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

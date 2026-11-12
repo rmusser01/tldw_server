@@ -1,0 +1,95 @@
+"""Fail CI when a Resource Governor route_map entry is dead, shadowed or unused.
+
+Builds the fully enabled app the same way the route-auth ratchet does. The
+allowlist holds intentional exceptions, one problem string per line, with a
+``#`` comment giving the reason.
+"""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ALLOWLIST = Path(__file__).resolve().parent / "rg_route_map_lint_allowlist.txt"
+
+
+def lint(route_map: Mapping[str, Any], served: list[Any], allow: set[str]) -> list[str]:
+    """Check a route_map against the routes the app serves.
+
+    Args:
+        route_map: The policy snapshot's ``route_map`` (``by_path`` globs, ``by_tag``).
+        served: Served routes (``iter_served_routes``); each has ``path``, ``methods``
+            and ``tags``. Only routes with HTTP methods are matched against globs.
+        allow: Problem strings to suppress (the allowlist file's entries).
+
+    Returns:
+        Problem strings (dead or shadowed ``by_path`` patterns, unused or shadowed
+        ``by_tag`` entries) that are not in ``allow``; empty when clean.
+    """
+    from tldw_Server_API.app.core.Resource_Governance.policy_resolver import compile_route_glob
+
+    http = [r for r in served if getattr(r, "path", None) and getattr(r, "methods", None)]
+    paths = [r.path for r in http]
+    patterns = [(str(p), compile_route_glob(str(p))) for p in (route_map.get("by_path") or {})]
+    problems: list[str] = []
+    for i, (raw, rx) in enumerate(patterns):
+        hits = [p for p in paths if rx.match(p)]
+        if not hits:
+            problems.append(f"by_path {raw} matches no served route")
+        elif all(any(earlier.match(p) for _r, earlier in patterns[:i]) for p in hits):
+            problems.append(f"by_path {raw} is shadowed by earlier patterns")
+    used_tags = {t for r in served for t in (getattr(r, "tags", None) or ())}
+    for tag in route_map.get("by_tag") or {}:
+        tagged = [r.path for r in http if str(tag) in (getattr(r, "tags", None) or ())]
+        if str(tag) not in used_tags:
+            problems.append(f"by_tag {tag} is used by no served route")
+        elif tagged and all(any(rx.match(p) for _r, rx in patterns) for p in tagged):
+            # by_path wins, so this tag can never resolve a policy.
+            problems.append(f"by_tag {tag} is shadowed by by_path entries")
+    return [p for p in problems if p not in allow]
+
+
+def _allowlist() -> set[str]:
+    if not ALLOWLIST.exists():
+        return set()
+    out = set()
+    for line in ALLOWLIST.read_text(encoding="utf-8").splitlines():
+        entry = line.split("#", 1)[0].strip()
+        if entry:
+            out.add(entry)
+    return out
+
+
+def load_inputs() -> tuple[Mapping[str, Any], list[Any]]:
+    """Build the fully enabled app and load the shipped policy file.
+
+    Returns:
+        The policy snapshot's ``route_map`` and the app's served routes.
+    """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    import asyncio
+
+    from Helper_Scripts.ci.route_auth_ratchet import load_app
+    from tldw_Server_API.app.core.Resource_Governance.policy_loader import default_policy_loader
+    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+
+    app = load_app()
+    loader = default_policy_loader()
+    asyncio.run(loader.load_once())
+    return loader.get_snapshot().route_map or {}, list(iter_served_routes(app.routes))
+
+
+def main() -> int:
+    route_map, served = load_inputs()
+    problems = lint(route_map, served, _allowlist())
+    for p in problems:
+        print(p)
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

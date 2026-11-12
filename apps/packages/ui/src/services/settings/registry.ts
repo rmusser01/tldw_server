@@ -33,6 +33,40 @@ export type SettingDef<T> = {
 
 const storageCache = new Map<StorageOptions["area"] | undefined, ReturnType<typeof createSafeStorage>>()
 
+// WP-20: per-context cache of normalized setting values. Reads hit the cache
+// instead of re-issuing storage reads + localStorage mirror writes on
+// every get. The selected store's watcher invalidates the cache, so writes
+// from OTHER contexts (options page vs sidepanel) are picked up on the next
+// read-through miss.
+const valueCache = new Map<string, unknown>()
+
+// Last localStorage mirror value this context wrote or observed (serialized
+// form). The mirror is only written when the normalized value differs from
+// this cached form.
+const mirrorCache = new Map<string, string | null>()
+
+const settingCacheKey = (setting: SettingDef<unknown>): string =>
+  `${getStorageForSetting(setting).area}::${setting.key}`
+
+const observedSettings = new Set<string>()
+const ensureStorageChangeListener = (setting: SettingDef<unknown>): boolean => {
+  const key = settingCacheKey(setting)
+  if (observedSettings.has(key)) return true
+  try {
+    const watched: unknown = getStorageForSetting(setting).watch({
+      [setting.key]: () => valueCache.delete(key)
+    })
+    if (watched === true || typeof watched === "function") {
+      observedSettings.add(key)
+      return true
+    }
+  } catch {
+    // Without a watcher, read through storage rather than cache stale values.
+  }
+  valueCache.delete(key)
+  return false
+}
+
 export const getStorageForSetting = (setting: SettingDef<unknown>) => {
   const area = setting.area
   if (storageCache.has(area)) {
@@ -103,8 +137,18 @@ const writeLocalStorageValue = <T>(setting: SettingDef<T>, value: T) => {
   if (!setting.localStorageKey || !setting.mirrorToLocalStorage) return
   if (typeof window === "undefined") return
   try {
+    const mirrorKey = setting.localStorageKey
     if (isUnset(value)) {
-      window.localStorage.removeItem(setting.localStorageKey)
+      // Compare against the cached mirror so a repeated unset read does not
+      // issue removeItem on every get.
+      let last = mirrorCache.get(mirrorKey)
+      if (last === undefined) {
+        last = window.localStorage.getItem(mirrorKey)
+      }
+      if (last !== null) {
+        window.localStorage.removeItem(mirrorKey)
+      }
+      mirrorCache.set(mirrorKey, null)
       return
     }
     const serialized = setting.localStorageSerialize
@@ -112,7 +156,16 @@ const writeLocalStorageValue = <T>(setting: SettingDef<T>, value: T) => {
       : typeof value === "string"
         ? value
         : JSON.stringify(value)
-    window.localStorage.setItem(setting.localStorageKey, serialized)
+    // Write-only-on-change: the mirror is compared against the cached value
+    // (what this context last wrote or observed), not re-written per read.
+    let last = mirrorCache.get(mirrorKey)
+    if (last === undefined) {
+      last = window.localStorage.getItem(mirrorKey)
+    }
+    if (last !== serialized) {
+      window.localStorage.setItem(mirrorKey, serialized)
+    }
+    mirrorCache.set(mirrorKey, serialized)
   } catch {
     // ignore localStorage errors
   }
@@ -130,44 +183,90 @@ export const normalizeSettingValue = <T>(
   return coerced
 }
 
-export const getSetting = async <T>(setting: SettingDef<T>): Promise<T> => {
+/** Opt in to read failures when absence must not authorize overwriting stored data. */
+export const getSetting = async <T,>(
+  setting: SettingDef<T>,
+  options?: { throwOnError?: boolean; isCurrent?: () => boolean }
+): Promise<T> => {
   try {
+    const observed = ensureStorageChangeListener(setting)
+    const cacheKey = settingCacheKey(setting as unknown as SettingDef<unknown>)
+    if (observed && valueCache.has(cacheKey)) {
+      // Invariant: cached values are SHARED references, not copies (copying
+      // per read would defeat the cache). Consumers must treat getSetting
+      // results as read-only and never mutate object/array values in place —
+      // no mutating consumer exists today; keep it that way.
+      return valueCache.get(cacheKey) as T
+    }
     await setting.beforeGet?.()
+    if (options?.isCurrent?.() === false) return setting.defaultValue
     const storage = getStorageForSetting(setting)
     const raw = await storage.get(setting.key)
+    // An old read must not migrate or mirror over a newer explicit choice.
+    if (options?.isCurrent?.() === false) return setting.defaultValue
+    let normalized: T
+    let cacheable = observed
     if (isUnset(raw)) {
       const legacy = readLocalStorageValue(setting)
       if (!isUnset(legacy)) {
-        const normalized = normalizeSettingValue(setting, legacy)
+        normalized = normalizeSettingValue(setting, legacy)
         await storage.set(setting.key, normalized)
         writeLocalStorageValue(setting, normalized)
         if (!setting.mirrorToLocalStorage) clearLocalStorageValue(setting)
-        return normalized
+      } else {
+        normalized = setting.defaultValue
+        // An absent setting is not cached: absence stays observable for
+        // future writes/first-set migrations without extra invalidation.
+        cacheable = false
       }
-      return setting.defaultValue
+    } else {
+      normalized = normalizeSettingValue(setting, raw)
+      if (normalized !== raw) {
+        await storage.set(setting.key, normalized)
+      }
+      writeLocalStorageValue(setting, normalized)
     }
-    const normalized = normalizeSettingValue(setting, raw)
-    if (normalized !== raw) {
-      await storage.set(setting.key, normalized)
+    if (cacheable) {
+      valueCache.set(cacheKey, normalized)
     }
-    writeLocalStorageValue(setting, normalized)
     return normalized
-  } catch {
+  } catch (error) {
+    if (options?.throwOnError) throw error
     return setting.defaultValue
   }
 }
 
 export const setSetting = async <T>(setting: SettingDef<T>, value: T) => {
+  const observed = ensureStorageChangeListener(setting)
   const storage = getStorageForSetting(setting)
   const normalized = normalizeSettingValue(setting, value)
   await storage.set(setting.key, normalized)
+  if (observed) {
+    valueCache.set(settingCacheKey(setting as unknown as SettingDef<unknown>), normalized)
+  }
   writeLocalStorageValue(setting, normalized)
 }
 
 export const clearSetting = async (setting: SettingDef<unknown>) => {
+  ensureStorageChangeListener(setting)
   const storage = getStorageForSetting(setting)
   await storage.remove(setting.key)
+  valueCache.delete(settingCacheKey(setting))
+  if (setting.localStorageKey) mirrorCache.delete(setting.localStorageKey)
   clearLocalStorageValue(setting)
+}
+
+/**
+ * Test-only seam: drop the module-level value/mirror caches. Suites that seed
+ * storage directly (bypassing `setSetting`) or that swap the storage mock have
+ * no storage watcher invalidation path in jsdom, so a cached value from an
+ * earlier test would be served across the reset. Production never needs this:
+ * the cache is invalidated by the selected store's watcher, `setSetting` and
+ * `clearSetting`.
+ */
+export const __clearSettingCachesForTests = (): void => {
+  valueCache.clear()
+  mirrorCache.clear()
 }
 
 export const coerceBoolean = (value: unknown, fallback: boolean): boolean => {

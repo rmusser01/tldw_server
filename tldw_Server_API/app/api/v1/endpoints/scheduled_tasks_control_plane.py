@@ -207,6 +207,11 @@ _AUTOMATION_ERROR_MAP: dict[str, tuple[int, str, str]] = {
         "scheduled_task_idempotency_conflict",
         "Idempotency key was already used with a different payload.",
     ),
+    "message_store_unavailable": (
+        status.HTTP_503_SERVICE_UNAVAILABLE,
+        "scheduled_task_message_store_unavailable",
+        "The encrypted message store is unavailable; no definition was persisted.",
+    ),
     "execution_target_unusable": (
         status.HTTP_422_UNPROCESSABLE_ENTITY,
         "scheduled_task_execution_target_unusable",

@@ -116,6 +116,8 @@ export interface PlaygroundImageGenModalProps {
   onReferenceFileIdChange: (value: number | undefined) => void
   referenceImageCandidates: ReferenceImageCandidate[]
   referenceImageCandidatesLoading: boolean
+  referenceImageCandidatesFailed?: boolean
+  onRetryReferenceImages?: () => void
 
   // Submit
   submitting: boolean
@@ -211,6 +213,8 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
       onReferenceFileIdChange,
       referenceImageCandidates,
       referenceImageCandidatesLoading,
+      referenceImageCandidatesFailed = false,
+      onRetryReferenceImages,
       submitting,
       onSubmit,
       t
@@ -379,6 +383,10 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
             <Select
               value={referenceFileId ?? undefined}
               data-testid="image-generate-reference-image-select"
+              aria-label={t(
+                "playground:imageGeneration.referenceImageLabel",
+                "Reference image (optional)"
+              )}
               allowClear
               loading={referenceImageCandidatesLoading}
               placeholder={t(
@@ -396,6 +404,24 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
               }
               disabled={busy}
             />
+            {referenceImageCandidatesFailed && (
+              <div role="alert" className="text-xs text-text-muted">
+                <p>
+                  {t(
+                    "playground:imageGeneration.referenceImagesFailed",
+                    "Could not load reference images. Retry, or clear the selection to continue without one."
+                  )}
+                </p>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={onRetryReferenceImages}
+                  className="min-h-11 rounded px-2 underline focus-visible:outline focus-visible:outline-2 disabled:opacity-60"
+                >
+                  {t("common:retry", "Retry")}
+                </button>
+              </div>
+            )}
             <p className="text-[11px] text-text-muted">
               {t(
                 "playground:imageGeneration.referenceImageHint",
@@ -673,7 +699,7 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
                   </div>
                 )}
                 <div className="mt-3 flex flex-wrap justify-end gap-2">
-                  <Button onClick={onRejectRefined}>
+                  <Button onClick={onRejectRefined} disabled={busy}>
                     {t(
                       "playground:imageGeneration.refineKeepOriginal",
                       "Keep original"
@@ -682,6 +708,7 @@ export const PlaygroundImageGenModal: React.FC<PlaygroundImageGenModalProps> =
                   <Button
                     type="primary"
                     onClick={onApplyRefined}
+                    disabled={busy}
                     data-testid="image-refine-accept"
                   >
                     {t(

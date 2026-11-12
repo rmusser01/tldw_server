@@ -1851,6 +1851,7 @@ async def test_audio_chat_ws_partial_success_cancellation_drains_before_runtime_
     lifecycle: list[str] = []
     waiting_for_release = threading.Event()
     release_stream = threading.Event()
+    runtime_closed = asyncio.Event()
 
     class Runtime:
         async def resolve(self, _provider: str, *, model: str | None = None):
@@ -1865,6 +1866,7 @@ async def test_audio_chat_ws_partial_success_cancellation_drains_before_runtime_
 
         async def close(self) -> None:
             lifecycle.append("runtime_close")
+            runtime_closed.set()
 
     class BlockingSyncStream:
         def __init__(self) -> None:
@@ -1932,10 +1934,7 @@ async def test_audio_chat_ws_partial_success_cancellation_drains_before_runtime_
 
     assert any(message.get("type") == "llm_delta" for message in ws.sent_json)
     assert any(message.get("type") == "interrupted" for message in ws.sent_json)
-    for _ in range(100):
-        if "runtime_close" in lifecycle:
-            break
-        await asyncio.sleep(0.01)
+    await asyncio.wait_for(runtime_closed.wait(), timeout=1.0)
     assert lifecycle.count("mark_used") == 1
     assert lifecycle.index("stream_close") < lifecycle.index("runtime_close")
 
@@ -2748,6 +2747,28 @@ async def test_audio_chat_ws_overlap_warning_sanitizes_internal_message(monkeypa
     assert warnings[-1]["message"] == "Realtime TTS session warning"
     assert "tts provider degraded" not in str(warnings)
     assert "/private/tts/cache" not in str(warnings)
+
+
+@pytest.mark.unit
+async def test_cancelled_audio_child_drain_preserves_caller_cancellation() -> None:
+    child = asyncio.create_task(asyncio.sleep(10))
+    child.cancel()
+    await audio_streaming_module._await_child_task(child)
+
+    pending = asyncio.create_task(asyncio.sleep(10))
+    entered = asyncio.Event()
+
+    async def drain() -> None:
+        entered.set()
+        await audio_streaming_module._await_child_task(pending)
+
+    caller = asyncio.create_task(drain())
+    await entered.wait()
+    caller.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+    pending.cancel()
+    await asyncio.gather(pending, return_exceptions=True)
 
 
 @pytest.mark.integration

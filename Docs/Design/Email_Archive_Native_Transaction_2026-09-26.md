@@ -1,0 +1,9 @@
+# Archive native email transaction
+
+TASK-13375 follows TASK-13373. Profile the optimized path using guarded synthetic HTTP archives, SQLite first then PostgreSQL. No personal Gmail access or model work.
+
+For 300 initial messages, SQLite worker operations took 4.755 profiled seconds: connection configuration 2.386s and saved-payload reads 1.485s. PostgreSQL worker operations took 17.652s: legacy persistence 9.058s, graph upsert 5.132s, saved-payload reads 3.408s, and scope setup 4.171s across1200 connection borrows. Profile overhead and host variability prevent comparison with unprofiled references.
+
+Archive native synchronization will wrap saved-payload reads and graph upsert in a single per-message MediaDatabase transaction. The legacy Media write remains outside and already committed. Catch native exceptions outside this new transaction so both nested graph writes and reads release/roll back before the nonfatal error is handled. Keep existing saved-payload metadata fallback, declined-overwrite behavior, tenant scope, retry identity and metrics. The primary-message and attachment paths retain their existing behavior. No batch transaction, native SQL outside DB abstractions, global cache, or new dependency.
+
+Real SQLite tests prove the read and graph entry share one live connection, graph failure after nested writes rolls back the graph while preserving legacy rows, declined overwrite still reflects accepted content, and retries preserve IDs. Existing cancellation/isolation tests remain. Standard repository PostgreSQL fixtures and guarded authenticated probes verify real RLS, persistence, retrieval, retries and isolation. Fresh unprofiled baseline and post-change probes run SQLite then PostgreSQL. Record observed throughput honestly; no sustained50msg/s or1M-message claim from three100-message archives.

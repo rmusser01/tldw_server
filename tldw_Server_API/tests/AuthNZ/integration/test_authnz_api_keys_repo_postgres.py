@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager, APIKe
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.api_keys_repo import AuthnzApiKeysRepo
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
+from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
 pytestmark = pytest.mark.integration
 
@@ -21,30 +22,7 @@ async def test_authnz_api_keys_repo_rotation_and_revoke_postgres(test_db_pool):
     pool = test_db_pool
 
     # Seed a user row for FK
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (
-                uuid,
-                username,
-                email,
-                password_hash,
-                role,
-                is_active,
-                is_verified,
-                storage_quota_mb,
-                storage_used_mb,
-                created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-            """,
-            str(uuid.uuid4()),
-            "pg_api_keys_repo_user",
-            "pg_api_keys_repo_user@example.com",
-            "x",
-            "user",
-            datetime.utcnow(),
-        )
+    await ensure_test_user(pool, "pg_api_keys_repo_user", "pg_api_keys_repo_user@example.com", is_verified=True)
 
     user_id = await pool.fetchval(
         "SELECT id FROM users WHERE username = $1",
@@ -118,30 +96,7 @@ async def test_authnz_api_keys_repo_usage_and_audit_postgres(test_db_pool):
     pool = test_db_pool
 
     # Seed a user row for FK
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (
-                uuid,
-                username,
-                email,
-                password_hash,
-                role,
-                is_active,
-                is_verified,
-                storage_quota_mb,
-                storage_used_mb,
-                created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, TRUE, TRUE, 5120, 0.0, $6)
-            """,
-            str(uuid.uuid4()),
-            "pg_api_keys_usage_user",
-            "pg_api_keys_usage_user@example.com",
-            "x",
-            "user",
-            datetime.utcnow(),
-        )
+    await ensure_test_user(pool, "pg_api_keys_usage_user", "pg_api_keys_usage_user@example.com", is_verified=True)
 
     user_id = await pool.fetchval(
         "SELECT id FROM users WHERE username = $1",

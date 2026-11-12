@@ -48,9 +48,9 @@ Implement Stage 4 of the approved chat/world-book cache cost-control plan. Persi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: focused Stage 3/4 suite passed (27 passed); SQLite/pricing/usage focused suite passed (14 passed); optional Postgres migration test skipped due local fixture availability; git diff --check passed. Bandit run on touched Python scope reported one existing B608 at migrations.py:616 outside this diff; no new Bandit findings were introduced in changed lines.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

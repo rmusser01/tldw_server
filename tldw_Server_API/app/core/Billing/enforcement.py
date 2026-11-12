@@ -4,6 +4,7 @@ enforcement.py
 Billing limit enforcement that integrates with the Resource Governor system.
 Provides dependencies for checking and enforcing subscription limits.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -11,7 +12,7 @@ import os
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -48,6 +49,9 @@ _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     sqlite3.Error,
 )
+
+# The plan's LLM tokens leave out calls on a member's own provider key (ADR-083, TASK-13955).
+_OWN_KEY_EXCLUDED = "AND COALESCE(l.credential_source, '') <> 'user'"
 
 _BILLING_ENFORCEMENT_FAILURE_MODE_ENV = "BILLING_ENFORCEMENT_FAILURE_MODE"
 _BILLING_ENFORCEMENT_FAILURE_MODE_OPEN = "open"
@@ -288,6 +292,28 @@ class BillingEnforcer:
             )
             return self._permissive_limit_fallbacks()
 
+    async def get_mcp_token_limit(self, scope: Any, *, operator_limit: int | None, conn: Any) -> int | None:
+        """Combine operator and active hosted limits on the supplied transaction."""
+        if conn is None:
+            raise ValueError("MCP billing limits require a supplied connection")
+        if operator_limit is not None and (type(operator_limit) is not int or not 0 <= operator_limit < (1 << 63)):
+            raise ValueError("Invalid MCP operator quota")
+        if scope.kind != "org":
+            return operator_limit
+        if not await billing_checks_active():
+            return operator_limit
+        from tldw_Server_API.app.core.Billing.subscription_service import (
+            get_subscription_service,
+        )
+
+        limits = await (await get_subscription_service()).get_org_limits(scope.value, conn=conn)
+        value = limits["llm_tokens_month"]
+        if type(value) is not int or not -1 <= value < (1 << 63):
+            raise ValueError("Invalid MCP subscription quota")
+        if value == -1:
+            return operator_limit
+        return value if operator_limit is None else min(value, operator_limit)
+
     async def get_org_usage(self, org_id: int) -> UsageSummary:
         """
         Get current usage summary for an organization.
@@ -300,7 +326,7 @@ class BillingEnforcer:
         if org_id in self._usage_cache:
             cached, cached_at = self._usage_cache[org_id]
             if now - cached_at < self._cache_ttl:
-                return cached
+                return await self._with_native_storage(cached)
 
         summary = UsageSummary(org_id=org_id)
 
@@ -340,17 +366,17 @@ class BillingEnforcer:
             if org_id in self._usage_cache:
                 cached, _ = self._usage_cache[org_id]
                 logger.warning(f"Using stale cached usage for org {org_id}")
-                return cached
+                return await self._with_native_storage(cached)
             if self._fail_closed_on_data_error():
                 logger.error(
                     "No cached usage for org {}; returning restrictive usage (fail-closed).",
                     org_id,
                 )
-                return self._restrictive_usage_fallback(org_id)
+                return await self._with_native_storage(self._restrictive_usage_fallback(org_id))
             # Otherwise return zeros (fail-open) but log warning
             logger.warning(f"No cached usage for org {org_id}, returning zeros (fail-open)")
 
-        return summary
+        return await self._with_native_storage(summary)
 
     async def _get_api_calls_today(self, org_id: int) -> int:
         """Read today's canonical user-scoped API rollup for the organization."""
@@ -377,82 +403,111 @@ class BillingEnforcer:
         User-scoped calls are attributed to a user's primary org (earliest
         org_members.added_at, tie-broken by lowest org_id) to avoid
         double-counting when a user belongs to multiple orgs.
+
+        Calls on a member's own provider key are left out (ADR-083), except on
+        a schema without ``credential_source``, where every row counts.
+        Explicit request-time organization attribution takes precedence. Legacy
+        calls without it use the primary org or API-key org. Unresolved MCP
+        exposure is added without age filtering; reconciled rows are excluded.
         """
         try:
             from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+            from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import missing_credential_source
 
             pool = await get_db_pool()
             now = datetime.now(timezone.utc)
-            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-            is_postgres = self._is_postgres_pool(pool)
+            # Naive UTC: on PostgreSQL llm_usage_log.ts is TIMESTAMP without time zone, and asyncpg
+            # refuses an aware bound for it, so the plan's tokens counted nothing there (TASK-13955).
+            month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+            from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 
-            async with pool.acquire() as conn:
-                if is_postgres:
-                    # PostgreSQL: single-pass attribution, no UNION path.
-                    result = await conn.fetchval(
-                        """
-                        WITH primary_org AS (
-                            SELECT user_id, org_id
-                            FROM (
-                                SELECT user_id, org_id,
-                                       ROW_NUMBER() OVER (
-                                           PARTITION BY user_id
-                                           ORDER BY added_at ASC, org_id ASC
-                                       ) AS rn
-                                FROM org_members
-                            ) ranked
-                            WHERE rn = 1
-                        )
-                        SELECT COALESCE(SUM(l.total_tokens), 0)
-                        FROM llm_usage_log AS l
-                        LEFT JOIN primary_org AS po ON l.user_id = po.user_id
-                        LEFT JOIN api_keys AS ak ON l.key_id = ak.id
-                        WHERE l.ts >= $2
-                          AND (
-                                po.org_id = $1
-                                OR ak.org_id = $1
-                              )
-                        """,
-                        org_id, month_start,
-                    )
-                else:
-                    # SQLite: single-pass attribution, no UNION path.
-                    month_start_str = month_start.strftime("%Y-%m-%d %H:%M:%S")
-                    cur = await conn.execute(
-                        """
-                        WITH primary_org AS (
-                            SELECT om.user_id, MIN(om.added_at) AS min_added
-                            FROM org_members om
-                            GROUP BY om.user_id
-                        ),
-                        primary_org_resolved AS (
-                            SELECT om.user_id, MIN(om.org_id) AS org_id
-                            FROM org_members om
-                            JOIN primary_org po
-                              ON po.user_id = om.user_id AND po.min_added = om.added_at
-                            GROUP BY om.user_id
-                        )
-                        SELECT COALESCE(SUM(l.total_tokens), 0)
-                        FROM llm_usage_log AS l
-                        LEFT JOIN primary_org_resolved po ON l.user_id = po.user_id
-                        LEFT JOIN api_keys AS ak ON l.key_id = ak.id
-                        WHERE l.ts >= ?
-                          AND (
-                                po.org_id = ?
-                                OR ak.org_id = ?
-                              )
-                        """,
-                        (month_start_str, org_id, org_id),
-                    )
-                    row = await cur.fetchone()
-                    result = row[0] if row else 0
-
-                return int(result or 0)
+            missing_schema_errors: tuple[type[Exception], ...] = (sqlite3.OperationalError,)
+            if asyncpg is not None:
+                missing_schema_errors += (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError)
+            try:
+                async with pool.acquire() as conn:
+                    return await AuthnzUsageRepo(pool).read_org_token_exposure(conn, org_id, month_start)
+            except missing_schema_errors as exc:
+                if not any(
+                    name in str(exc) for name in ("billing_org_id", "provider_usage_reservations", "credential_source")
+                ):
+                    raise
+                # Only legacy Billing readers may fall back to pre-MCP schema.
+            try:
+                return await self._sum_org_llm_tokens(pool, org_id, month_start, _OWN_KEY_EXCLUDED)
+            except Exception as exc:
+                if not missing_credential_source(exc, "the billing plan's llm_tokens_month"):
+                    raise
+                return await self._sum_org_llm_tokens(pool, org_id, month_start, "")  # every row counts
         except _BILLING_ENFORCEMENT_NONCRITICAL_EXCEPTIONS as exc:
             self._log_source_failure("debug", "Failed to get LLM tokens", org_id, exc)
             if self._fail_closed_on_data_error():
                 raise
             return 0
+
+    async def _sum_org_llm_tokens(self, pool: Any, org_id: int, month_start: datetime, own_key: str) -> int:
+        """Sum the org's ``llm_usage_log`` tokens since ``month_start``; ``own_key`` is "" or ``_OWN_KEY_EXCLUDED``."""
+        async with pool.acquire() as conn:
+            if self._is_postgres_pool(pool):
+                # PostgreSQL: single-pass attribution, no UNION path.
+                result = await conn.fetchval(
+                    f"""
+                    WITH primary_org AS (
+                        SELECT user_id, org_id
+                        FROM (
+                            SELECT user_id, org_id,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY user_id
+                                       ORDER BY added_at ASC, org_id ASC
+                                   ) AS rn
+                            FROM org_members
+                        ) ranked
+                        WHERE rn = 1
+                    )
+                    SELECT COALESCE(SUM(l.total_tokens), 0)
+                    FROM llm_usage_log AS l
+                    LEFT JOIN primary_org AS po ON l.user_id = po.user_id
+                    LEFT JOIN api_keys AS ak ON l.key_id = ak.id
+                    WHERE l.ts >= $2 {own_key}
+                      AND (
+                            po.org_id = $1
+                            OR ak.org_id = $1
+                          )
+                    """,  # nosec B608
+                    org_id, month_start,
+                )
+            else:
+                # SQLite: single-pass attribution, no UNION path.
+                month_start_str = month_start.strftime("%Y-%m-%d %H:%M:%S")
+                cur = await conn.execute(
+                    f"""
+                    WITH primary_org AS (
+                        SELECT om.user_id, MIN(om.added_at) AS min_added
+                        FROM org_members om
+                        GROUP BY om.user_id
+                    ),
+                    primary_org_resolved AS (
+                        SELECT om.user_id, MIN(om.org_id) AS org_id
+                        FROM org_members om
+                        JOIN primary_org po
+                          ON po.user_id = om.user_id AND po.min_added = om.added_at
+                        GROUP BY om.user_id
+                    )
+                    SELECT COALESCE(SUM(l.total_tokens), 0)
+                    FROM llm_usage_log AS l
+                    LEFT JOIN primary_org_resolved po ON l.user_id = po.user_id
+                    LEFT JOIN api_keys AS ak ON l.key_id = ak.id
+                    WHERE l.ts >= ? {own_key}
+                      AND (
+                            po.org_id = ?
+                            OR ak.org_id = ?
+                          )
+                    """,  # nosec B608
+                    (month_start_str, org_id, org_id),
+                )
+                row = await cur.fetchone()
+                result = row[0] if row else 0
+            return int(result or 0)
 
     async def _get_team_member_count(self, org_id: int) -> int:
         """Get current team member count for organization."""
@@ -557,6 +612,21 @@ class BillingEnforcer:
             if self._fail_closed_on_data_error():
                 raise
             return 0
+
+    async def _with_native_storage(self, legacy: UsageSummary) -> UsageSummary:
+        """Never cache a native aggregate or turn an unknown ledger into empty usage."""
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+            NativeQuotaReservationStore,
+            NativeQuotaUnavailableError,
+        )
+        try:
+            native = await NativeQuotaReservationStore(await get_db_pool()).org_member_usage(legacy.org_id)
+        except NativeQuotaUnavailableError:
+            raise
+        except Exception as exc:
+            raise NativeQuotaUnavailableError('Native retained storage usage is unavailable') from exc
+        return replace(legacy, storage_bytes=legacy.storage_bytes + native)
 
     async def _get_storage_bytes(self, org_id: int) -> int:
         """Sum storage_used_mb from users table for all org members."""
@@ -973,6 +1043,31 @@ billing_enabled = is_billing_enabled
 
 
 def enforcement_enabled() -> bool:
-    """Check if limit enforcement is enabled (can be separate from billing)."""
-    # Can have enforcement without Stripe billing (e.g., for usage caps)
-    return os.environ.get("LIMIT_ENFORCEMENT_ENABLED", "true").lower() == "true"
+    """The usage-quota master switch; this name is kept for existing imports (config.usage_quotas_enabled)."""
+    from tldw_Server_API.app.core.config import usage_quotas_enabled
+
+    return usage_quotas_enabled()
+
+
+_PLAN_LIMITS_UNENFORCED_WARNED = False
+
+
+async def billing_checks_active() -> bool:
+    """
+    True when org billing-plan limits apply: usage quotas are on and a billing repository
+    is wired (the hosted product). OSS installs wire none, so billing checks, org
+    resolution and usage aggregation never run there (spec 2 §6).
+    """
+    global _PLAN_LIMITS_UNENFORCED_WARNED
+    from tldw_Server_API.app.core.Billing.subscription_service import billing_repo_configured
+
+    repo_wired = await billing_repo_configured()
+    if enforcement_enabled():
+        return repo_wired
+    if repo_wired and not _PLAN_LIMITS_UNENFORCED_WARNED:
+        _PLAN_LIMITS_UNENFORCED_WARNED = True
+        logger.warning(
+            "A billing repository is configured but usage quotas are off: plan limits are NOT enforced. "
+            "Set USAGE_QUOTAS_ENABLED=true to enforce them."
+        )
+    return False

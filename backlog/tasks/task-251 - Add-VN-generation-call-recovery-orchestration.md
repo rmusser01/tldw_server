@@ -42,12 +42,12 @@ Implement Task 4 from Docs/superpowers/plans/2026-05-10-vn-scripted-generation-b
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added a narrow `execute_script_generation_call` helper for Task 5 to call when the interpreter reaches a model-backed generate opcode.
 - The helper replays completed same-key actions before scene-version validation so a lost HTTP response can be retried after the committed scene has moved on.
 - The helper rejects provider-started in-flight same-key calls with `generation_request_in_progress`, and abandons expired provider-started leases with `generation_attempt_abandoned`.
 - Full script interpreter event/scene integration remains scoped to Task 5.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

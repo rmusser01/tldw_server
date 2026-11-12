@@ -1,0 +1,42 @@
+{
+  "production_base": "607431154cf10129b5d9afa8f9b57d46636466fc",
+  "tested_rebased_head": "113653debd30968fafaa2e986ca6fd99b11c3036",
+  "prior_published_head": "9af0906ac18972e492066cdf0b985516a4ba94db",
+  "prior_four_commits_patch_identical": true,
+  "environment": {
+    "fastapi": "0.141.1",
+    "starlette": "1.2.1",
+    "pydantic": "2.11.7",
+    "python": "3.11.13",
+    "isolated_fastapi_overlay": true,
+    "existing_environment_modified": false
+  },
+  "verification": {
+    "independent_buddies": "25 passed, 1 PostgreSQL fixture skip",
+    "served_routes": "8 passed",
+    "combined_duration_seconds": 72.03,
+    "canonical_workspace_api": "1 passed",
+    "canonical_status": 200,
+    "noncanonical_status": 307,
+    "effective_auth_dependency_retained": true,
+    "canonical_probe_sha256": "4eae906eb4fec21288cbe05077021c1d51952625b1b80b1e579e2311a6dbbc51",
+    "task_parser_roundtrip": true,
+    "unrelated_RG_task_unchanged": true
+  },
+  "task_id_repair": {
+    "old": "TASK-13395",
+    "new": "TASK-13396",
+    "history_preserved": true
+  },
+  "log_sha256": {
+    "buddy_and_routes": "7c8380a25b9e217160611362ab7c40945cefa2c431ff50202dca2d451ec5ef34",
+    "canonical_workspace": "b6bcfaa87beb865a7372d6c1e2edaac171bc0f04bf011656d393bde7ed9e7f9a"
+  },
+  "raw_logs": "local only",
+  "limits": [
+    "Earlier browser/build receipts retain their original source attribution",
+    "No PostgreSQL availability qualification",
+    "No installed-extension, upgraded WebUI, native-terminal or physical-voice qualification",
+    "No full local suite or paid provider calls"
+  ]
+}

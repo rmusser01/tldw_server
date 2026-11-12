@@ -31,9 +31,9 @@ After #1251 merged the chunking/vector/prompts processing tranche, keep PR #1250
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 After #1251 merged the processing router tranche, rebased PR #1250 and narrowed this slice to embeddings_v5_production_enhanced and media_embeddings. Preserved #1251 chunking/vector/prompts tests and added separate embedding router attr laziness coverage.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -32,7 +32,7 @@ Make the floating Persona Buddy surface a direct entry point into the existing p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added focused implementation plan at Docs/superpowers/plans/2026-05-09-persona-buddy-visual-workflow-entry-plan.md.
 
 RED: bunx vitest run src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx initially failed because the Buddy popover had no Open Visuals link.
@@ -42,7 +42,7 @@ HYGIENE: git diff --check passed.
 BANDIT: not applicable; touched code is frontend TypeScript plus Backlog/plan metadata only.
 
 Opened draft PR #1412 for the direct Buddy/Persona visual-pack workflow entry point.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

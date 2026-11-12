@@ -29,7 +29,6 @@ providers:
     base_url: "https://api.openai.com/v1/audio/speech"
     model: "tts-1"  # or "tts-1-hd" for higher quality
     timeout: 60
-    max_retries: 3
     # Optional: when true, perform a lightweight API-key verification
     # call during adapter initialization. Disabled by default so that
     # startup does not depend on external network availability.
@@ -184,6 +183,9 @@ providers:
     extra_params:
       managed: false
       allow_remote_base_url: false
+      # allow_private_network admits exactly the base_url origin, private/LAN or public (any port; no
+      # EGRESS_ALLOWLIST entry needed under strict); cloud metadata and link-local stay refused.
+      allow_private_network: false
       retain_request_artifacts: false
       external_voice_reference_mode: "disabled"  # disabled | shared_path
       request_option_allowlist:

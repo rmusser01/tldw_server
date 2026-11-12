@@ -35,7 +35,7 @@ Implement the frontend Stage 3 runtime/type slice for Persona Visual state catal
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented frontend Persona Visual custom-state runtime support. Added custom visual state typing and state_catalog metadata, exact tool_name authored-trigger matching from structured activeToolName, active_tool_name render-context propagation from live voice, and custom state display/preservation in VisualPackEditor.
 
 Verification: bun run test src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx passed with 81 tests. VisualPackEditor default timeout run exposed two slow existing tests; rerun with --testTimeout=20000 passed all 24 editor tests. git diff --check passed. Package tsc was attempted and exited nonzero due existing repo-wide test type errors outside this slice, so it is recorded as a known non-clean baseline gate rather than a pass. Bandit is not applicable because this slice touched frontend TypeScript and Backlog task files only.
@@ -47,7 +47,7 @@ PR #1717 review follow-up addressed: branded PersonaVisualCustomStateId no longe
 Review follow-up verification: bun run test src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx -t "extracts activeToolName" passed; bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "clamps stale generation" --testTimeout=20000 passed; bun run test src/components/Common/PersonaBuddy/__tests__/personaVisualState.test.ts src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/hooks/__tests__/usePersonaLiveVoiceController.test.tsx src/routes/hooks/__tests__/usePersonaIncomingPayload.visuals.test.tsx src/store/__tests__/persona-visual-runtime.test.ts passed with 86 tests; bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx --testTimeout=30000 passed with 25 tests; git diff --check passed. ./node_modules/.bin/tsc --noEmit -p tsconfig.json --pretty false still exits nonzero on existing repo-wide type drift outside this slice; no changed persona visual files were reported in the emitted errors. Bandit remains not applicable for this frontend-only TypeScript/task-file slice.
 
 Follow-up after PR comment: hardened VisualPackEditor localization test background fetch stubs so the candidate-loading assertion no longer waits on unrelated background requests. Verification after this follow-up: bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx -t "localizes loading and refresh labels while candidates are loading" --testTimeout=20000 passed; bun run test src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx --testTimeout=30000 passed with 25 tests; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

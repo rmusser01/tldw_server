@@ -138,6 +138,15 @@ The database uses a schema version to manage evolution.
 *   Initialization applies the base schema (V4) and then migrations to V5 (flashcards/decks/reviews), V6 (flashcard `model_type`/`extra`), and V7 (flashcard `reverse`).
 *   A legacy repair path adds missing `entity_id` to `sync_log` if detected before reapplying schema.
 
+PostgreSQL cold initialization and upgrades wait up to 30 seconds to acquire the
+schema-bootstrap advisory lock. This coordination budget does not increase the
+five-second DDL lock timeout or the 30-second migration statement timeout, and
+an operator's shorter statement timeout still applies during acquisition. A
+completed current schema is checked on each open without replaying migrations.
+Failed acquisition or migration cleanup discards the uncertain connection rather
+than returning it to the pool. Exhausting a budget still fails initialization;
+large upgrades should run offline rather than rely on unbounded startup retries.
+
 ### Client ID
 The `client_id` provided during `CharactersRAGDB` initialization is crucial for the `sync_log`. Every modification (create, update, delete) logged in `sync_log` (and written to the entity tables) is stamped with this `client_id`. This allows synchronization systems to identify the origin of changes and helps in conflict resolution strategies.
 
@@ -186,6 +195,7 @@ The library is designed to be used in multi-threaded environments:
 *   It uses `threading.local()` to store SQLite connections, ensuring each thread has its own independent connection.
 *   When connecting, `check_same_thread=False` is used, which is necessary when connections are managed per-thread but might be created by a central manager.
 *   The `PRAGMA journal_mode=WAL;` (Write-Ahead Logging) is set for non-memory databases, which improves concurrency and performance.
+*   **PostgreSQL:** a pooled connection is owned by a `chacha_operation` (`DB_Management/chacha/operation_scope.py`). `ChaChaOperationMiddleware` opens one per HTTP request; outside HTTP each unit of work opens its own: a WebSocket step or persona call, a job owner or cancel action (`@owns_chacha_checkouts`), or a background pass. All the threads of one operation share one connection, so never run ChaCha transactions concurrently inside it: code that fans out gives each call its own `chacha_operation(independent=True)`. A `db.transaction()` entered while another thread or task holds the operation's transaction raises `ConcurrentChaChaTransactionError`. Outside an operation a handle falls back to one checkout per thread. It goes back to the pool at the next ChaCha call after the thread exits, but a dropped handle's not before the cyclic GC collects it and its thread has exited, so new background entry points must own their work ([ADR-080](../../ADR/080-chacha-postgres-checkouts-owned-by-entry-points.md)). `close_all_connections()` never closes the shared content pool.
 
 ### JSON Fields
 Certain columns store structured data as JSON strings:

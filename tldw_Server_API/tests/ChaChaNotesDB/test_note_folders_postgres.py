@@ -184,3 +184,50 @@ def test_postgres_note_folder_schema_backfills_active_duplicates_and_uses_partia
         )
     finally:
         db.close_connection()
+
+
+def test_postgres_keyword_link_listing_is_owner_scoped(pg_database_config: DatabaseConfig) -> None:
+    """The listing must scope exactly like its count (TASK-13317).
+
+    The notes endpoint used to list collection_keywords with raw SQL and no owner
+    filter, returning every tenant's links in the shared PostgreSQL database while the
+    total it reported counted only the caller's.
+    """
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owners = ("920001", "920002")
+    dbs = {owner: CharactersRAGDB(db_path=":memory:", client_id=owner, backend=backend) for owner in owners}
+    linked: dict[str, tuple[int, int]] = {}
+    for owner, db in dbs.items():
+        keyword_id = db.add_keyword(f"scope-probe-{owner}")
+        collection_id = db.add_keyword_collection(f"scope-probe-{owner}")
+        assert db.link_collection_to_keyword(collection_id, keyword_id)
+        linked[owner] = (collection_id, keyword_id)
+
+    for owner, db in dbs.items():
+        listed = {(row["collection_id"], row["keyword_id"]) for row in db.list_collection_keyword_links(1000, 0)}
+        other = linked[owners[1] if owner == owners[0] else owners[0]]
+        assert linked[owner] in listed
+        assert other not in listed
+        assert len(listed) == db.count_collection_keyword_links()
+
+
+def test_postgres_keyword_lookup_is_case_insensitive_and_owner_scoped(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    """PostgreSQL strips COLLATE NOCASE, so lookups must not compare case-sensitively (TASK-13950.5)."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(db_path=":memory:", client_id="930001", backend=backend)
+    other = CharactersRAGDB(db_path=":memory:", client_id="930002", backend=backend)
+
+    try:
+        keyword_id = db.add_keyword("foo")
+        other_id = other.add_keyword("FOO")
+
+        found = db.get_keyword_by_text("FOO")
+        other_found = other.get_keyword_by_text("foo")
+
+        assert found is not None and (found["id"], found["keyword"]) == (keyword_id, "foo")
+        assert other_found is not None and other_found["id"] == other_id
+    finally:
+        db.close_connection()
+        other.close_connection()

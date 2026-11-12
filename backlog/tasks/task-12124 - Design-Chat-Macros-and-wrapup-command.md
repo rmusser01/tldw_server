@@ -27,17 +27,15 @@ Write the approved Chat Macros design spec covering a dedicated Chat_Macros modu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Design doc written at Docs/superpowers/specs/2026-07-03-chat-macros-design.md.
 - Spec review loop completed: reviewer status Approved; no blocking issues.
 - Advisory refinements folded in before the first commit: explicit branch_strategy schema knob and v1 repeated --question behavior.
 - Follow-up implementation-readiness review completed after user request. The spec now resolves run DB ownership, final result persistence, idempotent post-back semantics, shell-style slash arg parsing/bounds, and staged implementation guidance.
 - Verification: documentation-only task; no code tests or Bandit run applicable. Local checks verified no TODO/TBD/FIXME placeholders in the spec.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Bookkeeping corrected on 2026-08-23 after TASK-12126 and PR #2618 were completed and merged.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -56,6 +56,25 @@ describe("useImplicitFeedback", () => {
     })
   })
 
+  it("sends nothing while disabled (temporary mode)", async () => {
+    const { result } = renderHook(() =>
+      useImplicitFeedback({
+        conversationId: "C_1",
+        messageId: "M_1",
+        query: "And of Italy?",
+        sources: [],
+        enabled: false
+      })
+    )
+
+    act(() => {
+      result.current.trackDwellTime(3000)
+    })
+
+    await Promise.resolve()
+    expect(mocks.submitImplicitFeedback).not.toHaveBeenCalled()
+  })
+
   it("emits dwell_time with dwell_ms", async () => {
     const source = {
       metadata: {

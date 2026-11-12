@@ -9,7 +9,7 @@ import hashlib
 
 import pytest
 
-from tldw_Server_API.app.core.DB_Management.kanban_vector_search import (
+from tldw_Server_API.app.core.Kanban.vector_search import (
     get_kanban_collection_name,
     is_vector_search_available,
     KanbanVectorSearch,
@@ -239,7 +239,7 @@ class TestKanbanVectorSearchHelpers:
         assert result == []
 
     def test_index_card_enqueues_embeddings_job(self, monkeypatch):
-        from tldw_Server_API.app.core.DB_Management import kanban_vector_search as kvs
+        from tldw_Server_API.app.core.Kanban import vector_search as kvs
 
         instance = kvs.KanbanVectorSearch(
             user_id="1",
@@ -282,7 +282,7 @@ class TestKanbanVectorSearchHelpers:
         assert stage_payload["card_version"] == 7
 
     def test_index_card_fails_root_job_when_enqueue_fails(self, monkeypatch):
-        from tldw_Server_API.app.core.DB_Management import kanban_vector_search as kvs
+        from tldw_Server_API.app.core.Kanban import vector_search as kvs
 
         instance = kvs.KanbanVectorSearch(
             user_id="1",
@@ -361,7 +361,7 @@ class TestKanbanVectorSearchHelpers:
 
     def test_factory_degrades_on_pyo3_style_panic(self, monkeypatch):
 
-        from tldw_Server_API.app.core.DB_Management import kanban_vector_search as kvs
+        from tldw_Server_API.app.core.Kanban import vector_search as kvs
 
         class PanicException(BaseException):
             pass

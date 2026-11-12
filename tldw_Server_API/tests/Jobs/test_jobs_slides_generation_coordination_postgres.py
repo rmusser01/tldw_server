@@ -97,15 +97,16 @@ def test_postgres_migration_adds_archive_indexes_shared_tables_and_narrow_uuid_c
     jobs_pg_dsn,
 ):
     ensure_jobs_tables_pg(jobs_pg_dsn)
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute("DROP INDEX IF EXISTS idx_jobs_archive_slides_scope")
         cur.execute("DROP INDEX IF EXISTS idx_jobs_archive_uuid_unique")
         cur.execute("CREATE INDEX idx_jobs_archive_slides_scope ON jobs_archive(uuid)")
         cur.execute("CREATE UNIQUE INDEX idx_jobs_archive_uuid_unique ON jobs_archive(id)")
 
-    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
     assert manager.get_slides_generation_readiness()["archive_indexes_ready"] is False
     ensure_jobs_tables_pg(jobs_pg_dsn)
+    assert manager.get_slides_generation_readiness()["archive_indexes_ready"] is True
 
     with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
         cur.execute(
@@ -207,6 +208,27 @@ def test_postgres_migration_adds_archive_indexes_shared_tables_and_narrow_uuid_c
                         ),
                         (job_uuid,),
                     )
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize("ordering", ("ASC", "ASC NULLS FIRST", "DESC NULLS LAST"))
+def test_postgres_archive_index_readiness_rejects_wrong_sort_options(jobs_pg_dsn, ordering):
+    with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
+        assert slides_archive_indexes_ready_pg(cur) is True
+        cur.execute("DROP INDEX idx_jobs_archive_slides_scope")
+        cur.execute(
+            psycopg.sql.SQL(
+                "CREATE INDEX idx_jobs_archive_slides_scope ON jobs_archive "
+                "(domain, queue, job_type, idempotency_key, owner_user_id, archived_at {}) "
+                "WHERE idempotency_key IS NOT NULL"
+            ).format(psycopg.sql.SQL(ordering))
+        )
+        assert slides_archive_indexes_ready_pg(cur) is False
+
+    ensure_jobs_tables_pg(jobs_pg_dsn)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        assert slides_archive_indexes_ready_pg(cur) is True
 
 
 @pytest.mark.pg_jobs
@@ -849,9 +871,9 @@ def test_postgres_reconciliation_lock_order_and_registry_grant_are_narrow():
     assert singleton_lock < registry_lock
     assert "SELECT DISTINCT config_revision" not in postgres_source
 
-    prune_source = inspect.getsource(JobManager.prune_jobs)
-    assert "pg_advisory_xact_lock" in prune_source
-    assert "_SLIDES_GENERATION_CORRELATION_LOCK_PARTS" in prune_source
+    transaction_source = inspect.getsource(JobManager._prune_transaction)
+    assert "pg_advisory_xact_lock" in transaction_source
+    assert "_SLIDES_GENERATION_CORRELATION_LOCK_PARTS" in transaction_source
 
     rls_source = inspect.getsource(ensure_jobs_rls_policies_pg)
     assert "GRANT INSERT ON TABLE " in rls_source
@@ -1004,15 +1026,16 @@ def test_postgres_archive_index_shape_helper_rejects_wrong_catalog_rows():
             True,
             False,
             6,
-            ["domain", "queue", "job_type", "idempotency_key", "owner_user_id", "archived_at DESC"],
+            ["domain", "queue", "job_type", "idempotency_key", "owner_user_id", "archived_at"],
+            [0, 0, 0, 0, 0, 3],
             "(idempotency_key IS NOT NULL)",
         ),
-        (True, True, True, 1, ["uuid"], "(uuid IS NOT NULL)"),
+        (True, True, True, 1, ["uuid"], [0], "(uuid IS NOT NULL)"),
     )
     assert slides_archive_indexes_ready_pg(StubCursor(exact_rows)) is True
     wrong_rows = (
-        (True, True, False, 1, ["uuid"], "(uuid IS NOT NULL)"),
-        (True, True, True, 1, ["uuid"], "(uuid IS NOT NULL)"),
+        (True, True, False, 1, ["uuid"], [0], "(uuid IS NOT NULL)"),
+        (True, True, True, 1, ["uuid"], [0], "(uuid IS NOT NULL)"),
     )
     assert slides_archive_indexes_ready_pg(StubCursor(wrong_rows)) is False
     included_rows = (
@@ -1021,16 +1044,17 @@ def test_postgres_archive_index_shape_helper_rejects_wrong_catalog_rows():
             True,
             False,
             7,
-            ["domain", "queue", "job_type", "idempotency_key", "owner_user_id", "archived_at DESC"],
+            ["domain", "queue", "job_type", "idempotency_key", "owner_user_id", "archived_at"],
+            [0, 0, 0, 0, 0, 3],
             "(idempotency_key IS NOT NULL)",
         ),
-        (True, True, True, 2, ["uuid"], "(uuid IS NOT NULL)"),
+        (True, True, True, 2, ["uuid"], [0], "(uuid IS NOT NULL)"),
     )
     assert slides_archive_indexes_ready_pg(StubCursor(included_rows)) is False
 
 
 @pytest.mark.pg_jobs
-def test_postgres_rls_role_gets_only_registry_insert(jobs_pg_dsn, monkeypatch):
+def test_postgres_rls_role_insert_grants_remain_owner_scoped(jobs_pg_dsn, monkeypatch):
     role = f"jobs_registry_{uuid.uuid4().hex[:12]}"
     monkeypatch.setenv("JOBS_PG_RLS_ROLE", role)
     ensure_jobs_rls_policies_pg(jobs_pg_dsn)
@@ -1055,7 +1079,26 @@ def test_postgres_rls_role_gets_only_registry_insert(jobs_pg_dsn, monkeypatch):
                 "SELECT has_table_privilege(%s, 'jobs', 'INSERT')",
                 (role,),
             )
-            assert cur.fetchone()[0] is False
+            assert cur.fetchone()[0] is True
+        with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+            cur.execute(psycopg.sql.SQL("SET LOCAL ROLE {}").format(psycopg.sql.Identifier(role)))
+            cur.execute("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user")
+            assert cur.fetchone() == (False, False)
+            cur.execute("SELECT set_config('app.is_admin','false',true)")
+            cur.execute("SELECT set_config('app.domain_allowlist','claims',true)")
+            cur.execute("SELECT set_config('app.owner_user_id','owner-a',true)")
+            cur.execute(
+                "INSERT INTO jobs(uuid,domain,queue,job_type,owner_user_id,status) "
+                "VALUES (%s,'claims','default','registry-probe','owner-a','queued') RETURNING owner_user_id",
+                (str(uuid.uuid4()),),
+            )
+            assert cur.fetchone()[0] == "owner-a"
+            with pytest.raises(psycopg.errors.InsufficientPrivilege), conn.transaction():
+                cur.execute(
+                    "INSERT INTO jobs(uuid,domain,queue,job_type,owner_user_id,status) "
+                    "VALUES (%s,'claims','default','registry-probe','owner-b','queued')",
+                    (str(uuid.uuid4()),),
+                )
     finally:
         with psycopg.connect(jobs_pg_dsn, autocommit=True) as conn, conn.cursor() as cur:
             identifier = psycopg.sql.Identifier(role)
@@ -1642,6 +1685,153 @@ def test_postgres_archived_generic_identity_rejects_json_type_mismatch(
 
     assert found.state is JobIdentityLookupState.CONFLICT
     assert found.row is None
+
+
+@pytest.mark.pg_jobs
+@pytest.mark.parametrize(
+    ("create_owner", "create_key"),
+    (("owner-2", "must-not-slip-through"), ("owner-1", "unsafe-archive")),
+)
+def test_postgres_unsafe_archive_poison_commits_before_waiting_create_rechecks(
+    jobs_pg_dsn, monkeypatch, create_owner, create_key
+):
+    prune_manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    create_manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    job = prune_manager.create_job(
+        domain="slides",
+        queue="default",
+        job_type="presentation.generate",
+        payload={"receipt_id": "active"},
+        owner_user_id="owner-1",
+        idempotency_key="unsafe-archive",
+    )
+    dependent = prune_manager.create_job(
+        domain="slides",
+        queue="high",
+        job_type="presentation.generate",
+        payload={"receipt_id": "dependent"},
+        owner_user_id="owner-1",
+        idempotency_key="dependent",
+    )
+    assert prune_manager.add_job_dependency(dependent["uuid"], job["uuid"])
+    tables = ("jobs", "jobs_archive", "job_dependencies")
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE jobs SET status='completed', completed_at=%s WHERE id=%s",
+            (NOW - timedelta(days=60), int(job["id"])),
+        )
+        cur.execute(
+            """
+            INSERT INTO jobs_archive (
+                id, uuid, domain, queue, job_type, owner_user_id,
+                idempotency_key, payload, status, completed_at, archived_at
+            ) VALUES (%s, %s, 'slides', 'default', 'presentation.generate',
+                      'other-owner', 'other-key', %s, 'completed', %s, %s)
+            """,
+            (int(job["id"]), job["uuid"], json.dumps({"receipt_id": "archive"}), NOW - timedelta(days=60), NOW),
+        )
+        before_prune = {}
+        for table in tables:
+            cur.execute(psycopg.sql.SQL("SELECT * FROM {} ORDER BY 1").format(psycopg.sql.Identifier(table)))
+            before_prune[table] = cur.fetchall()
+
+    collision_seen, allow_poison, create_waiting, create_finished = (Event() for _ in range(4))
+    original_collision_check = prune_manager._idempotent_slides_archive_collisions
+
+    def pause_on_collision(*args, **kwargs):
+        try:
+            return original_collision_check(*args, **kwargs)
+        except SlidesGenerationJobsUnavailableError:
+            collision_seen.set()
+            assert allow_poison.wait(timeout=5)
+            raise
+
+    class SignalingCursor:
+        def __init__(self, inner, *, pruning):
+            self._inner, self._pruning = inner, pruning
+
+        def __enter__(self):
+            self._inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._inner.__exit__(*args)
+
+        def execute(self, sql, *args, **kwargs):
+            if not self._pruning and "pg_advisory_xact_lock" in str(sql):
+                create_waiting.set()
+            return self._inner.execute(sql, *args, **kwargs)
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    class SignalingConnection:
+        def __init__(self, inner, *, pruning):
+            self._inner, self._pruning = inner, pruning
+
+        def cursor(self, *args, **kwargs):
+            return SignalingCursor(self._inner.cursor(*args, **kwargs), pruning=self._pruning)
+
+        def __enter__(self):
+            self._inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            result = self._inner.__exit__(*args)
+            if self._pruning and args[0] is not None:
+                # Force the waiting creator through the real advisory-fence release.
+                assert create_finished.wait(timeout=5)
+            return result
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    original_prune_connect, original_create_connect = prune_manager._connect, create_manager._connect
+    monkeypatch.setattr(prune_manager, "_idempotent_slides_archive_collisions", pause_on_collision)
+    monkeypatch.setattr(prune_manager, "_connect", lambda: SignalingConnection(original_prune_connect(), pruning=True))
+    monkeypatch.setattr(
+        create_manager, "_connect", lambda: SignalingConnection(original_create_connect(), pruning=False)
+    )
+    monkeypatch.setenv("JOBS_ARCHIVE_BEFORE_DELETE", "true")
+
+    def create_while_pruning():
+        try:
+            return create_manager.create_job(
+                domain="slides",
+                queue="default",
+                job_type="presentation.generate",
+                payload={"receipt_id": "racing"},
+                owner_user_id=create_owner,
+                idempotency_key=create_key,
+            )
+        finally:
+            create_finished.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        prune_future = executor.submit(
+            prune_manager.prune_jobs,
+            older_than_days=1,
+            domain="slides",
+            queue="default",
+            job_type="presentation.generate",
+        )
+        assert collision_seen.wait(timeout=5)
+        create_future = executor.submit(create_while_pruning)
+        assert create_waiting.wait(timeout=5)
+        allow_poison.set()
+        with pytest.raises(
+            SlidesGenerationJobsUnavailableError, match="unsafe presentation.generate archive collision"
+        ):
+            prune_future.result(timeout=5)
+        with pytest.raises(SlidesGenerationJobsUnavailableError, match="coordination is unavailable"):
+            create_future.result(timeout=5)
+
+    with psycopg.connect(jobs_pg_dsn) as conn, conn.cursor() as cur:
+        for table in tables:
+            cur.execute(psycopg.sql.SQL("SELECT * FROM {} ORDER BY 1").format(psycopg.sql.Identifier(table)))
+            assert cur.fetchall() == before_prune[table]
+        cur.execute("SELECT diagnostic_code FROM slides_standalone_reconciliation WHERE singleton_id=1")
+        assert cur.fetchone()[0] == "ambiguous_generation_legacy_row"
 
 
 @pytest.mark.pg_jobs

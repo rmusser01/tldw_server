@@ -534,7 +534,7 @@
     "message": "Salvar após revisão"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Revisar antes de salvar"
+    "message": "Revisar o conteúdo extraído antes de salvar"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Processe agora e depois edite os rascunhos localmente antes de enviá-los ao servidor."
@@ -2758,5 +2758,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "O salvamento offline não está disponível até que sua conta e o armazenamento local sejam confirmados. Suas alterações permanecem sem salvar."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

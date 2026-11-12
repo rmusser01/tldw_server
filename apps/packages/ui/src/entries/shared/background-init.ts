@@ -1,6 +1,11 @@
 import type { Storage } from "@plasmohq/storage"
 import { browser } from "wxt/browser"
-import { getInitialConfig } from "@/services/action"
+import {
+  ACTION_ICON_CLICK_SETTING,
+  CONTEXT_MENU_CLICK_SETTING,
+  getInitialConfig
+} from "@/services/action"
+import { getStorageForSetting } from "@/services/settings/registry"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { resolveEffectiveTldwConfig } from "@/services/tldw/single-user-credential"
@@ -31,9 +36,12 @@ export type BackgroundInitResult = {
 }
 
 export const MODEL_WARM_ALARM_NAME = "tldw:model-warm"
-const MODEL_WARM_INTERVAL_MINUTES = 60
+const MODEL_WARM_INTERVAL_MINUTES = 360
 const OPENAPI_DRIFT_LAST_CHECK_KEY = "__tldwOpenApiDriftLastCheckV1"
-const OPENAPI_DRIFT_MIN_INTERVAL_MS = 15 * 60 * 1000
+// Full /openapi.json downloads on every routine worker wake are far too
+// chatty; drift is re-checked at most daily (config changes still re-check
+// immediately because the persisted marker is scoped to the server base).
+const OPENAPI_DRIFT_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 
 type OpenApiDriftLastCheck = {
   base: string
@@ -73,7 +81,9 @@ const syncWebClipperContextMenu = async (menuId: string) => {
 
   let hasWebClipper = false
   try {
-    const capabilities = await getServerCapabilities({ forceRefresh: true })
+    // Cold start must not bypass the persisted capability cache; the cache
+    // key is scoped to the connection, so config changes still miss.
+    const capabilities = await getServerCapabilities()
     hasWebClipper = Boolean(capabilities.hasWebClipper)
   } catch {
     hasWebClipper = false
@@ -92,8 +102,10 @@ const syncWebClipperContextMenu = async (menuId: string) => {
 
 const shouldSkipOpenApiDriftCheck = async (
   storage: Storage,
-  base: string
+  base: string,
+  force = false
 ): Promise<boolean> => {
+  if (force) return false
   try {
     const raw = await storage.get<OpenApiDriftLastCheck | null>(
       OPENAPI_DRIFT_LAST_CHECK_KEY
@@ -174,7 +186,7 @@ const isSameOriginWebUiOpenApiBase = (base: string): boolean => {
   }
 }
 
-const checkOpenApiDrift = async (storage: Storage) => {
+const checkOpenApiDrift = async (storage: Storage, options?: { force?: boolean }) => {
   let timeout: ReturnType<typeof setTimeout> | null = null
   try {
     const cfg = await resolveEffectiveTldwConfig({
@@ -184,7 +196,8 @@ const checkOpenApiDrift = async (storage: Storage) => {
     const base = String(cfg?.serverUrl || "").replace(/\/$/, "")
     if (!base) return
     if (isSameOriginWebUiOpenApiBase(base)) return
-    if (await shouldSkipOpenApiDriftCheck(storage, base)) return
+    if (await shouldSkipOpenApiDriftCheck(storage, base, options?.force === true))
+      return
 
     const controller = new AbortController()
     timeout = setTimeout(() => controller.abort(), 10000)
@@ -288,14 +301,16 @@ export const initBackground = async (
     sidePanel: browser.i18n.getMessage("openSidePanelToChat")
   }
 
-  storage.watch({
+  getStorageForSetting(ACTION_ICON_CLICK_SETTING).watch({
     actionIconClick: (value) => {
       const oldValue = value?.oldValue || "webui"
       const newValue = value?.newValue || "webui"
       if (oldValue !== newValue) {
         onActionIconClickChange(newValue)
       }
-    },
+    }
+  })
+  getStorageForSetting(CONTEXT_MENU_CLICK_SETTING).watch({
     contextMenuClick: (value) => {
       const oldValue = value?.oldValue || "sidePanel"
       const newValue = value?.newValue || "sidePanel"
@@ -308,15 +323,23 @@ export const initBackground = async (
           contexts: ["page", "selection"]
         })
       }
-    },
+    }
+  })
+  storage.watch({
     tldwConfig: (value) => {
       const nextUrl = getServerUrl(value?.newValue)
       const prevUrl = getServerUrl(value?.oldValue)
       const hasServer = nextUrl.length > 0
       void scheduleModelWarmAlarm(hasServer)
-      void syncWebClipperContextMenu(saveToClipperMenuId)
-      if (hasServer && nextUrl !== prevUrl) {
-        void warmModels(true)
+      // WP-62: the clipper context menu only depends on the connected
+      // server, so re-sync it (and re-warm models) only when the URL actually
+      // changed — unrelated config writes (e.g. credential refreshes) used to
+      // rebuild the menu and re-resolve capabilities on every write.
+      if (nextUrl !== prevUrl) {
+        void syncWebClipperContextMenu(saveToClipperMenuId)
+        if (hasServer) {
+          void warmModels(true)
+        }
       }
     }
   })
@@ -457,7 +480,9 @@ export const initBackground = async (
   }
 
   if (hasServer) {
-    void warmModels(true)
+    // Cold start warms from the persisted catalog (15-min TTL) instead of
+    // forcing a refresh_openrouter=true round trip on every worker wake.
+    void warmModels(false)
   }
   await scheduleModelWarmAlarm(hasServer)
 

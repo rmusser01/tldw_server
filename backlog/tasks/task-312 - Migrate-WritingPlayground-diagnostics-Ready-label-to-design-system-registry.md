@@ -34,7 +34,7 @@ Replace the remaining hardcoded WritingPlaygroundDiagnosticsPanel Ready product-
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented WritingPlaygroundDiagnosticsPanel ready-label migration to getDesignSystemState("ready").label with optional fallback. Added focused Vitest coverage that mocks the registry ready label to "Registry Ready" and verifies the panel renders it. Removed the matching canonical-state-label baseline entry and refreshed the two existing AntD Alert baseline IDs shifted by the import.
 
 Verification: bun run test src/components/Option/WritingPlayground/__tests__/WritingPlaygroundDiagnosticsPanel.design-system-state.test.tsx --reporter=dot (pass); bun run test src/design-system/__tests__/product-state-guard.test.ts --reporter=dot (pass); bun run verify:design-system-state (pass, 504 baseline exceptions / 24 canonical-state-label); node JSON parse for design-system-product-state-baseline.json (pass); git diff --check (pass); touched-path TypeScript filter over bunx tsc --noEmit --pretty false (tsc exited 2 for existing repo-wide diagnostics, no diagnostics matched touched paths).
@@ -46,7 +46,7 @@ PR review follow-up: live review scan found Gemini/Qodo feedback that the compon
 PR review follow-up implemented: replaced nullable readyState with module-level READY_STATE_LABEL = getDesignSystemState("ready").label, matching the established WorkspaceStatusStrip pattern and preserving the prior ready fallback behavior. Updated the regression test to use vi.hoisted for the mock label because the registry lookup now happens at module import time. Refreshed the two shifted AntD Alert baseline IDs after the module-level constant moved line context.
 
 Follow-up verification: bun run test src/components/Option/WritingPlayground/__tests__/WritingPlaygroundDiagnosticsPanel.design-system-state.test.tsx --reporter=dot (pass after vi.hoisted test fix); bun run test src/design-system/__tests__/product-state-guard.test.ts --reporter=dot (pass); bun run verify:design-system-state (pass, 504 baseline exceptions / 24 canonical-state-label); node JSON parse for design-system-product-state-baseline.json (pass); git diff --check (pass); touched-path TypeScript filter over bunx tsc --noEmit --pretty false (tsc exited 2 for existing repo-wide diagnostics, no diagnostics matched touched paths).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

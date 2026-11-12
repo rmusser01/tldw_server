@@ -1,0 +1,13 @@
+# Initial server setup and fresh Chat input
+
+TASK-13454.10; follows the approved Chat UX remediation design. Baseline d96e1d0693, latest fetched dev27ce976387.
+
+Actual fresh WebUI /chat, server19765 absent: Retry preserves a typed two-line draft. Server settings followed by Close hard-navigates twice, returning to /chat with empty input. Client routing alone also unmounts the local composer. Unowned persistent storage is forbidden; the existing account clearing remains authoritative.
+
+Keep the composer/H1/provider ancestry mounted. Reuse the existing TldwSettings leaf inside a chat-local AntD dialog, opened from readiness recovery and the composer connection notice using the existing cancelable settings-navigation request. The dialog owns only visibility/dirty dismissal, with normal focus trap/return and a scrollable body. Reuse the settings form's dirty-state wording for dismissal; diagnostics opens separately so it does not remove the editor. Direct Settings routes remain usable.
+
+Open/Close preservation and Save/first-owner preservation are separate acceptance boundaries. Existing connection Save invalidates the owner and Core address/session. Do not skip clearing because ownerKey is null. A one-shot RAM checkpoint may only belong to an explicit proven first-configuration commit, freshly typed never-owned fresh input, and successful normal owner verification. No prior owner/IDs/transcript; no unrelated principal/config/storage event, ABA, New, newer input or route/overlay teardown; failure discards the checkpoint. The normal uninvalidated null-to-owner resolution and existing disabled-to-enabled draft hydration already preserve current nonempty text and are reused. Complete provenance/receipt qualification before implementing the Save boundary.
+
+Actual compact first setup needs its route owner loader/lifetime reviewed separately: its Form is not mounted before the verified owner and is keyed by owner revision/active tab. A shared hook test is insufficient product proof. No generic anonymous persistence, replacement queue, prompt assembler or authentication bypass is introduced.
+
+The bounded dialog implementation also prevents dismissal while Save is pending and checks the visible fields, form lifetime and account generation after validation and before the credential lock's first mutation. The guarded lock read must not initialize or acquire its own lock. This is cancellation qualification, not an initial-absence CAS or a first-Save handoff receipt. The complete initial setup contract still needs strict successful absence across current, legacy, cookie, runtime/environment and session authority; tolerant null getters cannot grant it.

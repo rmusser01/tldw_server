@@ -27,6 +27,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
 )
 from tldw_Server_API.app.core.Evaluations import ms_g_eval
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.providers import (
     bedrock_adapter,
     custom_openai_adapter,
@@ -303,7 +304,7 @@ async def test_chat_translation_forwards_genuine_cloud_handle_and_overwrites_loo
     )
 
     translated_provider, request, _internal = (
-        chat_service._build_adapter_request_from_chat_args(
+        gateway._build_adapter_request_from_chat_args(
             {
                 "api_provider": provider,
                 "messages": [{"role": "user", "content": "hello"}],
@@ -331,7 +332,7 @@ def test_chat_translation_rejects_bare_resolved_marker() -> None:
     """The compatibility marker cannot bypass legacy credential resolution alone."""
 
     with pytest.raises(ChatConfigurationError):
-        chat_service._build_adapter_request_from_chat_args(
+        gateway._build_adapter_request_from_chat_args(
             {
                 "api_provider": "openai",
                 "messages": [{"role": "user", "content": "hello"}],
@@ -468,7 +469,7 @@ async def test_event_gated_cloud_calls_keep_rotated_credentials_and_timeouts_iso
             assert provider == "openai"
             return RecordingAdapter()
 
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: Registry())
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: Registry())
 
     def invoke(
         handle: ProviderCallCredentials,

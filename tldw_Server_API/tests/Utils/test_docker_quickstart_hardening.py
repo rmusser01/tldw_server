@@ -124,7 +124,8 @@ def test_api_dockerfile_excludes_protected_frontend_and_bundles_legal_files():
             "COPY LICENSES /app/LICENSES",
             "COPY tldw_Server_API /app/tldw_Server_API",
             "COPY apps/mcp-unified/src /app/apps/mcp-unified/src",
-            "COPY packages/tldw_profile_core/src /app/packages/tldw_profile_core/src",
+            # Whole package since bd53b9d71a: its declared schema/fixture data ships too.
+            "COPY packages/tldw_profile_core /app/packages/tldw_profile_core",
             "COPY --from=builder /install /usr/local",
             "COPY --chown=appuser:appuser tldw_Server_API /app/tldw_Server_API",
             "COPY --chown=appuser:appuser Docs /app/Docs",
@@ -211,6 +212,15 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
         "Expected Dockerfile.webui to copy the Bun lockfile explicitly",
     )
     _require(
+        "COPY apps/patches /app/apps/patches" in text,
+        "Expected frozen workspace patches to be present before dependency installation",
+    )
+    _require(
+        text.index("COPY apps/patches /app/apps/patches")
+        < text.index("RUN bun install --frozen-lockfile --cwd /app/apps"),
+        "Expected patched dependencies to be copied before the frozen install layer",
+    )
+    _require(
         "COPY apps/tldw-frontend /app/apps/tldw-frontend" in text,
         "Expected Dockerfile.webui to copy the frontend workspace explicitly",
     )
@@ -225,11 +235,6 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
     _require(
         "COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs" in text,
         "Expected Dockerfile.webui to copy only the extension prepare shim needed for install scripts",
-    )
-    _require(
-        "COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json"
-        in text,
-        "Expected Dockerfile.webui to copy the voice assistant package manifest for frozen lockfile workspace resolution",
     )
     _require(
         "pkg.workspaces=" not in text,

@@ -6,13 +6,13 @@ import { useFeedback } from "@/hooks/useFeedback"
 import { useImplicitFeedback } from "@/hooks/useImplicitFeedback"
 import { MessageActionsBar } from "@/components/Common/Playground/MessageActionsBar"
 import { useFeedbackStore } from "@/store/feedback"
+import { useStoreMessageOption } from "@/store/option"
 
 const mocks = vi.hoisted(() => ({
   submitExplicitFeedback: vi.fn().mockResolvedValue({ ok: true, feedback_id: "fb-chat-1" }),
   submitImplicitFeedback: vi.fn().mockResolvedValue({ ok: true }),
   updateChatRating: vi.fn().mockResolvedValue({}),
-  notificationError: vi.fn(),
-  setServerChatVersion: vi.fn()
+  notificationError: vi.fn()
 }))
 
 vi.mock("@/services/feedback", () => ({
@@ -20,14 +20,6 @@ vi.mock("@/services/feedback", () => ({
   submitExplicitFeedback: mocks.submitExplicitFeedback,
   submitImplicitFeedback: mocks.submitImplicitFeedback,
   updateChatRating: mocks.updateChatRating
-}))
-
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: any) =>
-    selector({
-      serverChatVersion: null,
-      setServerChatVersion: mocks.setServerChatVersion
-    })
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
@@ -49,6 +41,7 @@ describe("Chat feedback flows", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useFeedbackStore.setState({ entries: {} })
+    useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
     window.localStorage.clear()
   })
 

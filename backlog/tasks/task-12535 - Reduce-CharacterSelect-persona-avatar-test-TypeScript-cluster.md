@@ -33,14 +33,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task517-tsc-final.txt`: package `tsc` reported two diagnostics in `src/components/Sidepanel/Chat/__tests__/CharacterSelect.persona-avatar.test.tsx` where `unknown[]` args were spread into zero-argument mock functions.
 - Root cause was test mock forwarding only. The hoisted `initialize` and `listPersonaProfiles` mocks are declared as zero-argument functions, so forwarding generic unknown args does not match their tuple type.
 - Replaced `(...args: unknown[]) => mocks.initialize(...args)` and `mocks.listPersonaProfiles(...args)` with direct zero-argument calls.
 - Focused verification: `bunx vitest run src/components/Sidepanel/Chat/__tests__/CharacterSelect.persona-avatar.test.tsx` passed: 2 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task518-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 63 in `/tmp/task517-tsc-final.txt` to 61 in `/tmp/task518-tsc-final.txt`; `rg -n 'CharacterSelect\.persona-avatar\.test\.tsx' /tmp/task518-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -133,6 +133,17 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
   const mountedRef = React.useRef(true)
   const mountGenerationRef = React.useRef(0)
   const reloadRequestRef = React.useRef(0)
+  const automaticListRef = React.useRef<{
+    personaId: string | null
+    surface: string | null
+    promise: Promise<PersonaLiveSessionList>
+    request: number
+    settled: boolean
+  } | null>(null)
+  const pendingListRef = React.useRef<{
+    promise: Promise<PersonaLiveSessionList>
+    request: number
+  } | null>(null)
 
   React.useEffect(() => {
     sessionsRef.current = sessions
@@ -162,51 +173,115 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
     []
   )
 
-  const reload = React.useCallback(async (): Promise<PersonaLiveSessionList> => {
-    const generation = mountGenerationRef.current
+  const consumeSessionList = React.useCallback(
+    async (
+      promise: Promise<PersonaLiveSessionList>,
+      request: number
+    ): Promise<PersonaLiveSessionList> => {
+      const generation = mountGenerationRef.current
+      const isCurrentRequest = () =>
+        mountedRef.current &&
+        generation === mountGenerationRef.current &&
+        request === reloadRequestRef.current
+      if (request === reloadRequestRef.current) {
+        pendingListRef.current = { promise, request }
+        setLoading(true)
+        setError(null)
+      }
+      try {
+        const payload = await promise
+        if (isCurrentRequest()) {
+          setSessions(payload.sessions)
+          setFocusedSessionId(chooseFocusedSessionId(payload))
+        }
+        return payload
+      } catch (err) {
+        const message = getSessionErrorMessage(
+          err,
+          "Failed to load Persona live sessions"
+        )
+        if (isCurrentRequest()) {
+          setError(message)
+        }
+        throw err
+      } finally {
+        if (pendingListRef.current?.request === request) {
+          pendingListRef.current = null
+        }
+        if (isCurrentRequest()) {
+          setLoading(false)
+        }
+      }
+    },
+    []
+  )
+
+  const reload = React.useCallback((): Promise<PersonaLiveSessionList> => {
     const request = ++reloadRequestRef.current
-    const isCurrentRequest = () =>
-      mountedRef.current &&
-      generation === mountGenerationRef.current &&
-      request === reloadRequestRef.current
-    setLoading(true)
-    setError(null)
-    try {
-      const payload = await listPersonaLiveSessions({
+    return consumeSessionList(
+      listPersonaLiveSessions({
         personaId: normalizedDefaultPersonaId,
         surface: normalizedSurface
-      })
-      if (isCurrentRequest()) {
-        setSessions(payload.sessions)
-        setFocusedSessionId(chooseFocusedSessionId(payload))
-      }
-      return payload
-    } catch (err) {
-      const message = getSessionErrorMessage(
-        err,
-        "Failed to load Persona live sessions"
-      )
-      if (isCurrentRequest()) {
-        setError(message)
-      }
-      throw err
-    } finally {
-      if (isCurrentRequest()) {
-        setLoading(false)
-      }
-    }
-  }, [normalizedDefaultPersonaId, normalizedSurface])
+      }),
+      request
+    )
+  }, [consumeSessionList, normalizedDefaultPersonaId, normalizedSurface])
 
   React.useEffect(() => {
     if (!autoLoad) {
+      if (automaticListRef.current) {
+        if (automaticListRef.current.request === reloadRequestRef.current) {
+          reloadRequestRef.current += 1
+        }
+        automaticListRef.current = null
+      }
       setLoading(false)
       return
     }
-    void reload().catch(() => undefined)
-  }, [autoLoad, reload])
+    let entry = automaticListRef.current
+    if (
+      !entry ||
+      entry.personaId !== normalizedDefaultPersonaId ||
+      entry.surface !== normalizedSurface
+    ) {
+      entry = {
+        personaId: normalizedDefaultPersonaId,
+        surface: normalizedSurface,
+        promise: listPersonaLiveSessions({
+          personaId: normalizedDefaultPersonaId,
+          surface: normalizedSurface
+        }),
+        request: ++reloadRequestRef.current,
+        settled: false
+      }
+      const pending = entry
+      entry.promise = entry.promise.finally(() => {
+        pending.settled = true
+      })
+      automaticListRef.current = entry
+    }
+    // Effect replay retains refs. Reattach to pending work; a settled snapshot
+    // must not reload or overwrite newer session actions/stream updates.
+    if (!entry.settled) {
+      void consumeSessionList(entry.promise, entry.request).catch(
+        () => undefined
+      )
+    }
+  }, [
+    autoLoad,
+    consumeSessionList,
+    normalizedDefaultPersonaId,
+    normalizedSurface
+  ])
 
   React.useEffect(() => {
     mountedRef.current = true
+    const pending = pendingListRef.current
+    if (pending && pending.request === reloadRequestRef.current) {
+      void consumeSessionList(pending.promise, pending.request).catch(
+        () => undefined
+      )
+    }
     return () => {
       mountedRef.current = false
       // Strict Mode reuses refs on setup. Work from the discarded mount must
@@ -234,7 +309,7 @@ export function usePersonaLiveControl(options: PersonaLiveControlOptions = {}) {
         }
       }
     }
-  }, [])
+  }, [consumeSessionList])
 
   const focusSession = React.useCallback(
     async (sessionId: string): Promise<PersonaLiveSessionSummary> => {

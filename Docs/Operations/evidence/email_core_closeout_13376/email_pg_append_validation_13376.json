@@ -1,0 +1,11 @@
+{
+  "media_id": 121,
+  "native_id": 121,
+  "subject_bytes": 16384,
+  "native_subject_preserved": true,
+  "normal_append_after_explicit_ids": true,
+  "other_user_media_rows": 0,
+  "outbound_attempts": 0,
+  "model_attempts": 0,
+  "root": "/private/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/tldw-email-live-postgres-55bkk89b"
+}

@@ -56,7 +56,7 @@ Add the next narrow sandbox recovery slice after PR #1406: make vz_linux session
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Design spec added at `Docs/superpowers/specs/2026-05-09-vz-linux-helper-generation-session-recovery-design.md`.
 - Implementation plan added at `Docs/superpowers/plans/2026-05-09-vz-linux-helper-generation-session-recovery.md`.
 - PR opened at https://github.com/rmusser01/tldw_server/pull/1414.
@@ -75,7 +75,7 @@ Verification: swift test --filter 'PingTests|HelperServiceVMTests' passed; pytes
 PR 1420 review pass plan: add runner docstrings and metadata None guard; move optional nonempty string normalization to a shared Sandbox helper; make Postgres session-control column migrations fail fast with contextual logging; run focused tests and Bandit before pushing.
 
 PR 1420 review verification: focused pytest passed with 27 passed and 2 skipped; git diff --check passed; Bandit review scope wrote /tmp/bandit_vz_helper_generation_review.json with 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

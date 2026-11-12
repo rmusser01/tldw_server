@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import inspect
 import json
@@ -139,7 +140,8 @@ def make_configured_explainer_generator() -> ExplainerGenerator:
             "stream": False,
             "app_config": app_config,
         }
-        response = adapter.chat(request, timeout=timeout)
+        # Off the event loop: a sync provider call blocks the server and cannot be quota-checked there (spec §4b).
+        response = await asyncio.to_thread(adapter.chat, request, timeout=timeout)
         if inspect.isawaitable(response):
             response = await response
         parsed = _parse_generation_response(response)
@@ -273,7 +275,7 @@ async def handle_explainer_node_expansion_job(
             "children_created": len(created_child_ids),
             "child_node_ids": created_child_ids,
         }
-    except Exception:
+    except Exception as exc:
         repo.update_node(
             session_id,
             node_id,
@@ -282,6 +284,7 @@ async def handle_explainer_node_expansion_job(
             generation_metadata=_build_error_metadata(
                 job_id=job_id,
                 grounding=session.grounding,
+                error=getattr(exc, "failure_code", None) or "generation_failed",
             ),
         )
         raise
@@ -442,11 +445,11 @@ def _build_generation_metadata(
     return metadata
 
 
-def _build_error_metadata(*, job_id: str, grounding: str) -> dict[str, Any]:
+def _build_error_metadata(*, job_id: str, grounding: str, error: str = "generation_failed") -> dict[str, Any]:
     return {
         "jobId": job_id,
         "grounding": grounding,
-        "error": "generation_failed",
+        "error": error,
         "generatedAt": _utc_now(),
     }
 

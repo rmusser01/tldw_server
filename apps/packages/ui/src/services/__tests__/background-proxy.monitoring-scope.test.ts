@@ -64,6 +64,20 @@ describe('scoped monitoring transport used after saving a Note', () => {
     )
   })
 
+  it('dispatches captured Restore through the real allowlist and account transport', async () => {
+    await bgRequest({path:"/api/v1/chats/owned/restore?scope_type=global&expected_version=4",method:"POST",servicePromptConfig:{serverUrl:"https://notes.test",authMode:"multi-user",expectedUserId:7},headers:{"X-TLDW-Expected-User-ID":"7"}})
+    expect(boundary.fetch).toHaveBeenCalledTimes(1)
+    const [url,init]=boundary.fetch.mock.calls[0]
+    expect(new URL(String(url)).pathname).toBe("/api/v1/chats/owned/restore")
+    expect(init.method).toBe("POST")
+    expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("7")
+  })
+  it('refuses captured Restore when credentials resolve to a replacement account', async () => {
+    boundary.get.mockImplementation(async (key:string)=>key==="tldwConfig" ? config(8) : null)
+    await expect(bgRequest({path:"/api/v1/chats/owned/restore",method:"POST",servicePromptConfig:{serverUrl:"https://notes.test",authMode:"multi-user",expectedUserId:7}})).rejects.toMatchObject({status:412})
+    expect(boundary.fetch).not.toHaveBeenCalled()
+  })
+
   it('rejects an account replacement while credentials are being loaded before dispatch', async () => {
     let release!: (value: unknown) => void
     const pendingConfig = new Promise((resolve) => {

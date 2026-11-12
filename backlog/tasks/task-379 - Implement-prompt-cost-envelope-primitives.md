@@ -46,14 +46,14 @@ Implement Stage 1 of the approved chat/world-book cache cost-control plan. This 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline before implementation: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/test_chat_service_token_estimates.py -q passed (1 test).
 
 TDD red runs recorded: new test file initially failed during collection because prompt_cost_envelope did not exist; additional unknown-content-part test failed until unsupported content parts were changed to bounded markers.
 Green verification: source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Chat/unit/test_prompt_cost_envelope.py tldw_Server_API/tests/Chat/unit/test_chat_service_token_estimates.py -q passed (7 tests).
 Security/format verification: git diff --check passed. Bandit command passed with zero findings: python -m bandit -r tldw_Server_API/app/core/Chat/prompt_cost_envelope.py -f json -o /tmp/bandit_task379.json.
 Known notes: no provider dispatch, prompt layout, usage persistence, or cache behavior was wired in this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

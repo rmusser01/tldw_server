@@ -1,17 +1,18 @@
-import React from "react"
-import { IndependentBuddyHost } from "@/components/Common/PersonaBuddy/IndependentBuddyHost"
-import { useTranslation } from "react-i18next"
-import { useSidepanelInit } from "~/hooks/useSidepanelInit"
-import { platformConfig } from "@/config/platform"
+import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 import {
   BuddyShellHost,
   BuddyShellRenderContextProvider
 } from "@/components/Common/PersonaBuddy"
+import { IndependentBuddyHost } from "@/components/Common/PersonaBuddy/IndependentBuddyHost"
 import { QuickChatHelperButton } from "@/components/Common/QuickChatHelper"
-import { patchStaticAntdNotificationCompat } from "@/utils/antd-notification-compat"
-import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
-import { AppShell } from "./AppShell"
+import { QuickIngestModalHost } from "@/components/Layouts/QuickIngestButton"
+import { platformConfig } from "@/config/platform"
 import { SidepanelRouteShell } from "@/routes/sidepanel-route-shell"
+import { patchStaticAntdNotificationCompat } from "@/utils/antd-notification-compat"
+import React from "react"
+import { useTranslation } from "react-i18next"
+import { useSidepanelInit } from "~/hooks/useSidepanelInit"
+import { AppShell } from "./AppShell"
 import {
   HashRouterWithFuture,
   SidepanelMemoryRouter
@@ -37,7 +38,7 @@ export const SidepanelApp: React.FC = () => {
     <>
       {platformConfig.features.showQuickChatHelper && <QuickChatHelperButton />}
       {platformConfig.features.showKeyboardShortcutsModal && (
-        <PageHelpModalHost />
+        <PageHelpModalHost scope="sidepanel" />
       )}
     </>
   )
@@ -53,6 +54,7 @@ export const SidepanelApp: React.FC = () => {
         extras={
           <>
             {extras}
+            <QuickIngestModalHost />
             <BuddyShellHost root="sidepanel" />
             <IndependentBuddyHost root="sidepanel" />
           </>

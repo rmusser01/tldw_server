@@ -50,7 +50,7 @@ Implement GitHub issue #1706: promote one golden-path ACP run deliverable, such 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented ACP artifact promotion backend slice for issue #1706. Added a focused promotion service at tldw_Server_API/app/core/Agent_Orchestration/artifact_promotion.py and dispatch wiring in tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py. Added regression coverage in tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion.py plus a dispatch-level golden path in test_orchestration_api.py. Verification: pytest tldw_Server_API/tests/Agent_Orchestration -q => 176 passed, 5 warnings. Ruff check on touched files => all checks passed. Bandit production touched files => exit 0; touched files with pytest B101/B105 excluded => exit 0.
 
 PR #1718 review follow-up reopened this task for Gemini feedback on post-commit promotion error handling and preview truncation maintainability.
@@ -58,7 +58,7 @@ PR #1718 review follow-up reopened this task for Gemini feedback on post-commit 
 Review follow-up verification: `python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py -k promotion_failure_without_rolling_back_task -q` failed before the endpoint fix and passed after it; `python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion.py tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py -q` passed with 43 tests and 5 warnings; `python -m ruff check tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py tldw_Server_API/app/core/Agent_Orchestration/artifact_promotion.py tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py` passed; `python -m bandit -r tldw_Server_API/app/api/v1/endpoints/agent_orchestration.py tldw_Server_API/app/core/Agent_Orchestration/artifact_promotion.py -f json -o /tmp/bandit_acp_artifact_promotion_1718.json` passed with 0 results/errors; `git diff --check` passed.
 
 Second review follow-up added `_run_sync` offloading for promotion DB I/O, response-contract assertions, promotable artifact type validation with `promote_as` fallback, optional metadata/schema/export validation, and per-artifact promotion failure isolation. The CodeRabbit suggestion to skip redacted artifacts was evaluated and not implemented because TASK-369's accepted behavior is to preserve the redaction contract for promoted artifacts; the UI layer suppresses sensitive provenance/lineage when the redaction posture requires it. Verification after this patch: `python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion.py -k 'promote_as or promote_flag_without_allowed_artifact_type or malformed_optional_metadata' -q` passed with 7 tests and 5 warnings; `python -m pytest tldw_Server_API/tests/Agent_Orchestration/test_artifact_promotion.py tldw_Server_API/tests/Agent_Orchestration/test_orchestration_api.py -q` passed with 50 tests and 5 warnings; Ruff passed on the touched endpoint/service/test files; Bandit passed with 0 results/errors; `git diff --check` passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

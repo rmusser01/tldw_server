@@ -3290,6 +3290,7 @@ def test_flashcard_assistant_respond_persists_user_and_assistant_messages(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         assert action == "explain"
@@ -3318,6 +3319,54 @@ def test_flashcard_assistant_respond_persists_user_and_assistant_messages(
     assert payload["assistant_message"]["role"] == "assistant"
     assert payload["assistant_message"]["content"] == "The glomerulus is the filtration tuft in the nephron."
     assert payload["thread"]["message_count"] == 2
+
+
+@pytest.mark.parametrize(
+    ("provider", "stored", "asks"),
+    [("openai", "openai", ["openai"]), ("openai", "anthropic", ["openai"]), ("not-a-provider", "openai", [])],
+    ids=["own-key", "server-key", "no-usable-provider"],
+)
+def test_flashcard_assistant_respond_names_its_provider_to_the_llm_quota(
+    client_with_flashcards_db: TestClient, monkeypatch, provider: str, stored: str, asks: list[str],
+):
+    """Past a limit, a reply whose provider runs on the user's own key is answered, unmarked; on the server's
+    key, or with no usable provider, it gets the 402 and the assistant never calls the LLM (TASK-15426)."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work, users_own_key
+
+    created = client_with_flashcards_db.post(
+        "/api/v1/flashcards",
+        json={"front": "What is the glomerulus?", "back": "It filters blood."},
+        headers=AUTH_HEADERS,
+    )
+    assert created.status_code == 200
+    card_uuid = created.json()["uuid"]
+    calls: list[dict[str, Any]] = []
+
+    async def recording_generate_reply(**kwargs: Any) -> dict[str, Any]:
+        calls.append({**kwargs, "prechecked": current_llm_call_context().prechecked})
+        return {"assistant_text": "Filtration.", "structured_payload": {}, "provider": "openai", "model": "gpt-test"}
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.api.v1.endpoints.flashcards.generate_study_assistant_reply",
+        recording_generate_reply,
+    )
+    refuse_llm_work(monkeypatch)
+    asked = users_own_key(monkeypatch, stored)
+
+    response = client_with_flashcards_db.post(
+        f"/api/v1/flashcards/{card_uuid}/assistant/respond",
+        json={"action": "explain", "provider": provider, "model": "gpt-test"},
+        headers=AUTH_HEADERS,
+    )
+
+    assert asked == asks
+    if stored == provider:
+        assert response.status_code == 200, response.text
+        assert [(call["provider_credentials"].api_key, call["prechecked"]) for call in calls] == [("sk-users-own-key", False)]
+    else:
+        assert_llm_quota_402(response)
+        assert calls == []
 
 
 def test_flashcard_assistant_respond_returns_409_for_stale_thread_version(
@@ -3359,6 +3408,7 @@ def test_flashcard_assistant_respond_returns_409_for_stale_thread_version(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         nonlocal call_count
@@ -3406,6 +3456,7 @@ def test_flashcard_assistant_respond_returns_400_for_input_error(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         raise InputError("invalid study assistant action")
@@ -3445,6 +3496,7 @@ def test_flashcard_assistant_respond_returns_500_for_db_error(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         raise CharactersRAGDBError("flashcard assistant reply backend unavailable")
@@ -3485,6 +3537,7 @@ def test_flashcard_assistant_respond_returns_409_for_db_conflict(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         return {
@@ -3566,6 +3619,7 @@ def test_flashcard_assistant_fact_check_returns_required_payload_keys(
         provider: str | None = None,
         model: str | None = None,
         guidance: str | None = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """Supply a controlled reply while preserving the generation call contract."""
         assert action == "fact_check"
@@ -5662,3 +5716,33 @@ def test_flashcard_tag_suggestions_rejects_limit_over_max(
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("expected_user", [None, "1", "2", "invalid"])
+def test_deck_update_checks_optional_expected_user(
+    client_with_flashcards_db, monkeypatch, expected_user
+):
+    """A stale owner assertion must fail before a real deck can be renamed."""
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    async def observed_principal(_request):
+        return AuthPrincipal(kind="user", user_id=1)
+
+    monkeypatch.setattr(auth_deps, "get_auth_principal", observed_principal)
+    client = client_with_flashcards_db
+    created = client.post("/api/v1/flashcards/decks", json={"name": "Opening name"})
+    assert created.status_code == 200  # nosec B101 - New pytest fixture setup contract.
+    original = created.json()
+    headers = {} if expected_user is None else {"X-TLDW-Expected-User-ID": expected_user}
+    response = client.patch(
+        f"/api/v1/flashcards/decks/{original['id']}",
+        json={"name": "Reviewed name", "expected_version": original["version"]},
+        headers=headers,
+    )
+    allowed = expected_user in (None, "1")
+    assert response.status_code == (200 if allowed else 412)  # nosec B101 - New pytest owner-boundary contract.
+    current = next(deck for deck in client.get("/api/v1/flashcards/decks").json() if deck["id"] == original["id"])
+    assert current["name"] == ("Reviewed name" if allowed else "Opening name")  # nosec B101 - New pytest persistence contract.
+    if not allowed:
+        assert current["version"] == original["version"]  # nosec B101 - Denial must leave the real version unchanged.

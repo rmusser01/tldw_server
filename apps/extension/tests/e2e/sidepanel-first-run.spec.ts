@@ -72,9 +72,9 @@ test.describe('Sidepanel first-run and connection panel', () => {
     const textarea = page.getByPlaceholder(/Type a message|Connect to tldw/i)
     await expect(textarea).toBeVisible()
 
-    // Default state: local-only persistence.
+    // Default state: saved on this device only.
     await expect(
-      page.getByText(/Saved locally in this browser only/i)
+      page.getByText(/Saved on this device/i).first()
     ).toBeVisible()
 
     // Toggle to temporary chat and confirm the label updates.

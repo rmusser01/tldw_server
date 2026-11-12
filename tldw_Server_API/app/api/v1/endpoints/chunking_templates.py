@@ -72,7 +72,9 @@ def _resolve_owner(requested_user_id: Any, current_user: Any) -> str:
     than through FastAPI the unfilled default is a `Query` object, so the
     request value is recognised by type rather than by identity.
     """
-    caller = str(getattr(current_user, 'id', '') or '')
+    caller = str(getattr(current_user, 'id', '') or '').strip()
+    if not caller:
+        raise HTTPException(status_code=401, detail="Authenticated template owner required")
     requested = requested_user_id if isinstance(requested_user_id, str) else None
     if requested is not None and requested != caller:
         raise HTTPException(
@@ -87,6 +89,17 @@ def _fb_bucket(user_id: Optional[str]) -> dict[str, dict[str, Any]]:
     if uid not in _FALLBACK_TEMPLATES:
         _FALLBACK_TEMPLATES[uid] = {}
     return _FALLBACK_TEMPLATES[uid]
+
+def _fb_visible_buckets(owner_user_id: str):
+    """Expose only active owned customs and the public built-in catalog."""
+    for bucket in _FALLBACK_TEMPLATES.values():
+        yield {
+            name: rec for name, rec in bucket.items()
+            if not rec.get("deleted") and (
+                rec.get("is_builtin") or str(rec.get("user_id") or "") == owner_user_id
+            )
+        }
+
 
 def _supports(obj: Any, method: str) -> bool:
     return hasattr(obj, method) and callable(getattr(obj, method, None))
@@ -196,6 +209,7 @@ async def list_templates(
         List of chunking templates matching the filter criteria
     """
     try:
+        owner_user_id = _resolve_owner(user_id, current_user)
         if response is not None:
             _emit_db_capability_headers(response, db, ["list_chunking_templates"])
             _set_db_capability_gauge(response)
@@ -205,7 +219,7 @@ async def list_templates(
         # it read everyone's -- the in-memory fallback below is a process-global
         # dict keyed by user id, so that held on SQLite too, not just on a
         # shared PostgreSQL content backend.
-        scoped_user_id = _resolve_owner(user_id, current_user) or None
+        scoped_user_id = owner_user_id
         if _supports(db, 'list_chunking_templates'):
             templates = db.list_chunking_templates(
                 include_builtin=include_builtin,
@@ -218,9 +232,13 @@ async def list_templates(
             increment_counter("chunking_templates_fallback_list_total", labels={"mode": "fallback"})
             # Fallback: aggregate from in-memory store
             templates = []
-            buckets = [_fb_bucket(scoped_user_id)]
+            buckets = _fb_visible_buckets(owner_user_id)
             for bucket in buckets:
                 for _, rec in bucket.items():
+                    if rec.get("is_builtin") and not include_builtin:
+                        continue
+                    if not rec.get("is_builtin") and not include_custom:
+                        continue
                     if tags and not any(t in (rec.get('tags') or []) for t in tags):
                         continue
                     templates.append(rec)
@@ -272,12 +290,13 @@ async def get_template(
         404: Template not found
     """
     try:
+        owner_user_id = _resolve_owner(None, current_user)
         template = None
         if _supports(db, 'get_chunking_template'):
-            template = db.get_chunking_template(name=template_name)
+            template = db.get_chunking_template(name=template_name, owner_user_id=owner_user_id)
         if not template:
             # Fallback search across in-memory buckets
-            for bucket in _FALLBACK_TEMPLATES.values():
+            for bucket in _fb_visible_buckets(owner_user_id):
                 if template_name in bucket:
                     template = bucket[template_name]
                     break
@@ -327,6 +346,7 @@ async def create_template(
         409: Template with same name already exists
     """
     try:
+        owner_user_id = _resolve_owner(template_data.user_id, current_user)
         # Convert template config to JSON string
         tmpl_dict = model_dump_compat(template_data.template)
         template_json = json.dumps(tmpl_dict)
@@ -339,7 +359,6 @@ async def create_template(
         # Ownership comes from the authenticated caller, never from the body.
         # Listing is scoped to the owner, so a row stored with a null or foreign
         # owner would be invisible to the client that just created it.
-        owner_user_id = _resolve_owner(template_data.user_id, current_user)
         # Create template in database (or fallback)
         if _supports(db, 'create_chunking_template'):
             created = db.create_chunking_template(
@@ -350,7 +369,7 @@ async def create_template(
                 tags=template_data.tags,
                 user_id=owner_user_id
             )
-            stored = db.get_chunking_template(name=created['name'])
+            stored = db.get_chunking_template(name=created['name'], owner_user_id=owner_user_id)
         else:
             increment_counter("chunking_templates_create_total", labels={"mode": "fallback"})
             # In-memory fallback
@@ -429,6 +448,7 @@ async def update_template(
         404: Template not found
     """
     try:
+        owner_user_id = _resolve_owner(None, current_user)
         # Emit DB capability headers for diagnostics
         if response is not None:
             _emit_db_capability_headers(response, db, [
@@ -444,7 +464,7 @@ async def update_template(
         # Fast path: use list() to detect built-ins deterministically when available
         if _supports(db, 'list_chunking_templates'):
             try:
-                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=None, include_deleted=False) if t.get('name') == template_name]
+                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=owner_user_id, include_deleted=False) if t.get('name') == template_name]
                 if matches:
                     ex0 = matches[0]
                     if ex0.get('is_builtin'):
@@ -457,21 +477,23 @@ async def update_template(
         existing = None
         if _supports(db, 'get_chunking_template'):
             try:
-                existing = db.get_chunking_template(name=template_name)
+                existing = db.get_chunking_template(name=template_name, owner_user_id=owner_user_id)
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 existing = None
         if not existing and _supports(db, 'list_chunking_templates'):
             try:
-                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=None, include_deleted=False) if t.get('name') == template_name]
+                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=owner_user_id, include_deleted=False) if t.get('name') == template_name]
                 existing = matches[0] if matches else None
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 existing = None
         if not existing:
             # Fallback store (best-effort). If still missing, continue; disambiguate later.
-            for bucket in _FALLBACK_TEMPLATES.values():
+            for bucket in _fb_visible_buckets(owner_user_id):
                 if template_name in bucket:
                     existing = bucket[template_name]
                     break
+        if not existing:
+            raise HTTPException(status_code=404, detail={"success": False, "error": f"Template '{template_name}' not found", "error_code": "NOT_FOUND"})
         if existing and existing.get('is_builtin'):
             raise HTTPException(status_code=400, detail="Cannot modify built-in templates")
 
@@ -495,7 +517,8 @@ async def update_template(
                     name=template_name,
                     template_json=template_json,
                     description=template_update.description,
-                    tags=template_update.tags
+                    tags=template_update.tags,
+                    owner_user_id=owner_user_id,
                 )
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 # Conservatively treat DB-layer exceptions as a protected/bad update
@@ -503,7 +526,7 @@ async def update_template(
         else:
             # In-memory update
             success = False
-            for bucket in _FALLBACK_TEMPLATES.values():
+            for bucket in _fb_visible_buckets(owner_user_id):
                 if template_name in bucket:
                     rec = bucket[template_name]
                     if rec.get('is_builtin'):
@@ -523,12 +546,12 @@ async def update_template(
             existing = None
             try:
                 if hasattr(db, 'get_chunking_template'):
-                    existing = db.get_chunking_template(name=template_name)
+                    existing = db.get_chunking_template(name=template_name, owner_user_id=owner_user_id)
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 existing = None
             if existing is None and hasattr(db, 'list_chunking_templates'):
                 try:
-                    matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=None, include_deleted=False) if t.get('name') == template_name]
+                    matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=owner_user_id, include_deleted=False) if t.get('name') == template_name]
                     existing = matches[0] if matches else None
                 except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                     existing = None
@@ -542,17 +565,17 @@ async def update_template(
         updated = None
         try:
             if hasattr(db, 'get_chunking_template'):
-                updated = db.get_chunking_template(name=template_name)
+                updated = db.get_chunking_template(name=template_name, owner_user_id=owner_user_id)
         except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
             updated = None
         if updated is None and hasattr(db, 'list_chunking_templates'):
             try:
-                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=None, include_deleted=False) if t.get('name') == template_name]
+                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=owner_user_id, include_deleted=False) if t.get('name') == template_name]
                 updated = matches[0] if matches else None
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 updated = None
         if updated is None:
-            for bucket in _FALLBACK_TEMPLATES.values():
+            for bucket in _fb_visible_buckets(owner_user_id):
                 if template_name in bucket:
                     updated = bucket[template_name]
                     break
@@ -600,6 +623,7 @@ async def delete_template(
         404: Template not found
     """
     try:
+        owner_user_id = _resolve_owner(None, current_user)
         # Emit DB capability headers for diagnostics
         if response is not None:
             _emit_db_capability_headers(response, db, [
@@ -616,17 +640,17 @@ async def delete_template(
         existing = None
         if _supports(db, 'get_chunking_template'):
             try:
-                existing = db.get_chunking_template(name=template_name)
+                existing = db.get_chunking_template(name=template_name, owner_user_id=owner_user_id)
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 existing = None
         if not existing and _supports(db, 'list_chunking_templates'):
             try:
-                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=None, include_deleted=False) if t.get('name') == template_name]
+                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=owner_user_id, include_deleted=False) if t.get('name') == template_name]
                 existing = matches[0] if matches else None
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 existing = None
         if not existing:
-            for bucket in _FALLBACK_TEMPLATES.values():
+            for bucket in _fb_visible_buckets(owner_user_id):
                 if template_name in bucket:
                     existing = bucket[template_name]
                     break
@@ -640,15 +664,16 @@ async def delete_template(
             try:
                 success = db.delete_chunking_template(
                     name=template_name,
-                    hard_delete=hard_delete
+                    hard_delete=hard_delete,
+                    owner_user_id=owner_user_id,
                 )
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 raise HTTPException(status_code=400, detail={"success": False, "error": "Cannot delete built-in templates or invalid delete", "error_code": "BAD_REQUEST"}) from None
         else:
             success = False
-            for bucket in _FALLBACK_TEMPLATES.values():
+            for bucket in _fb_visible_buckets(owner_user_id):
                 if template_name in bucket:
-                    del bucket[template_name]
+                    del _fb_bucket(owner_user_id)[template_name]
                     success = True
                     break
 
@@ -657,18 +682,18 @@ async def delete_template(
             existing = None
             try:
                 if hasattr(db, 'get_chunking_template'):
-                    existing = db.get_chunking_template(name=template_name)
+                    existing = db.get_chunking_template(name=template_name, owner_user_id=owner_user_id)
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 existing = None
             if existing is None and hasattr(db, 'list_chunking_templates'):
                 try:
-                    matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=None, include_deleted=False) if t.get('name') == template_name]
+                    matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=owner_user_id, include_deleted=False) if t.get('name') == template_name]
                     existing = matches[0] if matches else None
                 except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                     existing = None
             if not existing:
                 # Probe fallback store
-                for bucket in _FALLBACK_TEMPLATES.values():
+                for bucket in _fb_visible_buckets(owner_user_id):
                     if template_name in bucket:
                         existing = bucket[template_name]
                         break
@@ -709,6 +734,7 @@ async def apply_template(
         400: Template application error
     """
     try:
+        owner_user_id = _resolve_owner(None, current_user)
         # Emit DB capability headers for diagnostics
         if response is not None:
             _emit_db_capability_headers(response, db, ["get_chunking_template", "list_chunking_templates"])
@@ -718,17 +744,17 @@ async def apply_template(
         template_data = None
         if _supports(db, 'get_chunking_template'):
             try:
-                template_data = db.get_chunking_template(name=request.template_name)
+                template_data = db.get_chunking_template(name=request.template_name, owner_user_id=owner_user_id)
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 template_data = None
         if template_data is None and _supports(db, 'list_chunking_templates'):
             try:
-                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=None, include_deleted=False) if t.get('name') == request.template_name]
+                matches = [t for t in db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=owner_user_id, include_deleted=False) if t.get('name') == request.template_name]
                 template_data = matches[0] if matches else None
             except _CHUNKING_TEMPLATES_NONCRITICAL_EXCEPTIONS:
                 template_data = None
         if template_data is None:
-            for bucket in _FALLBACK_TEMPLATES.values():
+            for bucket in _fb_visible_buckets(owner_user_id):
                 if request.template_name in bucket:
                     template_data = bucket[request.template_name]
                     break
@@ -811,7 +837,8 @@ async def apply_template(
 
 @router.post("/validate", response_model=TemplateValidationResponse)
 async def validate_template(
-    template_config: dict[str, Any] = Body(..., description="Template configuration to validate")
+    template_config: dict[str, Any] = Body(..., description="Template configuration to validate"),
+    current_user: User = Depends(get_request_user),
 ) -> TemplateValidationResponse:
     """
     Validate a template configuration without saving it.
@@ -1033,7 +1060,8 @@ async def match_templates(
 ):
     """Return templates ranked by a simple metadata-based score for auto-apply."""
     try:
-        templates = db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=None, include_deleted=False)
+        owner_user_id = _resolve_owner(None, current_user)
+        templates = db.list_chunking_templates(include_builtin=True, include_custom=True, tags=None, user_id=owner_user_id, include_deleted=False)
         ranked = []
         for t in templates:
             try:
@@ -1066,6 +1094,7 @@ async def learn_template(
 ):
     """Learn a basic hierarchical boundary template from an example text and optionally save it."""
     try:
+        owner_user_id = _resolve_owner(None, current_user)
         boundaries = TemplateLearner.learn_boundaries(req.example_text or "")
         tmpl = {
             "name": req.name,
@@ -1080,7 +1109,7 @@ async def learn_template(
             }
         }
         if req.save:
-            uid = str(getattr(current_user, 'id', ''))
+            uid = owner_user_id
             if _supports(db, 'create_chunking_template'):
                 db.create_chunking_template(name=req.name, template_json=json.dumps(tmpl), description=req.description or "Learned", is_builtin=False, tags=["learned"], user_id=uid)
             else:

@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.External_Sources.onedrive import OneDriveConnector
 from tldw_Server_API.app.core.External_Sources.sync_adapter import FileSyncAdapter
 from tldw_Server_API.app.core.External_Sources.zotero import ZoteroConnector
 from tldw_Server_API.app.core.exceptions import ConnectorServiceError
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 _CONNECTORS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -144,8 +145,7 @@ def _connector_secret_encryption_required() -> bool:
     return (
         _env_truthy("CONNECTORS_REQUIRE_TOKEN_ENCRYPTION")
         or auth_mode == "multi_user"
-        or _env_truthy("tldw_production")
-        or _env_truthy("TLDW_PRODUCTION")
+        or is_production_like_env()
     )
 
 
@@ -460,7 +460,7 @@ async def upsert_policy(db, org_id: int, policy: dict[str, Any]) -> dict[str, An
             ",".join(data.get("denied_remote_paths") or []),
             ",".join(data.get("allowed_notion_workspaces") or []),
             ",".join(data.get("denied_notion_workspaces") or []),
-            (data.get("quotas_per_role") or {}),
+            json.dumps(data.get("quotas_per_role") or {}),
         )
     else:
         await db.execute(
@@ -491,10 +491,11 @@ async def upsert_policy(db, org_id: int, policy: dict[str, Any]) -> dict[str, An
 
 
 async def get_policy(db, org_id: int) -> dict[str, Any]:
-    await _ensure_tables(db)
     is_pg = _is_postgres_connection(db)
     if is_pg:
-        row = await db.fetchrow("SELECT * FROM org_connector_policy WHERE org_id = $1", org_id)
+        if not await db.fetchval("SELECT to_regclass('public.org_connector_policy') IS NOT NULL"):
+            return {}
+        row = await db.fetchrow("SELECT * FROM public.org_connector_policy WHERE org_id = $1", org_id)
         if not row:
             return {}
         row = dict(row)
@@ -506,7 +507,10 @@ async def get_policy(db, org_id: int) -> dict[str, Any]:
         row["denied_remote_paths"] = (row.get("denied_remote_paths") or "").split(",") if row.get("denied_remote_paths") else []
         row["allowed_notion_workspaces"] = (row.get("allowed_notion_workspaces") or "").split(",") if row.get("allowed_notion_workspaces") else []
         row["denied_notion_workspaces"] = (row.get("denied_notion_workspaces") or "").split(",") if row.get("denied_notion_workspaces") else []
+        quotas = row.get("quotas_per_role")
+        row["quotas_per_role"] = json.loads(quotas) if isinstance(quotas, str) else (quotas or {})
         return row
+    await _ensure_tables(db)
     cur = await db.execute("SELECT * FROM org_connector_policy WHERE org_id = ?", (org_id,))
     r = await cur.fetchone()
     if not r:

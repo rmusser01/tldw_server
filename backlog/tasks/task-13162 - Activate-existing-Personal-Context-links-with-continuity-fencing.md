@@ -48,7 +48,7 @@ Implement Task 1 of Docs/superpowers/plans/2026-09-03-personal-context-ongoing-s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented encrypted exact-head activation preparation, protected deterministic Sync installation, leased canonical coverage/compaction, exact per-device acknowledgement, canonical continuity enforcement, delivery expiry and abandoned-preparation recovery. Existing authorized purge removes the new journals. Version-0 rollout and shared wire records remain unchanged. Updated API/developer/user docs and generated published copies; ADR-002 governs without a new decision.
 
 Compatibility work preserved original cursor, race, projection and recovery assertions. Replaced metadata-only fixtures with explicit typed proof doubles where source publication state is the test subject; production certification and authenticated endpoints use real activation install/ack. Seven bootstrap failures also reproduced on unchanged dev (571 passed/7 failed at 3bc8c6a98c). Fixture repairs exposed a failed-ingress transition bug blocking bootstrap: added only failed to terminalization states after existing exact receipt verification. Regression RED: 2 failures/20 passes on SQLite/PostgreSQL; GREEN: 22 receipt/state cases plus all 48 bootstrap tests passed. This supporting fix was added to AC8 and the plan before implementation.
@@ -68,7 +68,7 @@ Qodo remediation: core bootstrap now owns version dispatch; public activation co
 Final targeted matrix completed: 673 passed, 53 warnings, zero failures/errors/skips, PostgreSQL required, 4739.07 seconds; /private/tmp/task13162-qodo-final.xml. All required CI gates passed and Qodo reported zero findings at 850ead03ee. Rebased onto dev 86eb9e517c after unrelated Buddy changes, preserving both testing-lessons additions in the sole documentation conflict. Range-diff confirms Personal Context code and tests unchanged; scoped Ruff passed again. Task remains In Progress until final rebased-head CI and remote merge complete. User explicitly approved unattended review fixes, rebases, pushes and merging PR 2886. ADR-002 and version-zero rollout remain unchanged.
 
 Latest-dev follow-up: rebased onto 53d683f0ed (merged llama.cpp snapshots). Preserved both appended testing-lessons entries and regenerated the combined OpenAPI fingerprint (2073 paths, 3140 schemas, sha256 53e1e9a2ef87a01fbefa8e1f5300578a6a127c8c97bcb22b14e861ab00cb3ffb). Range-diff preserves all Personal Context code/test patches; shared exceptions retain both domains. Fresh focused activation gate: 57 passed, 5 warnings, PostgreSQL required, 52.60 seconds, /private/tmp/task13162-latest-dev-activation.xml. Scoped Ruff, diff check and source/published developer-document comparison passed. Keep task In Progress until fresh remote checks and merge complete.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

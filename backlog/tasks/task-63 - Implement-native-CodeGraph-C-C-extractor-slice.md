@@ -49,7 +49,7 @@ Add the next native CodeGraph language slice for C and C++ after the merged C# w
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline in fresh worktree from origin/dev after PR #1288 merge: CodeGraph plus MCP focused suite passed with 118 passed and 5 warnings.
 
 Started implementation in /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/codegraph-c-cpp-extractor on branch codex/codegraph-c-cpp-extractor. Applying TDD for parser metadata, loader, extractor, indexer, and MCP behavior.
@@ -59,7 +59,7 @@ Implemented C/C++ dependency probing, parser loader mappings, foundation languag
 PR #1293 review-fix pass started: Qodo requested docstrings for _node_name, _function_name, and _declarator_name in c_family_extractor.py.
 
 PR #1293 review fix: added docstrings to _node_name, _function_name, and _declarator_name. Verification: C/C++ extractor tests passed with 6 passed and 5 warnings; Ruff passed on c_family_extractor and C/C++ extractor tests; Bandit JSON at /tmp/bandit_codegraph_c_cpp_review_fixes.json reported errors 0 and results 0; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

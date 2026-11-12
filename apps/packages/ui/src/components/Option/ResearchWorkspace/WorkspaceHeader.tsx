@@ -1,3 +1,4 @@
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 import React from "react"
 import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { useTranslation } from "react-i18next"
@@ -55,6 +56,12 @@ import {
 } from "@/services/tldw/TldwApiClient"
 import type { WorkspaceApiResponse } from "@/services/tldw/domains/workspace-api"
 import { useWorkspaceStore } from "@/store/workspace"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
+import { loadWorkspaceArtifacts, persistWorkspaceArtifact, rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec"
+import { mapServerArtifactToLocal } from "@/store/workspace-api"
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { useConnectionStore } from "@/store/connection"
 import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
 import { deriveConnectionUxState } from "@/types/connection"
@@ -95,7 +102,6 @@ import {
   undoWorkspaceAction,
   clearAllPendingUndoActions
 } from "./undo-manager"
-import { useTutorialStore } from "@/store/tutorials"
 import {
   FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS,
   FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY,
@@ -309,10 +315,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 }) => {
   const { t } = useTranslation(["playground", "option", "common"])
   const navigate = useNavigate()
-  const startTutorial = useTutorialStore((s) => s.startTutorial)
+  const startTutorial = useStartTutorial()
   const [messageApi, messageContextHolder] = message.useMessage()
   const handleStartWorkspaceTour = React.useCallback(() => {
-    startTutorial("research-workspace-basics")
+    if (!startTutorial("research-workspace-basics")) return
     messageApi.info(
       t(
         "playground:workspace.tourStarted",
@@ -450,7 +456,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       storageOriginUsedBytes >= 0 &&
       typeof storageOriginQuotaBytes === "number" &&
       Number.isFinite(storageOriginQuotaBytes) &&
-      storageOriginQuotaBytes > 0
+      storageOriginQuotaBytes >= 0
 
     const hasAccountUsage =
       typeof storageAccountUsedBytes === "number" &&
@@ -458,7 +464,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       storageAccountUsedBytes >= 0 &&
       typeof storageAccountQuotaBytes === "number" &&
       Number.isFinite(storageAccountQuotaBytes) &&
-      storageAccountQuotaBytes > 0
+      storageAccountQuotaBytes >= 0
 
     let accountUsageShortLabel: string | null = null
     let accountRatio: number | null = null
@@ -473,10 +479,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           ? String(Math.round(roundedAccountQuota))
           : roundedAccountQuota.toFixed(1)
       accountUsageShortLabel = `${roundedAccountUsed.toFixed(1)}/${accountQuotaLabel} MB`
-      accountRatio = Math.max(
-        0,
-        Math.min(1, storageAccountUsedBytes / storageAccountQuotaBytes)
-      )
+      accountRatio =
+        storageAccountQuotaBytes > 0
+          ? Math.max(0, Math.min(1, storageAccountUsedBytes / storageAccountQuotaBytes))
+          : 1
     }
 
     const ratio = accountRatio ?? workspaceRatio
@@ -661,7 +667,14 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     (s) => s.restoreArchivedWorkspace
   )
   const deleteWorkspace = useWorkspaceStore((s) => s.deleteWorkspace)
-  const addArtifact = useWorkspaceStore((s) => s.addArtifact)
+  const restoreArtifact = useWorkspaceStore((s) => s.restoreArtifact)
+  const pendingAcpDrafts = React.useRef(new Map<string, { draft: GeneratedArtifact; intent: string }>())
+  React.useLayoutEffect(() => {
+    pendingAcpDrafts.current.clear()
+    return watchChatAccountChanges((invalidated) => {
+      if (invalidated) pendingAcpDrafts.current.clear()
+    })
+  }, [workspaceId])
   const captureUndoSnapshot = useWorkspaceStore((s) => s.captureUndoSnapshot)
   const restoreUndoSnapshot = useWorkspaceStore((s) => s.restoreUndoSnapshot)
   const saveCurrentWorkspace = useWorkspaceStore((s) => s.saveCurrentWorkspace)
@@ -740,92 +753,137 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }
 
   const handleSaveAcpRunArtifact = React.useCallback(
-    (input: WorkspaceACPRunArtifactSaveInput) => {
-      const rootArtifactId = `acp-run-${input.runId}`
-      const versionIdPrefix = `${rootArtifactId}-v`
-      const currentArtifacts =
-        useWorkspaceStore.getState().generatedArtifacts || []
-      const priorVersions = currentArtifacts.filter(
-        (artifact: GeneratedArtifact) =>
-          artifact.rootArtifactId === rootArtifactId ||
-          artifact.artifactVersionId?.startsWith(versionIdPrefix)
-      )
-      const getArtifactVersion = (artifact: GeneratedArtifact): number => {
-        if (Number.isFinite(artifact.version)) return artifact.version ?? 0
-        const suffix = artifact.artifactVersionId?.startsWith(versionIdPrefix)
-          ? artifact.artifactVersionId.slice(versionIdPrefix.length)
-          : ""
-        return suffix && /^\d+$/.test(suffix) ? Number(suffix) : 0
+    async (input: WorkspaceACPRunArtifactSaveInput) => {
+      const isCurrent = () => input.isCurrent() && !input.scope.scopeSignal.aborted &&
+        !input.scope.scopeInvalidatedSignal.aborted &&
+        useWorkspaceStore.getState().workspaceId === input.workspaceId
+      const assertCurrent = () => {
+        if (!isCurrent()) throw createServicePromptScopeChangedError()
       }
-      const previousArtifact = priorVersions.reduce<GeneratedArtifact | null>(
-        (latest, artifact) => {
-          if (!latest) return artifact
-          return getArtifactVersion(artifact) > getArtifactVersion(latest)
-            ? artifact
-            : latest
-        },
-        null
-      )
-      const version = (previousArtifact ? getArtifactVersion(previousArtifact) : 0) + 1
-      const artifactVersionId = `${rootArtifactId}-v${version}`
-      const savedAt = new Date()
-      const parsedCompletedAt = input.completedAt
-        ? new Date(input.completedAt)
-        : savedAt
-      const completedAt = Number.isNaN(parsedCompletedAt.getTime())
-        ? savedAt
-        : parsedCompletedAt
+      assertCurrent()
+      const deadline = performance.now() + 15000
+      const key = JSON.stringify([input.scope.scopeKey, input.workspaceId, input.runId])
+      const intent = JSON.stringify([input.projectId, input.projectName, input.taskId,
+        input.taskTitle, input.runId, input.status, input.resultPreview, input.sessionId,
+        input.agentType, input.startedAt, input.completedAt, input.links, input.history])
+      const pending = pendingAcpDrafts.current.get(key)
+      if (pending && pending.intent !== intent) {
+        pendingAcpDrafts.current.delete(key)
+        throw new Error("The run result changed. Save again to save the currently displayed result as a new version.")
+      }
+      let draft = pending?.draft
+      if (!draft) {
+        const rows = await loadWorkspaceArtifacts(input.workspaceId, {
+          ...requestScopeFields(input.scope.requestScope),
+          abortSignal: AbortSignal.any([input.scope.scopeSignal, input.scope.scopeInvalidatedSignal, AbortSignal.timeout(15000)]),
+          timeoutMs: Math.max(1, Math.ceil(deadline - performance.now()))
+        })
+        assertCurrent()
+        if (!Array.isArray(rows) || rows.some(row => row.workspace_id !== input.workspaceId))
+          throw new Error("Saved artifacts belong to another workspace.")
+        rememberCanonicalArtifactWorkspace(input.workspaceId, input.scope.scopeKey)
+        const rootArtifactId = `acp-run-${input.runId}`
+        const versionIdPrefix = `${rootArtifactId}-v`
+        const currentArtifacts = rows.map(mapServerArtifactToLocal)
+        const priorVersions = currentArtifacts.filter(
+          (artifact: GeneratedArtifact) =>
+            artifact.rootArtifactId === rootArtifactId ||
+            artifact.artifactVersionId?.startsWith(versionIdPrefix)
+        )
+        const getArtifactVersion = (artifact: GeneratedArtifact): number => {
+          const suffix = artifact.artifactVersionId?.startsWith(versionIdPrefix)
+            ? artifact.artifactVersionId.slice(versionIdPrefix.length)
+            : ""
+          return suffix && /^\d+$/.test(suffix) ? Number(suffix) : artifact.version ?? 0
+        }
+        const previousArtifact = priorVersions.reduce<GeneratedArtifact | null>(
+          (latest, artifact) => {
+            if (!latest) return artifact
+            return getArtifactVersion(artifact) > getArtifactVersion(latest)
+              ? artifact
+              : latest
+          },
+          null
+        )
+        const version = (previousArtifact ? getArtifactVersion(previousArtifact) : 0) + 1
+        const artifactVersionId = `${rootArtifactId}-v${version}`
+        const savedAt = new Date()
+        const parsedCompletedAt = input.completedAt
+          ? new Date(input.completedAt)
+          : savedAt
+        const completedAt = Number.isNaN(parsedCompletedAt.getTime())
+          ? savedAt
+          : parsedCompletedAt
 
-      addArtifact({
-        type: "report",
-        status: "completed",
-        title: t(
-          "playground:workspace.savedAgentResultTitle",
-          "Agent result: {{taskTitle}}",
-          { taskTitle: input.taskTitle }
-        ),
-        content: input.resultPreview,
-        previewText: input.resultPreview,
-        summary: input.resultPreview,
-        version,
-        artifactVersionId,
-        rootArtifactId,
-        previousVersionId: previousArtifact?.artifactVersionId,
-        projectId: String(input.projectId),
-        taskId: String(input.taskId),
-        ownerScope: "research_workspace",
-        ownerId: workspaceId || undefined,
-        producerMetadata: {
-          producerType: "acp_agent_task",
-          producerId: String(input.taskId),
-          runId: String(input.runId),
-          sessionId: input.sessionId || undefined,
-          taskId: String(input.taskId),
+        draft = bindWorkspaceArtifactOrigin({
+          id: artifactVersionId, createdAt: savedAt,
+          type: "report",
+          status: "completed",
+          title: t(
+            "playground:workspace.savedAgentResultTitle",
+            "Agent result: {{taskTitle}}",
+            { taskTitle: input.taskTitle }
+          ),
+          content: input.resultPreview,
+          previewText: input.resultPreview,
+          summary: input.resultPreview,
+          version,
+          artifactVersionId,
+          rootArtifactId,
+          previousVersionId: previousArtifact?.artifactVersionId,
           projectId: String(input.projectId),
-          agentType: input.agentType || undefined,
-          links: input.links
-        },
-        versionMetadata: {
-          revisionReason: "Saved from ACP run history",
-          versionLabel: `v${version}`
-        },
-        data: {
-          acpRun: {
-            runId: input.runId,
-            sessionId: input.sessionId,
-            status: input.status,
-            agentType: input.agentType,
-            startedAt: input.startedAt,
-            completedAt: input.completedAt,
-            savedAt: savedAt.toISOString(),
-            artifactCount: input.history?.artifact_count ?? 0,
-            diagnosticCount: input.history?.diagnostic_count ?? 0,
-            auditEventCount: input.history?.audit_event_count ?? 0,
-            eventCount: input.history?.event_count ?? 0
-          }
-        },
-        completedAt
-      })
+          taskId: String(input.taskId),
+          ownerScope: "research_workspace",
+          ownerId: input.workspaceId,
+          producerMetadata: {
+            producerType: "acp_agent_task",
+            producerId: String(input.taskId),
+            runId: String(input.runId),
+            sessionId: input.sessionId || undefined,
+            taskId: String(input.taskId),
+            projectId: String(input.projectId),
+            agentType: input.agentType || undefined,
+            links: input.links
+          },
+          versionMetadata: {
+            revisionReason: "Saved from ACP run history",
+            versionLabel: `v${version}`
+          },
+          data: {
+            acpRun: {
+              runId: input.runId,
+              sessionId: input.sessionId,
+              status: input.status,
+              agentType: input.agentType,
+              startedAt: input.startedAt,
+              completedAt: input.completedAt,
+              savedAt: savedAt.toISOString(),
+              artifactCount: input.history?.artifact_count ?? 0,
+              diagnosticCount: input.history?.diagnostic_count ?? 0,
+              auditEventCount: input.history?.audit_event_count ?? 0,
+              eventCount: input.history?.event_count ?? 0
+            }
+          },
+          completedAt
+        }, input.scope.scopeKey, input.workspaceId)
+        pendingAcpDrafts.current.set(key, { draft, intent })
+      }
+      let saved: GeneratedArtifact
+      try {
+        saved = await persistWorkspaceArtifact(draft, {
+          workspaceId: input.workspaceId, scope: input.scope,
+          isCurrent: () => isCurrent() && pendingAcpDrafts.current.get(key)?.draft === draft,
+          deadline
+        })
+      } catch (error) {
+        if ((error as { status?: number })?.status === 409 ||
+          (error instanceof Error && error.message === "This saved draft changed. Reload it before saving another revision."))
+          pendingAcpDrafts.current.delete(key)
+        throw error
+      }
+      assertCurrent()
+      restoreArtifact({ ...saved, completedAt: saved.completedAt ?? draft.completedAt }, { index: 0 })
+      pendingAcpDrafts.current.delete(key)
       messageApi.success(
         t(
           "playground:workspace.acpRunSavedToStudio",
@@ -834,7 +892,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       )
       saveCurrentWorkspace()
     },
-    [addArtifact, messageApi, saveCurrentWorkspace, t, workspaceId]
+    [restoreArtifact, messageApi, saveCurrentWorkspace, t]
   )
 
   const applyDefaultAssistantWorkspaceState = (

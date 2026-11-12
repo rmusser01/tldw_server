@@ -23,7 +23,6 @@ from typing import Any, Optional
 #
 # Import Local libraries
 from tldw_Server_API.app.core.config import load_and_log_configs
-from tldw_Server_API.app.core.deprecations import log_runtime_deprecation
 
 #
 # Import 3rd-Party Libraries
@@ -54,6 +53,8 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 # Session shim for non-streaming POST calls
 # - Preserves the public name `create_session_with_retries` so tests can
 #   monkeypatch it, while centralizing non-streaming requests via http_client.
+# - Returned in tests too: a pytest-only branch once handed tests the legacy
+#   facade, so no test exercised this shim's non-streaming path.
 # - For streaming (stream=True), falls back to the legacy session facade
 #   returned by http_helpers.create_session_with_retries to preserve
 #   iter_lines() semantics used in streaming paths.
@@ -76,14 +77,8 @@ class _SessionShim:
 
     def post(self, url, *, headers=None, json=None, stream: bool = False, timeout=None, **kwargs):
         if stream:
-            log_runtime_deprecation(
-                "llm_chat_legacy_session",
-                message=(
-                    "LLM chat streaming path used legacy requests Session compatibility "
-                    "facade for iter_lines behavior."
-                ),
-            )
-            # For streaming, use legacy requests session to preserve iter_lines semantics
+            # Streaming goes through the http_helpers facade (http_client underneath),
+            # which exposes the iter_lines() shape the provider stream readers expect.
             self._delegate_session = _legacy_create_session_with_retries(
                 total=1,
             )

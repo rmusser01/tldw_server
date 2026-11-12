@@ -2,6 +2,7 @@
 import React from "react"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mockReducedMotion } from "@/test-utils/reducedMotion"
 import { ArtifactsPanel } from "../ArtifactsPanel"
 import { useArtifactsStore, type ArtifactItem } from "@/store/artifacts"
 
@@ -158,7 +159,29 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
     expect(mermaidDiagramBlockMock).not.toHaveBeenCalled()
   })
 
+  // AX-19 (#3124): the jump smooth-scrolled even under reduced motion.
+  it.each([
+    [false, "smooth"],
+    [true, "auto"]
+  ] as const)("scrolls to the artifact origin (reduced motion %s: %s)", (reduce, behavior) => {
+    const restoreMatchMedia = mockReducedMotion(reduce)
+    const origin = document.createElement("div")
+    origin.id = `artifact-origin-${diagramArtifact.id}`
+    origin.scrollIntoView = vi.fn()
+    document.body.appendChild(origin)
+    try {
+      useArtifactsStore.getState().openArtifact(diagramArtifact)
+      render(<ArtifactsPanel />)
+      fireEvent.click(screen.getByTestId("artifacts-jump-source"))
+      expect(origin.scrollIntoView).toHaveBeenCalledWith({ behavior, block: "center" })
+    } finally {
+      origin.remove()
+      restoreMatchMedia()
+    }
+  })
+
   it("jumps to the matching Mermaid artifact origin", () => {
+    const restoreMatchMedia = mockReducedMotion(false)
     vi.useFakeTimers()
     const origin = document.createElement("div")
     origin.id = `artifact-origin-${diagramArtifact.id}`
@@ -166,7 +189,10 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
     document.body.appendChild(origin)
     const focusArtifactsTrigger = vi.fn()
     const scrollLatest = vi.fn()
-    window.addEventListener("tldw:focus-artifacts-trigger", focusArtifactsTrigger)
+    window.addEventListener(
+      "tldw:focus-artifacts-trigger",
+      focusArtifactsTrigger
+    )
     window.addEventListener("tldw:scroll-to-latest", scrollLatest)
     try {
       useArtifactsStore.getState().openArtifact(diagramArtifact)
@@ -192,6 +218,24 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
         focusArtifactsTrigger
       )
       window.removeEventListener("tldw:scroll-to-latest", scrollLatest)
+      restoreMatchMedia()
     }
   })
+})
+
+it("keeps artifact code rows in a shared column layout with indentation", () => {
+  useArtifactsStore
+    .getState()
+    .openArtifact({
+      ...graphvizArtifact,
+      kind: "code",
+      content: "x = 1\n    longer_value = 2",
+      language: "python"
+    })
+  const { container } = render(<ArtifactsPanel />)
+  const rows = container.querySelectorAll("pre .table-row")
+  expect(rows).toHaveLength(2)
+  expect(rows[0].parentElement).toBe(rows[1].parentElement)
+  expect(rows[0].parentElement).toHaveClass("table")
+  expect(rows[1].lastElementChild?.textContent).toBe("    longer_value = 2")
 })

@@ -409,7 +409,8 @@ async def test_async_scrapers_offload_extraction_pipeline(monkeypatch, method):
 
     class FakePage:
         async def goto(self, *_args, **_kwargs):
-            return None
+            # 9d13180d3a: only a terminal 2xx navigation response is extracted.
+            return SimpleNamespace(status=200)
 
         async def wait_for_load_state(self, *_args, **_kwargs):
             return None

@@ -7,8 +7,8 @@ import pytest
 
 
 @pytest.mark.asyncio
-async def test_backup_schedules_repo_sqlite_roundtrip_and_uniqueness(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_backup_schedules_repo_sqlite_roundtrip_and_uniqueness(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.backup_schedules_repo import (
         AuthnzBackupSchedulesRepo,
@@ -20,7 +20,6 @@ async def test_backup_schedules_repo_sqlite_roundtrip_and_uniqueness(tmp_path, m
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -90,8 +89,8 @@ async def test_backup_schedules_repo_sqlite_roundtrip_and_uniqueness(tmp_path, m
 
 
 @pytest.mark.asyncio
-async def test_backup_schedules_repo_sqlite_claim_run_slot_is_idempotent(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_backup_schedules_repo_sqlite_claim_run_slot_is_idempotent(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.backup_schedules_repo import (
         AuthnzBackupSchedulesRepo,
@@ -103,7 +102,6 @@ async def test_backup_schedules_repo_sqlite_claim_run_slot_is_idempotent(tmp_pat
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))

@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.config import (
     web_outbound_policy_mode,
 )
 from tldw_Server_API.app.core.config_sections.auth import load_auth_config
+from tldw_Server_API.app.core.Security.egress import public_url_policy_active
 
 ConfiguredBrowserTransportMode = Literal[
     "auto",
@@ -116,7 +117,7 @@ def decide_browser_transport(
         )
 
     auth = _normalize_profile_value(auth_mode)
-    outbound = _normalize_profile_value(outbound_policy_mode)
+    outbound = "strict" if public_url_policy_active() else _normalize_profile_value(outbound_policy_mode)
     if auth == "single_user" and outbound == "compat":
         return BrowserTransportDecision(
             allowed=True,

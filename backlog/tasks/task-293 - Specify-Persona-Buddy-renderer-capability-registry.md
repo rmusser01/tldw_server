@@ -42,7 +42,7 @@ Write the approved design spec for an end-to-end thin slice that adds a Persona/
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Worktree: <local_worktree_path_redacted>
 
 Branch: codex/persona-buddy-renderer-capability-spec
@@ -54,7 +54,7 @@ Spec review iteration 2 approved the patched design with no remaining contradict
 Human-requested design risk review found three improvements before implementation planning: keep draft manifest saves permissive until activation/import-preview validation, avoid new renderer-level asset-role enforcement, and explicitly name the API schema/frontend service additions so the capability endpoint is useful without making Buddy fetch it at runtime. Patched the spec accordingly.
 
 Verification: git diff --check passed. ASCII scan found no non-ASCII characters. Bandit skipped because this task changed only markdown documentation and Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

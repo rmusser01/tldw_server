@@ -37,13 +37,13 @@ Fix the remaining live character-chat row-action gap found during the post-P1 Pu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a regression for the row `Chat as...` case where `selectedModel` is null but the model catalog contains entries. The test failed before the fix because the row full-chat path used the quick-chat fallback model.
 
 Changed Characters manager wiring so `useCharacterCrud` receives explicit `selectedChatModel` for full-chat readiness; the quick-chat popup retains its separate fallback behavior.
 
 Puppeteer/Chrome final refresh confirms `09-returning-user-row-chat-action` stays on `/characters` and shows `Character chat setup` with the selected-character model blocker.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

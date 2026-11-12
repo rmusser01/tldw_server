@@ -12,6 +12,7 @@ import {
 
 type BulkDecisionBarProps = {
   selectedCount: number
+  disabled?: boolean
   deciding?: ModerationDecisionAction | null
   result?: ModerationReviewBulkDecisionResponse | null
   onBulkDecision: (action: ModerationDecisionAction, reason?: string) => Promise<void> | void
@@ -22,6 +23,7 @@ const ACTIONS: ModerationDecisionAction[] = ["approve", "dismiss", "block", "red
 
 export const BulkDecisionBar: React.FC<BulkDecisionBarProps> = ({
   selectedCount,
+  disabled = false,
   deciding = null,
   result,
   onBulkDecision,
@@ -30,7 +32,7 @@ export const BulkDecisionBar: React.FC<BulkDecisionBarProps> = ({
   const [reason, setReason] = React.useState("")
   const [validation, setValidation] = React.useState<string | null>(null)
   const reasonValidationId = React.useId()
-  const disabled = selectedCount === 0 || Boolean(deciding)
+  const actionsDisabled = disabled || selectedCount === 0 || Boolean(deciding)
 
   const runBulkDecision = async (action: ModerationDecisionAction) => {
     if (decisionRequiresReason(action) && !reason.trim()) {
@@ -78,7 +80,7 @@ export const BulkDecisionBar: React.FC<BulkDecisionBarProps> = ({
               key={action}
               type="button"
               onClick={() => void runBulkDecision(action)}
-              disabled={disabled}
+              disabled={actionsDisabled}
               className="rounded-md border border-border bg-surface2 px-3 py-2 text-sm font-medium text-text hover:bg-surface3 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {deciding === action ? "Saving" : `${decisionActionLabel(action)} selected`}

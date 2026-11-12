@@ -30,9 +30,9 @@ Continue #1116 Phase 2.2 by deferring core LLM/provider-tail router imports from
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red: focused llm_provider_router_attr_lookup test failed before implementation because scoped core LLM/provider router attrs were touched during iter_core_router_specs(). Green: focused test passed after converting scoped routers to lazy ImportedRouterSpec entries. Full verification passed: router_groups_contract 55 passed; main_router_contract 6 passed; openapi_contracts 69 passed; Bandit core.py 0 results/0 errors; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

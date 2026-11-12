@@ -42,7 +42,7 @@ Implement the first #1537 slice as a backend-owned ACP execution-health summary 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented backend ACP execution-health summary contract with session status counts, failure buckets, retention/redaction posture, compatibility support-state rollup, and fail-closed compatibility enum coercion.
 
 Verification: focused execution-health pytest 3 passed; full admin ACP endpoint pytest 20 passed; git diff --check passed; Bandit touched backend scope reported 0 findings; OpenAPI schema generation exposed /api/v1/admin/acp/execution-health/summary with fake test SINGLE_USER_API_KEY.
@@ -56,7 +56,7 @@ Review-fix coordination links added for #1512 retention, #1513 redacted views, a
 Trackable follow-up split: backend aggregation hardening covers DB/pre-aggregated execution-health metrics beyond the summary contract; frontend display covers admin UI cards/tables and drill-through entry points; docs/verification covers release evidence, OpenAPI examples, and compatibility matrix signoff. These follow-ups coordinate under #1537 and the linked ACP-adjacent issues rather than being claimed complete by this backend contract slice.
 
 Review-fix verification: PASS pytest tldw_Server_API/tests/Admin/test_admin_acp_new_endpoints.py -q (23 passed); PASS git diff --check; PASS py_compile touched backend files; PASS OpenAPI route/schema smoke for execution-health setup_health; Bandit touched backend scope reports only pre-existing baseline findings in ACP_Sessions_DB.py, with 0 findings in the new execution_health.py and admin endpoint/service changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

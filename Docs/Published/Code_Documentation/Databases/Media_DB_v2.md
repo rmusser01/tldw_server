@@ -208,7 +208,7 @@ These methods support the public API:
 These methods modify the database content. They typically operate within a transaction, update `last_modified` and `version` columns, log events to `sync_log`, and update FTS tables where appropriate.
 
 *   **`add_keyword(self, keyword: str) -> Tuple[Optional[int], Optional[str]]`**:
-    Adds a new keyword (case-insensitive, stored lowercase) or undeletes an existing one. Updates `keyword_fts`. Logs 'create' or 'update' to `sync_log`.
+    Adds a new keyword or undeletes an existing one. Keywords are case-insensitive and keep their first-seen display casing; lookups compare `normalize_keyword_identity` values (NFC plus casefold). Updates `keyword_fts`. Logs 'create' or 'update' to `sync_log`.
     *   **Returns**: `(keyword_id, keyword_uuid)`.
     *   **Raises**: `InputError`, `ConflictError`, `DatabaseError`.
 
@@ -467,9 +467,6 @@ These functions require a `MediaDatabase` instance to be passed as the `db_insta
     *   **Returns**: `(processed_count, remaining_in_trash_count)`.
     *   **Raises**: `TypeError`, `ValueError`, `DatabaseError` (can be from `soft_delete_media`).
 
-*   **`check_media_and_whisper_model(*args, **kwargs)`**:
-    Deprecated function, logs a warning.
-
 *   **`get_unprocessed_media(db_instance: MediaDatabase) -> List[Dict]`**:
     Retrieves active, non-trashed media items with `vector_processing = 0`.
     *   **Returns**: List of dicts (`id`, `uuid`, `content`, `type`, `title`).
@@ -556,7 +553,7 @@ The current database schema consists of the following main tables:
 
 *   **`schema_version`**: Stores the current schema version of the database.
 *   **`Media`**: Core table for media items (articles, videos, notes, etc.). Includes metadata like URL, title, content, author, timestamps, content hash, UUID, and flags for `is_trash`, `deleted`. Also tracks `chunking_status` and `vector_processing` states.
-*   **`Keywords`**: Stores unique keywords (normalized to lowercase). Includes UUID and sync metadata.
+*   **`Keywords`**: Stores unique keywords, case-insensitive with display casing preserved (SQLite `COLLATE NOCASE`; on PostgreSQL a unique `LOWER(keyword)` index over active rows). On PostgreSQL the keyword vocabulary is shared, so the first-seen casing is every user's display casing. Includes UUID and sync metadata.
 *   **`MediaKeywords`**: Junction table linking `Media` and `Keywords` (many-to-many).
 *   **`Transcripts`**: Stores transcriptions for media items, potentially from different models. Includes UUID and sync metadata.
 *   **`MediaChunks`**: Stores processed, smaller segments (chunks) of media content, often used for vectorization or focused analysis. Includes UUID and sync metadata.

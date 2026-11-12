@@ -39,7 +39,7 @@ Implement Task 10 from Docs/superpowers/plans/2026-05-08-persona-visual-packs-im
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented persona_visuals MCP module with capabilities, trigger_state, create_draft_pack, update_manifest, and enqueue_generation tools.
 
 Added Persona Live visual_state_override payload extraction/emission and persisted the override payload on the tool result.
@@ -47,7 +47,7 @@ Added Persona Live visual_state_override payload extraction/emission and persist
 Confirmed existing frontend runtime override store and incoming payload hook cover receive/expiry workflow; no frontend code changes were needed for this slice.
 
 Verification passed: python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_persona_visuals_module.py -v; bunx vitest run src/store/__tests__/persona-visual-runtime.test.ts src/routes/hooks/__tests__/usePersonaIncomingPayload.visuals.test.tsx; git diff --check; Bandit JSON at /tmp/bandit_persona_visuals_mcp.json with zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

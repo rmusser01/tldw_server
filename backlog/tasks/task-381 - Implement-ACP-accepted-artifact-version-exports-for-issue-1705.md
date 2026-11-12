@@ -48,7 +48,7 @@ Implement GitHub issue #1705: export accepted traceable work-product artifact ve
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline before implementation: python -m pytest tldw_Server_API/tests/ChaChaNotesDB/test_workspace_sub_resources_db.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -q passed with 64 passed and 5 warnings. Plan file: Docs/superpowers/plans/2026-05-15-acp-artifact-exports-1705-plan.md.
 
 Implemented accepted-version export schemas, renderer, POST endpoint, and export_refs persistence without content version bumps. Red run: workspace_artifact_export tests failed with 404 before route implementation. Green runs: export slice passed, then workspace API plus ChaChaNotes DB slice passed with 66 passed.
@@ -58,7 +58,7 @@ PR #1726 review sweep: addressing Qodo docstring/logging/version-row/markdown-ma
 PR #1726 review sweep addressed direct artifact version lookup, helper docstrings, contextual export error logging, base64 Markdown metadata marker, rendered HTML export bodies, transactional export_refs persistence, and missing version snapshot conflict handling. Verification: export slice passed (3 selected); broader workspace DB/API suite passed (67 passed, 5 warnings); Ruff passed on non-legacy touched files; compileall passed; Bandit touched scope reported 0 findings; git diff --check passed. Full ChaChaNotes_DB.py Ruff still reports existing baseline findings outside this patch.
 
 Late CodeRabbit review sweep addressed workspace lookup error mapping by moving _require_workspace into the export try block and centralized WorkspaceArtifactExportStateError in app/core/exceptions.py. Existing race and missing-version comments were already addressed by the transactional CAS-style export_refs update and loud missing-version conflict.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

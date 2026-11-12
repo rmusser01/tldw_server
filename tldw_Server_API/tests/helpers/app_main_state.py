@@ -5,6 +5,7 @@ import importlib
 import sys
 from collections.abc import Iterator
 from types import ModuleType
+from weakref import WeakSet
 
 APP_PACKAGE_NAME = "tldw_Server_API.app"
 APP_MAIN_MODULE_NAME = "tldw_Server_API.app.main"
@@ -69,10 +70,15 @@ def import_app_main() -> ModuleType:
     return current
 
 
+# Track live reload modules without retaining them or confusing reused IDs.
+_RELOADED_MODULES: WeakSet[ModuleType] = WeakSet()
+
+
 def reload_app_main() -> ModuleType:
     clear_app_main()
     importlib.invalidate_caches()
     imported = importlib.import_module(APP_MAIN_MODULE_NAME)
+    _RELOADED_MODULES.add(imported)
     return set_app_main(imported)
 
 
@@ -99,12 +105,18 @@ def app_main_isolated() -> Iterator[None]:
 
     Yields:
         None. The block runs with whatever module is current; on exit the module
-        that was current on entry is put back, or removed again if there was
-        none.
+        that was current on entry is put back, or, if there was none, a module
+        from :func:`reload_app_main` is removed again (a plain first import
+        stays).
     """
     snapshot = snapshot_app_main()
     try:
         yield
     finally:
-        if snapshot_app_main() is not snapshot:
+        current = snapshot_app_main()
+        # An ordinary first import is not a swap: nothing held an earlier app
+        # to split from. Unloading it made every later test re-import app.main,
+        # leaking a whole FastAPI app per test until shards crawled into the CI
+        # timeout. Only undo a module that reload_app_main() produced.
+        if current is not snapshot and (snapshot is not None or current in _RELOADED_MODULES):
             restore_app_main(snapshot)

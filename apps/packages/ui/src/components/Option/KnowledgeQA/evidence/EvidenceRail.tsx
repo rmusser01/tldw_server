@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
+import { Drawer } from "antd"
 import { X, PanelRightOpen, FileText, BarChart3 } from "lucide-react"
 import { cn } from "@/libs/utils"
-import { useDesktop } from "@/hooks/useMediaQuery"
+import { useDesktop, useMediaQuery } from "@/hooks/useMediaQuery"
+import { containDialogTab } from "../dialogKeyboard"
 import { SourceList } from "../SourceList"
 
 const LazySearchDetailsPanel = React.lazy(() =>
@@ -17,6 +19,7 @@ type EvidenceRailProps = {
   onTabChange: (tab: "sources" | "details") => void
   resultsCount: number
   citationsCount: number
+  showTrigger?: boolean
   className?: string
 }
 
@@ -26,12 +29,15 @@ function EvidenceRailContent({
   onTabChange,
   resultsCount,
   citationsCount,
-}: Omit<EvidenceRailProps, "open" | "className">) {
+  showHeader = true,
+}: Omit<EvidenceRailProps, "open" | "className"> & {
+  showHeader?: boolean
+}) {
   const [sourceAnnouncement, setSourceAnnouncement] = useState("")
 
   useEffect(() => {
     setSourceAnnouncement(
-      `Evidence updated. ${resultsCount} source${resultsCount === 1 ? "" : "s"} and ${citationsCount} citation${citationsCount === 1 ? "" : "s"}.`
+      `Evidence updated. ${resultsCount} source${resultsCount === 1 ? "" : "s"} and ${citationsCount} citation${citationsCount === 1 ? "" : "s"}.`,
     )
   }, [resultsCount, citationsCount])
 
@@ -40,20 +46,22 @@ function EvidenceRailContent({
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {sourceAnnouncement}
       </div>
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold">Evidence</h2>
-        <span className="text-xs text-text-muted">
-          {resultsCount} sources • {citationsCount} citations
-        </span>
-        <button
-          type="button"
-          onClick={() => onOpenChange(false)}
-          className="ml-auto flex items-center justify-center min-w-8 min-h-8 h-8 w-8 rounded-md text-text-muted hover:bg-hover hover:text-text transition-colors"
-          aria-label="Close evidence panel"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
+      {showHeader ? (
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <h2 className="text-sm font-semibold">Evidence</h2>
+          <span className="text-xs text-text-muted">
+            {resultsCount} sources • {citationsCount} citations
+          </span>
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            className="ml-auto flex items-center justify-center min-w-8 min-h-8 h-8 w-8 rounded-md text-text-muted hover:bg-hover hover:text-text transition-colors"
+            aria-label="Close evidence panel"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
       <div className="border-b border-border px-3 py-2">
         <div className="inline-flex rounded-md border border-border bg-bg-subtle p-0.5">
           <button
@@ -63,7 +71,7 @@ function EvidenceRailContent({
               "inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
               tab === "sources"
                 ? "bg-primary text-white"
-                : "text-text-subtle hover:bg-hover hover:text-text"
+                : "text-text-subtle hover:bg-hover hover:text-text",
             )}
             aria-pressed={tab === "sources"}
           >
@@ -77,7 +85,7 @@ function EvidenceRailContent({
               "inline-flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
               tab === "details"
                 ? "bg-primary text-white"
-                : "text-text-subtle hover:bg-hover hover:text-text"
+                : "text-text-subtle hover:bg-hover hover:text-text",
             )}
             aria-pressed={tab === "details"}
           >
@@ -118,8 +126,11 @@ export function EvidenceRail({
   resultsCount,
   citationsCount,
   className,
+  showTrigger = true,
 }: EvidenceRailProps) {
   const isDesktop = useDesktop()
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)")
+  const drawerRef = useRef<HTMLDivElement>(null)
 
   if (isDesktop) {
     if (!open) {
@@ -127,7 +138,7 @@ export function EvidenceRail({
         <aside
           className={cn(
             "hidden w-14 shrink-0 border-l border-border bg-surface/40 lg:flex lg:flex-col lg:items-center lg:py-3",
-            className
+            className,
           )}
           aria-label="Open evidence panel"
         >
@@ -156,7 +167,7 @@ export function EvidenceRail({
         className={cn(
           "hidden w-[400px] shrink-0 border-l border-border bg-surface/40 lg:block xl:w-[420px]",
           "motion-safe:transition-all motion-safe:duration-300 motion-safe:animate-in motion-safe:slide-in-from-right motion-reduce:animate-none motion-reduce:transition-none",
-          className
+          className,
         )}
         aria-label="Evidence panel"
       >
@@ -173,38 +184,73 @@ export function EvidenceRail({
 
   return (
     <>
-      {!open ? (
+      {showTrigger ? (
         <button
           type="button"
           onClick={() => onOpenChange(true)}
-          className="fixed bottom-4 right-4 z-40 rounded-full border border-border bg-surface px-3 py-2 text-sm text-text-subtle shadow-md hover:bg-hover hover:text-text transition-colors"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 rounded-full border border-border bg-surface px-3 py-2 text-sm text-text-subtle shadow-md hover:bg-hover hover:text-text transition-colors"
           aria-label="Open evidence panel"
-          aria-expanded={false}
+          aria-expanded={open}
           aria-controls="knowledge-evidence-panel-mobile"
         >
           Evidence
         </button>
       ) : null}
 
-      {open ? (
-        <div id="knowledge-evidence-panel-mobile" className="fixed inset-0 z-50 lg:hidden">
-          <button
-            type="button"
-            className="absolute inset-0 bg-black/45"
-            onClick={() => onOpenChange(false)}
-            aria-label="Close evidence panel"
+      <Drawer
+        {...(reducedMotion
+          ? {
+              motion: {
+                motionAppear: false,
+                motionEnter: false,
+                motionLeave: false,
+              },
+              maskMotion: {
+                motionAppear: false,
+                motionEnter: false,
+                motionLeave: false,
+              },
+            }
+          : {})}
+        open={open}
+        drawerRender={(content) => (
+          <div ref={drawerRef} onKeyDown={containDialogTab}>
+            {content}
+          </div>
+        )}
+        afterOpenChange={(visible) => {
+          if (visible)
+            drawerRef.current
+              ?.querySelector<HTMLButtonElement>(
+                '[aria-label="Close evidence panel"]',
+              )
+              ?.focus()
+        }}
+        title={<h2 className="text-sm font-semibold">Evidence</h2>}
+        closable={{ "aria-label": "Close evidence panel" }}
+        extra={
+          <span className="text-xs text-text-muted">
+            {resultsCount} sources • {citationsCount} citations
+          </span>
+        }
+        onClose={() => onOpenChange(false)}
+        size="min(88vw, 28rem)"
+        styles={{ body: { padding: 0 }, wrapper: { maxWidth: "100vw" } }}
+      >
+        <div
+          id="knowledge-evidence-panel-mobile"
+          className="h-full pb-[env(safe-area-inset-bottom)]"
+        >
+          <EvidenceRailContent
+            showHeader={false}
+            tab={tab}
+            onOpenChange={onOpenChange}
+            onTabChange={onTabChange}
+            resultsCount={resultsCount}
+            citationsCount={citationsCount}
           />
-          <aside className="absolute right-0 top-0 h-full w-[88vw] max-w-md border-l border-border bg-surface shadow-xl motion-safe:transition-all motion-safe:duration-300 motion-safe:animate-in motion-safe:slide-in-from-right motion-reduce:animate-none motion-reduce:transition-none">
-            <EvidenceRailContent
-              tab={tab}
-              onOpenChange={onOpenChange}
-              onTabChange={onTabChange}
-              resultsCount={resultsCount}
-              citationsCount={citationsCount}
-            />
-          </aside>
         </div>
-      ) : null}
+      </Drawer>
     </>
   )
 }

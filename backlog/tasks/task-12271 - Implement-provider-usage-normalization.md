@@ -46,9 +46,9 @@ Implement Stage 3 of the approved chat/world-book cache cost-control plan. This 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: focused usage/chat/accounting tests passed (18 passed); git diff --check passed; Bandit zero findings for touched Usage/Chat files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

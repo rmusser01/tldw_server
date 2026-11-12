@@ -31,19 +31,24 @@ import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import { bgRequest, bgUpload } from "@/services/background-proxy"
 import { getServerCapabilities } from "@/services/tldw/server-capabilities"
 import { resolvePerformChunking } from "@/services/tldw/ingest-defaults"
+import { completedIngestJobIndicatesSkipped } from "@/services/tldw/ingest-job-results"
 import { normalizeMediaTypeForUpload } from "@/services/tldw/media-routing"
 import { fetchChatModels } from "@/services/tldw-server"
 import {
   DRAFT_STORAGE_CAP_BYTES,
+  clearDrafts,
   getDraftAsset,
   getDraftBatches,
   getDraftById,
   getDraftsByBatch,
   storeDraftAsset,
-  upsertContentDraft
+  upsertContentDraft,
+  updateContentDraft
 } from "@/db/dexie/drafts"
+import type { RouteLeaveGuardProps } from "@/entries/shared/route-leave-guard"
 import type { ContentDraft, DraftBatch, DraftSection } from "@/db/dexie/types"
-import { db } from "@/db/dexie/schema"
+import { quickIngestAuthority, useQuickIngestAuthority, type QuickIngestOperation } from "@/services/tldw/quick-ingest-authority"
+import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 
 const statusColor = (status?: ContentDraft["status"]) => {
   switch (status) {
@@ -73,6 +78,7 @@ const extractMediaId = (
 
   const direct =
     (data as any).media_id ??
+    (data as Record<string, unknown>).db_id ??
     (data as any).id ??
     (data as any).pk ??
     (data as any).uuid
@@ -144,29 +150,50 @@ const buildSafeMetadata = (
 
 const commitDraftToServer = async (
   draft: ContentDraft,
-  onWarning?: (msg: string) => void
+  operation: QuickIngestOperation,
+  onWarning?: (msg: string) => void,
+  admittedMedia?: Map<string, string>
 ): Promise<ContentDraft> => {
+  operation.assertCurrent()
+  const stored = await getDraftById(draft.id, operation)
+  if (!stored) throw new Error("Draft is no longer available for this account.")
+  if (stored.updatedAt !== draft.updatedAt) {
+    const error = new Error("Draft changed elsewhere. Your edits remain in the editor; copy them before reloading the saved draft.")
+    error.name = "DraftConflictError"
+    throw error
+  }
+  if (stored.status === "committed" || stored.status === "discarded") throw new Error("This draft is already finalized.")
+  if (!draft.title.trim() || !draft.content.trim()) throw new Error("A title and non-empty content are required before committing.")
+  operation.assertCurrent()
   const fields = buildFields(draft)
-  let includeOriginalType = false
+  const includeOriginalType = draft.source.kind !== "url" && !draft.sourceAssetId && draft.mediaType !== "audio" && draft.mediaType !== "video"
   let uploadResp: any
 
+  let mediaId = stored.pendingMediaId || admittedMedia?.get(draft.id)
+  if (!mediaId) {
   if (draft.source.kind === "url" && draft.source.url) {
     fields.urls = [draft.source.url]
     uploadResp = await bgUpload({
+      servicePromptConfig: operation.requestScope.config,
+      abortSignal: operation.signal,
       path: "/api/v1/media/add",
       method: "POST",
       fields
     })
   } else if (draft.sourceAssetId) {
-    const asset = await getDraftAsset(draft.sourceAssetId)
+    const asset = await getDraftAsset(draft.sourceAssetId, operation)
     if (!asset) {
       throw new Error("Source file missing. Please reattach to commit.")
     }
     const data = await asset.blob.arrayBuffer()
+    operation.assertCurrent()
     uploadResp = await bgUpload({
+      servicePromptConfig: operation.requestScope.config,
+      abortSignal: operation.signal,
       path: "/api/v1/media/add",
       method: "POST",
       fields,
+      fileFieldName: "files",
       file: {
         name: asset.fileName,
         type: asset.mimeType,
@@ -178,15 +205,17 @@ const commitDraftToServer = async (
       "Audio/video drafts require the original source file to commit."
     )
   } else {
-    includeOriginalType = true
     const synthetic = buildSyntheticFile(draft)
     uploadResp = await bgUpload({
+      servicePromptConfig: operation.requestScope.config,
+      abortSignal: operation.signal,
       path: "/api/v1/media/add",
       method: "POST",
       fields: {
         ...fields,
         media_type: "document"
       },
+      fileFieldName: "files",
       file: {
         name: synthetic.fileName,
         type: synthetic.mimeType,
@@ -195,20 +224,32 @@ const commitDraftToServer = async (
     })
   }
 
-  const mediaId = extractMediaId(uploadResp)
+  operation.assertCurrent()
+  if (completedIngestJobIndicatesSkipped(uploadResp?.results?.[0] ?? uploadResp)) {
+    throw new Error("This source already exists. Saved media was preserved; this draft was not committed.")
+  }
+  mediaId = extractMediaId(uploadResp) || undefined
   if (!mediaId) {
     throw new Error("Media ID not returned from server.")
   }
 
+  admittedMedia?.set(draft.id, mediaId)
+  }
+  // Checkpoint admission before any later write, so Retry resumes the same source.
+  await updateContentDraft(draft.id, { pendingMediaId: mediaId }, operation)
+  operation.assertCurrent()
+
   const updatePayload: Record<string, any> = {}
-  if (draft.title) updatePayload.title = draft.title
-  if (draft.content) updatePayload.content = draft.content
+  updatePayload.title = draft.title
+  updatePayload.content = draft.content
   if (draft.keywords) updatePayload.keywords = draft.keywords
-  if (draft.analysis) updatePayload.analysis = draft.analysis
-  if (draft.prompt) updatePayload.prompt = draft.prompt
+  if (draft.analysis !== undefined) updatePayload.analysis = draft.analysis
+  if (draft.prompt !== undefined) updatePayload.prompt = draft.prompt
 
   if (Object.keys(updatePayload).length > 0) {
     await bgRequest({
+      servicePromptConfig: operation.requestScope.config,
+      abortSignal: operation.signal,
       path: `/api/v1/media/${mediaId}`,
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -216,9 +257,12 @@ const commitDraftToServer = async (
     })
   }
 
+  operation.assertCurrent()
   const safeMetadata = buildSafeMetadata(draft, includeOriginalType)
   if (safeMetadata) {
     await bgRequest({
+      servicePromptConfig: operation.requestScope.config,
+      abortSignal: operation.signal,
       path: `/api/v1/media/${mediaId}/metadata`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -229,6 +273,7 @@ const commitDraftToServer = async (
     })
   }
 
+  operation.assertCurrent()
   // Trigger reprocessing when content was edited so chunks and embeddings
   // reflect the updated text.  Failures here are non-fatal – the content
   // is already persisted, so we only warn.
@@ -236,9 +281,11 @@ const commitDraftToServer = async (
     draft.content != null &&
     draft.originalContent != null &&
     draft.content !== draft.originalContent
-  if (contentEdited) {
+  if (contentEdited && draft.processingOptions?.perform_chunking !== false) {
     try {
       await bgRequest({
+      servicePromptConfig: operation.requestScope.config,
+      abortSignal: operation.signal,
         path: `/api/v1/media/${mediaId}/reprocess`,
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -249,6 +296,7 @@ const commitDraftToServer = async (
         }
       })
     } catch (reprocessErr) {
+      operation.assertCurrent()
       console.warn(
         "[ContentReview] Reprocess after content edit failed — chunks/embeddings may be stale:",
         reprocessErr
@@ -259,6 +307,7 @@ const commitDraftToServer = async (
     }
   }
 
+  operation.assertCurrent()
   const now = Date.now()
   return {
     ...draft,
@@ -291,9 +340,32 @@ const cloneDraft = (draft: ContentDraft): ContentDraft => {
 }
 
 
-export const ContentReviewPage: React.FC = () => {
+type ReviewPageProps = { LeaveGuard?: React.ComponentType<RouteLeaveGuardProps> }
+export const ContentReviewPage: React.FC<ReviewPageProps> = ({ LeaveGuard }) => {
+  const authorityKey = useQuickIngestAuthority()
+  // Re-check A → B → A transitions even when React batches the same final key.
+  useQuickIngestSessionStore(state => state.generation)
+  const operation = authorityKey ? quickIngestAuthority.capture({ sessionBound: false }) : null
+  return operation ? <OwnedContentReviewPage key={JSON.stringify([authorityKey, operation.authorityRevision])} LeaveGuard={LeaveGuard} /> : null
+}
+
+const OwnedContentReviewPage: React.FC<ReviewPageProps> = ({ LeaveGuard }) => {
+  const operation = React.useMemo(() => quickIngestAuthority.capture({ sessionBound: false }), [])
   const { t } = useTranslation(["option"])
   const [messageApi, contextHolder] = message.useMessage()
+  const [sourceAssetAvailable, setSourceAssetAvailable] = React.useState<boolean | null>(null)
+  const [draftConflict, setDraftConflict] = React.useState(false)
+  const runAction = React.useCallback(async (action: () => Promise<unknown>) => {
+    try {
+      operation.assertCurrent()
+      await action()
+    } catch (error) {
+      if (operation.isCurrent()) {
+        if (error instanceof Error && error.name === "DraftConflictError") setDraftConflict(true)
+        messageApi.error(error instanceof Error ? error.message : "Review action failed.")
+      }
+    }
+  }, [messageApi, operation])
   const location = useLocation()
   const navigate = useNavigate()
   const confirmDanger = useConfirmDanger()
@@ -326,8 +398,22 @@ export const ContentReviewPage: React.FC = () => {
     Array<{ value: string; label: string }>
   >([])
   const [modelsLoading, setModelsLoading] = React.useState<boolean>(false)
+  const pendingWritesRef = React.useRef(0)
+  const aiRequestRef = React.useRef(false)
+  const savingRef = React.useRef(false)
+  const committingRef = React.useRef(false)
+  const admittedMediaRef = React.useRef(new Map<string, string>())
+  const dirtyRef = React.useRef(isDirty)
+  dirtyRef.current = isDirty
   const saveTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
+
+  const persistDraft = React.useCallback(async (updated: ContentDraft, expectedUpdatedAt: number) => {
+    pendingWritesRef.current += 1
+    setIsSaving(true)
+    try { await upsertContentDraft(updated, operation, expectedUpdatedAt) }
+    finally { pendingWritesRef.current -= 1; setIsSaving(pendingWritesRef.current > 0) }
+  }, [operation])
 
   const query = React.useMemo(() => {
     return new URLSearchParams(location.search)
@@ -338,17 +424,17 @@ export const ContentReviewPage: React.FC = () => {
   draftFromQueryRef.current = draftFromQuery
 
   const refreshBatches = React.useCallback(async () => {
-    const data = await getDraftBatches()
+    const data = await getDraftBatches(operation)
     setBatches(data)
     return data
-  }, [])
+  }, [operation])
 
   const refreshDrafts = React.useCallback(async (batchId: string) => {
-    const data = await getDraftsByBatch(batchId)
+    const data = await getDraftsByBatch(batchId, operation)
     const sorted = [...data].sort((a, b) => a.createdAt - b.createdAt)
     setDrafts(sorted)
     return sorted
-  }, [])
+  }, [operation])
 
   React.useEffect(() => {
     let mounted = true
@@ -365,7 +451,7 @@ export const ContentReviewPage: React.FC = () => {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [operation])
 
   React.useEffect(() => {
     let mounted = true
@@ -392,7 +478,7 @@ export const ContentReviewPage: React.FC = () => {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [operation])
 
   const syncRoute = React.useCallback(
     (batchId: string | null, draftId?: string | null) => {
@@ -415,8 +501,17 @@ export const ContentReviewPage: React.FC = () => {
   )
   const syncRouteRef = React.useRef(syncRoute)
   syncRouteRef.current = syncRoute
+  const routeSelectionRef = React.useRef({ activeBatchId, activeDraftId, batchFromQuery, draftFromQuery })
+  routeSelectionRef.current = { activeBatchId, activeDraftId, batchFromQuery, draftFromQuery }
 
   React.useEffect(() => {
+    const { activeBatchId, activeDraftId, draftFromQuery } = routeSelectionRef.current
+    if (activeDraftId && (dirtyRef.current || savingRef.current) &&
+        (batchFromQuery !== activeBatchId || draftFromQuery !== activeDraftId)) {
+      syncRouteRef.current(activeBatchId, activeDraftId)
+      messageApi.info("Save the current draft before changing its URL. Your edits remain here.")
+      return
+    }
     let mounted = true
     setIsLoading(true)
     refreshBatches()
@@ -432,19 +527,27 @@ export const ContentReviewPage: React.FC = () => {
           syncRouteRef.current(initialBatch, draftFromQueryRef.current)
         }
       })
+      .catch(error => { if (mounted && operation.isCurrent()) messageApi.error(error.message) })
       .finally(() => {
         if (mounted) setIsLoading(false)
       })
     return () => {
       mounted = false
     }
-  }, [batchFromQuery, refreshBatches])
+  }, [batchFromQuery, messageApi, operation, refreshBatches])
 
   React.useEffect(() => {
+    const { activeDraftId, batchFromQuery } = routeSelectionRef.current
     if (!activeBatchId) {
       setDrafts([])
       setActiveDraftId(null)
       setDraftContent(null)
+      return
+    }
+    if (activeDraftId && (dirtyRef.current || savingRef.current) &&
+        (batchFromQuery !== activeBatchId || draftFromQuery !== activeDraftId)) {
+      syncRouteRef.current(activeBatchId, activeDraftId)
+      messageApi.info("Save the current draft before changing its URL. Your edits remain here.")
       return
     }
     let mounted = true
@@ -462,13 +565,14 @@ export const ContentReviewPage: React.FC = () => {
           syncRouteRef.current(activeBatchId, preferred)
         }
       })
+      .catch(error => { if (mounted && operation.isCurrent()) messageApi.error(error.message) })
       .finally(() => {
         if (mounted) setIsLoading(false)
       })
     return () => {
       mounted = false
     }
-  }, [activeBatchId, draftFromQuery, refreshDrafts])
+  }, [activeBatchId, draftFromQuery, messageApi, operation, refreshDrafts])
 
   React.useEffect(() => {
     if (!activeDraftId) {
@@ -477,17 +581,17 @@ export const ContentReviewPage: React.FC = () => {
     }
     let mounted = true
     const loadDraft = async () => {
-      const draft = await getDraftById(activeDraftId)
+      const draft = await getDraftById(activeDraftId, operation)
       if (!mounted || !draft) return
       let resolved = draft
       if (draft.status === "pending") {
-        const now = Date.now()
+        const now = Math.max(Date.now(), draft.updatedAt + 1)
         const updated: ContentDraft = {
           ...draft,
           status: "in_progress",
           updatedAt: now
         }
-        await upsertContentDraft(updated)
+        await persistDraft(updated, draft.updatedAt)
         if (!mounted) return
         setDrafts((prev) =>
           prev.map((d) => (d.id === draft.id ? updated : d))
@@ -497,13 +601,25 @@ export const ContentReviewPage: React.FC = () => {
       if (!mounted) return
       setDraftContent(cloneDraft(resolved))
       setIsDirty(false)
+      setDraftConflict(false)
       setLastSavedAt(resolved.updatedAt)
     }
-    void loadDraft()
+    void runAction(loadDraft)
     return () => {
       mounted = false
     }
-  }, [activeDraftId])
+  }, [activeDraftId, operation, persistDraft, runAction])
+
+  React.useEffect(() => {
+    let current = true
+    setSourceAssetAvailable(null)
+    if (draftContent?.source.kind === "file" && draftContent.sourceAssetId) {
+      void getDraftAsset(draftContent.sourceAssetId, operation).then(asset => {
+        if (current) setSourceAssetAvailable(Boolean(asset))
+      }).catch(() => { if (current) setSourceAssetAvailable(false) })
+    }
+    return () => { current = false }
+  }, [draftContent?.id, draftContent?.source.kind, draftContent?.sourceAssetId, operation])
 
   const totalCount = drafts.length
   const reviewedCount = drafts.filter((d) => d.status === "reviewed").length
@@ -524,13 +640,31 @@ export const ContentReviewPage: React.FC = () => {
   // saveDraftLocally depends on draftContent → effect depends on saveDraftLocally → loop
   const draftContentRef = React.useRef(draftContent)
   draftContentRef.current = draftContent
+  const publishSavedDraft = React.useCallback((current: ContentDraft, updated: ContentDraft) => {
+    setDrafts(previous => previous.map(draft => draft.id === updated.id ? updated : draft))
+    const latest = draftContentRef.current
+    if (latest === current) {
+      draftContentRef.current = updated
+      setDraftContent(updated)
+      dirtyRef.current = false
+      setIsDirty(false)
+      setDraftConflict(false)
+      setLastSavedAt(updated.updatedAt)
+    } else if (latest?.id === current.id && latest.updatedAt === current.updatedAt) {
+      const rebased = { ...latest, updatedAt: updated.updatedAt, revisions: updated.revisions }
+      draftContentRef.current = rebased
+      setDraftContent(rebased)
+      setLastSavedAt(updated.updatedAt)
+    }
+  }, [])
 
   const saveDraftLocally = React.useCallback(
     async (label?: string) => {
       const current = draftContentRef.current
       if (!current) return
-      setIsSaving(true)
-      const now = Date.now()
+      if (savingRef.current) throw new Error("A draft save is still in progress. Your edits remain here; try again after it finishes.")
+      savingRef.current = true
+      const now = Math.max(Date.now(), current.updatedAt + 1)
       const revisions =
         label && current.content !== current.originalContent
           ? [
@@ -552,25 +686,26 @@ export const ContentReviewPage: React.FC = () => {
         revisions,
         updatedAt: now
       }
-      await upsertContentDraft(updated)
-      setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
-      setDraftContent(updated)
-      setIsDirty(false)
-      setLastSavedAt(now)
-      setIsSaving(false)
+      try {
+        await persistDraft(updated, current.updatedAt)
+        publishSavedDraft(current, updated)
+        return updated
+      } finally {
+        savingRef.current = false
+      }
     },
-    []
+    [persistDraft, publishSavedDraft]
   )
 
   const applyDraftUpdate = React.useCallback(
     async (
+      current: ContentDraft,
       nextContent: string,
       label: string,
       extras?: Partial<ContentDraft>
     ) => {
-      const current = draftContentRef.current
-      if (!current) return
-      const now = Date.now()
+      if (draftContentRef.current !== current) throw new Error("Draft changed while AI was running. Your current edits were preserved; review the draft and try again.")
+      const now = Math.max(Date.now(), current.updatedAt + 1)
       const revisions =
         label && nextContent !== current.originalContent
           ? [
@@ -594,13 +729,10 @@ export const ContentReviewPage: React.FC = () => {
         revisions,
         updatedAt: now
       }
-      await upsertContentDraft(updated)
-      setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
-      setDraftContent(updated)
-      setIsDirty(false)
-      setLastSavedAt(now)
+      await persistDraft(updated, current.updatedAt)
+      publishSavedDraft(current, updated)
     },
-    []
+    [persistDraft, publishSavedDraft]
   )
 
   React.useEffect(() => {
@@ -609,12 +741,22 @@ export const ContentReviewPage: React.FC = () => {
       clearTimeout(saveTimerRef.current)
     }
     saveTimerRef.current = setTimeout(() => {
-      void saveDraftLocally()
+      void runAction(() => saveDraftLocally())
     }, 2000)
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
-  }, [isDirty, saveDraftLocally])
+  }, [isDirty, runAction, saveDraftLocally])
+
+  React.useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current && !committingRef.current) return
+      event.preventDefault()
+      event.returnValue = ""
+    }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [])
 
   const handleSectionToggle = (section: DraftSection, include: boolean) => {
     if (!draftContent || !draftContent.sections) return
@@ -648,7 +790,7 @@ export const ContentReviewPage: React.FC = () => {
         danger: false,
         autoFocusButton: "cancel"
       })
-      if (!ok) return
+      if (!ok || !operation.isCurrent()) return
     }
     const { sections, strategy } = detectSections(
       draftContent.content || ""
@@ -659,7 +801,7 @@ export const ContentReviewPage: React.FC = () => {
       )
       return
     }
-    const now = Date.now()
+    const now = Math.max(Date.now(), draftContent.updatedAt + 1)
     const updated: ContentDraft = {
       ...draftContent,
       sections,
@@ -667,11 +809,8 @@ export const ContentReviewPage: React.FC = () => {
       sectionStrategy: strategy || undefined,
       updatedAt: now
     }
-    await upsertContentDraft(updated)
-    setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
-    setDraftContent(updated)
-    setIsDirty(false)
-    setLastSavedAt(now)
+    await persistDraft(updated, draftContent.updatedAt)
+    publishSavedDraft(draftContent, updated)
   }
 
   const ensureAiConsent = React.useCallback(async () => {
@@ -687,10 +826,10 @@ export const ContentReviewPage: React.FC = () => {
       danger: false,
       autoFocusButton: "cancel"
     })
-    if (!ok) return false
+    if (!ok || !operation.isCurrent()) return false
     setAiWarningSeen(true)
     return true
-  }, [aiWarningSeen, confirmDanger, setAiWarningSeen, t])
+  }, [aiWarningSeen, confirmDanger, operation, setAiWarningSeen, t])
 
   const runChatRewrite = React.useCallback(
     async (
@@ -700,26 +839,30 @@ export const ContentReviewPage: React.FC = () => {
       modelOverride?: string | null
     ) => {
       const body = {
-        model: modelOverride || selectedModel || "default",
+        model: modelOverride || selectedModel || undefined,
         stream: false,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: wrapDraftForPrompt(content, instruction) }
         ]
       }
+      operation.assertCurrent()
       const resp = await bgRequest<any>({
+        servicePromptConfig: operation.requestScope.config,
+        abortSignal: operation.signal,
         path: "/api/v1/chat/completions",
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body
       })
+      operation.assertCurrent()
       return extractChatContent(resp)
     },
-    [selectedModel]
+    [operation, selectedModel]
   )
 
   const handleAiCorrections = async () => {
-    if (!draftContent || isFinalized) return
+    if (!draftContent || isFinalized || committingRef.current || aiRequestRef.current || pendingWritesRef.current) return
     if (!hasChat) {
       messageApi.error(
         t("contentReview.aiUnavailable", "Chat completions unavailable.")
@@ -727,14 +870,18 @@ export const ContentReviewPage: React.FC = () => {
       return
     }
     if (!draftContent.content?.trim()) return
+    aiRequestRef.current = true
+    try {
     const consented = await ensureAiConsent()
-    if (!consented) return
+    if (!consented || !operation.isCurrent()) return
+    const current = isDirty ? await saveDraftLocally("Pre-AI save") : draftContent
+    if (!current) return
     setAiBusy(true)
     try {
       const nextContent = await runChatRewrite(
         AI_CORRECTION_PROMPT.system,
         AI_CORRECTION_PROMPT.instruction,
-        draftContent.content
+        current.content
       )
       if (!nextContent) {
         messageApi.error(
@@ -742,26 +889,28 @@ export const ContentReviewPage: React.FC = () => {
         )
         return
       }
-      if (nextContent.trim() === draftContent.content.trim()) {
+      if (nextContent.trim() === current.content.trim()) {
         messageApi.info(
           t("contentReview.aiNoChange", "No changes returned.")
         )
         return
       }
-      await applyDraftUpdate(nextContent, "AI corrections")
+      await applyDraftUpdate(current, nextContent, "AI corrections")
       messageApi.success(
         t("contentReview.aiApplied", "AI corrections applied.")
       )
     } catch (err: any) {
+      if (!operation.isCurrent()) return
       const msg = err?.message || "AI corrections failed."
       messageApi.error(msg)
     } finally {
       setAiBusy(false)
     }
+    } finally { aiRequestRef.current = false }
   }
 
   const handleApplyTemplate = async () => {
-    if (!draftContent || isFinalized) return
+    if (!draftContent || isFinalized || committingRef.current || aiRequestRef.current || pendingWritesRef.current) return
     if (!hasChat) {
       messageApi.error(
         t("contentReview.aiUnavailable", "Chat completions unavailable.")
@@ -775,18 +924,22 @@ export const ContentReviewPage: React.FC = () => {
       )
       return
     }
+    aiRequestRef.current = true
+    try {
     const consented = await ensureAiConsent()
-    if (!consented) return
+    if (!consented || !operation.isCurrent()) return
     const template = CONTENT_REVIEW_TEMPLATES.find(
       (item) => item.id === selectedTemplateId
     )
     if (!template) return
+    const current = isDirty ? await saveDraftLocally("Pre-AI save") : draftContent
+    if (!current) return
     setTemplateBusy(true)
     try {
       const nextContent = await runChatRewrite(
         template.systemPrompt,
         template.instruction,
-        draftContent.content
+        current.content
       )
       if (!nextContent) {
         messageApi.error(
@@ -794,24 +947,26 @@ export const ContentReviewPage: React.FC = () => {
         )
         return
       }
-      if (nextContent.trim() === draftContent.content.trim()) {
+      if (nextContent.trim() === current.content.trim()) {
         messageApi.info(
           t("contentReview.aiNoChange", "No changes returned.")
         )
         return
       }
-      await applyDraftUpdate(nextContent, "Template formatting", {
+      await applyDraftUpdate(current, nextContent, "Template formatting", {
         contentFormat: template.outputFormat
       })
       messageApi.success(
         t("contentReview.templateApplied", "Template applied.")
       )
     } catch (err: any) {
+      if (!operation.isCurrent()) return
       const msg = err?.message || "Template application failed."
       messageApi.error(msg)
     } finally {
       setTemplateBusy(false)
     }
+    } finally { aiRequestRef.current = false }
   }
 
   const handleResetContent = async () => {
@@ -827,26 +982,23 @@ export const ContentReviewPage: React.FC = () => {
       danger: false,
       autoFocusButton: "cancel"
     })
-    if (!ok) return
+    if (!ok || !operation.isCurrent()) return
     updateDraftField("content", draftContent.originalContent)
     updateDraftField("excludedSectionIds", [])
   }
 
   const handleMarkReviewed = async () => {
     if (!draftContent) return
-    const now = Date.now()
+    const now = Math.max(Date.now(), draftContent.updatedAt + 1)
     const updated = {
       ...draftContent,
       status: "reviewed" as const,
       reviewedAt: now,
       updatedAt: now
     }
-    await upsertContentDraft(updated)
-    setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
-    setDraftContent(updated)
-    setIsDirty(false)
-    setLastSavedAt(now)
-    navigateToAdjacent(1)
+    await persistDraft(updated, draftContent.updatedAt)
+    publishSavedDraft(draftContent, updated)
+    await navigateToAdjacent(1)
   }
 
   const handleDiscard = async () => {
@@ -862,61 +1014,61 @@ export const ContentReviewPage: React.FC = () => {
       danger: true,
       autoFocusButton: "cancel"
     })
-    if (!ok) return
-    const now = Date.now()
+    if (!ok || !operation.isCurrent()) return
+    const now = Math.max(Date.now(), draftContent.updatedAt + 1)
     const updated = {
       ...draftContent,
       status: "discarded" as const,
       updatedAt: now
     }
-    await upsertContentDraft(updated)
-    setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
-    setDraftContent(updated)
-    setIsDirty(false)
+    await persistDraft(updated, draftContent.updatedAt)
+    publishSavedDraft(draftContent, updated)
   }
 
-  const navigateToAdjacent = (direction: 1 | -1) => {
-    if (!activeDraftId) return
-    const index = drafts.findIndex((d) => d.id === activeDraftId)
-    if (index === -1) return
+  const flushForNavigation = async () => {
+    if (committingRef.current) throw new Error("Wait for the current commit before leaving this draft.")
+    if (savingRef.current) throw new Error("A draft save is still in progress. Your edits remain here; try again after it finishes.")
+    if (dirtyRef.current) await saveDraftLocally("Before navigation")
+    if (dirtyRef.current) throw new Error("New edits arrived while saving. Navigation paused so you can keep or save them.")
+  }
+  const selectDraft = async (id: string, batchId = activeBatchId) => {
+    await flushForNavigation()
+    setActiveDraftId(id)
+    syncRoute(batchId, id)
+  }
+  const navigateToAdjacent = async (direction: 1 | -1) => {
+    const index = drafts.findIndex(d => d.id === activeDraftId)
     const next = drafts[index + direction]
-    if (next) {
-      setActiveDraftId(next.id)
-      syncRoute(activeBatchId, next.id)
-    }
+    if (index >= 0 && next) await selectDraft(next.id)
   }
 
   const handleCommit = async () => {
-    if (!draftContent) return
-    if (isDirty) {
-      await saveDraftLocally("Pre-commit save")
-    }
+    if (!draftContent || committingRef.current || isFinalized) return
+    if (pendingWritesRef.current || savingRef.current || aiRequestRef.current) throw new Error("Wait for the current draft save or AI request before committing.")
+    committingRef.current = true
     setIsCommitting(true)
     try {
-      const updated = await commitDraftToServer(draftContent, (warn) =>
-        messageApi.warning(warn)
-      )
-      await upsertContentDraft(updated)
-      setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
+      const current = isDirty ? await saveDraftLocally("Pre-commit save") : draftContent
+      if (!current) return
+      const updated = await commitDraftToServer(current, operation, warn => messageApi.warning(warn), admittedMediaRef.current)
+      updated.updatedAt = Math.max(Date.now(), current.updatedAt + 1)
+      await persistDraft(updated, current.updatedAt)
+      setDrafts(prev => prev.map(d => d.id === updated.id ? updated : d))
       setDraftContent(updated)
       setIsDirty(false)
       setLastSavedAt(updated.updatedAt)
-      messageApi.success(
-        t("contentReview.commitSuccess", "Draft committed.")
-      )
-    } catch (err: any) {
-      const msg = err?.message || "Commit failed."
-      messageApi.error(msg)
+      messageApi.success(t("contentReview.commitSuccess", "Draft committed."))
     } finally {
+      committingRef.current = false
       setIsCommitting(false)
     }
   }
 
   const handleCommitSingle = async (draft: ContentDraft) => {
-    const updated = await commitDraftToServer(draft, (warn) =>
-      messageApi.warning(warn)
+    const updated = await commitDraftToServer(draft, operation, (warn) =>
+      messageApi.warning(warn), admittedMediaRef.current
     )
-    await upsertContentDraft(updated)
+    await persistDraft(updated, draft.updatedAt)
     setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
     if (draftContent?.id === updated.id) {
       setDraftContent(updated)
@@ -926,7 +1078,10 @@ export const ContentReviewPage: React.FC = () => {
   }
 
   const handleCommitAll = async () => {
-    if (reviewedCount === 0) return
+    if (reviewedCount === 0 || committingRef.current) return
+    if (pendingWritesRef.current || savingRef.current || aiRequestRef.current) throw new Error("Wait for the current draft save or AI request before committing.")
+    committingRef.current = true
+    try {
     const ok = await confirmDanger({
       title: t("contentReview.commitAllTitle", "Commit reviewed drafts?"),
       content: t(
@@ -938,13 +1093,13 @@ export const ContentReviewPage: React.FC = () => {
       danger: false,
       autoFocusButton: "ok"
     })
-    if (!ok) return
+    if (!ok || !operation.isCurrent()) return
 
     if (draftContent && isDirty) {
       await saveDraftLocally("Pre-commit save")
     }
 
-    const reviewed = drafts.filter((d) => d.status === "reviewed")
+    const reviewed = (await getDraftsByBatch(activeBatchId!, operation)).filter(d => d.status === "reviewed")
     setIsCommitting(true)
     let successCount = 0
     let failCount = 0
@@ -954,6 +1109,7 @@ export const ContentReviewPage: React.FC = () => {
         await handleCommitSingle(draft)
         successCount += 1
       } catch (err: any) {
+        if (!operation.isCurrent()) return
         failCount += 1
         errors.push({
           title: draft.title || draft.id,
@@ -972,11 +1128,12 @@ export const ContentReviewPage: React.FC = () => {
         { success: successCount, failed: failCount }
       )
     )
+    } finally { committingRef.current = false; setIsCommitting(false) }
   }
 
   const handleReattachFile = async (file?: File) => {
     if (!draftContent || !file) return
-    const stored = await storeDraftAsset(draftContent.id, file)
+    const stored = await storeDraftAsset(draftContent.id, file, operation)
     if (!stored.asset) {
       messageApi.warning(
         t(
@@ -989,6 +1146,7 @@ export const ContentReviewPage: React.FC = () => {
     }
     const updated: ContentDraft = {
       ...draftContent,
+      updatedAt: Math.max(Date.now(), draftContent.updatedAt + 1),
       source: {
         kind: "file",
         fileName: file.name,
@@ -998,10 +1156,8 @@ export const ContentReviewPage: React.FC = () => {
       },
       sourceAssetId: stored.asset.id
     }
-    await upsertContentDraft(updated)
-    setDrafts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)))
-    setDraftContent(updated)
-    setIsDirty(false)
+    await persistDraft(updated, draftContent.updatedAt)
+    publishSavedDraft(draftContent, updated)
   }
 
   const handleClearDrafts = async () => {
@@ -1009,19 +1165,15 @@ export const ContentReviewPage: React.FC = () => {
       title: t("contentReview.clearTitle", "Clear all drafts?"),
       content: t(
         "contentReview.clearBody",
-        "This removes all local content review drafts and assets."
+        "This removes this account's local content review drafts and assets."
       ),
       okText: t("contentReview.clearConfirm", "Clear drafts"),
       cancelText: t("contentReview.clearCancel", "Cancel"),
       danger: true,
       autoFocusButton: "cancel"
     })
-    if (!ok) return
-    await db.transaction("rw", [db.contentDrafts, db.draftAssets, db.draftBatches], async () => {
-      await db.contentDrafts.clear()
-      await db.draftAssets.clear()
-      await db.draftBatches.clear()
-    })
+    if (!ok || !operation.isCurrent()) return
+    await clearDrafts(operation)
     setBatches([])
     setDrafts([])
     setActiveBatchId(null)
@@ -1038,7 +1190,8 @@ export const ContentReviewPage: React.FC = () => {
   const missingRequiredAsset =
     !!draftContent &&
     draftContent.source.kind === "file" &&
-    !draftContent.sourceAssetId &&
+    (!draftContent.sourceAssetId || sourceAssetAvailable === false) &&
+    !draftContent.pendingMediaId && !admittedMediaRef.current.has(draftContent.id) &&
     (draftContent.mediaType === "audio" || draftContent.mediaType === "video")
   const isFinalized =
     !!draftContent &&
@@ -1047,11 +1200,26 @@ export const ContentReviewPage: React.FC = () => {
     !!draftContent &&
     (draftContent.status === "committed" ||
       draftContent.status === "discarded" ||
-      missingRequiredAsset)
+      missingRequiredAsset || (sourceAssetAvailable === false && !draftContent.pendingMediaId && !admittedMediaRef.current.has(draftContent.id)))
 
   return (
     <div className="space-y-4">
       {contextHolder}
+      {LeaveGuard ? <LeaveGuard when={isDirty || isSaving || isCommitting} onLeave={async () => {
+        let ready = false
+        await runAction(async () => { await flushForNavigation(); ready = true })
+        return ready
+      }} /> : null}
+      {draftConflict && <div role="alert" className="rounded border border-warn p-3">
+        <p>Draft changed elsewhere. Your edits remain here. Copy them before reloading the saved draft.</p>
+        <Button onClick={() => { void runAction(async () => {
+          const ok = await confirmDanger({ title: "Reload saved draft?", content: "This replaces the editor with the saved draft. Copy any edits you want to keep first.", okText: "Reload saved draft", cancelText: "Keep editing", danger: false })
+          if (!ok || !draftContent) return
+          const saved = await getDraftById(draftContent.id, operation)
+          if (!saved) throw new Error("Draft is no longer available.")
+          setDraftContent(cloneDraft(saved)); setIsDirty(false); setDraftConflict(false); setLastSavedAt(saved.updatedAt)
+        }) }} disabled={isCommitting}>Reload saved draft</Button>
+      </div>}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Typography.Title level={3} className="!mb-1">
@@ -1080,13 +1248,13 @@ export const ContentReviewPage: React.FC = () => {
         </div>
         <Space>
           <Button
-            onClick={handleCommitAll}
-            disabled={reviewedCount === 0 || isCommitting}
+            onClick={() => { void runAction(handleCommitAll) }}
+            disabled={reviewedCount === 0 || isCommitting || isSaving || aiBusy || templateBusy}
             type="primary"
           >
             {t("contentReview.commitAll", "Commit All")}
           </Button>
-          <Button onClick={handleClearDrafts} danger>
+          <Button onClick={() => { void runAction(handleClearDrafts) }} danger disabled={isCommitting}>
             {t("contentReview.clearDrafts", "Clear drafts")}
           </Button>
         </Space>
@@ -1113,10 +1281,12 @@ export const ContentReviewPage: React.FC = () => {
               <Select
                 className="mt-2 w-full"
                 value={activeBatchId || undefined}
-                onChange={(value) => {
+                disabled={isCommitting}
+                onChange={value => { void runAction(async () => {
+                  await flushForNavigation()
                   setActiveBatchId(value)
                   syncRoute(value, null)
-                }}
+                }) }}
                 options={batches.map((batch, index) => ({
                   value: batch.id,
                   label:
@@ -1145,10 +1315,7 @@ export const ContentReviewPage: React.FC = () => {
                 loading={isLoading}
                 renderItem={(draft) => (
                   <List.Item
-                    onClick={() => {
-                      setActiveDraftId(draft.id)
-                      syncRoute(activeBatchId, draft.id)
-                    }}
+                    onClick={() => { void runAction(() => selectDraft(draft.id)) }}
                     className={`cursor-pointer px-3 py-2 ${
                       draft.id === activeDraftId
                         ? "bg-primary/10 "
@@ -1192,7 +1359,7 @@ export const ContentReviewPage: React.FC = () => {
                         onChange={(e) =>
                           updateDraftField("title", e.target.value)
                         }
-                        disabled={isFinalized}
+                        disabled={isFinalized || isCommitting}
                         placeholder={t(
                           "contentReview.titlePlaceholder",
                           "Draft title"
@@ -1221,16 +1388,16 @@ export const ContentReviewPage: React.FC = () => {
                       </div>
                     </div>
                     <Space>
-                      <Button onClick={handleResetContent} disabled={isFinalized}>
+                      <Button onClick={() => { void runAction(handleResetContent) }} disabled={isFinalized || isCommitting}>
                         {t("contentReview.resetContent", "Reset")}
                       </Button>
                       <Button onClick={() => setDiffOpen(true)}>
                         {t("contentReview.diffView", "Diff view")}
                       </Button>
                       <Button
-                        onClick={() => saveDraftLocally("Manual save")}
+                        onClick={() => { void runAction(() => saveDraftLocally("Manual save")) }}
                         loading={isSaving}
-                        disabled={isFinalized}
+                        disabled={isFinalized || isCommitting}
                       >
                         {t("contentReview.saveDraft", "Save draft")}
                       </Button>
@@ -1270,7 +1437,7 @@ export const ContentReviewPage: React.FC = () => {
                               "Server default"
                             )}
                             loading={modelsLoading}
-                            disabled={!hasChat || modelsLoading}
+                            disabled={isCommitting || !hasChat || modelsLoading}
                             options={modelOptions}
                             showSearch
                             filterOption={(input, option) =>
@@ -1287,9 +1454,9 @@ export const ContentReviewPage: React.FC = () => {
                           >
                             <Button
                               size="small"
-                              onClick={handleAiCorrections}
+                              onClick={() => { void runAction(handleAiCorrections) }}
                               disabled={
-                                isFinalized || aiBusy || templateBusy || !hasChat
+                                isFinalized || isCommitting || aiBusy || templateBusy || !hasChat
                               }
                               loading={aiBusy}
                             >
@@ -1318,7 +1485,7 @@ export const ContentReviewPage: React.FC = () => {
                           />
                           <Button
                             size="small"
-                            onClick={handleApplyTemplate}
+                            onClick={() => { void runAction(handleApplyTemplate) }}
                             disabled={
                               isFinalized ||
                               aiBusy ||
@@ -1332,8 +1499,8 @@ export const ContentReviewPage: React.FC = () => {
                           </Button>
                           <Button
                             size="small"
-                            onClick={handleRedetectSections}
-                            disabled={isFinalized || aiBusy || templateBusy}
+                            onClick={() => { void runAction(handleRedetectSections) }}
+                            disabled={isFinalized || isCommitting || aiBusy || templateBusy}
                           >
                             {t("contentReview.detectSections", "Detect sections")}
                           </Button>
@@ -1346,7 +1513,7 @@ export const ContentReviewPage: React.FC = () => {
                         onChange={(e) =>
                           updateDraftField("content", e.target.value)
                         }
-                        readOnly={isFinalized}
+                        readOnly={isFinalized || isCommitting}
                       />
                     </div>
 
@@ -1373,7 +1540,7 @@ export const ContentReviewPage: React.FC = () => {
                                     >
                                       <Checkbox
                                         checked={included}
-                                        disabled={isFinalized}
+                                        disabled={isFinalized || isCommitting}
                                         onChange={(e) =>
                                           handleSectionToggle(
                                             section,
@@ -1426,7 +1593,7 @@ export const ContentReviewPage: React.FC = () => {
                             onChange={(value) =>
                               updateDraftField("keywords", value)
                             }
-                            disabled={isFinalized}
+                            disabled={isFinalized || isCommitting}
                             placeholder={t(
                               "contentReview.keywordsPlaceholder",
                               "Add keywords"
@@ -1444,11 +1611,11 @@ export const ContentReviewPage: React.FC = () => {
                             onChange={(e) =>
                               updateDraftField("reviewNotes", e.target.value)
                             }
-                            disabled={isFinalized}
+                            disabled={isFinalized || isCommitting}
                           />
                         </div>
                         {draftContent.source.kind === "file" &&
-                        !draftContent.sourceAssetId ? (
+                        (!draftContent.sourceAssetId || sourceAssetAvailable === false) ? (
                           <div className="rounded-md border border-warn/40 bg-warn/10 p-3 text-xs text-warn">
                             <div className="font-medium">
                               {t(
@@ -1478,7 +1645,7 @@ export const ContentReviewPage: React.FC = () => {
                                 className="hidden"
                                 onChange={(e) => {
                                   const file = e.target.files?.[0]
-                                  void handleReattachFile(file || undefined)
+                                  void runAction(() => handleReattachFile(file || undefined))
                                   e.target.value = ""
                                 }}
                               />
@@ -1495,9 +1662,9 @@ export const ContentReviewPage: React.FC = () => {
                       <Space orientation="vertical" className="mt-3 w-full">
                         <Button
                           type="primary"
-                          onClick={handleCommit}
+                          onClick={() => { void runAction(handleCommit) }}
                           loading={isCommitting}
-                          disabled={commitDisabled}
+                          disabled={commitDisabled || isCommitting || isSaving || aiBusy || templateBusy}
                         >
                           {t("contentReview.commit", "Commit")}
                         </Button>
@@ -1509,13 +1676,13 @@ export const ContentReviewPage: React.FC = () => {
                             )}
                           </div>
                         ) : null}
-                        <Button onClick={handleMarkReviewed} disabled={isFinalized}>
+                        <Button onClick={() => { void runAction(handleMarkReviewed) }} disabled={isFinalized || isCommitting}>
                           {t("contentReview.markReviewed", "Mark reviewed")}
                         </Button>
-                        <Button onClick={() => navigateToAdjacent(1)}>
+                        <Button onClick={() => { void runAction(() => navigateToAdjacent(1)) }}>
                           {t("contentReview.skipNext", "Skip")}
                         </Button>
-                        <Button danger onClick={handleDiscard} disabled={isFinalized}>
+                        <Button danger onClick={() => { void runAction(handleDiscard) }} disabled={isFinalized || isCommitting}>
                           {t("contentReview.discard", "Discard")}
                         </Button>
                       </Space>

@@ -1,21 +1,22 @@
-import React, { useCallback, useMemo } from "react"
-import { useTranslation } from "react-i18next"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
 import {
   AlertTriangle,
   ArrowLeft,
-  Play,
+  BookOpen,
+  File,
   FileText,
-  Music,
   Film,
   Globe,
   Image,
-  BookOpen,
-  File,
+  Music,
+  Play
 } from "lucide-react"
-import type { DetectedMediaType, IngestPreset, PresetConfig, WizardQueueItem } from "./types"
+import React, { useCallback, useMemo } from "react"
+import { useTranslation } from "react-i18next"
 import { useIngestWizard } from "./IngestWizardContext"
-
+import { getEligibleQueueItems, getQueueItemExclusionReason } from "./queue-items"
+import { getSavedMediaIds } from "./result-actions"
+import type { DetectedMediaType, IngestPreset, PresetConfig, WizardQueueItem } from "./types"
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -82,6 +83,7 @@ const TYPE_ICONS: Record<DetectedMediaType, React.ElementType> = {
 // ---------------------------------------------------------------------------
 
 type ReviewStepProps = {
+  processingItems?: WizardQueueItem[]
   isOnlineForIngest?: boolean
   isCheckingConnection?: boolean
   connectionRecoveryMessage?: string
@@ -89,6 +91,7 @@ type ReviewStepProps = {
 }
 
 export const ReviewStep: React.FC<ReviewStepProps> = ({
+  processingItems,
   isOnlineForIngest = true,
   isCheckingConnection = false,
   connectionRecoveryMessage,
@@ -107,9 +110,13 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
   const { queueItems, selectedPreset, presetConfig, conferenceBatchMetadata } = state
   const selectedQueueItems = useMemo(
-    () => queueItems.filter((item) => item.conferenceOverride?.selected !== false),
-    [queueItems]
+    () => processingItems ?? getEligibleQueueItems(queueItems),
+    [processingItems, queueItems]
   )
+
+  const savedItemIds = new Set(state.results.filter(result => getSavedMediaIds([result]).length > 0).map(result => result.id))
+  const completedItems = new Map(state.results.filter(result => result.status === "ok").map(result => [result.id, result]))
+  const processingItemIds = new Set(selectedQueueItems.map(item => item.id))
 
   // Preset display name
   const presetLabel = useMemo(
@@ -119,10 +126,7 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
 
   // Storage mode
   const storageMode = presetConfig.storeRemote ? "Server" : "Local"
-  const validItemCount = useMemo(
-    () => selectedQueueItems.filter((item) => item.validation.valid).length,
-    [selectedQueueItems]
-  )
+  const validItemCount = selectedQueueItems.length
   const canStartProcessing =
     validItemCount > 0 && isOnlineForIngest && !isCheckingConnection
 
@@ -231,9 +235,25 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           role="list"
           aria-label={qi("review.itemList.ariaLabel", "Items to process")}
         >
-          {selectedQueueItems.map((item) => {
+          {queueItems.map((item) => {
             const IconComponent = TYPE_ICONS[item.detectedType] ?? File
-            const ops = getOperationDescription(item.detectedType, selectedPreset, presetConfig)
+            const exclusion = getQueueItemExclusionReason(item, queueItems)
+            const saved = savedItemIds.has(item.id)
+            const selected = processingItemIds.has(item.id)
+            const completed = completedItems.get(item.id)
+            const ops = saved
+              ? qi("queueSavedExcluded", "Saved — excluded from this run")
+              : completed?.outcome === "skipped"
+                ? qi("queueSkippedExcluded", "Skipped — excluded from this run")
+                : completed
+                  ? qi("queueCompletedExcluded", "Completed — excluded from this run")
+                  : exclusion === "duplicate"
+              ? qi("queueDuplicateExcluded", "Already queued — excluded")
+              : exclusion === "invalid"
+                ? qi("queueInvalidExcluded", "Invalid — excluded")
+                : exclusion === "unselected" || !selected
+                  ? qi("queueUnselected", "Not selected — excluded")
+                  : getOperationDescription(item.detectedType, selectedPreset, presetConfig)
             const label = getItemLabel(item)
 
             return (
@@ -261,6 +281,17 @@ export const ReviewStep: React.FC<ReviewStepProps> = ({
           })}
         </ul>
 
+        <p className="mt-3 text-sm text-text-muted">
+          {presetConfig.common.overwrite_existing
+            ? qi(
+                "review.replacementAllowed",
+                "Replacement allowed: matching saved sources may be replaced. Affected saved items have not been confirmed."
+              )
+            : qi(
+                "review.replacementDisabled",
+                "Replacement disabled: existing saved sources are preserved."
+              )}
+        </p>
         {/* Storage mode */}
         <p className="mt-3 text-xs text-text-muted">
           {qi("review.storage", "Storage: {{mode}}", { mode: storageMode })}

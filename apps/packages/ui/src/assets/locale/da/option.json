@@ -395,7 +395,7 @@
     "storageServerDescription": "Gemt på din tldw-server (anbefales til RAG og delte arbejdsområder).",
     "storageLocalDescription": "Beholdes kun i denne browser; ingen data skrives til din server.",
     "storeAfterReview": "Gem efter gennemgang",
-    "reviewBeforeStorage": "Gennemgå før gem",
+    "reviewBeforeStorage": "Gennemse udtrukket indhold før lagring",
     "reviewBeforeStorageHint": "Behandl nu, og redigér derefter kladder lokalt, før du gemmer på din server.",
     "reviewEnabled": "Gennemgangstilstand",
     "reviewStorageCap": "Lokale kladder er begrænset til {{cap}}.",

@@ -5,8 +5,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+
 @pytest.mark.asyncio
-async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
+async def test_chat_budget_guard_dependency_returns_principal(tmp_path, fresh_services):
     """
     Drive the enforce_llm_budget dependency (not middleware) through a real HTTP request
     and assert the returned 402 includes AuthGovernor principal details.
@@ -18,23 +19,19 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
     db_path = tmp_path / "users.db"
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
 
-    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
-    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool, get_db_pool
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(pool.db_path))
 
-    # Seed a basic user
-    async with pool.transaction() as conn:
-        await conn.execute(
-            "INSERT INTO users (username, email, password_hash, is_active) VALUES (?, ?, ?, 1)",
-            ("budget_guard_user", "budget_guard@example.com", "x"),
-        )
-    user_id = await pool.fetchval("SELECT id FROM users WHERE username = ?", "budget_guard_user")
+    # Seeded through UsersDB: profile_user_write_guard rejects raw users writes.
+    from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
+
+    user_id = await ensure_test_user(pool, "budget_guard_user", "budget_guard@example.com", password_hash="x")
 
     # Create a virtual key with a zero budget so it is immediately over limit
     from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
@@ -59,8 +56,8 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
             await conn.execute("UPDATE api_keys SET scope = ? WHERE id = ?", ("write", key_id))
 
     # Remove LLMBudgetMiddleware so the dependency path handles the 402
-    from tldw_Server_API.app.main import app
     from tldw_Server_API.app.core.AuthNZ.llm_budget_middleware import LLMBudgetMiddleware
+    from tldw_Server_API.app.main import app
 
     original_middleware = list(getattr(app, "user_middleware", []))
     app.user_middleware = [m for m in original_middleware if getattr(m, "cls", None) is not LLMBudgetMiddleware]
@@ -89,5 +86,4 @@ async def test_chat_budget_guard_dependency_returns_principal(tmp_path):
             await pool.close()
         except Exception:
             _ = None
-        await reset_db_pool()
         reset_settings()

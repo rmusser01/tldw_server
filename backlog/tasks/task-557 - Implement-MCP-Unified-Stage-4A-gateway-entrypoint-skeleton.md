@@ -42,9 +42,9 @@ Docs/superpowers/plans/2026-05-30-mcp-unified-stage4a-gateway-entrypoint-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the Stage 4A gateway skeleton as package-owned code under mcp_unified.gateway. Added GatewayRequestContext and GatewayRuntime contracts plus FastAPI router/app factories for /mcp/status and /mcp/request. The JSON-RPC skeleton handles initialize, ping, tools/list, and tools/call through an injected runtime only. Kept SQLite store wiring, upstream external stdio lifecycle, client-facing stdio, host MCPServer imports, and host MCPProtocol imports out of scope. Tests live in the existing host MCP test suite to avoid shipping package tests while still asserting the gateway package has no tldw_Server_API imports.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

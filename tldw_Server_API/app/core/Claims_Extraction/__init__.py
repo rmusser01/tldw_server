@@ -1,6 +1,3 @@
-from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
-    FVAClaimResult,
-)
 from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
     Claim,
     ClaimExtractor,
@@ -16,6 +13,9 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import (
     ClaimsRebuildService,
     ClaimsRebuildTask,
     get_claims_rebuild_service,
+)
+from tldw_Server_API.app.core.Claims_Extraction.claims_schemas import (
+    FVAClaimResult,
 )
 from tldw_Server_API.app.core.Claims_Extraction.claims_utils import (
     claims_extraction_enabled,

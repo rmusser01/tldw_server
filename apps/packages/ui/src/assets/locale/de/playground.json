@@ -1,4 +1,11 @@
 {
+  "mediaHandoff": {
+    "conflictLabel": "Konflikt bei der Medienübernahme",
+    "conflict": "Im Nachrichtenfeld ist bereits ein Entwurf vorhanden. Füge die Medienquelle ein, ersetze deinen Entwurf oder brich den Import ab.",
+    "insert": "Medienquelle einfügen",
+    "replace": "Aktuellen Entwurf ersetzen",
+    "cancel": "Import abbrechen"
+  },
   "formError": {
     "noModel": "Bitte wählen Sie ein Modell aus",
     "noEmbeddingModel": "Bitte legen Sie ein Embedding-Modell auf der Seite Einstellungen > RAG fest"

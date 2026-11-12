@@ -887,8 +887,12 @@ class MCPProtocol:
         self,
         module: BaseModule,
         tool_args: Any,
+        *,
+        tool_name: str | None = None,
     ) -> Any:
-        return self._tool_execution_security.harden_and_sanitize_tool_arguments(module, tool_args)
+        return self._tool_execution_security.harden_and_sanitize_tool_arguments(
+            module, tool_args, tool_name=tool_name
+        )
 
     def _prepared_tool_call_payload(
         self,
@@ -1760,7 +1764,9 @@ class MCPProtocol:
                     module = await self.module_registry.find_module_for_tool(resource_id)
                     if module is not None:
                         tool_def = await self._resolve_tool_definition(module, resource_id)
-                        tool_args = self._harden_and_sanitize_tool_arguments(module, tool_args)
+                        tool_args = self._harden_and_sanitize_tool_arguments(
+                            module, tool_args, tool_name=resource_id
+                        )
                         is_write = self._resolve_write_classification(
                             module,
                             resource_id,
@@ -1939,6 +1945,18 @@ class MCPProtocol:
     ) -> dict[str, Any]:
         """List available tools"""
         tools = []
+        effective_policy = await self._resolve_effective_tool_policy(context)
+        discovery_policy = None
+        if isinstance(effective_policy, dict):
+            discovery_policy = dict(effective_policy)
+            allowed_patterns = [str(pattern).strip() for pattern in effective_policy.get("allowed_tools") or []]
+            # Discovery has no arguments; restricted allow rules keep the name conditionally available.
+            discovery_policy["allowed_tools"] = []
+            for pattern in allowed_patterns:
+                base, separator, _ = pattern.partition("(")
+                if separator and pattern.endswith(")") and self._tool_name_re.fullmatch(base.strip()):
+                    pattern = base.strip()
+                discovery_policy["allowed_tools"].append(pattern)
         catalog_filter = await self._resolve_catalog_tool_names(params, context)
         catalog_meta = self._catalog_filter_metadata(params, catalog_filter)
         modules = await self.module_registry.get_all_modules()
@@ -2001,7 +2019,9 @@ class MCPProtocol:
                     except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS:
                         is_write = None
                     can_execute = await self._has_tool_permission(context, name, is_write=is_write) if name else False
-                    tool_copy["canExecute"] = can_execute
+                    tool_copy["canExecute"] = can_execute and self._is_tool_allowed_by_effective_policy(
+                        name, None, discovery_policy
+                    )
                     tools.append(tool_copy)
             except _MCP_PROTOCOL_NONCRITICAL_EXCEPTIONS as e:
                 context.logger.exception(f"Error getting tools from module {module_id}: {e}")

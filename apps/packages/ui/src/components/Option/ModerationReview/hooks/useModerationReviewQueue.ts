@@ -10,6 +10,7 @@ import {
   type ModerationReviewBulkDecisionResponse,
   type ModerationReviewItem,
   type ModerationReviewListParams,
+  type ModerationReviewListResponse,
   type ModerationReviewSort,
   type ModerationReviewStatus,
   type ModerationSeverity
@@ -76,12 +77,12 @@ function messageFromError(error: unknown): string {
   return String((error as { message?: unknown })?.message || "Review queue request failed")
 }
 
-function loadStoredPresets(): ModerationReviewFilterPreset[] {
+function loadStoredPresets(storageKey: string): ModerationReviewFilterPreset[] {
   if (typeof window === "undefined") {
     return []
   }
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(FILTER_PRESETS_STORAGE_KEY) || "[]")
+    const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "[]")
     if (!Array.isArray(parsed)) {
       return []
     }
@@ -100,11 +101,11 @@ function loadStoredPresets(): ModerationReviewFilterPreset[] {
   }
 }
 
-function persistPresets(presets: ModerationReviewFilterPreset[]) {
+function persistPresets(storageKey: string, presets: ModerationReviewFilterPreset[]) {
   if (typeof window === "undefined") {
     return
   }
-  window.localStorage.setItem(FILTER_PRESETS_STORAGE_KEY, JSON.stringify(presets))
+  window.localStorage.setItem(storageKey, JSON.stringify(presets))
 }
 
 function filterMatchesActiveStatus(item: ModerationReviewItem, filters: ModerationReviewFilters): boolean {
@@ -116,12 +117,35 @@ type LoadFiltersOptions = {
   selectedItemFallback?: ModerationReviewItem | null
 }
 
-export function useModerationReviewQueue() {
+type ReviewQueuePage = {
+  items: ModerationReviewItem[]
+  total: number | null
+  loadedFilters: ModerationReviewFilters
+}
+
+export function useModerationReviewQueue(presetOwnerId: string) {
+  if (!/^recipe-owner:sha256:[a-f0-9]{64}$/.test(presetOwnerId)) throw new Error("Moderation presets require a resolved account")
+  const capturedOwner = React.useRef(presetOwnerId)
+  if (capturedOwner.current !== presetOwnerId) throw new Error("Moderation account changed; reopen the review workspace")
+  const presetStorageKey = `${FILTER_PRESETS_STORAGE_KEY}:${presetOwnerId}`
+  const mutationVersion = React.useRef(0)
+  const queueRead = React.useRef(0)
+  const detailRead = React.useRef(0)
+  const lifecycle = React.useRef(0)
+  const selectionId = React.useRef<string | null>(null)
+  const requestedFilters = React.useRef<ModerationReviewFilters>(DEFAULT_FILTERS)
   const [filters, setFilters] = React.useState<ModerationReviewFilters>(DEFAULT_FILTERS)
-  const [items, setItems] = React.useState<ModerationReviewItem[]>([])
+  const [page, setPageState] = React.useState<ReviewQueuePage>({ items: [], total: null, loadedFilters: DEFAULT_FILTERS })
+  // Async acknowledgements need the current page before React commits a render.
+  const pageRef = React.useRef(page)
+  const setPage = React.useCallback((update: React.SetStateAction<ReviewQueuePage>) => {
+    const next = typeof update === "function" ? update(pageRef.current) : update
+    pageRef.current = next
+    setPageState(next)
+  }, [])
+  const { items, total, loadedFilters } = page
   const [selectedItemId, setSelectedItemId] = React.useState<string | null>(null)
   const [selectedItem, setSelectedItem] = React.useState<ModerationReviewItem | null>(null)
-  const [total, setTotal] = React.useState<number | null>(null)
   const [nextCursor, setNextCursor] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [detailLoading, setDetailLoading] = React.useState(false)
@@ -133,8 +157,19 @@ export function useModerationReviewQueue() {
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set())
   const [bulkDeciding, setBulkDeciding] = React.useState<ModerationDecisionAction | null>(null)
   const [bulkResult, setBulkResult] = React.useState<ModerationReviewBulkDecisionResponse | null>(null)
-  const [filterPresets, setFilterPresets] = React.useState<ModerationReviewFilterPreset[]>(loadStoredPresets)
+  const [filterPresets, setFilterPresets] = React.useState<ModerationReviewFilterPreset[]>(() => loadStoredPresets(presetStorageKey))
   const selectedItemIds = React.useMemo(() => Array.from(selectedIds), [selectedIds])
+  const selectId = React.useCallback((id: string | null) => {
+    selectionId.current = id
+    setSelectedItemId(id)
+  }, [])
+  const recordMutation = React.useCallback((affectedIds: readonly string[]) => {
+    mutationVersion.current += 1
+    if (selectionId.current && affectedIds.includes(selectionId.current)) {
+      detailRead.current += 1
+      setDetailLoading(false)
+    }
+  }, [])
 
   const updateFilter = React.useCallback(
     <K extends keyof ModerationReviewFilters>(key: K, value: ModerationReviewFilters[K]) => {
@@ -152,41 +187,65 @@ export function useModerationReviewQueue() {
     activeFilters: ModerationReviewFilters,
     options: LoadFiltersOptions = {}
   ) => {
+    requestedFilters.current = activeFilters
+    const queueOwner = ++queueRead.current
+    const detailOwner = ++detailRead.current
+    setDetailLoading(false)
     setLoading(true)
     setError(null)
     setPartial(false)
     setWarnings([])
     try {
-      const response = await listModerationReviewItems(toListParams(activeFilters))
+      let response: ModerationReviewListResponse
+      // Preserve this request intent when an acknowledged write invalidates its GET.
+      for (;;) {
+        if (queueOwner !== queueRead.current) return
+        const version = mutationVersion.current
+        try {
+          response = await listModerationReviewItems(toListParams(activeFilters))
+        } catch (requestError) {
+          if (queueOwner !== queueRead.current) return
+          if (version !== mutationVersion.current) continue
+          throw requestError
+        }
+        if (queueOwner !== queueRead.current) return
+        if (version === mutationVersion.current) break
+      }
       const sorted = sortReviewItems(response.items || [], activeFilters.sort)
       const nextItems = options.append
         ? sortReviewItems([
-            ...items.filter((item) => !sorted.some((nextItem) => nextItem.id === item.id)),
+            ...pageRef.current.items.filter((item) => !sorted.some((nextItem) => nextItem.id === item.id)),
             ...sorted
           ], activeFilters.sort)
         : sorted
-      setItems(nextItems)
+      setPage({
+        items: nextItems,
+        total: typeof response.total === "number" ? response.total : nextItems.length,
+        loadedFilters: activeFilters
+      })
       setSelectedIds((current) => new Set([...current].filter((itemId) => nextItems.some((item) => item.id === itemId))))
-      setTotal(typeof response.total === "number" ? response.total : nextItems.length)
       setNextCursor(response.next_cursor || null)
+      if (detailOwner !== detailRead.current) return
       const fallbackItem = options.selectedItemFallback || null
       const hasFallbackSelection = Boolean(
-        selectedItemId && fallbackItem && fallbackItem.id === selectedItemId
+        selectionId.current && fallbackItem && fallbackItem.id === selectionId.current
       )
       const hasSelectedItemInPage = Boolean(
-        selectedItemId && nextItems.some((item) => item.id === selectedItemId)
+        selectionId.current && nextItems.some((item) => item.id === selectionId.current)
       )
       const preferredId = hasSelectedItemInPage || hasFallbackSelection
-        ? selectedItemId
+        ? selectionId.current
         : nextItems[0]?.id || null
-      setSelectedItemId(preferredId)
+      selectId(preferredId)
       if (preferredId) {
         const fallback = nextItems.find((item) => item.id === preferredId) || fallbackItem
         setSelectedItem(fallback)
         try {
           const detail = await getModerationReviewItem(preferredId)
+          if (detailOwner !== detailRead.current) return
           setSelectedItem(detail)
         } catch (detailError) {
+          if (detailOwner !== detailRead.current) return
           setPartial(true)
           setWarnings([`Item detail could not be loaded: ${messageFromError(detailError)}`])
         }
@@ -194,16 +253,18 @@ export function useModerationReviewQueue() {
         setSelectedItem(null)
       }
     } catch (requestError) {
+      if (queueOwner !== queueRead.current) return
       setError(requestError)
-      setItems([])
-      setSelectedItem(null)
-      setSelectedItemId(null)
-      setTotal(null)
+      setPage((current) => ({ ...current, items: [], total: null }))
+      if (detailOwner === detailRead.current) {
+        setSelectedItem(null)
+        selectId(null)
+      }
       setNextCursor(null)
     } finally {
-      setLoading(false)
+      if (queueOwner === queueRead.current) setLoading(false)
     }
-  }, [items, selectedItemId])
+  }, [selectId, setPage])
 
   const refresh = React.useCallback(async (options: LoadFiltersOptions = {}) => {
     await loadFilters(filters, options)
@@ -220,6 +281,11 @@ export function useModerationReviewQueue() {
 
   React.useEffect(() => {
     void refresh()
+    return () => {
+      lifecycle.current += 1
+      queueRead.current += 1
+      detailRead.current += 1
+    }
     // Initial load only; subsequent loads are explicit via Refresh to avoid
     // fetching on every search keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -227,23 +293,26 @@ export function useModerationReviewQueue() {
 
   const selectItem = React.useCallback(
     async (itemId: string) => {
-      setSelectedItemId(itemId)
-      const fallback = items.find((item) => item.id === itemId) || null
+      const detailOwner = ++detailRead.current
+      selectId(itemId)
+      const fallback = pageRef.current.items.find((item) => item.id === itemId) || null
       setSelectedItem(fallback)
       setDetailLoading(true)
       setPartial(false)
       setWarnings([])
       try {
         const detail = await getModerationReviewItem(itemId)
+        if (detailOwner !== detailRead.current) return
         setSelectedItem(detail)
       } catch (detailError) {
+        if (detailOwner !== detailRead.current) return
         setPartial(true)
         setWarnings([`Item detail could not be loaded: ${messageFromError(detailError)}`])
       } finally {
-        setDetailLoading(false)
+        if (detailOwner === detailRead.current) setDetailLoading(false)
       }
     },
-    [items]
+    [selectId]
   )
 
   const selectRelative = React.useCallback(
@@ -283,59 +352,67 @@ export function useModerationReviewQueue() {
 
   const decideSelected = React.useCallback(
     async (action: ModerationDecisionAction, reason?: string) => {
-      if (!selectedItemId) {
+      const owner = lifecycle.current
+      const itemId = selectionId.current
+      if (!itemId || error) {
         return
       }
       setDeciding(action)
       setError(null)
       try {
-        const response = await decideModerationReviewItem(selectedItemId, {
+        const response = await decideModerationReviewItem(itemId, {
           action,
           reason: reason?.trim() || undefined
         })
-        setSelectedItem(response.item)
+        if (owner !== lifecycle.current) return
+        recordMutation([itemId])
+        if (selectionId.current === itemId) setSelectedItem(response.item)
         setUndo(
           response.undo_token
             ? {
-                itemId: selectedItemId,
+                itemId,
                 token: response.undo_token,
                 action,
                 expiresAt: response.decision.undo_expires_at || null
               }
             : null
         )
-        await refresh({ selectedItemFallback: response.item })
+        await loadFilters(requestedFilters.current, { selectedItemFallback: response.item })
       } catch (requestError) {
-        setError(requestError)
+        if (owner === lifecycle.current) setError(requestError)
       } finally {
-        setDeciding(null)
+        if (owner === lifecycle.current) setDeciding(null)
       }
     },
-    [refresh, selectedItemId]
+    [error, loadFilters, recordMutation]
   )
 
   const undoDecision = React.useCallback(async () => {
-    if (!undo) {
+    const owner = lifecycle.current
+    const target = undo
+    if (!target) {
       return
     }
     setDeciding("undo")
     setError(null)
     try {
-      const item = await undoModerationReviewDecision(undo.itemId, undo.token)
-      setSelectedItem(item)
-      setSelectedItemId(item.id)
-      setUndo(null)
-      await refresh({ selectedItemFallback: item })
+      const item = await undoModerationReviewDecision(target.itemId, target.token)
+      if (owner !== lifecycle.current) return
+      recordMutation([target.itemId])
+      if (selectionId.current === target.itemId) setSelectedItem(item)
+      setUndo((current) => current?.itemId === target.itemId && current.token === target.token ? null : current)
+      await loadFilters(requestedFilters.current, { selectedItemFallback: item })
     } catch (requestError) {
-      setError(requestError)
+      if (owner === lifecycle.current) setError(requestError)
     } finally {
-      setDeciding(null)
+      if (owner === lifecycle.current) setDeciding(null)
     }
-  }, [refresh, undo])
+  }, [loadFilters, recordMutation, undo])
 
   const bulkDecideSelected = React.useCallback(
     async (action: ModerationDecisionAction, reason?: string) => {
-      if (selectedItemIds.length === 0) {
+      const owner = lifecycle.current
+      if (selectedItemIds.length === 0 || error) {
         return
       }
       setBulkDeciding(action)
@@ -346,30 +423,48 @@ export function useModerationReviewQueue() {
           action,
           reason: reason?.trim() || undefined
         })
+        if (owner !== lifecycle.current) return
+        const succeededIds = response.results.filter((entry) => entry.ok).map((entry) => entry.item_id)
+        if (succeededIds.length) recordMutation(succeededIds)
         setBulkResult(response)
         const itemUpdates = new Map(
           response.results
             .filter((entry) => entry.ok && entry.item)
             .map((entry) => [entry.item_id, entry.item as ModerationReviewItem])
         )
-        setItems((current) =>
-          current
-            .map((item) => itemUpdates.get(item.id) || item)
-            .filter((item) => filterMatchesActiveStatus(item, filters))
-        )
-        if (selectedItemId && itemUpdates.has(selectedItemId)) {
-          const updated = itemUpdates.get(selectedItemId) || null
-          setSelectedItem(updated && filterMatchesActiveStatus(updated, filters) ? updated : null)
+        setPage((current) => {
+          const removedIds = new Set(current.items.filter((item) => {
+            const updated = itemUpdates.get(item.id)
+            return updated && !filterMatchesActiveStatus(updated, current.loadedFilters)
+          }).map((item) => item.id))
+          return {
+            ...current,
+            items: current.items
+              .map((item) => itemUpdates.get(item.id) || item)
+              .filter((item) => !removedIds.has(item.id)),
+            total: current.total === null ? null : Math.max(0, current.total - removedIds.size)
+          }
+        })
+        const currentItemId = selectionId.current
+        if (currentItemId && itemUpdates.has(currentItemId)) {
+          const updated = itemUpdates.get(currentItemId) || null
+          setSelectedItem(updated && filterMatchesActiveStatus(updated, pageRef.current.loadedFilters) ? updated : null)
         }
-        const failedIds = new Set(response.results.filter((entry) => !entry.ok).map((entry) => entry.item_id))
-        setSelectedIds(failedIds)
+        setSelectedIds((current) => new Set([...current].filter((id) => !succeededIds.includes(id))))
+        if (response.results.some((entry) => entry.ok && !entry.item)) {
+          if (selectionId.current && succeededIds.includes(selectionId.current)) {
+            selectId(null)
+            setSelectedItem(null)
+          }
+          throw new Error("Some decisions were accepted without updated items. Refresh the queue before reviewing again.")
+        }
       } catch (requestError) {
-        setError(requestError)
+        if (owner === lifecycle.current) setError(requestError)
       } finally {
-        setBulkDeciding(null)
+        if (owner === lifecycle.current) setBulkDeciding(null)
       }
     },
-    [filters, selectedItemId, selectedItemIds]
+    [error, recordMutation, selectedItemIds, selectId, setPage]
   )
 
   const saveFilterPreset = React.useCallback(
@@ -384,9 +479,9 @@ export function useModerationReviewQueue() {
         { name: normalized, filters: { ...presetFilters, cursor: null } }
       ].sort((a, b) => a.name.localeCompare(b.name))
       setFilterPresets(next)
-      persistPresets(next)
+      persistPresets(presetStorageKey, next)
     },
-    [filterPresets, filters]
+    [filterPresets, filters, presetStorageKey]
   )
 
   const applyFilterPreset = React.useCallback(
@@ -409,13 +504,14 @@ export function useModerationReviewQueue() {
     (name: string) => {
       const next = filterPresets.filter((entry) => entry.name !== name)
       setFilterPresets(next)
-      persistPresets(next)
+      persistPresets(presetStorageKey, next)
     },
-    [filterPresets]
+    [filterPresets, presetStorageKey]
   )
 
   return {
     filters,
+    loadedFilters,
     updateFilter,
     items,
     selectedItemId,

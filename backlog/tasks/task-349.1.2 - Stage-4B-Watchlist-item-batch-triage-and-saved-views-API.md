@@ -40,11 +40,11 @@ Implement backend persistence and API endpoints for scalable item batch triage a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after Stage 4A commit 39b178da2. Scope: backend batch item triage endpoint, per-Watchlist saved review views, tests first, no frontend integration in this task.
 
 Implemented Stage 4B backend batch item triage and saved view API. Added watchlist_item_saved_views persistence, explicit item-ID and filter-scope batch updates, source/watchlist saved-view validation, static /items/batch-update route, and nested item-view CRUD routes. Verification: Stage 4B focused DB/API tests plus adjacent Watchlists API tests passed (16 passed); Bandit touched scope passed with zero findings; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

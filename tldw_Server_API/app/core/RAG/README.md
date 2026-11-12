@@ -14,7 +14,7 @@ Active entrypoints:
 Primary source paths:
 
 - Routers: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` and `tldw_Server_API/app/api/v1/endpoints/rag_health.py`
-- Schemas: `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py`
+- Schemas: `tldw_Server_API/app/core/RAG/rag_schemas_unified.py` (re-exported by `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py`)
 - Pipeline: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`
 
 ## Request Flow

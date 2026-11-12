@@ -14,7 +14,9 @@ it("keeps current-session review visible when Buddy is collapsed", () => {
   const props = {
     buddySummary: { has_buddy: true, persona_name: "Migu", role_summary: null, visual: null },
     personaId: "p1", isOpen: false, position: { x: 16, y: 16 },
-    onToggle: vi.fn(), onDragHandlePointerDown: vi.fn(), dockRef: React.createRef<HTMLDivElement>(), liveControl
+    onOpenControls: vi.fn(), onCloseControls: vi.fn(),
+    onBuddyPointerDown: vi.fn(), onBuddyKeyDown: vi.fn(),
+    onDragHandlePointerDown: vi.fn(), dockRef: React.createRef<HTMLDivElement>(), liveControl
   }
   const { rerender } = render(<BuddyShellDock {...props} />)
   expect(screen.queryByTestId("persona-buddy-popover")).not.toBeInTheDocument()

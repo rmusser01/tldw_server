@@ -1,27 +1,37 @@
 import { browser } from "wxt/browser"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 import { safeStorageSerde } from "@/utils/safe-storage"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+import { MANUAL_SESSION_KEY, manualSessionCredentialsMatch } from "@/services/tldw/single-user-credential"
 
 /** Observe account boundaries even when the Chat route is not mounted. */
 export const watchChatAccountChanges = (
-  changed: (invalidated: boolean) => void
+  changed: (invalidated: boolean, currentConfig?: TldwConfig | null, source?: Event) => void
 ): (() => void) => {
   if (typeof window === "undefined") return () => {}
-  const principalChanged = () => changed(true)
+  const principalChanged = (event: Event) => changed(true, undefined, event)
   const configChanged = (event: Event) => {
-    changed(Boolean((event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged))
+    changed(Boolean((event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged), undefined, event)
   }
-  const compare = (previous: unknown, current: unknown) => {
+  const compare = (previous: unknown, current: unknown, source?: Event) => {
+    const currentConfig = safeStorageSerde.deserializer(current) as TldwConfig | null
     changed(!current || !connectionAuthoritiesMatch(
-      safeStorageSerde.deserializer(current), safeStorageSerde.deserializer(previous)
-    ))
+      currentConfig, safeStorageSerde.deserializer(previous)
+    ), currentConfig, source)
   }
   const configKey = (key: string) => key === "tldwConfig" || key === "tldwCookieSessionConfig"
   const storageChanged = (event: StorageEvent) => {
-    if (event.key === null) changed(true)
-    else if (configKey(event.key)) compare(event.oldValue, event.newValue)
+    if (event.key === null) changed(true, undefined, event)
+    else if (configKey(event.key)) compare(event.oldValue, event.newValue, event)
   }
   const extensionChanged = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => {
+    if (area === "session") {
+      const change = changes[MANUAL_SESSION_KEY]
+      if (change && !manualSessionCredentialsMatch(
+        safeStorageSerde.deserializer(change.oldValue as string), safeStorageSerde.deserializer(change.newValue as string)
+      )) changed(true)
+      return
+    }
     if (area !== "local") return
     for (const [key, value] of Object.entries(changes)) {
       if (configKey(key)) compare(value.oldValue, value.newValue)

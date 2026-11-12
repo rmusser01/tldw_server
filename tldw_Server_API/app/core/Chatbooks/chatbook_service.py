@@ -27,7 +27,9 @@ import os
 import shutil
 import tempfile
 import zipfile
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from graphlib import TopologicalSorter
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable
 from typing import Any
@@ -39,6 +41,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.config import ACTUAL_PROJECT_ROOT, load_comprehensive_config, settings as core_settings
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     validate_chat_settings_storage,
 )
@@ -127,7 +130,7 @@ from .openwebui_hydration import (
     resolve_openwebui_file_path,
     validate_openwebui_data_root,
 )
-from .quota_manager import QuotaManager, UNLIMITED_QUOTA
+from .quota_manager import QuotaManager
 
 _CHATBOOK_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ArchiveError,
@@ -177,6 +180,7 @@ try:
     from ..DB_Management.media_db.api import (  # type: ignore
         create_media_database,
         get_media_by_id,
+        get_document_version,
         get_media_prompts,
         get_media_transcripts,
         get_media_by_uuid,
@@ -186,6 +190,7 @@ try:
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     create_media_database = None  # type: ignore
     get_media_by_id = None  # type: ignore
+    get_document_version = None  # type: ignore
     get_media_by_uuid = None  # type: ignore
     get_media_transcripts = None  # type: ignore
     get_media_prompts = None  # type: ignore
@@ -206,6 +211,80 @@ try:
     from ..Embeddings.ChromaDB_Library import ChromaDBManager  # type: ignore
 except _CHATBOOK_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     ChromaDBManager = None  # type: ignore
+
+
+@dataclass(frozen=True)
+class ChatbookJobLimits:
+    """A user's chatbook job allowances (spec 2 §4); None means unlimited."""
+
+    exports_per_day: float | None = None
+    imports_per_day: float | None = None
+    concurrent_jobs: float | None = None
+
+
+def record_failed_import_result(job: ImportJob, result: Any) -> None:
+    """Retain public partial-restore evidence without persisting private account payloads."""
+    if not isinstance(result, dict) or job.status == ImportStatus.CANCELLED:
+        return
+    for key in ("total_items", "processed_items", "successful_items", "failed_items", "skipped_items"):
+        value = result.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            setattr(job, key, value)
+    warnings = result.get("warnings")
+    if isinstance(warnings, list):
+        job.warnings = list(job.warnings or []) + [row for row in warnings if row not in (job.warnings or [])]
+    job.metadata = {
+        **(job.metadata if isinstance(job.metadata, dict) else {}),
+        **{key: result[key] for key in ("imported_items", "inventory_summary", "skipped_non_restorable") if key in result},
+    }
+
+
+def _build_import_result(
+    import_status: ImportJob,
+    imported_items: dict[str, int],
+    inventory_summary: dict[str, Any] | None,
+    skipped_non_restorable: dict[str, int],
+    account_restore_payload: dict[str, Any] | None,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Build the complete synchronous result before the caller cleans its extracted archive."""
+    # Build result message
+    logger.debug(f"Import status: total={import_status.total_items}, successful={import_status.successful_items}, skipped={import_status.skipped_items}, failed={import_status.failed_items}")
+    sync_result = {
+        "imported_items": imported_items,
+        "warnings": list(import_status.warnings or []),
+        "total_items": import_status.total_items,
+        "processed_items": import_status.processed_items,
+        "successful_items": import_status.successful_items,
+        "failed_items": import_status.failed_items,
+        "skipped_items": import_status.skipped_items,
+    }
+    if inventory_summary:
+        sync_result["inventory_summary"] = inventory_summary
+    if skipped_non_restorable:
+        sync_result["skipped_non_restorable"] = skipped_non_restorable
+    if account_restore_payload:
+        sync_result[_ACCOUNT_RESTORE_PAYLOAD_KEY] = account_restore_payload
+
+    if import_status.failed_items > 0:
+        return False, (
+            f"Import incomplete: {import_status.failed_items}/{import_status.total_items} items failed; "
+            f"{import_status.successful_items} imported, {import_status.skipped_items} skipped"
+        ), sync_result
+    if import_status.successful_items > 0:
+        message = f"Successfully imported {import_status.successful_items}/{import_status.total_items} items"
+        if import_status.skipped_items > 0:
+            message += f" ({import_status.skipped_items} skipped)"
+        return True, message, sync_result
+    elif import_status.total_items == 0:
+        # No items to import is not an error
+        return True, "Import completed: No items to import", sync_result
+    elif import_status.skipped_items > 0:
+        # All items were skipped (e.g., due to conflicts)
+        return True, f"Import completed: All {import_status.skipped_items} items were skipped", sync_result
+    else:
+        logger.debug("Import failed: No items were successfully imported or skipped")
+        return False, "No items were imported", sync_result
+
 
 
 class ChatbookService:
@@ -1059,6 +1138,18 @@ class ChatbookService:
             return None, f"Character {original_id} not found and no fallback character is available."
         return fallback, f"Character {original_id} not found; using default character."
 
+    @staticmethod
+    def _resolve_import_conversation_id(
+        source_id: Any, conversation_id_map: dict[str, str] | None, status: ImportJob,
+    ) -> str | None:
+        """Only this import's successful conversation writes can receive archived links."""
+        if source_id is None:
+            return None
+        destination_id = (conversation_id_map or {}).get(str(source_id))
+        if destination_id is None:
+            status.warnings.append("Conversation reference was not imported; left unlinked.")
+        return destination_id
+
     def _normalize_prompt_record(self, record: dict[str, Any]) -> dict[str, Any]:
         """Normalize prompt record for JSON export."""
         payload: dict[str, Any] = {}
@@ -1828,10 +1919,12 @@ class ChatbookService:
                     """
                     SELECT 1
                     FROM information_schema.columns
-                    WHERE table_name = ? AND column_name = ?
+                    WHERE table_schema = current_schema()
+                      AND table_name = ? AND column_name = ?
                     """,
                     (table_name, column_name),
                 )
+                return bool(self._fetch_results(cursor))
             else:
                 cursor = self.db.execute_query(
                     f"PRAGMA table_info({table_name})"  # nosec B608 - table name is allowlisted above.
@@ -2099,8 +2192,9 @@ class ChatbookService:
         if selection_mode == "allowlist" and sum(len(ids or []) for ids in content_selections.values()) == 0:
             return False, "Export allowlist contains no exportable items.", None
 
+        job_limits = await self._resolve_job_limits()
         if not async_mode:
-            self._check_chatbook_job_admission_with_lock("export")
+            self._check_chatbook_job_admission_with_lock("export", job_limits)
 
         if async_mode:
             # Create job and run asynchronously
@@ -2113,7 +2207,7 @@ class ChatbookService:
             )
 
             # Store job in database after atomically reserving Chatbooks quota.
-            self._save_export_job_with_quota(job)
+            self._save_export_job_with_quota(job, job_limits)
 
             # Enqueue into core Jobs and start worker if needed
             job_created = None
@@ -2983,8 +3077,9 @@ class ChatbookService:
         if safe_source_filename in {"", ".", ".."}:
             safe_source_filename = ""
 
+        job_limits = await self._resolve_job_limits()
         if not async_mode:
-            self._check_chatbook_job_admission_with_lock("import")
+            self._check_chatbook_job_admission_with_lock("import", job_limits)
 
         if async_mode:
             # Create job and run asynchronously
@@ -3005,7 +3100,7 @@ class ChatbookService:
             )
 
             # Store job in database after atomically reserving Chatbooks quota.
-            self._save_import_job_with_quota(job)
+            self._save_import_job_with_quota(job, job_limits)
 
             # Start async task through core Jobs.
             job_created = None
@@ -3278,7 +3373,9 @@ class ChatbookService:
 
             manifest_path_index = self._build_manifest_import_path_index(manifest)
             character_id_map: dict[str, int] = {}
-            media_id_map: dict[str, int] = {}
+            conversation_id_map: dict[str, str] = {}
+            message_id_map: dict[tuple[str, str], str] = {}
+            media_id_map: dict[str, int | None] = {}
             imported_items: dict[str, int] = {}
 
             def _run_import_for_type(
@@ -3389,7 +3486,9 @@ class ChatbookService:
                     conflict_resolution, prefix_imported,
                     import_status,
                     manifest_path_index=manifest_path_index,
-                    character_id_map=character_id_map
+                    character_id_map=character_id_map,
+                    conversation_id_map=conversation_id_map,
+                    message_id_map=message_id_map,
                 )
 
             # Import notes
@@ -3402,6 +3501,8 @@ class ChatbookService:
                     conflict_resolution, prefix_imported,
                     import_status,
                     manifest_path_index=manifest_path_index,
+                    conversation_id_map=conversation_id_map,
+                    message_id_map=message_id_map,
                 )
 
             # Import Explainer sessions from first-class content items.
@@ -3450,37 +3551,18 @@ class ChatbookService:
                         conflict_resolution, prefix_imported,
                         import_status,
                         manifest_path_index=manifest_path_index,
+                        conversation_id_map=conversation_id_map,
                     )
 
             # Note: We do NOT delete the original import file - the caller owns it
 
-            # Build result message
-            logger.debug(f"Import status: total={import_status.total_items}, successful={import_status.successful_items}, skipped={import_status.skipped_items}, failed={import_status.failed_items}")
-            sync_result = {
-                "imported_items": imported_items,
-                "warnings": list(import_status.warnings or []),
-            }
-            if inventory_summary:
-                sync_result["inventory_summary"] = inventory_summary
-            if skipped_non_restorable:
-                sync_result["skipped_non_restorable"] = skipped_non_restorable
-            if account_restore_payload:
-                sync_result[_ACCOUNT_RESTORE_PAYLOAD_KEY] = account_restore_payload
-
-            if import_status.successful_items > 0:
-                message = f"Successfully imported {import_status.successful_items}/{import_status.total_items} items"
-                if import_status.skipped_items > 0:
-                    message += f" ({import_status.skipped_items} skipped)"
-                return True, message, sync_result
-            elif import_status.total_items == 0:
-                # No items to import is not an error
-                return True, "Import completed: No items to import", sync_result
-            elif import_status.skipped_items > 0:
-                # All items were skipped (e.g., due to conflicts)
-                return True, f"Import completed: All {import_status.skipped_items} items were skipped", sync_result
-            else:
-                logger.debug("Import failed: No items were successfully imported or skipped")
-                return False, "No items were imported", sync_result
+            return _build_import_result(
+                import_status,
+                imported_items,
+                inventory_summary,
+                skipped_non_restorable,
+                account_restore_payload,
+            )
 
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Error importing chatbook: {e}")
@@ -3621,10 +3703,10 @@ class ChatbookService:
                 result,
             )
 
+            latest = self._get_import_job(job.job_id)
+            if latest and latest.status == ImportStatus.CANCELLED:
+                return
             if success:
-                latest = self._get_import_job(job.job_id)
-                if latest and latest.status == ImportStatus.CANCELLED:
-                    return
                 job.status = ImportStatus.COMPLETED
                 if isinstance(result, dict):
                     imported_items = result.get("imported_items") if isinstance(result.get("imported_items"), dict) else {}
@@ -3655,6 +3737,7 @@ class ChatbookService:
                     job.total_items = 0
                     job.processed_items = 0
             else:
+                record_failed_import_result(job, result)
                 job.status = ImportStatus.FAILED
                 job.error_message = message
 
@@ -4630,6 +4713,8 @@ class ChatbookService:
         if parsed.malformed_chat_count:
             result["failed_chats"] += parsed.malformed_chat_count
 
+        if result["failed_chats"]:
+            return False, "OpenWebUI import completed with failed chats; review the retained partial result.", result
         return True, "OpenWebUI import completed", result
 
     def import_openwebui_db(
@@ -4872,6 +4957,8 @@ class ChatbookService:
                 result["warnings"].extend(chat_warnings)
                 result["warnings"].append(f"OpenWebUI chat {chat.external_ref} failed to import: {exc}")
 
+        if result["failed_chats"]:
+            return False, "OpenWebUI database import completed with failed chats; review the retained partial result.", result
         return True, "OpenWebUI database import completed", result
 
     def _openwebui_conversation_title_exists(self, title: str) -> bool:
@@ -6098,6 +6185,7 @@ class ChatbookService:
                 for msg in (messages or []):
                     message_payload: dict[str, Any] = {
                         "id": msg['id'],
+                        "parent_message_id": msg.get("parent_message_id"),
                         "role": msg['sender'],
                         "content": msg.get('message', msg.get('content', '')),
                         "timestamp": msg['timestamp'].isoformat() if hasattr(msg['timestamp'], 'isoformat') else msg['timestamp'],
@@ -6307,17 +6395,22 @@ class ChatbookService:
                     "id": note['id'],
                     "title": rendered_title,
                     "content": rendered_content,
+                    "conversation_id": note.get("conversation_id"),
+                    "message_id": note.get("message_id"),
                     "created_at": note['created_at'].isoformat() if hasattr(note['created_at'], 'isoformat') else note['created_at']
                 }
 
                 # Write markdown file
                 note_file = notes_dir / f"note_{note_id}.md"
-                with open(note_file, 'w', encoding='utf-8') as f:
+                with open(note_file, 'w', encoding='utf-8', newline='') as f:
                     # Write frontmatter
                     f.write("---\n")
                     f.write(f"id: {note['id']}\n")
                     f.write(f"title: {_yaml_scalar(note_data['title'])}\n")
                     f.write(f"created_at: {note_data['created_at']}\n")
+                    for field in ("conversation_id", "message_id"):
+                        if note_data[field] is not None:
+                            f.write(f"{field}: {_yaml_scalar(note_data[field])}\n")
                     f.write("---\n\n")
                     f.write(str(note_data['content']))
 
@@ -6353,10 +6446,19 @@ class ChatbookService:
                 if not char:
                     continue
 
+                char = self._convert_datetimes(char)
+                image = char.get("image")
+                if image is not None:
+                    if not isinstance(image, (bytes, bytearray, memoryview)):
+                        raise ExportError("Unsupported character image representation")
+                    char["image"] = base64.b64encode(bytes(image)).decode("ascii")
+                    char["image_encoding"] = "base64"
+                serialized = json.dumps(char, indent=2, ensure_ascii=False)
+
                 # Write character file
                 char_file = chars_dir / f"character_{char_id}.json"
                 with open(char_file, 'w', encoding='utf-8') as f:
-                    json.dump(char, f, indent=2, ensure_ascii=False)
+                    f.write(serialized)
 
                 # Add to content
                 content.characters[char_id] = char
@@ -6370,7 +6472,7 @@ class ChatbookService:
                 ))
 
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Error collecting character {char_id}: {e}")
+                raise ExportError(f"Error collecting character {char_id}: {e}") from e
 
     def _collect_world_books(
         self,
@@ -6598,7 +6700,9 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
-        character_id_map: dict[str, int] | None = None
+        character_id_map: dict[str, int] | None = None,
+        conversation_id_map: dict[str, str] | None = None,
+        message_id_map: dict[tuple[str, str], str] | None = None,
     ):
         """Import conversations from chatbook."""
         max_img_bytes = self._get_max_message_image_bytes()
@@ -6657,6 +6761,22 @@ class ChatbookService:
                     status.warnings.append(f"Conversation {conv_id} skipped due to missing character_id.")
                     continue
 
+                messages = conv_data.get("messages", [])
+                source_indexes: dict[str, int] = {}
+                for index, msg in enumerate(messages):
+                    if msg.get("id") is not None:
+                        source_id = str(msg["id"])
+                        if source_id in source_indexes:
+                            raise ValidationError("Duplicate message ID in conversation")
+                        source_indexes[source_id] = index
+                # Parent-first order also handles archives whose timestamps put children first.
+                ordered_indexes = tuple(TopologicalSorter({
+                    index: (source_indexes[str(msg["parent_message_id"])],)
+                    if msg.get("parent_message_id") is not None and str(msg["parent_message_id"]) in source_indexes
+                    else ()
+                    for index, msg in enumerate(messages)
+                }).static_order())
+                imported_messages: dict[str, str] = {}
                 # Create conversation + messages atomically
                 with self.db.transaction():
                     conv_dict = {
@@ -6669,7 +6789,13 @@ class ChatbookService:
                     if new_conv_id:
                         # Import messages
                         base_path = extract_dir.resolve()
-                        for msg in conv_data.get('messages', []):
+                        for index in ordered_indexes:
+                            msg = messages[index]
+                            parent_id = None
+                            if msg.get("parent_message_id") is not None:
+                                parent_id = imported_messages.get(str(msg["parent_message_id"]))
+                                if parent_id is None:
+                                    status.warnings.append("Message parent was not imported; left unlinked.")
                             raw_role = msg.get('role') or msg.get('sender') or msg.get('author') or msg.get('from')
                             raw_content = msg.get('content')
                             if raw_content is None:
@@ -6678,6 +6804,7 @@ class ChatbookService:
                                 raw_content = msg.get('text')
                             msg_dict = {
                                 'conversation_id': new_conv_id,
+                                'parent_message_id': parent_id,
                                 'sender': raw_role or 'user',
                                 'content': raw_content if raw_content is not None else '',
                                 'timestamp': msg.get('timestamp') or msg.get('created_at')
@@ -6743,7 +6870,11 @@ class ChatbookService:
                             if images_payload:
                                 msg_dict['images'] = images_payload
 
-                            self.db.add_message(msg_dict)
+                            new_message_id = self.db.add_message(msg_dict)
+                            if not new_message_id:
+                                raise ValidationError("Message could not be imported")
+                            if msg.get("id") is not None:
+                                imported_messages[str(msg["id"])] = new_message_id
 
                         status.successful_items += 1
                     else:
@@ -6753,6 +6884,12 @@ class ChatbookService:
                             status.skipped_items += 1
                         else:
                             status.failed_items += 1
+
+                if new_conv_id:
+                    if conversation_id_map is not None:
+                        conversation_id_map[str(conv_id)] = new_conv_id
+                    if message_id_map is not None:
+                        message_id_map.update({(str(conv_id), key): value for key, value in imported_messages.items()})
 
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
                 status.failed_items += 1
@@ -6767,6 +6904,8 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
+        conversation_id_map: dict[str, str] | None = None,
+        message_id_map: dict[tuple[str, str], str] | None = None,
     ):
         """Import notes from chatbook."""
         template_settings = self._resolve_template_settings(manifest)
@@ -6819,12 +6958,13 @@ class ChatbookService:
                     continue
 
                 # Parse markdown with frontmatter
-                with open(note_file, encoding='utf-8') as f:
+                with open(note_file, encoding='utf-8', newline='') as f:
                     content = f.read()
 
                 # Extract frontmatter
                 note_content = content
                 note_title = f"Imported Note {note_id}"
+                parsed = {}
 
                 if content.startswith('---'):
                     parts = content.split('---', 2)
@@ -6840,7 +6980,10 @@ class ChatbookService:
                                 note_title = _extract_title_frontmatter(frontmatter, note_title)
                         except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                             note_title = _extract_title_frontmatter(frontmatter, note_title)
-                        note_content = parts[2].strip()
+                        body = parts[2]
+                        newline = "\r\n" if body.startswith("\r\n") else "\n"
+                        separator = newline * 2 if body.startswith(newline * 2) else newline
+                        note_content = body.removeprefix(separator)
 
                 note_title = self._render_chatbook_text(
                     note_title,
@@ -6866,6 +7009,15 @@ class ChatbookService:
                 elif existing and conflict_resolution == ConflictResolution.RENAME:
                     note_title = self._generate_unique_name(note_title, "note")
 
+                source_conversation = parsed.get("conversation_id") if isinstance(parsed, dict) else None
+                source_message = parsed.get("message_id") if isinstance(parsed, dict) else None
+                conversation_id = self._resolve_import_conversation_id(source_conversation, conversation_id_map, status)
+                message_id = None
+                if source_message is not None:
+                    if conversation_id is not None:
+                        message_id = (message_id_map or {}).get((str(source_conversation), str(source_message)))
+                    if message_id is None:
+                        status.warnings.append("Note message reference was not imported; left unlinked.")
                 coordinator = active_coordinator(self.db, user_id=self.user_id)
                 if coordinator is not None:
                     key = coordinator.request_fingerprint(
@@ -6874,6 +7026,8 @@ class ChatbookService:
                             "source_note_id": note_id,
                             "title": note_title,
                             "content": note_content,
+                            "conversation_id": conversation_id,
+                            "message_id": message_id,
                         },
                     )
                     new_note_id = stable_note_id("chatbook-import", key)
@@ -6882,11 +7036,15 @@ class ChatbookService:
                         note_id=new_note_id,
                         title=note_title,
                         content=note_content,
+                        conversation_id=conversation_id,
+                        message_id=message_id,
                         source="chatbook-import",
                         key=key,
                     )
                 else:
-                    new_note_id = self.db.add_note(title=note_title, content=note_content)
+                    new_note_id = self.db.add_note(
+                        title=note_title, content=note_content, conversation_id=conversation_id, message_id=message_id,
+                    )
 
                 if new_note_id:
                     status.successful_items += 1
@@ -6936,13 +7094,17 @@ class ChatbookService:
             try:
                 with open(payload_path, encoding="utf-8") as f:
                     payload = json.load(f)
-                restore_explainer_chatbook_payload(
+                restored = restore_explainer_chatbook_payload(
                     repo=repo,
                     payload=payload,
                     owner_user_id=self.user_id,
                     prefix_imported=prefix_imported,
+                    conflict_resolution=conflict_resolution.value,
                 )
-                status.successful_items += 1
+                if restored is None:
+                    status.skipped_items += 1
+                else:
+                    status.successful_items += 1
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
                 status.failed_items += 1
                 status.warnings.append(f"Error importing Explainer session {session_id_text}: {str(exc)}")
@@ -6990,13 +7152,17 @@ class ChatbookService:
                     raise ValueError("generated document payload must be an object")
                 payload.setdefault("type", "generated_document")
                 payload.setdefault("metadata", metadata)
-                restore_explainer_chatbook_payload(
+                restored = restore_explainer_chatbook_payload(
                     repo=repo,
                     payload=payload,
                     owner_user_id=self.user_id,
                     prefix_imported=prefix_imported,
+                    conflict_resolution=conflict_resolution.value,
                 )
-                status.successful_items += 1
+                if restored is None:
+                    status.skipped_items += 1
+                else:
+                    status.successful_items += 1
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS as exc:
                 status.failed_items += 1
                 status.warnings.append(
@@ -7194,7 +7360,7 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
-        media_id_map: dict[str, int] | None = None,
+        media_id_map: dict[str, int | None] | None = None,
     ) -> None:
         """Import Media DB rows, transcripts, chunks, and bundled stored artifacts."""
         media_db = self._get_media_db()
@@ -7235,6 +7401,26 @@ class ChatbookService:
                 get_by_title = getattr(media_db, "get_media_by_title", None)
                 existing = get_by_title(media_title) if callable(get_by_title) else None
                 if existing and conflict_resolution == ConflictResolution.SKIP:
+                    version = None
+                    if str(existing.get("owner_user_id")) == str(self.user_id_int) and get_document_version is not None:
+                        version = get_document_version(media_db, int(existing["id"]), include_content=False)
+                    stored_metadata = (version or {}).get("safe_metadata") or {}
+                    if isinstance(stored_metadata, str):
+                        try:
+                            stored_metadata = json.loads(stored_metadata)
+                        except ValueError:
+                            stored_metadata = {}
+                    provenance = stored_metadata.get("chatbook_import") if isinstance(stored_metadata, dict) else None
+                    if (
+                        media_id_map is not None
+                        and str(existing.get("owner_user_id")) == str(self.user_id_int)
+                        and payload.get("uuid")
+                        and isinstance(provenance, dict)
+                        and provenance.get("source_uuid") == payload["uuid"]
+                    ):
+                        self._record_imported_media_ids(
+                            media_id_map, media_id_text, payload.get("uuid"), int(existing["id"])
+                        )
                     status.skipped_items += 1
                     continue
                 if existing and conflict_resolution == ConflictResolution.RENAME:
@@ -7271,10 +7457,6 @@ class ChatbookService:
                 if not new_media_id:
                     status.failed_items += 1
                     continue
-                if media_id_map is not None:
-                    media_id_map[media_id_text] = int(new_media_id)
-                    if payload.get("uuid"):
-                        media_id_map[str(payload["uuid"])] = int(new_media_id)
                 self._restore_media_transcripts(
                     media_db=media_db,
                     media_id=int(new_media_id),
@@ -7285,9 +7467,7 @@ class ChatbookService:
                     media_db=media_db,
                     extract_dir=extract_dir,
                     media_id=int(new_media_id),
-                    stored_artifacts=[
-                        item for item in payload.get("stored_artifacts") or [] if isinstance(item, dict)
-                    ],
+                    stored_artifacts=[item for item in payload.get("stored_artifacts") or [] if isinstance(item, dict)],
                     status=status,
                 )
                 if pointer_only:
@@ -7298,10 +7478,51 @@ class ChatbookService:
                     status.warnings.append(
                         f"Restored {restored_artifacts} bundled stored media artifact(s) for media {media_id_text}."
                     )
+                if media_id_map is not None:
+                    self._record_imported_media_ids(media_id_map, media_id_text, payload.get("uuid"), int(new_media_id))
                 status.successful_items += 1
             except Exception as exc:
                 status.failed_items += 1
                 status.warnings.append(f"Error importing media {media_id_text}: {str(exc)}")
+
+    @staticmethod
+    def _record_imported_media_ids(
+        media_id_map: dict[str, int | None],
+        source_id: str,
+        source_uuid: Any,
+        destination_id: int,
+    ) -> None:
+        """Keep ambiguous archive aliases unresolved instead of binding the last writer."""
+        for key in {source_id, str(source_uuid) if source_uuid else source_id}:
+            if key in media_id_map and media_id_map[key] != destination_id:
+                media_id_map[key] = None
+            else:
+                media_id_map[key] = destination_id
+
+    def _remap_imported_media_metadata(
+        self,
+        metadata: dict[str, Any],
+        media_id_map: dict[str, int | None] | None,
+        status: ImportJob,
+    ) -> dict[str, Any]:
+        """Link collection chunks only to Media admitted by this import."""
+        result = dict(metadata)
+        references = [str(result[key]) for key in ("media_id", "media_uuid") if key in result]
+        if not references:
+            return result
+        targets = {(media_id_map or {}).get(key) for key in references}
+        record = None
+        if len(targets) == 1 and None not in targets:
+            media_db = self._get_media_db()
+            if media_db is not None and get_media_by_id is not None:
+                record = get_media_by_id(media_db, next(iter(targets)))
+        if record and str(record.get("owner_user_id")) == str(self.user_id_int):
+            result.update(media_id=int(record["id"]), media_uuid=str(record["uuid"]))
+        else:
+            result.pop("media_id", None)
+            result.pop("media_uuid", None)
+            status.warnings.append("Embedding Media reference was not imported; left unlinked.")
+        return result
 
     def _import_embeddings(
         self,
@@ -7312,7 +7533,7 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
-        media_id_map: dict[str, int] | None = None,
+        media_id_map: dict[str, int | None] | None = None,
     ) -> None:
         """Import Chroma collection embeddings and media vector blobs."""
         if manifest_path_index is None:
@@ -7396,7 +7617,8 @@ class ChatbookService:
                     ids.append(str(chunk.get("id") or uuid4()))
                     texts.append(str(chunk.get("document") or ""))
                     embeddings.append(chunk["embedding"])
-                    metadatas.append(chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {})
+                    metadata = chunk.get("metadata") if isinstance(chunk.get("metadata"), dict) else {}
+                    metadatas.append(self._remap_imported_media_metadata(metadata, media_id_map, status))
                 if not ids:
                     status.skipped_items += 1
                     status.warnings.append(f"Embedding collection payload had no valid vectors: {embedding_id_text}")
@@ -7435,6 +7657,7 @@ class ChatbookService:
         prefix_imported: bool,
         status: ImportJob,
         manifest_path_index: ManifestImportPathIndex | None = None,
+        conversation_id_map: dict[str, str] | None = None,
     ) -> None:
         """Import generic generated documents from a chatbook."""
         from ..Chat.document_generator import DocumentGeneratorService, DocumentType
@@ -7485,7 +7708,9 @@ class ChatbookService:
                 except Exception:
                     doc_type = DocumentType.SUMMARY
                 new_document_id = doc_service._save_generated_document(
-                    conversation_id=payload.get("conversation_id"),
+                    conversation_id=self._resolve_import_conversation_id(
+                        payload.get("conversation_id"), conversation_id_map, status,
+                    ),
                     document_type=doc_type,
                     title=title,
                     content=str(payload.get("content") or ""),
@@ -7544,6 +7769,11 @@ class ChatbookService:
 
                 with open(char_file, encoding='utf-8') as f:
                     char_data = json.load(f)
+
+                if "image_encoding" in char_data:
+                    if char_data.pop("image_encoding") != "base64" or not isinstance(char_data.get("image"), str):
+                        raise ValidationError("Unsupported character image encoding")
+                    char_data["image"] = base64.b64decode(char_data["image"], validate=True)
 
                 # Check for existing character
                 char_name = char_data.get('name', 'Unnamed')
@@ -7625,13 +7855,16 @@ class ChatbookService:
                     wb_data = json.load(f)
 
                 # Handle import with conflict resolution
-                wb_name = wb_data.get('name', 'Unnamed')
+                wb_details = wb_data.get('world_book')
+                if not isinstance(wb_details, dict):
+                    wb_details = wb_data
+                wb_name = wb_details.get('name', 'Unnamed')
                 if prefix_imported:
                     wb_name = f"[Imported] {wb_name}"
                     wb_data['name'] = wb_name
 
                 # Check for existing world book
-                existing = wb_service.get_world_book_by_name(wb_name)
+                existing = wb_service.get_world_book(name=wb_name)
                 if existing and conflict_resolution == ConflictResolution.SKIP:
                     status.skipped_items += 1
                     continue
@@ -7639,7 +7872,9 @@ class ChatbookService:
                     wb_name = self._generate_unique_name(wb_name, "world_book")
                     wb_data['name'] = wb_name
 
-                # Import world book
+                # The service prefers the nested legacy shape when it is present.
+                wb_details['name'] = wb_name
+                wb_data['name'] = wb_name
                 success = wb_service.import_world_book(wb_data)
 
                 if success:
@@ -7936,56 +8171,63 @@ class ChatbookService:
             ("chatbooks_quota", str(self.user_id)),
         )
 
-    def _check_chatbook_job_admission(self, operation_type: str) -> None:
+    async def _resolve_job_limits(self) -> ChatbookJobLimits:
+        """This user's chatbook allowances from their limits.* values."""
+        return ChatbookJobLimits(
+            exports_per_day=await user_quota(self.user_id_int, "limits.chatbooks_exports_per_day"),
+            imports_per_day=await user_quota(self.user_id_int, "limits.chatbooks_imports_per_day"),
+            concurrent_jobs=await user_quota(self.user_id_int, "limits.chatbooks_concurrent_jobs"),
+        )
+
+    def _check_chatbook_job_admission(self, operation_type: str, limits: ChatbookJobLimits) -> None:
         quota_manager = QuotaManager(self.user_id, self.user_tier, db=self.db)
         if quota_manager._quotas_disabled:
             return
 
         if operation_type == "export":
-            operation_limit = quota_manager.quotas["max_exports_per_day"]
-            limit_message = f"Daily export limit ({operation_limit}) reached. Try again tomorrow."
+            operation_limit = limits.exports_per_day
             quota_type = "daily_export"
         else:
-            operation_limit = quota_manager.quotas["max_imports_per_day"]
-            limit_message = f"Daily import limit ({operation_limit}) reached. Try again tomorrow."
+            operation_limit = limits.imports_per_day
             quota_type = "daily_import"
 
-        if operation_limit != UNLIMITED_QUOTA:
+        if operation_limit is not None:
             operations_today = self._count_operations_today_for_quota(operation_type)
             if operations_today >= operation_limit:
+                verb = "export" if operation_type == "export" else "import"
                 raise QuotaExceededError(
-                    limit_message,
+                    f"Daily {verb} limit ({int(operation_limit)}) reached. Try again tomorrow.",
                     quota_type=quota_type,
                     limit=operation_limit,
                     current=operations_today,
                 )
 
-        concurrent_limit = quota_manager.quotas["max_concurrent_jobs"]
-        if concurrent_limit != UNLIMITED_QUOTA:
+        concurrent_limit = limits.concurrent_jobs
+        if concurrent_limit is not None:
             active_jobs = self._count_active_jobs_for_quota()
             if active_jobs >= concurrent_limit:
                 raise QuotaExceededError(
-                    f"Maximum concurrent jobs ({concurrent_limit}) reached. Wait for current jobs to complete.",
+                    f"Maximum concurrent jobs ({int(concurrent_limit)}) reached. Wait for current jobs to complete.",
                     quota_type="concurrent_jobs",
                     limit=concurrent_limit,
                     current=active_jobs,
                 )
 
-    def _check_chatbook_job_admission_with_lock(self, operation_type: str) -> None:
+    def _check_chatbook_job_admission_with_lock(self, operation_type: str, limits: ChatbookJobLimits) -> None:
         with self.db.transaction():
             self._acquire_chatbook_quota_admission_lock()
-            self._check_chatbook_job_admission(operation_type)
+            self._check_chatbook_job_admission(operation_type, limits)
 
-    def _save_export_job_with_quota(self, job: ExportJob) -> None:
+    def _save_export_job_with_quota(self, job: ExportJob, limits: ChatbookJobLimits) -> None:
         with self.db.transaction():
             self._acquire_chatbook_quota_admission_lock()
-            self._check_chatbook_job_admission("export")
+            self._check_chatbook_job_admission("export", limits)
             self._save_export_job(job, commit=False)
 
-    def _save_import_job_with_quota(self, job: ImportJob) -> None:
+    def _save_import_job_with_quota(self, job: ImportJob, limits: ChatbookJobLimits) -> None:
         with self.db.transaction():
             self._acquire_chatbook_quota_admission_lock()
-            self._check_chatbook_job_admission("import")
+            self._check_chatbook_job_admission("import", limits)
             self._save_import_job(job, commit=False)
 
     def _save_export_job(self, job: ExportJob, *, commit: bool = True):
@@ -8000,12 +8242,28 @@ class ChatbookService:
                 job.progress_percentage = 100
                 job.processed_items = job.total_items
             self.db.execute_query("""
-                INSERT OR REPLACE INTO export_jobs (
+                INSERT INTO export_jobs (
                     job_id, user_id, status, chatbook_name, output_path,
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
                     file_size_bytes, download_url, expires_at, metadata
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    status = excluded.status,
+                    chatbook_name = excluded.chatbook_name,
+                    output_path = excluded.output_path,
+                    created_at = excluded.created_at,
+                    started_at = excluded.started_at,
+                    completed_at = excluded.completed_at,
+                    error_message = excluded.error_message,
+                    progress_percentage = excluded.progress_percentage,
+                    total_items = excluded.total_items,
+                    processed_items = excluded.processed_items,
+                    file_size_bytes = excluded.file_size_bytes,
+                    download_url = excluded.download_url,
+                    expires_at = excluded.expires_at,
+                    metadata = excluded.metadata
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_name,
                 job.output_path,
@@ -8176,13 +8434,30 @@ class ChatbookService:
                 job.progress_percentage = 100
                 job.processed_items = job.total_items
             self.db.execute_query("""
-                INSERT OR REPLACE INTO import_jobs (
+                INSERT INTO import_jobs (
                     job_id, user_id, status, chatbook_path,
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
                     successful_items, failed_items, skipped_items,
                     conflicts, warnings, metadata
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    status = excluded.status,
+                    chatbook_path = excluded.chatbook_path,
+                    created_at = excluded.created_at,
+                    started_at = excluded.started_at,
+                    completed_at = excluded.completed_at,
+                    error_message = excluded.error_message,
+                    progress_percentage = excluded.progress_percentage,
+                    total_items = excluded.total_items,
+                    processed_items = excluded.processed_items,
+                    successful_items = excluded.successful_items,
+                    failed_items = excluded.failed_items,
+                    skipped_items = excluded.skipped_items,
+                    conflicts = excluded.conflicts,
+                    warnings = excluded.warnings,
+                    metadata = excluded.metadata
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_path,
                 self._serialize_job_timestamp(job.created_at),
@@ -8881,7 +9156,14 @@ class ChatbookService:
         """Best-effort category counts for the full-account export preview."""
         if category in {"account_profile", "account_settings"}:
             return 1
-        if category in {"conversations", "notes", "characters", "world_books", "dictionaries"}:
+        if category in {
+            "conversations",
+            "notes",
+            "characters",
+            "world_books",
+            "dictionaries",
+            "tags_categories_relationships",
+        }:
             return self._scope_db_count_for_category(category)
         if category == "prompts":
             if self._scope_existing_user_path(DatabasePaths.PROMPTS_SUBDIR, DatabasePaths.PROMPTS_DB_NAME) is None:
@@ -8921,21 +9203,22 @@ class ChatbookService:
         }:
             return self._scope_media_count_for_category(category)
         if category == "embeddings":
+            media_vectors = self._scope_media_count_for_category("media_vector_embeddings")
             chroma_path = self._scope_existing_user_path(DatabasePaths.CHROMA_SUBDIR)
             if chroma_path is None:
-                return 0
+                return media_vectors
             try:
                 if not any(chroma_path.iterdir()):
-                    return 0
+                    return media_vectors
             except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
-                return 0
+                return media_vectors
             chroma = self._get_chroma_manager()
             if chroma is None:
-                return 0
+                return media_vectors
             try:
-                return sum(max(0, int(collection.count())) for collection in chroma.list_collections())
+                return media_vectors + len(chroma.list_collections())
             except _CHATBOOK_SCOPE_COUNT_EXCEPTIONS:
-                return 0
+                return media_vectors
         return 0
 
     def get_full_account_export_scope(self) -> dict[str, Any]:

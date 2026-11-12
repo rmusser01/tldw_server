@@ -780,7 +780,7 @@
     "message": "Não autorizado a salvar"
   },
   "mediaPage_spreadMode": {
-    "message": "Comparar"
+    "message": "Lado a lado"
   },
   "mediaPage_listMode": {
     "message": "Foco"
@@ -789,13 +789,13 @@
     "message": "Pilha"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "Ver itens selecionados lado a lado para comparação"
+    "message": "Organizar itens selecionados lado a lado"
   },
   "mediaPage_listModeTooltip": {
     "message": "Ver um item por vez com navegação"
   },
   "mediaPage_allModeTooltip": {
-    "message": "Ver todos os itens selecionados em uma lista rolável"
+    "message": "Mostrar a janela de leitura atual em uma pilha rolável"
   },
   "mediaPage_copyContentLabel": {
     "message": "Copiar conteúdo"
@@ -834,19 +834,19 @@
     "message": "Selecionar itens"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "Clique nos itens no painel à esquerda para adicioná-los ao visualizador."
+    "message": "Selecione pelas caixas e escolha Ler selecionados. Clique ou Enter visualiza."
   },
   "mediaPage_firstUseStep2": {
     "message": "Escolher uma visualização"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "Use \"Comparar\" para lado a lado, \"Foco\" para um por vez ou \"Pilha\" para ver tudo."
+    "message": "Lado a lado organiza; Foco mostra um item; Pilha mostra a janela atual. Comparar conteúdo compara o texto."
   },
   "mediaPage_firstUseStep3": {
     "message": "Navegar"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "Use os botões Anterior/Próximo ou o teclado (Tab + Enter) para percorrer os itens."
+    "message": "Anterior/Próximo ou j/k navega no contexto ativo. Tab e Espaço selecionam uma caixa."
   },
   "mediaPage_gotIt": {
     "message": "Entendi"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Escolha um provedor de análise e tente analisar novamente."
+  },
+  "mediaPage_resultsHint": {
+    "message": "Clique ou Enter para visualizar. Espaço na caixa seleciona. Shift+clique seleciona um intervalo."
+  },
+  "mediaPage_viewerAll": {
+    "message": "Janela de leitura (empilhada)"
   }
 }

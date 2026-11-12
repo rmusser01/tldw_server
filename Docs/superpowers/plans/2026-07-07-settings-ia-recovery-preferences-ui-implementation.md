@@ -1253,7 +1253,7 @@ git commit -m "test: cover settings wayfinding redesign"
 ## Task 8: Final Verification
 
 **Files:**
-- Update: `backlog/tasks/task-12166 - Plan-settings-IA-recovery-preferences-and-UI-implementation.md` only if implementation happens under this task
+- Update: `backlog/tasks/task-15086 - Plan-settings-IA-recovery-preferences-and-UI-implementation.md` only if implementation happens under this task
 
 - [ ] **Step 1: Run focused unit tests**
 

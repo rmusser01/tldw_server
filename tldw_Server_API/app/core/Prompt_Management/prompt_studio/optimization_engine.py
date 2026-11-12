@@ -11,11 +11,11 @@ from typing import Any, Optional
 import numpy as np
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-)
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
 from tldw_Server_API.app.core.Logging.log_context import log_context
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+)
 
 from ..optimization_model_config import (
     normalize_durable_optimization_config,
@@ -456,7 +456,7 @@ Follow these examples for consistency."""
                     user_prompt, version_number, parent_version_id, client_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                f"opt-{uuid.uuid4()}",
+                str(uuid.uuid4()),
                 prompt["project_id"],
                 prompt.get("signature_id"),
                 variant_name,
@@ -709,7 +709,7 @@ class BootstrapOptimizer:
                     user_prompt, version_number, parent_version_id, client_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                f"bootstrap-{uuid.uuid4()}",
+                str(uuid.uuid4()),
                 prompt["project_id"],
                 prompt.get("signature_id"),
                 variant_name,

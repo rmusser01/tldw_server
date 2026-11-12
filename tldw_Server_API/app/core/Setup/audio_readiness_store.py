@@ -8,7 +8,6 @@ import os
 import tempfile
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -23,16 +22,13 @@ from tldw_Server_API.app.core.Setup.audio_bundle_catalog import (
     get_audio_bundle_catalog,
 )
 from tldw_Server_API.app.core.exceptions import SetupLockTimeoutError
+from tldw_Server_API.app.core.Utils.iso_datetime import utc_now_iso as _utc_now
 
 CONFIG_ROOT = setup_manager.CONFIG_RELATIVE_PATH.parent
 READINESS_FILENAME = "setup_audio_readiness.json"
 _STORE: AudioReadinessStore | None = None
 _READINESS_LOCK_TIMEOUT_SECONDS = 10.0
 _READINESS_LOCK_STALE_SECONDS = 300.0
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 class AudioReadinessRecord(BaseModel):

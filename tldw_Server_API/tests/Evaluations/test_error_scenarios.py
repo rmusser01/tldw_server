@@ -95,7 +95,7 @@ class TestErrorScenarios:
 
             _, result = await evaluator._evaluate_relevance("query", "response", "openai")
             # Should normalize to 0-1 range (4/5 = 0.8)
-            assert result["score"] == 0.8
+            assert result["score"] == 0.75  # (4-1)/4 on the 1-5 scale; was 0.8 under the old inline raw/5.0
             assert result["raw_score"] == 4.0
 
     @pytest.mark.asyncio
@@ -307,7 +307,10 @@ class TestEdgeCases:
             _, result = await evaluator._evaluate_relevance("query", "response", "openai")
 
             # Should be 0.2 (1/5), not 0.0
-            assert result["score"] == 0.2
+            # A judge score of 1 ("lowest") is 0.0 on a 1-5 scale. This asserted 0.2, the
+            # 20% floor the old inline raw/5.0 put under every metric -- a test named
+            # "zero_score_handling" pinning a non-zero value. See core/Evaluations/scoring.py.
+            assert result["score"] == 0.0
             assert result["raw_score"] == 1.0
             assert "Evaluation failed" not in result.get("explanation", "")
 

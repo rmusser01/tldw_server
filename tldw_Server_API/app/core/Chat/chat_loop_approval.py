@@ -12,14 +12,11 @@ import time
 from threading import RLock
 from typing import Any
 
+from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
+
 
 def _b64url_encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
-
-
-def _b64url_decode(text: str) -> bytes:
-    padding = "=" * (-len(text) % 4)
-    return base64.urlsafe_b64decode((text + padding).encode("utf-8"))
 
 
 def _canonical_json(payload: dict[str, Any]) -> str:
@@ -94,24 +91,17 @@ def verify_approval_token(
     nonce_store: InMemoryApprovalNonceStore | None = None,
 ) -> tuple[bool, str | None]:
     try:
-        payload_segment, signature_segment = token.split(".", 1)
-    except ValueError:
-        return False, "token format invalid"
-
-    try:
-        payload_raw = _b64url_decode(payload_segment)
-        signature_raw = _b64url_decode(signature_segment)
-        payload = json.loads(payload_raw.decode("utf-8"))
-    except Exception:
-        return False, "token decode failed"
-
-    expected_sig = hmac.new(
-        _approval_secret(secret).encode("utf-8"),
-        payload_raw,
-        hashlib.sha256,
-    ).digest()
-    if not hmac.compare_digest(signature_raw, expected_sig):
+        payload_raw = verify_signed_token(token, _approval_secret(secret).encode("utf-8"))
+    except SignatureMismatchError:
         return False, "signature mismatch"
+    except ValueError:
+        return False, "token decode failed"
+    try:
+        payload = json.loads(payload_raw.decode("utf-8"))
+    except ValueError:
+        return False, "token decode failed"
+    if not isinstance(payload, dict):
+        return False, "token decode failed"
 
     expected_fields: dict[str, Any] = {
         "run_id": run_id,

@@ -7,7 +7,9 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
-from psycopg import sql as psycopg_sql
+pytest.importorskip("psycopg")
+
+from psycopg import sql as psycopg_sql  # noqa: E402
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory

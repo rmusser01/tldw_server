@@ -8,7 +8,7 @@ import statistics
 from collections.abc import Mapping
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import (
     ConfidenceSummary,
     RecipeManifest,
     RecommendationSlot,

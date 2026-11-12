@@ -40,9 +40,9 @@ Create repo-grounded planning documents that decompose the character-chat WebUI 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created coordination spec and eight individual work-package plan files under Docs/superpowers/specs and Docs/superpowers/plans. The DB corruption/root-cause plan separates confirmed SQLite evidence from hypotheses and includes non-destructive recovery, root-cause investigation, and startup guardrail stages. Verification performed: git diff --check passed on all new planning docs; ASCII scan found no non-ASCII characters; structural scan confirmed each plan has stages, success criteria, tests, status, risks, and handoff notes. Bandit is not applicable because this task only adds documentation/planning files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

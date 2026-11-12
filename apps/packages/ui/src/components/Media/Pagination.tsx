@@ -120,8 +120,8 @@ export function Pagination({
     return pages
   }, [totalPages, currentPage])
 
-  // Handle empty results case - after all hooks
-  if (currentItemsCount === 0) {
+  // A local filter can hide this page's rows while later pages still have matches.
+  if (currentItemsCount === 0 && totalPages <= 1) {
     return (
       <div className="px-4 py-2 border-t border-border bg-surface">
         <div className="text-xs text-text-muted text-center">
@@ -172,11 +172,13 @@ export function Pagination({
     <div className="px-4 py-2 border-t border-border bg-surface">
       {/* Items count */}
       <div className="text-xs text-text-muted mb-2 text-center">
-        {t(
-          'mediaPage.showingRange',
-          'Showing {{start}}-{{end}} of {{total}}',
-          { start: startItem, end: endItem, total: totalItems }
-        )}
+        {currentItemsCount === 0
+          ? t('mediaPage.showingZero', '0 of {{total}} results', { total: totalItems })
+          : t(
+              'mediaPage.showingRange',
+              'Showing {{start}}-{{end}} of {{total}}',
+              { start: startItem, end: endItem, total: totalItems }
+            )}
       </div>
 
       {/* Pagination controls */}

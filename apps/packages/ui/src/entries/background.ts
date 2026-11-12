@@ -1,11 +1,11 @@
-import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope";
+import { deriveScopedUserId } from "@/utils/media-navigation-scope";
+import { connectionAuthoritiesMatch, deriveConnectionAuthorityId } from "@/services/chat-surface-scope";
 import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts";
 import { browser } from "wxt/browser";
-import { createSafeStorage } from "@/utils/safe-storage";
+import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage";
 import { formatErrorMessage } from "@/utils/format-error-message";
 import { sanitizeRagProviderFailure } from "@/services/rag/provider-error-contract";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
-import { tldwAuth } from "@/services/tldw/TldwAuth";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
@@ -22,11 +22,15 @@ import {
 } from "@/services/recipe-persistence-uncertainty";
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode";
 import {
+  MANUAL_SESSION_KEY,
+  getBuildTimeApiKey,
+  manualSessionCredentialsMatch,
   hasNewerCurrentAccessToken,
   invalidateRefreshSessionIfCurrent,
   resolveEffectiveTldwConfig,
   REFRESH_ROTATION_KEY,
   REFRESH_SESSION_INVALIDATION_PREFIX,
+  refreshSessionInvalidationKey,
   storeRefreshRotationIfCurrent,
   waitForNewerCurrentAccessToken,
 } from "@/services/tldw/single-user-credential";
@@ -51,6 +55,7 @@ import {
   extractTranscriptionPieces,
   clampText,
   notify,
+  createBackgroundStatusBroadcaster,
 } from "@/services/background-helpers";
 import { buildClipDraft } from "@/services/web-clipper/draft-builder";
 import {
@@ -115,6 +120,7 @@ import {
   serializeQuickIngestBatches,
   serializeQuickIngestSessions,
   type PersistedQuickIngestBatch,
+  type PersistedSessionState,
 } from "@/entries/background-session-store";
 
 type BackgroundDiagnostics = {
@@ -282,28 +288,28 @@ export const launchWebClipperFromContextMenu = async (
   const tabsApi = (browser as any)?.tabs;
   let clipDraft = fallbackDraft;
 
-  if (tab?.id != null && typeof tabsApi?.sendMessage === "function") {
-    try {
-      const response = await tabsApi.sendMessage(tab.id, {
-        type: "capture-web-clipper",
-        requestedType,
-        pageUrl,
-        pageTitle: pageTitle || pageUrl,
-        selectionText: selectionText || undefined,
-      });
-      const normalized = normalizePendingClipDraft(response);
-      if (normalized) {
-        clipDraft = normalized;
-      }
-    } catch (error) {
-      logBackgroundError("request web clipper capture", error);
-    }
-  }
-
   const title =
     browser.i18n.getMessage("contextSaveToClipper") || "Save to Clipper";
   try {
+    // Chrome requires sidebar opening to begin in the original menu gesture.
     await ensureSidepanelOpen(tab?.id ?? undefined);
+    if (tab?.id != null && typeof tabsApi?.sendMessage === "function") {
+      try {
+        const response = await tabsApi.sendMessage(tab.id, {
+          type: "capture-web-clipper",
+          requestedType,
+          pageUrl,
+          pageTitle: pageTitle || pageUrl,
+          selectionText: selectionText || undefined,
+        });
+        const normalized = normalizePendingClipDraft(response);
+        if (normalized) {
+          clipDraft = normalized;
+        }
+      } catch (error) {
+        logBackgroundError("request web clipper capture", error);
+      }
+    }
     await sendBackgroundRuntimeMessage(
       {
         from: "background",
@@ -394,27 +400,30 @@ const warmModels = async (
         existing.map((m: any) => m?.lookup).filter(Boolean),
       );
 
+      const newModels: any[] = [];
       for (const model of models) {
+        const lookup = `${model.id}_tldw_${model.provider}`;
+        if (existingLookups.has(lookup)) continue;
+
+        // Transform ModelInfo to Model format
+        newModels.push({
+          id: `${model.id}_${generateID()}`,
+          model_id: model.id,
+          name: model.name,
+          provider_id: `tldw_${model.provider}`,
+          lookup,
+          model_type: model.type || "chat",
+          db_type: "openai_model",
+        });
+      }
+
+      if (newModels.length > 0) {
         try {
-          const lookup = `${model.id}_tldw_${model.provider}`;
-          if (existingLookups.has(lookup)) continue;
-
-          // Transform ModelInfo to Model format
-          const dbModel = {
-            id: `${model.id}_${generateID()}`,
-            model_id: model.id,
-            name: model.name,
-            provider_id: `tldw_${model.provider}`,
-            lookup,
-            model_type: model.type || "chat",
-            db_type: "openai_model",
-          };
-
-          await db.create(dbModel);
-          existingLookups.add(lookup);
+          // One batched storage write instead of a set() per model.
+          await db.createMany(newModels);
         } catch (err) {
-          // Log but don't fail the entire sync if one model fails
-          console.debug("[tldw] Failed to sync model to DB:", model.id, err);
+          // Log but don't fail the entire sync if the batch fails
+          console.debug("[tldw] Failed to sync models to DB:", err);
         }
       }
     }
@@ -435,11 +444,17 @@ export default defineBackground({
   main() {
     const storage = createSafeStorage({ area: "local" });
     const sessionStorage = createSafeStorage({ area: "session" });
-    const getEffectiveConfig = () =>
-      resolveEffectiveTldwConfig({
+    let connectionAuthorityEpoch = crypto.randomUUID();
+    const getEffectiveConfig = async () => {
+      const config = await resolveEffectiveTldwConfig({
         persistent: storage,
         session: sessionStorage,
       });
+      const envApiKey = getBuildTimeApiKey();
+      return config && config.authSource !== "cookie-session" && !config.apiKey && envApiKey
+        ? { ...config, apiKey: envApiKey }
+        : config;
+    };
     const resolveCurrentServicePromptConfig = async (
       checked: ServicePromptTargetLock,
     ) => {
@@ -581,107 +596,156 @@ export default defineBackground({
       }
     ).__tldwBackgroundDiagnostics = buildBackgroundDiagnostics;
 
-    let refreshInFlight: Promise<any> | null = null;
-    const scopedRefreshes = new Map<string, Promise<void>>();
+    type TerminalRefreshPublication = {
+      epoch: string;
+      error: unknown;
+      initiators: Set<AbortController>;
+    };
+    const scopedRefreshes = new Map<string, { promise: Promise<void>; controller: AbortController; initiators: Set<AbortController> }>();
+    const connectionRequestControllers = new Set<AbortController>();
+    const terminalMarkerPublications = new Map<string, TerminalRefreshPublication>();
+    const terminalRefreshResults = new WeakMap<AbortController, { epoch: string; error: unknown }>();
+    const pruneTerminalMarkerPublications = () => {
+      for (const [key, publication] of terminalMarkerPublications) {
+        if (![...publication.initiators].some(controller => connectionRequestControllers.has(controller))) {
+          terminalMarkerPublications.delete(key);
+        }
+      }
+    };
+    const retireConnectionAuthority = (publication?: TerminalRefreshPublication) => {
+      const retiredEpoch = connectionAuthorityEpoch;
+      connectionAuthorityEpoch = crypto.randomUUID();
+      if (publication?.epoch === retiredEpoch) {
+        // A terminal refresh may report its own safe failure after retiring all IO.
+        for (const controller of publication.initiators) {
+          if (connectionRequestControllers.has(controller)) {
+            terminalRefreshResults.set(controller, { epoch: connectionAuthorityEpoch, error: publication.error });
+          }
+        }
+      }
+      for (const flight of scopedRefreshes.values()) {
+        flight.controller.abort(createServicePromptScopeChangedError());
+      }
+      for (const controller of connectionRequestControllers) {
+        controller.abort(createServicePromptScopeChangedError());
+      }
+    };
     const refreshScopedAuth = async (
       checked: ServicePromptTargetLock,
-      originalConfig?: Awaited<
-        ReturnType<typeof resolveCurrentServicePromptConfig>
-      >,
+      originalConfig?: Awaited<ReturnType<typeof resolveCurrentServicePromptConfig>>,
+      callerSignal?: AbortSignal,
+      assertRequestCurrent: () => void = () => {},
+      callerController?: AbortController,
     ): Promise<void> => {
-      const cfg = originalConfig ??
-        await resolveCurrentServicePromptConfig(checked);
+      const epoch = connectionAuthorityEpoch;
+      const assertCurrent = () => {
+        assertRequestCurrent();
+        if (epoch !== connectionAuthorityEpoch) throw createServicePromptScopeChangedError();
+      };
+      callerSignal?.throwIfAborted();
+      assertCurrent();
+      const cfg = originalConfig ?? await resolveCurrentServicePromptConfig(checked);
+      assertCurrent();
+      callerSignal?.throwIfAborted();
       const refreshToken = String(cfg.refreshToken || "").trim();
       const capturedAccessToken = String(cfg.accessToken || "").trim();
-      if (!refreshToken) {
-        throw new Error("Token refresh failed: no refresh token available");
-      }
-      if (
-        originalConfig &&
-        await hasNewerCurrentAccessToken(
-          storage,
-          checked,
-          capturedAccessToken,
-        )
-      ) {
+      if (!refreshToken) throw new Error("Token refresh failed: no refresh token available");
+      if (originalConfig && await hasNewerCurrentAccessToken(storage, checked, capturedAccessToken)) {
+        assertCurrent();
+        callerSignal?.throwIfAborted();
         return;
       }
-      const current = originalConfig
-        ? await resolveCurrentServicePromptConfig(checked)
-        : cfg;
-      if (String(current.refreshToken || "").trim() !== refreshToken) {
-        throw createServicePromptScopeChangedError();
-      }
+      assertCurrent();
+      callerSignal?.throwIfAborted();
+      const current = originalConfig ? await resolveCurrentServicePromptConfig(checked) : cfg;
+      assertCurrent();
+      callerSignal?.throwIfAborted();
+      if (String(current.refreshToken || "").trim() !== refreshToken) throw createServicePromptScopeChangedError();
       const key = JSON.stringify([
-        checked.serverUrl ?? null,
-        checked.authMode ?? null,
-        checked.authSource ?? null,
-        checked.orgId ?? null,
-        refreshToken,
+        epoch, checked.serverUrl ?? null, checked.authMode ?? null,
+        checked.authSource ?? null, checked.orgId ?? null, refreshToken,
       ]);
-      let refresh = scopedRefreshes.get(key);
-      if (!refresh) {
-        refresh = (async () => {
+      let flight = scopedRefreshes.get(key);
+      if (flight?.controller.signal.aborted) flight = undefined;
+      if (!flight) {
+        const controller = new AbortController();
+        const initiators = new Set<AbortController>();
+        const assertFlightCurrent = () => {
+          controller.signal.throwIfAborted();
+          assertCurrent();
+        };
+        const promise = Promise.resolve().then(async () => {
           try {
-            const response = await tldwRequest(
-              {
-                path: "/api/v1/auth/refresh",
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: { refresh_token: refreshToken },
-                noAuth: true,
+            assertFlightCurrent();
+            const response = await tldwRequest({
+              path: "/api/v1/auth/refresh", method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: { refresh_token: refreshToken }, noAuth: true,
+              abortSignal: controller.signal,
+            }, {
+              getConfig: async () => cfg, useRuntimeAuthOverride: false,
+              fetchFn: (input, init) => {
+                assertFlightCurrent();
+                return fetch(input, init);
               },
-              {
-                getConfig: async () => cfg,
-                useRuntimeAuthOverride: false,
-              },
-            );
-            const tokens = response.ok
-              ? (response.data as {
-                  access_token?: string;
-                  refresh_token?: string;
-                } | null)
-              : null;
-            if (!tokens?.access_token) {
-              throw createTokenRefreshError(response);
-            }
+            });
+            assertFlightCurrent();
+            const tokens = response.ok ? response.data as { access_token?: string; refresh_token?: string } | null : null;
+            if (!tokens?.access_token) throw createTokenRefreshError(response);
             const stored = await storeRefreshRotationIfCurrent(
-              storage,
-              { ...checked, accessToken: capturedAccessToken },
-              refreshToken,
-              {
-                accessToken: tokens.access_token,
-                refreshToken: tokens.refresh_token || refreshToken,
-              },
+              storage, { ...checked, accessToken: capturedAccessToken }, refreshToken,
+              { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || refreshToken },
+              assertFlightCurrent,
             );
-            if (!stored) {
-              throw createServicePromptScopeChangedError();
-            }
+            assertFlightCurrent();
+            if (!stored) throw createServicePromptScopeChangedError();
           } catch (error) {
+            assertFlightCurrent();
             if (isRequestConfigScopeChangedError(error)) throw error;
-            if (
-              originalConfig &&
-              await waitForNewerCurrentAccessToken(
-                storage,
-                checked,
-                capturedAccessToken,
-              )
-            ) {
+            if (originalConfig && await waitForNewerCurrentAccessToken(storage, checked, capturedAccessToken)) {
+              assertFlightCurrent();
               return;
             }
-            if ((error as { status?: number } | null)?.status === 401 &&
-              !await invalidateRefreshSessionIfCurrent(storage, cfg)) {
-              throw createServicePromptScopeChangedError();
+            assertFlightCurrent();
+            if ((error as { status?: number } | null)?.status === 401) {
+              const markerKey = refreshSessionInvalidationKey(cfg);
+              const publicationStorage = {
+                ...storage,
+                set: async <T,>(publicationKey: string, value: T) => {
+                  assertFlightCurrent();
+                  if (!markerKey || publicationKey !== markerKey || value !== true) {
+                    throw createServicePromptScopeChangedError();
+                  }
+                  const publication = { epoch, error, initiators };
+                  terminalMarkerPublications.set(publicationKey, publication);
+                  try {
+                    await storage.set(publicationKey, value);
+                  } catch (writeError) {
+                    if (terminalMarkerPublications.get(publicationKey) === publication) {
+                      terminalMarkerPublications.delete(publicationKey);
+                    }
+                    throw writeError;
+                  }
+                },
+              };
+              if (!await invalidateRefreshSessionIfCurrent(publicationStorage, cfg, assertFlightCurrent)) {
+                throw createServicePromptScopeChangedError();
+              }
             }
             throw error;
           } finally {
-            scopedRefreshes.delete(key);
+            if (scopedRefreshes.get(key)?.promise === promise) scopedRefreshes.delete(key);
+            pruneTerminalMarkerPublications();
           }
-        })();
-        scopedRefreshes.set(key, refresh);
+        });
+        flight = { promise, controller, initiators };
+        scopedRefreshes.set(key, flight);
       }
-      await refresh;
+      if (callerController) flight.initiators.add(callerController);
+      await flight.promise;
+      assertCurrent();
     };
+
     let streamDebugEnabled = false;
     const ingestSessions = new Map<string, IngestSession>();
     const pendingAuthReplay = new Set<string>();
@@ -745,23 +809,27 @@ export default defineBackground({
 
     // Serialize the actual storage writes so that the many rapid, fire-and-forget
     // persist calls below cannot land out of order (an older Map snapshot
-    // clobbering a newer one). The snapshot is taken synchronously at call time;
-    // the writer coalesces overlapping writes so only the latest snapshot wins.
+    // clobbering a newer one). WP-19: the writer takes a snapshot BUILDER, so
+    // the Maps are only serialized when a write drains — a burst of status
+    // ticks inside one drain window serializes exactly once — and each drain
+    // diffs per-funnel shards so unchanged funnels cost zero bytes.
+    const buildSessionStateSnapshot = (): PersistedSessionState => ({
+      ingestSessions: serializeIngestSessions(ingestSessions),
+      pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
+      quickIngestSessions:
+        serializeQuickIngestSessions(quickIngestModalSessions),
+      quickIngestBatches:
+        serializeQuickIngestBatches(quickIngestBatchRecords),
+    });
     const writeSessionStateSerialized = createSerializedSessionStateWriter(
       getSessionStorageArea(),
+      buildSessionStateSnapshot,
       (error) => logBackgroundError("persist session state", error),
     );
 
     const persistSessionState = (): void => {
       try {
-        writeSessionStateSerialized({
-          ingestSessions: serializeIngestSessions(ingestSessions),
-          pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
-          quickIngestSessions:
-            serializeQuickIngestSessions(quickIngestModalSessions),
-          quickIngestBatches:
-            serializeQuickIngestBatches(quickIngestBatchRecords),
-        });
+        writeSessionStateSerialized();
       } catch (error) {
         logBackgroundError("persist session state", error);
       }
@@ -945,56 +1013,85 @@ export default defineBackground({
       return `/api/v1/media/metadata-search?${query.toString()}`;
     };
 
+    // WP-61: funnel events append to an in-memory pending array and flush
+    // through a coalescing drain — the same serialize-on-drain discipline as
+    // the WP-19 session writer — instead of read-modify-writing storage per
+    // event. The drain merges the pending burst into the persisted history
+    // exactly once (hydrate-on-first-flush), so a burst of events in one
+    // drain window costs a single bounded write.
+    type IngestFunnelMetricEntry = {
+      event: IngestFunnelEvent;
+      funnelId: string;
+      timestamp: string;
+      metadata: Record<string, unknown>;
+    };
+    const pendingFunnelMetrics: IngestFunnelMetricEntry[] = [];
+    let funnelMetricsHistory: IngestFunnelMetricEntry[] | null = null;
+    let ingestFunnelMetricsDirty = false;
+    let ingestFunnelMetricsFlush: Promise<void> | null = null;
+
+    const drainIngestFunnelMetrics = async (): Promise<void> => {
+      // Yield one microtask so a synchronous burst of funnel events is fully
+      // absorbed before the snapshot is written: one drain window, one write.
+      await Promise.resolve();
+      while (ingestFunnelMetricsDirty) {
+        ingestFunnelMetricsDirty = false;
+        try {
+          if (funnelMetricsHistory === null) {
+            const current = await storage.get<any>(INGEST_FUNNEL_METRICS_KEY);
+            funnelMetricsHistory = Array.isArray(current)
+              ? (current as IngestFunnelMetricEntry[])
+              : [];
+          }
+          funnelMetricsHistory.push(...pendingFunnelMetrics);
+          pendingFunnelMetrics.length = 0;
+          if (funnelMetricsHistory.length > INGEST_FUNNEL_METRICS_LIMIT) {
+            funnelMetricsHistory.splice(
+              0,
+              funnelMetricsHistory.length - INGEST_FUNNEL_METRICS_LIMIT,
+            );
+          }
+          await storage.set(INGEST_FUNNEL_METRICS_KEY, funnelMetricsHistory);
+        } catch (error) {
+          logBackgroundError("append ingest funnel metric", error);
+        }
+      }
+      ingestFunnelMetricsFlush = null;
+    };
+
     const appendIngestFunnelMetric = async (
       event: IngestFunnelEvent,
       funnelId: string,
       metadata?: Record<string, unknown>,
     ) => {
       try {
-        const current = await storage.get<any>(INGEST_FUNNEL_METRICS_KEY);
-        const entries = Array.isArray(current) ? current : [];
-        entries.push({
+        pendingFunnelMetrics.push({
           event,
           funnelId,
           timestamp: new Date().toISOString(),
           metadata: metadata || {},
         });
-        if (entries.length > INGEST_FUNNEL_METRICS_LIMIT) {
-          entries.splice(0, entries.length - INGEST_FUNNEL_METRICS_LIMIT);
+        ingestFunnelMetricsDirty = true;
+        if (ingestFunnelMetricsFlush === null) {
+          ingestFunnelMetricsFlush = drainIngestFunnelMetrics();
         }
-        await storage.set(INGEST_FUNNEL_METRICS_KEY, entries);
+        // Awaiting the in-flight drain guarantees the event is durable when
+        // the call resolves: events pushed mid-drain are picked up by the
+        // drain loop's dirty re-check.
+        await ingestFunnelMetricsFlush;
       } catch (error) {
         logBackgroundError("append ingest funnel metric", error);
       }
     };
 
-    const emitBackgroundMessage = async (
-      tabId: number | undefined,
-      type: string,
-      payload?: Record<string, unknown>,
-    ) => {
-      ensureSidepanelOpen(tabId);
-      try {
-        await browser.runtime.sendMessage({
-          from: "background",
-          type,
-          payload,
-        });
-      } catch (error) {
-        logBackgroundError(`send ${type}`, error);
-        setTimeout(() => {
-          try {
-            browser.runtime.sendMessage({
-              from: "background",
-              type,
-              payload,
-            });
-          } catch (retryError) {
-            logBackgroundError(`send ${type} (retry)`, retryError);
-          }
-        }, 500);
-      }
-    };
+    // WP-60: opens the sidepanel at most once per funnel (first status emit
+    // still opens it when the panel is closed) and retries failed sends once
+    // after 500ms. See `createBackgroundStatusBroadcaster`.
+    const emitBackgroundMessage = createBackgroundStatusBroadcaster({
+      openSidepanel: ensureSidepanelOpen,
+      sendMessage: (message) => browser.runtime.sendMessage(message),
+      logError: logBackgroundError,
+    });
 
     const emitIngestStatus = async (
       session: IngestSession,
@@ -1182,7 +1279,9 @@ export default defineBackground({
           bodyParts.join("\n\n") ||
           "Request completed. Open Media or the sidebar to view results.";
 
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         try {
           await browser.runtime.sendMessage({
             from: "background",
@@ -1551,19 +1650,19 @@ export default defineBackground({
         if (Array.isArray(files) && files.length > 0) {
           for (const item of files) {
             const result = appendUploadFile(item, item.fieldName || "files");
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         } else if (file?.data !== undefined && file?.data !== null) {
           const trimmedFieldName =
             typeof fileFieldName === "string" ? fileFieldName.trim() : "";
           if (trimmedFieldName) {
             const result = appendUploadFile(file, trimmedFieldName);
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           } else {
             const result = appendUploadFile(file, "files", {
               appendLegacyFileAlias: true,
             });
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         }
         const headers: Record<string, string> = { ...requestHeaders };
@@ -1696,13 +1795,26 @@ export default defineBackground({
       requestAbortSignal?: AbortSignal,
     ) => {
       const rawServicePromptConfig = payload?.servicePromptConfig;
+      const expectedConnectionAuthority = payload?.expectedConnectionAuthority;
+      const expectedConnectionEpoch = payload?.expectedConnectionEpoch;
+      const hasConnectionFence = expectedConnectionAuthority !== undefined;
+      const requestEpoch = connectionAuthorityEpoch;
+      const accountAbort = new AbortController();
+      const assertConnectionEpoch = () => {
+        if (requestEpoch !== connectionAuthorityEpoch ||
+            (hasConnectionFence && expectedConnectionEpoch !== connectionAuthorityEpoch)) {
+          throw createServicePromptScopeChangedError();
+        }
+      };
       const requestPayload = { ...(payload || {}) };
+      delete requestPayload.expectedConnectionAuthority;
+      delete requestPayload.expectedConnectionEpoch;
       delete requestPayload.servicePromptConfig;
       delete requestPayload.requestId;
       delete requestPayload.abortSignal;
-      if (requestAbortSignal) {
-        requestPayload.abortSignal = requestAbortSignal;
-      }
+      requestPayload.abortSignal = requestAbortSignal
+        ? AbortSignal.any([requestAbortSignal, accountAbort.signal])
+        : accountAbort.signal;
       const servicePromptConfig = readServicePromptTargetLock(
         rawServicePromptConfig,
       );
@@ -1719,8 +1831,21 @@ export default defineBackground({
         ReturnType<typeof resolveCurrentServicePromptConfig>
       > | undefined;
       let recipeDelivery: RecipeDeliveryReceipt | undefined;
+      let response: Awaited<ReturnType<typeof tldwRequest>> | undefined;
+      connectionRequestControllers.add(accountAbort);
       try {
-        const response = await tldwRequest(requestPayload, {
+        if (servicePromptConfig && hasConnectionFence) {
+          throw createServicePromptScopeChangedError();
+        }
+        response = await tldwRequest(requestPayload, {
+          requestScopeSignal: accountAbort.signal,
+          assertRequestCurrent: assertConnectionEpoch,
+          fetchFn: (async (input, init) => {
+            assertConnectionEpoch();
+            const response = await fetch(input, init);
+            assertConnectionEpoch();
+            return response;
+          }) as typeof fetch,
           getAuthenticatedPrincipal: getRecipeAuthenticatedPrincipal,
           dispatchAuthority: {
             markDispatched: (id, ownerId) => {
@@ -1728,6 +1853,7 @@ export default defineBackground({
               const operationId = crypto.randomUUID();
               recipeRegistry.reserve(id, ownerId, operationId);
               recipeDelivery = { id, ownerId, operationId };
+              return recipeDelivery;
             },
           },
           // IMPORTANT: getConfig must fetch fresh config each time it's called
@@ -1737,47 +1863,71 @@ export default defineBackground({
           // credentials at dispatch, while the expected-user header binds them.
           getConfig: servicePromptConfig
             ? async () => {
+                assertConnectionEpoch();
                 const current = await resolveCurrentServicePromptConfig(
                   servicePromptConfig,
                 );
+                assertConnectionEpoch();
                 originalScopedConfig ??= current;
                 return current;
               }
-            : async () => await getEffectiveConfig(),
-          ...(servicePromptConfig ? { useRuntimeAuthOverride: false } : {}),
-          refreshAuth: servicePromptConfig
-            ? () => refreshScopedAuth(
-                servicePromptConfig,
-                originalScopedConfig,
-              )
             : async () => {
-                if (!refreshInFlight) {
-                  refreshInFlight = (async () => {
-                    try {
-                      await tldwAuth.refreshToken();
-                    } finally {
-                      refreshInFlight = null;
-                    }
-                  })();
+                assertConnectionEpoch();
+                const current = await getEffectiveConfig();
+                assertConnectionEpoch();
+                if (hasConnectionFence &&
+                    (typeof expectedConnectionAuthority !== "string" ||
+                     expectedConnectionAuthority !== deriveConnectionAuthorityId(current))) {
+                  throw createServicePromptScopeChangedError();
                 }
-                await refreshInFlight;
+                originalScopedConfig ??= current ?? undefined;
+                return current;
               },
+          ...(servicePromptConfig || hasConnectionFence ? { useRuntimeAuthOverride: false } : {}),
+          refreshAuth: async (signal) => {
+            assertConnectionEpoch();
+            if (!originalScopedConfig) throw new Error("Token refresh failed: account configuration unavailable");
+            const principal = deriveScopedUserId({ authMode: originalScopedConfig.authMode, accessToken: originalScopedConfig.accessToken });
+            await refreshScopedAuth(
+              servicePromptConfig ?? {
+                ...originalScopedConfig,
+                expectedUserId: principal === "user:anonymous" ? null : principal.slice("user:".length),
+              },
+              originalScopedConfig, signal, assertConnectionEpoch, accountAbort,
+            );
+          },
         });
+        assertConnectionEpoch();
         return recipeDelivery ? { ...response, recipeDelivery } : response;
       } catch (error) {
-        if (servicePromptConfig && (error as { status?: unknown })?.status === 412) {
+        if ((error as { status?: unknown })?.status === 412) {
+          const terminal = terminalRefreshResults.get(accountAbort);
+          if (terminal?.epoch === connectionAuthorityEpoch && !requestAbortSignal?.aborted) {
+            return {
+              ok: false,
+              status: 401,
+              error: formatErrorMessage(terminal.error, "Session expired. Please log in again."),
+              ...(response?.recipePersistence ? { recipePersistence: response.recipePersistence } : {}),
+              ...(recipeDelivery ? { recipeDelivery } : {}),
+            };
+          }
           const message =
             "The server or authenticated account changed before the request was sent.";
           return {
             ok: false,
             status: 412,
             error: message,
+            ...(response?.recipePersistence ? { recipePersistence: response.recipePersistence } : {}),
+            ...(recipeDelivery ? { recipeDelivery } : {}),
             data: {
               detail: { code: "request_config_scope_changed", message },
             },
           };
         }
         throw error;
+      } finally {
+        connectionRequestControllers.delete(accountAbort);
+        pruneTerminalMarkerPublications();
       }
     };
 
@@ -1923,6 +2073,57 @@ export default defineBackground({
           await cancelRemoteIngestBatches(opts.lease, opts.tracker, "user_cancelled");
         },
         onPendingJobIds: opts.onPendingJobIds,
+        fetchJobs: async (batchId, jobIds) => {
+          // One batched status request per cycle instead of one request per
+          // job. Follows the endpoint's offset pagination so every tracked
+          // job can be reconciled from the batch response.
+          const collected: any[] = [];
+          const limit = Math.min(500, Math.max(jobIds.length, 100));
+          let offset = 0;
+          for (let page = 0; page < 10; page += 1) {
+            const response = (await opts.lease.request({
+              path: `/api/v1/media/ingest/jobs?batch_id=${encodeURIComponent(
+                batchId,
+              )}&limit=${limit}&offset=${offset}`,
+              method: "GET",
+              timeoutMs: 4200,
+            })) as
+              | { ok: boolean; status?: number; data?: any; error?: string }
+              | undefined;
+            if (!response?.ok) {
+              // First page failure carries the error for the whole batch;
+              // later-page failures keep whatever was already collected.
+              if (page === 0) return response;
+              break;
+            }
+            if (!Array.isArray(response.data?.jobs)) {
+              // Unexpected payload shape: surface it verbatim so each job is
+              // reconciled against the raw response, exactly like the old
+              // per-job GET path did.
+              return response;
+            }
+            const jobs = response.data.jobs;
+            collected.push(...jobs);
+            const hasMore =
+              response.data?.has_more ??
+              response.data?.pagination?.has_more;
+            const nextOffset =
+              response.data?.next_offset ??
+              response.data?.pagination?.next_offset;
+            if (!hasMore) break;
+            if (
+              !Number.isSafeInteger(nextOffset) ||
+              (nextOffset as number) <= offset
+            ) {
+              break;
+            }
+            offset = nextOffset as number;
+          }
+          return {
+            ok: true,
+            data: { jobs: collected },
+          } as { ok: boolean; status?: number; data?: any; error?: string };
+        },
         fetchJob: async (jobId) =>
           (await opts.lease.request({
             path: `/api/v1/media/ingest/jobs/${jobId}`,
@@ -3773,7 +3974,9 @@ export default defineBackground({
       if (message.type === "sidepanel") {
         try {
           const tabId = sender?.tab?.id ?? undefined;
-          ensureSidepanelOpen(tabId);
+          void ensureSidepanelOpen(tabId).catch((error) =>
+            logBackgroundError("open sidebar", error),
+          );
         } catch (error) {
           logBackgroundError("ensure sidepanel open", error);
         }
@@ -3834,6 +4037,15 @@ export default defineBackground({
           (signal) => handleTldwRequest(message.payload || {}, signal),
         );
       }
+      if (message.type === "tldw:connection-authority") {
+        const epoch = connectionAuthorityEpoch;
+        const current = await getEffectiveConfig();
+        if (epoch !== connectionAuthorityEpoch ||
+            message.payload?.expectedConnectionAuthority !== deriveConnectionAuthorityId(current)) {
+          return { ok: false, status: 412 };
+        }
+        return { ok: true, epoch };
+      }
       if (message.type === "tldw:ingest") {
         try {
           const tabs = await browser.tabs.query({
@@ -3878,8 +4090,34 @@ export default defineBackground({
       return true;
     };
 
-    browser.storage.onChanged.addListener((changes, areaName) => {
+    browser.storage.onChanged.addListener((rawChanges, areaName) => {
+      type StoredConfig = Parameters<typeof connectionAuthoritiesMatch>[0];
+      const changes = Object.fromEntries(Object.entries(rawChanges || {}).map(([key, change]) => [key, {
+        oldValue: safeStorageSerde.deserializer<StoredConfig>(change.oldValue as string),
+        newValue: safeStorageSerde.deserializer<StoredConfig>(change.newValue as string),
+      }]));
+      if (areaName === "session") {
+        const change = changes?.[MANUAL_SESSION_KEY];
+        if (change) {
+          if (!manualSessionCredentialsMatch(change.oldValue, change.newValue)) {
+            retireConnectionAuthority();
+          }
+        }
+        return;
+      }
       if (areaName !== "local") return;
+      const retiringChanges = Object.entries(changes || {}).filter(([key, change]) =>
+        ((key === "tldwConfig" || key === "tldwCookieSessionConfig") &&
+        (!change.newValue || !connectionAuthoritiesMatch(change.oldValue, change.newValue))) ||
+        (key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX) && change.oldValue !== change.newValue)
+      );
+      if (retiringChanges.length > 0) {
+        const [key, change] = retiringChanges[0];
+        const publication = retiringChanges.length === 1 && change.newValue === true
+          ? terminalMarkerPublications.get(key) : undefined;
+        if (publication) terminalMarkerPublications.delete(key);
+        retireConnectionAuthority(publication);
+      }
       if (Object.keys(changes || {}).some(key => key === "tldwConfig" || key === REFRESH_ROTATION_KEY || key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX))) {
         quickIngestCredentialRevision += 1;
         for (const validate of quickIngestAuthorityValidators) void validate().catch(() => {});
@@ -4076,13 +4314,17 @@ export default defineBackground({
       if (actionIconClick === "webui") {
         openOptionsTab();
       } else {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
       }
     });
 
     browser.contextMenus.onClicked.addListener(async (info, tab) => {
       if (info.menuItemId === "open-side-panel-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
       } else if (info.menuItemId === "open-web-ui-pa") {
         openOptionsTab();
       } else if (info.menuItemId === transcribeMenuId.transcribe) {
@@ -4106,10 +4348,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSaveToNotesOpeningSidebar") ||
           "Opening sidebar to save note…";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab.id!);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               await browser.runtime.sendMessage({
                 from: "background",
                 type: "save-to-notes",
@@ -4147,10 +4391,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSaveToCompanionOpeningSidebar") ||
           "Opening sidebar to save selection to companion...";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab?.id);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               const captureId =
                 typeof globalThis.crypto?.randomUUID === "function"
                   ? globalThis.crypto.randomUUID()
@@ -4194,10 +4440,12 @@ export default defineBackground({
           browser.i18n.getMessage("contextSidebarOpening") ||
           "Opening sidebar...";
         notify(title, openingMessage);
+        const opening = Promise.allSettled([ensureSidepanelOpen(tab?.id)]);
         setTimeout(
           async () => {
             try {
-              await ensureSidepanelOpen(tab?.id);
+              const [result] = await opening;
+              if (result.status === "rejected") throw result.reason;
               await browser.runtime.sendMessage({
                 from: "background",
                 type: "narrate-selection",
@@ -4256,7 +4504,9 @@ export default defineBackground({
           notify("tldw_server", "Failed to process page");
         }
       } else if (info.menuItemId === "summarize-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         // this is a bad method hope somone can fix it :)
         setTimeout(
           async () => {
@@ -4269,7 +4519,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "rephrase-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
         setTimeout(
           async () => {
             await browser.runtime.sendMessage({
@@ -4281,7 +4533,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "translate-pg") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {
@@ -4294,7 +4548,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "explain-pa") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {
@@ -4307,7 +4563,9 @@ export default defineBackground({
           isCopilotRunning ? 0 : 5000,
         );
       } else if (info.menuItemId === "custom-pg") {
-        ensureSidepanelOpen(tab?.id);
+        void ensureSidepanelOpen(tab?.id).catch((error) =>
+          logBackgroundError("open sidebar", error),
+        );
 
         setTimeout(
           async () => {
@@ -4337,21 +4595,15 @@ export default defineBackground({
           return;
         }
         try {
-          await browser.tabs.sendMessage(
-            tabId,
-            {
-              type: "tldw:popup:open",
-              payload: {
-                selectionText: selection,
-                pageUrl: info.pageUrl || tab?.url || "",
-                pageTitle: tab?.title || "",
-                frameId: info.frameId,
-              },
+          await browser.tabs.sendMessage(tabId, {
+            type: "tldw:popup:open",
+            payload: {
+              selectionText: selection,
+              pageUrl: info.pageUrl || tab?.url || "",
+              pageTitle: tab?.title || "",
+              frameId: info.frameId,
             },
-            typeof info.frameId === "number"
-              ? { frameId: info.frameId }
-              : undefined,
-          );
+          });
         } catch (error) {
           logBackgroundError("contextual popup sendMessage", error);
           notify(
@@ -4388,6 +4640,14 @@ export default defineBackground({
           }
         };
         const onMsg = async (msg: any) => {
+          if (disconnected || closed) return;
+          const requestAbort = new AbortController();
+          abort = requestAbort;
+          connectionRequestControllers.add(requestAbort);
+          const streamEpoch = connectionAuthorityEpoch;
+          const assertStreamCurrent = () => {
+            if (streamEpoch !== connectionAuthorityEpoch) throw createServicePromptScopeChangedError();
+          };
           const sanitizeRagProviderStreamError =
             msg?.sanitizeRagProviderStreamError === true;
           const postStreamError = (payload: {
@@ -4447,6 +4707,8 @@ export default defineBackground({
               ? await resolveCurrentServicePromptConfig(servicePromptConfig)
               : null;
             const cfg = scopedCfg ?? (await getEffectiveConfig());
+            assertStreamCurrent();
+            requestAbort.signal.throwIfAborted();
             if (!cfg?.serverUrl) throw new Error("tldw server not configured");
             const baseUrl = String(cfg.serverUrl).replace(/\/$/, "");
             const streamAccess = evaluateAbsoluteUrlAccess(path, cfg);
@@ -4498,8 +4760,6 @@ export default defineBackground({
             headers["Accept"] = "text/event-stream";
             headers["Cache-Control"] = headers["Cache-Control"] || "no-cache";
             headers["Connection"] = headers["Connection"] || "keep-alive";
-            const requestAbort = new AbortController();
-            abort = requestAbort;
             const idleMs = deriveStreamIdleTimeout(
               cfg,
               path,
@@ -4526,6 +4786,8 @@ export default defineBackground({
             headers["Cache-Control"] = headers["Cache-Control"] || "no-cache";
             headers["Connection"] = headers["Connection"] || "keep-alive";
 
+            assertStreamCurrent();
+            requestAbort.signal.throwIfAborted();
             let resp = await fetch(url, {
               method: msg.method || "POST",
               headers,
@@ -4535,6 +4797,7 @@ export default defineBackground({
                   : JSON.stringify(msg.body),
               signal: requestAbort.signal,
             });
+            assertStreamCurrent();
             if (
               !streamAccess.skipAuth &&
               resp.status === 401 &&
@@ -4542,46 +4805,36 @@ export default defineBackground({
               cfg.refreshToken
             ) {
               try {
-                if (servicePromptConfig) {
-                  await refreshScopedAuth(
-                    servicePromptConfig,
-                    scopedCfg ?? undefined,
-                  );
-                } else {
-                  if (!refreshInFlight) {
-                    refreshInFlight = (async () => {
-                      try {
-                        await tldwAuth.refreshToken();
-                      } finally {
-                        refreshInFlight = null;
-                      }
-                    })();
-                  }
-                  await refreshInFlight;
-                }
+                const principal = deriveScopedUserId({ authMode: cfg.authMode, accessToken: cfg.accessToken });
+                await refreshScopedAuth(
+                  servicePromptConfig ?? {
+                    serverUrl: cfg.serverUrl, authMode: cfg.authMode,
+                    authSource: cfg.authSource, orgId: cfg.orgId,
+                    expectedUserId: principal === "user:anonymous" ? null : principal.slice("user:".length),
+                  },
+                  cfg,
+                  requestAbort.signal,
+                  assertStreamCurrent, requestAbort,
+                );
               } catch (error) {
-                if (
-                  servicePromptConfig &&
-                  (error as { status?: unknown })?.status === 412
-                ) {
-                  throw error;
-                }
-                logBackgroundError("refresh auth (stream)", error);
+                assertStreamCurrent();
+                throw error;
               }
+              assertStreamCurrent();
               if (disconnected || closed || requestAbort.signal.aborted) {
                 return;
               }
               const updated = servicePromptConfig
                 ? await resolveCurrentServicePromptConfig(servicePromptConfig)
                 : await getEffectiveConfig();
+              assertStreamCurrent();
               if (updated?.accessToken)
                 headers["Authorization"] = `Bearer ${updated.accessToken}`;
-              const retryController = new AbortController();
               if (disconnected || closed || requestAbort.signal.aborted) {
-                retryController.abort();
                 return;
               }
-              abort = retryController;
+              assertStreamCurrent();
+              requestAbort.signal.throwIfAborted();
               resp = await fetch(url, {
                 method: msg.method || "POST",
                 headers,
@@ -4589,9 +4842,11 @@ export default defineBackground({
                   typeof msg.body === "string"
                     ? msg.body
                     : JSON.stringify(msg.body),
-                signal: retryController.signal,
+                signal: requestAbort.signal,
               });
             }
+            assertStreamCurrent();
+            requestAbort.signal.throwIfAborted();
             if (!resp.ok) {
               const ct = resp.headers.get("content-type") || "";
               let errMsg: any = resp.statusText;
@@ -4605,6 +4860,8 @@ export default defineBackground({
                 const t = await resp.text().catch(() => null);
                 if (t) errMsg = t;
               }
+              assertStreamCurrent();
+              requestAbort.signal.throwIfAborted();
               postStreamError({
                 event: "error",
                 status: resp.status,
@@ -4622,6 +4879,8 @@ export default defineBackground({
             resetIdle();
             while (true) {
               const { done, value } = await reader.read();
+              assertStreamCurrent();
+              requestAbort.signal.throwIfAborted();
               if (done) break;
               resetIdle();
               buffer += decoder.decode(value, { stream: true });
@@ -4630,6 +4889,8 @@ export default defineBackground({
               for (const line of lines) {
                 const trimmed = line.trim();
                 if (!trimmed) continue;
+                assertStreamCurrent();
+                requestAbort.signal.throwIfAborted();
                 // Any SSE activity resets idle timer
                 resetIdle();
                 if (trimmed.startsWith("event:")) {
@@ -4656,6 +4917,8 @@ export default defineBackground({
                       logBackgroundError("stream debug data", error);
                     }
                   }
+                  assertStreamCurrent();
+                  requestAbort.signal.throwIfAborted();
                   if (data === "[DONE]") {
                     closed = true;
                     if (idleTimer) clearTimeout(idleTimer);
@@ -4676,14 +4939,30 @@ export default defineBackground({
                       logBackgroundError("stream debug json", error);
                     }
                   }
+                  assertStreamCurrent();
+                  requestAbort.signal.throwIfAborted();
                   safePost({ event: "data", data });
                 }
               }
             }
+            assertStreamCurrent();
+            requestAbort.signal.throwIfAborted();
+            // CM-03: forward a final unterminated line, and tell the page when
+            // the body ended without [DONE] so a cut-off reply is not complete.
+            const tail = buffer.trim();
+            const tailData = tail.startsWith("data:") ? tail.slice(5).trim() : tail;
+            if (tailData && tailData !== "[DONE]" && /^(data:|\{|\[)/.test(tail))
+              safePost({ event: "data", data: tailData });
             closed = true;
             if (idleTimer) clearTimeout(idleTimer);
-            safePost({ event: "done" });
-          } catch (e: any) {
+            safePost({ event: "done", ...(tailData === "[DONE]" ? {} : { incomplete: true }) });
+          } catch (caught: any) {
+            let e = caught;
+            if (streamEpoch !== connectionAuthorityEpoch) {
+              const terminal = terminalRefreshResults.get(requestAbort);
+              e = terminal?.epoch === connectionAuthorityEpoch && !disconnected && !closed
+                ? terminal.error : createServicePromptScopeChangedError();
+            }
             if (idleTimer) clearTimeout(idleTimer);
             postStreamError({
               event: "error",
@@ -4691,8 +4970,14 @@ export default defineBackground({
               ...(typeof e?.details !== "undefined"
                 ? { details: e.details }
                 : {}),
+              ...(typeof e?.headers?.["retry-after"] === "string"
+                ? { retryAfter: e.headers["retry-after"] }
+                : {}),
               message: formatErrorMessage(e, "Stream error"),
             });
+          } finally {
+            connectionRequestControllers.delete(requestAbort);
+            pruneTerminalMarkerPublications();
           }
         };
         port.onMessage.addListener(onMsg);
@@ -4800,7 +5085,16 @@ export default defineBackground({
         if (alarm.name !== MODEL_WARM_ALARM_NAME) return;
         backgroundDiagnostics.alarmFires += 1;
         backgroundDiagnostics.lastAlarmAt = Date.now();
-        void warmModels(true);
+        // Periodic warm-up uses the cached catalog (no forced refresh); it
+        // no-ops entirely while the persisted catalog is still fresh.
+        void (async () => {
+          try {
+            if (await tldwModels.isCatalogFresh()) return;
+          } catch {
+            // Fall through to a non-forced warm attempt.
+          }
+          await warmModels(false);
+        })();
       });
     }
 

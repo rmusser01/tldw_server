@@ -2,7 +2,6 @@
 Datasets endpoints extracted from evaluations_unified.
 """
 
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, status
@@ -25,6 +24,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
+from tldw_Server_API.app.core.DB_Management.Evaluations_DB import to_unix_timestamp
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS,
     get_unified_evaluation_service_for_user,
@@ -43,21 +43,11 @@ def _normalize_dataset_payload(dataset: dict[str, Any]) -> dict[str, Any]:
     created = normalized.get("created")
     created_at = normalized.get("created_at")
 
-    timestamp: Optional[int] = None
+    # Naive SQLite strings and PostgreSQL datetimes are both UTC (ADR-014).
     if isinstance(created, (int, float)):
         timestamp = int(created)
-    elif isinstance(created_at, (int, float)):
-        timestamp = int(created_at)
-    elif isinstance(created_at, str):
-        try:
-            # Support both ISO-8601 and SQLite timestamp formats
-            ts = created_at.replace("Z", "+00:00")
-            timestamp = int(datetime.fromisoformat(ts).timestamp())
-        except (ValueError, TypeError, OverflowError):
-            timestamp = None
-
-    if timestamp is None:
-        timestamp = int(datetime.now(timezone.utc).timestamp())
+    else:
+        timestamp = to_unix_timestamp(created_at, fallback_now=True)
 
     normalized["created"] = timestamp
     normalized["created_at"] = timestamp

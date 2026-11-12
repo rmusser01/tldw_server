@@ -46,7 +46,7 @@ Continue TASK-45.44.3 by replacing Watchlists TemplateEditor AntD Alert warning 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - RED: focused TemplateEditor mode-contract test failed because the drift/repair warning content did not have a `[data-ds-component="Alert"]` ancestor.
 - Migrated the TemplateEditor version-drift and visual-repair warnings from AntD Alert props to the shared design-system Alert primitive while preserving warning copy and the repair action.
 - Removed the two TemplateEditor Alert entries from the product-state baseline.
@@ -64,7 +64,7 @@ Continue TASK-45.44.3 by replacing Watchlists TemplateEditor AntD Alert warning 
 - Follow-up verification: `bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot` passed 54 tests.
 - Follow-up verification: `bun run verify:design-system-state` passed with 249 total exceptions and 16 Jobs/Scheduler/Watchlists exceptions.
 - Follow-up TypeScript: `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still exits 2 with 347 existing diagnostics; no diagnostics mention TemplateEditor, the mode-contract test, Alert.tsx, the baseline, or this task.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

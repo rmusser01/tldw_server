@@ -41,13 +41,13 @@ Move the gated minimal-test audio jobs router factory onto the shared lazy optio
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "minimal_optional_router_specs and audio_jobs" -q failed with the expected old-factory behavior: 6 failed, 2 passed. Failures showed missing shared spec metadata, bypassed ImportedRouterSpec import hooks, and broad skip diagnostics.
 
 GREEN/validation: focused selector passed 8 passed; router_groups_contract.py passed 159 passed; test_main_router_contract.py passed 6 passed; test_openapi_contracts.py passed 69 passed; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported 0 results/errors; git diff --check passed.
 
 No documentation update was required for this internal router-registration cleanup. No skips or blockers remain.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

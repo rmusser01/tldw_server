@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.tests.helpers.app_main_state import reload_app_main
 
@@ -138,6 +139,10 @@ async def test_tenant_quota_429(monkeypatch):
     monkeypatch.setattr(aioredis, "from_url", fake_from_url)
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("EMBEDDINGS_TENANT_RPS", "1")
+    # The multi-user check reads the cached AuthNZ settings, not the env (TASK-13420).
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+
+    reset_settings()
 
     user = User(
         id="tenant1",
@@ -148,8 +153,11 @@ async def test_tenant_quota_429(monkeypatch):
     )
     request = SimpleNamespace(state=SimpleNamespace())
 
-    assert await ep._check_backpressure_and_quotas(request, user) is None
-    second = await ep._check_backpressure_and_quotas(request, user)
+    try:
+        assert await ep._check_backpressure_and_quotas(request, user) is None
+        second = await ep._check_backpressure_and_quotas(request, user)
+    finally:
+        reset_settings()  # later tests rebuild settings from the restored env
 
     assert second is not None
     assert second.status_code == 429
@@ -254,8 +262,8 @@ def test_embeddings_batch_route_has_rbac_rate_limit_parity():
     app = reload_app_main().app
     single_route = None
     batch_route = None
-    for route in app.routes:
-        if not isinstance(route, APIRoute):
+    for route in iter_served_routes(app.routes):
+        if not isinstance(route.route, APIRoute):
             continue
         if route.path == "/api/v1/embeddings" and "POST" in route.methods:
             single_route = route

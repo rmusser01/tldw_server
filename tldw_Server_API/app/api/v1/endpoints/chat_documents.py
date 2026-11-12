@@ -18,12 +18,14 @@ from starlette.responses import StreamingResponse
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.chat_documents_deps import get_document_generator_service
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
     AsyncGenerationResponse,
     BulkGenerateRequest,
     BulkGenerateResponse,
     DocumentListResponse,
+    DocumentType as DocType,
     GeneratedDocument,
     GenerateDocumentRequest,
     GenerateDocumentResponse,
@@ -32,24 +34,8 @@ from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
     PromptConfigResponse,
     SavePromptConfigRequest,
 )
-from tldw_Server_API.app.api.v1.schemas.document_generator_schemas import (
-    DocumentType as DocType,
-)
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
@@ -60,18 +46,31 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 from tldw_Server_API.app.core.Chat.document_generator import (
     DocumentGeneratorService,
     DocumentType,
-)
-from tldw_Server_API.app.core.Chat.document_generator import (
     GenerationStatus as GenStatus,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     invoke_stream_close_bounded,
+    is_empty_choices_usage_chunk,
     normalize_provider_stream_error,
     provider_stream_error_payload,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError, InputError
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCredentialRuntime,
+)
 from tldw_Server_API.app.core.testing import env_flag_enabled
 
 router = APIRouter()
@@ -139,9 +138,7 @@ def _classify_document_stream_chunk(chunk: Any) -> tuple[str, bool, str | None]:
 
     payload = _normalize_document_stream_chunk(chunk)
     control = payload.strip().lower()
-    if control == "[done]" or (
-        control.startswith("data:") and control.removeprefix("data:").strip() == "[done]"
-    ):
+    if control == "[done]" or is_done_line(payload):
         return "[DONE]", False, "done"
     return payload, bool(control), None
 
@@ -361,6 +358,8 @@ async def generate_document(
         user_id_int, team_ids, org_ids, trusted_base_url_override = (
             derive_trusted_credential_scope(http_request, principal)
         )
+        # Usage quotas (§4a), before the job branch and any generation; an own-key provider is let through unmarked.
+        await enforce_llm_quota(user_id_int, provider=provider_key)
         credential_runtime = ProviderCredentialRuntime(
             user_id=user_id_int,
             team_ids=team_ids,
@@ -517,6 +516,9 @@ async def generate_document(
                             if terminal_kind == "done":
                                 await stream.done()
                                 return
+                            if is_empty_choices_usage_chunk(payload):
+                                # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                                continue
                             if successful and not stream_success_state.get("terminal_error"):
                                 stream_success_state["successful"] = True
                             if not payload:
@@ -624,6 +626,9 @@ async def generate_document(
                         if terminal_kind == "done":
                             yield _encode_sse(payload)
                             return
+                        if is_empty_choices_usage_chunk(payload):
+                            # OpenAI's usage chunk, which this request cannot ask for: not sent (TASK-13951).
+                            continue
                         if successful and not stream_success_state.get("terminal_error"):
                             stream_success_state["successful"] = True
                         if payload:
@@ -1126,12 +1131,7 @@ async def get_prompt_config(
 
         is_custom = False
         try:
-            with db.get_connection() as conn:
-                cursor = conn.execute(
-                    "SELECT 1 FROM user_prompts WHERE document_type = ? AND is_active = 1",
-                    (doc_type.value,),
-                )
-                is_custom = cursor.fetchone() is not None
+            is_custom = service.has_custom_prompt(doc_type)
         except sqlite3.OperationalError as e:
             logger.warning(
                 "Database operational error checking custom prompts error_type={}",

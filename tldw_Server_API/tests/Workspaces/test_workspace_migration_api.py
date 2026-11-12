@@ -1,4 +1,6 @@
 """Tests for Research Workspace migration protocol endpoints."""
+import json
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -10,8 +12,7 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
     WORKSPACES_WRITE_RATE_LIMIT,
 )
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError, InputError
 
 _MANIFEST_HASH = "a" * 64
 _CHUNK_HASH = "b" * 64
@@ -33,7 +34,7 @@ def workspace_fastapi_app():
 
 
 @pytest.fixture
-def workspace_client(workspace_fastapi_app, db):
+def workspace_client(workspace_fastapi_app: FastAPI, db: CharactersRAGDB):
     async def _allow_rate_limit() -> None:
         return None
 
@@ -183,7 +184,7 @@ def test_workspace_migration_chunk_receipt_is_idempotent_and_conflict_checked(wo
 
 
 @pytest.mark.integration
-def test_workspace_migration_finalize_requires_all_chunks_and_enables_verified_delete(workspace_client):
+def test_workspace_migration_finalize_requires_all_receipts_but_retains_content(workspace_client):
     _create_session(
         workspace_client,
         declared_chunks=[
@@ -232,24 +233,23 @@ def test_workspace_migration_finalize_requires_all_chunks_and_enables_verified_d
     assert body["status"] == "finalized"
     assert body["accepted_chunk_count"] == 2
     assert body["missing_chunk_ids"] == []
-    assert body["client_delete_eligible"] is True
-    assert body["recovery_manifest"]["can_delete_legacy_storage"] is True
-    assert body["recovery_manifest"]["server_readback_verified"] is True
-    assert body["recovery_manifest"]["verification_status"] == "verified"
+    assert body["client_delete_eligible"] is False
+    assert body["recovery_manifest"]["can_delete_legacy_storage"] is False
+    assert body["recovery_manifest"]["server_readback_verified"] is False
+    assert body["recovery_manifest"]["verification_status"] == "content_not_migrated"  # nosec B101 -- Pytest verifies retained migration data and refused deletion.
 
     delete_ack = workspace_client.post(
         "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
         json={"acknowledged_manifest_hash": _MANIFEST_HASH},
     )
-    assert delete_ack.status_code == 200, delete_ack.text
-    assert delete_ack.json() == {"ok": True}
+    assert delete_ack.status_code == 409, delete_ack.text
+    assert delete_ack.json()["detail"]  # nosec B101 -- Pytest verifies retained migration data and refused deletion.
 
     duplicate_ack = workspace_client.post(
         "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
         json={"acknowledged_manifest_hash": _MANIFEST_HASH},
     )
-    assert duplicate_ack.status_code == 200, duplicate_ack.text
-    assert duplicate_ack.json() == {"ok": True}
+    assert duplicate_ack.status_code == 409, duplicate_ack.text  # nosec B101 -- Pytest verifies retained migration data and refused deletion.
 
 
 @pytest.mark.integration
@@ -335,7 +335,7 @@ def test_workspace_migration_client_delete_ack_requires_matching_manifest(worksp
         json={"manifest_hash": _MANIFEST_HASH},
     )
     assert finalized.status_code == 200, finalized.text
-    assert finalized.json()["client_delete_eligible"] is True
+    assert finalized.json()["client_delete_eligible"] is False  # nosec B101 -- Pytest verifies retained migration data and refused deletion.
 
     delete_ack = workspace_client.post(
         "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
@@ -371,9 +371,9 @@ def test_workspace_migration_failed_readback_verification_remains_recoverable(wo
     assert finalized.status_code == 200, finalized.text
     body = finalized.json()
     assert body["status"] == "finalized"
-    assert body["client_delete_eligible"] is False
-    assert body["recovery_manifest"]["can_delete_legacy_storage"] is False
-    assert body["recovery_manifest"]["server_readback_verified"] is False
+    assert body["client_delete_eligible"] is False  # nosec B101 -- Pytest verifies retained migration data and refused deletion.
+    assert body["recovery_manifest"]["can_delete_legacy_storage"] is False  # nosec B101 -- Pytest verifies retained migration data and refused deletion.
+    assert body["recovery_manifest"]["server_readback_verified"] is False  # nosec B101 -- Pytest verifies retained migration data and refused deletion.
     assert body["recovery_manifest"]["verification_status"] == "verification_failed"
     assert body["recovery_manifest"]["mismatch_chunk_ids"] == ["chunk-1"]
 
@@ -381,7 +381,7 @@ def test_workspace_migration_failed_readback_verification_remains_recoverable(wo
         "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
         json={"acknowledged_manifest_hash": _MANIFEST_HASH},
     )
-    assert delete_ack.status_code == 409, delete_ack.text
+    assert delete_ack.status_code == 409, delete_ack.text  # nosec B101 -- Pytest verifies retained migration data and refused deletion.
 
 
 @pytest.mark.integration
@@ -425,3 +425,70 @@ def test_workspace_migration_rejects_oversized_chunk_receipt(workspace_client):
     )
 
     assert response.status_code == 422, response.text
+
+
+@pytest.mark.integration
+def test_workspace_migration_missing_receipt_byte_count_precedes_session_lookup(db):
+    with pytest.raises(InputError, match="byte_count must be an integer"):
+        db.add_workspace_migration_chunk("missing-migration", "chunk-1", {"sha256": _CHUNK_HASH, "byte_count": None})
+
+
+@pytest.mark.integration
+def test_workspace_migration_stored_missing_declared_byte_count_remains_ineligible(db):
+    payload = _session_payload()
+    db.upsert_workspace_migration_session(payload)
+    receipt = {"sha256": _CHUNK_HASH, "byte_count": 64, "chunk_kind": "workspace_bundle"}
+    db.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
+    payload["declared_chunks"][0]["byte_count"] = None
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE workspace_migration_sessions SET declared_chunks_json = ? WHERE id = ?",
+            (json.dumps(payload["declared_chunks"]), "mig-1"),
+        )
+
+    with pytest.raises(ConflictError, match="invalid byte count") as exc_info:
+        db.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
+    assert exc_info.value.entity == "workspace_migration_chunks"
+    assert exc_info.value.entity_id == "chunk-1"
+    session = db.get_workspace_migration_session("mig-1")
+    assert session is not None
+    verification = db._verify_workspace_migration_delete_eligibility(session)
+    assert verification["eligible"] is False
+    assert verification["mismatch_chunk_ids"] == ["chunk-1"]
+
+
+@pytest.mark.integration
+def test_workspace_migration_missing_decoded_receipt_byte_count_remains_ineligible(db):
+    db.upsert_workspace_migration_session(_session_payload())
+    db.add_workspace_migration_chunk("mig-1", "chunk-1", {"sha256": _CHUNK_HASH, "byte_count": 64})
+    session = db.get_workspace_migration_session("mig-1")
+    assert session is not None
+    session["_chunks"][0]["byte_count"] = None
+    verification = db._verify_workspace_migration_delete_eligibility(session)
+    assert verification["eligible"] is False
+    assert verification["mismatch_chunk_ids"] == ["chunk-1"]
+
+@pytest.mark.integration
+def test_old_finalized_hash_receipt_never_authorizes_content_deletion(workspace_client, db):
+    _create_session(workspace_client)
+    receipt = {"sha256": _CHUNK_HASH, "byte_count": 64, "chunk_kind": "workspace_bundle"}
+    db.add_workspace_migration_chunk("mig-1", "chunk-1", receipt)
+    db.finalize_workspace_migration("mig-1", {"manifest_hash": _MANIFEST_HASH})
+    with db.transaction() as conn:
+        conn.execute(
+            "UPDATE workspace_migration_sessions SET client_delete_eligible = ?, recovery_manifest_json = ? WHERE id = ?",
+            (1, json.dumps({"client_delete_eligible": True, "can_delete_legacy_storage": True,
+                            "server_readback_verified": True}), "mig-1"),
+        )
+    for url in ("/api/v1/workspaces/migrations/mig-1", "/api/v1/workspaces/migrations"):
+        response = workspace_client.get(url)
+        assert response.status_code == 200, response.text  # nosec B101 - real API response.
+        body = response.json()
+        row = body[0] if isinstance(body, list) else body
+        assert row["client_delete_eligible"] is False  # nosec B101 - hash-only receipts cannot attest content.
+        assert row["recovery_manifest"]["server_readback_verified"] is False  # nosec B101 - no content readback.
+    denied = workspace_client.post(
+        "/api/v1/workspaces/migrations/mig-1/client-delete-ack",
+        json={"acknowledged_manifest_hash": _MANIFEST_HASH},
+    )
+    assert denied.status_code == 409, denied.text  # nosec B101 - old receipts cannot enable destructive acknowledgement.

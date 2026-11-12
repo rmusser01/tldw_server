@@ -139,7 +139,7 @@ export const WorldBooksManager: React.FC = () => {
     }, 0)
   }, [])
 
-  const { data, status } = useQuery({
+  const { data, status, error: worldBooksError, refetch: refetchWorldBooks, isFetching: isFetchingWorldBooks } = useQuery({
     queryKey: ['tldw:listWorldBooks'],
     queryFn: async () => {
       await tldwClient.initialize()
@@ -1286,6 +1286,22 @@ export const WorldBooksManager: React.FC = () => {
       )}
 
       {status === "pending" && <Skeleton active paragraph={{ rows: 6 }} />}
+
+      {status === "error" && (
+        <div role="alert">
+          <FeatureEmptyState
+            title={t("worldBooks.loadError.title", { defaultValue: "Unable to load world books" })}
+            description={worldBooksError instanceof Error
+              ? worldBooksError.message
+              : t("worldBooks.loadError.description", {
+                  defaultValue: "Could not load world books right now. Check your server connection and try again."
+                })}
+            primaryActionLabel={t("common:retry", "Retry")}
+            primaryDisabled={isFetchingWorldBooks}
+            onPrimaryAction={() => void refetchWorldBooks()}
+          />
+        </div>
+      )}
 
       {status === "success" && (
         Array.isArray(data) && data.length === 0 && !hasActiveListFilters ? (

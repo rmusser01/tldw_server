@@ -39,15 +39,11 @@ Task 1 from Docs/superpowers/plans/2026-06-04-canonical-workspaces-manager-proje
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Verification 2026-06-04: focused backend suite passed with 107 tests: python -m pytest tldw_Server_API/tests/Workspaces/test_workspace_core_models.py tldw_Server_API/tests/Workspaces/test_workspace_core_context.py tldw_Server_API/tests/Workspaces/test_workspaces_api.py -v. Bandit touched backend scope exited 0 and wrote /tmp/bandit_task_2255.json with no findings. git diff --check exited 0. Worker agent was closed after repeated timeouts; coordinator integrated and corrected the visible patch before verification.
 
 Review fix 2026-06-04: addressed code-quality finding by moving file inventory availability into a shared Workspace Core helper and using it for /roots, /capabilities, and /context projections. Added cross-contract API assertion and model helper coverage. Re-verified focused suite: 108 passed, 6 warnings. Re-ran Bandit touched backend scope: 0 findings in /tmp/bandit_task_2255.json. git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

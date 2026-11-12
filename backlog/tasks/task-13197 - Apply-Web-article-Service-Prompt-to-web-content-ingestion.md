@@ -36,7 +36,7 @@ Stage 1: Record approved design and establish regression baseline. Stage 2: Add 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline: 40 passed. Targeted RED tests demonstrated missing owner prompt lookup and discarded enhanced URL-level results before implementation. Implemented shared explicit-parameter resolver, authenticated ingestion snapshot, minimal ephemeral result retrieval, and existing Settings copy update. Compatibility/registry/API tests: 136 passed. Shared Settings and WebUI Settings: 76 passed each. Extra crawl-result and lookup cleanup boundary selection: 17 passed. Bandit on five touched runtime files: zero findings. OpenAPI export/type generation and fingerprint check passed unchanged. Full prompt matrix and independent review in progress.
 
 Independent reviewer found no blocking correctness/security/compatibility/over-engineering issues. Added the requested direct-ingestion unscoped regression (real model assembly and saved owner storage) to make that compatibility requirement explicit. Initial complete feature matrix: 75 passed. Final rerun includes this regression, connection cleanup cases, ephemeral boundaries, and strict forwarding contracts. Ruff is clean on changed code; existing B004 at process_web_scraping.py:41 is identical on dev and not modified. Python compilation passed. Temporary dependency symlinks removed without modifying shared dependencies.
@@ -48,7 +48,7 @@ Published PR #2913 against dev at requester option 2. Implementation commit 7532
 Rebased cleanly onto dev 7fe169e8c5; range-diff confirms both original commits unchanged. Qodo posted three actionable findings: domain exception with safe result ID, public-ingestion boundary tests rather than a private-helper import, and cleanup of consumed ephemeral crawl payloads. Addressing test-first before publishing the rebased head.
 
 All three Qodo findings addressed: reuse centralized ResourceNotFoundError with the safe result ID; exercise public ingestion orchestration rather than private helper; release enhanced and legacy temporary crawl entries, including malformed-envelope failure. RED: 10 failed and 6 passed before fixes. GREEN: 16 boundary cases passed. Rebased full focused backend suite: 234 passed; final boundary rerun: 16 passed. Ruff/compilation/diff checks passed and Bandit across five runtime files has zero findings. Independent follow-up review found no actionable issues. Publishing rebased fixes with an exact-head force-with-lease, then waiting for current-head Qodo and required CI. Human-summary waiver question for this PR is pending.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

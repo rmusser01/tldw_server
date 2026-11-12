@@ -9,7 +9,10 @@ import asyncio
 import contextlib
 import json
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from chromadb.api.models.Collection import Collection
 
 from loguru import logger
 
@@ -40,7 +43,7 @@ _STATE_ADAPTER_EXCEPTIONS = (
 _STATE_JSON_EXCEPTIONS = (TypeError, ValueError, json.JSONDecodeError)
 
 
-def _get_workflow_cache_collection(collection_name: str, user_id: str):
+def _get_workflow_cache_collection(collection_name: str, user_id: str) -> Collection | None:
     """Resolve the Chroma collection holding one account's workflow cache.
 
     Chroma isolates by directory, so the manager must be built for the account

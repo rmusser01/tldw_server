@@ -92,6 +92,10 @@ as `source=disabled`. Replacement and testing return `403`, but the key owner
 may still delete the orphan with
 `DELETE /api/v1/users/keys/gateway:<slug>`.
 
+## Usage Quotas
+
+A call made with your own key is recorded in your usage, with its tokens and cost. It does not count toward the operator's per-user LLM limits (`limits.llm_tokens_per_month`, `limits.llm_cost_per_day_usd`, `limits.llm_cost_per_month_usd`) or a hosted plan's monthly LLM tokens, and those limits never refuse it. That applies to providers that bill your key, such as OpenAI or Anthropic, when the server sends the call to that vendor. A key you store for a custom OpenAI-compatible endpoint reaches the operator's server, so those calls count. So do calls on a provider the operator has pointed at its own server instead of the vendor, and calls on an org or team shared key or on a server key. If you are already over a limit, an endpoint still answers a request whose LLM calls all use your own key: `/chat/completions`, the Messages API, character chat, document generation from a chat, the flashcards and quizzes study assistants, the judge-model evaluations and RAG searches that make no LLM call besides the answer (and, with a chat history, its reformulation). The study assistants use your own key for the reply's provider whenever it is a key that bills you as described above (not a key for a custom OpenAI-compatible endpoint, or for a provider the operator points at its own server), so those replies are recorded as yours and do not count. Media analysis, watchlist summaries, evaluation runs and benchmark runs never use a key you stored: their calls run on the server's key, or on a raw `api_key` you send with a benchmark or evaluation run, which counts the same, so over a limit they still refuse. In a character chat with automatic memory extraction on, a saved reply is still refused, because extraction runs on the server's key: turn extraction off, or ask for a reply this request does not save (stream it, or send `save_to_db: false`). See `Docs/Operations/Usage_Quotas.md` and ADR-083.
+
 ## Credential Fields
 
 Credential fields are validated per provider. By default, unknown providers only
@@ -200,7 +204,7 @@ DELETE /api/v1/admin/keys/shared/{scope_type}/{scope_id}/{provider}
 
 ## Auditing and Updates
 
-- `last_used_at` updates on successful provider calls.
+- `last_used_at` updates on successful provider calls. Calls by the features that resolve your key once, before their calls (the study assistants), do not update it; their usage is still recorded as yours.
 - Runtime updates are throttled by `BYOK_LAST_USED_THROTTLE_SECONDS`.
 - `keys/test` endpoints update `last_used_at` only if the tested key matches the stored key.
 - Responses never include plaintext keys; `key_hint` shows the last 4 characters only.

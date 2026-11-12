@@ -31,6 +31,8 @@ flashcards endpoint and DB adapters; this package holds portable card logic.
 - `scheduler_sm2.py` and `scheduler_fsrs.py` compute review state transitions.
 - `study_assistant.py` contains service helpers for study sessions.
 - `asset_refs.py` validates and normalizes media references on cards.
+- `flashcard_schemas.py` holds the flashcard generation request models, re-exported by
+  `app/api/v1/schemas/flashcards.py`.
 
 ## How It Connects
 

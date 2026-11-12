@@ -156,7 +156,7 @@ async def run_xml_transform_adapter(config: dict[str, Any], context: dict[str, A
     Output:
       - {"result": Any, "text": str}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -209,7 +209,7 @@ async def run_template_render_adapter(config: dict[str, Any], context: dict[str,
     Output:
       - {"rendered": str, "text": str}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -260,7 +260,7 @@ async def run_regex_extract_adapter(config: dict[str, Any], context: dict[str, A
     Output:
       - {"matches": [str], "count": int, "text": str}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -327,7 +327,7 @@ async def run_text_clean_adapter(config: dict[str, Any], context: dict[str, Any]
     Output:
       - {"text": str, "original_length": int, "cleaned_length": int}
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}

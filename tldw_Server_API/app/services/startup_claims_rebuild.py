@@ -143,7 +143,7 @@ def run_claims_rebuild_iteration(
     policy: str,
 ) -> None:
     """Submit one claims rebuild batch for the configured default user."""
-    with _claims_rebuild_db_session(app_settings) as (_, db_path, db):
+    with _claims_rebuild_db_session(app_settings) as (user_id, db_path, db):
         media_ids = _list_claims_rebuild_media_ids(
             db,
             policy=policy,
@@ -152,7 +152,7 @@ def run_claims_rebuild_iteration(
             limit=25,
         )
         for media_id in media_ids:
-            service.submit(media_id=media_id, db_path=db_path)
+            service.submit(media_id=media_id, db_path=db_path, owner_user_id=user_id)
 
 
 @contextmanager

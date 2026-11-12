@@ -5,19 +5,13 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCallCredentials,
-)
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_endpoint_env_keys,
     custom_openai_provider_name,
     custom_openai_section_name,
 )
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, raise_detached_error
-from tldw_Server_API.app.core.http_client import fetch as _hc_fetch
-from tldw_Server_API.app.core.http_client import stream_response as _hc_stream_response
+from tldw_Server_API.app.core.exceptions import ChatConfigurationError, EgressPolicyError, raise_detached_error
+from tldw_Server_API.app.core.http_client import fetch as _hc_fetch, stream_response as _hc_stream_response
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import validate_payload
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
 from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import (
@@ -33,6 +27,10 @@ from tldw_Server_API.app.core.LLM_Calls.streaming import (
     provider_stream_error_frame,
     wrap_sync_stream,
 )
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCallCredentials,
+)
 from tldw_Server_API.app.core.testing import is_truthy
 
 from .base import ChatProvider
@@ -41,7 +39,7 @@ from .base import ChatProvider
 def _provider_response_has_error(value: Any) -> bool:
     """Detect a protocol-owned provider error without retaining its detail."""
 
-    from tldw_Server_API.app.core.Chat.streaming_utils import (
+    from tldw_Server_API.app.core.LLM_Calls.provider_results import (
         normalize_provider_stream_error,
     )
 
@@ -155,7 +153,10 @@ class CustomOpenAIAdapter(ChatProvider):
             if self.default_base_url:
                 base = self.default_base_url
             else:
-                raise RuntimeError(f"{self.name} requires an explicit base URL")
+                raise ChatConfigurationError(
+                    provider=self.name,
+                    message=f"{self.name} requires an explicit base URL",
+                )
         return str(base).rstrip("/")
 
     def _is_configured_custom(self) -> bool:
@@ -208,7 +209,10 @@ class CustomOpenAIAdapter(ChatProvider):
 
         endpoint = resolve_trusted_provider_endpoint(self.name)
         if endpoint is None:
-            raise RuntimeError(f"{self.name} requires an explicit configured base URL")
+            raise ChatConfigurationError(
+                provider=self.name,
+                message=f"{self.name} requires an explicit configured base URL",
+            )
         return endpoint.base_url, endpoint
 
     def _consume_runtime_credentials(
@@ -339,6 +343,9 @@ class CustomOpenAIAdapter(ChatProvider):
                     timeout=timeout or 120.0,
                 ) as resp:
                     resp.raise_for_status()
+                    # Own loop (TASK-13373): stops reading at DONE or an error event and emits
+                    # the error frame only after the response context exits cleanly; the
+                    # shared SSE helpers keep reading and emit the frame inline.
                     for raw in resp.iter_lines():
                         if not raw:
                             continue

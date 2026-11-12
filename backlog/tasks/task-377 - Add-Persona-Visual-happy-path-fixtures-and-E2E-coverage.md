@@ -30,7 +30,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented starter-pack service/UI copy flow, deterministic E2E sprite-frame fixtures, default/upload setup-path Playwright coverage, and BuddyShell refresh on visual-pack activation. Validation: focused Vitest passed (55 tests); setup-path Playwright passed (2 tests); git diff --check passed. Full persona-live file passed 4 visual-pack tests but the existing live-backend WebSocket proof timed out waiting for Disconnect.
 
 Portable upload fixture determinism verified with a Bun import check: two generated buffers were byte-identical (uploaded-visual-pack.tldw-persona-vpack, 2055 bytes).
@@ -38,7 +38,7 @@ Portable upload fixture determinism verified with a Bun import check: two genera
 Addressed PR review findings: guarded starter pack loading against stale async responses, reset starter draft title on persona changes, localized starter labels/units, made uploaded fixture archive references consistent with its manifest, exercised upload import from true empty state, and aligned task status with completed DoD.
 
 Review-fix validation: focused Vitest passed (56 tests); portable fixture determinism passed (1888 byte archive, stable across builds); setup-path Playwright passed (2 tests) from a fresh port with the upload path starting from empty state; git diff --check passed; apps/tldw-frontend lint passed with existing warnings only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

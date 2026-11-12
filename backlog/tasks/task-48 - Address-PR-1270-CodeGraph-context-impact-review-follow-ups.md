@@ -44,7 +44,7 @@ Address the current PR #1270 review comments for the native CodeGraph context/im
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED verification: targeted regression tests failed before implementation because impact traversal did not pass a max_rows selector bound and codegraph.context include_code=null returned no snippets.
 
 Implemented SQL LIMIT/max_rows for impact relationship selection, normalized codegraph.context include_code=null to the default true, and added concise docstrings to new CodeGraph test modules/helpers.
@@ -52,7 +52,7 @@ Implemented SQL LIMIT/max_rows for impact relationship selection, normalized cod
 Verification so far: targeted regression tests passed; focused CodeGraph/MCP pytest suite passed with 97 passed and 5 warnings; Ruff touched scopes passed; Bandit /tmp/bandit_codegraph_context_impact.json reported zero findings; git diff --check passed.
 
 PR thread updates: replied to and resolved the three Qodo review threads for docstrings, SQL row limiting, and include_code=null. Replied to the CodeRabbit human-attestation thread without adding a false human-authored attestation; the thread remains a human-owner action.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

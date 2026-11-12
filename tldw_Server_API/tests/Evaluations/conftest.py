@@ -50,6 +50,50 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "requires_embeddings: Tests requiring embedding API access")
 
 
+@pytest.fixture(scope="session")
+def _evaluations_authnz_db_url(tmp_path_factory) -> str:
+    return f"sqlite:///{tmp_path_factory.mktemp('evals_authnz') / 'users.db'}"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_authnz_daily_ledger(monkeypatch, _evaluations_authnz_db_url):
+    """Keep the suite out of the checkout's Databases/users.db (TASK-13368).
+
+    The root conftest defaults DATABASE_URL to the checkout's users.db, so the
+    evaluations limiter's ResourceDailyLedger spent real daily quota on every local
+    run. Point AuthNZ at a session-scoped temp DB, and rebuild the cached settings,
+    pool and ledger only when something (another suite, or a test resetting the
+    pool) left them pointing elsewhere.
+    """
+    from tldw_Server_API.app.core.AuthNZ import database as authnz_db
+    from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
+    from tldw_Server_API.app.core.Evaluations import user_rate_limiter
+    from tldw_Server_API.app.core.Utils.app_services import app_services
+
+    url = _evaluations_authnz_db_url
+    monkeypatch.setenv("DATABASE_URL", url)
+    pool = app_services().db_pool
+    pool_url = getattr(getattr(pool, "settings", None), "DATABASE_URL", None)
+    if pool is not None and pool_url != url:
+        asyncio.run(authnz_db.reset_db_pool())
+        user_rate_limiter._evals_daily_ledger = None
+    elif get_settings().DATABASE_URL != url:
+        reset_settings()
+        user_rate_limiter._evals_daily_ledger = None
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _configured_key_is_the_test_key(monkeypatch):
+    """Single-user auth accepts only the configured key; the suite sends the test key."""
+    from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+    from tldw_Server_API.tests.test_config import test_config
+
+    monkeypatch.setenv("SINGLE_USER_API_KEY", test_config.TEST_API_KEY)
+    reset_settings()
+    yield
+
+
 # ============================================================================
 # Database Fixtures with Full Schema
 # ============================================================================
@@ -647,7 +691,7 @@ def override_unified_service(temp_db_path, monkeypatch):
     router_module._evaluation_service = None
     try:
         cache = getattr(service_module, "_service_instances_by_user")
-        cache.pop(_test_user_id, None)
+        cache.clear()
     except Exception:
         _ = None
     service_module._service_instance = None

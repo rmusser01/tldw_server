@@ -1,5 +1,5 @@
 import type { HistorySendTurn } from "@/types/chat-modes"
-import { settleAcceptedAssistant } from "@/services/chat-history-selection"
+import { settleAcceptedAssistant, settleSelectedExistingInput } from "@/services/chat-history-selection"
 import {
   getLastChatHistory,
   saveHistory,
@@ -224,10 +224,12 @@ export const saveMessageOnError = async ({
     const persistedHistoryId = await runChatPersistenceTransaction(
       scopeInvalidatedSignal,
       async () => {
-        const targetHistoryId =
-          historyId ?? (await saveHistory(title!, false, message_source)).id
-        const shouldSaveUser =
-          !isRegenerating && (!historyId || !isAbort || !isContinue)
+        const targetHistoryId = historyId ?? (
+          await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
+        ).id
+        const shouldSaveUser = !isRegenerating && (
+          !historyId || !isAbort || !isContinue
+        )
 
         if (isRegenerating && retryFailedTurn && userMessageId && userServerMessageId) {
           await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, userMessage)
@@ -346,7 +348,7 @@ export const saveMessageOnError = async ({
       return historyId
     } else {
       const title = await generateTitleWithFallback(selectedModel, userMessage)
-      const newHistoryId = await saveHistory(title, false, message_source)
+      const newHistoryId = await saveHistory(title, false, message_source, undefined, undefined, requestScope)
       updatePageTitle(title)
       if (!isRegenerating) {
         await saveMessage({
@@ -445,7 +447,7 @@ export const saveMessageOnError = async ({
   } else {
     // Create new history on error
     const title = await generateTitleWithFallback(selectedModel, userMessage)
-    const newHistoryId = await saveHistory(title, false, message_source)
+    const newHistoryId = await saveHistory(title, false, message_source, undefined, undefined, requestScope)
     updatePageTitle(title)
     try {
       if (!isRegenerating) {
@@ -504,6 +506,7 @@ export const saveMessageOnSuccess = async ({
   fullText,
   source,
   assistantImages,
+  resolveAssistantMedia,
   message_source = "web-ui",
   message_type,
   userMessageType,
@@ -545,6 +548,7 @@ export const saveMessageOnSuccess = async ({
   fullText: string
   source: any[]
   assistantImages?: string[]
+  resolveAssistantMedia?: () => { assistantImages?: string[]; generationInfo?: unknown }
   message_source?: "copilot" | "web-ui" | "server" | "branch"
   message_type?: string
   userMessageType?: string
@@ -574,14 +578,23 @@ export const saveMessageOnSuccess = async ({
   sessionFilesToAdd?: UploadedFile[]
 }) => {
   if (historyTurn) {
-    if (!historyTurn.admission) throw new Error("missing_history_admission")
+    if (!historyTurn.admission && !historyTurn.existingSelection)
+      throw new Error("missing_history_admission")
+    if (historyTurn.existingSelection && !historyTurn.selection)
+      throw new Error("missing_history_selection")
+    if (historyTurn.persistence === 'server' && !historyTurn.existingSelection) {
+      if (!historyTurn.resultId) throw new Error('missing_native_completion_receipt');
+      await historyTurn.complete?.(fullText);
+      return historyId ?? historyTurn.admission.conversation_id;
+    }
     const native = historyTurn.owner.kind === "native"
+    // ponytail: native history retains full reasoning text, not client elapsed-time telemetry.
+    // Add a negotiated metadata field if cross-client timing becomes required.
     if (
       native &&
       (source?.length ||
         assistantMetadataExtra ||
-        generationInfo ||
-        reasoning_time_taken > 0)
+        generationInfo || sessionFilesToAdd.length)
     ) {
       throw new Error("unsupported_history_native_result_metadata")
     }
@@ -596,7 +609,9 @@ export const saveMessageOnSuccess = async ({
       content: fullText,
       createdAt: historyTurn.createdAt!,
       images: assistantImages ?? [],
-      parent_message_id: historyTurn.admission.input_message_id,
+      parent_message_id: historyTurn.existingSelection
+        ? historyTurn.selection!.messages.at(-1)!.id
+        : historyTurn.admission!.input_message_id,
       ...(!native
         ? {
             sources: source,
@@ -613,13 +628,22 @@ export const saveMessageOnSuccess = async ({
           }
         : {})
     }
+    if (historyTurn.existingSelection) {
+      if (!historyTurn.stageSettlementPayload)
+        throw new Error("missing_history_recovery")
+      await historyTurn.stageSettlementPayload(assistant)
+      await settleSelectedExistingInput(historyTurn.owner, historyTurn.selection!, assistant)
+    } else {
     await settleAcceptedAssistant(
       historyTurn.owner,
-      historyTurn.admission,
-      assistant
+      historyTurn.admission!,
+      assistant,
+      undefined,
+      sessionFilesToAdd
     )
-    await historyTurn.complete?.()
+    }
     historyTurn.resultId = assistant.id
+    await historyTurn.complete?.(assistant.content)
     return historyId ?? assistant.history_id
   }
   if (scopeInvalidatedSignal?.aborted) {
@@ -628,7 +652,7 @@ export const saveMessageOnSuccess = async ({
     throw error
   }
 
-  const title = historyId
+  let title = historyId
     ? null
     : scopeSignal || requestScope
       ? await generateTitle(selectedModel, message, message, {
@@ -637,11 +661,16 @@ export const saveMessageOnSuccess = async ({
         })
       : await generateTitle(selectedModel, message, message)
 
+  if (!historyId && !title?.trim()) {
+    title = buildFallbackHistoryTitle(message)
+  }
+
   const persistedHistoryId = await runChatPersistenceTransaction(
     scopeInvalidatedSignal,
     async () => {
-      const targetHistoryId =
-        historyId ?? (await saveHistory(title!, false, message_source)).id
+      const targetHistoryId = historyId ?? (
+        await saveHistory(title!, false, message_source, undefined, undefined, requestScope)
+      ).id
 
       if (isRegenerate && retryFailedTurn && userMessageId && userServerMessageId) {
         await acknowledgeSavedUserMessage(targetHistoryId, userMessageId, userServerMessageId, message)
@@ -672,6 +701,7 @@ export const saveMessageOnSuccess = async ({
         const lastMessage = await getLastChatHistory(targetHistoryId)
         await updateMessage(targetHistoryId, lastMessage.id, fullText)
       } else {
+        const media = resolveAssistantMedia?.()
         await saveMessage({
           id: assistantMessageId,
           serverMessageId: assistantServerMessageId,
@@ -679,14 +709,14 @@ export const saveMessageOnSuccess = async ({
           name: selectedModel,
           role: "assistant",
           content: fullText,
-          images: assistantImages ?? [],
+          images: media?.assistantImages ?? assistantImages ?? [],
           source,
           time: 2,
           message_type: assistantMessageType ?? message_type,
           clusterId,
           modelId,
           parent_message_id: assistantParentMessageId ?? null,
-          generationInfo,
+          generationInfo: media?.generationInfo ?? generationInfo,
           metadataExtra: assistantMetadataExtra,
           reasoning_time_taken
         })

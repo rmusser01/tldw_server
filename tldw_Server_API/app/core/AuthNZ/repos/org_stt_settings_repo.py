@@ -6,6 +6,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.repos._dual_backend import row_dict
 
 
 class AuthnzOrgSttSettingsRepo:
@@ -35,16 +36,18 @@ class AuthnzOrgSttSettingsRepo:
         return callable(getattr(self.db, "fetchrow", None))
 
     async def ensure_tables(self) -> None:
-        """Ensure the org STT settings table exists when a pool is available."""
+        """Validate owner-provisioned STT settings before serving requests."""
         try:
             if self._is_postgres():
-                from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
-                    ensure_org_stt_settings_pg,
+                from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                    validate_postgres_org_stt_runtime,
                 )
 
-                ok = await ensure_org_stt_settings_pg(self.db)
-                if not ok:
-                    raise RuntimeError("PostgreSQL org_stt_settings schema ensure failed")
+                if self._is_db_pool():
+                    async with self.db.transaction() as conn:
+                        await validate_postgres_org_stt_runtime(conn)
+                else:
+                    await validate_postgres_org_stt_runtime(self.db)
                 return
 
             if self._is_db_pool():
@@ -98,14 +101,7 @@ class AuthnzOrgSttSettingsRepo:
 
     @classmethod
     def _row_to_dict(cls, row: Any) -> dict[str, Any]:
-        if isinstance(row, dict):
-            raw = dict(row)
-        else:
-            try:
-                keys = row.keys()
-                raw = {key: row[key] for key in keys}
-            except Exception:
-                raw = dict(row)
+        raw = row_dict(row)
         return {
             "org_id": int(raw["org_id"]),
             "delete_audio_after_success": bool(raw["delete_audio_after_success"]),

@@ -624,7 +624,7 @@ export const useOmniSearchDeps = (): OmniSearchDependencies => {
   const startNewChatFromOmni = React.useCallback(
     (title: string) => {
       const trimmed = title.trim()
-      clearChat()
+      if (clearChat() === false) return
       if (trimmed) {
         updatePageTitle(trimmed)
       }

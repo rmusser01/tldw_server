@@ -35,11 +35,11 @@ Add shared pre-dispatch prompt/cost guardrail decisions for chat and character-c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented prompt_cost_guardrails.py with prompt-safe decisions, env/config loading, warn/block thresholds, fingerprint churn warnings, output cap/choice/reasoning risk warnings, and bounded metadata. Wired chat streaming/non-streaming before provider dispatch and added character-chat guardrail evaluation after world-book insertion.
 
 Verification: red import failure confirmed for missing prompt_cost_guardrails module; focused guardrail tests and chat token estimate tests passed; broader chat_service_content and streaming structured tests passed; character chat error-mapping unit tests passed; py_compile passed for modified Python files; git diff --check passed; Bandit on touched app Python returned zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

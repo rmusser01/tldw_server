@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { File as NodeFile } from "node:buffer"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { UploadedFile } from "@/db/dexie/types"
 
@@ -54,6 +55,10 @@ const makeDeps = () => ({
 describe("chat document processing service", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it("keeps add-to-chat chat scoped and does not create media ids", async () => {
@@ -368,6 +373,8 @@ describe("chat document processing service", () => {
   })
 
   it("reconstructs upload files and builds chat-scoped retrieval snippets", async () => {
+    // Native fetch returns Node blobs, which must use the matching File constructor.
+    vi.stubGlobal("File", NodeFile)
     const uploadFile = await dataUrlToUploadFile(makeUploadedFile())
 
     expect(uploadFile.name).toBe("notes.md")
