@@ -40,6 +40,7 @@ from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract imp
     parse_notes_studio_document_v1,
     studio_result_hash,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -2977,6 +2978,37 @@ class NoteStore:
         ).fetchone()
         return int(row["cnt"]) if row else 0
 
+    def _active_keyword_ids_by_identity(self, tokens: list[str], keyword_table: str) -> dict[str, list[int]]:
+        """Map each token's ``normalize_keyword_identity`` to every active keyword id with it.
+
+        SQL cannot compare the identity (NFC plus casefold): SQLite's LOWER() and NOCASE
+        fold ASCII only, so a stored "Éclair" never matched "éclair", and Postgres LOWER()
+        misses ß/SS. As Media does (TASK-13950.5), one lookup reads the case-insensitive
+        SQL matches, which hold every ASCII row (an ASCII row's casefold is its
+        lowercase), plus every row with a non-ASCII character, and Python compares the
+        identities. Legacy rows that share an identity all count.
+        """
+        wanted = {normalize_keyword_identity(token) for token in tokens}
+        postgres = self._db.backend_type == BackendType.POSTGRESQL
+        values = [*tokens, *(wanted - set(tokens))]
+        placeholders = ", ".join(["LOWER(?)" if postgres else "?"] * len(values))
+        # SQLite's keyword column is NOCASE, so its IN folds ASCII case too.
+        match = f"{'LOWER(keyword)' if postgres else 'keyword'} IN ({placeholders})"
+        # ponytail: reads every non-ASCII keyword row; add a stored identity column if
+        # non-ASCII vocabularies get large.
+        non_ascii = "keyword ~ '[^[:ascii:]]'" if postgres else "keyword GLOB '*[^ -~]*'"
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        query = (
+            f"SELECT id, keyword FROM {keyword_table} "  # nosec B608 - fixed SQL fragments; values stay bound.
+            f"WHERE deleted = {'FALSE' if postgres else '0'} AND ({match} OR {non_ascii}){owner_clause}"
+        )
+        ids: dict[str, list[int]] = {}
+        for row in self._db.execute_query(query, (*values, *owner_params)).fetchall():
+            identity = normalize_keyword_identity(str(row["keyword"]))
+            if identity in wanted:
+                ids.setdefault(identity, []).append(int(row["id"]))
+        return ids
+
     def _keyword_token_filter(
         self,
         tokens: list[str],
@@ -2985,34 +3017,31 @@ class NoteStore:
     ) -> tuple[str, list[Any]]:
         """Build the keyword-token predicate for a notes search (NL-N1).
 
-        Tokens match keywords exactly, ignoring case. ``match="any"`` keeps a
-        note that has at least one of the tokens; ``match="all"`` keeps only a
-        note that has every token. The caller joins ``k`` (keywords) and ``n``
-        (notes); the "all" subquery applies the same owner and deleted filters
-        to its own keyword alias.
+        Tokens match keywords by ``normalize_keyword_identity``: exactly, ignoring
+        case on every backend. ``match="any"`` keeps a note that has at least one
+        of the tokens; ``match="all"`` keeps only a note that has every token. The
+        caller joins ``nk`` (note_keywords) and ``n`` (notes). The keyword ids come
+        from the owner's active keywords, so they carry the owner and deleted filters.
         """
         if match not in ("all", "any"):
             raise ValueError(f"Unsupported keyword match mode: {match!r}")
-        placeholders = ", ".join(["?"] * len(tokens))
-        clause = f"LOWER(k.keyword) IN ({placeholders})"
-        params: list[Any] = list(tokens)
-        if match == "all" and len(tokens) > 1:
-            if self._db.backend_type == BackendType.POSTGRESQL:
-                deleted_false = "FALSE"
-                k2_scope, k2_owner_params = self._db._selected_owner_filter(self._db.client_id, "k2")
-            else:
-                deleted_false = "0"
-                k2_scope, k2_owner_params = "", ()
-            clause += (
-                " AND n.id IN ("
-                "SELECT nk2.note_id FROM note_keywords nk2 "
-                f"JOIN {keyword_table} k2 ON k2.id = nk2.keyword_id "
-                f"WHERE k2.deleted = {deleted_false}{k2_scope} "
-                f"AND LOWER(k2.keyword) IN ({placeholders}) "
-                "GROUP BY nk2.note_id "
-                "HAVING COUNT(DISTINCT LOWER(k2.keyword)) = ?)"
-            )
-            params.extend([*k2_owner_params, *tokens, len(tokens)])
+        found = self._active_keyword_ids_by_identity(tokens, keyword_table)
+        groups = [found.get(normalize_keyword_identity(token), []) for token in tokens]
+        if match == "all" and not all(groups):
+            return "1 = 0", []
+        groups = [ids for ids in groups if ids]
+        if not groups:
+            return "1 = 0", []
+        all_ids = [keyword_id for ids in groups for keyword_id in ids]
+        clause = f"nk.keyword_id IN ({', '.join(['?'] * len(all_ids))})"
+        params: list[Any] = list(all_ids)
+        if match == "all" and len(groups) > 1:
+            for ids in groups:
+                clause += (
+                    " AND EXISTS (SELECT 1 FROM note_keywords nk2 WHERE nk2.note_id = n.id "
+                    f"AND nk2.keyword_id IN ({', '.join(['?'] * len(ids))}))"
+                )
+                params.extend(ids)
         return clause, params
 
     def search_notes_with_keywords(
@@ -3028,7 +3057,7 @@ class NoteStore:
         Tokens match keywords exactly (case-insensitive); ``match`` is "all"
         (every token, the default) or "any" (at least one).
         """
-        tokens = list(dict.fromkeys(t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()))
+        tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return []
@@ -3122,7 +3151,7 @@ class NoteStore:
 
         Uses the same exact, ``match``-mode token rules as ``search_notes_with_keywords``.
         """
-        tokens = list(dict.fromkeys(t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()))
+        tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return 0
