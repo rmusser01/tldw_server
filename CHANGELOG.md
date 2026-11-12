@@ -22,6 +22,8 @@ and this project adheres to Some kind of Versioning
 
 Promotes dev through PR #3443 and includes the changes already on main since
 v0.1.46. See the [full change inventory](Docs/Development/releases/0.1.47-change-inventory.md).
+The release also separates manual backend CI checkout from license-admitted
+PR checkout and fixes whitespace flagged by pre-commit.
 
 **Before upgrading:** Use Python 3.12 or later. Back up persistent data and stop
 API and worker writers before starting the upgrade. Production installs should

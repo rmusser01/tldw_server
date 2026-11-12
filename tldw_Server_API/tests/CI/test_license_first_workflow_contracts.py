@@ -811,7 +811,13 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 checkout_count += 1
                 checkout_inputs = step.get("with", {})
                 assert checkout_inputs.get("persist-credentials") is False, (name, job_name)
-                if (name, job_name) in CHANGE_CLASSIFIER_JOBS:
+                if (name, job_name) == ("backend-required.yml", "changes"):
+                    if step.get("if") == "github.event_name == 'workflow_run'":
+                        expected_ref = "${{ needs.admission.outputs.head_sha }}"
+                    else:
+                        assert step.get("if") == "github.event_name != 'workflow_run'"
+                        expected_ref = "${{ github.sha }}"
+                elif (name, job_name) in CHANGE_CLASSIFIER_JOBS:
                     expected_ref = classifier_ref
                 else:
                     expected_ref = admission_ref if "admission" in needs else event_ref
@@ -834,7 +840,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 61
+    assert checkout_count == 62
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -877,8 +883,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    # The PostgreSQL coverage job checks out the same immutable event head as its test job.
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 60
+    # The backend classifier uses the admitted SHA for workflow_run without an event fallback.
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 59
     assert combined_text.count("github.event.pull_request.head.sha") == 56
     # +1 each: backend-required passes the admitted-or-PR base to the backlog
     # task-format ratchet (TASK-13440), admission's base first, as the mypy step does.

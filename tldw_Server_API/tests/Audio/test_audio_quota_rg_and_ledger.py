@@ -114,4 +114,3 @@ async def test_consume_daily_minutes_if_allowed_is_atomic_and_idempotent(tmp_pat
         assert await ledger.total_for_day("user", "51", "minutes", day_utc=today) == 120
     finally:
         await pool.close()
-

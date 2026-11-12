@@ -81,8 +81,8 @@ index 33652b6865..c647a0e521 100644
 +++ b/tldw_Server_API/tests/AudioJobs/test_audio_worker_smoke.py
 @@ -809,14 +809,19 @@ async def _run_worker_until(worker, done) -> None:
          await asyncio.wait_for(task, timeout=2.0)
- 
- 
+
+
 -def _analyze_job(jm, text: str) -> int:
 +def _analyze_job(jm, text: str, api_name: str | None = "openai") -> int:
      row = jm.create_job(
@@ -91,8 +91,8 @@ index 33652b6865..c647a0e521 100644
 +        payload={"text": text, "api_name": api_name, "model": "whisper-1", "perform_analysis": True}, owner_user_id="7",
      )
      return int(row["id"])
- 
- 
+
+
 +def _failed_or_retried(jm, job_id: int) -> bool:
 +    job = jm.get_job(job_id) or {}
 +    return job.get("status") in {"failed", "quarantined"} or int(job.get("retry_count") or 0) >= 1
@@ -102,8 +102,8 @@ index 33652b6865..c647a0e521 100644
  async def test_audio_analyze_stores_the_model_analysis(analyze_worker):
      worker, jm, adapter = analyze_worker
 @@ -833,16 +838,84 @@ async def test_audio_analyze_stores_the_model_analysis(analyze_worker):
- 
- 
+
+
  @pytest.mark.unit
 -async def test_audio_analyze_fails_the_stage_on_an_error_result(analyze_worker):
 +@pytest.mark.parametrize("text", ["", " \n "], ids=["empty", "whitespace"])
@@ -121,8 +121,8 @@ index 33652b6865..c647a0e521 100644
 +    assert job.get("error_code") == "empty_transcript"
 +    assert adapter.requests == []
      assert jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7") == []
- 
- 
+
+
 +@pytest.mark.unit
 +@pytest.mark.parametrize(
 +    ("error_name", "code"),
@@ -237,7 +237,7 @@ index e23d2f19b3..89e3adcb9f 100644
 +++ b/tldw_Server_API/app/services/audio_jobs_worker.py
 @@ -20,6 +20,18 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
  from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
- 
+
  DOMAIN = "audio"
 +# Analysis failures a retry can fix. The other SummaryProviderError codes (missing model or
 +# credentials, bad configuration or authentication, an unknown provider) fail the same way every time.
@@ -251,8 +251,8 @@ index e23d2f19b3..89e3adcb9f 100644
 +        super().__init__(message)
 +        self.failure_code = failure_code
 +        self.retryable = retryable
- 
- 
+
+
  async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
 @@ -345,24 +357,41 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                      updated_payload["chunks"] = chunks
@@ -342,10 +342,10 @@ index 666ff0c621..4c46cbc54f 100644
 +    - `api_name` (string, optional): LLM provider for analysis. Without it the analysis stage is skipped, and the final payload records `analysis_skipped: "no api_name"`.
    - Response: `{ id, uuid, domain, queue, job_type, status }`
    - Auth: Single-user X-API-KEY or multi-user JWT.
- 
+
 @@ -36,6 +36,7 @@ Base path: `/api/v1/audio`
  ## Worker
- 
+
  - Service: runs the pipeline stages `audio_download → audio_convert → audio_transcribe → audio_chunk → audio_analyze → audio_store`.
 +- Analysis failures: these fail the job at once, with the reason in `error_code`: `missing_model`, `missing_credentials`, `authentication`, `configuration`, `invalid_provider`, `adapter_unavailable`, `llm_quota_exceeded` or `empty_transcript`. Every other provider failure is recorded as `rate_limit` or `provider_failure` and retried, including a provider rejecting the request (an unknown model, a transcript too long for the model). The same failure twice in a row quarantines the job (`JOBS_QUARANTINE_THRESHOLD`, default 2).
  - Env flags:
