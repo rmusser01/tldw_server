@@ -61,6 +61,7 @@ import {
 } from "@/hooks/useVisualIdentityResolver"
 import { VISUAL_IDENTITY_EXPRESSION_OPTIONS } from "@/utils/visual-identity-expressions"
 import { savedReplyActionAvailability, savedReplyRegenerateUnavailableReason, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 
 type TimelineBlock =
   | { kind: "single"; index: number }
@@ -1017,7 +1018,10 @@ export const PlaygroundChat = ({
     serverChatCharacterId,
     serverChatId
   ])
-  useCharacterChatSteeringScope(characterIdentityEnabled)
+  // A saved role-play chat refuses steered sends (sendSavedRoleplay), so steering
+  // is offered, and kept armed, only where it can run (CM-01).
+  const messageSteeringEnabled = characterIdentityEnabled && !isSavedRoleplayConversation(historySelection)
+  useCharacterChatSteeringScope(messageSteeringEnabled)
   const latestAssistantMood = React.useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index]
@@ -1447,7 +1451,7 @@ export const PlaygroundChat = ({
                 temporaryChat={temporaryChat}
                 onStopStreaming={stopStreamingFromUi}
                 onContinue={savedReplyActions.continue ? undefined : runContinue}
-                onRunSteeredContinue={runSteeredContinue}
+                onRunSteeredContinue={messageSteeringEnabled ? runSteeredContinue : undefined}
                 documents={message?.documents}
                 actionInfo={actionInfo}
                 serverChatId={serverChatId}
@@ -1487,10 +1491,10 @@ export const PlaygroundChat = ({
                 onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "prev")}
                 onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
-                onMessageSteeringModeChange={characterIdentityEnabled ? setMessageSteeringMode : undefined}
+                onMessageSteeringModeChange={messageSteeringEnabled ? setMessageSteeringMode : undefined}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}
-                onMessageSteeringForceNarrateChange={characterIdentityEnabled ? setMessageSteeringForceNarrate : undefined}
-                onClearMessageSteering={characterIdentityEnabled ? clearMessageSteering : undefined}
+                onMessageSteeringForceNarrateChange={messageSteeringEnabled ? setMessageSteeringForceNarrate : undefined}
+                onClearMessageSteering={messageSteeringEnabled ? clearMessageSteering : undefined}
                 hideEditAndRegenerate={isImageGenerationAssistantEvent}
                 hideContinue={isImageGenerationAssistantEvent}
               />
@@ -1526,6 +1530,7 @@ export const PlaygroundChat = ({
                 isEmbedding={isEmbedding}
                 selectedCharacter={selectedCharacter}
                 characterIdentityEnabled={characterIdentityEnabled}
+                messageSteeringEnabled={messageSteeringEnabled}
                 normalizedSearchQuery={normalizedSearchQuery}
                 historyId={historyId}
                 stableHistoryId={stableHistoryId}
