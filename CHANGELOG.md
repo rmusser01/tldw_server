@@ -60,6 +60,8 @@ header or the bearer subprotocol.
 
 ### Fixed
 
+- **Audio Studio and workspace links:** Audio preview and download validate media ticket destinations. Workspace diagnostics links only to the supported runtime configuration page.
+
 - **Recoverable chat history and cancellation.** Stop works before the first token, and permanent history erasure coordinates recoverable copies so deleted data cannot reappear through legacy history (#3368, #3431).
 - **Authentication and administration.** Sign-in links are consumed atomically, verification-email diagnostics omit secrets, and admin alert history reports the correct results (#3428–#3430).
 - **PostgreSQL and background jobs.** ChaChaNotes operations keep their intended transaction and tenant scope across requests, WebSockets and background work; job completion verifies current ownership before persisting results (#3082, #3092, #3293, #3295, #3297, #3312, #3323).
