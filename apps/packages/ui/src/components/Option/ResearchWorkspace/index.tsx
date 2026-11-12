@@ -1631,6 +1631,14 @@ const ResearchWorkspaceBody: React.FC = () => {
   React.useEffect(() => {
     processingMediaIdsRef.current = processingMediaIds
   }, [processingMediaIds])
+  // WP-42 follow-up: an in-flight migration is workspace activity too — the
+  // status projection should keep refreshing while the migration promise is
+  // pending (stage3 pins this; idle workspaces with the migration already
+  // settled still poll zero).
+  const workspaceMigrationLoadingRef = React.useRef(workspaceMigrationLoading)
+  React.useEffect(() => {
+    workspaceMigrationLoadingRef.current = workspaceMigrationLoading
+  }, [workspaceMigrationLoading])
   const activeWorkspaceOperations = React.useMemo(() => {
     const operations: string[] = []
 
@@ -3346,7 +3354,9 @@ const ResearchWorkspaceBody: React.FC = () => {
     // and skips hidden pages, catching up once when shown again.
     const poll = startWorkspaceStatusPoll({
       intervalMs: WORKSPACE_SOURCE_STATUS_POLL_INTERVAL_MS,
-      shouldPoll: () => processingMediaIdsRef.current.length > 0,
+      shouldPoll: () =>
+        processingMediaIdsRef.current.length > 0 ||
+        workspaceMigrationLoadingRef.current,
       poll: () => {
         workspaceStatusTickRef.current?.()
         processingSourceTickRef.current?.()
