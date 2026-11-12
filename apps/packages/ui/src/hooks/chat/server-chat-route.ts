@@ -46,6 +46,27 @@ const browserQueries = (href: string): URLSearchParams[] => {
   }
 }
 
+/** The history handoff the mounted chat page has finished with, loaded or not. */
+let settledHistoryHandoff: string | null = null
+
+/**
+ * The Playground has finished with the history handoff link in the browser
+ * address. A link it loaded is already gone from the address; one it could
+ * not load stays there, and the next address write drops it instead of
+ * waiting for it for as long as the page stays open (#3119).
+ */
+export const settleHistoryHandoff = (
+  browserHref: string | null | undefined = typeof window === "undefined"
+    ? null
+    : window.location.href
+) => {
+  settledHistoryHandoff = browserHref
+    ? browserQueries(browserHref)
+        .map((params) => params.get(HISTORY_SELECTION_HANDOFF_PARAM))
+        .find((value) => value !== null) ?? null
+    : null
+}
+
 /**
  * Where a router query that carries the history handoff stands against the
  * real browser address. The Playground removes the handoff with
@@ -55,7 +76,8 @@ const browserQueries = (href: string): URLSearchParams[] => {
  * - `"none"`: the router query carries no handoff.
  * - `"pending"`: the browser address still carries it, so the page has not
  *   consumed it yet and the address must be left alone.
- * - `"consumed"`: only the router's stale query carries it.
+ * - `"consumed"`: only the router's stale query carries it, or the page has
+ *   settled it (see `settleHistoryHandoff`).
  */
 export const historyHandoffState = (
   routerSearch: string | null | undefined,
@@ -63,7 +85,9 @@ export const historyHandoffState = (
     ? null
     : window.location.href
 ): "none" | "pending" | "consumed" => {
-  if (!toSearchParams(routerSearch).has(HISTORY_SELECTION_HANDOFF_PARAM)) return "none"
+  const handoff = toSearchParams(routerSearch).get(HISTORY_SELECTION_HANDOFF_PARAM)
+  if (handoff === null) return "none"
+  if (handoff === settledHistoryHandoff) return "consumed"
   if (!browserHref) return "pending"
   return browserQueries(browserHref).some((params) =>
     params.has(HISTORY_SELECTION_HANDOFF_PARAM)
@@ -86,8 +110,9 @@ const CONSUMED_ON_ARRIVAL_PARAMS = [
 
 /**
  * `search` without the one-shot parameters the real browser address no
- * longer carries, so writing the chat address from the router's stale query
- * never brings a consumed one back. Other parameters are always kept.
+ * longer carries, or (for the history handoff) that the page has settled, so
+ * writing the chat address from the router's stale query never brings a
+ * consumed one back. Other parameters are always kept.
  */
 export const withoutConsumedParams = (
   search: string | null | undefined,
@@ -96,12 +121,13 @@ export const withoutConsumedParams = (
     : window.location.href
 ): string => {
   const params = toSearchParams(search)
-  if (browserHref) {
-    const queries = browserQueries(browserHref)
-    for (const name of CONSUMED_ON_ARRIVAL_PARAMS) {
-      if (params.has(name) && !queries.some((query) => query.has(name))) {
-        params.delete(name)
-      }
+  const queries = browserHref ? browserQueries(browserHref) : null
+  for (const name of CONSUMED_ON_ARRIVAL_PARAMS) {
+    const value = params.get(name)
+    if (value === null) continue
+    const settled = name === HISTORY_SELECTION_HANDOFF_PARAM && value === settledHistoryHandoff
+    if (settled || (queries && !queries.some((query) => query.has(name)))) {
+      params.delete(name)
     }
   }
   const next = params.toString()
@@ -152,7 +178,10 @@ export const PLANNED_CHAT_NAVIGATION_TIMEOUT_MS = 3_000
  */
 export const reportMountedChatRoute = (route: MountedChatRoute | null) => {
   mountedChatRoute = route
-  if (route === null) pendingRoute = null
+  if (route === null) {
+    pendingRoute = null
+    settledHistoryHandoff = null
+  }
 }
 
 /**
@@ -199,4 +228,5 @@ export const settleServerChatNavigation = () => {
 export const resetServerChatRouteState = () => {
   mountedChatRoute = null
   pendingRoute = null
+  settledHistoryHandoff = null
 }

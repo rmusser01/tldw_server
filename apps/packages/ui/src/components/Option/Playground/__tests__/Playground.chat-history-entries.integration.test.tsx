@@ -8,6 +8,7 @@
  * tests see the history entries the browser would record.
  */
 import {
+  act,
   clickHeaderNewChat,
   createFakeTldwServer,
   HARNESS_WAIT,
@@ -20,7 +21,7 @@ import {
   waitFor
 } from "./harness/playground-harness"
 import { useLocation, useNavigate } from "react-router-dom"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 
 /** Lets a test lose the next navigation, as a cancelled one is lost. */
@@ -106,6 +107,9 @@ describe("Playground chat history entries under a slow router (#3119)", { timeou
     router.dropNext = false
     await resetPlaygroundHarness()
   })
+  afterEach(() => {
+    window.history.replaceState(null, "", "/")
+  })
 
   it("Back after New chat returns to the chat that was open", async () => {
     const view = await renderPlayground({ server: seedChat(), extras: chrome })
@@ -135,5 +139,27 @@ describe("Playground chat history entries under a slow router (#3119)", { timeou
     await openSavedServerChat(view, { title: "Beta topic", lastMessage: "Beta answer" })
 
     await waitFor(() => expect(address()).toBe("/chat?chat=chat-b"), HARNESS_WAIT)
+  })
+
+  it("a history handoff link that fails to load does not stop later address writes", async () => {
+    const handoff = `/chat?historySelection=${encodeURIComponent(JSON.stringify({
+      profile_id: "profile-gone",
+      client_session_id: "session-gone",
+      owner_key: "owner-gone",
+      conversation_id: "chat-gone",
+      owner_kind: "native"
+    }))}`
+    // The browser address carries the link until the Playground consumes it.
+    window.history.replaceState(null, "", handoff)
+    await renderPlayground({ server: seedChat(), extras: chrome, initialPath: handoff })
+    await screen.findByText("Selected history unavailable", {}, HARNESS_WAIT)
+
+    // The open chat then changes without a navigation (as a restored session
+    // or a new chat's first save does); the address must follow it.
+    act(() => {
+      useStoreMessageOption.getState().setServerChatId("chat-a")
+    })
+
+    await waitFor(() => expect(address()).toBe("/chat?chat=chat-a"), HARNESS_WAIT)
   })
 })

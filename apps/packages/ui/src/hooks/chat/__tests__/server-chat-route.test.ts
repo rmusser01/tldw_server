@@ -11,6 +11,7 @@ import {
   reportMountedChatRoute,
   resetServerChatRouteState,
   serverChatNavigationWaitMs,
+  settleHistoryHandoff,
   settleServerChatNavigation,
   withoutConsumedParams,
   withServerChatRouteId
@@ -131,6 +132,23 @@ describe("chat address and the history handoff link", () => {
 
   it("treats a handoff only the router still sees as consumed", () => {
     expect(historyHandoffState(handoff, "http://app.test/chat")).toBe("consumed")
+  })
+
+  // #3119: a link the page could not load stays in the address; once the
+  // page has settled it, the address sync stops waiting and drops it.
+  it("stops waiting for a handoff the page has settled, and drops it", () => {
+    const browser = `http://app.test/chat${handoff}`
+    settleHistoryHandoff(browser)
+    expect(historyHandoffState(handoff, browser)).toBe("consumed")
+    expect(withoutConsumedParams(`${handoff}&tab=x`, browser)).toBe("?tab=x")
+    resetServerChatRouteState()
+  })
+
+  it("forgets a settled handoff when the chat page unmounts", () => {
+    const browser = `http://app.test/chat${handoff}`
+    settleHistoryHandoff(browser)
+    reportMountedChatRoute(null)
+    expect(historyHandoffState(handoff, browser)).toBe("pending")
   })
 
   it("drops a consumed handoff from the query it writes", () => {
