@@ -4655,6 +4655,12 @@
   "composer_providerStatusConnecting": {
     "message": "Connecting…"
   },
+  "composer_providerStatusOffline": {
+    "message": "Offline"
+  },
+  "composer_serverStatusConnected": {
+    "message": "Server connected"
+  },
   "composer_connectionPendingSend": {
     "message": "Still connecting to your tldw server. Your draft has not been sent."
   },

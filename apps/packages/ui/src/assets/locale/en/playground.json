@@ -764,6 +764,8 @@
     "sceneDetails": "Scene details",
     "connectingNotice": "Connecting to your tldw server…",
     "providerStatusConnecting": "Connecting…",
+    "providerStatusOffline": "Offline",
+    "serverStatusConnected": "Server connected",
     "connectionPendingSend": "Still connecting to your tldw server. Your draft has not been sent.",
     "modelCatalogSearchPlaceholder": "Search all models",
     "modelScopeLabel": "Models to show",

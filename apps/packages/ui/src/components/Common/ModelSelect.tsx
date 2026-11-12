@@ -25,6 +25,7 @@ import {
   resolveModelSelectorSelection
 } from "@/hooks/playground/modelSelectorUtils"
 import { useChatModelReadinessState } from "@/hooks/chat/useChatModelReadinessState"
+import { useServerConnectionStatus } from "./useServerConnectionStatus"
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import {
   formatChatModelLabel,
@@ -388,16 +389,24 @@ const ModelSelectBase = (
         ? parseProviderQualifiedModelSelection(selectedModelValue).modelId
         : null
   })
-  const selectedModelReadinessLabel =
-    selectedModelReadiness === "unreachable"
+  // As on the full page (#3343): no claim about a model without evidence, and
+  // none while the server cannot take a send; the chip names the connection.
+  const serverConnection = useServerConnectionStatus()
+  const evidencedReadiness =
+    (selectedModelReadiness === "working" || selectedModelReadiness === "unreachable") &&
+    !serverConnection.blocked
+      ? selectedModelReadiness
+      : null
+  const selectedModelStatusLabel =
+    evidencedReadiness === "unreachable"
       ? t("modelSelect.readiness.unreachable", "Unreachable")
-      : selectedModelReadiness === "working"
+      : evidencedReadiness === "working"
         ? t("modelSelect.readiness.working", "Working")
-        : selectedModelReadiness === "not_checked"
-          ? t("modelSelect.readiness.notChecked", "Not checked")
+        : selectedModelReadiness
+          ? serverConnection.label
           : null
   const selectedModelSummary = selectedModelLabel
-    ? [selectedModelLabel, selectedModelReadinessLabel].filter(Boolean).join(". ")
+    ? [selectedModelLabel, selectedModelStatusLabel].filter(Boolean).join(". ")
     : null
 
   const saveFeedback = <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
@@ -528,17 +537,13 @@ const ModelSelectBase = (
                   <span className="ml-1.5 min-w-0 max-w-[200px] truncate text-xs font-medium text-text">
                     {selectedModelDisplay}
                   </span>
-                  {selectedModelReadiness ? (
+                  {evidencedReadiness ? (
                     <span
                       aria-hidden="true"
                       data-testid="chat-model-readiness"
-                      data-model-readiness={selectedModelReadiness}
+                      data-model-readiness={evidencedReadiness}
                       className={`ml-1.5 inline-block size-1.5 shrink-0 rounded-full ${
-                        selectedModelReadiness === "unreachable"
-                          ? "bg-warn"
-                          : selectedModelReadiness === "working"
-                            ? "bg-success"
-                            : "bg-text-muted"
+                        evidencedReadiness === "unreachable" ? "bg-warn" : "bg-success"
                       }`}
                     />
                   ) : null}
