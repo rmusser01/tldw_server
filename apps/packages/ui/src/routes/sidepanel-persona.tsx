@@ -1044,7 +1044,7 @@ const SidepanelPersona = ({
   const routeHeader =
     shell === "sidepanel" ? (
       <div className="sticky min-h-14 bg-surface top-0 z-10">
-        <SidepanelHeaderSimple activeTitle={routeTitle} />
+        <SidepanelHeaderSimple activeTitle={routeTitle} heading={routeTitle} />
       </div>
     ) : (
       <div className="rounded-lg border border-border bg-surface px-4 py-3">

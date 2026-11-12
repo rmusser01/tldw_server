@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import NotesSidebar, { type NotesSidebarProps } from "../NotesSidebar"
 
@@ -179,5 +179,34 @@ describe("NotesSidebar toggle and help-button accessibility", () => {
     const help = screen.getByRole("button", { name: "Organize help" })
     expect(help).toHaveClass("min-h-6", "min-w-6")
     expect(help).toHaveClass("focus-visible:ring-focus")
+  })
+
+  // AX-14 (#3123): screen-reader users move through the sidebar by heading.
+  it("names its collapsible sections with headings that hold their toggles", () => {
+    render(<NotesSidebar {...baseProps} />)
+
+    const views = screen.getByRole("heading", { level: 2, name: "Views" })
+    expect(within(views).getByRole("button", { name: "Views" })).toHaveAttribute(
+      "aria-expanded",
+      "true"
+    )
+    // Organize sits inside Views.
+    expect(screen.getByRole("heading", { level: 3, name: "Organize" })).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 2, name: "Filters" })).toBeInTheDocument()
+  })
+
+  it("puts the timeline's date groups under a Results heading", () => {
+    render(
+      <NotesSidebar
+        {...baseProps}
+        hasListError={false}
+        listViewMode="timeline"
+        timelineSections={[{ key: "today", label: "Today", notes: [] }]}
+      />
+    )
+
+    const timeline = screen.getByTestId("notes-timeline-view")
+    expect(within(timeline).getByRole("heading", { level: 2, name: "Results" })).toBeInTheDocument()
+    expect(within(timeline).getByRole("heading", { level: 3, name: "Today" })).toBeInTheDocument()
   })
 })

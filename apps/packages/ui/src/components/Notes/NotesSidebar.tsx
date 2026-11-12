@@ -610,6 +610,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   </Button>
                 </div>
                 <CollapsibleSection
+                  headingLevel={3}
                   title={t('option:notesSearch.organizeSectionTitle', {
                     defaultValue: 'Organize'
                   })}
@@ -1054,6 +1055,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           <div className="min-h-[240px] flex-1 overflow-y-auto" data-testid="notes-sidebar-results">
             {listMode === 'active' && listViewMode === 'timeline' ? (
               <div className="h-full overflow-y-auto px-3 py-3" data-testid="notes-timeline-view">
+                {/* Heads the date groups' h3s in the outline (AX-14). */}
+                <h2 className="sr-only">
+                  {t('option:notesSearch.resultsLabel', { defaultValue: 'Results' })}
+                </h2>
                 {listErrorState || (isFetching && (
                   <div className="mb-3 inline-flex items-center gap-2 text-xs text-text-muted">
                     <Spin size="small" />

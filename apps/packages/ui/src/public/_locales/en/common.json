@@ -1004,6 +1004,9 @@
   "chatSidebar_title": {
     "message": "Chats"
   },
+  "chatSidebar_historyLandmark": {
+    "message": "Chat history"
+  },
   "chatSidebar_newChat": {
     "message": "New Chat"
   },

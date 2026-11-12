@@ -560,6 +560,7 @@
   },
   "chatSidebar": {
     "title": "Chats",
+    "historyLandmark": "Chat history",
     "newChat": "New Chat",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
