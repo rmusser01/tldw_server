@@ -292,6 +292,19 @@ const baseProps: React.ComponentProps<typeof PlaygroundMessage> = {
   conversationInstanceId: "conversation-1"
 }
 
+describe("PlaygroundMessage pending reply (G19)", () => {
+  it("offers Stop on the reply placeholder before the request starts streaming", () => {
+    const onStopStreaming = vi.fn()
+    const view = render(
+      <PlaygroundMessage {...baseProps} message="▋" isPending onStopStreaming={onStopStreaming} />
+    )
+    fireEvent.click(screen.getByTestId("chat-message-stop-streaming"))
+    expect(onStopStreaming).toHaveBeenCalledOnce()
+    view.rerender(<PlaygroundMessage {...baseProps} message="▋" onStopStreaming={onStopStreaming} />)
+    expect(screen.queryByTestId("chat-message-stop-streaming")).toBeNull()
+  })
+})
+
 describe("PlaygroundMessage implicit feedback in temporary mode", () => {
   beforeEach(() => {
     vi.clearAllMocks()

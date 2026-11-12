@@ -282,6 +282,11 @@ type Props = {
   isTTSEnabled?: boolean
   generationInfo?: any
   isStreaming: boolean
+  /**
+   * A request for this reply is in flight but not streaming yet (for example
+   * while the server admits the message). The reply bubble offers Stop then too.
+   */
+  isPending?: boolean
   reasoningTimeTaken?: number
   openReasoning?: boolean
   modelImage?: string
@@ -565,6 +570,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     detachedReplyRef.current?.message === props.message
   const responseStreaming = props.isStreaming && !detachedResponse
   const responseProcessing = props.isProcessing && !detachedResponse
+  const responsePending = Boolean(props.isPending) && !detachedResponse
 
   // Track streaming completion for aria-live announcement
   const wasStreamingRef = useRef(false)
@@ -1513,7 +1519,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   const isActiveResponse =
     props.isBot &&
     isLastMessage &&
-    (responseStreaming || responseProcessing)
+    (responseStreaming || responseProcessing || responsePending)
   const feedbackDisabled =
     !canSubmit ||
     Boolean(errorPayload) ||

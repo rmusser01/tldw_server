@@ -5,6 +5,7 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
 import { useMessage } from "~/hooks/useMessage"
+import { usePageAssist } from "@/context"
 import { EmptySidePanel } from "../Chat/empty"
 import { useWebUI } from "@/store/webui"
 import { useUiModeStore } from "@/store/ui-mode"
@@ -75,6 +76,11 @@ export const SidePanelBody = ({
     isEmbedding
   } = useMessage()
   const { t } = useTranslation(["option"])
+  // A request is in flight from the moment it has a controller, before the
+  // server accepts it and streaming starts (G19); the reply bubble offers Stop
+  // until the request is stopped.
+  const { controller: requestController } = usePageAssist()
+  const requestPending = Boolean(requestController && !requestController.signal.aborted)
   const regenerateDisabledReason = isProtectedTrackedPersonaUnavailable(
     Boolean(historySelection), effectiveAssistantState?.kind,
     effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
@@ -502,6 +508,7 @@ export const SidePanelBody = ({
                   toolCalls={message?.toolCalls}
                   toolResults={message?.toolResults}
                   isStreaming={streaming && index === messages.length - 1}
+                  isPending={requestPending && index === messages.length - 1}
                   reasoningTimeTaken={message?.reasoning_time_taken}
                   openReasoning={openReasoning}
                   modelImage={message?.modelImage}
