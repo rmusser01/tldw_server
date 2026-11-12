@@ -4,6 +4,12 @@ import type { DiscoSkillComment } from '@/types/disco-skills';
 
 export type LastUsedModelType = { prompt_id?: string; prompt_content?: string }
 
+export type LegacyChatSource = {
+  history: string;
+  messages?: string;
+  files?: string;
+}
+
 export type HistoryInfo = {
   id: string;
   title: string;
@@ -20,6 +26,7 @@ export type HistoryInfo = {
   server_scope_type?: "global" | "workspace";
   server_workspace_id?: string;
   local_owner_key?: string;
+  tldw_history_legacy_source?: LegacyChatSource;
   // External settings writers register before writing; abandoned tokens block fork certification.
   local_settings_guard?: {
     revision: string;

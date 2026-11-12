@@ -69,7 +69,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Checkout
@@ -103,7 +103,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -125,7 +125,7 @@ jobs:
           PY
   preflight-python-312:
     name: Governed Preflight (Python 3.12)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       PYTHONPATH: .
@@ -172,7 +172,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -210,7 +210,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -244,7 +244,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout
@@ -294,7 +294,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       SKIP_WXT_PREPARE: "1"
@@ -342,7 +342,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -471,7 +471,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
       backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
@@ -509,7 +509,7 @@ jobs:
           python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
   full-suite-linux-312-shards:
     name: Full Suite shard (Ubuntu / Python 3.12 / ${{ matrix.shard.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
     # admission is skipped outside workflow_run, and an implicit success() treats any
@@ -2234,7 +2234,7 @@ jobs:
 
   full-suite-linux-312-summary:
     name: Full Suite (Ubuntu / Python 3.12)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [full-suite-linux-312-shards, changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
@@ -2271,7 +2271,7 @@ jobs:
   full-suite-linux-313-shards:
     # ~550 extra jobs per run: main pushes, releases and manual dispatch only.
     name: Full Suite shard (Ubuntu / Python 3.13 / ${{ matrix.shard.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     needs: [lint, syntax-check, changes]
     # admission is skipped outside workflow_run, and an implicit success() treats any
@@ -3927,7 +3927,7 @@ jobs:
 
   full-suite-linux-313-summary:
     name: Full Suite (Ubuntu / Python 3.13)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [full-suite-linux-313-shards, changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
@@ -5395,7 +5395,7 @@ jobs:
 
   full-suite-macos-312-summary:
     name: Full Suite (macos-latest / Python 3.12)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [full-suite-macos-312-shards, changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
@@ -6857,7 +6857,7 @@ jobs:
 
   full-suite-windows-312-summary:
     name: Full Suite (windows-latest / Python 3.12)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [full-suite-windows-312-shards, changes, admission, await_license]
     if: >-
       always() && !cancelled() &&
@@ -8326,7 +8326,7 @@ jobs:
 
   character-chat-rate-limits:
     name: Character Chat Rate-Limits (TEST_MODE=0)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     needs: [full-suite-linux-312-summary, changes]
     if: >-

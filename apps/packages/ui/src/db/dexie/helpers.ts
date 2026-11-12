@@ -1062,7 +1062,9 @@ export const exportChatHistory = async () => {
   const results = await Promise.allSettled(
     chatHistories.map(async (history) => {
       const messages = await db.getChatHistory(history.id)
-      return { history, messages }
+      const publicHistory = { ...history }
+      delete publicHistory.tldw_history_legacy_source
+      return { history: publicHistory, messages }
     })
   )
   return results

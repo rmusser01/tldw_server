@@ -179,13 +179,17 @@ async def run_benchmark(
                         }
                     )
 
-        successful_results = [r for r in results if "error" not in r]
+        # An item with no score (its model or judge call failed, or the reply held none) is neither successful
+        # nor failed: it is unscored, outside every average (owner, 2026-11-10).
+        successful_results = [r for r in results if "error" not in r and r["score"] is not None]
+        failed = sum("error" in r for r in results)
         scores = [float(r.get("score", 0.0)) for r in successful_results]
 
         summary: dict[str, Any] = {
             "total_evaluated": len(results),
             "successful": len(successful_results),
-            "failed": len(results) - len(successful_results),
+            "failed": failed,
+            "unscored": len(results) - len(successful_results) - failed,
             "average_score": (sum(scores) / len(scores)) if scores else 0.0,
             "min_score": min(scores) if scores else 0.0,
             "max_score": max(scores) if scores else 0.0,
