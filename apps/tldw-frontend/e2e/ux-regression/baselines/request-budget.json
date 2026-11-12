@@ -6,10 +6,10 @@
       "page": "notes",
       "kind": "total",
       "key": "api-requests",
-      "count": 21,
+      "count": 19,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "21 on 2026-10-22 after XP-16 stopped the 5 s buddy polling (it backs off after the mount read). Re-sample 10 runs before tightening further."
+      "note": "21 on 2026-10-22 after XP-16 stopped the 5 s buddy polling (it backs off after the mount read); 19 on 2026-11-12 after W4 TASK-13524's auth-snapshot + notification poll gating (CI run 43081892449, ratchet-directed)."
     },
     {
       "page": "notes",
