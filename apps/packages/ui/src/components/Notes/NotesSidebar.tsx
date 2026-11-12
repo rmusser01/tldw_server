@@ -112,6 +112,8 @@ export interface NotesSidebarProps {
   isFetching: boolean
   /** The rows belong to the previous page or search while this one loads. */
   isPlaceholderData?: boolean
+  /** The list's query has returned at least once (see NotesListPanel). */
+  listLoaded?: boolean
   hasListError?: boolean
   listErrorMessage?: string | null
   isStaleResults?: boolean
@@ -252,6 +254,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   // Fetching / online
   isFetching,
   isPlaceholderData = false,
+  listLoaded = false,
   hasListError = false,
   listErrorMessage = null,
   isStaleResults = false,
@@ -349,7 +352,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
     (selectedNotebookId != null ? 1 : 0) +
     (queryInput.trim() ? 1 : 0)
   // With no rows yet, "0 total" would be wrong while the first page loads (NL-16).
-  const isLoadingFirstRows = isFetching && filteredCount === 0
+  // A refetch of a loaded empty list keeps its count.
+  const isLoadingFirstRows = isFetching && filteredCount === 0 && (isPlaceholderData || !listLoaded)
   const headerCountLabel = hasListError
     ? t('option:notesSearch.headerRefreshFailed', {
         defaultValue: 'Refresh failed'
@@ -1180,7 +1184,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       </>
                     )}
                   </div>
-                ) : isFetching && (visibleNotes.length === 0 || isPlaceholderData) ? (
+                ) : isFetching && (isPlaceholderData || (visibleNotes.length === 0 && !listLoaded)) ? (
                   <div className="mb-3 inline-flex items-center gap-2 text-xs text-text-muted">
                     <Spin size="small" />
                     <span>
@@ -1351,6 +1355,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 isOnline={isOnline}
                 isFetching={isFetching}
                 isPlaceholderData={isPlaceholderData}
+                listLoaded={listLoaded}
                 hasError={hasListError}
                 errorMessage={listErrorMessage}
                 isStaleResults={isStaleResults}

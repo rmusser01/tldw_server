@@ -100,6 +100,12 @@ type NotesListPanelProps = {
   isFetching: boolean
   /** The rows belong to the previous page or search while this one loads. */
   isPlaceholderData?: boolean
+  /**
+   * This list's query has returned at least once, possibly with no rows. Until
+   * then the loading rows stand in for it; after that a refetch keeps what the
+   * list shows, even the empty state.
+   */
+  listLoaded?: boolean
   hasError?: boolean
   errorMessage?: string | null
   demoEnabled: boolean
@@ -151,6 +157,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   isOnline,
   isFetching,
   isPlaceholderData = false,
+  listLoaded = false,
   hasError = false,
   errorMessage = null,
   demoEnabled,
@@ -190,9 +197,10 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   const hasNotes = Array.isArray(notes) && notes.length > 0
   // A refresh of the same list keeps its rows on screen so the scroll position
   // survives (NS-04). Rows held over from another page or search are not this
-  // list's rows, so they give way to the loading state like an empty list.
+  // list's rows, so they give way to the loading state, as does a list that has
+  // not loaded yet. A refresh of a loaded empty list keeps its empty state.
   const isRefreshingRows = isFetching && hasNotes && !isPlaceholderData
-  const isLoadingRows = isFetching && !isRefreshingRows
+  const isLoadingRows = isFetching && !isRefreshingRows && (isPlaceholderData || !listLoaded)
   const hasListError = hasError
   const bulkSelectedIdSet = React.useMemo(
     () => new Set((bulkSelectedIds || []).map((id) => String(id))),
