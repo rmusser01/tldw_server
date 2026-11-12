@@ -114,6 +114,34 @@ def test_continue_saves_original_plus_continuation_as_sibling_reply(history_api,
     assert [row["id"] for row in rows if row["sender"] == "user"] == ["u1"]
 
 
+def test_continue_sends_the_saved_reply_without_trailing_whitespace(history_api, monkeypatch):
+    # Some providers (for example Anthropic) refuse a final assistant message
+    # that ends in whitespace, so the context ends at the last visible text.
+    from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
+
+    client, db, cid, headers = history_api
+    provider = endpoint.perform_chat_api_call
+    provider_inputs = []
+
+    def observe(api_endpoint, messages_payload, **kwargs):
+        provider_inputs.append(messages_payload)
+        return provider(api_endpoint, messages_payload, **kwargs)
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", observe)
+    answered(client, cid, headers)
+    db.update_message("a1", {"content": "reply a1 \n\n"}, 1)
+    response = continue_reply(client, cid, headers, select(client, cid, headers, after="a1"))
+    assert response.status_code == 200, response.text
+    final = [message for message in provider_inputs[0] if message["role"] != "system"][-1]
+    assert final["role"] == "assistant"
+    text = final["content"] if isinstance(final["content"], str) else final["content"][0]["text"]
+    assert text == "reply a1"
+    continuation = generated_text(events(response, False), False)
+    saved = db.get_messages_for_conversation(cid)[-1]["content"]
+    assert saved.startswith("reply a1")
+    assert saved.endswith(continuation)
+
+
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize(
     "boundary",

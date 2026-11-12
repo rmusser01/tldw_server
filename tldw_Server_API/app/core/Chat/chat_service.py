@@ -3695,6 +3695,10 @@ async def build_context_and_messages(
         if regenerate_reply_id is not None or continue_reply_id is not None:
             overlap_cut = len(request_messages)
         formatted_history = _format_selected_history_messages(history_snapshot, selected_content, character_card)
+        if continue_prefix is not None:
+            # The continued reply is the final context message. Some providers
+            # (for example Anthropic) refuse one that ends in whitespace.
+            formatted_history[-1]["content"] = formatted_history[-1]["content"].rstrip()
         if server_existing_input is not None:
             existing_dictionary_content = assistant_context.pop("history_dictionary_user_content", [])
             if existing_dictionary_content:

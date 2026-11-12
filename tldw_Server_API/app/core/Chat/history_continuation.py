@@ -99,6 +99,18 @@ def continued_reply_prefix(item: Mapping[str, Any]) -> str:
     return text
 
 
+def _join_continuation(prefix: str, text: str) -> str:
+    """Join the saved reply and its continuation.
+
+    The model saw the saved reply without its trailing whitespace. A
+    continuation that starts with its own whitespace (a provider that extends
+    the final message) replaces the saved trailing whitespace instead of
+    doubling it; one that starts with text (a provider that answers with a new
+    message) keeps the saved spacing.
+    """
+    return (prefix.rstrip() if text[:1].isspace() else prefix) + text
+
+
 def merge_continued_reply(payload: Mapping[str, Any], prefix: str) -> dict[str, Any]:
     """Return an assistant save payload whose content is ``prefix`` plus the continuation."""
     merged = dict(payload)
@@ -106,11 +118,11 @@ def merge_continued_reply(payload: Mapping[str, Any], prefix: str) -> dict[str, 
     if content is None:
         merged["content"] = prefix
     elif isinstance(content, str):
-        merged["content"] = prefix + content
+        merged["content"] = _join_continuation(prefix, content)
     elif isinstance(content, list):
         first = content[0] if content else None
         if isinstance(first, Mapping) and first.get("type") == "text" and isinstance(first.get("text"), str):
-            merged["content"] = [{**first, "text": prefix + first["text"]}, *content[1:]]
+            merged["content"] = [{**first, "text": _join_continuation(prefix, first["text"])}, *content[1:]]
         else:
             merged["content"] = [{"type": "text", "text": prefix}, *content]
     return merged
