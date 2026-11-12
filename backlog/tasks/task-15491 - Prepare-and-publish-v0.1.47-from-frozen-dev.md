@@ -26,8 +26,9 @@ Promote reviewed dev through PR #3443 to main, preserving main-only updates and 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-ADR required: no. This promotion follows the existing release and licensing process without changing policy or architecture. Candidate cutoff: dev 04905e02eafc34f3b8d82d30e013a81c660028d0; main 25dbf5e7b26b973ae78ac302350589e720eb7980.
-Draft promotion PR: https://github.com/rmusser01/tldw_server/pull/3454. The final local candidate passed 285 focused tests including strict MkDocs and protected-source equality (8,300 files); the main-base task format ratchet and backlog ID check passed separately. The FastAPI entry point compiles on Python 3.12 and scoped Bandit reports zero findings. Proposed release date 2026-11-12 and Countdown start 2028-11-12T12:00:00Z remain pending human approval, as does the human Change summary. Full runtime/UAT and final-head CI are not claimed.
+ADR required: no. This promotion follows the existing release and licensing process without changing policy or architecture. Candidate cutoff: dev 04905e02eafc34f3b8d82d30e013a81c660028d0 and main 25dbf5e7b26b973ae78ac302350589e720eb7980.
+Draft promotion PR: https://github.com/rmusser01/tldw_server/pull/3454. The candidate passed 285 focused tests, including strict MkDocs and verification of all 8,300 protected source files. The main-base task format ratchet and backlog ID check passed separately. The FastAPI entry point compiles on Python 3.12 and scoped Bandit reports zero findings.
+The requester approved the 2026-11-12 release date and the 2028-11-12T12:00:00Z Countdown start. The human Change summary and CI on the final PR head are pending. Full release UAT has not been run.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -38,9 +39,9 @@ Draft promotion PR: https://github.com/rmusser01/tldw_server/pull/3454. The fina
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
 <!-- DOD:END -->
