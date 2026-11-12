@@ -652,3 +652,51 @@ def test_timezone_prerequisite_only_runs_after_admitted_backend_change():
         row = row._replace(relevant=relevant)
         expected = row.admitted and row.changes == "success" and relevant and not row.cancelled
         assert _evaluate(child["if"], row.values, row.cancelled) is expected, row  # nosec B101
+
+
+
+@pytest.mark.parametrize(
+    ("report", "pytest_exit", "expected"),
+    [
+        ("<testcase/>", "0", 0),
+        ("<testcase><skipped/></testcase>", "0", 1),
+        ("", "0", 1),
+        ("<testcase/>", "1", 1),
+    ],
+    ids=["executed", "skipped", "unexecuted", "pytest-failed"],
+)
+def test_required_auth_teardown_rejects_missing_execution(tmp_path, report, pytest_exit, expected):
+    gate = _gate("backend-required.yml")
+    step = _step(gate, "Test Auth PostgreSQL fixture teardown")
+    assert not gate.get("continue-on-error") and not step.get("continue-on-error")  # nosec B101
+    assert step["env"]["TLDW_TEST_POSTGRES_REQUIRED"] == "1"  # nosec B101
+    assert step["env"]["TLDW_TEST_NO_DOCKER"] == "1"  # nosec B101
+    assert step["if"] == "needs.changes.outputs.backend_changed == 'true'"  # nosec B101
+    assert gate["services"]["postgres"]["image"] == (  # nosec B101
+        "${{ needs.changes.result == 'success' && needs.changes.outputs.backend_changed == 'true' "
+        "&& 'mirror.gcr.io/library/postgres:18-bookworm' || '' }}"
+    )
+
+    # Execute the workflow shell with controlled pytest outcomes.
+    fake_pytest = """
+    pytest() {
+        for arg in "$@"; do
+            case "$arg" in
+                --junitxml=*) printf '<testsuites><testsuite>%s</testsuite></testsuites>' \\
+                    "$CASE_REPORT" > "${arg#--junitxml=}" ;;
+            esac
+        done
+        return "$PYTEST_EXIT"
+    }
+    """
+    run = subprocess.run(  # nosec B603, B607 - local workflow command with controlled test outcomes
+        ["bash", "-c", fake_pytest + step["run"]],
+        env={
+            **os.environ,
+            "RUNNER_TEMP": str(tmp_path),
+            "CASE_REPORT": report,
+            "PYTEST_EXIT": pytest_exit,
+        },
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert run.returncode == expected, run.stderr  # nosec B101
