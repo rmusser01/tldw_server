@@ -20,8 +20,7 @@ api.v1.endpoints.chat -> api.v1.endpoints.llm_providers: 1
 api.v1.endpoints.control_plane -> api.v1.endpoints.metrics: 1
 api.v1.endpoints.explainer -> api.v1.endpoints.chatbooks: 1
 api.v1.endpoints.health -> main: 1
-api.v1.endpoints.media -> api.v1.endpoints.media_embeddings: 1
-api.v1.endpoints.media_embeddings -> api.v1.endpoints.embeddings_v5_production_enhanced: 3
+api.v1.endpoints.media_embeddings -> api.v1.endpoints.embeddings_v5_production_enhanced: 1
 api.v1.endpoints.metrics -> api.v1.endpoints.embeddings_v5_production_enhanced: 1
 api.v1.endpoints.monitoring -> api.v1.endpoints.admin: 1
 api.v1.endpoints.notes_graph_suggestions -> api.v1.endpoints.notes_graph: 1
@@ -93,13 +92,11 @@ core.DB_Management -> core.Writing: 1
 core.DB_Management -> core.claims_analytics_export_contract: 1
 core.DB_Management -> services: 3
 core.Embeddings -> api.v1.API_Deps: 1
-core.Embeddings -> api.v1.endpoints.embeddings_v5_production_enhanced: 2
-core.Embeddings -> api.v1.endpoints.media_embeddings: 1
+core.Embeddings -> api.v1.endpoints.embeddings_v5_production_enhanced: 4  # bump: the media-embeddings helpers moved from api.v1.endpoints.media_embeddings with their two lazy imports (TASK-13950.20); TASK-13950.28 AC2 removes all four
 core.Embeddings -> api.v1.utils: 1
 core.Evaluations -> api.v1.API_Deps: 1
 core.Evaluations -> api.v1.endpoints.embeddings_v5_production_enhanced: 3
 core.Infrastructure -> core.DB_Management: 3
-core.Ingestion_Media_Processing -> api.v1.endpoints.media_embeddings: 1
 core.Ingestion_Media_Processing -> services: 6
 core.Ingestion_Sources -> services: 1
 core.MCP_unified -> services: 11
@@ -123,7 +120,6 @@ services -> api.v1.endpoints.admin: 1
 services -> api.v1.endpoints.llamacpp: 1
 services -> api.v1.endpoints.llm_providers: 1
 services -> api.v1.endpoints.media: 2
-services -> api.v1.endpoints.media_embeddings: 1
 services -> api.v1.endpoints.sharing: 1
 services -> api.v1.schemas: 34
 services -> api.v1.utils: 7

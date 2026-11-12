@@ -403,7 +403,7 @@ async def _schedule_embeddings(
     form_data: AddMediaForm,
 ) -> None:
     try:
-        from tldw_Server_API.app.api.v1.endpoints.media_embeddings import (
+        from tldw_Server_API.app.core.Embeddings.media_embeddings import (
             generate_embeddings_for_media,
             get_media_content,
         )

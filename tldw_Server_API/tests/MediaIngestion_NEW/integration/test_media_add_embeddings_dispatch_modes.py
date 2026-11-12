@@ -7,7 +7,7 @@ import pytest
 from fastapi import status
 
 import tldw_Server_API.app.core.Embeddings.jobs_adapter as jobs_adapter_module
-import tldw_Server_API.app.api.v1.endpoints.media_embeddings as media_embeddings_endpoint
+import tldw_Server_API.app.core.Embeddings.media_embeddings as core_media_embeddings
 
 
 @pytest.mark.integration
@@ -65,12 +65,12 @@ def test_media_add_embeddings_dispatch_modes(
             fake_create_job,
         )
         monkeypatch.setattr(
-            media_embeddings_endpoint,
+            core_media_embeddings,
             "get_media_content",
             fake_get_media_content,
         )
         monkeypatch.setattr(
-            media_embeddings_endpoint,
+            core_media_embeddings,
             "generate_embeddings_for_media",
             fail_if_background_called,
         )
@@ -84,12 +84,12 @@ def test_media_add_embeddings_dispatch_modes(
             fail_if_jobs_called,
         )
         monkeypatch.setattr(
-            media_embeddings_endpoint,
+            core_media_embeddings,
             "get_media_content",
             fake_get_media_content,
         )
         monkeypatch.setattr(
-            media_embeddings_endpoint,
+            core_media_embeddings,
             "generate_embeddings_for_media",
             fake_generate_embeddings_for_media,
         )
@@ -202,12 +202,12 @@ def test_media_add_embeddings_form_dispatch_override_wins_over_env(
         fail_if_jobs_called,
     )
     monkeypatch.setattr(
-        media_embeddings_endpoint,
+        core_media_embeddings,
         "get_media_content",
         fake_get_media_content,
     )
     monkeypatch.setattr(
-        media_embeddings_endpoint,
+        core_media_embeddings,
         "generate_embeddings_for_media",
         fake_generate_embeddings_for_media,
     )

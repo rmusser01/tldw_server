@@ -505,7 +505,7 @@ def test_reprocess_force_regenerate_embeddings_delete_failure_sanitizes_log(tmp_
         _raise_delete_embeddings_for_media,
     )
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _fake_generate_embeddings_for_media,
     )
@@ -564,7 +564,7 @@ def test_generate_embeddings_sanitizes_persisted_error(monkeypatch):
         raise RuntimeError("embedding backend leaked /private/vector/token")
 
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _raise_generate_embeddings_for_media,
     )
@@ -614,7 +614,7 @@ def test_generate_embeddings_sanitizes_error_status_update_failure(monkeypatch):
         raise RuntimeError("embedding backend leaked /private/vector/token")
 
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _raise_generate_embeddings_for_media,
     )
@@ -682,8 +682,8 @@ def test_delete_embeddings_sanitizes_where_delete_fallback_log(monkeypatch):
         def get_or_create_collection(self, collection_name: str):
             return collection
 
-    monkeypatch.setattr(reprocess_endpoint.embeddings_endpoint, "_user_embedding_config", lambda: {})
-    monkeypatch.setattr(reprocess_endpoint.embeddings_endpoint, "ChromaDBManager", _FakeChromaDBManager)
+    monkeypatch.setattr(reprocess_endpoint._media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(reprocess_endpoint.ChromaDB_Library, "ChromaDBManager", _FakeChromaDBManager)
 
     reprocess_endpoint._delete_embeddings_for_media(media_id=321, user_id="1")
 
@@ -713,8 +713,8 @@ def test_delete_embeddings_sanitizes_verify_failure_log(monkeypatch):
         def get_or_create_collection(self, collection_name: str):
             return _VerifyFailureCollection()
 
-    monkeypatch.setattr(reprocess_endpoint.embeddings_endpoint, "_user_embedding_config", lambda: {})
-    monkeypatch.setattr(reprocess_endpoint.embeddings_endpoint, "ChromaDBManager", _FakeChromaDBManager)
+    monkeypatch.setattr(reprocess_endpoint._media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(reprocess_endpoint.ChromaDB_Library, "ChromaDBManager", _FakeChromaDBManager)
 
     reprocess_endpoint._delete_embeddings_for_media(media_id=321, user_id="1")
 
@@ -737,7 +737,7 @@ def test_reprocess_embeddings_marks_vector_processed(tmp_path, monkeypatch):
         return {"status": "success", "embedding_count": 1, "chunks_processed": 1}
 
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _fake_generate_embeddings_for_media,
     )
@@ -803,7 +803,7 @@ def test_reprocess_embeddings_retries_mark_processed_conflicts(tmp_path, monkeyp
         return {"status": "success", "embedding_count": 1, "chunks_processed": 1}
 
     monkeypatch.setattr(
-        reprocess_endpoint.embeddings_endpoint,
+        reprocess_endpoint._media_embeddings,
         "generate_embeddings_for_media",
         _fake_generate_embeddings_for_media,
     )

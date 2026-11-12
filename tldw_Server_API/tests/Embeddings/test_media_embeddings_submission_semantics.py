@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 from tldw_Server_API.app.api.v1.endpoints import media_embeddings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.Embeddings import media_embeddings as core_media_embeddings
 
 
 class _FakeMediaDB:
@@ -26,12 +27,12 @@ def test_user_embedding_config_sanitizes_user_db_base_fallback_log(monkeypatch):
     def _raise_path_error():
         raise RuntimeError("user db base exploded at /private/user/db")
 
-    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings.DatabasePaths, "get_user_db_base_dir", _raise_path_error)
-    monkeypatch.setitem(media_embeddings.settings, "EMBEDDING_CONFIG", {})
-    monkeypatch.setitem(media_embeddings.settings, "USER_DB_BASE_DIR", "/tmp/fallback-user-db")
+    monkeypatch.setattr(core_media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(core_media_embeddings.DatabasePaths, "get_user_db_base_dir", _raise_path_error)
+    monkeypatch.setitem(core_media_embeddings.settings, "EMBEDDING_CONFIG", {})
+    monkeypatch.setitem(core_media_embeddings.settings, "USER_DB_BASE_DIR", "/tmp/fallback-user-db")
 
-    config = media_embeddings._user_embedding_config()
+    config = core_media_embeddings._user_embedding_config()
 
     assert config["USER_DB_BASE_DIR"] == "/tmp/fallback-user-db"
     logger_stub.warning.assert_called_once_with(
@@ -42,11 +43,11 @@ def test_user_embedding_config_sanitizes_user_db_base_fallback_log(monkeypatch):
 def test_embeddings_jobs_backend_sanitizes_ignored_override_log(monkeypatch):
     logger_stub = MagicMock()
 
-    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(core_media_embeddings, "logger", logger_stub)
     monkeypatch.setenv("EMBEDDINGS_JOBS_BACKEND", "legacy:/private/backend")
     monkeypatch.delenv("TLDW_JOBS_BACKEND", raising=False)
 
-    assert media_embeddings._embeddings_jobs_backend() == "jobs"
+    assert core_media_embeddings._embeddings_jobs_backend() == "jobs"
     logger_stub.warning.assert_called_once_with(
         "Embeddings jobs backend override ignored; core Jobs is the only backend"
     )
@@ -59,11 +60,11 @@ async def test_get_media_content_sanitizes_backend_lookup_error(monkeypatch):
     def _raise_backend_error(*_args, **_kwargs):
         raise RuntimeError("media backend exploded")
 
-    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
+    monkeypatch.setattr(core_media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(core_media_embeddings, "get_media_by_id", _raise_backend_error)
 
     with pytest.raises(HTTPException) as excinfo:
-        await media_embeddings.get_media_content(media_id=123, db=object())
+        await core_media_embeddings.get_media_content(media_id=123, db=object())
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == "Error retrieving media content"
@@ -82,11 +83,11 @@ async def test_get_media_content_fallback_document_content_log_is_sanitized(monk
     def _raise_fallback_error(*_args, **_kwargs):
         raise RuntimeError("fallback document backend exploded at /private/media.db")
 
-    monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "get_media_by_id", _empty_media_item)
+    monkeypatch.setattr(core_media_embeddings, "logger", logger_stub)
+    monkeypatch.setattr(core_media_embeddings, "get_media_by_id", _empty_media_item)
     monkeypatch.setattr(media_db_api, "get_document_version", _raise_fallback_error)
 
-    result = await media_embeddings.get_media_content(media_id=123, db=object())
+    result = await core_media_embeddings.get_media_content(media_id=123, db=object())
 
     assert result["media_item"]["content"] == ""
     logger_stub.warning.assert_called_once_with("Failed to load fallback document content")
@@ -126,7 +127,7 @@ async def test_get_embeddings_status_chroma_failure_log_is_sanitized(monkeypatch
             raise RuntimeError("chroma status backend exploded at /private/chroma")
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(core_media_embeddings, "_user_embedding_config", lambda: {})
     monkeypatch.setattr(
         media_embeddings,
         "get_media_by_id",
@@ -152,8 +153,8 @@ async def test_generate_embeddings_sanitizes_backend_lookup_error(monkeypatch):
         raise RuntimeError("media backend exploded")
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "get_media_by_id", _raise_backend_error)
 
     with pytest.raises(HTTPException) as excinfo:
@@ -221,7 +222,7 @@ async def test_delete_embeddings_sanitizes_where_delete_fallback_log(monkeypatch
             return collection
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(core_media_embeddings, "_user_embedding_config", lambda: {})
     monkeypatch.setattr(media_embeddings, "get_media_by_id", lambda *_args, **_kwargs: {"id": 123})
     monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
     monkeypatch.setattr(media_embeddings, "invalidate_rag_caches", lambda *_args, **_kwargs: None)
@@ -257,7 +258,7 @@ async def test_delete_embeddings_sanitizes_verify_failure_log(monkeypatch):
             return _VerifyFailCollection()
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(core_media_embeddings, "_user_embedding_config", lambda: {})
     monkeypatch.setattr(media_embeddings, "get_media_by_id", lambda *_args, **_kwargs: {"id": 123})
     monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
     monkeypatch.setattr(media_embeddings, "invalidate_rag_caches", lambda *_args, **_kwargs: None)
@@ -281,8 +282,8 @@ async def test_generate_embeddings_fails_when_job_create_raises(monkeypatch):
             raise RuntimeError("queue unavailable")
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _FailingAdapter)
 
     with pytest.raises(HTTPException) as excinfo:
@@ -307,8 +308,8 @@ async def test_generate_embeddings_fails_when_job_id_missing(monkeypatch):
             return {}
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _MissingIdAdapter)
 
     with pytest.raises(HTTPException) as excinfo:
@@ -336,8 +337,8 @@ async def test_generate_embeddings_batch_returns_partial_response_on_partial_enq
             return {"uuid": f"job-{media_id}"}
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _PartialAdapter)
 
     response = await media_embeddings.generate_embeddings_batch(
@@ -360,8 +361,8 @@ async def test_generate_embeddings_batch_returns_partial_when_some_media_ids_mis
         def create_job(self, **kwargs):
             return {"uuid": f"job-{kwargs['media_id']}"}
 
-    monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _OkAdapter)
 
     # _FakeMediaDB only knows about media_id 123; 999 is missing
@@ -388,7 +389,7 @@ async def test_search_embeddings_sanitizes_embedding_failure_log(monkeypatch):
         raise RuntimeError("embedding backend exploded at /private/models")
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(
         embeddings_v5_production_enhanced,
         "create_embeddings_batch_async",
@@ -428,8 +429,8 @@ async def test_search_embeddings_sanitizes_chroma_query_failure_log(monkeypatch)
             self.client = _Client()
 
     monkeypatch.setattr(media_embeddings, "logger", logger_stub)
-    monkeypatch.setattr(media_embeddings, "_user_embedding_config", lambda: {})
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_user_embedding_config", lambda: {})
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "ChromaDBManager", _ChromaDBManager)
     monkeypatch.setattr(
         embeddings_v5_production_enhanced,
@@ -454,8 +455,8 @@ async def test_generate_embeddings_batch_raises_when_all_media_ids_missing(monke
         def create_job(self, **kwargs):
             return {"uuid": f"job-{kwargs['media_id']}"}
 
-    monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _OkAdapter)
 
     # _FakeMediaDB is empty — both IDs are missing
@@ -478,8 +479,8 @@ async def test_generate_embeddings_batch_raises_when_all_enqueues_fail_before_an
         def create_job(self, **kwargs):
             raise RuntimeError("enqueue failed")
 
-    monkeypatch.setattr(media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
-    monkeypatch.setattr(media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
+    monkeypatch.setattr(core_media_embeddings, "_embeddings_jobs_backend", lambda: "jobs")
+    monkeypatch.setattr(core_media_embeddings, "_resolve_model_provider", lambda *_: ("model-a", "provider-a"))
     monkeypatch.setattr(media_embeddings, "EmbeddingsJobsAdapter", _AlwaysFailingAdapter)
 
     with pytest.raises(HTTPException) as excinfo:

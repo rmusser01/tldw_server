@@ -533,7 +533,7 @@ def test_email_metadata_contract_diagnostic_excludes_input_ref(captured_logs):
 async def test_email_embedding_dispatch_diagnostics_exclude_content(monkeypatch, captured_logs, stage):
     from fastapi import BackgroundTasks
 
-    from tldw_Server_API.app.api.v1.endpoints import media_embeddings
+    from tldw_Server_API.app.core.Embeddings import media_embeddings
     from tldw_Server_API.app.core.Embeddings import jobs_adapter
     from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
 
