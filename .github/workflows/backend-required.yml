@@ -16,24 +16,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: backend-required-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  group: backend-required-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
-  admission:
-    if: >-
-      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success'
-    uses: ./.github/workflows/license-first-admission.yml
-    with:
-      workflow_file: backend-required.yml
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-      statuses: read
-
   # The pull_request path reports to the PR, so it is the one branch protection
   # sees -- but it used to start every gate immediately, in parallel with the
   # license audit it is supposed to follow. This makes it wait for the verdict.
@@ -46,70 +32,30 @@ jobs:
 
   changes:
     name: Detect Gate Changes
-    needs: [admission, await_license]
+    needs: [await_license]
     if: >-
       always() && !cancelled() &&
       (
-        (
-          github.event_name == 'workflow_run' &&
-          needs.admission.result == 'success' &&
-          needs.admission.outputs.should_run == 'true'
-        ) ||
-        (
-          github.event_name != 'workflow_run' &&
-          (
-            needs.await_license.result == 'skipped' ||
-            needs.await_license.outputs.license_passed == 'true'
-          )
-        )
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
       )
     runs-on: ubuntu-latest
     outputs:
-      backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
-      frontend_changed: ${{ steps.detect.outputs.frontend_changed || steps.detect_admitted.outputs.frontend_changed }}
-      e2e_changed: ${{ steps.detect.outputs.e2e_changed || steps.detect_admitted.outputs.e2e_changed }}
-      security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed || steps.detect_admitted.outputs.security_relevant_changed }}
-      coverage_required: ${{ steps.detect.outputs.coverage_required || steps.detect_admitted.outputs.coverage_required }}
+      backend_changed: ${{ steps.detect.outputs.backend_changed }}
+      frontend_changed: ${{ steps.detect.outputs.frontend_changed }}
+      e2e_changed: ${{ steps.detect.outputs.e2e_changed }}
+      security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed }}
+      coverage_required: ${{ steps.detect.outputs.coverage_required }}
     steps:
       - name: Checkout
-        if: github.event_name != 'workflow_run'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Checkout admitted PR
-        if: github.event_name == 'workflow_run'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          fetch-depth: 0
-          ref: ${{ needs.admission.outputs.head_sha }}
-          persist-credentials: false
       - id: detect
         name: Classify changed files
-        if: github.event_name != 'workflow_run'
         uses: ./.github/actions/detect-required-gate-changes
-      - id: detect_admitted
-        name: Classify admitted changed files
-        if: github.event_name == 'workflow_run'
-        shell: bash
-        env:
-          BASE_SHA: ${{ needs.admission.outputs.base_sha }}
-          HEAD_SHA: ${{ needs.admission.outputs.head_sha }}
-        run: |
-          set -euo pipefail
-          CHANGED_FILES_PATH="${RUNNER_TEMP}/required-gate-changed-files.txt"
-          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          fi
-          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
-            git fetch --no-tags --depth=1 origin "$HEAD_SHA"
-          fi
-          git cat-file -e "${BASE_SHA}^{commit}"
-          git cat-file -e "${HEAD_SHA}^{commit}"
-          git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
-          mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
-          python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
       # Every PR runs this job, backlog-only ones included, while backend-required's own
       # steps skip when no backend path changed; so the task id check lives here (TASK-13960).
       - name: Check backlog task ids are unique
@@ -120,22 +66,12 @@ jobs:
   non-utc-tests:
     name: Backend timestamps (non-UTC)
     runs-on: ubuntu-latest
-    needs: [changes, admission, await_license]
+    needs: [changes, await_license]
     if: >-
       always() && !cancelled() &&
       (
-        (
-          github.event_name == 'workflow_run' &&
-          needs.admission.result == 'success' &&
-          needs.admission.outputs.should_run == 'true'
-        ) ||
-        (
-          github.event_name != 'workflow_run' &&
-          (
-            needs.await_license.result == 'skipped' ||
-            needs.await_license.outputs.license_passed == 'true'
-          )
-        )
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
       ) &&
       (
         needs.changes.result == 'success' &&
@@ -148,7 +84,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
@@ -164,7 +100,7 @@ jobs:
         with:
           python-version: "3.12"
           use-uv: "true"
-          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
+          enable-pip-cache: "true"
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -266,39 +202,11 @@ jobs:
   backend-required:
     name: backend-required
     runs-on: ubuntu-latest
-    needs: [changes, admission, await_license, non-utc-tests]
-    # This job's name is the required status check, so it must REPORT rather
-    # than skip. A skipped job leaves the check unreported, and a run whose
-    # jobs all skip concludes "success" -- so a failed licence audit used to
-    # show green while running nothing. The last arm exists purely so a
-    # negative verdict reaches the assertion step below and goes red.
-    #
-    # The first two arms are the `changes` job's own condition and deliberately
-    # do not ask for needs.changes.result == 'success': when change detection
-    # was admitted and did not succeed, this job was skipped, and GitHub counts
-    # a skipped required job as satisfied. It now runs and the second step
-    # fails it (TASK-13462).
+    needs: [changes, await_license, non-utc-tests]
+    # Report failures for licensing or change detection instead of skipping the required check.
     if: >-
       always() && !cancelled() &&
-      (
-        (
-          github.event_name == 'workflow_run' &&
-          needs.admission.result == 'success' &&
-          needs.admission.outputs.should_run == 'true'
-        ) ||
-        (
-          github.event_name != 'workflow_run' &&
-          (
-            needs.await_license.result == 'skipped' ||
-            needs.await_license.outputs.license_passed == 'true'
-          )
-        ) ||
-        (
-          github.event_name != 'workflow_run' &&
-          needs.await_license.result != 'skipped' &&
-          needs.await_license.outputs.license_passed != 'true'
-        )
-      )
+      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
     # A passing run took 28 minutes on 2026-11-03, and #3412 hit 30 twice at the non-UTC step.
     timeout-minutes: 45
     services:
@@ -318,8 +226,7 @@ jobs:
     steps:
       - name: Require the license audit to have passed
         if: >-
-          github.event_name != 'workflow_run' &&
-          needs.await_license.result != 'skipped' &&
+          github.event_name == 'pull_request' &&
           needs.await_license.outputs.license_passed != 'true'
         run: |
           echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
@@ -358,7 +265,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
@@ -374,7 +281,7 @@ jobs:
         with:
           python-version: "3.12"
           use-uv: "true"
-          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
+          enable-pip-cache: "true"
           cache-dependency-path: |
             pyproject.toml
             uv.lock
@@ -427,8 +334,8 @@ jobs:
           DISPATCH_BASE_SHA: ${{ inputs.base_sha }}
         run: |
           set -euo pipefail
-          BASE_SHA="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}"
-          HEAD_SHA="${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}"
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
           # A dispatch carries no pull_request payload, so without this the base
           # would be HEAD^ and only the last commit would be type-checked. The
           # merge queue passes dev's tip. Empty on every other event, and already
@@ -499,7 +406,7 @@ jobs:
       - name: Enforce CI contracts and code ratchets
         if: needs.changes.outputs.backend_changed == 'true'
         env:
-          BACKLOG_TASK_FORMAT_BASE: ${{ inputs.base_sha || needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          BACKLOG_TASK_FORMAT_BASE: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
           PYTHONPATH: .
           PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
           TEST_MODE: "true"

@@ -156,7 +156,7 @@ def test_no_dispatch_input_is_interpolated_into_a_shell_script(name):
     ("dispatch_base", "event_base", "expected"),
     [
         ("a" * 40, "", "a" * 40),  # queue dispatch: dev's tip
-        ("", "b" * 40, "b" * 40),  # pull_request and workflow_run resolve what they always did
+        ("", "b" * 40, "b" * 40),  # pull_request supplies the base
         ("", "", ""),  # hand dispatch without a base: falls through to the HEAD^ fallback
     ],
 )
@@ -178,8 +178,7 @@ def test_backend_type_check_prefers_the_dispatch_base(dispatch_base, event_base,
 def test_backlog_ratchet_base_prefers_the_dispatch_base():
     step = _step(_gate("backend-required.yml"), "Enforce CI contracts and code ratchets")
     assert step["env"]["BACKLOG_TASK_FORMAT_BASE"] == (
-        "${{ inputs.base_sha || needs.admission.outputs.base_sha || "
-        "github.event.pull_request.base.sha || github.event.before }}"
+        "${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}"
     )
 
 
@@ -303,6 +302,13 @@ def _outcome(job: dict, row: Row) -> str:
     return "proceeds"
 
 
+def _gate_rows(name: str, *, reachable_only: bool = True) -> list[Row]:
+    rows = _rows(reachable_only=reachable_only)
+    if name == "backend-required.yml":
+        return [row for row in rows if row.event in _triggers(name)]
+    return rows
+
+
 def _expected_outcome(name: str, row: Row) -> str:
     if row.cancelled:
         return "skipped"  # a cancelled run stays cancelled
@@ -322,7 +328,7 @@ def test_gate_is_red_when_change_detection_did_not_succeed(name):
     """
     gate = _gate(name)
     newly_red = 0
-    for row in _rows():
+    for row in _gate_rows(name):
         assert _outcome(gate, row) == _expected_outcome(name, row), row
         newly_red += _outcome(gate, row) == "changes"
     assert newly_red, "no row exercised a failed change detection"
@@ -350,8 +356,9 @@ def test_gate_that_sees_admission_is_red_if_changes_was_skipped_when_it_should_h
     """Every gate needs admission and await_license itself, so it can tell "skipped by design" from
     "skipped although admitted" (which the `changes` condition should make impossible)."""
     gate = _gate(name)
-    assert {"changes", "admission", "await_license"} <= set(gate["needs"])
-    rows = [r for r in _rows(reachable_only=False) if r.admitted and r.changes == "skipped" and not r.cancelled]
+    assert {"changes", "await_license"} <= set(gate["needs"])
+    assert ("admission" in gate["needs"]) == (name != "backend-required.yml")
+    rows = [r for r in _gate_rows(name, reachable_only=False) if r.admitted and r.changes == "skipped" and not r.cancelled]
     assert rows
     for row in rows:
         assert _outcome(gate, row) == "changes", row
@@ -393,18 +400,27 @@ def test_every_gate_turns_a_license_wait_that_did_not_pass_red(name):
     up), fails, or reports a negative verdict, the gate used to be skipped in every workflow but
     backend-required, and GitHub counts a skipped required job as satisfied (TASK-13502)."""
     gate = _gate(name)
-    assert {"admission", "await_license"} <= set(gate["needs"])
+    assert "await_license" in gate["needs"]
+    assert ("admission" in gate["needs"]) == (name != "backend-required.yml")
     refusal = gate["steps"][0]
     assert refusal["name"] == LICENSE_STEP
-    assert refusal["if"] == (
-        "github.event_name != 'workflow_run' && needs.await_license.result != 'skipped' && "
-        "needs.await_license.outputs.license_passed != 'true'"
-    )
+    if name == "backend-required.yml":
+        assert refusal["if"] == (
+            "github.event_name == 'pull_request' && needs.await_license.outputs.license_passed != 'true'"
+        )
+    else:
+        assert refusal["if"] == (
+            "github.event_name != 'workflow_run' && needs.await_license.result != 'skipped' && "
+            "needs.await_license.outputs.license_passed != 'true'"
+        )
     assert refusal["run"] == (
         'echo "::error::License audit did not pass for this PR head, so the gates were not run. '
         'Fix the licence policy failure and re-run."\nexit 1\n'
     )
-    for awaited, passed in (("cancelled", ""), ("failure", ""), ("success", "false"), ("success", "")):
+    outcomes = [("cancelled", ""), ("failure", ""), ("success", "false"), ("success", "")]
+    if name == "backend-required.yml":
+        outcomes.append(("skipped", ""))
+    for awaited, passed in outcomes:
         values = {
             "github.event_name": "pull_request",
             "needs.admission.result": "skipped",
@@ -647,8 +663,8 @@ def test_timezone_prerequisite_only_runs_after_admitted_backend_change():
     jobs = _wf("backend-required.yml")["jobs"]
     assert "non-utc-tests" in jobs, "timezone prerequisite is missing"  # nosec B101
     child = jobs["non-utc-tests"]
-    assert {"changes", "admission", "await_license"} <= set(child["needs"])  # nosec B101
-    for row, relevant in product(_rows(reachable_only=False), (False, True)):
+    assert set(child["needs"]) == {"changes", "await_license"}  # nosec B101
+    for row, relevant in product(_gate_rows("backend-required.yml", reachable_only=False), (False, True)):
         row = row._replace(relevant=relevant)
         expected = row.admitted and row.changes == "success" and relevant and not row.cancelled
         assert _evaluate(child["if"], row.values, row.cancelled) is expected, row  # nosec B101

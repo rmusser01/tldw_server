@@ -522,7 +522,7 @@ def test_queue_control_workflows_never_run_pull_request_code() -> None:
                     assert step["run"].strip() == "python3 -m Helper_Scripts.ci.merge_queue", (name, job_name)
 
 
-def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
+def test_all_ordinary_workflows_keep_the_pr_license_wait() -> None:
     for name, (data, _) in _load_ordinary_workflows().items():
         assert "workflow_run" not in _trigger(data), name
 
@@ -532,6 +532,9 @@ def test_all_ordinary_workflows_call_exact_inert_admission_gate() -> None:
             "permissions": {"contents": "read", "statuses": "read"},
         }, name
 
+        if name == "backend-required.yml":
+            assert "admission" not in data["jobs"]
+            continue
         admission = data["jobs"]["admission"]
         await_license = data["jobs"]["await_license"]
         assert (admission, await_license) == ({  # nosec B101 - regression assertion
@@ -628,6 +631,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
         "${{ needs.admission.outputs.head_sha || "
         "github.event.workflow_run.pull_requests[0].head.sha || github.sha }}"
     )
+    backend_direct_condition = (
+        "always() && !cancelled() && (github.event_name == 'workflow_dispatch' || "
+        "(github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true'))"
+    )
     non_pr = "github.event_name != 'pull_request' && github.event_name != 'workflow_run'"
     backend_changed = (
         "(github.event_name != 'pull_request' && "
@@ -669,6 +676,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
 
     for name, (data, _) in _load_ordinary_workflows().items():
         jobs = data["jobs"]
+        backend_direct = name == "backend-required.yml"
         assert tuple(
             job_name for job_name in jobs if job_name not in {"admission", "await_license"}
         ) == ORIGINAL_JOB_NAMES[name]
@@ -681,7 +689,10 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
             ) == original_needs
             # The two gates travel together: a job that honours admission must also
             # wait for the license verdict, or the pull_request path runs it unordered.
-            assert ("admission" in needs) == ("await_license" in needs), (name, job_name)
+            if backend_direct:
+                assert "admission" not in needs, (name, job_name)
+            else:
+                assert ("admission" in needs) == ("await_license" in needs), (name, job_name)
 
             if job_name == "queue-tick":
                 # Exempt from the admission and checkout rules below, and not counted among
@@ -701,7 +712,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     assert "await_license" not in needs, (name, job_name)
                     assert job.get("if") is None, (name, job_name)
                     continue
-                assert needs.count("admission") == 1, (name, job_name)
+                assert needs.count("admission") == (0 if backend_direct else 1), (name, job_name)
                 assert needs.count("await_license") == 1, (name, job_name)
                 extra_condition = None
                 if name == "frontend-e2e-tiers.yml":
@@ -726,7 +737,20 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 if (name, job_name) in LICENSE_RED_GATES and name != "container-build-check.yml":
                     _assert_fails_when_change_detection_did_not_succeed(name, job)
                 expected_condition = admission_clause
-                if (name, job_name) in LICENSE_RED_GATES:
+                if backend_direct:
+                    expected_condition = backend_direct_condition
+                    if job_name == "backend-required":
+                        expected_condition = (
+                            "always() && !cancelled() && (github.event_name == 'pull_request' || "
+                            "github.event_name == 'workflow_dispatch')"
+                        )
+                        refusal = job["steps"][0]
+                        assert _normalized(refusal["if"]) == _normalized(
+                            "github.event_name == 'pull_request' && "
+                            "needs.await_license.outputs.license_passed != 'true'"
+                        )
+                        assert re.search(r"(?m)^\s*exit 1\s*$", refusal["run"])
+                elif (name, job_name) in LICENSE_RED_GATES:
                     # A required gate must report a license wait that did not pass as failure,
                     # even when the changes job was not admitted (TASK-13502).
                     expected_condition = """
@@ -811,12 +835,11 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                 checkout_count += 1
                 checkout_inputs = step.get("with", {})
                 assert checkout_inputs.get("persist-credentials") is False, (name, job_name)
-                if (name, job_name) == ("backend-required.yml", "changes"):
-                    if step.get("if") == "github.event_name == 'workflow_run'":
-                        expected_ref = "${{ needs.admission.outputs.head_sha }}"
-                    else:
-                        assert step.get("if") == "github.event_name != 'workflow_run'"
-                        expected_ref = "${{ github.sha }}"
+                if backend_direct:
+                    expected_ref = (
+                        "${{ github.sha }}" if job_name == "changes"
+                        else "${{ github.event.pull_request.head.sha || github.sha }}"
+                    )
                 elif (name, job_name) in CHANGE_CLASSIFIER_JOBS:
                     expected_ref = classifier_ref
                 else:
@@ -840,7 +863,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 62
+    assert checkout_count == 61
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -862,7 +885,10 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             assert "concurrency" not in data
         else:
             prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
-            assert data["concurrency"]["group"] == f"{prefix}-{concurrency_suffix}", name
+            suffix = concurrency_suffix
+            if name == "backend-required.yml":
+                suffix = suffix.replace("github.event.workflow_run.pull_requests[0].number || ", "")
+            assert data["concurrency"]["group"] == f"{prefix}-{suffix}", name
             expected_cancel: object = True
             if name == "jobs-suite.yml":
                 expected_cancel = (
@@ -881,30 +907,35 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         assert "github.event.workflow_run.head_sha" not in text
 
     combined_text = "\n".join(text for _, text in workflows.values())
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 26
     assert combined_text.count("github.event.pull_request.number") == 27
-    # The backend classifier uses the admitted SHA for workflow_run without an event fallback.
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 59
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
     assert combined_text.count("github.event.pull_request.head.sha") == 56
-    # +1 each: backend-required passes the admitted-or-PR base to the backlog
-    # task-format ratchet (TASK-13440), admission's base first, as the mypy step does.
+    # The backlog task ratchet still gets the PR base (TASK-13440).
     assert combined_text.count("github.event.pull_request.base.sha") == 6
-    assert combined_text.count("needs.admission.outputs.base_sha") == 14
+    assert combined_text.count("needs.admission.outputs.base_sha") == 11
 
     for name, output_names in CHANGE_CLASSIFIER_OUTPUTS.items():
         changes_job = workflows[name][0]["jobs"]["changes"]
         assert set(changes_job["outputs"]) == output_names
+        direct_step = next(step for step in changes_job["steps"] if step.get("id") == "detect")
+        assert direct_step["uses"] == "./.github/actions/detect-required-gate-changes"
+        if name == "backend-required.yml":
+            assert "if" not in direct_step
+            assert all(step.get("id") != "detect_admitted" for step in changes_job["steps"])
+            assert changes_job["outputs"] == {
+                output: f"${{{{ steps.detect.outputs.{output} }}}}" for output in output_names
+            }
+            continue
         for output_name in output_names:
             assert changes_job["outputs"][output_name] == (
                 f"${{{{ steps.detect.outputs.{output_name} || "
                 f"steps.detect_admitted.outputs.{output_name} }}}}"
             )
-        direct_step = next(step for step in changes_job["steps"] if step.get("id") == "detect")
         admitted_step = next(
             step for step in changes_job["steps"] if step.get("id") == "detect_admitted"
         )
         assert direct_step["if"] == "github.event_name != 'workflow_run'"
-        assert direct_step["uses"] == "./.github/actions/detect-required-gate-changes"
         assert admitted_step["if"] == "github.event_name == 'workflow_run'"
         assert admitted_step["env"] == {
             "BASE_SHA": "${{ needs.admission.outputs.base_sha }}",
@@ -928,14 +959,11 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
 
     backend_text = workflows["backend-required.yml"][1]
     assert (
-        'BASE_SHA="${{ needs.admission.outputs.base_sha || '
-        'github.event.pull_request.base.sha || github.event.before }}"'
+        'BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"'
     ) in backend_text
     assert (
-        'HEAD_SHA="${{ needs.admission.outputs.head_sha || '
-        'github.event.pull_request.head.sha || github.sha }}"'
+        'HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"'
     ) in backend_text
-    assert 'git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA"' in backend_text
     assert "< <(git diff" not in backend_text
     backend_mypy_script = next(
         step["run"]
@@ -946,6 +974,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     assert 'git cat-file -e "${HEAD_SHA}^{commit}"' in backend_mypy_script
     assert 'git fetch --no-tags --depth=1 origin "$BASE_SHA"' in backend_mypy_script
     assert 'git fetch --no-tags --depth=1 origin "$HEAD_SHA"' in backend_mypy_script
+    assert 'git diff --name-only --diff-filter=d "$BASE_SHA" "$HEAD_SHA"' in backend_mypy_script
 
     frontend_unit_job = workflows["frontend-required.yml"][0]["jobs"]["frontend-unit-tests"]
     frontend_checkout = next(
@@ -1121,6 +1150,10 @@ def test_admitted_jobs_restore_but_cannot_save_shared_caches() -> None:
                 if uses == "./.github/actions/setup-python-deps":
                     setup_helper_count += 1
                     cache_condition = inputs.get("enable-pip-cache")
+                    if name == "backend-required.yml":
+                        assert set(_trigger(data)) == {"pull_request", "workflow_dispatch"}
+                        assert cache_condition == "true", (name, job_name)
+                        continue
                     assert cache_condition in {
                         "${{ github.event_name != 'workflow_run' }}",
                         (
@@ -1872,7 +1905,7 @@ def test_a_deliberate_license_bypass_fails_the_contract(monkeypatch: pytest.Monk
     # Removing the await job itself must also fail the exact-gate contract.
     if drop_job:
         with pytest.raises((AssertionError, KeyError)):
-            test_all_ordinary_workflows_call_exact_inert_admission_gate()
+            test_all_ordinary_workflows_keep_the_pr_license_wait()
 
 
 def test_frontend_critical_journeys_start_real_application_with_declared_provider() -> None:

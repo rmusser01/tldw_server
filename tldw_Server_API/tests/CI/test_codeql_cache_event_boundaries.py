@@ -25,16 +25,13 @@ PR_FIELDS = {
 }
 
 
-def test_backend_change_detection_separates_event_and_admitted_checkouts() -> None:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/backend-required.yml").read_text())
-    checkouts = [
-        step for step in workflow["jobs"]["changes"]["steps"]
-        if step.get("uses", "").startswith("actions/checkout@")
-    ]
-    assert [(step.get("if"), step["with"]["ref"]) for step in checkouts] == [
-        ("github.event_name != 'workflow_run'", "${{ github.sha }}"),
-        ("github.event_name == 'workflow_run'", "${{ needs.admission.outputs.head_sha }}"),
-    ]
+def test_backend_required_only_uses_direct_event_sources() -> None:
+    text = (ROOT / ".github/workflows/backend-required.yml").read_text()
+    workflow = yaml.safe_load(text)
+    assert set(workflow.get("on", workflow.get(True))) == {"pull_request", "workflow_dispatch"}
+    assert "admission" not in workflow["jobs"]
+    assert "needs.admission" not in text
+    assert "github.event.workflow_run" not in text
 
 
 def non_pr_checkout_ref(expression: str, jobs: dict[str, Any], job: dict[str, Any]) -> str:
@@ -69,8 +66,6 @@ def test_cache_writing_events_checkout_the_event_commit(workflow_path: str, job_
     assert checkouts
     for step in checkouts:
         assert step["with"]["persist-credentials"] is False
-        if step.get("if") == "github.event_name == 'workflow_run'":
-            continue
         assert non_pr_checkout_ref(step["with"]["ref"], workflow["jobs"], job) == "github.sha"
 
 
