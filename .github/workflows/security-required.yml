@@ -146,7 +146,7 @@ jobs:
 
       - name: Dependency review (high/critical)
         if: github.event_name == 'pull_request' || github.event_name == 'workflow_run'
-        uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
         with:
           base-ref: ${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha }}
           head-ref: ${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
