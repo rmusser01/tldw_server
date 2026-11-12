@@ -1682,7 +1682,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
             const current = await fetchNote(snapshot.noteId, ownedRequest)
             operation.requireCurrent()
             const currentEditor = latestEditorRef.current
-            // Content edits bump the version; tag-only edits do not, so compare tags too.
+            // Content and tag edits bump the version (#3157); the tag check also covers older servers.
             if (
               (currentEditor.isDirty && currentEditor.selectedId != null && String(currentEditor.selectedId) === snapshot.noteId) ||
               toNoteVersion(current) !== snapshot.appliedVersion ||

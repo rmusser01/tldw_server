@@ -2477,6 +2477,66 @@ class NoteStore:
                          exc_info=True)
             raise
 
+    def bump_note_version(
+        self,
+        note_id: str,
+        expected_version: int,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
+    ) -> int:
+        """Advance a note's version for a change kept outside the note row, such as its tags or folders.
+
+        Optimistic locking compares this version, so a relink that left it alone let two
+        clients at the same version both succeed (#3157). Returns the new version and raises
+        ``ConflictError`` when the note is no longer at ``expected_version``.
+        """
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        next_version = expected_version + 1
+        query = (
+            "UPDATE notes SET last_modified = ?, version = ?, client_id = ? "
+            f"WHERE id = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608 - fixed owner SQL fragment; values stay bound.
+        )
+        params = (
+            self._db._get_current_utc_timestamp_iso(),
+            next_version,
+            self._db.client_id,
+            note_id,
+            expected_version,
+        ) + owner_params
+
+        def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> int:
+            if transaction_conn.execute(query, params).rowcount == 0:
+                current_version = self._db._get_current_db_version(
+                    transaction_conn, "notes", "id", note_id, owner_client_id=self._db.client_id
+                )
+                raise ConflictError(  # noqa: TRY003
+                    f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                    entity="notes",
+                    entity_id=note_id,
+                )
+            note = transaction_conn.execute("SELECT title, content FROM notes WHERE id = ?", (note_id,)).fetchone()
+            # Graph and semantic state are only current while they match the note's version.
+            self._db.note_graph_projection_store.replace_projection(
+                note_id=note_id,
+                source_version=next_version,
+                projection=parse_wikilinks(str(note["content"] or ""), source_note_id=note_id),
+                conn=transaction_conn,
+            )
+            self._mark_note_semantic_dirty(
+                transaction_conn,
+                dataset_id=semantic_dataset_id,
+                note_id=note_id,
+                title=str(note["title"]),
+                content=str(note["content"]),
+                content_version=next_version,
+            )
+            return next_version
+
+        if conn is not None:
+            return _execute(conn)
+        with self._db.transaction() as transaction_conn:
+            return _execute(transaction_conn)
+
     # ------------------------------------------------------------------
     # Note deletion and restoration
     # ------------------------------------------------------------------
