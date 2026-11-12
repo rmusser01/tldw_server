@@ -8,9 +8,19 @@ import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
+type StartTutorialOptions = {
+  /**
+   * What makes a launcher stale. "address" (the default): any change of the
+   * address since it rendered. "page": only a change of page, so a same-page
+   * address change (opening a note writes /notes?note=<id>) keeps it.
+   */
+  fence?: "address" | "page"
+}
+
 /** Transfer explicit launcher intent before its Help/Quick modal is removed. */
-export const useStartTutorial = () => {
+export const useStartTutorial = ({ fence = "address" }: StartTutorialOptions = {}) => {
   const location = useLocation()
+  const pathname = location.pathname
   const selection = useHistorySelectionContext()
   const start = useTutorialStore((state) => state.startTutorial)
   const route = JSON.stringify([
@@ -37,9 +47,11 @@ export const useStartTutorial = () => {
   const owner = selection?.owner,
     account = selection?.draftAccount
   const currentRoute = useRef(route)
+  const currentPathname = useRef(pathname)
   useLayoutEffect(() => {
     currentRoute.current = route
-  }, [route])
+    currentPathname.current = pathname
+  }, [route, pathname])
   const mounted = useRef(true)
   useLayoutEffect(() => {
     mounted.current = true
@@ -50,13 +62,18 @@ export const useStartTutorial = () => {
   return useCallback(
     (tutorialId: string, target?: HTMLElement | null) => {
       const sourceIsCurrent = () =>
-        route === currentRoute.current &&
+        (fence === "page"
+          ? pathname === currentPathname.current
+          : route === currentRoute.current) &&
         source.isCurrent() &&
         (!owner ||
           owner.kind === "unavailable" ||
           owner.validate_lease?.() !== false) &&
         (!account?.requestScope || account.isCurrent())
       if (!mounted.current || !sourceIsCurrent()) return false
+      // The run belongs to the address it starts on (the launcher's own,
+      // unless a page-fenced launcher survived a same-page address change).
+      const startRoute = currentRoute.current
       const launcher = document.activeElement
       let owned = true,
         enteredTour = false
@@ -92,7 +109,7 @@ export const useStartTutorial = () => {
               ? launcher
               : null
             : target,
-        route,
+        route: startRoute,
         isCurrent: () => owned && sourceIsCurrent(),
         lastFocusedControl: () => lastFocusedControl,
         dispose: () => {
@@ -116,6 +133,6 @@ export const useStartTutorial = () => {
       }
       return true
     },
-    [start, source, owner, account, route]
+    [start, source, owner, account, route, pathname, fence]
   )
 }

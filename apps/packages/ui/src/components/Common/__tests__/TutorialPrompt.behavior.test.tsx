@@ -95,7 +95,7 @@ vi.mock("@/tutorials", () => ({
 }))
 
 describe("TutorialPrompt behavior", () => {
-  it.each(["dismiss", "close", "unmount", "same-path navigation"])(
+  it.each(["dismiss", "close", "unmount", "page navigation"])(
     "an old notification Start refuses %s",
     (boundary) => {
       const mounted = render(
@@ -112,7 +112,7 @@ describe("TutorialPrompt behavior", () => {
         act(() => notification.btn.props.children[0].props.onClick())
       else if (boundary === "close") act(() => notification.onClose())
       else if (boundary === "unmount") mounted.unmount()
-      else act(() => capturedNavigate?.("/chat?find=2#help"))
+      else act(() => capturedNavigate?.("/media"))
       act(originalStart)
       expect(startTutorialMock).not.toHaveBeenCalled()
     }
@@ -315,5 +315,31 @@ describe("TutorialPrompt behavior", () => {
       vi.advanceTimersByTime(15000)
     })
     expect(infoMock).toHaveBeenCalledTimes(1)
+  })
+
+  // #3119: opening a note writes /notes?note=<id>. A prompt already on
+  // screen stays open through that same-page address change, and its Start
+  // still starts the tour.
+  it("keeps a visible prompt open through a same-page address change", () => {
+    render(
+      <MemoryRouter initialEntries={["/notes"]}>
+        <NavigatorBridge />
+        <TutorialPrompt />
+      </MemoryRouter>
+    )
+    act(() => {
+      vi.advanceTimersByTime(2000)
+    })
+    expect(infoMock).toHaveBeenCalledTimes(1)
+    const notification = infoMock.mock.calls[0][0]
+
+    act(() => {
+      capturedNavigate?.("/notes?note=n1#section")
+    })
+    expect(destroyMock).not.toHaveBeenCalled()
+
+    act(() => notification.btn.props.children[1].props.onClick())
+    expect(startTutorialMock).toHaveBeenCalledOnce()
+    expect(markPromptSeenMock).toHaveBeenCalledWith("/notes")
   })
 })
