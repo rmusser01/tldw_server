@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { Tabs } from "antd"
 import { useTranslation } from "react-i18next"
 
@@ -120,7 +121,7 @@ export const TldwSettingsTabs = ({
         )
         if (element) {
           element.scrollIntoView({
-            behavior: "smooth",
+            behavior: smoothScrollBehavior(),
             block: "start"
           })
         }
