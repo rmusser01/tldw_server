@@ -51,11 +51,11 @@
       "page": "chat",
       "kind": "total",
       "key": "api-requests",
-      "count": 22,
+      "count": 20,
       "tolerance": 1,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "22 on 2026-10-22 after XP-16 stopped the buddy polling and FirstRunGate stopped re-reading profiles on /chat; +1 when the config/providers race loses."
+      "note": "22 on 2026-10-22 after XP-16 stopped the buddy polling and FirstRunGate stopped re-reading profiles on /chat; 20 on 2026-11-12 after W4 TASK-13524's model-catalog staleTime/gcTime caching (CI run 43132582711, ratchet-directed)."
     },
     {
       "page": "chat",
