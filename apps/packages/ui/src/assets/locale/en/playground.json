@@ -1489,6 +1489,12 @@
     "regenerationRefusedMessage": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again.",
     "regenerationUnknownTitle": "New reply unconfirmed",
     "regenerationUnknownMessage": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically.",
+    "savedContinuedReplyTitle": "Continued reply saved",
+    "savedContinuedReplyMessage": "The continued reply is saved as an alternative to the original reply, which is kept. Open the saved reply when you are ready.",
+    "continuationRefusedTitle": "Continued reply refused",
+    "continuationRefusedMessage": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before continuing again.",
+    "continuationUnknownTitle": "Continued reply unconfirmed",
+    "continuationUnknownMessage": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved the continued reply. Reload this chat before continuing again. Recovery will not send it again automatically.",
     "roleplayReplyUnconfirmedMessage": "Your message is saved. Any reply that arrived is retained here. Explicit Retry may generate another reply if none is already saved, including while an earlier request is still running. It does not add another user message.",
     "roleplayInputUnconfirmedMessage": "The server may have received this message. Explicit Retry may generate a reply if none is already saved. It keeps the original message identity and your retained input."
   },

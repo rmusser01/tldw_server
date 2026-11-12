@@ -1152,18 +1152,18 @@ export const settleLocalSelectedExistingInput = (
 
 
 const HISTORY_TURN_OUTCOMES = new Set<string>(["complete", "interrupted", "stopped"])
+/** Regenerate and Continue reuse the saved question's admission rather than admitting a new input. */
+const reusesSavedQuestion = (action: HistoryTurnRecovery["action"]) =>
+  action === "regenerate" || action === "continue"
+const HISTORY_TURN_ACTIONS = new Set<string>(["edit_resend", "regenerate", "continue"])
 
 const projectHistoryTurnRecovery = async (
   turn: HistoryTurnRecovery
 ): Promise<HistoryTurnRecovery> => {
-  if (
-    turn.action !== undefined &&
-    turn.action !== "edit_resend" &&
-    turn.action !== "regenerate"
-  )
+  if (turn.action !== undefined && !HISTORY_TURN_ACTIONS.has(turn.action))
     fail("unsupported_history_action")
   if (
-    turn.action === "regenerate" &&
+    reusesSavedQuestion(turn.action) &&
     (turn.persistence !== "server" ||
       turn.origin_view?.interpretation.kind !== "parent_graph_v1" ||
       turn.origin_view.cursor.kind !== "after_message")
@@ -1408,7 +1408,7 @@ export const saveHistoryTurnRecovery = async (
       fail("invalid_history_operation")
     if (detached.persistence === "server" && !detached.roleplay_resume && !detached.existing_selection && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
       fail("history_operation_conflict")
-    if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || (detached.action !== "regenerate" && detached.admission.selection_digest !== detached.selection_digest)))
+    if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || (!reusesSavedQuestion(detached.action) && detached.admission.selection_digest !== detached.selection_digest)))
       fail("history_operation_conflict")
     if (
       detached.state === "refused" &&
@@ -1417,7 +1417,7 @@ export const saveHistoryTurnRecovery = async (
         detached.result_text ||
         detached.outcome ||
         detached.settled_message_id ||
-        (detached.persistence === "server" && detached.action !== "regenerate" && detached.input_images?.length))
+        (detached.persistence === "server" && !reusesSavedQuestion(detached.action) && detached.input_images?.length))
     )
       fail("history_operation_conflict")
 
@@ -1533,7 +1533,7 @@ export const loadHistoryTurnRecoveries = async (
     )
     const entries = owned.flatMap(record => Object.values(record.pending_turns ?? {}).map(turn => {
         const { action, ...ordinary } = turn
-        if (action !== undefined && action !== "edit_resend" && action !== "regenerate") fail("unsupported_history_action")
+        if (action !== undefined && !HISTORY_TURN_ACTIONS.has(action)) fail("unsupported_history_action")
         return { scope: { profile_id: record.profile_id, client_session_id: record.client_session_id },
           turn: { ...ordinary, ...(action ? { action } : {}) } }
       }))

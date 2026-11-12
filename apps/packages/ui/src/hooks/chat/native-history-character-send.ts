@@ -46,7 +46,8 @@ import {
   nativeEditResendView,
   nativeRegenerateView,
   nativeRegenerationMessage,
-  parseNativeRegenerationAdmission
+  parseNativeRegenerationAdmission,
+  unsupportedSavedReplyActionCode
 } from "@/services/chat-history-selection"
 import {
   tldwClient,
@@ -159,7 +160,7 @@ export const sendNativeHistoryCharacter = async (
   const explicitAction = editResend ?? regenerate
   if (regenerate && (editResend || params.greetingSeed || params.privateDraft ||
       controller.getCurrent().status !== "ready" || controller.getCurrent().owner?.kind !== "native"))
-    throw new Error("unsupported_history_regeneration")
+    throw new Error(unsupportedSavedReplyActionCode(regenerate))
   const greetingSeed = params.greetingSeed ? structuredClone(params.greetingSeed) : undefined
   const privateHandle = params.privateDraft ? structuredClone(params.privateDraft.handle) : undefined
   if (privateHandle && (!isChatDraftHandle(privateHandle) || privateHandle.address.kind !== "fresh" || privateHandle.address.temporary))
@@ -683,7 +684,8 @@ export const sendNativeHistoryCharacter = async (
       state: HistoryTurnRecovery["state"]
     ): HistoryTurnRecovery => ({
       operation_id: operationId,
-      ...(editResend ? { action: "edit_resend" as const } : regenerate ? { action: "regenerate" as const } : {}),
+      ...(editResend ? { action: "edit_resend" as const }
+        : regenerate ? { action: regenerate.action === "continue" ? "continue" as const : "regenerate" as const } : {}),
       persistence: "server",
       origin_view: view,
       owner_key: view.owner_key,

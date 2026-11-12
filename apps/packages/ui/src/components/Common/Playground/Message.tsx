@@ -255,6 +255,12 @@ type Props = {
   onRegenerate: () => void
   regenerateDisabledReason?: string | null
   /**
+   * Why Continue can't run on this reply (CM-01). A surface whose one reason
+   * covers every generation (for example an unavailable persona) can omit it;
+   * Continue then uses `regenerateDisabledReason`.
+   */
+  continueDisabledReason?: string | null
+  /**
    * This reply's Continue and Retry run on the server's saved reply (D7), so its
    * recorded output-limit or interrupted status may offer them (CM-03).
    */
@@ -1777,6 +1783,8 @@ const PlaygroundMessageImpl = (props: Props) => {
       props.onRegenerate()
     }, true)
   }, [apiProviderOverride, props.onRegenerate, t, updateChatModelSetting, runResponseRecovery])
+  const continueDisabledReason =
+    props.continueDisabledReason === undefined ? props.regenerateDisabledReason : props.continueDisabledReason
   const errorRecoveryActions = React.useMemo(() => {
     if (!errorPayload || responseRecoveryBusy) return []
     const actions: ResponseRecoveryAction[] = [
@@ -1814,7 +1822,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.continueFromPartial",
           "Continue from partial"
         ),
-        disabledReason: props.regenerateDisabledReason,
+        disabledReason: continueDisabledReason,
         onClick: () => runResponseRecovery(() => props.onContinue?.(), true)
       })
     }
@@ -1855,6 +1863,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.onContinue,
     props.onRegenerate,
     props.regenerateDisabledReason,
+    continueDisabledReason,
     t
   ])
   const interruptionRecoveryActions = React.useMemo(() => {
@@ -1890,7 +1899,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.continueFromPartial",
           "Continue from partial"
         ),
-        disabledReason: props.regenerateDisabledReason,
+        disabledReason: continueDisabledReason,
         onClick: () => runResponseRecovery(() => props.onContinue?.(), true)
       })
     }
@@ -1907,6 +1916,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.onContinue,
     props.onRegenerate,
     props.regenerateDisabledReason,
+    continueDisabledReason,
     t
   ])
 
@@ -1917,6 +1927,7 @@ const PlaygroundMessageImpl = (props: Props) => {
         : incompleteReplyRecoveryActions({
             t: (key, fallback) => t(key, fallback) as string,
             disabledReason: props.regenerateDisabledReason,
+            continueDisabledReason,
             onRetry: () => runResponseRecovery(props.onRegenerate, true),
             onSwitchModel: () => runResponseRecovery(handleOpenModelSettings),
             onContinue: props.onContinue && !props.hideContinue
@@ -1924,7 +1935,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           }),
     [liveOutputLimited, recordedIncomplete, isLastMessage, errorPayload, responseRecoveryBusy, runResponseRecovery,
       handleOpenModelSettings, props.hideContinue, props.onContinue, props.onRegenerate,
-      props.regenerateDisabledReason, t]
+      props.regenerateDisabledReason, continueDisabledReason, t]
   )
 
   const emptyResponseRecoveryActions = React.useMemo(

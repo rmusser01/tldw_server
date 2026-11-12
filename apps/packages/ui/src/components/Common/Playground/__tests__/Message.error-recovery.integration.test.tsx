@@ -564,6 +564,25 @@ describe("PlaygroundMessage error recovery integration", () => {
   })
 
   it.each([
+    ["an output-limited", { generationInfo: { finish_reason: "length" } }],
+    ["an interrupted", { generationInfo: { interrupted: true } }]
+  ])("CM-01 gives Continue on %s reply its own disabled reason, not Regenerate's", (_label, props) => {
+    const regenerateReason = "This saved reply can't be regenerated here."
+    const view = render(
+      <PlaygroundMessage {...baseProps} {...props} regenerateDisabledReason={regenerateReason} continueDisabledReason={null} />
+    )
+    expect(screen.getByRole("button", { name: "Retry same model" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Continue from partial" })).toBeEnabled()
+    const continueReason = "This saved reply can't be continued here."
+    view.rerender(
+      <PlaygroundMessage {...baseProps} {...props} regenerateDisabledReason={null} continueDisabledReason={continueReason} />
+    )
+    expect(screen.getByRole("button", { name: "Continue from partial" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Continue from partial" })).toHaveAttribute("title", continueReason)
+    expect(screen.getByRole("button", { name: "Retry same model" })).toBeEnabled()
+  })
+
+  it.each([
     ["a complete reply", { isBot: true, generationInfo: { finish_reason: "stop" } }],
     ["a user message", { isBot: false, role: "user" as const, generationInfo: { finish_reason: "length" } }],
     ["a saved reply with its own status", { generationInfo: { finish_reason: "length" }, metadataExtra: { generation_status: "complete" } }]

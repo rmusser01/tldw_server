@@ -1660,6 +1660,18 @@ it("confirmed saved-image regeneration refusal keeps the exact original attachme
   await history.saveHistoryTurnRecovery(bookmark, origin, { ...pending, state: "refused" })
   expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject({ ...pending, state: "refused" })
 })
+it("a native Continue recovery keeps its own action, like a regeneration", async () => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  origin.cursor = { kind: "after_message", message_id: "original-assistant" }
+  const pending = { ...regenerationRecovery(origin), action: "continue" as const }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const accepted = { ...pending, input_id: "original-input", state: "accepted_unsent" as const, admission: { version: 1 as const,
+    owner_key: owner.owner_key, conversation_id: "chat", input_message_id: "original-input", input_message_revision: "1", selection_digest: "ORIGINAL ADMISSION" } }
+  await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+  expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject(accepted)
+  const client = { ...pending, operation_id: "client-continue", persistence: "client" as const, input_id: "u", assistant_id: "a" }
+  await expect(history.saveHistoryTurnRecovery(bookmark, origin, client)).rejects.toThrow("unsupported_history_action")
+})
 it.each(["client", "before_message"])("regeneration recovery refuses unsupported %s persistence or boundary", async boundary => {
   const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
   origin.cursor = { kind: boundary === "client" ? "after_message" : "before_message", message_id: "original-assistant" }

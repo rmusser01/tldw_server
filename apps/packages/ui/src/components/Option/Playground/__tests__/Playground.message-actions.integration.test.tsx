@@ -411,6 +411,17 @@ describe("native admitted continuation through the actual Playground", { timeout
     })
   })
 
+  it("CM-01 keeps an unconfirmed Continue for review in Continue's own words", async () => {
+    const { view } = await renderWithAdmittedExchange()
+    view.server.planCompletion({ status: 500 })
+    await withUnhandledRejectionsRecorded(async () => {
+      await clickContinue(view)
+      await waitFor(() => expect(screen.getByText("Continued reply unconfirmed")).toBeInTheDocument(), HARNESS_WAIT)
+      expect(screen.getByText(/before continuing again/)).toBeInTheDocument()
+      expect(screen.queryByText(/New reply unconfirmed|before regenerating again/)).toBeNull()
+    })
+  })
+
   it("CM-01 explains a refused Continue in plain words and keeps the saved reply", async () => {
     const view = await renderWithSavedChat()
     await withUnhandledRejectionsRecorded(async () => {

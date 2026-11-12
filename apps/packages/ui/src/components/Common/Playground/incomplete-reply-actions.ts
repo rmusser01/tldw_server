@@ -15,13 +15,16 @@ export type IncompleteReplyAction = {
 export const incompleteReplyRecoveryActions = ({
   t,
   disabledReason,
+  continueDisabledReason = disabledReason,
   onRetry,
   onSwitchModel,
   onContinue
 }: {
   t: (key: string, fallback: string) => string
-  /** Why Retry and Continue cannot run on this reply right now. */
+  /** Why Retry cannot run on this reply right now. */
   disabledReason?: string | null
+  /** Why Continue cannot run on this reply right now; defaults to Retry's reason. */
+  continueDisabledReason?: string | null
   onRetry: () => void
   onSwitchModel: () => void
   /** Omitted where the reply cannot be continued. */
@@ -32,7 +35,7 @@ export const incompleteReplyRecoveryActions = ({
     actions.push({
       id: "continue",
       label: t("playground:errorRecovery.continueFromPartial", "Continue from partial"),
-      disabledReason,
+      disabledReason: continueDisabledReason,
       onClick: onContinue
     })
   actions.push(

@@ -1402,6 +1402,7 @@ export const PlaygroundChat = ({
                 totalMessages={messages.length}
                 onRegenerate={regenerateLastMessage}
                 regenerateDisabledReason={regenerateDisabledReason ?? savedReplyRegenerateUnavailableReason(savedReplyActions.regenerate, t)}
+                continueDisabledReason={regenerateDisabledReason}
                 savedStatusActions={savedStatusActions}
                 onRegenerateImage={(payload) => {
                   void handleRegenerateGeneratedImage(payload)
