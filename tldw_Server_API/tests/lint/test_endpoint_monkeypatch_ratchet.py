@@ -77,7 +77,7 @@ PATCHES = _ceilings.Ratchet(
     ),
     stale="No test patches this endpoint module any more.",
 )
-SEED: dict[str, int] = {"monkeypatch": 5810, "other": 937}  # dev as merged into PR A (3c91d1a279)
+SEED: dict[str, int] = {"monkeypatch": 5823, "other": 937}  # dev as merged into PR A (6623522447)
 EXIT_TARGET = SEED["monkeypatch"] * 55 // 100
 
 
