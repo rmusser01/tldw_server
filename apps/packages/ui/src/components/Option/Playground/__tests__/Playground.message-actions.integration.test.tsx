@@ -369,7 +369,7 @@ const moreActions = async (view: Awaited<ReturnType<typeof renderPlayground>>) =
 
 const clickContinue = async (view: Awaited<ReturnType<typeof renderPlayground>>) => {
   await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "More actions" }))
-  await view.user.click(await screen.findByRole("button", { name: "Continue Response" }, HARNESS_WAIT))
+  await view.user.click(await screen.findByRole("menuitem", { name: "Continue Response" }, HARNESS_WAIT))
 }
 
 describe("native admitted continuation through the actual Playground", { timeout: 60_000 }, () => {
@@ -426,7 +426,7 @@ describe("native admitted continuation through the actual Playground", { timeout
       await waitForChatIdle()
       expect(screen.queryByText(/New reply unconfirmed|New reply refused/)).toBeNull()
       await moreActions(view)
-      expect(screen.queryByRole("button", { name: "Continue Response" })).toBeNull()
+      expect(screen.queryByRole("menuitem", { name: "Continue Response" })).toBeNull()
       expect(view.server.completionRequests()).toHaveLength(1)
     })
   })
@@ -458,8 +458,8 @@ describe("saved-reply action availability (CM-01)", { timeout: 60_000 }, () => {
     expect(regenerate).toBeDisabled()
     expect(regenerate).toHaveAttribute("title", expect.stringMatching(/can't be regenerated here.*New Branch/))
     await moreActions(view)
-    expect(screen.queryByRole("button", { name: "Continue Response" })).toBeNull()
-    expect(screen.getByRole("button", { name: "New Branch" })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: "Continue Response" })).toBeNull()
+    expect(screen.getByRole("menuitem", { name: "New Branch" })).toBeInTheDocument()
     const rail = screen.getByTestId("playground-runtime-inspector")
     expect(within(rail).getByRole("button", { name: "Regenerate last response", hidden: true })).toBeDisabled()
     expect(rail).toHaveTextContent(/can't be regenerated here/)

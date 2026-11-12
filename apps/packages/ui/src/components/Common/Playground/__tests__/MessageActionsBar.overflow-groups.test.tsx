@@ -111,7 +111,7 @@ describe("MessageActionsBar overflow menu", () => {
       />
     )
 
-    const actions = within(menu()).getAllByRole("button")
+    const actions = within(menu()).getAllByRole("menuitem")
     expect(actions.length).toBeGreaterThan(8)
     for (const action of actions) {
       expect(action.querySelector("svg"), action.textContent ?? "").not.toBeNull()
@@ -125,7 +125,7 @@ describe("MessageActionsBar overflow menu", () => {
       "Make this shorter",
       "Explain this"
     ]) {
-      expect(within(menu()).getByRole("button", { name: label })).toBeInTheDocument()
+      expect(within(menu()).getByRole("menuitem", { name: label })).toBeInTheDocument()
     }
   })
 
@@ -140,7 +140,7 @@ describe("MessageActionsBar overflow menu", () => {
       />
     )
 
-    const readAloud = within(menu()).getByRole("button", { name: "Read Aloud" })
+    const readAloud = within(menu()).getByRole("menuitem", { name: "Read Aloud" })
     expect(readAloud).toBeDisabled()
     expect(readAloud).toHaveAccessibleDescription(reason)
     expect(within(menu()).getByText(reason)).toBeVisible()
