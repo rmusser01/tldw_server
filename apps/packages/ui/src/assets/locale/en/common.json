@@ -780,6 +780,7 @@
     "goToCharacters": "Go to Characters",
     "toggleChatWithPage": "Toggle chat with current page",
     "searchThread": "Search this conversation",
+    "switchModel": "Switch model",
     "toggleArtifacts": "Toggle artifacts panel (when available)",
     "toggleCompare": "Toggle compare mode (when enabled)",
     "toggleModes": "Open mode launcher",

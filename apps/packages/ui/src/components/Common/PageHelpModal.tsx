@@ -348,6 +348,10 @@ export function PageHelpModal({
                   keys: `${modKey} + F`
                 },
                 {
+                  label: t("common:shortcuts.switchModel", "Switch model"),
+                  keys: `${modKey} + E`
+                },
+                {
                   label: t(
                     "common:shortcuts.toggleArtifacts",
                     "Toggle artifacts panel (when available)"

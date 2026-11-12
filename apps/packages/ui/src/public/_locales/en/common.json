@@ -2056,6 +2056,9 @@
   "shortcuts_searchThread": {
     "message": "Search this conversation"
   },
+  "shortcuts_switchModel": {
+    "message": "Switch model"
+  },
   "shortcuts_toggleArtifacts": {
     "message": "Toggle artifacts panel (when available)"
   },

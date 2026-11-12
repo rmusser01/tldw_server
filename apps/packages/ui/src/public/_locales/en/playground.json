@@ -2105,6 +2105,9 @@
   "composer_slashGenerateImageDescDefault": {
     "message": "Generate an image (default: {{backend}}). Use /generate-image:<provider> to override."
   },
+  "composer_slashModelDesc": {
+    "message": "Choose the model for this chat"
+  },
   "imageBackend_menuLabel": {
     "message": "Default image provider"
   },
