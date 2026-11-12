@@ -4,10 +4,10 @@
  * local-only and temporary chats have no address of their own.
  *
  * Opening a chat from the sidebar, a note or the command palette navigates to
- * that address. Switching from one saved chat to another adds a history entry
- * so Back returns to the previous chat; filling in the address of a chat that
- * had none (a restored session, a new chat's first saved turn) replaces the
- * current entry instead.
+ * that address, and New chat navigates to the bare chat page. Leaving a saved
+ * chat this way adds a history entry so Back returns to it; filling in the
+ * address of a chat that had none (a restored session, a new chat's first
+ * saved turn) replaces the current entry instead.
  */
 import { normalizeCharacterChatSessionId } from "@/utils/character-chat-mode-intent"
 import {
@@ -135,7 +135,8 @@ export const buildServerChatPath = (chatId: string, chatPath = "/chat"): string 
 type MountedChatRoute = { namesChat: boolean }
 
 let mountedChatRoute: MountedChatRoute | null = null
-let pendingRouteChatId: string | null = null
+/** The chat a planned navigation opens; `chatId: null` is New chat's bare chat page. */
+let pendingRoute: { chatId: string | null } | null = null
 
 /** The chat page reports the chat its current address names while it is mounted. */
 export const reportMountedChatRoute = (route: MountedChatRoute | null) => {
@@ -143,32 +144,35 @@ export const reportMountedChatRoute = (route: MountedChatRoute | null) => {
 }
 
 /**
- * Plan the navigation that opens `chatId` on the chat page. The chat page's
- * address sync leaves the URL alone until this navigation lands, so a slow
- * router (Next.js) does not record the chat twice.
+ * Plan the navigation that opens `chatId` on the chat page, or the bare chat
+ * page for New chat (`null`). The chat page's address sync leaves the URL
+ * alone until this navigation lands, so a slow router (Next.js) does not
+ * record the chat twice, and its in-place rewrite cannot cancel New chat's
+ * history entry.
  */
 export const planServerChatNavigation = (
-  chatId: string,
+  chatId: string | null,
   chatPath = "/chat"
 ): { to: string; replace: boolean } => {
-  pendingRouteChatId = chatId
+  pendingRoute = { chatId }
   return {
-    to: buildServerChatPath(chatId, chatPath),
+    to: chatId === null ? chatPath : buildServerChatPath(chatId, chatPath),
     // From a chat page with no chat in its address there is nothing to go Back to.
     replace: mountedChatRoute !== null && !mountedChatRoute.namesChat
   }
 }
 
-/** True while a navigation to `chatId` planned above has not landed yet. */
+/** True while a navigation to `chatId` (null: the bare chat page) planned above has not landed yet. */
 export const isServerChatNavigationPending = (chatId: string | null): boolean =>
-  chatId !== null && pendingRouteChatId === chatId
+  pendingRoute !== null && pendingRoute.chatId === chatId
 
+/** A location naming `routeChatId` (null: no chat) arrived. */
 export const settleServerChatNavigation = (routeChatId: string | null) => {
-  if (routeChatId !== null && pendingRouteChatId === routeChatId) pendingRouteChatId = null
+  if (pendingRoute !== null && pendingRoute.chatId === routeChatId) pendingRoute = null
 }
 
 /** Test seam: forget module state between tests. */
 export const resetServerChatRouteState = () => {
   mountedChatRoute = null
-  pendingRouteChatId = null
+  pendingRoute = null
 }

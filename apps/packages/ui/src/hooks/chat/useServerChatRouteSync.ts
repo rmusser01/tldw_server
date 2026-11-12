@@ -21,8 +21,9 @@ import {
  * - When the address changes (Back, Forward, a pasted `/chat?chat=<id>` link)
  *   and names another chat, open that chat.
  * - When the open chat changes without a navigation (a restored session, a new
- *   chat's first saved turn, New chat, a chat the server no longer has),
- *   rewrite the address in place so reloading reopens what is on screen.
+ *   chat's first saved turn, a chat the server no longer has), rewrite the
+ *   address in place so reloading reopens what is on screen. New chat plans
+ *   its own navigation, which adds a history entry.
  *
  * Character chat routes (`?mode=character`) keep their own address handling.
  */
@@ -47,8 +48,8 @@ export const useServerChatRouteSync = () => {
     handledLocationKey.current = location.key
     if (characterRoute) return
     const state = useStoreMessageOption.getState()
+    if (locationChanged) settleServerChatNavigation(routeChatId)
     if (locationChanged && routeChatId) {
-      settleServerChatNavigation(routeChatId)
       if (routeChatId === state.serverChatId) return
       const opened = selectServerChat(
         { id: routeChatId } as ServerChatSummary,

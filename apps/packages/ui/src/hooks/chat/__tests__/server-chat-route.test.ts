@@ -54,6 +54,14 @@ describe("chat page addresses (XP-05)", () => {
     expect(planServerChatNavigation("chat-b").replace).toBe(false)
   })
 
+  it("plans New chat as a history entry of its own when it leaves a saved chat (#3119)", () => {
+    reportMountedChatRoute({ namesChat: true })
+    expect(planServerChatNavigation(null)).toEqual({ to: "/chat", replace: false })
+    expect(isServerChatNavigationPending(null)).toBe(true)
+    settleServerChatNavigation(null)
+    expect(isServerChatNavigationPending(null)).toBe(false)
+  })
+
   it("holds the address sync until the planned navigation lands", () => {
     planServerChatNavigation("chat-b")
     expect(isServerChatNavigationPending("chat-b")).toBe(true)
