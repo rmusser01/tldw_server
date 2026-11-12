@@ -4068,7 +4068,6 @@ export const SidepanelForm = ({
                               className="flex min-w-0 flex-wrap items-center gap-2">
                               {/* L15: gap-2 provides visual separation */}
                               <>
-                                {!primaryAction.showStop ? (
                                   <>
                                     <Tooltip
                                       title={t("playground:actions.upload", "Attach image")}
@@ -4206,7 +4205,7 @@ export const SidepanelForm = ({
                                       </button>
                                     </Tooltip>
                                   </>
-                                ) : (
+                                {primaryAction.showStop && (
                                   <Tooltip title={t("tooltip.stopStreaming")}>
                                     <button
                                       type="button"
@@ -4732,7 +4731,6 @@ export const SidepanelForm = ({
                           "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                         const v5InlineSlot = (
                           <>
-                            {!primaryAction.showStop ? (
                               <>
                                 <Tooltip
                                   title={t(
@@ -4884,7 +4882,7 @@ export const SidepanelForm = ({
                                   </button>
                                 </Tooltip>
                               </>
-                            ) : (
+                            {primaryAction.showStop && (
                               <Tooltip title={t("tooltip.stopStreaming")}>
                                 <button
                                   type="button"
