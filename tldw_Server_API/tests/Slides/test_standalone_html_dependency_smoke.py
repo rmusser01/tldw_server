@@ -6,7 +6,7 @@ from tldw_Server_API.app.core.Slides.standalone_html_validator import validate_s
 
 def test_direct_parser_dependencies_and_accepted_html_css_path() -> None:
     assert html5lib.__version__ == "1.1"
-    assert tinycss2.__version__ == "1.4.0"
+    assert tinycss2.__version__ == "1.5.1"
 
     result = validate_standalone_html(
         "<!doctype html><html><head><meta charset=utf-8><title>Smoke</title>"
