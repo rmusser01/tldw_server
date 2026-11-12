@@ -6,7 +6,7 @@ import { useStoreMessageOption } from "@/store/option"
 import {
   historyHandoffState,
   isAddressableServerChatId,
-  isCharacterChatRouteSearch,
+  isCharacterChatRouteLocation,
   isServerChatNavigationPending,
   readServerChatRouteId,
   reportMountedChatRoute,
@@ -26,7 +26,8 @@ import {
  *   address in place so reloading reopens what is on screen. New chat plans
  *   its own navigation, which adds a history entry.
  *
- * Character chat routes (`?mode=character`) keep their own address handling.
+ * Character chat routes (`?mode=character`, also in a hash route) keep their
+ * own address handling.
  */
 export const useServerChatRouteSync = () => {
   const location = useLocation()
@@ -36,7 +37,7 @@ export const useServerChatRouteSync = () => {
   const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
   const search = location.search ?? ""
   const routeChatId = readServerChatRouteId(search)
-  const characterRoute = isCharacterChatRouteSearch(search)
+  const characterRoute = isCharacterChatRouteLocation(search, location.hash)
   const handledLocationKey = React.useRef<string | null>(null)
   // Bumped when a planned navigation is given up, to write the address then.
   const [plannedNavigationExpiry, setPlannedNavigationExpiry] = React.useState(0)

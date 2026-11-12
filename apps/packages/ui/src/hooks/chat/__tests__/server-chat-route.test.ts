@@ -3,6 +3,7 @@ import {
   buildServerChatPath,
   historyHandoffState,
   isAddressableServerChatId,
+  isCharacterChatRouteLocation,
   isCharacterChatRouteSearch,
   isServerChatNavigationPending,
   PLANNED_CHAT_NAVIGATION_TIMEOUT_MS,
@@ -40,6 +41,14 @@ describe("chat page addresses (XP-05)", () => {
   it("leaves character chat routes to the character intent", () => {
     expect(isCharacterChatRouteSearch("?mode=character&chatId=abc")).toBe(true)
     expect(isCharacterChatRouteSearch("?chat=abc")).toBe(false)
+  })
+
+  // The Playground also reads a character intent from a hash route outside a
+  // hash router (/options.html?keep=1#/chat?mode=character&...).
+  it("leaves a character chat route carried in the hash to the character intent", () => {
+    expect(isCharacterChatRouteLocation("?keep=1", "#/chat?mode=character&characterId=5&chatId=robot")).toBe(true)
+    expect(isCharacterChatRouteLocation("?mode=character", "")).toBe(true)
+    expect(isCharacterChatRouteLocation("?chat=abc", "#anchor")).toBe(false)
   })
 
   it("adds a history entry when switching from one saved chat to another", () => {

@@ -29,6 +29,22 @@ export const readServerChatRouteId = (search: string | null | undefined): string
 export const isCharacterChatRouteSearch = (search: string | null | undefined): boolean =>
   toSearchParams(search).get("mode")?.trim().toLowerCase() === "character"
 
+/**
+ * A character chat route in the location's query, or in a hash route outside
+ * a hash router (`/options.html#/chat?mode=character&...`), which the
+ * Playground's character intent also reads.
+ */
+export const isCharacterChatRouteLocation = (
+  search: string | null | undefined,
+  hash: string | null | undefined
+): boolean => {
+  const hashQueryStart = (hash ?? "").indexOf("?")
+  return (
+    isCharacterChatRouteSearch(search) ||
+    (hashQueryStart >= 0 && isCharacterChatRouteSearch((hash ?? "").slice(hashQueryStart)))
+  )
+}
+
 /** The one-shot history handoff a link may carry; the Playground consumes it. */
 export const HISTORY_SELECTION_HANDOFF_PARAM = "historySelection"
 
