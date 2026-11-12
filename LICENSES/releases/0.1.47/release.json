@@ -4,7 +4,7 @@
   "product_version": "0.1.47",
   "repository": "https://github.com/rmusser01/tldw_server",
   "source_url": "https://github.com/rmusser01/tldw_server/tree/v0.1.47",
-  "protected_source_revision": "04905e02eafc34f3b8d82d30e013a81c660028d0",
+  "protected_source_revision": "d326a6c9da0b1a923b3d2fce1e10f0af32ae7c02",
   "release_date": "2026-11-12",
   "countdown_start": "2028-11-12T12:00:00Z",
   "protected_paths": [
@@ -28,7 +28,7 @@
   },
   "protected_file_manifest": {
     "path": "LICENSES/releases/0.1.47/protected-files.sha256",
-    "sha256": "ffb6d7dd105e036ed43e2e17c377cb909659e9c135d438ae76e27f39a424a8a4"
+    "sha256": "5b49f1ed305b8d6d23f6fbb1d56a8c6498fbb3694e28e2d48d30a3aff58c114d"
   },
   "required_notices": [
     "LICENSE",
@@ -42,7 +42,7 @@
     "protected_source_snapshot": {
       "manifest": "LICENSES/releases/0.1.47/protected-files.sha256",
       "result": "verified",
-      "source_revision": "04905e02eafc34f3b8d82d30e013a81c660028d0"
+      "source_revision": "d326a6c9da0b1a923b3d2fce1e10f0af32ae7c02"
     },
     "protected_binaries": {
       "published": false,
