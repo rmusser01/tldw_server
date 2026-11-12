@@ -2198,6 +2198,12 @@
   "codeCopied": {
     "message": "Copied"
   },
+  "copyFailed": {
+    "message": "Couldn't copy"
+  },
+  "copyFailedHint": {
+    "message": "Select the text and copy it with Ctrl+C (⌘C on a Mac)."
+  },
   "table_scrollForMore": {
     "message": "Scroll for more columns →"
   },

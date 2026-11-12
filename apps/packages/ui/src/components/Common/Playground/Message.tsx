@@ -32,6 +32,7 @@ import { PlaygroundUserMessageBubble } from "./PlaygroundUserMessage"
 import { resolveAssistantDisplayName, USER_TURN_TINT_STYLE } from "./turn-presentation"
 import { DocumentProcessingTurn } from "./DocumentProcessingTurn"
 import { copyToClipboard } from "@/utils/clipboard"
+import { useCopyFeedback } from "@/components/Common/useCopyFeedback"
 import { ChatDocuments } from "@/models/ChatTypes"
 import { buildChatTextClass } from "@/utils/chat-style"
 import { highlightText } from "@/utils/text-highlight"
@@ -450,7 +451,7 @@ const arePlaygroundMessagePropsEqual = (prev: Props, next: Props): boolean => {
 const PlaygroundMessageImpl = (props: Props) => {
   const [sourcesExpanded, setSourcesExpanded] = useState<boolean | null>(null)
   const articleRef = useRef<HTMLElement | null>(null)
-  const [isBtnPressed, setIsBtnPressed] = React.useState(false)
+  const copyFeedback = useCopyFeedback(2000)
   const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
   const editMode = editPresentation !== null
   const [checkWideMode] = useStorage("checkWideMode", false)
@@ -1317,17 +1318,14 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.isBot
   ])
 
+  const runCopy = copyFeedback.run
   const handleCopy = React.useCallback(async () => {
-    await copyToClipboard({
+    const copied = await runCopy(() => copyToClipboard({
       text: errorFriendlyText || props.message,
       formatted: copyAsFormattedText
-    })
-    trackCopy()
-    setIsBtnPressed(true)
-    setTimeout(() => {
-      setIsBtnPressed(false)
-    }, 2000)
-  }, [copyAsFormattedText, errorFriendlyText, props.message, trackCopy])
+    }))
+    if (copied) trackCopy()
+  }, [copyAsFormattedText, errorFriendlyText, props.message, runCopy, trackCopy])
 
   const handleGenerateDocument = React.useCallback(() => {
     if (!props.serverChatId || typeof window === "undefined") return
@@ -1440,15 +1438,11 @@ const PlaygroundMessageImpl = (props: Props) => {
       !errorPayload &&
       !ttsActionDisabled
     ) {
-      await copyToClipboard({
+      const copied = await runCopy(() => copyToClipboard({
         text: props.message,
         formatted: copyAsFormattedText
-      })
-      trackCopy()
-      setIsBtnPressed(true)
-      setTimeout(() => {
-        setIsBtnPressed(false)
-      }, 2000)
+      }))
+      if (copied) trackCopy()
     }
   }
 
@@ -3192,7 +3186,8 @@ const PlaygroundMessageImpl = (props: Props) => {
               isSpeaking={isSpeaking}
               onToggleTts={handleToggleTts}
               hideCopy={props.hideCopy}
-              copyPressed={isBtnPressed}
+              copyPressed={copyFeedback.copied}
+              copyFailed={copyFeedback.failed}
               onCopy={handleCopy}
               canReply={canReply}
               onReply={handleReply}

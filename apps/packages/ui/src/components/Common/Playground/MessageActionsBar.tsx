@@ -33,6 +33,7 @@ import {
   Trash2
 } from "lucide-react"
 import { IconButton } from "../IconButton"
+import { CopyStatus, useCopyFailedHint } from "../CopyStatus"
 import { GenerationInfo } from "./GenerationInfo"
 import { FeedbackButtons } from "@/components/Sidepanel/Chat/FeedbackButtons"
 import type { FeedbackThumb } from "@/store/feedback"
@@ -137,6 +138,8 @@ type MessageActionsBarProps = {
   onToggleTts: () => void
   hideCopy?: boolean
   copyPressed: boolean
+  /** The last copy failed; the bar says so and keeps the copy icon. */
+  copyFailed?: boolean
   onCopy: () => void | Promise<void>
   canReply: boolean
   onReply: () => void
@@ -203,6 +206,7 @@ export function MessageActionsBar({
   onToggleTts,
   hideCopy,
   copyPressed,
+  copyFailed = false,
   onCopy,
   canReply,
   onReply,
@@ -268,6 +272,7 @@ export function MessageActionsBar({
       actionMenuOpenRef.current && actionMenuRef.current === menu && menu.isConnected)
   }, [overflowOpen])
   const showLeftFeedback = !editMode && showFeedbackControls
+  const copyFailedHint = useCopyFailedHint()
 
   // Build overflow menu items, grouped: reuse · role-play steering ·
   // transform · listen/feedback/pin · delete, with dividers between groups.
@@ -583,7 +588,7 @@ export function MessageActionsBar({
           <div className="flex flex-wrap items-center gap-1">
             {/* Primary actions: Copy, Edit, Regenerate */}
             {!hideCopy && (
-              <Tooltip title={t("copyToClipboard")}>
+              <Tooltip title={copyFailed ? copyFailedHint : t("copyToClipboard")}>
                 <IconButton
                   ariaLabel={t("copyToClipboard") as string}
                   onClick={() => { void onCopy() }}
@@ -603,6 +608,7 @@ export function MessageActionsBar({
                 </IconButton>
               </Tooltip>
             )}
+            {!hideCopy && <CopyStatus status={copyFailed ? "failed" : copyPressed ? "copied" : "idle"} />}
             {!hideEditAndRegenerate && (
               <Tooltip title={t("edit")}>
                 <IconButton

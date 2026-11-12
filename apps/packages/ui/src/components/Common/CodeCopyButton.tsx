@@ -1,6 +1,7 @@
 import { Tooltip } from "antd"
 import { CopyCheckIcon, CopyIcon } from "lucide-react"
 import type { FC } from "react"
+import { CopyStatus, useCopyFailedHint } from "./CopyStatus"
 import { useCopyFeedback } from "./useCopyFeedback"
 
 type Props = {
@@ -15,7 +16,8 @@ type Props = {
 
 /**
  * Copy button shared by every code block surface (the full CodeBlock and the
- * slim chat toolbar), so copy behaviour and feedback stay identical.
+ * slim chat toolbar), so copy behaviour and feedback stay identical. The
+ * result is announced next to the button, and a failed copy says so.
  */
 export const CodeCopyButton: FC<Props> = ({
   value,
@@ -23,28 +25,27 @@ export const CodeCopyButton: FC<Props> = ({
   copiedLabel,
   className = ""
 }) => {
-  const { copied, copy } = useCopyFeedback()
+  const { status, copied, failed, copy } = useCopyFeedback()
+  const failedHint = useCopyFailedHint()
 
   return (
-    <Tooltip title={label}>
-      <button
-        type="button"
-        onClick={() => {
-          void copy(value)
-        }}
-        aria-label={label}
-        className={`flex items-center gap-1.5 rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${className}`}>
-        {!copied ? (
-          <CopyIcon className="size-4" aria-hidden="true" />
-        ) : (
-          <CopyCheckIcon className="size-4 text-success" aria-hidden="true" />
-        )}
-        {copiedLabel ? (
-          <span aria-live="polite" className="text-[11px] text-success">
-            {copied ? copiedLabel : ""}
-          </span>
-        ) : null}
-      </button>
-    </Tooltip>
+    <span className="inline-flex items-center gap-1.5">
+      <Tooltip title={failed ? failedHint : label}>
+        <button
+          type="button"
+          onClick={() => {
+            void copy(value)
+          }}
+          aria-label={label}
+          className={`flex items-center gap-1.5 rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 ${className}`}>
+          {!copied ? (
+            <CopyIcon className="size-4" aria-hidden="true" />
+          ) : (
+            <CopyCheckIcon className="size-4 text-success" aria-hidden="true" />
+          )}
+        </button>
+      </Tooltip>
+      <CopyStatus status={status} copiedLabel={copiedLabel} />
+    </span>
   )
 }

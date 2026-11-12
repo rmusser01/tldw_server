@@ -436,6 +436,42 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
 })
 
 
+describe("message Copy feedback (G17)", () => {
+  const props: React.ComponentProps<typeof PlaygroundMessage> = {
+    isBot: true, name: "Persona", message: ANSWER, isProcessing: false, isStreaming: false,
+    onEditFormSubmit: vi.fn(), onRegenerate: vi.fn(), currentMessageIndex: 1, totalMessages: 2,
+    conversationInstanceId: SERVER_CHAT_ID
+  }
+
+  const original = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+  const setClipboard = (writeText: unknown) =>
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+  afterEach(() => {
+    if (original) Object.defineProperty(navigator, "clipboard", original)
+    else Reflect.deleteProperty(navigator, "clipboard")
+  })
+
+  it("announces Copied next to the Copy button once the reply is on the clipboard", async () => {
+    const copy = vi.fn().mockResolvedValue(undefined)
+    setClipboard(copy)
+    render(<PlaygroundMessage {...props} />)
+    const button = screen.getByRole("button", { name: "copyToClipboard" })
+    fireEvent.click(button)
+    const copied = await screen.findByText("Copied")
+    expect(copy).toHaveBeenCalledWith(ANSWER)
+    expect(copied.closest('[role="status"]')).not.toBeNull()
+    expect(button).not.toContainElement(copied)
+  })
+
+  it("says the copy failed instead of confirming it", async () => {
+    setClipboard(vi.fn().mockRejectedValue(new Error("Denied")))
+    render(<PlaygroundMessage {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "copyToClipboard" }))
+    expect(await screen.findByText("Couldn't copy")).toBeInTheDocument()
+    expect(screen.queryByText("Copied")).toBeNull()
+  })
+})
+
 describe("rendered research actions after a parent or policy change", () => {
   beforeEach(() => {
     researchState.runs = []
