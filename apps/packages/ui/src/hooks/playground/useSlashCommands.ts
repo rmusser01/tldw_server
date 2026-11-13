@@ -46,6 +46,8 @@ export type UseSlashCommandsParams = {
   currentMessage: string
   /** `/new`: the header's New chat path (`startSavedChat`). */
   onNewChat: () => void
+  /** Drop the open chat's saved draft (a standalone command's own text). */
+  clearSourceDraft?: () => void
 }
 
 export function useSlashCommands({
@@ -57,7 +59,8 @@ export function useSlashCommands({
   imageBackendDefaultTrimmed,
   imageBackendLabel,
   currentMessage,
-  onNewChat
+  onNewChat,
+  clearSourceDraft
 }: UseSlashCommandsParams) {
   const { t } = useTranslation(["playground", "common"])
   const serverOnline = useConnectionStore((state) => state.state.isConnected)
@@ -150,9 +153,9 @@ export function useSlashCommands({
         ),
         keywords: ["clear", "reset", "start"],
         // The header's New chat path (CC-11). The chat changes under the
-        // draft, so nothing after the command is sent.
+        // draft, so nothing is sent; text after `/new` moves to the new chat.
         standalone: true,
-        action: onNewChat
+        action: () => onNewChat()
       },
       {
         id: "slash-prompt",
@@ -163,10 +166,14 @@ export function useSlashCommands({
           "Pick a saved prompt for this chat"
         ),
         keywords: ["prompts", "template", "system"],
-        action: () => {
+        // `/prompt weekly` opens the picker searching "weekly"; nothing is sent.
+        standalone: true,
+        consumesArgument: true,
+        action: (search) => {
           dispatchOpenPromptSelect({
             source: "slash-command",
-            returnFocusSelector: "#textarea-message"
+            returnFocusSelector: "#textarea-message",
+            ...(search?.trim() ? { search: search.trim() } : {})
           })
         }
       }
@@ -340,6 +347,22 @@ export function useSlashCommands({
     [currentMessage, parseImageSlashCommand]
   )
 
+  /**
+   * Run a standalone command (`/new`, `/prompt`). The open chat's saved draft
+   * is cleared first, so the command's own text is not left behind in the
+   * chat it leaves; then the text after the command either goes to the
+   * command or stays in the composer of wherever the command lands.
+   */
+  const runStandaloneCommand = React.useCallback(
+    (command: SlashCommandItem, argument: string, setMessage: (value: string) => void) => {
+      clearSourceDraft?.()
+      setMessage("")
+      command.action?.(argument)
+      setMessage(command.consumesArgument ? "" : argument)
+    },
+    [clearSourceDraft]
+  )
+
   const handleSlashCommandSelect = React.useCallback(
     (command: SlashCommandItem, formSetFieldValue: (field: string, value: string) => void, textareaRef: React.RefObject<HTMLTextAreaElement | null>) => {
       const parsed = parseSlashInput(currentMessage)
@@ -355,13 +378,17 @@ export function useSlashCommands({
         return
       }
       const focusBefore = document.activeElement
-      command.action?.()
-      formSetFieldValue("message", parsed?.remainder || "")
+      if (command.standalone) {
+        runStandaloneCommand(command, parsed?.remainder || "", (value) => formSetFieldValue("message", value))
+      } else {
+        command.action?.()
+        formSetFieldValue("message", parsed?.remainder || "")
+      }
       // A command that moved focus (/model opens the model picker) keeps it.
       if (document.activeElement !== focusBefore) return
       requestAnimationFrame(() => textareaRef.current?.focus())
     },
-    [currentMessage, parseSlashInput]
+    [currentMessage, parseSlashInput, runStandaloneCommand]
   )
 
   return {
@@ -378,6 +405,7 @@ export function useSlashCommands({
     parseSlashCommand,
     resolveSubmissionIntent,
     activeImageCommand,
-    handleSlashCommandSelect
+    handleSlashCommandSelect,
+    runStandaloneCommand
   }
 }

@@ -16,10 +16,12 @@ import {
   waitFor,
   waitForChatIdle
 } from "./harness/playground-harness"
+import React from "react"
 import { fireEvent } from "@testing-library/react"
 import { beforeEach, describe, expect, it } from "vitest"
 import { isMac } from "@/hooks/useKeyboardShortcuts"
 import { useStoreMessageOption } from "@/store/option"
+import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
 
 const MODEL_SETTINGS_TITLE = "Current Chat Model Settings"
 // antd ids are all "test-id" under NODE_ENV=test, so a dialog's
@@ -42,6 +44,21 @@ const typeOneKeyAtATime = async (
     typed += char
     afterEachKey(typed)
   }
+}
+
+// Opens a saved server chat the way the sidebar does, to check the draft it kept.
+const sourceChat = { id: "" }
+const ReopenSourceChat = () => {
+  const select = useSelectServerChat()
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        select({ id: sourceChat.id, title: "First", state: "in-progress", version: 1, source: "webui-chat" } as Parameters<typeof select>[0])
+      }>
+      Reopen source chat
+    </button>
+  )
 }
 
 describe("Playground slash commands", { timeout: 60_000 }, () => {
@@ -156,13 +173,19 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     ])
   })
 
-  it("sends nothing when '/new' is submitted with text after it", async () => {
+  // CC-11 review: '/new' must not leave its own text behind as the draft of
+  // the chat it leaves; text typed after it moves to the new chat.
+  it.each([
+    ["picked from the menu", "/new", ""],
+    ["submitted with text after it", "/new and then this", "and then this"]
+  ])("leaves no command draft in the chat '/new' leaves (%s)", async (_how, typed, carried) => {
     const server = createFakeTldwServer()
-    const view = await renderPlayground({ server })
+    const view = await renderPlayground({ server, extras: <ReopenSourceChat /> })
     await sendFromComposer(view, "First topic question")
+    sourceChat.id = String(useStoreMessageOption.getState().serverChatId)
 
     await view.user.click(view.composer)
-    await view.user.type(view.composer, "/new and then this")
+    await view.user.type(view.composer, typed)
     await view.user.keyboard("{Enter}")
 
     await waitFor(
@@ -172,6 +195,15 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     await waitForChatIdle()
     expect(server.completionRequests()).toHaveLength(1)
     expect(useStoreMessageOption.getState().messages).toEqual([])
+    await waitFor(() => expect(screen.getByTestId("chat-input")).toHaveValue(carried), HARNESS_WAIT)
+
+    // Let the new chat's draft save, then go back to the chat it left.
+    await new Promise((resolve) => setTimeout(resolve, 1_200))
+    await view.user.click(screen.getByRole("button", { name: "Reopen source chat" }))
+    await screen.findByText("First topic question", {}, HARNESS_WAIT)
+    await waitForChatIdle()
+    await new Promise((resolve) => setTimeout(resolve, 1_200))
+    expect(screen.getByTestId("chat-input")).toHaveValue("")
   })
 
   it("opens the prompt picker with '/prompt'", async () => {
@@ -185,6 +217,20 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     expect(await screen.findByPlaceholderText("Search prompts...", {}, HARNESS_WAIT)).toBeInTheDocument()
     expect(view.composer).toHaveValue("")
     expect(server.completionRequests()).toHaveLength(0)
+  })
+
+  it("searches the prompt picker for the text after '/prompt' and sends nothing", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "/prompt weekly review")
+    await view.user.keyboard("{Enter}")
+
+    expect(await screen.findByPlaceholderText("Search prompts...", {}, HARNESS_WAIT)).toHaveValue("weekly review")
+    await waitForChatIdle()
+    expect(server.completionRequests()).toHaveLength(0)
+    expect(view.composer).toHaveValue("")
   })
 
   it("lists the server's chat commands and sends a picked one as typed", async () => {

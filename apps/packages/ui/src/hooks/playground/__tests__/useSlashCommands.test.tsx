@@ -219,6 +219,41 @@ describe("playground useSlashCommands: /new, /prompt and server commands", () =>
     }
   })
 
+  it("clears the chat's saved draft before a standalone command runs, then places the text after it", () => {
+    const calls: string[] = []
+    const { result } = renderHook(() =>
+      useSlashCommands({
+        ...baseParams,
+        onNewChat: () => calls.push("new chat"),
+        clearSourceDraft: () => calls.push("clear source draft")
+      })
+    )
+    const intent = result.current.resolveSubmissionIntent("/new and then this")
+    result.current.runStandaloneCommand(intent.slashCommand!, intent.message, (value) =>
+      calls.push(`message:${value}`)
+    )
+    expect(calls).toEqual(["clear source draft", "message:", "new chat", "message:and then this"])
+  })
+
+  it("passes the text after /prompt to the picker as its search", () => {
+    const opened: CustomEvent[] = []
+    const listener = (event: Event) => opened.push(event as CustomEvent)
+    window.addEventListener(OPEN_PROMPT_SELECT_EVENT, listener)
+    try {
+      const clearSourceDraft = vi.fn()
+      const { result } = renderHook(() => useSlashCommands({ ...baseParams, clearSourceDraft }))
+      const intent = result.current.resolveSubmissionIntent("/prompt weekly review")
+      expect(intent.slashCommand).toMatchObject({ command: "prompt", standalone: true, consumesArgument: true })
+      const messages: string[] = []
+      result.current.runStandaloneCommand(intent.slashCommand!, intent.message, (value) => messages.push(value))
+      expect(clearSourceDraft).toHaveBeenCalledTimes(1)
+      expect(opened[0]?.detail).toMatchObject({ source: "slash-command", search: "weekly review" })
+      expect(messages).toEqual(["", ""])
+    } finally {
+      window.removeEventListener(OPEN_PROMPT_SELECT_EVENT, listener)
+    }
+  })
+
   it("lists the server's chat commands and sends them as typed", async () => {
     commandIo.listChatCommands.mockResolvedValue({
       commands: [
