@@ -1,6 +1,14 @@
-/** Enabled items of a `role="menu"`, in DOM order. */
-const MENU_ITEM_SELECTOR =
-  "[role='menuitem']:not(:disabled):not([aria-disabled='true'])"
+/**
+ * Items of a `role="menu"`, in DOM order. Items marked aria-disabled stay
+ * in the order, so assistive technology reads them and why they are off.
+ */
+const MENU_ITEM_SELECTOR = [
+  "[role='menuitem']",
+  "[role='menuitemcheckbox']",
+  "[role='menuitemradio']"
+]
+  .map((role) => `${role}:not(:disabled)`)
+  .join(", ")
 
 /**
  * Arrow Up/Down (wrapping), Home and End for a menu of focusable menu items,

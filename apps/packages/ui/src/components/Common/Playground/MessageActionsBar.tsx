@@ -41,6 +41,9 @@ import type { GenerationInfo as GenerationInfoType } from "./types"
 import type { MessageSteeringMode } from "@/types/message-steering"
 import type { QuickMessageAction } from "./quick-message-actions"
 
+/** Every focusable kind of menu item; the first one takes focus on open. */
+const MENU_ITEMS = "[role='menuitem']:not(:disabled), [role='menuitemcheckbox']:not(:disabled)"
+
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
 
@@ -68,20 +71,32 @@ const OverflowMenuItem: React.FC<{
   disabledReason?: string | null
   danger?: boolean
   active?: boolean
-}> = ({ icon, label, onClick, disabled, disabledReason, danger, active }) => {
+  /** Makes the item a toggle (menuitemcheckbox) in this state. */
+  checked?: boolean
+}> = ({ icon, label, onClick, disabled, disabledReason, danger, active, checked }) => {
   const reasonId = React.useId()
   const reason = disabled && disabledReason ? disabledReason : null
   return (
     <>
       <button
         type="button"
-        role="menuitem"
-        onClick={onClick}
-        disabled={disabled}
-        aria-disabled={disabled}
+        role={checked === undefined ? "menuitem" : "menuitemcheckbox"}
+        aria-checked={checked}
+        // Roving focus: the arrow keys move between items and Tab leaves.
+        tabIndex={-1}
+        onClick={(event) => {
+          // A disabled item stays focusable, so its reason is read, but does
+          // nothing and leaves the menu open.
+          if (disabled) {
+            event.stopPropagation()
+            return
+          }
+          onClick?.()
+        }}
+        aria-disabled={disabled || undefined}
         aria-describedby={reason ? reasonId : undefined}
         title={reason ?? undefined}
-        className={`flex min-h-[44px] min-w-[44px] w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`flex min-h-[44px] min-w-[44px] w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition hover:bg-surface2 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${
           danger
             ? "text-danger hover:text-danger"
             : active
@@ -268,7 +283,7 @@ export function MessageActionsBar({
   React.useEffect(() => {
     const menu = actionMenuRef.current
     if (!overflowOpen || !menu) return
-    scheduleFocusFirstVisibleElement("[role='menuitem']:not(:disabled)", menu, () =>
+    scheduleFocusFirstVisibleElement(MENU_ITEMS, menu, () =>
       actionMenuOpenRef.current && actionMenuRef.current === menu && menu.isConnected)
   }, [overflowOpen])
   const showLeftFeedback = !editMode && showFeedbackControls
@@ -338,6 +353,7 @@ export function MessageActionsBar({
             )
           }}
           active={messageSteeringMode === "continue_as_user"}
+          checked={onRunSteeredContinue ? undefined : messageSteeringMode === "continue_as_user"}
         />
       )
       steering.push(
@@ -359,6 +375,7 @@ export function MessageActionsBar({
             )
           }}
           active={messageSteeringMode === "impersonate_user"}
+          checked={onRunSteeredContinue ? undefined : messageSteeringMode === "impersonate_user"}
         />
       )
       steering.push(
@@ -370,6 +387,7 @@ export function MessageActionsBar({
             onMessageSteeringForceNarrateChange(!messageSteeringForceNarrate)
           }
           active={messageSteeringForceNarrate}
+          checked={Boolean(messageSteeringForceNarrate)}
         />
       )
       const steeringActive =
@@ -679,13 +697,21 @@ export function MessageActionsBar({
                 aria-label={t("common:moreActions", "More actions") as string}
                 className="flex min-w-[180px] flex-col py-1"
                 onClick={() => changeActionMenu(false)}
+                onBlur={event => {
+                  // Focus left the menu: close it. Clicking the trigger
+                  // toggles it itself; focus lost to nowhere returns to it.
+                  const next = event.relatedTarget
+                  if (next && (event.currentTarget.contains(next) || next === actionTriggerRef.current)) return
+                  changeActionMenu(false)
+                  if (!next) actionTriggerRef.current?.focus()
+                }}
                 onKeyDown={event => {
                   // Arrow, Home and End move between actions (AX-02).
                   if (moveMenuFocus(event.currentTarget, event.key)) {
                     event.preventDefault()
                     return
                   }
-                  if (event.key !== "Escape") return
+                  if (event.key !== "Escape" && event.key !== "Tab") return
                   event.preventDefault()
                   event.stopPropagation()
                   changeActionMenu(false)
