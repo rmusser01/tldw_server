@@ -672,7 +672,13 @@
     "viewTrash": "View Trash",
     "permanentlyDeleted": "Chat permanently deleted.",
     "noSearchMatches": "No chats match “{{query}}”",
-    "clearSearch": "Clear search"
+    "clearSearch": "Clear search",
+    "chatSettings": "Chat settings",
+    "moveToFolder": "Move to folder…",
+    "exportMarkdown": "Markdown",
+    "exportJson": "JSON",
+    "exportSuccess": "Chat exported.",
+    "exportFailed": "Couldn't export this chat. Try again."
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"

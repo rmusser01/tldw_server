@@ -46,6 +46,8 @@ import {
   type SidebarServerChatFilterValue
 } from "@/services/settings/ui-settings"
 import { ServerChatRow } from "./ServerChatRow"
+import { exportServerChat } from "@/services/chat-transcript-export"
+import type { TranscriptFormat } from "@/utils/chat-transcript"
 import { CHAT_RECENCY_GROUP_LABELS, groupChatsByRecency } from "./chat-history-groups"
 import { showMovedToTrashNotice } from "./server-chat-trash-notice"
 import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
@@ -168,6 +170,8 @@ export function ServerChatList({
     [selectedChatIds]
   )
   const [bulkFolderPickerOpen, setBulkFolderPickerOpen] = React.useState(false)
+  // A row's "Move to folder…" reuses the bulk picker for one chat (CS-09).
+  const [folderTargetIds, setFolderTargetIds] = React.useState<string[] | null>(null)
   const [bulkTagPickerOpen, setBulkTagPickerOpen] = React.useState(false)
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] =
     React.useState(false)
@@ -1213,7 +1217,52 @@ export function ServerChatList({
 
   const handleBulkFolderPickerClose = React.useCallback(() => {
     setBulkFolderPickerOpen(false)
+    setFolderTargetIds(null)
   }, [])
+
+  // CS-09: export reads the saved chat from the server, so it works for chats
+  // that have no copy on this device.
+  const handleExportChat = React.useCallback(
+    async (chat: ServerChatHistoryItem, format: TranscriptFormat) => {
+      const action = captureAction([chat.id])
+      if (!action) return
+      try {
+        await exportServerChat(chat.id, format, {
+          title: chat.title,
+          requestScope: action.requestScope
+        })
+        if (action.isCurrent())
+          message.success(t("common:chatSidebar.exportSuccess", "Chat exported."))
+      } catch (error) {
+        console.warn("[chat-sidebar] Could not export the chat", error)
+        if (action.isCurrent())
+          message.error(
+            t("common:chatSidebar.exportFailed", "Couldn't export this chat. Try again.")
+          )
+      }
+    },
+    [captureAction, t]
+  )
+
+  const handleMoveToFolder = React.useCallback(
+    (chat: ServerChatHistoryItem) => {
+      if (folderApiAvailable === false) {
+        message.error(
+          t(
+            "sidepanel:folderPicker.notAvailable",
+            "Folder organization is not available on this server"
+          )
+        )
+        return
+      }
+      const action = captureAction([chat.id])
+      if (!action) return
+      managementAction.current = action
+      setFolderTargetIds([chat.id])
+      setBulkFolderPickerOpen(true)
+    },
+    [captureAction, folderApiAvailable, t]
+  )
 
   const handleBulkTagPickerClose = React.useCallback(() => {
     setBulkTagPickerOpen(false)
@@ -1491,6 +1540,8 @@ export function ServerChatList({
       onRenameChat={handleRenameChat}
       onCreateTable={handleCreateTable}
       onEditTopic={handleEditTopic}
+      onExportChat={handleExportChat}
+      onMoveToFolder={handleMoveToFolder}
       onDeleteChat={isTrashView ? handleHardDeleteChat : handleMoveChatToTrash}
       onRestoreChat={handleRestoreChat}
       onUpdateState={handleUpdateState}
@@ -1737,6 +1788,7 @@ export function ServerChatList({
                     const action = captureAction(selectedConversationIds)
                     if (action) {
                       managementAction.current = action
+                      setFolderTargetIds(null)
                       openBulkFolderPicker()
                     }
                   }}
@@ -1906,9 +1958,9 @@ export function ServerChatList({
           <BulkFolderPickerModal
             open={bulkFolderPickerOpen}
             operation={managementAction.current}
-            conversationIds={selectedConversationIds}
+            conversationIds={folderTargetIds ?? selectedConversationIds}
             onClose={handleBulkFolderPickerClose}
-            onSuccess={clearSelection}
+            onSuccess={folderTargetIds ? undefined : clearSelection}
           />
         )}
         {bulkTagPickerOpen && managementAction.current?.isCurrent() && (

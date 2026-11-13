@@ -31,6 +31,7 @@ import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { watchServerChatLoadAuthority } from "@/services/server-chat-load-authority"
 import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages, resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
+import { serverChatActivePath } from "@/utils/newest-leaf-path"
 import NotesEditorPane from "@/components/Notes/NotesEditorPane"
 import NotesGraphWorkspace from "@/components/Notes/NotesGraphWorkspace"
 import NotesStudioCreateModal from "@/components/Notes/NotesStudioCreateModal"
@@ -2526,7 +2527,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         kind: identity.assistantKind, id: assistantId, name: identity.assistantKind === "persona" ? "Persona" : "Assistant",
         metadata: { selectionMode: "tracked" }
       } : null
-      const mappedMessages = mapServerChatMessagesToPlaygroundMessages({ serverMessages: rows, assistantName: selection?.name || "Assistant", characterId: identity.characterId })
+      // CM-N2: open the chat on its newest path, as the chat page shows it.
+      const mappedMessages = mapServerChatMessagesToPlaygroundMessages({ serverMessages: serverChatActivePath(rows).messages, assistantName: selection?.name || "Assistant", characterId: identity.characterId })
       if (await setSelectedAssistant(selection, { isCurrent }) === false) return
       if (!isCurrent()) return
       stopWatchingChat()

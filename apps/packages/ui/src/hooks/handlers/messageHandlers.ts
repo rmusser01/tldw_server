@@ -5,6 +5,7 @@ import i18n from "i18next"
 import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
 
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
+import { announceNativeBranch, nativeBranchTitle, openNativeChat } from "./fork-lineage"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
 import type { UploadedFile } from "@/db/dexie/types"
 import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
@@ -766,6 +767,10 @@ export const createBranchMessage =
         ? await prepareNativeFork(native, request, { validate_lease: current })
         : await prepareLocalFork(request, { validate_lease: current })
       if (!current()) throw new Error("stale_selection")
+      // CM-12: the branch is named after its parent chat and the message it starts from.
+      const branchTitle = native && request.input.kind === "normal"
+        ? nativeBranchTitle(options.chatTitle, request.input.selection.messages?.length ?? 0)
+        : null
       // Dispatch has begun: a later view change only suppresses application of the actual owner result.
       const result = native
         ? await commitNativeFork(
@@ -774,7 +779,8 @@ export const createBranchMessage =
               candidateChild = childId;
               notifyServerMutation();
               await recordForkCandidate(claim!, childId);
-            }
+            },
+            { title: branchTitle }
           )
         : await commitLocalFork(prepared as Awaited<ReturnType<typeof prepareLocalFork>>);
       observed = result;
@@ -793,10 +799,33 @@ export const createBranchMessage =
         return result;
       const controller = options.historySelection;
       if (!controller) return result;
+      if (native) {
+        const parent = { chatId: native.conversation_id, ownerKey: result.owner_key, scope: native.scope }
+        let opened = false
+        await openNativeChat(controller, { ...parent, chatId: result.child_id }, acceptDraft, options, (childId) => {
+          opened = true
+          options.onOpened?.(childId)
+        })
+        if (opened)
+          announceNativeBranch(options.notification, {
+            branchTitle,
+            parentTitle: options.chatTitle,
+            // Only from the branch it announced: elsewhere the notice no longer applies.
+            backToParent: () => {
+              const live = controller.getCurrent()
+              if (live.owner?.kind !== "native" || live.owner.conversation_id !== result.child_id) return
+              void openNativeChat(controller, parent, captureChatDraftLoad("switch"), options).catch(() =>
+                options.notification.error({
+                  message: i18n.t("playground:historySelection.backToParentFailed", "Couldn't open the original chat"),
+                  description: i18n.t("playground:historySelection.backToParentFailedDetail",
+                    "Open it from the chat list instead.")
+                }))
+            }
+          })
+        return result
+      }
       await controller.loadConversation(
-        native
-          ? { serverChatId: result.child_id, scope: native.scope, isCurrent: acceptDraft.isCurrent }
-          : { historyId: result.child_id, isCurrent: acceptDraft.isCurrent },
+        { historyId: result.child_id, isCurrent: acceptDraft.isCurrent },
         undefined,
         (receipt) => {
           const live = controller.getCurrent()
@@ -804,37 +833,12 @@ export const createBranchMessage =
             live.status !== "ready" ||
             live.owner !== receipt.owner ||
             live.view !== receipt.view ||
-            receipt.owner.kind !== (native ? "native" : "local") ||
+            receipt.owner.kind !== "local" ||
             receipt.owner.conversation_id !== result.child_id ||
             receipt.view.conversation_id !== result.child_id ||
             receipt.view.owner_key !== result.owner_key
           )
             return
-          if (native) {
-            if (
-              receipt.owner.kind !== "native" ||
-              !receipt.owner.validate_lease()
-            )
-              return
-            const expected = native.scope ?? { type: "global" }
-            const actual = receipt.owner.scope ?? { type: "global" }
-            if (
-              actual.type !== expected.type ||
-              (actual.type === "workspace" &&
-                expected.type === "workspace" &&
-                actual.workspaceId !== expected.workspaceId)
-            )
-              return
-            if (!acceptDraft(receipt)) return
-            options.setHistoryId(null)
-            options.setContext?.([])
-            options.setSelectedSystemPrompt?.("")
-            options.setSystemPrompt?.("")
-            options.setServerChatMetaLoaded?.(false)
-            options.setServerChatId?.(result.child_id)
-            options.onOpened?.(result.child_id)
-            return
-          }
           const local = prepared as Awaited<ReturnType<typeof prepareLocalFork>>
           if (!acceptDraft(receipt)) return
           options.setHistory(formatToChatHistory(local.messages))

@@ -19,6 +19,7 @@ import { ImageExportWrapper } from "../Common/ImageExport"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { useStoreMessageOption } from "@/store/option"
 import { trackCompareMetric } from "@/utils/compare-metrics"
+import { downloadTextFile, formatTranscriptMessagesMarkdown } from "@/utils/chat-transcript"
 
 interface MoreOptionsProps {
   messages: Message[]
@@ -141,35 +142,21 @@ const formatAsText = (messages: Message[]) => {
     })
     .join("\n\n")
 }
-const formatAsMarkdown = (messages: Message[]) => {
-  return messages
-    .map((msg) => {
-      let content = `### **${msg.isBot ? removeModelSuffix(`${msg.modelName || msg.name}`?.replaceAll(/accounts\/[^\/]+\/models\//g, "")) : "You"}**:\n\n${msg.message}`
+// The shared transcript format (CS-09), with the model's name on each reply.
+const formatAsMarkdown = (messages: Message[]) =>
+  formatTranscriptMessagesMarkdown(
+    messages.map((msg) => ({
+      role: msg.isBot ? ("assistant" as const) : ("user" as const),
+      content: msg.message,
+      speaker: msg.isBot
+        ? removeModelSuffix(`${msg.modelName || msg.name}`?.replaceAll(/accounts\/[^\/]+\/models\//g, ""))
+        : null,
+      images: msg.images
+    }))
+  )
 
-      if (msg.images && msg.images.length > 0) {
-        const imageMarkdown = msg.images
-          .filter((img) => img.length > 0)
-          .map((img) => `\n\n![Image](${img})`)
-          .join("\n")
-        content += imageMarkdown
-      }
-
-      return content
-    })
-    .join("\n\n")
-}
-
-const downloadFile = (content: string, filename: string) => {
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
-}
+const downloadFile = (content: string, filename: string) =>
+  downloadTextFile(content, filename, "text/plain;charset=utf-8")
 
 const generateChatImage = async (messages: Message[]) => {
   // Lazy-load html2canvas to reduce initial bundle size (~400KB)

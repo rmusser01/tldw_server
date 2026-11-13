@@ -539,7 +539,10 @@
     "folderApplyPartialError": "Some chats could not be added to folders. Your selection is kept so you can try again."
   },
   "contextMenu": {
-    "status": "Status"
+    "status": "Status",
+    "export": "Export",
+    "openMenu": "Chat actions: {{title}}",
+    "exportUnsaved": "This chat isn't saved yet, so there is nothing to export."
   },
   "characterSelect": {
     "label": "Character",

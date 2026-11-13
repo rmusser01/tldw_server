@@ -539,6 +539,37 @@ it.each(["retained-hint", "pre-hint"])("opens a saved canonical Chat after real 
   expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.serverChatId).toBe("verified-chat");
 });
 
+it("verifies a cached branched Chat against its newest path, not every saved alternative (CM-N2)", async () => {
+  prepare(true);
+  useWorkspaceStore.getState().switchWorkspace(TARGET);
+  const serverMessages = [
+    { id: "question", role: "user" as const, content: "Saved question",
+      created_at: "2026-10-31T00:00:00Z", version: 1, parent_message_id: null },
+    { id: "older-answer", role: "assistant" as const, sender: "AI", content: "Older answer",
+      created_at: "2026-10-31T00:00:01Z", version: 1, parent_message_id: "question" },
+    { id: "newer-answer", role: "assistant" as const, sender: "AI", content: "Newer answer",
+      created_at: "2026-10-31T00:00:02Z", version: 1, parent_message_id: "question" },
+  ];
+  const messages = mapServerChatMessagesToPlaygroundMessages({
+    serverMessages: [serverMessages[0], serverMessages[2]], assistantName: "AI", characterId: null });
+  useWorkspaceStore.getState().saveWorkspaceChatSession(TARGET, {
+    messages, history: [], historyId: null, serverChatId: "verified-chat",
+  }, { scopeKey: boundary.scopeKey, isCurrent: () => !boundary.controller.signal.aborted });
+  await flushWorkspacePersistence();
+  await useWorkspaceStore.persist.rehydrate();
+  boundary.request.mockImplementation((request: { path: string }) =>
+    request.path.startsWith("/api/v1/chats/verified-chat/messages")
+      ? Promise.resolve({ messages: serverMessages, total: 3 })
+      : request.path.startsWith("/api/v1/chats/verified-chat?")
+        ? Promise.resolve({ id: "verified-chat", scope_type: "workspace", workspace_id: TARGET, deleted: false })
+        : reply(request));
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  // Before CM-N2 the older answer made the cache look edited, and the restore stopped.
+  expect(await screen.findByTestId("opened-sources")).toHaveTextContent("source-A");
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.serverChatId).toBe("verified-chat");
+});
+
 it.each([
   "body", "role", "version", "metadata", "sources", "images", "variants",
   "unknown", "order", "duplicate", "history", "history-id",

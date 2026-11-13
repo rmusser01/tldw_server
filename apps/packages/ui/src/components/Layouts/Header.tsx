@@ -1,7 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useLocation, useNavigate } from "react-router-dom"
-import { Button, Input, InputNumber, Modal, Tooltip } from "antd"
+import { Button, Input, InputNumber, Modal, Tooltip, message } from "antd"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { useActiveChatTitle } from "@/hooks/useActiveChatTitle"
 import { useMessageOption } from "~/hooks/useMessageOption"
@@ -32,6 +32,14 @@ import {
 import { getHeaderActionPolicy } from "./header-action-policy"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
 import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
+import { useForkParentChat } from "@/hooks/chat/useForkParentChat"
+import { buildServerChatPath } from "@/hooks/chat/server-chat-route"
+import { exportServerChat } from "@/services/chat-transcript-export"
+import type { TranscriptFormat } from "@/utils/chat-transcript"
+
+const BulkFolderPickerModal = React.lazy(
+  () => import("@/components/Sidepanel/Chat/BulkFolderPickerModal")
+)
 import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
 
 type Props = {
@@ -106,6 +114,25 @@ export const Header: React.FC<Props> = ({
     [location.pathname]
   )
   const isChatRoute = headerActionPolicy.showChatSessionActions
+  // CM-12: a branch leads back to the chat it came from. Opening it through
+  // the chat's address adds a history entry, so Back returns to the branch.
+  const forkParent = useForkParentChat(isChatRoute && !temporaryChat ? serverChatId : null)
+  // CS-09: the open saved chat can be exported (read from the server) and filed.
+  const savedChatId = isChatRoute && !temporaryChat ? serverChatId : null
+  const [folderPickerChatId, setFolderPickerChatId] = React.useState<string | null>(null)
+  const exportOpenChat = React.useCallback(
+    async (format: TranscriptFormat) => {
+      if (!savedChatId) return
+      try {
+        await exportServerChat(savedChatId, format, { title: activeTitle })
+        message.success(t("common:chatSidebar.exportSuccess", "Chat exported."))
+      } catch (error) {
+        console.warn("[chat-header] Could not export the chat", error)
+        message.error(t("common:chatSidebar.exportFailed", "Couldn't export this chat. Try again."))
+      }
+    },
+    [activeTitle, savedChatId, t]
+  )
 
   const isEditingTitle = titleReady && titleEdit?.owner === titleOwner
   const chatTitle = isEditingTitle ? titleEdit.value : activeTitle
@@ -408,6 +435,10 @@ export const Header: React.FC<Props> = ({
         showChatTitle={headerActionPolicy.showChatTitle}
         showSessionModeBadge={headerActionPolicy.showSessionModeBadge}
         persistenceKind={persistenceKind}
+        parentChatTitle={forkParent?.title ?? null}
+        onOpenParentChat={forkParent ? () => navigate(buildServerChatPath(forkParent.id)) : undefined}
+        onExportChat={savedChatId ? (format) => void exportOpenChat(format) : undefined}
+        onMoveToFolder={savedChatId ? () => setFolderPickerChatId(savedChatId) : undefined}
         shortcutsExpanded={headerShortcutsExpanded}
         onToggleShortcuts={toggleHeaderShortcuts}
         commandKeyLabel={cmdKey}
@@ -448,6 +479,15 @@ export const Header: React.FC<Props> = ({
           open={ttsClipsOpen}
           onClose={() => setTtsClipsOpen(false)}
         />
+      ) : null}
+      {folderPickerChatId ? (
+        <React.Suspense fallback={null}>
+          <BulkFolderPickerModal
+            open
+            conversationIds={[folderPickerChatId]}
+            onClose={() => setFolderPickerChatId(null)}
+          />
+        </React.Suspense>
       ) : null}
       <Modal
         open={shareModalOpen}

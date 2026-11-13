@@ -480,3 +480,54 @@ it("explains Temporary history without promising removal of retained local draft
     "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
   )
 })
+
+describe("ChatHeader branch lineage (CM-12)", () => {
+  it("shows the chat a branch came from and leads back to it", () => {
+    const onOpenParentChat = vi.fn()
+    render(<ChatHeader {...createProps({ parentChatTitle: "Trip plan", onOpenParentChat })} />)
+    expect(screen.getByText("Branched from")).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Back to parent chat: Trip plan" }))
+    expect(onOpenParentChat).toHaveBeenCalledOnce()
+  })
+
+  it("names an untitled parent chat instead of leaving the link empty", () => {
+    render(<ChatHeader {...createProps({ parentChatTitle: "", onOpenParentChat: vi.fn() })} />)
+    expect(screen.getByRole("button", { name: "Back to parent chat: Untitled" })).toBeVisible()
+  })
+
+  it("shows no lineage for a chat that isn't a branch", () => {
+    render(<ChatHeader {...createProps()} />)
+    expect(screen.queryByText("Branched from")).not.toBeInTheDocument()
+  })
+})
+
+describe("ChatHeader per-chat actions (CS-09)", () => {
+  it("exports the open chat as Markdown or JSON from More", async () => {
+    const onExportChat = vi.fn()
+    render(<ChatHeader {...createProps({ onExportChat, onMoveToFolder: vi.fn() })} />)
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    fireEvent.mouseEnter(await screen.findByRole("menuitem", { name: /^Export/ }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Markdown" }))
+    expect(onExportChat).toHaveBeenCalledWith("markdown")
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    fireEvent.mouseEnter(await screen.findByRole("menuitem", { name: /^Export/ }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "JSON" }))
+    expect(onExportChat).toHaveBeenLastCalledWith("json")
+  })
+
+  it("moves the open chat to a folder from More", async () => {
+    const onMoveToFolder = vi.fn()
+    render(<ChatHeader {...createProps({ onExportChat: vi.fn(), onMoveToFolder })} />)
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to folder…" }))
+    expect(onMoveToFolder).toHaveBeenCalledOnce()
+  })
+
+  it("offers neither for a chat that isn't saved on the server", async () => {
+    render(<ChatHeader {...createProps()} />)
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    await screen.findByRole("menuitem", { name: "Open settings" })
+    expect(screen.queryByRole("menuitem", { name: /^Export/ })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Move to folder…" })).toBeNull()
+  })
+})

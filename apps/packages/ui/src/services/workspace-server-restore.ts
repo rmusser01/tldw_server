@@ -3,6 +3,7 @@ import { formatToMessage } from "@/db/dexie/helpers";
 import { readWorkspaceServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
 import { canonicalHistoryJson } from "@/db/dexie/history-selection";
 import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader";
+import { serverChatActivePath } from "@/utils/newest-leaf-path";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import type { Message } from "@/store/option";
 import { rememberCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
@@ -512,7 +513,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
     if (chatReference?.serverChatId && cachedChat?.serverChatId === chatReference.serverChatId &&
         cachedChat.messages.length) {
       const signal = AbortSignal.any([scope.scopeSignal, AbortSignal.timeout(15000)]);
-      const serverMessages = await fetchAllServerChatMessages(
+      const listedMessages = await fetchAllServerChatMessages(
         ({ limit, offset }) => tldwClient.listChatMessages(chatReference.serverChatId!, {
           limit, offset, include_metadata: "true", include_images: "true",
           include_deleted: "false", render_placeholders: "false",
@@ -521,6 +522,8 @@ export const restoreMigratedResearchWorkspace = async (options: {
         { signal },
       );
       assertCurrent();
+      // CM-N2: a branched chat shows its newest path, so that is what a cache can match.
+      const serverMessages = serverChatActivePath(listedMessages).messages;
       const canonical = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null });
       const mirrorMessages = mirror ? formatToMessage(mirror.rows) : undefined;
       // Older manual two-message saves omitted parents. Retain that exact local

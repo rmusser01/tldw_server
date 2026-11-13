@@ -2233,5 +2233,23 @@
   },
   "regenerateMessage_failed": {
     "message": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
+  },
+  "chatSidebar_chatSettings": {
+    "message": "Chat settings"
+  },
+  "chatSidebar_moveToFolder": {
+    "message": "Move to folder…"
+  },
+  "chatSidebar_exportMarkdown": {
+    "message": "Markdown"
+  },
+  "chatSidebar_exportJson": {
+    "message": "JSON"
+  },
+  "chatSidebar_exportSuccess": {
+    "message": "Chat exported."
+  },
+  "chatSidebar_exportFailed": {
+    "message": "Couldn't export this chat. Try again."
   }
 }

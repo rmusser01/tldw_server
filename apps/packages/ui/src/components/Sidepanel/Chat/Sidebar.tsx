@@ -39,6 +39,9 @@ import { ModeToggle } from "./ModeToggle"
 import { ConversationContextMenu } from "./ConversationContextMenu"
 import { FolderPickerModal } from "./FolderPickerModal"
 import { exportTabToJSON, exportTabToMarkdown } from "@/utils/conversation-export"
+import { exportServerChat } from "@/services/chat-transcript-export"
+import type { TranscriptFormat } from "@/utils/chat-transcript"
+import { ConversationMenuButton } from "./ConversationMenuButton"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import {
   moveServerChatToTrash,
@@ -678,39 +681,42 @@ export const SidepanelChatSidebar = ({
     setFolderPickerOpen(false)
   }, [])
 
-  const handleExportJSON = React.useCallback(
-    async (tabId: string) => {
+  // CS-09: a tab bound to a server chat exports from the server, so a chat
+  // saved only there (most chats since D7) can be exported; a device-only tab
+  // exports its saved history.
+  const exportTab = React.useCallback(
+    async (tabId: string, format: TranscriptFormat) => {
       const tab = tabs.find((t) => t.id === tabId)
-      if (!tab?.historyId) {
-        message.error(t("sidepanel:contextMenu.exportError", "Cannot export: conversation not saved locally"))
+      if (!tab?.serverChatId && !tab?.historyId) {
+        message.error(t("sidepanel:contextMenu.exportUnsaved", "This chat isn't saved yet, so there is nothing to export."))
         return
       }
-      const success = await exportTabToJSON(tab.historyId)
+      let success = false
+      try {
+        if (tab.serverChatId) {
+          await exportServerChat(tab.serverChatId, format, {
+            title: tab.label,
+            requestScope: owner?.isCurrent() ? owner.snapshot.requestScope : undefined
+          })
+          success = true
+        } else {
+          success = format === "json"
+            ? await exportTabToJSON(tab.historyId)
+            : await exportTabToMarkdown(tab.historyId)
+        }
+      } catch (error) {
+        console.warn("[sidepanel] Could not export the chat", error)
+      }
       if (success) {
         message.success(t("sidepanel:contextMenu.exportSuccess", "Exported successfully"))
       } else {
         message.error(t("sidepanel:contextMenu.exportError", "Export failed"))
       }
     },
-    [tabs, t]
+    [owner, tabs, t]
   )
-
-  const handleExportMarkdown = React.useCallback(
-    async (tabId: string) => {
-      const tab = tabs.find((t) => t.id === tabId)
-      if (!tab?.historyId) {
-        message.error(t("sidepanel:contextMenu.exportError", "Cannot export: conversation not saved locally"))
-        return
-      }
-      const success = await exportTabToMarkdown(tab.historyId)
-      if (success) {
-        message.success(t("sidepanel:contextMenu.exportSuccess", "Exported successfully"))
-      } else {
-        message.error(t("sidepanel:contextMenu.exportError", "Export failed"))
-      }
-    },
-    [tabs, t]
-  )
+  const handleExportJSON = React.useCallback((tabId: string) => void exportTab(tabId, "json"), [exportTab])
+  const handleExportMarkdown = React.useCallback((tabId: string) => void exportTab(tabId, "markdown"), [exportTab])
   const isPro = uiMode === "pro"
   const itemClass = isPro ? "px-2 py-1 text-caption" : "px-3 py-2 text-body"
   const groupGap = isPro ? "gap-1" : "gap-2"
@@ -781,6 +787,7 @@ export const SidepanelChatSidebar = ({
           </button>
           {!selectionMode && (
             <div className="flex items-center gap-1 flex-shrink-0">
+              <ConversationMenuButton />
               <Tooltip title={tab.pinned ? t("common:unpin", "Unpin") : t("common:pin", "Pin")}>
                 <button
                   type="button"

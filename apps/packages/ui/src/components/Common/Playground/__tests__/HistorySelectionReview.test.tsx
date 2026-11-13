@@ -2203,3 +2203,43 @@ it.each([false, true])("B02 reviews a saved question before explicit retry (stal
   else { await vi.waitFor(() => expect(retry).toHaveBeenCalledWith(review)) }
   expect(retry).toHaveBeenCalledTimes(stale ? 0 : 1)
 })
+
+describe("legacy chats with alternative replies (CM-N2)", () => {
+  const legacyBranched = () => {
+    const sourceNodes = [
+      linkedNode("u1", "user", null),
+      linkedNode("a1", "assistant", "u1"),
+      linkedNode("a1b", "assistant", "u1"),
+      linkedNode("u2", "user", null),
+      linkedNode("a2", "assistant", "u2")
+    ]
+    return {
+      ...controller(),
+      capture: { snapshot: { nodes: sourceNodes, source_digest: "legacy" } }
+    } as unknown as HistorySelectionController
+  }
+
+  it("says the chat has alternative replies before the review opens", () => {
+    render(<HistorySelectionReview selection={legacyBranched()} />)
+    expect(screen.getByText(/This chat has alternative replies/)).toBeInTheDocument()
+  })
+
+  it("proposes the newest path and leaves the older alternative reply out", () => {
+    const selection = legacyBranched()
+    render(<HistorySelectionReview selection={selection} />)
+    fireEvent.click(screen.getByRole("button", { name: "Review conversation history" }))
+    expect(screen.getByText("4 of 5 messages included")).toBeInTheDocument()
+    expect(screen.getByRole("checkbox", { name: /Include Assistant: assistant text a1$/ })).not.toBeChecked()
+    expect(screen.getByRole("checkbox", { name: /Include Assistant: assistant text a1b$/ })).toBeChecked()
+    fireEvent.click(screen.getByRole("button", { name: "Confirm selected history" }))
+    expect((selection.confirm as ReturnType<typeof vi.fn>).mock.calls[0]).toEqual([
+      ["u1", "a1b", "u2", "a2"],
+      { kind: "after_message", message_id: "a2" }
+    ])
+  })
+
+  it("adds no hint to a legacy chat without alternatives", () => {
+    render(<HistorySelectionReview selection={controller()} />)
+    expect(screen.queryByText(/This chat has alternative replies/)).toBeNull()
+  })
+})
