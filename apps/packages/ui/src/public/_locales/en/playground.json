@@ -4916,5 +4916,32 @@
   },
   "regions_artifactsShort": {
     "message": "Artifacts"
+  },
+  "header_branchedFrom": {
+    "message": "Branched from"
+  },
+  "header_backToParentChat": {
+    "message": "Back to parent chat: {{title}}"
+  },
+  "historySelection_branchTitle": {
+    "message": "{{title}} — branch at message {{number}}"
+  },
+  "historySelection_branchTitleUntitled": {
+    "message": "Branch at message {{number}}"
+  },
+  "historySelection_branchCreated": {
+    "message": "Branch created"
+  },
+  "historySelection_branchCreatedFrom": {
+    "message": "This chat continues from \"{{title}}\". The original chat is unchanged."
+  },
+  "historySelection_backToParent": {
+    "message": "Back to parent"
+  },
+  "historySelection_backToParentFailed": {
+    "message": "Couldn't open the original chat"
+  },
+  "historySelection_backToParentFailedDetail": {
+    "message": "Open it from the chat list instead."
   }
 }

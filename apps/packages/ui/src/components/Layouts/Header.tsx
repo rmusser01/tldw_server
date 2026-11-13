@@ -32,6 +32,8 @@ import {
 import { getHeaderActionPolicy } from "./header-action-policy"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
 import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
+import { useForkParentChat } from "@/hooks/chat/useForkParentChat"
+import { buildServerChatPath } from "@/hooks/chat/server-chat-route"
 import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
 
 type Props = {
@@ -106,6 +108,9 @@ export const Header: React.FC<Props> = ({
     [location.pathname]
   )
   const isChatRoute = headerActionPolicy.showChatSessionActions
+  // CM-12: a branch leads back to the chat it came from. Opening it through
+  // the chat's address adds a history entry, so Back returns to the branch.
+  const forkParent = useForkParentChat(isChatRoute && !temporaryChat ? serverChatId : null)
 
   const isEditingTitle = titleReady && titleEdit?.owner === titleOwner
   const chatTitle = isEditingTitle ? titleEdit.value : activeTitle
@@ -408,6 +413,8 @@ export const Header: React.FC<Props> = ({
         showChatTitle={headerActionPolicy.showChatTitle}
         showSessionModeBadge={headerActionPolicy.showSessionModeBadge}
         persistenceKind={persistenceKind}
+        parentChatTitle={forkParent?.title ?? null}
+        onOpenParentChat={forkParent ? () => navigate(buildServerChatPath(forkParent.id)) : undefined}
         shortcutsExpanded={headerShortcutsExpanded}
         onToggleShortcuts={toggleHeaderShortcuts}
         commandKeyLabel={cmdKey}

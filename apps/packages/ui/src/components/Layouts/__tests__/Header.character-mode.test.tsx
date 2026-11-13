@@ -20,6 +20,7 @@ const messageOptionState = {
 }
 
 let selectedCharacter: { id: string; name: string } | null = null
+const forkParent = vi.hoisted(() => ({ value: null as { id: string; title: string } | null, requested: [] as unknown[] }))
 
 const mockT = (
   key: string,
@@ -91,8 +92,17 @@ vi.mock("@/db", () => ({
   updateHistory: vi.fn().mockResolvedValue(undefined)
 }))
 
+vi.mock("@/hooks/chat/useForkParentChat", () => ({
+  useForkParentChat: (chatId: unknown) => {
+    forkParent.requested.push(chatId)
+    return forkParent.value
+  }
+}))
+
 vi.mock("../ChatHeader", () => ({
   ChatHeader: ({
+    parentChatTitle,
+    onOpenParentChat,
     onOpenCommandPalette,
     onStartSavedChat,
     onStartTemporaryChat,
@@ -105,8 +115,15 @@ vi.mock("../ChatHeader", () => ({
     onStartCharacterChat?: () => void
     persistenceKind?: string
     activeCharacterName?: string | null
+    parentChatTitle?: string | null
+    onOpenParentChat?: () => void
   }) => (
     <div>
+      {onOpenParentChat ? (
+        <button type="button" onClick={() => onOpenParentChat()}>
+          Back to {parentChatTitle}
+        </button>
+      ) : null}
       <output data-testid="header-persistence">{persistenceKind}</output>
       <button type="button" onClick={() => onOpenCommandPalette?.()}>
         Open command palette
@@ -144,6 +161,36 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     revokeConversationShareLink: vi.fn()
   }
 }))
+
+describe("Header branch lineage (CM-12)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    messageOptionState.serverChatId = "branch-chat"
+    messageOptionState.temporaryChat = false
+    forkParent.value = null
+    forkParent.requested = []
+    locationPathname = "/chat"
+  })
+
+  it("leads from a branch back to the chat it came from through the chat's address", () => {
+    forkParent.value = { id: "trip", title: "Trip plan" }
+    render(<Header />)
+    expect(forkParent.requested.at(-1)).toBe("branch-chat")
+    fireEvent.click(screen.getByRole("button", { name: "Back to Trip plan" }))
+    expect(navigateMock).toHaveBeenCalledWith("/chat?chat=trip")
+  })
+
+  it("looks up no lineage off the chat page or in a temporary chat", () => {
+    locationPathname = "/notes"
+    render(<Header />)
+    expect(forkParent.requested.at(-1)).toBeNull()
+  })
+
+  it("offers no way back for a chat that isn't a branch", () => {
+    render(<Header />)
+    expect(screen.queryByRole("button", { name: /^Back to/ })).not.toBeInTheDocument()
+  })
+})
 
 describe("Header character mode sequencing", () => {
   beforeEach(() => {

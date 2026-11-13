@@ -5,6 +5,7 @@ import {
   Bell,
   BellOff,
   CogIcon,
+  CornerUpLeft,
   House,
   LoaderCircle,
   Menu,
@@ -77,6 +78,12 @@ type ChatHeaderProps = {
   notificationState?: HeaderNotificationState
   onRetryNotifications?: () => void | Promise<void>
   renderAccountMenu?: (onClose: () => void) => React.ReactNode
+  /**
+   * The title of the chat this one was branched from (CM-12); an empty title
+   * reads "Untitled". With `onOpenParentChat`, the header leads back to it.
+   */
+  parentChatTitle?: string | null
+  onOpenParentChat?: () => void
 }
 
 const toText = (value: unknown): string =>
@@ -116,7 +123,9 @@ export function ChatHeader({
   onOpenNotifications,
   notificationState = "active",
   onRetryNotifications,
-  renderAccountMenu
+  renderAccountMenu,
+  parentChatTitle = null,
+  onOpenParentChat
 }: ChatHeaderProps) {
   const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false)
   const headerMenuTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -660,6 +669,34 @@ export function ChatHeader({
             )}
           </h2>
           {sessionBadges}
+          {parentChatTitle != null && onOpenParentChat ? (
+            <p
+              className="flex min-w-0 max-w-full items-center gap-1 text-[11px] text-text-muted"
+              data-testid="chat-header-parent-chat"
+            >
+              <span className="shrink-0">
+                {toText(t("playground:header.branchedFrom", "Branched from"))}
+              </span>
+              <button
+                type="button"
+                onClick={onOpenParentChat}
+                aria-label={toText(
+                  t("playground:header.backToParentChat", "Back to parent chat: {{title}}", {
+                    title:
+                      parentChatTitle.trim() ||
+                      toText(t("option:header.untitledChat", "Untitled"))
+                  } as any)
+                )}
+                className={`inline-flex min-w-0 items-center gap-1 rounded text-text-muted underline-offset-2 hover:text-text hover:underline ${focusRingClasses}`}
+              >
+                <CornerUpLeft className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">
+                  {parentChatTitle.trim() ||
+                    toText(t("option:header.untitledChat", "Untitled"))}
+                </span>
+              </button>
+            </p>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
           <button
