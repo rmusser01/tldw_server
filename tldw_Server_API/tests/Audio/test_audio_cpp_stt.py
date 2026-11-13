@@ -2253,6 +2253,7 @@ async def test_audio_cpp_owned_cleanup_late_failure_is_not_logged_after_cancella
     tmp_path: Path,
     operation: str,
 ) -> None:
+    """Drain either owned operation without logging its late failure."""
     loop = asyncio.get_running_loop()
     previous_handler = loop.get_exception_handler()
     unhandled: list[dict[str, object]] = []
@@ -2260,13 +2261,17 @@ async def test_audio_cpp_owned_cleanup_late_failure_is_not_logged_after_cancella
     release = threading.Event()
 
     def fail_after_release(*_args: Any, **_kwargs: Any) -> BinaryIO:
+        """Fail only once the test allows the blocked operation to finish."""
         loop.call_soon_threadsafe(started.set)
         if not release.wait(timeout=2):
             raise AssertionError("test did not release owned operation")
         raise RuntimeError("raw-owned-audio-error")
 
     class FailingResponse:
+        """Response whose close fails after the caller is cancelled."""
+
         async def aclose(self) -> None:
+            """Run the gated failure on a worker thread."""
             await asyncio.to_thread(fail_after_release)
 
     if operation == "response-close":

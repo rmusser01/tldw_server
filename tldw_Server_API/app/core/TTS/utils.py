@@ -141,6 +141,7 @@ async def hold_tts_engine(lock: asyncio.Lock) -> AsyncIterator[Callable[..., Awa
     last_call: asyncio.Future | None = None
 
     async def run(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        """Wait for a thread call without cancelling the engine's owned work."""
         nonlocal last_call
         last_call = asyncio.ensure_future(run_tts_blocking_call(func, *args, **kwargs))
         if not last_call.done():

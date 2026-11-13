@@ -622,6 +622,7 @@ async def _close_audio_cpp_response(response: object) -> None:
 async def _close_audio_cpp_response_before_cancellation(
     response: object,
 ) -> None:
+    """Drain response cleanup before propagating the caller's cancellation."""
     close_task = asyncio.create_task(_close_audio_cpp_response(response))
     caller_cancellation: asyncio.CancelledError | None = None
     while not close_task.done():
@@ -847,6 +848,7 @@ async def _audio_cpp_discovery(
     afetch_fn: _Afetch,
     client: object | None,
 ) -> AudioCppDiscovery:
+    """Share one discovery result without letting a follower cancel the leader."""
     leader = False
     loop = asyncio.get_running_loop()
     with _audio_cpp_discovery_lock:
@@ -867,6 +869,7 @@ async def _audio_cpp_discovery(
         wrapped = asyncio.wrap_future(future)
 
         def consume_follower_exception(done: asyncio.Future[AudioCppDiscovery]) -> None:
+            """Retrieve a late failure even when this follower stopped waiting."""
             if not done.cancelled():
                 done.exception()
 

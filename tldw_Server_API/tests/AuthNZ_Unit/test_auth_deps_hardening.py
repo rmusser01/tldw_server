@@ -200,6 +200,7 @@ async def test_api_key_auth_error_logging_does_not_leak_exception_message_outsid
 
 @pytest.mark.asyncio
 async def test_maintenance_guard_skipped_log_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Check redaction in the message, independently of timestamp metadata."""
     secret = "maintenance secret path=/tmp/maintenance.json user_id=444"
 
     async def _principal(_request: object) -> AuthPrincipal:
@@ -214,7 +215,7 @@ async def test_maintenance_guard_skipped_log_is_sanitized(monkeypatch: pytest.Mo
     monkeypatch.setattr(admin_system_ops_service, "get_maintenance_state", _raise_secret_state)
 
     sink = io.StringIO()
-    token = logger.add(sink, level="DEBUG")
+    token = logger.add(sink, level="DEBUG", format="{message}")
     try:
         principal = await auth_deps.get_auth_principal(_DummyRequest())
     finally:
