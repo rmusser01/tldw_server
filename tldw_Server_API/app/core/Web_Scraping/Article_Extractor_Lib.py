@@ -1175,10 +1175,11 @@ def _get_sync_crawl_admission() -> _SyncCrawlAdmission:
     gate = admissions.get(pid)
     if gate is not None:
         return gate
-    inherited = next(reversed(admissions.values()), None)
+    # Read inherited capacity from a snapshot; another caller can publish concurrently.
+    inherited = next(reversed(admissions.copy().values()), None)
     candidate = _SyncCrawlAdmission() if inherited is None else _SyncCrawlAdmission(inherited.capacity)
     gate = admissions.setdefault(pid, candidate)
-    for inherited_pid in tuple(admissions):
+    for inherited_pid in admissions.copy():
         if inherited_pid != pid:
             admissions.pop(inherited_pid, None)
     return gate

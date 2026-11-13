@@ -69,7 +69,7 @@ corrections are committed. The approved publication is PR #3436; no merge.
   optional live providers/curl, native Windows and merge readiness are not claimed.
 
 Exact commands, logs, intermediate failures and reviewer evidence are recorded
-under TASK-15466. Logs use `/tmp/web-phase5-nov7-*`; original accepted code remains
+under TASK-15493. Logs use `/tmp/web-phase5-nov7-*`; original accepted code remains
 at `codex/web-scraping-phase-5-pre-nov7-integration-51064cee`. The branch/worktree
 are retained. The requester subsequently approved pushing and creating a PR
 after the scoped checks; no merge was authorized. Final pre-publication review
