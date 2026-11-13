@@ -42,6 +42,31 @@ def test_concurrent_first_calls_share_one_admission_gate(monkeypatch):
         assert first.result() is second.result() is legacy._get_sync_crawl_admission()
 
 
+def test_first_call_can_race_with_gate_publication_before_capacity_lookup(monkeypatch):
+    winner = legacy._SyncCrawlAdmission()
+
+    class AdmissionRegistry(dict):
+        def values(self):
+            registry = self
+
+            class LiveView:
+                def __reversed__(self):
+                    values = reversed(dict.values(registry))
+                    registry[winner.pid] = winner
+                    return values
+
+            return LiveView()
+
+        def copy(self):
+            snapshot = super().copy()
+            self[winner.pid] = winner
+            return snapshot
+
+    services = services_module.AppServices(sync_crawl_admissions=AdmissionRegistry())
+    monkeypatch.setattr(services_module, "_SERVICES", services)
+    assert legacy._get_sync_crawl_admission() is winner
+
+
 def test_sync_admission_replaces_child_gate_before_touching_inherited_lock(monkeypatch):
     services = services_module.AppServices()
     monkeypatch.setattr(services_module, "_SERVICES", services)

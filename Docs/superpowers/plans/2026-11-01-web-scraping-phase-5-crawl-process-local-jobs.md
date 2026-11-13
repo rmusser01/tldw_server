@@ -12,7 +12,7 @@
 
 **Decision:** [Accepted ADR-096](../../ADR/096-web-scraping-crawl-and-process-local-job-ownership.md). No new ADR: this plan implements that ownership decision without changing it.
 
-**Task:** TASK-15432 (planning complete); TASK-15467 (execution complete). **Status:** Approved for subagent-driven execution by the human requester on 2026-11-01; implementation and review complete. November 7 integration/publication is tracked separately by TASK-15466 and its integration plan. No merge is authorized.
+**Task:** TASK-15432 (planning complete); TASK-15467 (execution complete). **Status:** Approved for subagent-driven execution by the human requester on 2026-11-01; implementation and review complete. Integration, publication and the later merge request are tracked separately by TASK-15493 and its integration and review plans.
 
 ## Global Constraints
 
