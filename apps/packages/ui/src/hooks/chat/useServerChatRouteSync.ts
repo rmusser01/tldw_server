@@ -70,7 +70,10 @@ export const useServerChatRouteSync = () => {
       openChatId && isAddressableServerChatId(openChatId) ? openChatId : null
     if (activeChatId === routeChatId) return
     // A navigation that names this chat is on its way; let it land, and look
-    // again if it never does.
+    // again if it never does. A same-page push slower than the wait
+    // (PLANNED_CHAT_NAVIGATION_TIMEOUT_MS, 3 s) is treated like a lost one:
+    // the address is then written with replace, which on the WebUI cancels
+    // the push still in flight, so that slow push adds no history entry.
     if (isServerChatNavigationPending(activeChatId)) {
       const timer = setTimeout(
         () => setPlannedNavigationExpiry((count) => count + 1),
