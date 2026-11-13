@@ -1,5 +1,5 @@
 import React from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import { ComposerTextarea } from "../ComposerTextarea"
 import userEvent from "@testing-library/user-event"
@@ -8,7 +8,10 @@ import useDynamicTextareaSize from "@/hooks/useDynamicTextareaSize"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key
+    t: (_key: string, fallback?: string | { defaultValue?: string; count?: number }) =>
+      typeof fallback === "string"
+        ? fallback
+        : (fallback?.defaultValue ?? _key).replace("{{count}}", String(fallback?.count ?? ""))
   })
 }))
 
@@ -60,13 +63,15 @@ describe("ComposerTextarea idle collapse", () => {
 
 
 describe("ComposerTextarea native semantics", () => {
-  it("keeps multiline input and composition handlers without claiming an expandable textbox", () => {
+  // AX-12: the textarea is a combobox for its suggestions; aria-expanded is
+  // the suggestion list's state only, never the composer's own expansion.
+  it("keeps multiline input and composition handlers, expanded only for suggestions", () => {
     const draft = "  Exact opening\nKeep trailing spaces  "
     const props = createProps({ value: draft, displayValue: draft, ariaExpanded: true })
     render(<ComposerTextarea {...props} />)
-    const textarea = screen.getByRole("textbox", { name: "Message input" })
+    const textarea = screen.getByRole("combobox", { name: "Message input" })
     expect(textarea.tagName).toBe("TEXTAREA")
-    expect(textarea).not.toHaveAttribute("aria-expanded")
+    expect(textarea).toHaveAttribute("aria-expanded", "false")
     expect(textarea).toHaveValue(draft)
     fireEvent.compositionStart(textarea)
     fireEvent.compositionEnd(textarea)
@@ -106,7 +111,7 @@ it("forwards the sizing callback to the native textarea and retains the focus ob
     )
   }
   const view = render(<SizedTextarea />)
-  const node = screen.getByRole("textbox", {
+  const node = screen.getByRole("combobox", {
     name: "Message input"
   }) as HTMLTextAreaElement
   Object.defineProperty(node, "scrollHeight", {
@@ -152,5 +157,54 @@ describe("composer action focus preserves input geometry", () => {
       await user.click(screen.getByRole("button", { name: "Outside composer" }))
       expect(screen.getByTestId("chat-input")).toHaveStyle({ minHeight: "44px" })
     } finally { view.unmount() }
+  })
+})
+
+// AX-12: the slash menu is a listbox the textarea controls, so a screen
+// reader hears each command while arrowing and how many there are.
+describe("ComposerTextarea slash suggestions", () => {
+  const commands = [
+    { id: "slash-search", command: "search", label: "Search", description: "Search your knowledge" },
+    { id: "slash-web", command: "web", label: "Web search" }
+  ]
+
+  it("exposes the slash menu as a listbox of options the textarea points into", () => {
+    const view = render(
+      <ComposerTextarea {...(createProps({ showSlashMenu: true, slashCommands: commands, slashActiveIndex: 0 }) as any)} />
+    )
+    const textarea = screen.getByRole("combobox", { name: "Message input" })
+    expect(textarea).toHaveAttribute("aria-expanded", "true")
+    const listbox = screen.getByRole("listbox")
+    expect(textarea).toHaveAttribute("aria-controls", listbox.id)
+    const options = within(listbox).getAllByRole("option")
+    expect(options).toHaveLength(2)
+    expect(options.map((option) => option.id).every(Boolean)).toBe(true)
+    expect(textarea).toHaveAttribute("aria-activedescendant", options[0].id)
+    expect(options[0]).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByTestId("suggestion-count-status")).toHaveTextContent("2 commands")
+
+    view.rerender(
+      <ComposerTextarea {...(createProps({ showSlashMenu: true, slashCommands: commands, slashActiveIndex: 1 }) as any)} />
+    )
+    expect(textarea).toHaveAttribute("aria-activedescendant", within(screen.getByRole("listbox")).getAllByRole("option")[1].id)
+  })
+
+  it("picks a command without taking focus from the textarea", () => {
+    const onSlashSelect = vi.fn()
+    render(
+      <ComposerTextarea {...(createProps({ showSlashMenu: true, slashCommands: commands, onSlashSelect }) as any)} />
+    )
+    const option = screen.getAllByRole("option")[1]
+    expect(option).not.toHaveAttribute("tabindex")
+    expect(fireEvent.mouseDown(option)).toBe(false)
+    fireEvent.click(option)
+    expect(onSlashSelect).toHaveBeenCalledWith(commands[1])
+  })
+
+  it("announces when no command matches", () => {
+    render(<ComposerTextarea {...(createProps({ showSlashMenu: true, slashCommands: [] }) as any)} />)
+    expect(screen.getByRole("combobox", { name: "Message input" })).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByRole("listbox")).toBeNull()
+    expect(screen.getByTestId("suggestion-count-status")).toHaveTextContent("No results found")
   })
 })

@@ -1727,7 +1727,10 @@
     "shortcutListSelectDescription": "Select or clear the focused note.",
     "shortcutListPinDescription": "Pin or unpin the focused note.",
     "shortcutListAdjacentDescription": "Open the previous or next note.",
-    "shortcutListReturnDescription": "Return to the notes list."
+    "shortcutListReturnDescription": "Return to the notes list.",
+    "wikilinkSuggestionCount": "{{count}} notes",
+    "wikilinkSuggestionCount_one": "{{count}} note",
+    "wikilinkSuggestionCount_other": "{{count}} notes"
   },
   "tts": {
     "playground": "TTS Playground"

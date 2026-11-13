@@ -2118,5 +2118,26 @@
   },
   "chatWithPage_onDescription": {
     "message": "Your next messages are answered using the page open in this tab."
+  },
+  "composer_commandsLabel": {
+    "message": "Commands"
+  },
+  "composer_commandCount": {
+    "message": "{{count}} commands"
+  },
+  "composer_commandCount_one": {
+    "message": "{{count}} command"
+  },
+  "composer_commandCount_other": {
+    "message": "{{count}} commands"
+  },
+  "composer_mentionCount": {
+    "message": "{{count}} matches"
+  },
+  "composer_mentionCount_one": {
+    "message": "{{count}} match"
+  },
+  "composer_mentionCount_other": {
+    "message": "{{count}} matches"
   }
 }

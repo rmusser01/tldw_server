@@ -26,6 +26,8 @@ import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklis
 import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
 import { MISSING_WIKILINK_PREVIEW_CLASSES } from '@/components/Notes/wikilinks'
+import { WikilinkSuggestionList } from '@/components/Notes/WikilinkSuggestionList'
+import { useComposerCombobox } from '@/hooks/useComposerCombobox'
 import type {
   NoteTask,
   NoteTaskActivityEvent,
@@ -549,6 +551,13 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   }
 
   const { t } = useTranslation(['option', 'common'])
+  // The note textarea is a combobox over its [[wikilink]] suggestions (AX-12).
+  const wikilinkSuggestionsOpen = Boolean(activeWikilinkQuery) && wikilinkSuggestions.length > 0
+  const wikilinkCombobox = useComposerCombobox({
+    open: wikilinkSuggestionsOpen,
+    count: wikilinkSuggestions.length,
+    activeIndex: wikilinkSelectionIndex
+  })
   const unavailableStateLabel =
     getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL
   const unavailableLabel = t('option:notesSearch.linkedNoteUnavailable', {
@@ -1779,43 +1788,16 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                         defaultValue: 'Note content'
                       })}
                       aria-describedby={contentDescribedBy}
+                      {...wikilinkCombobox.inputProps}
                     />
-                    {activeWikilinkQuery && wikilinkSuggestions.length > 0 && (
-                      <div
-                        className="mt-2 rounded-lg border border-border bg-surface p-1"
-                        role="listbox"
-                        aria-label={t('option:notesSearch.wikilinkSuggestionsLabel', {
-                          defaultValue: 'Wikilink suggestions'
-                        })}
-                        data-testid="notes-wikilink-suggestions"
-                      >
-                        {wikilinkSuggestions.map((candidate, index) => {
-                          const duplicateCount =
-                            wikilinkSuggestionDisplayCounts.get(candidate.title.toLowerCase()) || 0
-                          const label =
-                            duplicateCount > 1 ? `${candidate.title} (${candidate.id})` : candidate.title
-                          return (
-                            <button
-                              key={`${candidate.id}-${candidate.title}`}
-                              type="button"
-                              className={`block w-full rounded px-2 py-1 text-left text-xs ${
-                                index === wikilinkSelectionIndex
-                                  ? 'bg-surface2 text-text'
-                                  : 'text-text-muted hover:bg-surface2 hover:text-text'
-                              }`}
-                              aria-selected={index === wikilinkSelectionIndex}
-                              onMouseDown={(event) => {
-                                event.preventDefault()
-                                applyWikilinkSuggestion(candidate)
-                              }}
-                              data-testid={`notes-wikilink-suggestion-${candidate.id.replace(/[^a-z0-9_-]/gi, '_')}`}
-                            >
-                              {label}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    )}
+                    <WikilinkSuggestionList
+                      open={wikilinkSuggestionsOpen}
+                      listboxId={wikilinkCombobox.listboxId}
+                      suggestions={wikilinkSuggestions}
+                      displayCounts={wikilinkSuggestionDisplayCounts}
+                      selectionIndex={wikilinkSelectionIndex}
+                      onApply={applyWikilinkSuggestion}
+                    />
                   </>
                 )}
                 <MetaText
@@ -1913,43 +1895,16 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                       defaultValue: 'Note content'
                     })}
                     aria-describedby={contentDescribedBy}
+                    {...wikilinkCombobox.inputProps}
                   />
-                  {activeWikilinkQuery && wikilinkSuggestions.length > 0 && (
-                    <div
-                      className="mt-2 rounded-lg border border-border bg-surface p-1"
-                      role="listbox"
-                      aria-label={t('option:notesSearch.wikilinkSuggestionsLabel', {
-                        defaultValue: 'Wikilink suggestions'
-                      })}
-                      data-testid="notes-wikilink-suggestions"
-                    >
-                      {wikilinkSuggestions.map((candidate, index) => {
-                        const duplicateCount =
-                          wikilinkSuggestionDisplayCounts.get(candidate.title.toLowerCase()) || 0
-                        const label =
-                          duplicateCount > 1 ? `${candidate.title} (${candidate.id})` : candidate.title
-                        return (
-                          <button
-                            key={`${candidate.id}-${candidate.title}`}
-                            type="button"
-                            className={`block w-full rounded px-2 py-1 text-left text-xs ${
-                              index === wikilinkSelectionIndex
-                                ? 'bg-surface2 text-text'
-                                : 'text-text-muted hover:bg-surface2 hover:text-text'
-                            }`}
-                            aria-selected={index === wikilinkSelectionIndex}
-                            onMouseDown={(event) => {
-                              event.preventDefault()
-                              applyWikilinkSuggestion(candidate)
-                            }}
-                            data-testid={`notes-wikilink-suggestion-${candidate.id.replace(/[^a-z0-9_-]/gi, '_')}`}
-                          >
-                            {label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
+                  <WikilinkSuggestionList
+                    open={wikilinkSuggestionsOpen}
+                    listboxId={wikilinkCombobox.listboxId}
+                    suggestions={wikilinkSuggestions}
+                    displayCounts={wikilinkSuggestionDisplayCounts}
+                    selectionIndex={wikilinkSelectionIndex}
+                    onApply={applyWikilinkSuggestion}
+                  />
                 </>
               )}
               <MetaText

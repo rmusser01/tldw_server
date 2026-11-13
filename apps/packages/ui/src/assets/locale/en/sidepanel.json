@@ -120,7 +120,14 @@
     "sendAfterReplyTitle": "Sends your message after the current reply finishes.",
     "sendAfterReplyAria": "Send after this reply",
     "waitingForModel": "Waiting for {{model}}…",
-    "waitingForReply": "Waiting for the reply…"
+    "waitingForReply": "Waiting for the reply…",
+    "commandsLabel": "Commands",
+    "commandCount": "{{count}} commands",
+    "commandCount_one": "{{count}} command",
+    "commandCount_other": "{{count}} commands",
+    "mentionCount": "{{count}} matches",
+    "mentionCount_one": "{{count}} match",
+    "mentionCount_other": "{{count}} matches"
   },
   "notification": {
     "ingestSent": "Sent to tldw server",
