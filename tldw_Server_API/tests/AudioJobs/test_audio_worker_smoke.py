@@ -983,29 +983,38 @@ async def test_audio_analyze_error_reply_on_the_last_attempt_keeps_the_transcrip
 
 @pytest.mark.unit
 async def test_audio_analyze_error_reply_is_retried_as_a_provider_failure(analyze_worker, monkeypatch):
-    from datetime import datetime, timedelta, timezone
-
     worker, jm, adapter = analyze_worker
-    fail_job = type(jm).fail_job
-    scheduling_window = []
-
-    def capture_schedule(manager, *args, **kwargs):
-        # SQLite DATETIME stores UTC seconds; exclude subsequent worker shutdown.
-        before = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
-        result = fail_job(manager, *args, **kwargs)
-        after = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
-        scheduling_window.append((before, after))
-        return result
-
-    monkeypatch.setattr(type(jm), "fail_job", capture_schedule)
     adapter.reply = "Error: the provider said no"
     job_id = _analyze_job(jm, "hello transcript")
+    from datetime import datetime, timedelta, timezone
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    fail_job = JobManager.fail_job
+    receipts = []
+
+    def capture_schedule(manager, failed_id, *args, **kwargs):
+        before = datetime.now(timezone.utc)
+        result = fail_job(manager, failed_id, *args, **kwargs)
+        after = datetime.now(timezone.utc)
+        if failed_id == job_id:
+            receipts.append((before, after, result))
+        return result
+
+    monkeypatch.setattr(JobManager, "fail_job", capture_schedule)
     await _run_worker_until(worker, lambda: _settled(jm, job_id))
     job = jm.get_job(job_id) or {}
     assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("queued", 1, "provider_failure")
-    assert len(scheduling_window) == 1
-    before, after = scheduling_window[0]
-    assert before + timedelta(seconds=5) <= datetime.fromisoformat(job["available_at"]) <= after + timedelta(seconds=5)
+    assert len(receipts) == 1  # nosec B101 -- One actual Jobs failure transition owns the schedule.
+    before, after, succeeded = receipts[0]
+    due = datetime.fromisoformat(str(job["available_at"])).replace(tzinfo=timezone.utc)
+    # SQLite stores whole seconds; worker cleanup must not consume this assertion's budget.
+    assert (  # nosec B101 -- Verify the persisted five-second schedule at its real failure transition.
+        succeeded is True
+        and before.replace(microsecond=0) + timedelta(seconds=5)
+        <= due
+        <= after.replace(microsecond=0) + timedelta(seconds=5)
+    )
     assert _stored(jm) == []
 
 

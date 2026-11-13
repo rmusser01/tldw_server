@@ -102,7 +102,7 @@ describe("Prompt Studio canonical targets and run contracts", () => {
   it("displays canonical actual and expected responses, milliseconds, and an ungraded result", async () => {
     mount("run"); await selectRunPrompt()
     fireEvent.click(screen.getByRole("button", { name: "Run Tests" }))
-    expect(await screen.findByText("Mira Vale directs Rowan.")).toBeVisible()
+    await waitFor(() => expect(screen.getByText("Mira Vale directs Rowan.")).toBeVisible())
     expect(screen.getByText("Dr. Mira Vale")).toBeVisible()
     expect(screen.getByText("0.25s")).toBeVisible()
     expect(screen.getByText("1 ungraded")).toBeVisible()
@@ -160,7 +160,7 @@ describe("Prompt Studio canonical targets and run contracts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Run Tests" }))
     await waitFor(() => expect(posts()).toHaveLength(1))
     expect(posts()[0].body).toMatchObject({ provider: undefined, model: undefined })
-    expect(await screen.findByText("Mira Vale directs Rowan.")).toBeVisible()
+    await waitFor(() => expect(screen.getByText("Mira Vale directs Rowan.")).toBeVisible())
   })
   it("keeps an exact canonical answer ungraded and displays zero milliseconds", async () => {
     runData = { results: [{ ...run, actual: { response: "Dr. Mira Vale" }, execution_time_ms: 0 }] }
@@ -179,7 +179,7 @@ describe("Prompt Studio canonical targets and run contracts", () => {
     ] }
     mount("run"); await selectRunPrompt()
     fireEvent.click(screen.getByRole("button", { name: "Run Tests" }))
-    expect(await screen.findByText("Reviewed answer")).toBeVisible()
+    await waitFor(() => expect(screen.getByText("Reviewed answer")).toBeVisible())
     expect(screen.getByText("Pass")).toBeVisible()
     expect(screen.getByText("Fail")).toBeVisible()
     expect(screen.getByText("Provider timed out")).toBeVisible()

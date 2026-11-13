@@ -10,6 +10,7 @@ from typing import Dict, Any
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import DEFAULT_CHARACTER_NAME
 
+from tldw_Server_API.app.core.Chat import chat_helpers as chat_helpers_module
 from tldw_Server_API.app.core.Chat.chat_helpers import (
     validate_request_payload,
     get_or_create_character_context,
@@ -18,6 +19,8 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
     prepare_llm_messages,
     extract_system_message,
     extract_response_content,
+    first_user_message_text,
+    format_new_conversation_title,
     validate_provider_configuration,
 )
 
@@ -395,6 +398,105 @@ class TestGetOrCreateConversation:
 
         assert conv_id == "threaded_conv"
         assert was_created is True
+
+    async def test_new_conversation_is_titled_from_the_first_user_message(self):
+        """XP-14: a new chat is named after what the user asked, not a timestamp."""
+        db = MockDatabase()
+        saved: list[dict[str, Any]] = []
+        db.add_conversation = lambda data: saved.append(dict(data)) or "titled_conv"
+        loop = asyncio.get_running_loop()
+
+        await get_or_create_conversation(
+            db,
+            None,
+            1,
+            "Helpful AI Assistant",
+            "test_client",
+            loop,
+            first_user_message="  How do I   tune a LoRA adapter for code review?",
+        )
+
+        assert saved[0]["title"] == "How do I tune a LoRA…"
+
+    async def test_new_conversation_without_text_is_titled_by_assistant_and_local_time(self, monkeypatch):
+        """XP-14: without message text the title reads '<assistant> · Nov 12, 16:41 PST', in server local time."""
+        db = MockDatabase()
+        saved: list[dict[str, Any]] = []
+        db.add_conversation = lambda data: saved.append(dict(data)) or "titled_conv"
+        pacific = datetime.timezone(datetime.timedelta(hours=-8), "PST")
+        monkeypatch.setattr(
+            chat_helpers_module,
+            "_local_now",
+            lambda: datetime.datetime(2026, 11, 12, 16, 41, 5, tzinfo=pacific),
+        )
+        loop = asyncio.get_running_loop()
+
+        await get_or_create_conversation(db, None, 1, "Helpful AI Assistant", "test_client", loop)
+
+        assert saved[0]["title"] == "Helpful AI Assistant · Nov 12, 16:41 PST"
+
+
+class TestNewConversationTitle:
+    """XP-14: titles people can read for chats the server creates."""
+
+    def test_uses_the_first_six_words(self):
+        assert format_new_conversation_title("Bot", "one two three four five six") == "one two three four five six"
+
+    def test_shortens_a_long_first_message(self):
+        title = format_new_conversation_title("Bot", "x" * 200)
+        assert len(title) <= 60
+        assert title.endswith("…")
+
+    def test_keeps_the_cap_after_adding_the_ellipsis(self):
+        six_words = " ".join(["abcdefghi"] * 5 + ["abcdefghij"])  # exactly 60 characters
+        title = format_new_conversation_title("Bot", f"{six_words} and more")
+        assert len(title) <= 60
+        assert title.endswith("…")
+
+    def test_reads_only_the_first_words_of_a_long_message(self):
+        """A multi-megabyte first message is not split into all of its words."""
+        splits: list[int] = []
+
+        class SpyText(str):
+            def split(self, sep=None, maxsplit=-1):
+                splits.append(maxsplit)
+                return super().split(sep, maxsplit)
+
+        title = format_new_conversation_title("Bot", SpyText("word " * 200_000))
+        assert title == "word word word word word word…"
+        assert splits == [6]
+
+    def test_does_not_cut_a_combining_mark_from_its_letter(self):
+        title = format_new_conversation_title("Bot", "a" * 58 + "e\u0301" + "z" * 10)
+        assert title == "a" * 58 + "…"
+
+    def test_does_not_cut_inside_an_emoji_sequence(self):
+        title = format_new_conversation_title("Bot", "a" * 57 + "\U0001F469\u200d\U0001F4BB" + "zzz")
+        assert title == "a" * 57 + "…"
+
+    def test_falls_back_to_the_assistant_and_a_readable_time_with_its_zone(self):
+        moment = datetime.datetime(
+            2026, 10, 3, 3, 38, 23, tzinfo=datetime.timezone(datetime.timedelta(hours=2), "CEST")
+        )
+        assert format_new_conversation_title("Helpful AI Assistant", "   ", now=moment) == (
+            "Helpful AI Assistant · Oct 3, 03:38 CEST"
+        )
+
+    def test_the_default_clock_is_server_local_time(self):
+        """A UTC time without a zone reads as local time; the default clock is local and zoned."""
+        moment = chat_helpers_module._local_now()
+        assert moment.tzinfo is not None
+        assert moment.utcoffset() == datetime.datetime.now().astimezone().utcoffset()
+
+    def test_reads_the_first_user_text_from_request_messages(self):
+        messages = [
+            MockMessage(role="system", content="Be brief"),
+            MockMessage(role="user", content=[MockImagePart("data:image/png;base64,AA"), MockMessagePart(text="What is this?")]),
+            MockMessage(role="user", content="Later question"),
+        ]
+        assert first_user_message_text(messages) == "What is this?"
+        assert first_user_message_text([{"role": "user", "content": "From a dict"}]) == "From a dict"
+        assert first_user_message_text([MockMessage(role="assistant", content="Hi")]) is None
 
 
 @pytest.mark.asyncio

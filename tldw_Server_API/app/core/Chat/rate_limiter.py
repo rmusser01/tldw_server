@@ -36,6 +36,14 @@ _RATE_LIMITER_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
 )
 
+_LEGACY_TEST_LIMIT_KEYS: tuple[str, ...] = (
+    "TEST_CHAT_PER_USER_RPM",
+    "TEST_CHAT_PER_CONVERSATION_RPM",
+    "TEST_CHAT_GLOBAL_RPM",
+    "TEST_CHAT_TOKENS_PER_MINUTE",
+    "TEST_CHAT_BURST_MULTIPLIER",
+)
+
 #######################################################################################################################
 #
 # Types:
@@ -182,21 +190,6 @@ class ConversationRateLimiter:
         self._conversation_requests: dict[str, list[float]] = {}
         self._user_tokens: dict[str, list[tuple[float, int]]] = {}
 
-    @staticmethod
-    def _legacy_test_limits_enabled() -> bool:
-        if not is_test_mode():
-            return False
-        return any(
-            os.getenv(name) is not None
-            for name in (
-                "TEST_CHAT_PER_USER_RPM",
-                "TEST_CHAT_PER_CONVERSATION_RPM",
-                "TEST_CHAT_GLOBAL_RPM",
-                "TEST_CHAT_TOKENS_PER_MINUTE",
-                "TEST_CHAT_BURST_MULTIPLIER",
-            )
-        )
-
     def _effective_limit(self, base_limit: int) -> int:
         try:
             burst = float(self.config.burst_multiplier)
@@ -286,7 +279,7 @@ class ConversationRateLimiter:
             Tuple of (allowed, error_message)
         """
         if not _rg_chat_primary_enabled():
-            if self._legacy_test_limits_enabled():
+            if is_test_mode() and any(os.getenv(name) is not None for name in _LEGACY_TEST_LIMIT_KEYS):
                 return await self._check_legacy_test_limits(
                     user_id=user_id,
                     conversation_id=conversation_id,

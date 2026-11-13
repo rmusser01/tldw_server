@@ -8,6 +8,8 @@ interface CollapsibleSectionProps {
   defaultOpen?: boolean
   storageKey?: string
   testId?: string
+  /** Heading level of the title; a section nested in another passes 3. */
+  headingLevel?: 2 | 3
   onOpenChange?: (open: boolean) => void
   children: React.ReactNode
 }
@@ -19,9 +21,11 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   defaultOpen = false,
   storageKey,
   testId,
+  headingLevel = 2,
   onOpenChange,
   children,
 }) => {
+  const Heading = headingLevel === 3 ? 'h3' : 'h2'
   const panelId = React.useId()
   const [open, setOpen] = React.useState(() => {
     if (storageKey) {
@@ -51,31 +55,35 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   return (
     <div data-testid={testId}>
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={toggle}
-          className="flex min-w-0 flex-1 items-center justify-between py-1.5 text-[11px] uppercase tracking-[0.08em] text-text-muted hover:text-text transition-colors"
-          aria-expanded={open}
-          aria-controls={panelId}
-          data-testid={testId ? `${testId}-toggle` : undefined}
-        >
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate">{title}</span>
-            {badge != null && !open && (
-              <span
-                className="inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
-                data-testid={testId ? `${testId}-badge` : undefined}
-              >
-                {badge}
-              </span>
+        {/* The title is a heading holding its toggle, so screen-reader users
+            can move between sections by heading (AX-14). */}
+        <Heading className="m-0 flex min-w-0 flex-1 font-normal">
+          <button
+            type="button"
+            onClick={toggle}
+            className="flex min-w-0 flex-1 items-center justify-between py-1.5 text-[11px] uppercase tracking-[0.08em] text-text-muted hover:text-text transition-colors"
+            aria-expanded={open}
+            aria-controls={panelId}
+            data-testid={testId ? `${testId}-toggle` : undefined}
+          >
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate">{title}</span>
+              {badge != null && !open && (
+                <span
+                  className="inline-flex items-center rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                  data-testid={testId ? `${testId}-badge` : undefined}
+                >
+                  {badge}
+                </span>
+              )}
+            </span>
+            {open ? (
+              <ChevronDown className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5" />
             )}
-          </span>
-          {open ? (
-            <ChevronDown className="w-3.5 h-3.5" />
-          ) : (
-            <ChevronRight className="w-3.5 h-3.5" />
-          )}
-        </button>
+          </button>
+        </Heading>
         {titleAccessory ? <div className="flex items-center">{titleAccessory}</div> : null}
       </div>
       <div id={panelId} hidden={!open} className="space-y-2 pb-2">{open && children}</div>

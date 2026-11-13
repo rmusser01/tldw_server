@@ -1,4 +1,5 @@
 import { browser } from "wxt/browser"
+import { captureDocumentGetSignal } from "./document-get-scope"
 import { createSafeStorage } from "@/utils/safe-storage"
 import { formatErrorMessage } from "@/utils/format-error-message"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
@@ -536,7 +537,7 @@ const resolveCurrentServicePromptConfig = async (
 // page load and each fetches the same resource), share a single network request
 // instead of firing N identical ones. Successful requests are not cached; 429s
 // get a brief per-key cooldown so remount/retry loops do not hammer the server.
-const inFlightGetRequests = new Map<string, Promise<unknown>>()
+const inFlightGetRequests = new Map<string, { promise: Promise<unknown>; documentSignal?: AbortSignal }>()
 const rateLimitedGetResults = new Map<
   string,
   { expiresAt: number; rejected: boolean; value: unknown }
@@ -777,7 +778,8 @@ export const createDirectRuntime = (
   storage: DirectRuntimeStorage,
   servicePromptConfig?: ServicePromptTargetConfig,
   initialConfig?: DirectConfigSnapshot,
-  onDispatch?: () => void
+  onDispatch?: () => void,
+  documentSignal?: AbortSignal
 ) => {
   let originalConfig: TldwConfig | undefined = initialConfig ? { ...initialConfig } : undefined
   let hasInitialConfig = typeof initialConfig !== "undefined"
@@ -787,8 +789,8 @@ export const createDirectRuntime = (
   })
   const assertCurrent = () => account.signal.throwIfAborted()
   return {
-    requestScopeSignal: account.signal,
-    assertRequestCurrent: assertCurrent,
+    requestScopeSignal: documentSignal ? AbortSignal.any([account.signal, documentSignal]) : account.signal,
+    assertRequestCurrent: () => { assertCurrent(); documentSignal?.throwIfAborted() },
     releaseRequest: releaseAccount,
     ...(onDispatch ? { fetchFn: (input: RequestInfo | URL, init?: RequestInit) => {
       init?.signal?.throwIfAborted()
@@ -833,6 +835,8 @@ export async function bgRequest<
   const hasRuntimeMessage =
     !init.preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
+  const documentSignal = !hasRuntimeMessage ? captureDocumentGetSignal(method) : undefined
+  documentSignal?.throwIfAborted()
   const coalescable =
     method === "GET" &&
     !init.body &&
@@ -846,10 +850,12 @@ export async function bgRequest<
     !init.onDispatch &&
     !hasRuntimeMessage
   if (!coalescable) {
-    return bgRequestImpl<T, P, M>(init)
+    const value = await bgRequestImpl<T, P, M>(init, undefined, undefined, documentSignal)
+    documentSignal?.throwIfAborted()
+    return value
   }
   const storage = createSafeStorage({ area: "local" })
-  const runtime = createDirectRuntime(storage)
+  const runtime = createDirectRuntime(storage, undefined, undefined, undefined, documentSignal)
   // The outer caller retains observation through its coalesced result publication.
   const requestRuntime = { ...runtime, releaseRequest: undefined }
   try {
@@ -860,7 +866,7 @@ export async function bgRequest<
     )
     runtime.assertRequestCurrent()
     if (!directContext) {
-      const value = await bgRequestImpl<T, P, M>(init, undefined, requestRuntime)
+      const value = await bgRequestImpl<T, P, M>(init, undefined, requestRuntime, documentSignal)
       runtime.assertRequestCurrent()
       return value
     }
@@ -886,17 +892,21 @@ export async function bgRequest<
       timeoutMs: typeof init.timeoutMs === "number" ? init.timeoutMs : null
     })
     const existing = inFlightGetRequests.get(key)
-    if (existing) {
-      const value = await existing as T
+    if (existing && !existing.documentSignal?.aborted) {
+      const value = await existing.promise as T
       runtime.assertRequestCurrent()
       return value
     }
     const rateLimited = rateLimitedGetResults.get(key)
     if (rateLimited) {
       if (rateLimited.expiresAt > Date.now()) {
-        return rateLimited.rejected
-          ? Promise.reject(rateLimited.value)
-          : Promise.resolve(rateLimited.value as T)
+        try {
+          return await (rateLimited.rejected
+            ? Promise.reject(rateLimited.value)
+            : Promise.resolve(rateLimited.value as T))
+        } finally {
+          runtime.assertRequestCurrent()
+        }
       }
       rateLimitedGetResults.delete(key)
     }
@@ -917,13 +927,15 @@ export async function bgRequest<
         value
       })
     }
-    const promise = bgRequestImpl<T, P, M>(init, directContext, requestRuntime)
+    const promise = bgRequestImpl<T, P, M>(init, directContext, requestRuntime, documentSignal)
       .then(
         (value) => {
+          runtime.assertRequestCurrent()
           rememberRateLimit(value, false)
           return value
         },
         (error) => {
+          runtime.assertRequestCurrent()
           rememberRateLimit(error, true)
           throw error
         }
@@ -931,11 +943,11 @@ export async function bgRequest<
       .finally(() => {
         // Only clear the entry if it is still the promise we created — defensive in
         // case the map handling changes to allow overwrites in the future.
-        if (inFlightGetRequests.get(key) === promise) {
+        if (inFlightGetRequests.get(key)?.promise === promise) {
           inFlightGetRequests.delete(key)
         }
       })
-    inFlightGetRequests.set(key, promise)
+    inFlightGetRequests.set(key, { promise, documentSignal })
     const value = await promise as T
     runtime.assertRequestCurrent()
     return value
@@ -951,7 +963,8 @@ async function bgRequestImpl<
 >(
   init: BgRequestInit<P, M>,
   directContext?: DirectRequestContext,
-  directRuntime?: Parameters<typeof tldwRequest>[1]
+  directRuntime?: Parameters<typeof tldwRequest>[1],
+  documentSignal?: AbortSignal
 ): Promise<T> {
   const {
     path: rawPath,
@@ -1217,7 +1230,7 @@ async function bgRequestImpl<
         responseType,
         maxResponseBytes
       },
-      createDirectRuntime(storage, servicePromptConfig, configSnapshot, notifyDispatch)
+      createDirectRuntime(storage, servicePromptConfig, configSnapshot, notifyDispatch, documentSignal)
     )
   }
   const resolveArrayBufferResponse = async (
@@ -1272,7 +1285,7 @@ async function bgRequestImpl<
         responseType,
         maxResponseBytes
       },
-      createDirectRuntime(storage, servicePromptConfig, configSnapshot, notifyDispatch)
+      createDirectRuntime(storage, servicePromptConfig, configSnapshot, notifyDispatch, documentSignal)
     )
     if (!resp?.ok) {
       const failure = await handleFailedResponse(resp, "direct")
@@ -1482,7 +1495,8 @@ async function bgRequestImpl<
       storage,
       servicePromptConfig,
       directContext ? directContext.config : configSnapshot,
-      notifyDispatch
+      notifyDispatch,
+      documentSignal
     )
   )
   if (!resp?.ok) {

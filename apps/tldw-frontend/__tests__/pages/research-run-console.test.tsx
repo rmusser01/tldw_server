@@ -296,6 +296,33 @@ describe('ResearchRunsPage', () => {
     });
   });
 
+  it('shows research-run loading failure and recovers with one manual retry', async () => {
+    mocks.listResearchRuns.mockRejectedValueOnce(new Error('Controlled list outage'));
+    const user = userEvent.setup();
+    renderWithProviders(<ResearchRunsPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load research runs.');
+    expect(screen.queryByText('No research runs yet.')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Retry loading runs' }));
+    expect(await screen.findByText('Investigate local evidence')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(mocks.listResearchRuns).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains saved runs when a list refresh fails', async () => {
+    const { queryClient } = renderWithProviders(<ResearchRunsPage />);
+    expect(await screen.findByText('Older run')).toBeInTheDocument();
+    mocks.listResearchRuns.mockRejectedValue(new Error('Controlled refresh outage'));
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ['research-runs'], exact: true });
+    });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Unable to load research runs.');
+    expect(screen.getByText('Older run')).toBeInTheDocument();
+    expect(screen.queryByText('No research runs yet.')).not.toBeInTheDocument();
+  });
+
   it('renders run history and applies live snapshot updates for the selected run', async () => {
     renderWithProviders(<ResearchRunsPage />);
 

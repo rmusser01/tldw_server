@@ -26,7 +26,14 @@ def _fresh_catalogs(monkeypatch: pytest.MonkeyPatch):
     chat_service.invalidate_model_alias_caches()
 
 
-_LISTED = ("claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1", "claude-opus-4-5")
+_LISTED = (
+    "claude-sonnet-4-5",
+    "claude-haiku-4-5",
+    "claude-opus-4-1",
+    "claude-opus-4-5",
+    "claude-3-5-haiku-20241022",
+    "claude-3-7-sonnet-20250219",
+)
 
 
 @pytest.fixture
@@ -109,7 +116,18 @@ def test_canonical_anthropic_model_id_dashes_only_dotted_claude_versions() -> No
         assert canon(unchanged) == unchanged
 
 
-def test_the_adapter_sends_the_dashed_api_id(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("saved", "canonical"),
+    [
+        ("claude-sonnet-4.5", "claude-sonnet-4-5"),
+        ("claude-haiku-3.5", "claude-3-5-haiku-20241022"),
+        ("claude-sonnet-3.7", "claude-3-7-sonnet-20250219"),
+    ],
+    ids=["current", "legacy-haiku", "legacy-sonnet"],
+)
+def test_the_adapter_sends_the_dashed_api_id(
+    monkeypatch: pytest.MonkeyPatch, saved: str, canonical: str
+) -> None:
     from tldw_Server_API.app.core.LLM_Calls.providers import anthropic_adapter as anth_mod
 
     monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_ANTHROPIC", "1")
@@ -142,10 +160,10 @@ def test_the_adapter_sends_the_dashed_api_id(monkeypatch: pytest.MonkeyPatch) ->
 
     monkeypatch.setattr(anth_mod, "http_client_factory", lambda *a, **k: _Client())
     anth_mod.AnthropicAdapter().chat(
-        {"messages": [{"role": "user", "content": "hi"}], "model": "claude-sonnet-4.5", "api_key": "k", "max_tokens": 32}
+        {"messages": [{"role": "user", "content": "hi"}], "model": saved, "api_key": "k", "max_tokens": 32}
     )
 
-    assert [payload["model"] for payload in sent] == ["claude-sonnet-4-5"]
+    assert [payload["model"] for payload in sent] == [canonical]  # nosec B101 -- actual adapter legacy-ID regression.
 
 
 def test_the_messages_native_payload_sends_the_dashed_api_id_to_anthropic_only() -> None:
@@ -260,3 +278,42 @@ def test_the_allowlist_check_returns_false_instead_of_raising_on_unhashable_or_o
     from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import allowlist_has_model
 
     assert allowlist_has_model(allowed, model) is False
+
+
+@pytest.mark.parametrize(
+    ("saved", "canonical", "prompt", "completion"),
+    [
+        ("claude-haiku-3.5", "claude-3-5-haiku-20241022", 0.0008, 0.004),
+        ("claude-sonnet-3.7", "claude-3-7-sonnet-20250219", 0.003, 0.015),
+    ],
+    ids=["legacy-haiku", "legacy-sonnet"],
+)
+def test_saved_three_series_names_keep_price_selection_allowlist_and_native_payload(
+    saved, canonical, prompt, completion, anthropic_inventory
+):
+    """Old saved spellings still reach the catalog IDs introduced by the pricing refresh."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.api.v1.endpoints import messages as endpoint
+    from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import allowlist_has_model, canonical_anthropic_model_id
+    from tldw_Server_API.app.core.Usage.pricing_catalog import PricingCatalog
+
+    assert canonical_anthropic_model_id(saved) == canonical  # nosec B101 -- exact legacy compatibility boundary.
+    assert canonical_anthropic_model_id(saved.upper()) == canonical  # nosec B101 -- stored case variants remain usable.
+    rates, _ = PricingCatalog().get_rate_details("anthropic", saved)
+    assert (rates["prompt"], rates["completion"]) == (prompt, completion)  # nosec B101 -- actual catalog rates.
+    assert _known_with_credentials(saved) is True  # nosec B101 -- strict model selection.
+    inferred, debug = chat_service.infer_provider_from_model_catalog(
+        provider="openai",
+        model=saved,
+        provider_explicit=False,
+    )
+    assert inferred == "openai"  # nosec B101 -- commercial inventory requires credentials.
+    assert debug["reason"] == "commercial_inventory_requires_credentials"  # nosec B101 -- retain routing authority.
+    assert allowlist_has_model([saved], canonical) and allowlist_has_model(
+        [canonical], saved
+    )  # nosec B101 -- exact alias, both directions.
+    request = SimpleNamespace(model_dump=lambda exclude_none=True: {"messages": []})
+    assert (
+        endpoint._prepare_native_payload(request, model=saved, provider="anthropic")["model"] == canonical
+    )  # nosec B101 -- actual native builder.

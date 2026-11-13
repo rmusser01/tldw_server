@@ -41,6 +41,7 @@ It also publishes these individual files and assets:
 - `Docs/Site/RELEASE_NOTES.md` as `Docs/Published/RELEASE_NOTES.md`
 - `Docs/Architecture.md`
 - `Docs/Operations/Env_Vars.md` as `Docs/Published/Env_Vars.md`
+- `Docs/Operations/Claims_Cluster_Rebuild_Jobs.md`
 - `Docs/Overview/Feature_Status.md`
 - `Docs/Logo.png` as both `Docs/Published/assets/logo.png` and
   `Docs/Published/assets/favicon.png`

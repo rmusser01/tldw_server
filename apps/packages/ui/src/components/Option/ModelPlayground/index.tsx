@@ -1,4 +1,7 @@
 import React from "react"
+import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
+import { useStoreMessageOption } from "@/store/option"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "react-router-dom"
 import { PanelRightClose, PanelRightOpen, Bug, FlaskConical } from "lucide-react"
@@ -8,6 +11,7 @@ import { ModelPlaygroundChat } from "./ModelPlaygroundChat"
 import { ParametersSidebar } from "./ParametersSidebar"
 import { DebugPanel } from "./DebugPanel"
 import { useMessageOption } from "@/hooks/useMessageOption"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
 import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
 import {
@@ -25,11 +29,29 @@ import {
  * - Debug panel (traces, tokens, timing)
  * - System prompt editor
  */
-export const ModelPlayground: React.FC = () => {
+export const ModelPlayground: React.FC = () => (
+  <HistorySelectionProvider
+    storageKey="tldw-h1-playground-reference"
+    onCapture={(capture) => {
+      const display = formatSelectedHistory(capture)
+      useStoreMessageOption.setState({ history: display.history, messages: display.messages })
+    }}
+  >
+    <ModelPlaygroundContent />
+  </HistorySelectionProvider>
+)
+
+const ModelPlaygroundContent: React.FC = () => {
   const { t } = useTranslation(["playground", "option", "common"])
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useStorage(MODEL_PLAYGROUND_SIDEBAR_KEY, true)
   const [debugOpen, setDebugOpen] = useStorage(MODEL_PLAYGROUND_DEBUG_KEY, false)
+
+  const draftAddress = useStoreMessageOption((state) => state.chatDraftAddress)
+  React.useLayoutEffect(() => {
+    const state = useStoreMessageOption.getState()
+    if (!state.chatDraftAddress) state.startNewChatDraft()
+  }, [draftAddress])
 
   const { messages, streaming } = useMessageOption({
     hydrateServerChat: true,
@@ -42,8 +64,28 @@ export const ModelPlayground: React.FC = () => {
     hasUnseenMessages
   } = useSmartScroll(messages, streaming, 120)
 
-  const handleGoToChat = () => {
-    navigate("/")
+  const historySelection = useHistorySelectionContext()!
+  const conversationId = useStoreMessageOption((state) => state.serverChatId || state.historyId)
+  const hasConversation = Boolean(conversationId || messages.length)
+  const handoffPending = hasConversation && (
+    !historySelection.settingsQualified ||
+    historySelection.status === "pending" ||
+    !historySelection.reference ||
+    Boolean(conversationId && historySelection.reference.conversation_id !== conversationId)
+  )
+  const handleGoToChat = async () => {
+    const state = useStoreMessageOption.getState()
+    const selectedId = state.serverChatId || state.historyId
+    const current = historySelection.getCurrent()
+    const reference = historySelection.getReference()
+    const retained = Boolean(selectedId || state.messages.length)
+    if (retained && (
+      !current.settingsQualified || current.status === "pending" || !reference ||
+      Boolean(selectedId && reference.conversation_id !== selectedId)
+    )) return
+    const source = captureChatDraftSource(historySelection.fence())
+    const path = await historySelection.prepareExpansionPath()
+    if (path && source.isCurrent() && (!retained || path !== "/chat")) navigate(path)
   }
 
   return (
@@ -102,7 +144,10 @@ export const ModelPlayground: React.FC = () => {
           <button
             type="button"
             onClick={handleGoToChat}
-            className="ml-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text transition hover:bg-surface2"
+            disabled={handoffPending}
+            aria-busy={handoffPending}
+            title={handoffPending ? t("common:loading", "Loading...") : undefined}
+            className="ml-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-sm font-medium text-text transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t("playground:workspace.goToSimpleChat", "Simple Chat")}
           </button>

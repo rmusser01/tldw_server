@@ -94,7 +94,7 @@ def _patch_allowed_roots(monkeypatch: pytest.MonkeyPatch, allowed_root: Path) ->
     )
 
 
-def _write_openwebui_hydration_db(data_root: Path) -> None:
+def _write_openwebui_hydration_db(data_root: Path, *, files: list[dict] | None = None) -> None:
     conn = sqlite3.connect(data_root / "webui.db")
     try:
         conn.execute(
@@ -168,11 +168,22 @@ def _write_openwebui_hydration_db(data_root: Path) -> None:
             )
             """
         )
-        conn.execute(
+        if files is None:
+            files = [
+                {
+                    "id": "file-image",
+                    "user_id": "ow-user",
+                    "filename": "image.png",
+                    "path": "uploads/file-image_image.png",
+                    "hash": "hash-image",
+                }
+            ]
+        conn.executemany(
             """
             INSERT INTO file (id, user_id, hash, filename, path, data, meta, created_at, updated_at)
-            VALUES ('file-image', 'ow-user', 'hash-image', 'image.png', 'uploads/file-image_image.png', '{}', '{}', 1, 1)
-            """
+            VALUES (?, ?, ?, ?, ?, '{}', '{}', 1, 1)
+            """,
+            [(row["id"], row["user_id"], row["hash"], row["filename"], row["path"]) for row in files],
         )
         conn.commit()
     finally:

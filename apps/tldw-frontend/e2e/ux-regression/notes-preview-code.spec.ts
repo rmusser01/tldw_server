@@ -158,14 +158,14 @@ for (const surface of ['WebUI', 'extension options'] as const) {
       }
       await page.goto(url('/notes'));
       const notes = new NotesPage(page);
-      await page.getByTestId(`notes-open-button-${noteId}`).click();
-      await expect(notes.contentTextarea).toHaveValue(content);
       const prompt = page.getByText('New to this page?', { exact: true });
       if (extension) {
         await expect(prompt).toBeVisible();
         await page.getByRole('button', { name: 'Not now', exact: true }).click();
         await expect(prompt).toBeHidden();
       }
+      await page.getByTestId(`notes-open-button-${noteId}`).click();
+      await expect(notes.contentTextarea).toHaveValue(content);
       await page.getByRole('button', { name: 'Preview', exact: true }).click();
       let preview = page.getByTestId('notes-preview-surface');
       await assertProse(preview);

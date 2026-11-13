@@ -3,7 +3,7 @@ import { HistorySelectionProvider, useHistorySelectionContext } from '@/hooks/ch
 import { formatSelectedHistory } from '@/db/dexie/helpers';
 import React, { lazy, Suspense, useState, useContext, useCallback } from 'react';
 
-import { Drawer, Tooltip } from 'antd';
+import { Drawer, Tooltip, message } from 'antd';
 import { EraserIcon, XIcon } from 'lucide-react';
 import { IconButton } from '@/components/Common/IconButton';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -62,6 +62,7 @@ import {
 } from '@web/components/notifications/NotificationLifecycleProvider';
 import { NotificationToastBridge } from '@web/components/notifications/NotificationToastBridge';
 import { CommandPaletteHost } from '@/components/Common/CommandPaletteHost';
+import { openModelSelector } from '@/utils/model-selector-events';
 import {
   useConnectionActions,
   useConnectionState,
@@ -411,7 +412,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     onToggleRag: () => setChatMode(chatMode === 'rag' ? 'normal' : 'rag'),
     onToggleWebSearch: () => setWebSearch(!webSearch),
     onIngestPage: handleIngestPage,
-    onSwitchModel: hideHeader ? undefined : () => setOpenModelSettings(true),
+    // The composer's model picker when /chat is open, else chat settings (AX-01).
+    onSwitchModel: hideHeader ? undefined : () => openModelSelector() || setOpenModelSettings(true),
     onToggleSidebar: shellSidebarEnabled ? toggleSidebar : undefined,
   };
 
@@ -656,7 +658,12 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                           if (clearChat({ discardTemporaryConfirmed: true }) === false) return;
 
                           const db = new PageAssistDatabase();
-                          await db.deleteAllChatHistory();
+                          try {
+                            await db.deleteAllChatHistory();
+                          } catch {
+                            message.error(t('common:deleteHistoriesError'));
+                            return;
+                          }
                           await queryClient.invalidateQueries({
                             queryKey: ['fetchChatHistory'],
                           });
@@ -869,7 +876,7 @@ function RootLayoutShell({
       </NotificationRuntimeOwner>
     </DemoModeProvider>
   );
-  return location.pathname === "/chat" ? (
+  return ["/chat", "/model-playground"].includes(location.pathname) ? (
     <HistorySelectionProvider
       storageKey="tldw-h1-playground-reference"
       onCapture={(capture) => {

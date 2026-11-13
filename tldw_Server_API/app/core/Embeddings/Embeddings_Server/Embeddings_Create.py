@@ -360,10 +360,6 @@ def _synthetic_test_embedding(text: str, dims: int = 384) -> list[float]:
     return [float(val) / norm for val in vec]
 
 
-def _should_use_inprocess_test_embeddings(provider: str) -> bool:
-    return provider.strip().lower() == "huggingface" and is_test_mode() and env_flag_enabled("E2E_INPROCESS")
-
-
 def _log_rejected_path(
     label: str,
     value: str,
@@ -2021,7 +2017,7 @@ def create_embeddings_batch(
     try:
         embedder_instance: Any = None  # To hold HFEmbedder or ONNXEmbedder
 
-        if _should_use_inprocess_test_embeddings(provider):
+        if provider.strip().lower() == "huggingface" and is_test_mode() and env_flag_enabled("E2E_INPROCESS"):
             logger.info(
                 "Using deterministic synthetic embeddings for {} in in-process test mode",
                 model_id_to_use,

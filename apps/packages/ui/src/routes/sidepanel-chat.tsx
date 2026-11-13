@@ -887,8 +887,7 @@ const SidepanelChatContent = ({
     [messages]
   )
   const scrollToLatestBottom = sidepanelScrollToLatestBottom(
-    composerHeight,
-    DEFAULT_COMPOSER_HEIGHT
+    composerHeight, DEFAULT_COMPOSER_HEIGHT, Boolean(stickyChatInput)
   )
 
   const clearNoteCapture = React.useCallback(() => {

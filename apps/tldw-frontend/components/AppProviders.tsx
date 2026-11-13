@@ -62,7 +62,7 @@ export const AppProviders: React.FC<AppProvidersProps> = ({
 
   useEffect(() => {
     if (typeof document === "undefined") return
-    const language = i18n.resolvedLanguage || i18n.language
+    const language = i18n.language || i18n.resolvedLanguage
     document.documentElement.lang = language
     document.documentElement.dir = i18n.dir(language)
     setDirection(i18n.dir(language))

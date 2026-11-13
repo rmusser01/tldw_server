@@ -1596,8 +1596,9 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
     const importUpdates = await Promise.all(
       importActive.map((job) => tldwClient.getChatbookImportJob(job.job_id).catch(() => job))
     )
+    const importActiveByJobId = new Map(importActive.map((job) => [job.job_id, job]))
     const completedImportRefreshNeeded = importUpdates.some((job) => {
-      const previous = importActive.find((item) => item.job_id === job.job_id)
+      const previous = importActiveByJobId.get(job.job_id)
       const mergedJob = {
         ...previous,
         ...job,
@@ -2746,7 +2747,8 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
   const hydrationJobResult = hydrationJob?.result
   const hydrationJobSummary =
     hydrationJobResult && typeof hydrationJobResult === "object"
-      ? (hydrationJobResult as { summary?: OpenWebUIHydrationSummary }).summary
+      ? ((hydrationJobResult as { summary?: OpenWebUIHydrationSummary }).summary ??
+          (hydrationJobResult as OpenWebUIHydrationSummary))
       : undefined
 
   const importTab = (
@@ -3626,24 +3628,10 @@ export const ChatbooksPlaygroundPage: React.FC = () => {
                         )
                       },
                       {
-                        value: "overwrite",
-                        label: t(
-                          "settings:chatbooksPlayground.conflictOverwrite",
-                          "Overwrite"
-                        )
-                      },
-                      {
                         value: "rename",
                         label: t(
                           "settings:chatbooksPlayground.conflictRename",
                           "Rename"
-                        )
-                      },
-                      {
-                        value: "merge",
-                        label: t(
-                          "settings:chatbooksPlayground.conflictMerge",
-                          "Merge"
                         )
                       }
                     ]}

@@ -500,3 +500,52 @@ async def test_media_evidence_respects_shared_visibility(
     with scoped_context(user_id=reader, team_ids=teams, org_ids=orgs, is_admin=is_admin):
         documents = await retriever.retrieve("Rowan", allowed_media_ids=[media_id])
     assert [doc.metadata["source_id"] for doc in documents] == ([str(media_id)] if visible else [])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fts_level", ["media", "chunk"])
+async def test_selected_media_retains_distinct_facets_after_strict_fts_miss(
+    restricted_media_store,
+    fts_level,
+):
+    """Selected evidence remains discoverable without admitting other owners or sources."""
+    db = restricted_media_store
+    texts = [
+        "Rowan Observatory opened in 2019. The telescope is named Selene. Tours start on Friday at 18:00.",
+        "Rowan Observatory field report: the dome opens at 17:30. Visitors enter through the east gate.",
+    ]
+    selected = []
+    for owner, title, text in [
+        (1, "S04 Rowan.txt", texts[0]),
+        (1, "S04 Rowan field report", texts[1]),
+        (1, "Unselected Rowan field report", texts[1]),
+    ]:
+        with scoped_context(user_id=owner, is_admin=False):
+            media_id, _, _ = db.add_media_with_keywords(
+                title=title,
+                media_type="document",
+                content=text,
+                owner_user_id=owner,
+                chunks=[{"text": text, "start_char": 0, "end_char": len(text)}],
+            )
+        if len(selected) < 2:
+            selected.append(media_id)
+    retriever = MediaDBRetriever(
+        db_path=db.db_path_str,
+        media_db=db,
+        user_id="1",
+        config=RetrievalConfig(max_results=8, min_score=0, use_fts=True, use_vector=False, fts_level=fts_level),
+    )
+    question = (
+        "From the two selected sources only, list the telescope, Friday tour time, "
+        "dome opening time and visitor entrance in four short cited bullets. /no_think"
+    )
+    with scoped_context(user_id=1, is_admin=False):
+        documents = await retriever.retrieve(question, allowed_media_ids=selected)
+    actual_ids = {str(document.metadata.get("media_id", document.id)) for document in documents}
+    assert actual_ids == {str(mid) for mid in selected}  # nosec B101 -- Real selected-evidence retrieval boundary.
+    with scoped_context(user_id=1, is_admin=False):
+        unscoped = await retriever.retrieve(question)
+    assert {str(document.metadata.get("media_id", document.id)) for document in unscoped} == {str(selected[0])}  # nosec B101 -- Keep the unscoped three-term fallback contract.
+    with scoped_context(user_id=2, is_admin=False):
+        assert await retriever.retrieve(question, allowed_media_ids=selected) == []  # nosec B101 -- Foreign-owner denial is required.

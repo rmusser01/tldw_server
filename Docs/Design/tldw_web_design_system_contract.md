@@ -70,6 +70,15 @@ tokens such as `--color-bg`, `--color-surface`, `--color-primary`,
 `--color-success`, `--color-warn`, `--color-danger`, `--color-text`,
 `--radius-*`, `--shadow-*`, and font tokens remain the base.
 
+Text utilities for those colours read text shades: `text-primary`,
+`text-success`, `text-warn` and `text-danger` paint with
+`--color-primary-text`, `--color-success-text`, `--color-warn-text` and
+`--color-danger-text`. Each is its base colour moved towards `--color-text`
+until it reaches 4.5:1 on the page, card and panel surfaces and on its own
+`/10` tint, so a status chip (`text-success bg-success/10`) stays readable in
+the light theme (#3124). Fills, borders and rings keep the base colour.
+Built-in and custom themes derive the shades in `themes/text-on-tint.ts`.
+
 Version 1 should extend the system toward product states. Recommended semantic
 state tokens include:
 

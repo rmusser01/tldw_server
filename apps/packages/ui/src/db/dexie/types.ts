@@ -4,6 +4,12 @@ import type { DiscoSkillComment } from '@/types/disco-skills';
 
 export type LastUsedModelType = { prompt_id?: string; prompt_content?: string }
 
+export type LegacyChatSource = {
+  history: string;
+  messages?: string;
+  files?: string;
+}
+
 export type HistoryInfo = {
   id: string;
   title: string;
@@ -20,6 +26,7 @@ export type HistoryInfo = {
   server_scope_type?: "global" | "workspace";
   server_workspace_id?: string;
   local_owner_key?: string;
+  tldw_history_legacy_source?: LegacyChatSource;
   // External settings writers register before writing; abandoned tokens block fork certification.
   local_settings_guard?: {
     revision: string;
@@ -169,6 +176,16 @@ export type CompareParentMeta = {
 };
 export type CompareContinuationMode = "winner" | "compare";
 
+/**
+ * Message-content search side-table row (WP-23 / TASK-13523): one distinct
+ * word of a history's messages. Compound primary key `[token+history_id]`
+ * makes writes idempotent; `token` is indexed for candidate lookups.
+ */
+export type SearchTokenRow = {
+  token: string;
+  history_id: string;
+};
+
 export type CompareState = {
   history_id: string;
   compareMode: boolean;
@@ -277,8 +294,11 @@ export type HistoryBookmarkScope = { profile_id: string; client_session_id: stri
 export type HistoryTurnOutcome = "complete" | "interrupted" | "stopped";
 /** A retained turn is scoped data; its settlement payload has no runtime owner capability. */
 export type HistoryTurnRecovery = {
-  /** Explicit alternatives remain in review until the user opens their result. */
-  action?: 'edit_resend' | 'regenerate';
+  /**
+   * Explicit alternatives remain in review until the user opens their result.
+   * `continue` reuses the saved question like `regenerate` (CM-01).
+   */
+  action?: 'edit_resend' | 'regenerate' | 'continue';
   operation_id: string;
   origin_view: HistoryViewSelectionV1;
   selection_digest: string;

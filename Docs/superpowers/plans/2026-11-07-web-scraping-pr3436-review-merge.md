@@ -1,6 +1,6 @@
 # PR 3436 Review And Merge
 
-**Task:** TASK-15466. User requests rebase onto latest `dev`, address all issues
+**Task:** TASK-15493 (formerly TASK-15466). User requests rebase onto latest `dev`, address all issues
 and comments, use `superpowers:requesting-code-review` instead of Qodo, then merge.
 The requester explicitly answered "waived" to the human Change-summary gate;
 record that exception for this PR only, without inventing human-authored prose.
@@ -62,3 +62,20 @@ required checks remain necessary; Stage 4 is not pre-approved by local results.
 PR-specific summary waiver recorded; no unapproved check bypass or unrelated cleanup.
 **Tests:** Latest base/head/check/review audit; verify merged state and merge commit.
 **Status:** Not Started.
+
+## November 13 CI Follow-Up
+
+- Integrated dev `4b6b9ec446`, including its VN membership fixture, MCP spy
+  fixture, and Ubuntu runner fixes. Resolved generated conflicts without
+  changing ADR-096. Renumbered only the colliding integration record.
+- Removed the runtime foundation-to-scraping import. The scraping domain
+  publishes its gate in the existing service container without an inherited
+  lock; checkpoint decoder tests patch only the checkpoint module's binding.
+- Provision Chromium for the native integration shards and FFmpeg for the
+  Auth integration shard that exercises VN runtime startup. The three other
+  shard failures were HTTP 504s while downloading uv before tests ran.
+- Local receipts: 351 CI-equivalent layering/workflow/scraping/MCP tests,
+  12 VN cases including PostgreSQL, and 74 serial Chromium cases passed.
+  The initial concurrent native run had seven failures; it is not counted
+  as a pass. The task-format test must be rerun on the committed tree.
+- GitHub must re-run the gates on the new head before merge.

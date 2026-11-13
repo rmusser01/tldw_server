@@ -8,7 +8,6 @@ import importlib
 import importlib.util
 import os
 import re
-import sys
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any, Optional
@@ -19,6 +18,7 @@ import numpy as np
 # Third-party Imports
 from loguru import logger
 
+from ...testing import env_flag_enabled, is_test_context
 from ..tts_exceptions import (
     TTSGenerationError,
     TTSGPUError,
@@ -65,17 +65,6 @@ _TORCH_IMPORT_ERROR: Exception | None = None
 _TORCH_IMPORT_ATTEMPTED: bool = False
 
 
-def _is_test_runtime() -> bool:
-    test_flags = {"1", "true", "yes", "y", "on"}
-    if str(os.getenv("PYTEST_CURRENT_TEST", "")).strip():
-        return True
-    if str(os.getenv("MINIMAL_TEST_APP", "")).strip().lower() in test_flags:
-        return True
-    if str(os.getenv("TLDW_TEST_MODE", "")).strip().lower() in test_flags:
-        return True
-    return any("pytest" in str(arg or "") for arg in sys.argv)
-
-
 def _get_torch(*, allow_import: bool) -> Any | None:
     global torch, _TORCH_IMPORT_ERROR, _TORCH_IMPORT_ATTEMPTED
 
@@ -99,7 +88,7 @@ def _get_torch(*, allow_import: bool) -> Any | None:
 
 
 def _torch_cuda_available(*, allow_import: bool = False) -> bool:
-    torch_mod = _get_torch(allow_import=allow_import and not _is_test_runtime())
+    torch_mod = _get_torch(allow_import=allow_import and not (is_test_context() or env_flag_enabled("MINIMAL_TEST_APP")))
     if torch_mod is None:
         return False
     try:
@@ -109,7 +98,7 @@ def _torch_cuda_available(*, allow_import: bool = False) -> bool:
 
 
 def _torch_mps_available(*, allow_import: bool = False) -> bool:
-    torch_mod = _get_torch(allow_import=allow_import and not _is_test_runtime())
+    torch_mod = _get_torch(allow_import=allow_import and not (is_test_context() or env_flag_enabled("MINIMAL_TEST_APP")))
     if torch_mod is None:
         return False
     try:

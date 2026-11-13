@@ -34,7 +34,7 @@ import {
   extractWorkspaceIdFromChatSessionKey,
   isWorkspaceChatSessionKeyForWorkspace
 } from "@/store/workspace-chat-session-key"
-import { buildResearchWorkspaceMigrationTombstoneKey } from "@/store/workspace-migration"
+import { buildResearchWorkspaceMigrationTombstoneKey, type ResearchWorkspaceChatReferenceOwner } from "@/store/workspace-migration"
 import type {
   AddSourceModalState,
   AddSourceTab,
@@ -3026,7 +3026,7 @@ export interface WorkspaceSourceTransferExecutionResult
 
 interface WorkspaceIdentityActions {
   initializeWorkspace: (name?: string) => string
-  restoreServerWorkspace: (snapshot: WorkspaceSnapshot) => void
+  restoreServerWorkspace: (snapshot: WorkspaceSnapshot, chatSession?: WorkspaceChatSession) => void
   setWorkspaceName: (name: string) => void
   loadWorkspace: (config: WorkspaceConfig) => void
 }
@@ -3185,7 +3185,8 @@ interface WorkspaceListActions {
   /** Save chat session state for a workspace */
   saveWorkspaceChatSession: (
     workspaceSessionKey: string,
-    session: WorkspaceChatSession
+    session: WorkspaceChatSession,
+    owner?: ResearchWorkspaceChatReferenceOwner
   ) => void
   /** Retrieve chat session state for a workspace */
   getWorkspaceChatSession: (
@@ -3869,7 +3870,7 @@ const normalizeWorkspaceSessionMessages = (messages: unknown): Message[] => {
     .map((message) => ({ ...message }))
 }
 
-const deriveHistoryFromMessages = (messages: Message[]): ChatHistory =>
+export const deriveHistoryFromMessages = (messages: Message[]): ChatHistory =>
   messages
     .map((message) => {
       const content = typeof message.message === "string" ? message.message : ""

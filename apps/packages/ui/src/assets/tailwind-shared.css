@@ -83,6 +83,14 @@
   --color-success: 4 120 87;
   --color-warn: 168 82 7;
   --color-danger: 190 45 74;
+  /* What text-primary, text-success, text-warn and text-danger paint with:
+     each colour moved towards --color-text until it reaches 4.5:1 on the
+     page, card and panel surfaces and on its own /10 tint (#3124). Custom
+     themes derive them in themes/text-on-tint.ts. */
+  --color-primary-text: 43 92 188;
+  --color-success-text: 7 112 82;
+  --color-warn-text: 154 77 10;
+  --color-danger-text: 174 44 71;
   --color-muted: 102 112 133;
   --color-border: 226 221 211;
   --color-border-strong: 207 200 186;
@@ -151,6 +159,10 @@
   --color-success: 59 214 150;
   --color-warn: 247 185 85;
   --color-danger: 255 107 139;
+  --color-primary-text: 99 146 254;
+  --color-success-text: 59 214 150;
+  --color-warn-text: 247 185 85;
+  --color-danger-text: 255 107 139;
   --color-muted: 154 163 178;
   --color-border: 43 49 59;
   --color-border-strong: 59 67 80;
@@ -435,6 +447,17 @@ body {
   color: rgb(var(--color-text)) !important;
 }
 
+/* Keep Ant Design solid actions on the same readable pairs as shared buttons. */
+.ant-btn-color-primary.ant-btn-variant-solid:not(:disabled):not([aria-disabled="true"]):not(.ant-btn-disabled):not(.ant-btn-dangerous):not(.ant-btn-background-ghost) {
+  background-color: rgb(var(--color-primary)) !important;
+  color: rgb(var(--color-primary-foreground)) !important;
+}
+
+.ant-btn-color-primary.ant-btn-variant-solid:not(:disabled):not([aria-disabled="true"]):not(.ant-btn-disabled):not(.ant-btn-dangerous):not(.ant-btn-background-ghost):is(:hover, :active) {
+  background-color: rgb(var(--color-primary-strong)) !important;
+  color: rgb(var(--color-primary-strong-foreground)) !important;
+}
+
 .ant-card-head {
   border-color: rgb(var(--color-border)) !important;
 }
@@ -678,8 +701,9 @@ body {
 .ant-input-textarea textarea::placeholder,
 .ant-input-affix-wrapper input::placeholder,
 .ant-picker-input > input::placeholder,
-.ant-select-selection-placeholder {
-  color: rgb(var(--color-text-muted)) !important;
+.ant-select-selection-placeholder,
+.ant-select-placeholder {
+  color: var(--ant-color-text-placeholder, rgb(var(--color-text-muted))) !important;
 }
 
 .ant-input-password-icon,

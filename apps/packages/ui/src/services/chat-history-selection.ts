@@ -902,13 +902,17 @@ export const nativeEditResendView = (
   }
 }
 
-const nativeRegenerationTarget = (capture: HistorySelectionCaptureV1) => {
+/** The refusal code for a saved-reply action: Continue has its own (CM-01). */
+export const unsupportedSavedReplyActionCode = (intent?: Pick<NativeHistoryRegenerate, "action">) =>
+  intent?.action === "continue" ? "unsupported_history_continuation" : "unsupported_history_regeneration"
+
+const nativeRegenerationTarget = (capture: HistorySelectionCaptureV1, unsupported = "unsupported_history_regeneration") => {
   const user = capture.rows.at(-2)
   const reply = capture.rows.at(-1)
   if (!user || !reply || user.role !== "user" || reply.role !== "assistant" ||
       !user.settled || !reply.settled || reply.parent_id !== user.id ||
       user.comparison || reply.comparison)
-    return fail("unsupported_history_regeneration")
+    return fail(unsupported)
   for (const row of [user, reply]) {
     const nodes = capture.snapshot.nodes.filter(node => node.id === row.id)
     if (nodes.length !== 1 || canonicalHistoryJson(nodes[0]) !== canonicalHistoryJson(row))
@@ -934,8 +938,8 @@ export const nativeRegenerateView = (
       owner.conversation_id !== intent.conversation_id || (owner.owner_key && owner.owner_key !== intent.owner_key))
     fail("owner_conversation_mismatch")
   if (origin.interpretation.kind !== "parent_graph_v1" || capture.view.interpretation.kind !== "parent_graph_v1")
-    fail("unsupported_history_regeneration")
-  const { user, reply } = nativeRegenerationTarget(capture)
+    fail(unsupportedSavedReplyActionCode(intent))
+  const { user, reply } = nativeRegenerationTarget(capture, unsupportedSavedReplyActionCode(intent))
   if (reply.id !== intent.message_id || reply.revision !== intent.message_revision ||
       user.id !== intent.input_message_id || user.revision !== intent.input_message_revision)
     fail("message_changed")
@@ -952,7 +956,7 @@ export const nativeRegenerationMessage = (
   intent: NativeHistoryRegenerate,
   inputVersion: number
 ): Extract<ChatMessage, { role: "user" }> => {
-  const { user, reply, content } = nativeRegenerationTarget(capture)
+  const { user, reply, content } = nativeRegenerationTarget(capture, unsupportedSavedReplyActionCode(intent))
   if (user.id !== intent.input_message_id || user.revision !== intent.input_message_revision ||
       reply.id !== intent.message_id || reply.revision !== intent.message_revision)
     fail("message_changed")
@@ -964,7 +968,7 @@ export const nativeRegenerationMessage = (
       !Array.isArray(details) || details.length !== content.images.length ||
       details.some(detail => typeof detail !== "string" || !["auto", "high", "low"].includes(detail)) ||
       content.images.some(image => !/^data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/]*={0,2}$/.test(image)))
-    fail("unsupported_history_regeneration")
+    fail(unsupportedSavedReplyActionCode(intent))
   const text = inputVersion === 1 && extra.content_placeholder_reason === "image_attachment" &&
     content.images.length && content.message === `<Image attachment x${content.images.length}>`
     ? "" : content.message

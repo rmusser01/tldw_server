@@ -1,3 +1,4 @@
+import { requestScopeFields, type ServicePromptRequestScope } from "./service-prompts"
 import { bgRequest } from "@/services/background-proxy"
 import { buildQuery, toTrimmedStringArray } from "../client-utils"
 import type {
@@ -628,23 +629,7 @@ export interface TldwApiClientCore {
   fillPathParams(template: string, values: string | string[]): string
 }
 
-export const presentationsMethods = {
-  async generateSlidesFromMedia(
-    this: TldwApiClientCore,
-    mediaId: number,
-    options?: {
-      titleHint?: string
-      theme?: string
-      visualStyleId?: string
-      visualStyleScope?: string
-      provider?: string
-      model?: string
-      claimsVerificationProvider?: string
-      claimsVerificationModel?: string
-      temperature?: number
-      signal?: AbortSignal
-    }
-  ): Promise<{
+type SlidesFromMediaResponse = {
     id: string
     title: string
     description?: string
@@ -664,7 +649,27 @@ export const presentationsMethods = {
     }>
     version: number
     created_at: string
-  }> {
+  }
+
+export const presentationsMethods = {
+  async generateSlidesFromMedia(
+    this: TldwApiClientCore,
+    mediaId: number,
+    options?: {
+      titleHint?: string
+      theme?: string
+      visualStyleId?: string
+      visualStyleScope?: string
+      provider?: string
+      model?: string
+      claimsVerificationProvider?: string
+      claimsVerificationModel?: string
+      temperature?: number
+      maxTokens?: number
+      requestScope?: ServicePromptRequestScope
+      signal?: AbortSignal
+    }
+  ): Promise<SlidesFromMediaResponse> {
     const body: Record<string, unknown> = { media_id: mediaId }
     if (options?.titleHint) body.title_hint = options.titleHint
     if (options?.theme) body.theme = options.theme
@@ -679,12 +684,16 @@ export const presentationsMethods = {
       body.claims_verification_model = options.claimsVerificationModel
     }
     if (options?.temperature != null) body.temperature = options.temperature
-    return await this.request<any>({
-      path: "/api/v1/slides/generate/from-media",
+    if (options?.maxTokens != null) body.max_tokens = options.maxTokens
+    const request = {
+      path: "/api/v1/slides/generate/from-media" as const,
       method: "POST",
       body,
       abortSignal: options?.signal
-    })
+    }
+    return options?.requestScope
+      ? await bgRequest<SlidesFromMediaResponse>({ ...request, ...requestScopeFields(options.requestScope), method: "POST" })
+      : await this.request<any>(request)
   },
 
   async listVisualStyles(
@@ -814,7 +823,10 @@ export const presentationsMethods = {
     const response = await this.request<unknown>({
       path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}`,
       method: "GET",
-      headers: presentationNegotiationHeaders(),
+      headers: {
+        ...presentationNegotiationHeaders(),
+        "Cache-Control": "no-cache"
+      },
       ...(options?.abortSignal ? { abortSignal: options.abortSignal } : {}),
       returnResponse: true
     })
@@ -1134,13 +1146,15 @@ export const presentationsMethods = {
   async exportPresentation(
     this: TldwApiClientCore,
     presentationId: string,
-    format: "revealjs" | "markdown" | "json" | "pdf"
+    format: "revealjs" | "markdown" | "json" | "pdf",
+    options?: { abortSignal?: AbortSignal }
   ): Promise<Blob> {
     await this.ensureConfigForRequest(true)
 
     const response = await this.request<any>({
       path: `/api/v1/slides/presentations/${encodeURIComponent(presentationId)}/export?format=${encodeURIComponent(format)}`,
       method: "GET",
+      abortSignal: options?.abortSignal,
       headers: presentationNegotiationHeaders(),
       responseType: "arrayBuffer",
       returnResponse: true

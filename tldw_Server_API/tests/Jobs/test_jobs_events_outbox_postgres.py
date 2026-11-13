@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from pathlib import Path
 import pytest
 from fastapi.routing import APIRoute
 
@@ -14,6 +15,8 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+from tldw_Server_API.tests._plugins.authnz_fixtures import authnz_schema_ready_sync  # noqa: F401
 
 
 def _ensure_jobs_router_registered(app) -> None:
@@ -32,7 +35,16 @@ def _ensure_jobs_router_registered(app) -> None:
     app.include_router(jobs_admin_router, prefix=f"{API_V1_PREFIX}", tags=["jobs"])
 
 
-
+@pytest.fixture(autouse=True)
+def _prepare_outbox_authnz(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    request: pytest.FixtureRequest,
+) -> None:
+    """Provision full-app AuthNZ separately from the official Jobs PG database."""
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'authnz.db'}")
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    request.getfixturevalue("authnz_schema_ready_sync")
 
 
 @pytest.mark.integration

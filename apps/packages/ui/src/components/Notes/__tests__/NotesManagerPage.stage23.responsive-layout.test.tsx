@@ -198,6 +198,47 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     })
   })
 
+  it("moves focus through the actual offcanvas sidebar ref and returns it on Escape", async () => {
+    setViewportWidth(375)
+    renderPage()
+    const opener = screen.getByTestId("notes-mobile-open-list-button")
+    opener.focus()
+    fireEvent.click(opener)
+    const sidebar = screen.getByTestId("notes-list-region")
+    await waitFor(() => expect(sidebar.querySelector("[data-notes-search-input]")).toHaveFocus())
+    fireEvent.keyDown(sidebar.querySelector("[data-notes-search-input]")!, { key: "Escape" })
+    await waitFor(() => expect(opener).toHaveFocus())
+    expect(sidebar).toHaveAttribute("inert")
+  })
+
+  it.each([375, 1024])("removes the hidden sidebar from keyboard and screen-reader navigation at %ipx and restores it when opened", async (width) => {
+    setViewportWidth(width)
+    renderPage()
+    const sidebar = screen.getByTestId("notes-list-region")
+    if (width >= 768) {
+      fireEvent.click(screen.getByTestId("notes-desktop-sidebar-toggle"))
+    }
+    await waitFor(() => {
+      expect(sidebar).toHaveAttribute("inert")
+      expect(sidebar).toHaveAttribute("aria-hidden", "true")
+    })
+
+    fireEvent.click(screen.getByRole("link", { name: "Skip to notes list" }))
+    await waitFor(() => {
+      expect(sidebar).not.toHaveAttribute("inert")
+      expect(sidebar).not.toHaveAttribute("aria-hidden")
+      expect(sidebar).toHaveFocus()
+    })
+
+    fireEvent.click(screen.getByTestId(
+      width < 768 ? "notes-mobile-sidebar-backdrop" : "notes-desktop-sidebar-toggle"
+    ))
+    await waitFor(() => {
+      expect(sidebar).toHaveAttribute("inert")
+      expect(sidebar).toHaveAttribute("aria-hidden", "true")
+    })
+  })
+
   it("uses mobile single-panel mode below 768 and desktop split mode at 768+", async () => {
     const { rerender } = renderPage()
 
@@ -336,6 +377,28 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
       expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAccessibleName(
         "Expand notes sidebar"
       )
+    })
+  })
+
+  it("preserves the expanded desktop sidebar after a mobile round trip", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const page = () => <QueryClientProvider client={client}><NotesManagerPage /></QueryClientProvider>
+    const { rerender } = render(page())
+    expect(screen.getByTestId("notes-list-region")).not.toHaveAttribute("inert")
+
+    setViewportWidth(375)
+    rerender(page())
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-mobile-open-list-button")).toBeInTheDocument()
+      expect(screen.getByTestId("notes-list-region")).toHaveAttribute("inert")
+    })
+
+    setViewportWidth(1024)
+    rerender(page())
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAttribute("aria-label", "Collapse notes sidebar")
+      expect(screen.getByTestId("notes-list-region")).not.toHaveAttribute("inert")
+      expect(screen.getByTestId("notes-list-region")).not.toHaveAttribute("aria-hidden")
     })
   })
 

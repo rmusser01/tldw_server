@@ -405,12 +405,17 @@ def release_job(
     *,
     command: ReleaseJobCommand,
     counters_enabled: bool,
+    clock: Callable[[], datetime] | None = None,
 ) -> LifecycleResult:
     """Release one processing SQLite job back to the ready queue."""
 
+    from ..resource import resource_mutation
+
     owns_transaction = begin_immediate_if_needed(conn)
     transaction = conn if owns_transaction else nullcontext(conn)
-    with transaction:
+    with transaction, resource_mutation(conn, where="id=?", params=(command.job_id,), clock=clock) as mutation:
+        if not mutation.worker_allowed(command.job_id, command.worker_id, command.lease_id):
+            return LifecycleResult.no_transition(NoTransitionReason.STALE_LEASE)
         enrollment = workflow_enrollment_projection(conn, backend="sqlite")
         selected_sql = "SELECT id, domain, queue, job_type, status, worker_id, lease_id FROM jobs WHERE id = ?"
         if enrollment == "workflow_capability_version":

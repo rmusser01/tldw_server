@@ -5286,6 +5286,9 @@ async def test_public_multibatch_marks_first_valid_batch_before_second_cancel(
         lambda **_kwargs: SimpleNamespace(fallback_chain=["openai"]),
     )
 
+    # Prepare real settings before timing the provider cancellation rendezvous.
+    mod.settings.get("EMBEDDINGS_ENFORCE_POLICY")
+
     if surface == "batch":
         operation = mod.create_embeddings_batch_endpoint(
             payload=mod.EmbeddingsBatchRequest(

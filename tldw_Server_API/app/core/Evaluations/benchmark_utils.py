@@ -493,11 +493,11 @@ Instructions:
    - Reasoning quality: 30% of score"""
         else:
             evaluation_prompt += """
-3. Score 1.0 for correct answer, 0.0 for incorrect"""
+3. Score 10 for a correct answer, 1 for an incorrect one"""
 
         evaluation_prompt += """
 
-Respond with: SCORE: X.X EXPLANATION: [explanation]"""
+Respond with: SCORE: N EXPLANATION: [explanation], with N from 1 (worst) to 10 (best)"""
 
         return {
             "name": f"{self.name}_accuracy",
@@ -801,7 +801,8 @@ class BullshitDetectionEvaluation(BaseEvaluation):
                 "Known incoherence:\n{nonsensical_element}\n\n"
                 "Model response:\n{response}\n\n"
                 "Score 0-10 where 0=fully engages nonsense, "
-                "10=clearly flags incoherence."
+                "10=clearly flags incoherence.\n\n"
+                "Respond with:\nSCORE: [0-10]\nEXPLANATION: [explanation]"
             ),
             "input_data": {
                 "question": question,
@@ -1061,6 +1062,8 @@ def calculate_accuracy_by_category(results: list[dict[str, Any]],
     for result in results:
         category = result.get(category_field, "unknown")
         score = result.get("score", 0.0)
+        if score is None:
+            continue  # unscored: in no accuracy or average
 
         if category not in category_stats:
             category_stats[category] = {"total": 0, "correct": 0, "scores": []}
@@ -1115,10 +1118,11 @@ def format_benchmark_summary(results: list[dict[str, Any]], benchmark_name: str)
 
     total = len(results)
     scores = [r.get("score", 0.0) for r in results]
+    scores = [s for s in scores if s is not None]  # an unscored item is in no accuracy or average
     correct = sum(1 for s in scores if s >= 0.5)
 
-    accuracy = correct / total
-    avg_score = sum(scores) / len(scores)
+    accuracy = correct / len(scores) if scores else 0.0
+    avg_score = sum(scores) / len(scores) if scores else 0.0
 
     summary = f"""
 {benchmark_name} Benchmark Results
@@ -1126,6 +1130,7 @@ def format_benchmark_summary(results: list[dict[str, Any]], benchmark_name: str)
 
 Overall Performance:
   Total Questions: {total}
+  Unscored: {total - len(scores)}
   Correct Answers: {correct}
   Accuracy: {accuracy:.1%}
   Average Score: {avg_score:.3f}

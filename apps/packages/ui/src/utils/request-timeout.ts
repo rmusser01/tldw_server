@@ -66,6 +66,11 @@ export const resolveRequestTimeout = (
       Number(cfg?.requestTimeoutMs) > 0 ? Number(cfg?.requestTimeoutMs) : 0
     return Math.max(configuredTimeout, MODEL_METADATA_REQUEST_TIMEOUT_FLOOR_MS)
   }
+  if (/\/api\/v1\/llamacpp\/(?:profiles\/[^/?#]+\/(?:start|resume)|start-by-model|start_server)\/?(?:[?#]|$)/.test(p)) {
+    // Cold model loading outlasts the generic10s timeout; allow startup and cleanup.
+    const configuredTimeout = Number(cfg?.requestTimeoutMs) > 0 ? Number(cfg?.requestTimeoutMs) : 0
+    return Math.max(configuredTimeout, 120000)
+  }
   if (isMediaApiPath(p)) {
     return Number(cfg?.mediaRequestTimeoutMs) > 0
       ? Number(cfg?.mediaRequestTimeoutMs)

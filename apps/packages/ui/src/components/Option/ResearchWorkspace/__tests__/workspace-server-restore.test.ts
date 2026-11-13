@@ -1,3 +1,4 @@
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
 import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,12 +39,14 @@ import {
   buildResearchWorkspaceMigrationTombstone,
   buildResearchWorkspaceMigrationTombstoneKey,
 } from "@/store/workspace-migration";
-import { useWorkspaceStore } from "@/store/workspace";
+import { flushWorkspacePersistence, useWorkspaceStore } from "@/store/workspace";
 import {
   readMigratedResearchWorkspaceId,
   restoreMigratedResearchWorkspace,
-} from "../workspace-server-restore";
+} from "@/services/workspace-server-restore";
 import { isServicePromptRequestPath } from "@/services/tldw/service-prompt-scope-error";
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
+import { loadServicePromptSnapshot } from "@/services/service-prompts";
 
 const receiptKey = "tldw:research-workspace:migration:tombstone:original";
 const context = () => ({
@@ -126,6 +129,46 @@ beforeEach(() => {
 });
 
 describe("migrated Research Workspace restoration", () => {
+
+  it("retains a newly imported report through a tombstoned cold restore", async () => {
+    const originalRequest = boundary.request.getMockImplementation()!;
+    let saved: Record<string, unknown> | undefined;
+    boundary.request.mockImplementation(async (input) => {
+      if (input.method === "POST" && input.path === "/api/v1/workspaces/original/artifacts") {
+        saved = { ...input.body, workspace_id: "original", version: 1,
+          created_at: "2026-10-30T00:00:00Z", completed_at: null, total_tokens: null, total_cost_usd: null };
+        return saved;
+      }
+      if (input.path === "/api/v1/workspaces/original/artifacts") return saved ? [saved] : [];
+      return originalRequest(input);
+    });
+    await expect(restore()).resolves.toBe(true);
+    const draft = useWorkspaceStore.getState().addArtifact({
+      type: "report",
+      status: "completed",
+      title: "Deep Research: rs_owned",
+      content: "The telescope is Selene. Friday tours start at 18:00.",
+      producerMetadata: { producerType: "deep_research_bundle_import", runId: "rs_owned" },
+      data: { deepResearch: { researchRunId: "rs_owned", selectedImportedSources: [{ sourceId: "src_1" }] } },
+    });
+    const scope = await loadServicePromptSnapshot([]);
+    try {
+      bindWorkspaceArtifactOrigin(draft, scope.scopeKey, "original");
+      const retained = await persistWorkspaceArtifact(draft, {
+        workspaceId: "original", scope,
+        isCurrent: () => useWorkspaceStore.getState().workspaceId === "original",
+      });
+      useWorkspaceStore.getState().updateArtifactStatus(draft.id, draft.status, retained);
+    } finally { scope.release(); }
+    await flushWorkspacePersistence();
+    useWorkspaceStore.setState({ generatedArtifacts: [], workspaceSnapshots: {} });
+    await expect(restore()).resolves.toBe(true);
+    expect(useWorkspaceStore.getState().generatedArtifacts).toContainEqual(
+      expect.objectContaining({ id: draft.id, title: draft.title, content: draft.content,
+        producerMetadata: draft.producerMetadata, data: draft.data }),
+    );
+    expect(JSON.parse(localStorage.getItem(receiptKey)!)).toMatchObject({ contentRetained: false });
+  });
   it.each([
     "jobs_unavailable",
     "media_db_unavailable",
@@ -329,11 +372,11 @@ describe("migrated Research Workspace restoration", () => {
   });
 
   it.each(["context", "artifacts", "notes"])(
-    "permits scoped restoration GET for %s without permitting mutations",
+    "permits scoped restoration GET for %s with only the explicit artifact-create mutation",
     (resource) => {
       const path = `/api/v1/workspaces/original/${resource}`;
       expect(isServicePromptRequestPath(path, "GET")).toBe(true);
-      expect(isServicePromptRequestPath(path, "POST")).toBe(false);
+      expect(isServicePromptRequestPath(path, "POST")).toBe(resource === "artifacts");
       expect(isServicePromptRequestPath(path, "PUT")).toBe(false);
       expect(
         isServicePromptRequestPath(
@@ -990,4 +1033,503 @@ it("preserves intentional changed-head refusal when canonical recovery verifies 
     statusDetails: { statusReason: "capture_head_changed" },
   });
   expect(useWorkspaceStore.getState().getSelectedMediaIds()).toEqual([]);
+});
+
+
+it("leaves multiple canonical Quick Notes for visible selection instead of choosing a search result", async () => {
+  const originalRequest = boundary.request.getMockImplementation()!;
+  boundary.request.mockImplementation(async (request) => {
+    if (request.path.endsWith("/notes")) return [];
+    if (request.path.includes("/notes/search/"))
+      return { notes: [{ id: "note-one" }, { id: "note-two" }] };
+    if (request.path === "/api/v1/notes/note-one" || request.path === "/api/v1/notes/note-two")
+      return { id: request.path.split("/").at(-1), title: "Research", content: "Saved body",
+        version: 1, keywords: ["workspace:original"] };
+    return originalRequest(request);
+  });
+  const apply = vi.fn();
+  await restore(apply);
+  expect(apply.mock.calls[0][0].currentNote.id).toBeUndefined();
+  expect(apply.mock.calls[0][0].currentNote.content).toBe("");
+});
+
+describe("post-migration saved chat identity", () => {
+  const chatId = "11111111-2222-4333-8444-555555555555";
+  const empty = {
+    messages: [],
+    history: [],
+    historyId: null,
+    serverChatId: chatId
+  };
+  const owner = () => {
+    const controller = boundary.controller;
+    return {
+      scopeKey: boundary.scopeKey,
+      isCurrent: () => !controller.signal.aborted
+    };
+  };
+
+  it("retains an acknowledged chat identity without restoring local transcript payloads", async () => {
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    useWorkspaceStore.getState().saveWorkspaceChatSession(
+      "original",
+      {
+        ...empty,
+        messages: [
+          { isBot: true, name: "AI", message: "Private answer", sources: [] }
+        ]
+      },
+      owner()
+    );
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    expect(receipt.chatReference).toEqual({
+      referenceId: "original",
+      serverChatId: chatId
+    });
+    expect(JSON.stringify(receipt)).not.toContain("Private answer");
+  });
+
+  it("does not let initial null state erase the hint, but remembers explicit Clear and Undo", () => {
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    const save = useWorkspaceStore.getState().saveWorkspaceChatSession;
+    save("original", empty, owner());
+    save("original", { ...empty, serverChatId: null }, owner());
+    expect(
+      JSON.parse(localStorage.getItem(receiptKey)!).chatReference.serverChatId
+    ).toBe(chatId);
+    save(
+      "original",
+      { ...empty, serverChatId: null },
+      { ...owner(), clear: true }
+    );
+    expect(
+      JSON.parse(localStorage.getItem(receiptKey)!).chatReference.serverChatId
+    ).toBeNull();
+    save("original", empty, owner());
+    expect(
+      JSON.parse(localStorage.getItem(receiptKey)!).chatReference.serverChatId
+    ).toBe(chatId);
+  });
+
+  it.each(["account", "workspace", "reference", "bound-owner"])(
+    "rejects a retired %s hint writer",
+    (change) => {
+      useWorkspaceStore.setState({
+        workspaceId: "original",
+        workspaceChatReferenceId: "original"
+      });
+      const captured = owner();
+      const before = localStorage.getItem(receiptKey);
+      if (change === "account") boundary.controller.abort();
+      if (change === "workspace")
+        useWorkspaceStore.setState({ workspaceId: "other" });
+      if (change === "reference")
+        useWorkspaceStore.setState({ workspaceChatReferenceId: "other" });
+      if (change === "bound-owner") captured.scopeKey = "other-account";
+      useWorkspaceStore
+        .getState()
+        .saveWorkspaceChatSession("original", empty, captured);
+      expect(localStorage.getItem(receiptKey)).toBe(before);
+    }
+  );
+
+  it("keeps an unbound marker unbound until canonical membership and chat validation", async () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    delete receipt.serverScopeKey;
+    localStorage.setItem(receiptKey, JSON.stringify(receipt));
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    useWorkspaceStore
+      .getState()
+      .saveWorkspaceChatSession("original", empty, owner());
+    expect(
+      JSON.parse(localStorage.getItem(receiptKey)!).serverScopeKey
+    ).toBeUndefined();
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) =>
+      request.path.startsWith("/api/v1/chats/")
+        ? {
+            id: chatId,
+            scope_type: "workspace",
+            workspace_id: "original",
+            deleted: false
+          }
+        : originalRequest(request)
+    );
+    useWorkspaceStore.setState({
+      workspaceId: "",
+      workspaceChatReferenceId: "",
+      workspaceChatSessions: {}
+    });
+    await useWorkspaceStore.persist.rehydrate();
+    expect(useWorkspaceStore.getState().workspaceId).toBe("");
+    await restore();
+    expect(
+      useWorkspaceStore.getState().getWorkspaceChatSession("original")
+    ).toEqual(empty);
+    expect(JSON.parse(localStorage.getItem(receiptKey)!).serverScopeKey).toBe(
+      "original-alice"
+    );
+    expect(boundary.request).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "/api/v1/workspaces/" })
+    );
+  });
+
+  it("retains the acknowledged in-memory ID and answer if hint storage fails", () => {
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("Quota exceeded");
+      });
+    const session = {
+      ...empty,
+      messages: [
+        { isBot: true, name: "AI", message: "Keep this answer", sources: [] }
+      ]
+    };
+    try {
+      expect(() =>
+        useWorkspaceStore
+          .getState()
+          .saveWorkspaceChatSession("original", session, owner())
+      ).toThrow("Quota exceeded");
+      expect(
+        useWorkspaceStore.getState().getWorkspaceChatSession("original")
+      ).toEqual(session);
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it.each([
+    { id: "foreign" },
+    { scope_type: "global" },
+    { workspace_id: "foreign" },
+    { deleted: true }
+  ])(
+    "refuses a mismatched saved chat head %j before publishing",
+    async (wrong) => {
+      const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+      delete receipt.serverScopeKey;
+      localStorage.setItem(
+        receiptKey,
+        JSON.stringify({
+          ...receipt,
+          chatReference: { referenceId: "original", serverChatId: chatId }
+        })
+      );
+      const before = localStorage.getItem(receiptKey);
+      const originalRequest = boundary.request.getMockImplementation()!;
+      boundary.request.mockImplementation(async (request) =>
+        request.path.startsWith("/api/v1/chats/")
+          ? {
+              id: chatId,
+              scope_type: "workspace",
+              workspace_id: "original",
+              deleted: false,
+              ...wrong
+            }
+          : originalRequest(request)
+      );
+      const apply = vi.fn();
+      await expect(restore(apply)).rejects.toThrow("Saved workspace chat");
+      expect(apply).not.toHaveBeenCalled();
+      expect(localStorage.getItem(receiptKey)).toBe(before);
+    }
+  );
+
+  it("does not publish a chat head after account invalidation", async () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.setItem(
+      receiptKey,
+      JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "original", serverChatId: chatId }
+      })
+    );
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) => {
+      if (!request.path.startsWith("/api/v1/chats/"))
+        return originalRequest(request);
+      boundary.controller.abort();
+      return {
+        id: chatId,
+        scope_type: "workspace",
+        workspace_id: "original",
+        deleted: false
+      };
+    });
+    const apply = vi.fn();
+    await expect(restore(apply)).rejects.toMatchObject({ status: 412 });
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("updates the actual legacy-key receipt when its server workspace ID differs", () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.removeItem(receiptKey);
+    const legacyKey =
+      "tldw:research-workspace:migration:tombstone:legacy-original";
+    localStorage.setItem(
+      legacyKey,
+      JSON.stringify({ ...receipt, legacyWorkspaceId: "legacy-original" })
+    );
+    useWorkspaceStore.setState({
+      workspaceId: "original",
+      workspaceChatReferenceId: "original"
+    });
+    useWorkspaceStore
+      .getState()
+      .saveWorkspaceChatSession("original", empty, owner());
+    expect(
+      JSON.parse(localStorage.getItem(legacyKey)!).chatReference.serverChatId
+    ).toBe(chatId);
+    expect(localStorage.getItem(receiptKey)).toBeNull();
+  });
+
+  it("does not overwrite a newer hint that arrives during restoration", async () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.setItem(
+      receiptKey,
+      JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "original", serverChatId: chatId }
+      })
+    );
+    let latest = "";
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) => {
+      if (!request.path.startsWith("/api/v1/chats/"))
+        return originalRequest(request);
+      latest = JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "new-selection", serverChatId: null }
+      });
+      localStorage.setItem(receiptKey, latest);
+      return {
+        id: chatId,
+        scope_type: "workspace",
+        workspace_id: "original",
+        deleted: false
+      };
+    });
+    const apply = vi.fn();
+    await expect(restore(apply)).rejects.toThrow("changed during restoration");
+    expect(apply).not.toHaveBeenCalled();
+    expect(localStorage.getItem(receiptKey)).toBe(latest);
+  });
+
+  it("checks synchronous selection retirement before binding and publication", async () => {
+    let current = true;
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    delete receipt.serverScopeKey;
+    localStorage.setItem(
+      receiptKey,
+      JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "original", serverChatId: chatId }
+      })
+    );
+    const before = localStorage.getItem(receiptKey);
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) => {
+      if (!request.path.startsWith("/api/v1/chats/"))
+        return originalRequest(request);
+      current = false;
+      return {
+        id: chatId,
+        scope_type: "workspace",
+        workspace_id: "original",
+        deleted: false
+      };
+    });
+    const apply = vi.fn();
+    await expect(
+      restoreMigratedResearchWorkspace({
+        signal: new AbortController().signal,
+        isCurrent: () => current,
+        apply
+      })
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(apply).not.toHaveBeenCalled();
+    expect(localStorage.getItem(receiptKey)).toBe(before);
+  });
+
+  it.each([
+    null,
+    [],
+    { referenceId: "original", serverChatId: {} },
+    { referenceId: "x".repeat(257), serverChatId: chatId }
+  ])(
+    "refuses malformed reference %j without creating a replacement",
+    async (chatReference) => {
+      const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+      localStorage.setItem(
+        receiptKey,
+        JSON.stringify({ ...receipt, chatReference })
+      );
+      const apply = vi.fn();
+      await expect(restore(apply)).rejects.toThrow("reference is invalid");
+      expect(apply).not.toHaveBeenCalled();
+      expect(
+        boundary.request.mock.calls.every(
+          ([request]) => request.method === "GET"
+        )
+      ).toBe(true);
+    }
+  );
+
+  it("restores a retained empty chat through the exact account-scoped server head", async () => {
+    const receipt = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.setItem(
+      receiptKey,
+      JSON.stringify({
+        ...receipt,
+        chatReference: { referenceId: "original", serverChatId: chatId }
+      })
+    );
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) =>
+      request.path.startsWith("/api/v1/chats/")
+        ? {
+            id: chatId,
+            scope_type: "workspace",
+            workspace_id: "original",
+            deleted: false
+          }
+        : originalRequest(request)
+    );
+    await expect(restore()).resolves.toBe(true);
+    expect(
+      useWorkspaceStore.getState().getWorkspaceChatSession("original")
+    ).toEqual(empty);
+    expect(boundary.request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "GET",
+        path: `/api/v1/chats/${chatId}?scope_type=workspace&workspace_id=original`,
+        servicePromptConfig: expect.objectContaining({
+          ...boundary.config,
+          expectedUserId: "alice"
+        }),
+        headers: { "X-TLDW-Expected-User-ID": "alice" }
+      })
+    );
+  });
+  it("restores an acknowledged Chat in a fresh canonical Workspace without legacy payloads", async () => {
+    localStorage.clear();
+    await restoreMigratedResearchWorkspace({
+      workspaceId: "original", signal: new AbortController().signal,
+      apply: useWorkspaceStore.getState().restoreServerWorkspace,
+    });
+    useWorkspaceStore.getState().saveWorkspaceChatSession("original", empty, owner());
+    const originalRequest = boundary.request.getMockImplementation()!;
+    boundary.request.mockImplementation(async (request) =>
+      request.path.startsWith("/api/v1/chats/")
+        ? { id: chatId, scope_type: "workspace", workspace_id: "original", deleted: false }
+        : originalRequest(request));
+    useWorkspaceStore.setState({ workspaceChatSessions: {} });
+    const apply = vi.fn();
+    await restoreMigratedResearchWorkspace({
+      workspaceId: "original", signal: new AbortController().signal, apply,
+    });
+    expect(apply.mock.calls[0][1]).toMatchObject({ serverChatId: chatId, messages: [] });
+    expect(localStorage.getItem(receiptKey)).toBeNull();
+  });
+
+  it.each(["clear", "undo", "other-account", "changed-hint", "wrong-workspace"])(
+    "keeps fresh canonical Chat restoration safe after %s",
+    async (change) => {
+      localStorage.clear();
+      await restoreMigratedResearchWorkspace({
+        workspaceId: "original", signal: new AbortController().signal,
+        apply: useWorkspaceStore.getState().restoreServerWorkspace,
+      });
+      const save = useWorkspaceStore.getState().saveWorkspaceChatSession;
+      save("original", empty, owner());
+      if (change === "clear" || change === "undo")
+        save("original", { ...empty, serverChatId: null }, { ...owner(), clear: true });
+      if (change === "undo") save("original", empty, owner());
+      if (change === "other-account") {
+        boundary.scopeKey = "original-bob";
+        boundary.userId = "bob";
+      }
+      const originalRequest = boundary.request.getMockImplementation()!;
+      boundary.request.mockImplementation(async (request) => {
+        if (!request.path.startsWith("/api/v1/chats/")) return originalRequest(request);
+        if (change === "changed-hint")
+          save("original", { ...empty, serverChatId: "newer-chat" }, owner());
+        return { id: chatId, scope_type: "workspace",
+          workspace_id: change === "wrong-workspace" ? "foreign" : "original", deleted: false };
+      });
+      const apply = vi.fn();
+      const restored = restoreMigratedResearchWorkspace({
+        workspaceId: "original", signal: new AbortController().signal, apply,
+      });
+      if (change === "changed-hint" || change === "wrong-workspace") {
+        await expect(restored).rejects.toThrow(
+          change === "changed-hint" ? "changed during restoration" : "Saved workspace chat");
+        expect(apply).not.toHaveBeenCalled();
+      } else {
+        await expect(restored).resolves.toBe(true);
+        expect(apply.mock.calls[0][1]?.serverChatId).toBe(
+          change === "clear" ? null : change === "other-account" ? undefined : chatId);
+      }
+      expect(localStorage.getItem(receiptKey)).toBeNull();
+    }
+  );
+
+  it.each(["malformed", "oversized", "missing-id"])(
+    "refuses a %s canonical Chat hint",
+    async (kind) => {
+      localStorage.clear();
+      await restoreMigratedResearchWorkspace({
+        workspaceId: "original", signal: new AbortController().signal,
+        apply: useWorkspaceStore.getState().restoreServerWorkspace,
+      });
+      useWorkspaceStore.getState().saveWorkspaceChatSession("original", empty, owner());
+      const key = Object.keys(localStorage).find(key => key.startsWith("tldw:research-workspace:chat-reference:"))!;
+      localStorage.setItem(key, kind === "malformed" ? "{" :
+        kind === "oversized" ? " ".repeat(4097) : JSON.stringify({ referenceId: "original" }));
+      const apply = vi.fn();
+      await expect(restoreMigratedResearchWorkspace({
+        workspaceId: "original", signal: new AbortController().signal, apply,
+      })).rejects.toThrow();
+      expect(apply).not.toHaveBeenCalled();
+    }
+  );
+
+  it("refuses conflicting canonical and migration Chat hints", async () => {
+    useWorkspaceStore.setState({ workspaceId: "original", workspaceChatReferenceId: "original" });
+    useWorkspaceStore.getState().saveWorkspaceChatSession("original", empty, owner());
+    const marker = JSON.parse(localStorage.getItem(receiptKey)!);
+    localStorage.setItem(receiptKey, JSON.stringify({
+      ...marker, chatReference: { referenceId: "different-reference", serverChatId: null },
+    }));
+    const apply = vi.fn();
+    await expect(restore(apply)).rejects.toThrow("references conflict");
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("enrolls an explicitly requested canonical workspace without manufacturing a migration tombstone", async () => {
+    localStorage.clear();
+    const applied = vi.fn();
+    await expect(restoreMigratedResearchWorkspace({
+      workspaceId: "original", signal: new AbortController().signal, apply: applied,
+    })).resolves.toBe(true);
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(hasCanonicalArtifactWorkspace("original", boundary.scopeKey)).toBe(true);
+    expect(localStorage.getItem(receiptKey)).toBeNull();
+  });
+
 });

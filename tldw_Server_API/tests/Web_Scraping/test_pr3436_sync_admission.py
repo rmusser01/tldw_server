@@ -1,5 +1,8 @@
 """Synchronous crawl admission belongs to the existing service container."""
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
 from tldw_Server_API.app.core.Utils import app_services as services_module
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy
 
@@ -20,6 +23,23 @@ def test_sync_admission_uses_each_service_containers_own_gate(monkeypatch):
     finally:
         release()
     assert first_gate.active_count == 0
+
+
+def test_concurrent_first_calls_share_one_admission_gate(monkeypatch):
+    services = services_module.AppServices()
+    monkeypatch.setattr(services_module, "_SERVICES", services)
+    create_gate = legacy._SyncCrawlAdmission
+    both_creating = Barrier(2, timeout=5)
+
+    def create_together():
+        both_creating.wait()
+        return create_gate()
+
+    monkeypatch.setattr(legacy, "_SyncCrawlAdmission", create_together)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(legacy._get_sync_crawl_admission)
+        second = executor.submit(legacy._get_sync_crawl_admission)
+        assert first.result() is second.result() is legacy._get_sync_crawl_admission()
 
 
 def test_sync_admission_replaces_child_gate_before_touching_inherited_lock(monkeypatch):

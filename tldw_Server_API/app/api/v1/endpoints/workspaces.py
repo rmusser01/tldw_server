@@ -88,6 +88,7 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     WorkspaceSourceSavedViewConflictError,
     WorkspaceSourceSavedViewNotFoundError,
 )
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError, WorkspaceArtifactExportStateError
 from tldw_Server_API.app.core.feature_flags import is_persona_enabled
@@ -1164,7 +1165,7 @@ async def upsert_workspace(
             study_materials_policy=body.study_materials_policy,
             workspace_profile=workspace_profile,
         )
-    except (ConflictError, InputError, CharactersRAGDBError) as exc:
+    except (ConflictError, InputError, CharactersRAGDBError, NotFoundError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to create or update workspace") from exc
     return _ws_to_response(ws, db=db, current_user=current_user)
 

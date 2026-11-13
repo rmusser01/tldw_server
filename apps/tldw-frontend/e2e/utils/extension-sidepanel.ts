@@ -235,12 +235,30 @@ export class SidePanelChat {
     const result = this.sidebar.getByRole("button", { name: new RegExp(`^${escapeRegExp(title)}(?: .+)? Server$`) })
     await expect(result).toBeVisible()
     await result.click()
-    await expect
-      .poll(async () => {
-        const state = await this.readTabs()
-        return state.tabs.find((tab) => tab.id === state.activeTabId)?.serverChatId ?? null
-      }, { message: `the side panel should switch to a tab for chat ${chatId}` })
-      .toBe(chatId)
+    try {
+      await expect
+        .poll(async () => {
+          const state = await this.readTabs()
+          return state.tabs.find((tab) => tab.id === state.activeTabId)?.serverChatId ?? null
+        }, { message: `the side panel should switch to a tab for chat ${chatId}` })
+        .toBe(chatId)
+    } catch (error) {
+      console.error("[sidepanel-chat-search:readiness]", await this.page.evaluate(async () => {
+        const store = Reflect.get(window, "__tldw_useConnectionStore")
+        const state = store?.getState?.()?.state
+        const saved = await chrome.storage.local.get(null)
+        return {
+          storeReady: typeof store?.getState === "function",
+          connected: state?.isConnected === true,
+          checking: state?.isChecking === true,
+          restoreBusy: !!document.querySelector('[aria-busy="true"][aria-label="Restoring previous chat"]'),
+          composerDockCount: document.querySelectorAll('[data-testid="sidepanel-composer-dock"]').length,
+          alertCount: document.querySelectorAll('[role="alert"]').length,
+          savedGlobalKeyCount: Object.keys(saved).filter((key) => key.startsWith("sidepanelChatTabsState:v2:") && key.endsWith(":global")).length,
+        }
+      }).catch(() => ({ snapshotUnavailable: true })))
+      throw error
+    }
   }
 
   /** Right-click a tab row and pick an item from its context menu. */

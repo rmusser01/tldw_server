@@ -119,3 +119,129 @@ describe("B02 canonical partial reply display", () => {
     expect(formatSelectedHistory(capture).messages[1].generationInfo).toEqual({ custom: "retained" })
   })
 })
+
+const namedSenderCapture = (
+  role: string,
+  extra: Record<string, unknown> | null = null,
+  alternatives: HistoryNodeV1[] = [],
+  ownerKey = NATIVE_OWNER_KEY
+): HistorySelectionCaptureV1 => {
+  const capture = buildNativeServerCapture()
+  const rows = capture.rows.map((row, index) => index === 1 ? { ...row, role } : row)
+  return {
+    ...capture,
+    rows,
+    snapshot: { ...capture.snapshot, owner_key: ownerKey, nodes: [...rows, ...alternatives] },
+    selected_content: capture.selected_content.map((row, index) => index === 1 ? { ...row, extra_metadata: extra } : row)
+  }
+}
+
+describe("X01 named sender display after upgrade", () => {
+  it("renders a stored Character name as an assistant without rewriting capture or provider history", () => {
+    const capture = namedSenderCapture("X01 Rowan Archivist", { generation_status: "stopped" })
+    const before = JSON.stringify(capture)
+    const display = formatSelectedHistory(capture)
+
+    expect(display.messages[1]).toMatchObject({ isBot: true, role: "assistant", name: "Assistant", generationInfo: { interrupted: true, stopped: true } })
+    expect(display.history[1]).toMatchObject({ role: "user", content: "Retrieval-augmented generation." })
+    expect(JSON.stringify(capture)).toBe(before)
+  })
+
+  it.each(["user", "system", "assistant"])("honors explicit %s metadata on a named sender", role => {
+    const capture = namedSenderCapture("Saved display name", { sender_role: role, sender_name: "Saved display name" })
+    const before = JSON.stringify(capture)
+
+    expect(formatSelectedHistory(capture).messages[1]).toMatchObject({ role, isBot: role === "assistant", name: "Saved display name" })
+    expect(JSON.stringify(capture)).toBe(before)
+  })
+
+  it("keeps named assistant alternatives and excludes tool output from the alternative list", () => {
+    const capture = namedSenderCapture("X01 Rowan Archivist", null, [
+      node("alternate", "srv-msg-user-1", "Old Character name", "2"),
+      node("tool-result", "srv-msg-user-1", "tool", "3")
+    ])
+    const before = JSON.stringify(capture)
+
+    expect(formatSelectedHistory(capture).messages[1].variants?.map(item => item.id)).toEqual(["srv-msg-assistant-1", "alternate"])
+    expect(JSON.stringify(capture)).toBe(before)
+  })
+
+  it.each(["tool", "function"])("keeps an explicitly tagged %s out of assistant alternatives and partial status", role => {
+    const capture = namedSenderCapture("assistant", { sender_role: role, generation_status: "stopped" }, [node("alternate", "srv-msg-user-1", "assistant", "2")])
+    const display = formatSelectedHistory(capture)
+    expect(display.messages[1].generationInfo).toBeUndefined()
+    expect(display.messages[1].variants).toBeUndefined()
+    expect(display.history[1].role).toBe("assistant")
+  })
+
+  it.each(["tool", "function"])("does not group a selected %s sibling with the selected assistant", role => {
+    const base = buildNativeServerCapture()
+    const tool = node("selected-tool", "srv-msg-user-1", "assistant", "2")
+    const capture: HistorySelectionCaptureV1 = {
+      ...base,
+      rows: [...base.rows, tool],
+      snapshot: { ...base.snapshot, nodes: [...base.snapshot.nodes, tool] },
+      selected_content: [...base.selected_content, { id: tool.id, revision: tool.revision, message: "Tool output", images: [], extra_metadata: { sender_role: role } }]
+    }
+    const before = JSON.stringify(capture)
+    const display = formatSelectedHistory(capture)
+    expect(display.messages.slice(1).map(message => [message.variants, message.activeVariantIndex])).toEqual([[undefined, undefined], [undefined, undefined]])
+    expect(JSON.stringify(capture)).toBe(before)
+  })
+
+  it.each([
+    ["user", "user"], ["human", "user"], ["system", "system"],
+    ["tool", "assistant"], ["function", "assistant"], ["tool:read", "user"],
+    ["", "user"], ["   ", "user"]
+  ])("retains the existing %s display convention", (role, expected) => {
+    expect(formatSelectedHistory(namedSenderCapture(role)).messages[1]).toMatchObject({ role: expected, isBot: expected === "assistant" })
+  })
+
+  it("keeps an unknown local sender on the existing user fallback", () => {
+    const capture = namedSenderCapture("Local display name", null, [], "local-history-v1:profile")
+    expect(formatSelectedHistory(capture).messages[1]).toMatchObject({ role: "user", isBot: false })
+  })
+})
+
+describe("CM-04 recorded RAG sources after reload", () => {
+  const recordedSources = {
+    origin: "knowledge_qa",
+    sources: [
+      {
+        originalId: 42,
+        excerpt: "RAG retrieves passages before generating.",
+        mediaId: 42,
+        title: "RAG primer",
+        type: "text",
+        sourceType: "text"
+      }
+    ]
+  }
+  const withSources = (value: unknown, row = 1) => {
+    const capture = buildNativeServerCapture()
+    capture.selected_content[row].extra_metadata = { workspace_rag_sources_v1: value }
+    return formatSelectedHistory(capture).messages
+  }
+
+  it("shows the sources recorded with a saved reply again", () => {
+    const [, reply] = withSources(recordedSources)
+    expect(reply.sources).toEqual([
+      expect.objectContaining({
+        name: "RAG primer",
+        pageContent: "RAG retrieves passages before generating.",
+        metadata: expect.objectContaining({ media_id: 42 })
+      })
+    ])
+  })
+
+  it("ignores malformed recorded sources without losing the saved reply", () => {
+    const [, reply] = withSources({ ...recordedSources, sources: [{ ...recordedSources.sources[0], mediaId: "42junk" }] })
+    expect(reply.sources).toEqual([])
+    expect(reply.message).toBe("Retrieval-augmented generation.")
+  })
+
+  it("does not show sources on a user message", () => {
+    const [question] = withSources(recordedSources, 0)
+    expect(question.sources).toEqual([])
+  })
+})

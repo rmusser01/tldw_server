@@ -19,8 +19,10 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
     ensure_postgres_profile_version_sync,
+    validate_postgres_profile_version_sync,
 )
 from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
+    POSTGRES_PROFILE_FOREIGN_KEYS_SQL,
     PROFILE_CANDIDATE_TABLES,
     profile_candidate_schema_is_valid,
 )
@@ -45,6 +47,10 @@ from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.postgres_auth_catalog import (
+    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+    validate_postgres_rbac_runtime,
+)
 from tldw_Server_API.app.core.DB_Management.sql_utils import split_sql_statements
 
 _USERDB_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -90,6 +96,23 @@ class AuthenticationError(UserDatabaseError):
 ########################################################################################################################
 # UserDatabase Class
 ########################################################################################################################
+
+_REQUIRED_RBAC_ROLES = ("admin", "user", "viewer")
+_REQUIRED_RBAC_PERMISSIONS = (
+    "media.read",
+    "media.create",
+    "media.delete",
+    "sql.read",
+    "sql.target:media_db",
+    "system.configure",
+    "users.manage_roles",
+)
+_REQUIRED_RBAC_ROLE_PERMISSIONS = {
+    "user": ("media.read", "media.create", "sql.read", "sql.target:media_db"),
+    "viewer": ("media.read",),
+    "admin": _REQUIRED_RBAC_PERMISSIONS,
+}
+
 
 class UserDatabase:
     """
@@ -168,6 +191,21 @@ class UserDatabase:
 
     def _initialize_schema(self):
         """Initialize database schema if needed."""
+        if self.backend.backend_type == BackendType.POSTGRESQL:
+            with self.backend.transaction() as connection:
+                authority = self.backend.execute(
+                    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL, connection=connection
+                ).first
+                if authority and not authority["can_migrate"]:
+                    try:
+                        validate_postgres_rbac_runtime(self.backend, connection=connection)
+                        validate_postgres_profile_version_sync(self.backend, connection=connection)
+                        self._validate_profile_candidate_tables_postgres(connection=connection)
+                        self._validate_default_data(connection=connection)
+                    except _USERDB_NONCRITICAL_EXCEPTIONS:
+                        raise UserDatabaseError("PostgreSQL AuthNZ runtime schema validation failed") from None
+                    return
+
         # Determine schema file based on backend type
         schema_name = "users_auth_schema.sql"
         # Go up to the project root (tldw_server/)
@@ -1496,23 +1534,36 @@ class UserDatabase:
             "CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_artifact ON audio_studio_media_tickets(user_id, project_id, artifact_id)",
         ]
 
-    def _seed_default_data(self) -> None:
-        required_roles = ("admin", "user", "viewer")
-        required_permissions = (
-            "media.read",
-            "media.create",
-            "media.delete",
-            "sql.read",
-            "sql.target:media_db",
-            "system.configure",
-            "users.manage_roles",
-        )
-        required_role_permissions = {
-            "user": ("media.read", "media.create", "sql.read", "sql.target:media_db"),
-            "viewer": ("media.read",),
-            "admin": required_permissions,
-        }
+    def _validate_default_data(self, *, connection: Any | None = None) -> None:
+        """Verify required seed authority without inserting or repairing any rows."""
+        def execute(query: str) -> Any:
+            """Keep runtime admission on its caller-owned pool connection."""
+            if connection is None:
+                return self.backend.execute(query)
+            return self.backend.execute(query, connection=connection)
 
+        roles = {row["name"]: row["id"] for row in execute("SELECT id, name FROM roles").rows}
+        permissions = {row["name"]: row["id"] for row in execute("SELECT id, name FROM permissions").rows}
+        missing_roles = [name for name in _REQUIRED_RBAC_ROLES if name not in roles]
+        missing_permissions = [name for name in _REQUIRED_RBAC_PERMISSIONS if name not in permissions]
+        if missing_roles or missing_permissions:
+            raise UserDatabaseError(
+                f"Required RBAC seed state missing: roles={missing_roles}, permissions={missing_permissions}"
+            )
+        links = {
+            (row["role_id"], row["permission_id"])
+            for row in execute("SELECT role_id, permission_id FROM role_permissions").rows
+        }
+        missing_links = [
+            f"{role}:{permission}"
+            for role, names in _REQUIRED_RBAC_ROLE_PERMISSIONS.items()
+            for permission in names
+            if (roles[role], permissions[permission]) not in links
+        ]
+        if missing_links:
+            raise UserDatabaseError(f"Required RBAC seed links missing: {missing_links}")
+
+    def _seed_default_data(self) -> None:
         # Seed roles
         default_roles = [
             ("admin", "Administrator", True),
@@ -1536,14 +1587,12 @@ class UserDatabase:
             )
             sel_role_id = "SELECT id FROM roles WHERE name = %s"
             sel_perm_id = "SELECT id FROM permissions WHERE name = %s"
-            sel_role_perm = "SELECT 1 FROM role_permissions WHERE role_id = %s AND permission_id = %s"
         else:
             role_sql = "INSERT OR IGNORE INTO roles (name, description, is_system) VALUES (?, ?, ?)"
             perm_sql = "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)"
             rp_sql = "INSERT OR IGNORE INTO role_permissions (role_id, permission_id) VALUES (?, ?)"
             sel_role_id = "SELECT id FROM roles WHERE name = ?"
             sel_perm_id = "SELECT id FROM permissions WHERE name = ?"
-            sel_role_perm = "SELECT 1 FROM role_permissions WHERE role_id = ? AND permission_id = ?"
 
         for name, description, is_system in default_roles:
             try:
@@ -1573,8 +1622,8 @@ class UserDatabase:
             return res.rows[0]['id'] if res.rows else None
 
         try:
-            role_ids = {name: _get_id(sel_role_id, name) for name in required_roles}
-            perm_ids = {name: _get_id(sel_perm_id, name) for name in required_permissions}
+            role_ids = {name: _get_id(sel_role_id, name) for name in _REQUIRED_RBAC_ROLES}
+            perm_ids = {name: _get_id(sel_perm_id, name) for name in _REQUIRED_RBAC_PERMISSIONS}
 
             missing_roles = [name for name, role_id in role_ids.items() if role_id is None]
             missing_permissions = [name for name, perm_id in perm_ids.items() if perm_id is None]
@@ -1584,7 +1633,7 @@ class UserDatabase:
                     f"roles={missing_roles}, permissions={missing_permissions}"
                 )
 
-            for role_name, permission_names in required_role_permissions.items():
+            for role_name, permission_names in _REQUIRED_RBAC_ROLE_PERMISSIONS.items():
                 role_id = role_ids[role_name]
                 for permission_name in permission_names:
                     perm_id = perm_ids[permission_name]
@@ -1592,19 +1641,7 @@ class UserDatabase:
                         with contextlib.suppress(_USERDB_NONCRITICAL_EXCEPTIONS):
                             self.backend.execute(rp_sql, (role_id, perm_id))
 
-            missing_links: list[str] = []
-            for role_name, permission_names in required_role_permissions.items():
-                role_id = role_ids[role_name]
-                for permission_name in permission_names:
-                    perm_id = perm_ids[permission_name]
-                    result = self.backend.execute(sel_role_perm, (role_id, perm_id))
-                    if not result.rows:
-                        missing_links.append(f"{role_name}:{permission_name}")
-
-            if missing_links:
-                raise UserDatabaseError(
-                    f"Required RBAC seed links missing: {missing_links}"
-                )
+            self._validate_default_data()
         except UserDatabaseError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -1967,31 +2004,16 @@ class UserDatabase:
             )
 
         foreign_keys = execute(
-            "SELECT tc.table_name, kcu.column_name, "
-            "ccu.table_schema AS foreign_table_schema, "
-            "ccu.table_name AS foreign_table_name, "
-            "ccu.column_name AS foreign_column_name, rc.delete_rule "
-            "FROM information_schema.table_constraints AS tc "
-            "JOIN information_schema.key_column_usage AS kcu "
-            "ON tc.constraint_name = kcu.constraint_name "
-            "AND tc.constraint_schema = kcu.constraint_schema "
-            "JOIN information_schema.referential_constraints AS rc "
-            "ON tc.constraint_name = rc.constraint_name "
-            "AND tc.constraint_schema = rc.constraint_schema "
-            "JOIN information_schema.constraint_column_usage AS ccu "
-            "ON rc.unique_constraint_name = ccu.constraint_name "
-            "AND rc.unique_constraint_schema = ccu.constraint_schema "
-            "WHERE tc.table_schema = 'public' "
-            "AND tc.constraint_type = 'FOREIGN KEY' "
-            "AND tc.table_name IN "
-            + table_filter,  # nosec B608 -- only fixed-count placeholders are appended.
-            PROFILE_CANDIDATE_TABLES,
+            POSTGRES_PROFILE_FOREIGN_KEYS_SQL.replace("$1::text[]", "%s"),
+            (list(PROFILE_CANDIDATE_TABLES),),
         ).rows
         foreign_keys_by_table: dict[
             str,
             set[tuple[str, str, str, str, str]],
         ] = {table_name: set() for table_name in PROFILE_CANDIDATE_TABLES}
         for row in foreign_keys:
+            if not row["constraint_validated"]:
+                raise UserDatabaseError("Required profile candidate foreign key is not validated")
             foreign_keys_by_table[str(row["table_name"])].add(
                 (
                     str(row["column_name"]),

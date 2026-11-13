@@ -24,18 +24,71 @@ _INSERT = "INSERT INTO tx_probe (name) VALUES (?)"
 def tx_db(pg_database_config, tmp_path):
     """A handle on its own pool, and a reader of what was committed."""
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    backend.execute("CREATE TABLE tx_probe (name TEXT NOT NULL)")
-    db = CharactersRAGDB(tmp_path / "tx.db", client_id="1", backend=backend)
-    db.close_connection()
-
-    def committed():
-        return [row["name"] for row in backend.execute("SELECT name FROM tx_probe ORDER BY name").rows]
-
+    db = None
     try:
+        backend.execute("CREATE TABLE tx_probe (name TEXT NOT NULL)")
+        db = CharactersRAGDB(tmp_path / "tx.db", client_id="1", backend=backend)
+        db.close_connection()
+
+        def committed():
+            return [row["name"] for row in backend.execute("SELECT name FROM tx_probe ORDER BY name").rows]
+
         yield db, committed
     finally:
-        db.close_connection()
-        backend.get_pool().close_all()
+        try:
+            if db is not None:
+                db.close_connection()
+        finally:
+            backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize(
+    "fixture_name,failure_stage",
+    [
+        ("tx", "schema"),
+        ("tx", "constructor"),
+        ("tx", "initial-close"),
+        ("semantic", "constructor"),
+        ("semantic", "initial-close"),
+    ],
+)
+def test_tx_fixture_releases_pool_when_setup_fails(monkeypatch, tmp_path, fixture_name, failure_stage):
+    """A fixture setup error must release its own pool before pytest tears down the database."""
+    import sys
+    from types import SimpleNamespace
+
+    closed = []
+    failure = RuntimeError("fixture setup failed")
+    pool = SimpleNamespace(close_all=lambda: closed.append("pool"))
+
+    def execute(_sql):
+        if failure_stage == "schema":
+            raise failure
+
+    backend = SimpleNamespace(execute=execute, get_pool=lambda: pool)
+
+    def construct(*_args, **_kwargs):
+        if failure_stage == "constructor":
+            raise failure
+
+        def close():
+            raise failure
+
+        return SimpleNamespace(close_connection=close)
+
+    monkeypatch.setattr(DatabaseBackendFactory, "create_backend", lambda _config: backend)
+    module = sys.modules[__name__]
+    if fixture_name == "semantic":
+        from tldw_Server_API.tests.Notes_Graph.integration import test_semantic_conversion_postgres_operation
+
+        module = test_semantic_conversion_postgres_operation
+    monkeypatch.setattr(module, "CharactersRAGDB", construct)
+    fixture_function = tx_db if fixture_name == "tx" else module.pg_db
+    fixture = fixture_function.__wrapped__(object(), tmp_path)
+    with pytest.raises(RuntimeError, match="fixture setup failed") as caught:
+        next(fixture)
+    assert caught.value is failure  # nosec B101 - the real fixture preserves the original setup exception.
+    assert closed == ["pool"]  # nosec B101 # The fixture must release its pool after every setup error.
 
 
 def _overlap_on_two_threads(db):
@@ -190,8 +243,11 @@ def test_a_refused_transaction_is_logged_at_its_caller(tx_db):
 
     db, _committed = tx_db
     records = []
-    sink = logger.add(lambda message: records.append(message.record), level="ERROR",
-                      filter=lambda record: "overlapped" in record["message"])
+    sink = logger.add(
+        lambda message: records.append(message.record),
+        level="ERROR",
+        filter=lambda record: "overlapped" in record["message"],
+    )
     try:
         with chacha_operation(independent=True):
             outcome = _overlap_on_two_threads(db)

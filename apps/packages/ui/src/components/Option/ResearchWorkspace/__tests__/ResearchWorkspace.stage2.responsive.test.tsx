@@ -1,3 +1,5 @@
+import type { GeneratedArtifact } from "@/types/workspace"
+import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec"
 import {
   act,
   fireEvent,
@@ -22,6 +24,12 @@ import {
   writePendingWebClipAgentTaskRequest
 } from "@/services/web-clipper/agent-task-handoff"
 
+vi.mock("@/services/service-prompts", async original => ({
+  ...(await original<typeof import("@/services/service-prompts")>()),
+  loadServicePromptSnapshot: mockLoadArtifactScope,
+}))
+vi.mock("@/services/workspace-artifact-persistence", () => ({ persistWorkspaceArtifact: mockArtifactSave, hasCanonicalArtifactWorkspace: () => false }))
+
 const ONBOARDING_KEY = "tldw:research-workspace:onboarding-dismissed:v1"
 const {
   onboardingStorageState,
@@ -29,6 +37,9 @@ const {
   mockWorkspaceStorageSetItem,
   mockGetResearchWorkspaceCapabilities,
   mockGetResearchBundle,
+  mockArtifactSave,
+  mockLoadArtifactScope,
+  mockFlushArtifactPersistence,
   mockChatPaneProps,
   mockStudioPaneProps,
   mockWorkspaceHeaderProps
@@ -52,6 +63,13 @@ const {
     }
   })),
   mockGetResearchBundle: vi.fn(),
+  mockFlushArtifactPersistence: vi.fn(async () => {}),
+  mockArtifactSave: vi.fn(async (artifact: GeneratedArtifact) => ({ ...artifact, workspaceArtifactId: artifact.id, workspaceArtifactVersion: 1 })),
+  mockLoadArtifactScope: vi.fn(async (_ids: unknown, options?: { signal?: AbortSignal }) => {
+    const signal = options?.signal ?? new AbortController().signal
+    return { scopeKey: "server:alice", requestScope: { config: { serverUrl: "https://owned.test" }, userId: "alice" },
+      scopeSignal: signal, scopeInvalidatedSignal: signal, release: vi.fn() }
+  }),
   mockChatPaneProps: [] as any[],
   mockStudioPaneProps: [] as any[],
   mockWorkspaceHeaderProps: [] as any[]
@@ -91,6 +109,8 @@ const mockMessageApi = {
 }
 
 const testState = {
+  migrated: false,
+  updateArtifactStatus: vi.fn(),
   isMobile: false,
   storeHydrated: true,
   leftPaneCollapsed: false,
@@ -167,6 +187,8 @@ vi.mock("@/store/workspace", () => {
 
   return {
     useWorkspaceStore,
+    hasResearchWorkspaceMigrationTombstone: () => testState.migrated,
+    flushWorkspacePersistence: mockFlushArtifactPersistence,
     createWorkspaceStorage: () => ({
       getItem: (key: string) => {
         mockWorkspaceStorageGetItem.mockImplementationOnce(async (requestedKey: string) =>
@@ -301,6 +323,10 @@ vi.mock("antd", () => ({
 describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    testState.migrated = false
+    testState.updateArtifactStatus = vi.fn((id, _status, updates) => {
+      testState.generatedArtifacts = testState.generatedArtifacts.map(artifact => artifact.id === id ? { ...artifact, ...updates } : artifact)
+    })
     onboardingStorageState.value = "1"
     testState.isMobile = false
     testState.storeHydrated = true
@@ -317,7 +343,11 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     })
     testState.clearCurrentNote = vi.fn()
     testState.loadNote = vi.fn()
-    testState.addArtifact = vi.fn()
+    testState.addArtifact = vi.fn((payload) => {
+      const artifact = { ...payload, id: "imported-draft", createdAt: new Date() }
+      testState.generatedArtifacts = [artifact, ...testState.generatedArtifacts]
+      return artifact
+    })
     mockGetResearchWorkspaceCapabilities.mockClear()
     mockGetResearchBundle.mockReset()
     mockChatPaneProps.length = 0
@@ -667,6 +697,105 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(
       screen.getByRole("complementary", { name: "Studio panel" })
     ).toBeInTheDocument()
+  })
+
+
+
+  it("excludes an unwitnessed source artifact and route hints from newly owned provenance", async () => {
+    testState.migrated = true
+    const foreign = { id: "foreign-source", type: "data_table" as const, status: "completed" as const,
+      title: "FOREIGN_PRIVATE_SOURCE", content: "FOREIGN_PRIVATE_SOURCE", createdAt: new Date(),
+      sourceLineage: [{ sourceId: "foreign-source", title: "FOREIGN_PRIVATE_SOURCE" }] }
+    bindWorkspaceArtifactOrigin(foreign, "foreign-server:bob", "workspace-1")
+    testState.generatedArtifacts = [foreign]
+    mockGetResearchBundle.mockResolvedValueOnce(createCompletedDeepResearchBundle())
+    window.history.replaceState(null, "", "/research-workspace?source_workspace_id=workspace-1&source_artifact_id=foreign-source&source_artifact_title=FOREIGN_PRIVATE_SOURCE&source_artifact_template=corpus_gap_finder&research_run_id=research-run-7")
+    render(<ResearchWorkspace />)
+    fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
+    await waitFor(() => expect(mockArtifactSave).toHaveBeenCalledTimes(1))
+    expect(JSON.stringify(mockArtifactSave.mock.calls[0][0])).not.toContain("FOREIGN_PRIVATE_SOURCE")
+    await waitFor(() => expect(screen.getByTestId("workspace-deep-research-return-handoff")).toHaveTextContent("Bundle imported"))
+  })
+
+  it("turns a current bundle timeout into an enabled retry instead of stranded Importing", async () => {
+    testState.migrated = true
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      mockGetResearchBundle.mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+        options.signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })
+      }))
+      window.history.replaceState(null, "", "/research-workspace?source_workspace_id=workspace-1&research_run_id=research-run-7")
+      render(<ResearchWorkspace />)
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /import bundle/i })); await Promise.resolve() })
+      expect(mockGetResearchBundle).toHaveBeenCalledTimes(1)
+      await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
+      expect(screen.getByTestId("workspace-deep-research-return-handoff")).toHaveTextContent("within 15 seconds")
+      expect(screen.getByRole("button", { name: /import bundle/i })).toBeEnabled()
+      expect(mockArtifactSave).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers() }
+  })
+
+
+  it.each([false, true])("settles a held persistence flush without late owner publication (retire=%s)", async retire => {
+    testState.migrated = true
+    let releaseFlush!: () => void
+    mockFlushArtifactPersistence.mockImplementationOnce(() => new Promise<void>(resolve => { releaseFlush = resolve }))
+    mockGetResearchBundle.mockResolvedValueOnce(createCompletedDeepResearchBundle())
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      window.history.replaceState(null, "", "/research-workspace?source_workspace_id=workspace-1&research_run_id=research-run-7")
+      render(<ResearchWorkspace />)
+      await act(async () => { fireEvent.click(screen.getByRole("button", { name: /import bundle/i })); await Promise.resolve() })
+      expect(mockFlushArtifactPersistence).toHaveBeenCalledTimes(1)
+      if (retire) act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+      await act(async () => { await vi.advanceTimersByTimeAsync(15000) })
+      const handoff = screen.getByTestId("workspace-deep-research-return-handoff")
+      expect(handoff).toHaveTextContent(retire ? "account or server changed" : "within 15 seconds")
+      expect(screen.getByRole("button", { name: /import bundle/i })).toBeEnabled()
+      await act(async () => { releaseFlush(); await Promise.resolve() })
+      expect(handoff).not.toHaveTextContent("Bundle imported")
+      expect(handoff).toHaveTextContent(retire ? "account or server changed" : "within 15 seconds")
+    } finally { vi.useRealTimers() }
+  })
+
+  it.each(["foreign-account", "serialized-cache"])("does not upload a same-ID %s draft from the import cache", async kind => {
+    testState.migrated = true
+    const foreign = { id: "foreign-draft", type: "report" as const, status: "completed" as const,
+      title: "Foreign report", content: "FOREIGN-PRIVATE-CONTENT", createdAt: new Date(),
+      producerMetadata: { producerType: "deep_research_bundle_import", runId: "research-run-7" } }
+    bindWorkspaceArtifactOrigin(foreign, "foreign-server:bob", "workspace-1")
+    testState.generatedArtifacts = [kind === "serialized-cache" ? JSON.parse(JSON.stringify(foreign)) : foreign]
+    mockGetResearchBundle.mockResolvedValueOnce(createCompletedDeepResearchBundle())
+    window.history.replaceState(null, "", "/research-workspace?source_workspace_id=workspace-1&research_run_id=research-run-7")
+    render(<ResearchWorkspace />)
+    fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
+    await waitFor(() => expect(mockArtifactSave).toHaveBeenCalledTimes(1))
+    const saved = mockArtifactSave.mock.calls[0][0]
+    expect(saved.id).toBe("imported-draft")
+    expect(saved.content).not.toContain("FOREIGN-PRIVATE-CONTENT")
+    expect(testState.addArtifact).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByTestId("workspace-deep-research-return-handoff")).toHaveTextContent("Bundle imported"))
+  })
+
+  it.each([false, true])("waits for the canonical acknowledgement and refuses retired publication (retire=%s)", async retire => {
+    testState.migrated = true
+    let resolveSave!: (value: Awaited<ReturnType<typeof mockArtifactSave>>) => void
+    mockArtifactSave.mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve }))
+    mockGetResearchBundle.mockResolvedValueOnce(createCompletedDeepResearchBundle())
+    window.history.replaceState(null, "", "/research-workspace?source_workspace_id=workspace-1&research_run_id=research-run-7")
+    render(<ResearchWorkspace />)
+    fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
+    await waitFor(() => expect(mockArtifactSave).toHaveBeenCalledTimes(1))
+    expect(screen.getByTestId("workspace-deep-research-return-handoff")).not.toHaveTextContent("Bundle imported")
+    if (retire) act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+    await act(async () => resolveSave({ ...mockArtifactSave.mock.calls[0][0], workspaceArtifactId: "canonical-draft", workspaceArtifactVersion: 1 }))
+    if (retire) {
+      expect(testState.updateArtifactStatus).not.toHaveBeenCalled()
+      expect(screen.getByTestId("workspace-deep-research-return-handoff")).not.toHaveTextContent("Bundle imported")
+    } else {
+      await waitFor(() => expect(screen.getByTestId("workspace-deep-research-return-handoff")).toHaveTextContent("Bundle imported"))
+      expect(testState.updateArtifactStatus).toHaveBeenCalledWith("imported-draft", "completed", expect.objectContaining({ workspaceArtifactVersion: 1 }))
+    }
   })
 
   it("imports a completed Deep Research bundle from the return handoff", async () => {

@@ -46,7 +46,10 @@ const fixture = (kind: "native" | "local") => ({
   owner: { kind },
   capture: {
     view: { conversation_id: "fixture" },
-    snapshot: { owner_key: kind === "local" ? "local-history-v1:fixture" : "native-fixture", nodes: [] },
+    snapshot: { owner_key: kind === "local" ? "local-history-v1:fixture" : "native-fixture", nodes: [
+      { id: "u", role: "user", parent_id: null },
+      { id: "a", role: "assistant", parent_id: "u" }
+    ] },
     rows: [
       { id: "u", role: "user", parent_id: null },
       { id: "a", role: "assistant", parent_id: "u" }

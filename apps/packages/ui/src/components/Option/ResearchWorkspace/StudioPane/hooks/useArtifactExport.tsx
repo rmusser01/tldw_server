@@ -1,3 +1,8 @@
+import { hasWorkspaceArtifactOriginEvidence } from "@/store/workspace-artifact-codec"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { loadServicePromptSnapshot } from "@/services/service-prompts"
+import { persistWorkspaceArtifact } from "@/services/workspace-artifact-persistence"
+import { useWorkspaceStore } from "@/store/workspace"
 import React from "react"
 import { Button, Modal } from "antd"
 import type { MessageInstance } from "antd/es/message/interface"
@@ -15,12 +20,8 @@ import { renderWorkspaceMessageActionContent } from "../../workspace-message-con
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const SLIDES_EXPORT_FORMATS: { value: string; label: string; ext: string }[] = [
-  { value: "revealjs", label: "Reveal.js (ZIP)", ext: "zip" },
-  { value: "markdown", label: "Markdown", ext: "md" },
-  { value: "pdf", label: "PDF", ext: "pdf" },
-  { value: "json", label: "JSON", ext: "json" }
-]
+import { SLIDES_EXPORT_FORMATS } from "@/utils/presentation-export-formats"
+export { SLIDES_EXPORT_FORMATS } from "@/utils/presentation-export-formats"
 
 const WORKSPACE_DISCUSS_EVENT = "research-workspace:discuss-artifact"
 
@@ -64,11 +65,14 @@ const getMediaOutputDownloadRef = (artifact: GeneratedArtifact) => {
 
 export const downloadBlobFile = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  try {
+    const a = document.createElement("a")
+    a.href = url
+    a.download = filename
+    a.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }
 
 export function getFileExtension(type: ArtifactType): string {
@@ -128,6 +132,7 @@ export const getResponsiveArtifactModalProps = (
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface UseArtifactExportDeps {
+  workspaceId?: string | null
   messageApi: MessageInstance
   isMobile: boolean
   generatedArtifacts: GeneratedArtifact[]
@@ -143,6 +148,7 @@ export interface UseArtifactExportDeps {
 
 export function useArtifactExport(deps: UseArtifactExportDeps) {
   const {
+    workspaceId,
     messageApi,
     isMobile,
     generatedArtifacts,
@@ -152,6 +158,37 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
     t,
   } = deps
 
+  const mounted = React.useRef(true)
+  const audioDownloads = React.useRef(new Set<AbortController>())
+  React.useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  React.useEffect(() => () => {
+    for (const controller of audioDownloads.current) controller.abort()
+    audioDownloads.current.clear()
+  }, [workspaceId])
+
+  const persistRemoval = React.useCallback(async (
+    artifact: GeneratedArtifact, removed: boolean, allowAbsent = false,
+  ) => {
+    if (!workspaceId) throw new Error("Select the original workspace before changing this output.")
+    const deadline = performance.now() + 15000
+    const scope = await loadServicePromptSnapshot([], { signal: AbortSignal.timeout(15000) })
+    const isCurrent = () => mounted.current && useWorkspaceStore.getState().workspaceId === workspaceId &&
+      (allowAbsent ? !useWorkspaceStore.getState().generatedArtifacts.some(item => item.id === artifact.id)
+        : useWorkspaceStore.getState().generatedArtifacts.find(item => item.id === artifact.id) === artifact)
+    try {
+      const current = artifact.workspaceArtifactId ? artifact : await persistWorkspaceArtifact(artifact, {
+        workspaceId, scope, isCurrent, deadline,
+      })
+      return await persistWorkspaceArtifact({ ...current, removedFromStudio: removed,
+        reviewStatus: removed ? "archived" : artifact.reviewStatus ?? "draft" }, {
+        workspaceId, scope, isCurrent, deadline, reviewChangeOnly: true,
+      })
+    } finally { scope.release() }
+  }, [workspaceId])
+
   const handleDeleteArtifact = React.useCallback(
     (artifact: GeneratedArtifact) => {
       const artifactIndex = generatedArtifacts.findIndex(
@@ -159,20 +196,46 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
       )
       Modal.confirm({
         title: t("playground:studio.deleteOutputTitle", "Delete output?"),
-        content: t(
-          "playground:studio.deleteOutputDescription",
-          "This generated output will be permanently removed."
-        ),
+        content: artifact.workspaceArtifactId
+          ? "Remove this saved output from Studio? Its version history is retained, and you can undo for ten seconds."
+          : t("playground:studio.deleteOutputDescription", "This generated output will be permanently removed."),
         okText: t("common:delete", "Delete"),
         cancelText: t("common:cancel", "Cancel"),
         okButtonProps: { danger: true },
-        onOk: () => {
+        onOk: async () => {
+          const canonical = Boolean(artifact.workspaceArtifactId || hasWorkspaceArtifactOriginEvidence(artifact))
+          let archived: GeneratedArtifact | undefined
+          let retired = false
+          const releaseAccount = watchChatAccountChanges(changed => { retired ||= changed })
+          try {
+            if (canonical) archived = await persistRemoval(artifact, true)
+            if (canonical && (retired || !mounted.current || useWorkspaceStore.getState().workspaceId !== workspaceId ||
+              useWorkspaceStore.getState().generatedArtifacts.find(item => item.id === artifact.id) !== artifact))
+              throw new Error("The output's account or workspace changed before removal completed.")
+          } catch (error) {
+            messageApi.error(error instanceof Error ? error.message : "Output removal could not be saved.")
+            throw error
+          } finally { releaseAccount() }
           const undoHandle = scheduleWorkspaceUndoAction({
             apply: () => {
               removeArtifact(artifact.id)
             },
             undo: () => {
-              restoreArtifact(artifact, { index: artifactIndex })
+              if (!archived) { restoreArtifact(artifact, { index: artifactIndex }); return }
+              void (async () => {
+                let retired = false
+                const releaseAccount = watchChatAccountChanges(changed => { retired ||= changed })
+                try {
+                  const restored = await persistRemoval({ ...archived!, reviewStatus: artifact.reviewStatus ?? "draft" }, false, true)
+                  if (retired || !mounted.current || useWorkspaceStore.getState().workspaceId !== workspaceId ||
+                    useWorkspaceStore.getState().generatedArtifacts.some(item => item.id === artifact.id))
+                    throw new Error("The output's account or workspace changed before Undo completed.")
+                  restoreArtifact(restored, { index: artifactIndex })
+                  messageApi.success(t("playground:studio.outputRestored", "Output restored"))
+                } catch (error) {
+                  messageApi.error(error instanceof Error ? error.message : "Output could not be restored. Reload saved outputs.")
+                } finally { releaseAccount() }
+              })()
             }
           })
 
@@ -193,7 +256,7 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
                 size="small"
                 type="link"
                 onClick={() => {
-                  if (undoWorkspaceAction(undoHandle.id)) {
+                  if (undoWorkspaceAction(undoHandle.id) && !canonical) {
                     messageApi.success(
                       t("playground:studio.outputRestored", "Output restored")
                     )
@@ -218,7 +281,7 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
         }
       })
     },
-    [generatedArtifacts, messageApi, removeArtifact, restoreArtifact, t]
+    [generatedArtifacts, messageApi, removeArtifact, restoreArtifact, persistRemoval, workspaceId, t]
   )
 
   const handleDiscussArtifact = React.useCallback(
@@ -290,12 +353,48 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
 
   const handleDownloadArtifact = React.useCallback(
     async (artifact: GeneratedArtifact, format?: string) => {
-      // Handle audio download - use the audioUrl blob directly
-      if (artifact.type === "audio_overview" && artifact.audioUrl) {
-        const a = document.createElement("a")
-        a.href = artifact.audioUrl
-        a.download = `${artifact.title}.${artifact.audioFormat || "mp3"}`
-        a.click()
+      if (artifact.type === "audio_overview") {
+        if (artifact.audioFormat === "browser") {
+          downloadBlobFile(new Blob([artifact.content || ""], { type: "text/plain" }), artifact.title + ".txt")
+          messageApi.success("Downloaded the script. Browser speech does not provide an audio file.")
+          return
+        }
+        if (artifact.audioUrl && !artifact.exportRefs?.some(ref => ref.sourceType === "storage_file")) {
+          const a = document.createElement("a")
+          a.href = artifact.audioUrl
+          a.download = artifact.title + "." + (artifact.audioFormat || "mp3")
+          a.click()
+          return
+        }
+        const deadline = performance.now() + 15000
+        const controller = new AbortController()
+        let retired = false
+        const ownsArtifact = () => mounted.current && useWorkspaceStore.getState().workspaceId === workspaceId &&
+          useWorkspaceStore.getState().generatedArtifacts.find(item => item.id === artifact.id) === artifact
+        const retire = () => { retired = true; controller.abort() }
+        const timeoutError = () => new DOMException("Saved audio download exceeded 15 seconds.", "TimeoutError")
+        audioDownloads.current.add(controller)
+        const stopAccount = watchChatAccountChanges(invalidated => { if (invalidated) retire() })
+        const timeout = setTimeout(() => controller.abort(timeoutError()), 15000)
+        const isCurrent = () => !retired && performance.now() < deadline && !controller.signal.aborted && ownsArtifact()
+        const stopStore = useWorkspaceStore.subscribe(() => { if (!ownsArtifact()) retire() })
+        try {
+          const { readStoredWorkspaceAudio } = await import("@/services/workspace-artifact-audio")
+          if (!workspaceId || !isCurrent()) throw controller.signal.reason ?? timeoutError()
+          const blob = await readStoredWorkspaceAudio(artifact, { workspaceId, isCurrent, signal: controller.signal })
+          if (!isCurrent()) throw controller.signal.reason ?? timeoutError()
+          downloadBlobFile(blob, artifact.title + "." + artifact.audioFormat)
+          messageApi.success(t("common:downloadSuccess", "Downloaded successfully"))
+        } catch {
+          const timedOut = performance.now() >= deadline || controller.signal.reason?.name === "TimeoutError"
+          if (!retired && ownsArtifact() && (!controller.signal.aborted || timedOut))
+            messageApi.error("Saved audio could not be downloaded. Retry, reopen the output or generate its audio again.")
+        } finally {
+          clearTimeout(timeout)
+          stopStore()
+          stopAccount()
+          audioDownloads.current.delete(controller)
+        }
         return
       }
 
@@ -432,7 +531,7 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
         URL.revokeObjectURL(url)
       }
     },
-    [messageApi, t]
+    [messageApi, t, workspaceId]
   )
 
   // Show slides export format selection modal

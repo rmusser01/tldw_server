@@ -86,7 +86,7 @@ KEYWORD_NORMALIZATION_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/core/DB_Management/chacha/conversation_store.py": 1,
     "tldw_Server_API/app/core/DB_Management/chacha/note_graph_suggestion_store.py": 5,
     "tldw_Server_API/app/core/DB_Management/chacha/note_semantic_store.py": 1,
-    "tldw_Server_API/app/core/DB_Management/chacha/note_store.py": 3,
+    "tldw_Server_API/app/core/DB_Management/chacha/note_store.py": 1,  # "tag:" prefix check in _normalize_graph_tag_filter, not identity
     "tldw_Server_API/app/core/DB_Management/chacha/persona_state_store.py": 2,
     "tldw_Server_API/app/core/DB_Management/media_db/repositories/clone_snapshot_repository.py": 1,
     "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_repository.py": 1,  # bump: chunk_type in add_media_with_keywords, not identity

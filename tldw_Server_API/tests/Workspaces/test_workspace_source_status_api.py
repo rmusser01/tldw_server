@@ -863,3 +863,57 @@ def test_workspace_job_manager_resolver_fails_open(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(workspaces_endpoint, "try_get_job_manager", _raise_job_manager)
 
     assert workspaces_endpoint.try_get_workspace_job_manager() is None
+
+
+@pytest.mark.integration
+def test_synced_text_without_chunks_remains_text_searchable(
+    workspace_status_app,
+    workspace_status_db,
+    tmp_path,
+):
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+    from tldw_Server_API.app.core.Ingestion_Sources.sinks.media_sink import apply_media_change
+
+    media_db = MediaDatabase(db_path=str(tmp_path / "synced-media.db"), client_id="1")
+    try:
+        created = apply_media_change(
+            media_db,
+            binding=None,
+            change={"event_type": "created", "relative_path": "rowan.txt", "text": "The telescope is Selene."},
+            policy="canonical",
+        )
+        media_id = created["media_id"]
+        before = media_db.get_media_by_id(media_id)
+        workspace_status_db.upsert_workspace("ws-synced", "Synced source")
+        workspace_status_db.add_workspace_source(
+            "ws-synced",
+            {
+                "id": "src-synced",
+                "media_id": media_id,
+                "title": "rowan.txt",
+                "source_type": "text",
+                "position": 0,
+                "selected": True,
+            },
+        )
+        _install_overrides(workspace_status_app, workspace_status_db, media_db)
+        try:
+            with TestClient(workspace_status_app, raise_server_exceptions=False) as client:
+                response = client.get("/api/v1/workspaces/ws-synced/sources/status")
+        finally:
+            _clear_overrides(workspace_status_app)
+        assert response.status_code == 200, response.text  # nosec B101 -- pytest HTTP contract assertion.
+        source = response.json()["sources"][0]
+        assert (  # nosec B101 -- pytest protects real sink persistence and read-only text readiness.
+            before["chunking_status"],
+            source["state"],
+            source["status_reason"],
+            source["selected"],
+            source["readiness"]["fts_ready"],
+            source["readiness"]["vector_ready"],
+            source["readiness"]["citation_ready"],
+            source["readiness"]["tool_accessible"],
+            media_db.get_media_by_id(media_id),
+        ) == ("pending", "partially_queryable", "chunking_pending", True, True, False, True, True, before)
+    finally:
+        media_db.close_connection()

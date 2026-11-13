@@ -12,6 +12,7 @@ vi.mock("@/services/tldw/runtime-auth-override", async (original) => ({
 }))
 
 import { modelsAudioMethods } from "../models-audio"
+import { TldwApiClient } from "../../TldwApiClient"
 const config = (user = 7, serverUrl = "https://c10.example") => ({
   serverUrl, authMode: "multi-user" as const, authSource: "manual" as const,
   accessToken: `fixture.${btoa(JSON.stringify({ sub: String(user) }))}.signature`, refreshToken: `fixture-refresh-${user}`
@@ -65,4 +66,28 @@ describe("managed model captured request authority", () => {
     expect(boundary.wires).toBe(0)
     expect(boundary.fetch.mock.calls.every(([, init]) => init.signal.aborted)).toBe(true)
   })
+})
+
+
+it.each(["domain", "client"])("allows a cold managed startup through the normal %s transport", async kind => {
+  vi.useFakeTimers()
+  try {
+    boundary.fetch.mockImplementation((_url: unknown, init: RequestInit) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(new Response(JSON.stringify({ ok: true }), {
+        headers: { "content-type": "application/json" }
+      })), 58903)
+      init.signal?.addEventListener("abort", () => {
+        clearTimeout(timer)
+        reject(new DOMException("Aborted", "AbortError"))
+      }, { once: true })
+    }))
+    const options = { configSnapshot: { ...config(), requestTimeoutMs: 10000 } }
+    const call = kind === "domain"
+      ? modelsAudioMethods.startLlamacppProfile("cold", options)
+      : new TldwApiClient().startLlamacppProfile("cold", options)
+    const outcome = call.then(value => ({ value }), error => ({ error }))
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(await outcome).toEqual({ value: { ok: true } })
+    expect(boundary.fetch).toHaveBeenCalledTimes(1)
+  } finally { vi.useRealTimers() }
 })

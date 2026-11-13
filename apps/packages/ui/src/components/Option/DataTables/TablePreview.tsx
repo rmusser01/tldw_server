@@ -13,7 +13,6 @@ import {
   message
 } from "antd"
 import type { ColumnsType } from "antd/es/table"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   GripVertical,
   Plus,
@@ -26,7 +25,7 @@ import {
 import { useTranslation } from "react-i18next"
 import { useDataTablesStore } from "@/store/data-tables"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { pollDataTableJob } from "@/utils/data-tables-jobs"
+import { useDataTableGeneration } from "@/hooks/useDataTableGeneration"
 import type { DataTableColumn, DataTableRow } from "@/types/data-tables"
 import { Alert } from "@/components/ui/primitives"
 import { EditableCell } from "./EditableCell"
@@ -94,7 +93,9 @@ const SortablePreviewHeader: React.FC<{
  */
 export const TablePreview: React.FC = () => {
   const { t } = useTranslation(["dataTables", "common"])
-  const queryClient = useQueryClient()
+  const generation = useDataTableGeneration()
+  const isGenerating = generation.isGenerating
+  const runGeneration = generation.run
 
   // Store state
   const tableName = useDataTablesStore((s) => s.tableName)
@@ -120,7 +121,6 @@ export const TablePreview: React.FC = () => {
 
   // Editing actions
   const startEditing = useDataTablesStore((s) => s.startEditing)
-  const stopEditing = useDataTablesStore((s) => s.stopEditing)
   const updateCell = useDataTablesStore((s) => s.updateCell)
   const addRow = useDataTablesStore((s) => s.addRow)
   const deleteRow = useDataTablesStore((s) => s.deleteRow)
@@ -132,174 +132,43 @@ export const TablePreview: React.FC = () => {
 
   // Local state
   const [addColumnModalOpen, setAddColumnModalOpen] = useState(false)
-  const [generationJob, setGenerationJob] = useState<{
-    jobId: number
-    tableUuid: string
-    rowsLimit: number
-  } | null>(null)
-
-  useEffect(() => {
-    return () => {
-      queryClient.cancelQueries({ queryKey: ["dataTableGeneration"] })
-    }
-  }, [queryClient])
-
-  // Generate table
-  const generateMutation = useMutation({
-    mutationFn: async (payload: {
-      name: string
-      prompt: string
-      sources: {
-        type: string
-        id: string
-        title: string
-        snippet?: string
-      }[]
-      columnHints?: Partial<DataTableColumn>[]
-      model?: string
-      maxRows: number
-      rowsLimit: number
-    }) => {
-      const response = await tldwClient.generateDataTable({
-        name: payload.name,
-        prompt: payload.prompt,
-        sources: payload.sources,
-        column_hints: payload.columnHints,
-        model: payload.model,
-        max_rows: payload.maxRows
-      })
-
-      const jobId = response?.job_id
-      const tableUuid = response?.table?.uuid
-      if (!jobId || !tableUuid) {
-        throw new Error("Generation job was not created")
-      }
-
-      return {
-        jobId,
-        tableUuid,
-        rowsLimit: payload.rowsLimit
-      }
-    },
-    onSuccess: (job) => {
-      setGenerationJob(job)
-    },
-    onError: (error) => {
-      console.error("Failed to start table generation:", error)
-      const errorMessage =
-        error instanceof Error ? error.message : "Generation failed"
-      setGenerationError(errorMessage)
-      message.error(errorMessage)
-    }
-  })
-
-  const pollQuery = useQuery({
-    queryKey: ["dataTableGeneration", generationJob?.jobId],
-    enabled: Boolean(generationJob?.jobId),
-    queryFn: async ({ signal }) => {
-      if (!generationJob) {
-        throw new Error("No generation job")
-      }
-      const jobStatus = await pollDataTableJob({
-        jobId: generationJob.jobId,
-        fetchJob: (id) => tldwClient.getDataTableJob(id),
-        signal
-      })
-      const status = String(jobStatus?.status || "").toLowerCase()
-      if (status !== "completed") {
-        throw new Error(jobStatus?.error_message || "Generation failed")
-      }
-
-      const table = await tldwClient.getDataTable(
-        jobStatus.table_uuid || generationJob.tableUuid,
-        { rows_limit: generationJob.rowsLimit }
-      )
-      if (!table) {
-        throw new Error("No table data in response")
-      }
-
-      return table
-    },
-    retry: false
-  })
-
-  const isGenerating = generateMutation.isPending || pollQuery.isFetching
-
   useEffect(() => {
     setIsGenerating(isGenerating)
+    return () => setIsGenerating(false)
   }, [isGenerating, setIsGenerating])
 
-  useEffect(() => {
-    if (!pollQuery.data) return
-    const tableWithId = {
-      ...pollQuery.data,
-      id: pollQuery.data.id || `preview-${Date.now()}`
-    }
-    setGenerationError(null)
-    setGeneratedTable(tableWithId)
-    startEditing(tableWithId)
-    setGenerationJob(null)
-    message.success(t("dataTables:generateSuccess", "Table generated successfully!"))
-  }, [
-    pollQuery.data,
-    setGeneratedTable,
-    setGenerationError,
-    setGenerationJob,
-    startEditing,
-    t
-  ])
-
-  useEffect(() => {
-    if (!pollQuery.error) return
-    if (pollQuery.error instanceof Error && pollQuery.error.message === "Polling cancelled") {
-      return
-    }
-    console.error("Table generation failed:", pollQuery.error)
-    const errorMessage =
-      pollQuery.error instanceof Error ? pollQuery.error.message : "Generation failed"
-    setGenerationError(errorMessage)
-    message.error(errorMessage)
-    setGenerationJob(null)
-  }, [pollQuery.error, setGenerationError, setGenerationJob])
-
   const generateTable = useCallback(() => {
-    const rowsLimit = Math.min(Math.max(maxRows, 1), 2000)
-    void queryClient.cancelQueries({ queryKey: ["dataTableGeneration"] })
     setGenerationError(null)
     setGenerationWarnings([])
-    setGeneratedTable(null)
-    setGenerationJob(null)
-    stopEditing() // Clear any previous editing state
-
-    generateMutation.mutate({
+    void runGeneration((options) => tldwClient.generateDataTable({
       name: tableName.trim() || "Untitled Table",
       prompt,
-      sources: selectedSources.map((s) => ({
-        type: s.type,
-        id: s.id,
-        title: s.title,
-        snippet: s.snippet
-      })),
-      columnHints: columnHints.length > 0 ? columnHints : undefined,
+      sources: selectedSources.map(({ type, id, title, snippet }) => ({ type, id, title, snippet })),
+      column_hints: columnHints.length > 0 ? columnHints : undefined,
       model: selectedModel || undefined,
-      maxRows,
-      rowsLimit
+      max_rows: maxRows
+    }, options), Math.min(Math.max(maxRows, 1), 2000), {
+      onComplete: (table) => {
+        setGenerationError(null)
+        setGeneratedTable(table)
+        startEditing(table)
+        message.success(t("dataTables:generateSuccess", "Table generated successfully!"))
+      },
+      onError: (error) => {
+        const detail = error instanceof Error ? error.message : "Generation failed"
+        setGenerationError(detail)
+        message.error(detail)
+      }
     })
-  }, [
-    columnHints,
-    generateMutation,
-    maxRows,
-    prompt,
-    queryClient,
-    selectedModel,
-    selectedSources,
-    setGeneratedTable,
-    setGenerationError,
-    setGenerationWarnings,
-    setGenerationJob,
-    stopEditing,
-    tableName
-  ])
+  }, [columnHints, runGeneration, maxRows, prompt, selectedModel, selectedSources, setGeneratedTable, setGenerationError, setGenerationWarnings, startEditing, t, tableName])
+
+  const cancelGeneration = async () => {
+    try {
+      await generation.cancel(() => setGenerationError(t("dataTables:generationCancelled", "Generation cancelled. Your saved table is unchanged.")))
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : "Cancellation failed")
+    }
+  }
 
   // Generate on mount if not already generated
   useEffect(() => {
@@ -447,6 +316,9 @@ export const TablePreview: React.FC = () => {
             {t("dataTables:generating", "Generating table from your sources...")}
           </span>
         </p>
+        <Button onClick={cancelGeneration} loading={generation.isCancelling} className="mt-4">
+          {t("dataTables:cancelGeneration", "Cancel generation")}
+        </Button>
         <p className="text-xs text-text-subtle mt-2">
           {t("dataTables:generatingNote", "This may take a moment depending on the amount of data.")}
         </p>

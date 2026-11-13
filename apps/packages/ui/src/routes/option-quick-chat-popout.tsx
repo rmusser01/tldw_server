@@ -10,7 +10,7 @@ import { QuickChatInput } from "@/components/Common/QuickChatHelper/QuickChatInp
 import { AlertCircle } from "lucide-react"
 import { useChatModelsSelect } from "@/hooks/useChatModelsSelect"
 import { QuickChatGuidesPanel } from "@/components/Common/QuickChatHelper/QuickChatGuidesPanel"
-import { parseQuickChatPopoutState } from "@/components/Common/QuickChatHelper/popout-state"
+import { useQuickChatPopoutRestore } from "@/components/Common/QuickChatHelper/popout-state"
 import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 const QuickChatPopout: React.FC = () => {
@@ -18,7 +18,6 @@ const QuickChatPopout: React.FC = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const hasRestoredRef = useRef(false)
   const [sourceRouteContext, setSourceRouteContext] = useState<string | null>(null)
   const { assistantMode, setAssistantMode } = useQuickChatStore()
 
@@ -43,44 +42,10 @@ const QuickChatPopout: React.FC = () => {
   const showModelsError = modelsError && models.length === 0
   const modelsErrorHintId = "quick-chat-models-error-hint"
 
-  // Restore state from sessionStorage on mount
-  useEffect(() => {
-    if (hasRestoredRef.current) return
-
-    const stateKey = searchParams.get("state")
-    if (!stateKey) {
-      hasRestoredRef.current = true
-      return
-    }
-    if (!/^[a-zA-Z0-9:_-]{1,128}$/.test(stateKey)) {
-      console.warn("Invalid quick chat state key")
-      hasRestoredRef.current = true
-      return
-    }
-    try {
-      const savedState = sessionStorage.getItem(stateKey)
-      if (!savedState) return
-
-      const parsed = JSON.parse(savedState) as unknown
-      const parsedState = parseQuickChatPopoutState(parsed)
-      if (parsedState) {
-        useQuickChatStore.getState().restoreFromState({
-          messages: parsedState.messages,
-          modelOverride: parsedState.modelOverride,
-          assistantMode: parsedState.assistantMode
-        })
-        setSourceRouteContext(parsedState.sourceRoute)
-      } else {
-        console.warn("Invalid quick chat state structure in sessionStorage")
-      }
-    } catch (error) {
-      console.error("Failed to restore quick chat state:", error)
-    } finally {
-      // Clean up sessionStorage regardless of validity or parse errors
-      sessionStorage.removeItem(stateKey)
-      hasRestoredRef.current = true
-    }
-  }, [searchParams])
+  useQuickChatPopoutRestore(searchParams.get("state"), parsedState => {
+    useQuickChatStore.getState().restoreFromState(parsedState)
+    setSourceRouteContext(parsedState.sourceRoute)
+  })
 
   // Scroll to bottom when messages change
   useEffect(() => {

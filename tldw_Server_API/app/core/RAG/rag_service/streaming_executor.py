@@ -378,7 +378,10 @@ async def _retrieve_standard_documents(
     kwargs.setdefault("search_mode", retrieval_plan.search_mode)
     kwargs.setdefault("resolved_request", resolved_request)
     kwargs.setdefault("retrieval_plan", retrieval_plan)
-    kwargs["enable_generation"] = False
+    kwargs["enable_generation"] = False  # retrieval only: the stream makes the one answer call (TASK-15482)
+    if kwargs.get("enable_pre_retrieval_clarification") is None:
+        # Unset, the gate follows enable_generation: the request's, not this retrieval step's.
+        kwargs["enable_pre_retrieval_clarification"] = bool(payload.get("enable_generation"))
 
     if progress_queue is not None and bool(payload.get("enable_research_progress", False)):
 

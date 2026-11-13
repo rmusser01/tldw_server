@@ -124,6 +124,7 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "files_export_gc_task",
         "files_jobs_task",
         "ingestion_sources_cleanup",
+        "ingestion_sources_task",
         "jobs_crypto_rotate_task",
         "jobs_integrity_task",
         "jobs_metrics_reconcile_task",

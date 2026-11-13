@@ -483,11 +483,6 @@
       "count": 1
     }
   },
-  "packages/ui/src/components/Option/ResearchWorkspace/WorkspaceACPHistoryModal.tsx": {
-    "no-restricted-syntax": {
-      "count": 2
-    }
-  },
   "packages/ui/src/components/Option/ResearchWorkspace/WorkspaceAgentTaskHandoffModal.tsx": {
     "no-restricted-syntax": {
       "count": 1
@@ -499,14 +494,6 @@
     },
     "no-restricted-syntax": {
       "count": 2
-    }
-  },
-  "packages/ui/src/components/Option/ResearchWorkspace/workspace-server-restore.ts": {
-    "no-restricted-imports": {
-      "count": 1
-    },
-    "no-restricted-syntax": {
-      "count": 4
     }
   },
   "packages/ui/src/components/Option/ScheduledTasks/ScheduledTasksPage.tsx": {
@@ -752,7 +739,7 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 15
+      "count": 9
     }
   },
   "packages/ui/src/components/Review/hooks/useMediaSelection.ts": {

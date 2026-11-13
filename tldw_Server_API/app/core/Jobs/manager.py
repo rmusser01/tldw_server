@@ -5,10 +5,10 @@ import hashlib
 import json
 import os
 import re
-import secrets
 import sqlite3
 import time
 import uuid as _uuid
+from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -137,6 +137,7 @@ from .operations.postgres import release_job as _postgres_release_job
 from .operations.postgres import renew_lease as _postgres_renew_lease
 from .operations.postgres import renew_leases_batch as _postgres_renew_leases_batch
 from .operations.postgres import replay_idempotent_operation as _postgres_replay_idempotent_operation
+from .operations.resource import ResourceMutation, resource_mutation
 from .operations.sqlite import acquire_job as _sqlite_acquire_job
 from .operations.sqlite import admit_idempotent_operation as _sqlite_admit_idempotent_operation
 from .operations.sqlite import apply_prepared_disposition as _sqlite_apply_prepared_disposition
@@ -163,6 +164,8 @@ from .pg_migrations import (
     slides_archive_indexes_ready_pg,
     slides_archive_projection_ready_pg,
 )
+from .resource_contracts import RESOURCE_METADATA_FIELDS, ResourceAdmission, ResourceAdmissionRequest, ResourceAttempt
+from .resource_policy import reject_resource_required, validate_resource_command
 from .tracing import job_span
 
 if TYPE_CHECKING:
@@ -422,6 +425,114 @@ def _as_utc_datetime(value: Any) -> datetime | None:
     return parsed.astimezone(_tz.utc)
 
 
+def _bounded_completion_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Apply the configured JSON size cap before opening a completion transaction."""
+    max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
+    truncate = _shared_is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
+    if result is None:
+        return None
+    try:
+        serialized = json.dumps(result)
+    except (TypeError, ValueError):
+        return result
+    size = len(serialized.encode("utf-8"))
+    if size > max_bytes:
+        if truncate:
+            return {"_truncated": True, "len_bytes": size}
+        raise ValueError(f"Result too large: {size} bytes > limit {max_bytes}")  # noqa: TRY003
+    return result
+
+
+def _record_ttl_group_counts(
+    rows: list[Any],
+    *,
+    reason: str,
+    counter_deltas: dict[tuple[str, str, str], list[int]],
+    queued: bool,
+    metric_facts: list[tuple[str, tuple[str, str, str], int]],
+) -> int:
+    """Accumulate counter deltas and deferred metric facts from selected TTL rows."""
+    def value(row: Any, key: str) -> Any:
+        return row.get(key) if isinstance(row, dict) else row[key]
+
+    affected = 0
+    for row in rows:
+        key = (str(value(row, "domain")), str(value(row, "queue")), str(value(row, "job_type")))
+        total = int(value(row, "total_count") or 0)
+        ready = int(value(row, "ready_count") or 0)
+        scheduled = int(value(row, "scheduled_count") or 0)
+        affected += total
+        deltas = counter_deltas.setdefault(key, [0, 0, 0])
+        if queued:
+            deltas[0] += ready
+            deltas[1] += scheduled
+        else:
+            deltas[2] += total
+        metric_facts.append((reason, key, total))
+    return affected
+
+
+def _ttl_resource_filter(
+    *, postgres: bool, reference_time: datetime, age_seconds: int | None,
+    runtime_seconds: int | None, domain: str | None, queue: str | None,
+    job_type: str | None,
+) -> tuple[str, list[Any]]:
+    """Select the complete TTL population before entering the resource guard."""
+    marker = "%s" if postgres else "?"
+    candidates = []
+    params: list[Any] = []
+    for status, column, seconds in (
+        ("queued", "created_at", age_seconds),
+        ("processing", "COALESCE(started_at, acquired_at)", runtime_seconds),
+    ):
+        if seconds is None:
+            continue
+        if postgres:
+            candidates.append(f"(status='{status}' AND {column} <= (%s - (%s || ' seconds')::interval))")
+            params.extend((reference_time, seconds))
+        else:
+            candidates.append(f"(status='{status}' AND {column} <= DATETIME(?, ?))")
+            params.extend((reference_time.strftime("%Y-%m-%d %H:%M:%S.%f"), f"-{seconds} seconds"))
+    where = ["(" + " OR ".join(candidates) + ")"]
+    for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type)):
+        if value is not None:
+            where.append(f"{column}={marker}")
+            params.append(value)
+    return " AND ".join(where), params
+
+
+def _job_archive_projections() -> tuple[str, str]:
+    """Keep archived resource metadata while clearing obsolete terminal leases."""
+    columns = ("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS)
+    projection = ", ".join(columns)
+    selection = ", ".join(
+        (
+            "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
+            f"THEN NULL ELSE {column} END AS {column}"
+            if column in {"leased_until", "lease_id", "worker_id"}
+            else column
+        )
+        for column in columns
+    )
+    return projection, selection
+
+
+def _reschedule_filter(
+    *, marker: str, domain: str | None, queue: str | None,
+    job_type: str | None, status: str | None, set_now: bool,
+) -> tuple[str, list[Any]]:
+    """Build the same administrative selection for both reschedule backends."""
+    where = ["1=1"]
+    params: list[Any] = []
+    for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type), ("status", status)):
+        if value:
+            where.append(f"{column}={marker}")
+            params.append(value)
+    if set_now:
+        where.append("available_at IS NOT NULL")
+    return " AND ".join(where), params
+
+
 class JobManager:
     """DB-backed Job Manager with leasing, retries, and cancellation.
 
@@ -579,7 +690,14 @@ class JobManager:
         conn = self._connect()
         try:
             if self.backend == "postgres":
-                with self._pg_cursor(conn) as cur:
+                # Fair-share is per tenant across domains. Broaden only this
+                # scalar aggregate's domain filter, never a non-admin's owner.
+                # An existing admin claim can be narrowed to the requested owner.
+                aggregate_owner = user_id if self._RLS_IS_ADMIN.get() else self._RLS_OWNER_USER_ID.get()
+                with (
+                    self.scoped_rls_context(is_admin=False, domain_allowlist=None, owner_user_id=aggregate_owner),
+                    self._pg_cursor(conn) as cur,
+                ):
                     cur.execute(
                         "SELECT COUNT(*) AS c FROM jobs WHERE owner_user_id = %s AND status IN ('queued', 'processing')",
                         (user_id,),
@@ -2321,6 +2439,28 @@ class JobManager:
             pass
 
     @classmethod
+    @contextlib.contextmanager
+    def scoped_rls_context(
+        cls, *, is_admin: bool, domain_allowlist: str | None, owner_user_id: str | None
+    ) -> Iterator[None]:
+        """Temporarily bind Jobs scope, not authorization; restore tokens locally.
+
+        Enter and exit inside the same synchronous/threadpool call. A token
+        cannot be reset from a different execution context.
+        """
+        domain = domain_allowlist if (domain_allowlist or "").strip() else None
+        owner = owner_user_id if (owner_user_id or "").strip() else None
+        admin_token = cls._RLS_IS_ADMIN.set(bool(is_admin))
+        domain_token = cls._RLS_DOMAIN_ALLOWLIST.set(domain)
+        owner_token = cls._RLS_OWNER_USER_ID.set(owner)
+        try:
+            yield
+        finally:
+            cls._RLS_OWNER_USER_ID.reset(owner_token)
+            cls._RLS_DOMAIN_ALLOWLIST.reset(domain_token)
+            cls._RLS_IS_ADMIN.reset(admin_token)
+
+    @classmethod
     def clear_rls_context(cls) -> None:
         try:
             cls._RLS_IS_ADMIN.set(False)
@@ -3304,6 +3444,7 @@ class JobManager:
     ) -> IdempotentOperationAdmission | None:
         """Read an exact owner-scoped receipt without applying admission policy."""
 
+        reject_resource_required(command.job.domain, command.job.job_type)
         conn = self._connect()
         try:
             if self.backend == "postgres":
@@ -3322,6 +3463,7 @@ class JobManager:
     ) -> IdempotentOperationAdmission:
         """Atomically admit or replay one owner-scoped user operation."""
 
+        reject_resource_required(command.job.domain, command.job.job_type)
         job = command.job
         replay = self.replay_idempotent_operation(command)
         if replay is not None:
@@ -3537,6 +3679,227 @@ class JobManager:
             self._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")),
         )
 
+    def _prepare_job_admission(
+        self,
+        command: CreateJobCommand,
+        *,
+        fair_share_exempt: bool = False,
+        canonical_delivery_id: str | None = None,
+        resource_request: ResourceAdmissionRequest | None = None,
+    ) -> CreateJobCommand | AdmissionResult:
+        """Apply the shared creation-only preparation, after resource lookup."""
+        domain, queue, job_type = command.domain, command.queue, command.job_type
+        payload, owner_user_id = command.payload, command.owner_user_id
+        priority, idempotency_key = command.priority, command.idempotency_key
+        expired_lease_policy = command.expired_lease_policy
+        quarantine_threshold = command.quarantine_threshold
+        slides_generation = _is_slides_generation_scope(domain, queue, job_type)
+        slides_replay_controls = {
+            "expected_expired_lease_policy": expired_lease_policy,
+            "expected_quarantine_threshold": quarantine_threshold,
+            "validate_execution_controls": True,
+        }
+        # Queue name policy
+        allowed_queues = self._get_allowed_queues(domain)
+        if queue not in allowed_queues:
+            error = ValueError(
+                f"Queue '{queue}' not allowed for domain '{domain}'. Allowed: {allowed_queues}"
+            )
+            if slides_generation:
+                existing = self._serialized_slides_generation_replay(
+                    owner_user_id=owner_user_id,
+                    idempotency_key=idempotency_key,
+                    **slides_replay_controls,
+                    rejection=error,
+                )
+                if existing is not None:
+                    return AdmissionResult.existing(row=existing)
+            raise error  # noqa: TRY003
+
+        # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
+        if owner_user_id and _fair_share_enabled():
+            try:
+                scheduler = _get_fair_share()
+                active_count = self._count_active_jobs_for_user(owner_user_id)
+                if not fair_share_exempt and not scheduler.can_submit(owner_user_id, active_count):
+                    if resource_request is not None:
+                        return AdmissionResult.rejected(AdmissionRejectionReason.FAIR_SHARE_LIMIT)
+                    raise BadRequestError(
+                        f"User {owner_user_id} has reached the maximum concurrent job limit "
+                        f"({scheduler.max_per_user})"
+                    )
+                fair_priority = scheduler.calculate_priority(owner_user_id, active_count)
+                fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
+                priority = min(priority, fair_priority_mapped)
+            except BadRequestError as exc:
+                if slides_generation:
+                    existing = self._serialized_slides_generation_replay(
+                        owner_user_id=owner_user_id,
+                        idempotency_key=idempotency_key,
+                        **slides_replay_controls,
+                        rejection=exc,
+                    )
+                    if existing is not None:
+                        return AdmissionResult.existing(row=existing)
+                raise
+            except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
+                logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
+
+        # Secret hygiene (reject/redact)
+        try:
+            cleaned, found, where = self._scan_and_redact_secrets(payload)
+        except _JOB_NONCRITICAL_EXCEPTIONS as _sec_e:
+            logger.debug(
+                "Jobs secret hygiene scan error: {}",
+                type(_sec_e).__name__,
+            )
+        else:
+            if found and JobManager._is_truthy(os.getenv("JOBS_SECRET_REJECT", "")):
+                suffix = "..." if len(where) > 3 else ""
+                raise ValueError(
+                    f"Payload appears to contain secrets at: {where[:3]}{suffix}"
+                )  # noqa: TRY003 - public rejection text is an API compatibility contract.
+            if found:
+                payload = cleaned
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
+
+        # JSON payload size cap
+        max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
+        truncate = JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
+        # Optional encryption at rest for payload
+        if resource_request is not None:
+            validate_resource_command(replace(command, payload=payload), resource_request)
+        payload = self._maybe_encrypt_json(payload, domain)
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
+        try:
+            payload_json = json.dumps(payload)
+        except (TypeError, ValueError) as exc:
+            if slides_generation:
+                existing = self._serialized_slides_generation_replay(
+                    owner_user_id=owner_user_id,
+                    idempotency_key=idempotency_key,
+                    **slides_replay_controls,
+                    rejection=exc,
+                )
+                if existing is not None:
+                    return AdmissionResult.existing(row=existing)
+            raise
+        payload_bytes = len(payload_json.encode("utf-8"))
+        if payload_bytes > max_bytes:
+            if truncate and resource_request is None:
+                payload = {"_truncated": True, "len_bytes": payload_bytes}
+                if canonical_delivery_id is not None:
+                    _require_unchanged_canonical_admin_webhook_payload(
+                        payload,
+                        delivery_id=canonical_delivery_id,
+                    )
+                payload_json = json.dumps(payload)
+                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+                    increment_json_truncated({"domain": domain, "queue": queue, "job_type": job_type}, "payload")
+            else:
+                error = ValueError(
+                    f"Payload too large: {payload_bytes} bytes > limit {max_bytes}"
+                )
+                if slides_generation:
+                    existing = self._serialized_slides_generation_replay(
+                        owner_user_id=owner_user_id,
+                        idempotency_key=idempotency_key,
+                        **slides_replay_controls,
+                        rejection=error,
+                    )
+                    if existing is not None:
+                        return AdmissionResult.existing(row=existing)
+                raise error  # noqa: TRY003
+
+        if canonical_delivery_id is not None:
+            _require_unchanged_canonical_admin_webhook_payload(
+                payload,
+                delivery_id=canonical_delivery_id,
+            )
+        # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
+        # Optional job_type allowlist
+        allowed_job_types: list[str] = []
+        env_all = os.getenv("JOBS_ALLOWED_JOB_TYPES", "").strip()
+        if env_all:
+            allowed_job_types.extend([x.strip() for x in env_all.split(",") if x.strip()])
+        if domain:
+            env_dom = os.getenv(f"JOBS_ALLOWED_JOB_TYPES_{str(domain).upper()}", "").strip()
+            if env_dom:
+                allowed_job_types.extend([x.strip() for x in env_dom.split(",") if x.strip()])
+        if allowed_job_types and job_type not in allowed_job_types:
+            error = ValueError(
+                f"Job type '{job_type}' not allowed for domain '{domain}'. Allowed: {sorted(set(allowed_job_types))}"
+            )
+            if slides_generation:
+                existing = self._serialized_slides_generation_replay(
+                    owner_user_id=owner_user_id,
+                    idempotency_key=idempotency_key,
+                    **slides_replay_controls,
+                    rejection=error,
+                )
+                if existing is not None:
+                    return AdmissionResult.existing(row=existing)
+            raise error  # noqa: TRY003
+
+        return replace(command, payload=payload, priority=priority)
+
+    def admit_resource_job(self, command: CreateJobCommand, *, request: ResourceAdmissionRequest) -> ResourceAdmission:
+        """Atomically replay, reuse, conflict or admit a registered resource Job.
+
+        This does not authorize callers. Enter scoped_rls_context inside the
+        executing call when using owner-facing PostgreSQL reads/admission.
+        """
+        command, request = validate_resource_command(command, request)
+
+        def prepare(candidate: CreateJobCommand) -> CreateJobCommand | AdmissionResult:
+            prepared = self._prepare_job_admission(candidate, resource_request=request)
+            if isinstance(prepared, AdmissionResult):
+                if prepared.outcome is OperationOutcome.ADMISSION_REJECTED:
+                    return prepared
+                raise RuntimeError("unexpected resource preparation replay")
+            if not prepared.trace_id:
+                prepared = replace(prepared, trace_id=str(_uuid.uuid4()))
+            return prepared
+
+        conn = self._connect()
+        try:
+            kwargs = {
+                "command": command,
+                "uuid_value": str(_uuid.uuid4()),
+                "now": self._clock.now_utc(),
+                "max_queued_quota": self._quota_get("JOBS_QUOTA_MAX_QUEUED", command.domain, command.owner_user_id),
+                "submits_per_minute_quota": self._quota_get(
+                    "JOBS_QUOTA_SUBMITS_PER_MIN", command.domain, command.owner_user_id
+                ),
+                "counters_enabled": JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
+                "resource_request": request,
+                "prepare_command": prepare,
+            }
+            if self.backend == "postgres":
+                result = _postgres_create_job_admission(conn, self._pg_cursor, **kwargs)
+            else:
+                result = _sqlite_create_job_admission(conn, **kwargs)
+        finally:
+            conn.close()
+        if isinstance(result, ResourceAdmission):
+            return result
+        if result.outcome is not OperationOutcome.APPLIED:
+            return ResourceAdmission("rejected", None, result)
+        self._emit_create_side_effects(result, backend=self.backend, idempotency_key=None)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._update_gauges(domain=command.domain, queue=command.queue, job_type=command.job_type)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._assert_invariants(result.row)
+        return ResourceAdmission("created", result.row, None)
+
     def admit_job(
         self,
         *,
@@ -3585,6 +3948,7 @@ class JobManager:
         ``create_job`` delegates here and maps only the final typed outcome to
         its legacy dict/exception contract.
         """
+        reject_resource_required(domain, job_type)
         try:
             expired_lease_policy = ExpiredLeasePolicy(expired_lease_policy)
         except (TypeError, ValueError):
@@ -3604,8 +3968,7 @@ class JobManager:
                 payload=payload,
             )
             canonical = (
-                idempotency_key
-                == canonical_admin_webhook_idempotency_key(canonical_delivery_id)
+                idempotency_key == canonical_admin_webhook_idempotency_key(canonical_delivery_id)
                 and owner_user_id is None
                 and project_id is None
                 and batch_group is None
@@ -3613,8 +3976,7 @@ class JobManager:
                 and priority == ADMIN_WEBHOOK_DELIVERY_PRIORITY
                 and max_retries == ADMIN_WEBHOOK_DELIVERY_MAX_RETRIES
                 and expired_lease_policy is ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT
-                and quarantine_threshold
-                == ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD
+                and quarantine_threshold == ADMIN_WEBHOOK_DELIVERY_QUARANTINE_THRESHOLD
             )
             if not canonical:
                 raise ValueError("canonical admin webhook admission facts are invalid")
@@ -3637,128 +3999,30 @@ class JobManager:
             if existing is not None:
                 return AdmissionResult.existing(row=existing)
 
-        # Queue name policy
-        allowed_queues = self._get_allowed_queues(domain)
-        if queue not in allowed_queues:
-            error = ValueError(
-                f"Queue '{queue}' not allowed for domain '{domain}'. Allowed: {allowed_queues}"
-            )
-            if slides_generation:
-                existing = self._serialized_slides_generation_replay(
-                    owner_user_id=owner_user_id,
-                    idempotency_key=idempotency_key,
-                    **slides_replay_controls,
-                    rejection=error,
-                )
-                if existing is not None:
-                    return AdmissionResult.existing(row=existing)
-            raise error  # noqa: TRY003
-
-        # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
-        if owner_user_id and _fair_share_enabled():
-            try:
-                scheduler = _get_fair_share()
-                active_count = self._count_active_jobs_for_user(owner_user_id)
-                if not fair_share_exempt and not scheduler.can_submit(owner_user_id, active_count):
-                    raise BadRequestError(
-                        f"User {owner_user_id} has reached the maximum concurrent job limit "
-                        f"({scheduler.max_per_user})"
-                    )
-                fair_priority = scheduler.calculate_priority(owner_user_id, active_count)
-                fair_priority_mapped = self._map_fair_share_score_to_priority(fair_priority)
-                priority = min(priority, fair_priority_mapped)
-            except BadRequestError as exc:
-                if slides_generation:
-                    existing = self._serialized_slides_generation_replay(
-                        owner_user_id=owner_user_id,
-                        idempotency_key=idempotency_key,
-                        **slides_replay_controls,
-                        rejection=exc,
-                    )
-                    if existing is not None:
-                        return AdmissionResult.existing(row=existing)
-                raise
-            except _JOB_NONCRITICAL_EXCEPTIONS as _fs_exc:
-                logger.warning(f"Fair-share scheduling check skipped: {_fs_exc}")
-
-        # Secret hygiene (reject/redact)
-        try:
-            cleaned, found, where = self._scan_and_redact_secrets(payload)
-        except _JOB_NONCRITICAL_EXCEPTIONS as _sec_e:
-            logger.debug(
-                "Jobs secret hygiene scan error: {}",
-                type(_sec_e).__name__,
-            )
-        else:
-            if found and JobManager._is_truthy(os.getenv("JOBS_SECRET_REJECT", "")):
-                suffix = "..." if len(where) > 3 else ""
-                raise ValueError(
-                    f"Payload appears to contain secrets at: {where[:3]}{suffix}"
-                )  # noqa: TRY003 - public rejection text is an API compatibility contract.
-            if found:
-                payload = cleaned
-        if canonical_delivery_id is not None:
-            _require_unchanged_canonical_admin_webhook_payload(
-                payload,
-                delivery_id=canonical_delivery_id,
-            )
-
-        # JSON payload size cap
-        max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
-        truncate = JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
-        # Optional encryption at rest for payload
-        payload = self._maybe_encrypt_json(payload, domain)
-        if canonical_delivery_id is not None:
-            _require_unchanged_canonical_admin_webhook_payload(
-                payload,
-                delivery_id=canonical_delivery_id,
-            )
-        try:
-            payload_json = json.dumps(payload)
-        except (TypeError, ValueError) as exc:
-            if slides_generation:
-                existing = self._serialized_slides_generation_replay(
-                    owner_user_id=owner_user_id,
-                    idempotency_key=idempotency_key,
-                    **slides_replay_controls,
-                    rejection=exc,
-                )
-                if existing is not None:
-                    return AdmissionResult.existing(row=existing)
-            raise
-        payload_bytes = len(payload_json.encode("utf-8"))
-        if payload_bytes > max_bytes:
-            if truncate:
-                payload = {"_truncated": True, "len_bytes": payload_bytes}
-                if canonical_delivery_id is not None:
-                    _require_unchanged_canonical_admin_webhook_payload(
-                        payload,
-                        delivery_id=canonical_delivery_id,
-                    )
-                payload_json = json.dumps(payload)
-                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                    increment_json_truncated({"domain": domain, "queue": queue, "job_type": job_type}, "payload")
-            else:
-                error = ValueError(
-                    f"Payload too large: {payload_bytes} bytes > limit {max_bytes}"
-                )
-                if slides_generation:
-                    existing = self._serialized_slides_generation_replay(
-                        owner_user_id=owner_user_id,
-                        idempotency_key=idempotency_key,
-                        **slides_replay_controls,
-                        rejection=error,
-                    )
-                    if existing is not None:
-                        return AdmissionResult.existing(row=existing)
-                raise error  # noqa: TRY003
-
-        if canonical_delivery_id is not None:
-            _require_unchanged_canonical_admin_webhook_payload(
-                payload,
-                delivery_id=canonical_delivery_id,
-            )
-        # Note: completion_token enforcement applies to finalize paths (complete/fail), not creation.
+        prepared = self._prepare_job_admission(
+            self._build_create_job_command(
+                domain=domain,
+                queue=queue,
+                job_type=job_type,
+                payload=payload,
+                owner_user_id=owner_user_id,
+                project_id=project_id,
+                batch_group=batch_group,
+                priority=priority,
+                max_retries=max_retries,
+                available_at=available_at,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+                trace_id=trace_id,
+                expired_lease_policy=expired_lease_policy,
+                quarantine_threshold=quarantine_threshold,
+            ),
+            fair_share_exempt=fair_share_exempt,
+            canonical_delivery_id=canonical_delivery_id,
+        )
+        if isinstance(prepared, AdmissionResult):
+            return prepared
+        payload, priority = prepared.payload, prepared.priority
         conn = self._connect()
         try:
             try:
@@ -3787,30 +4051,6 @@ class JobManager:
             avail_param_sqlite = avail_param
             if avail_param_sqlite is not None and getattr(avail_param_sqlite, "tzinfo", None) is not None:
                 avail_param_sqlite = avail_param_sqlite.astimezone(_tz.utc).replace(tzinfo=None)
-            # Optional job_type allowlist
-            allowed_job_types: list[str] = []
-            env_all = os.getenv("JOBS_ALLOWED_JOB_TYPES", "").strip()
-            if env_all:
-                allowed_job_types.extend([x.strip() for x in env_all.split(",") if x.strip()])
-            if domain:
-                env_dom = os.getenv(f"JOBS_ALLOWED_JOB_TYPES_{str(domain).upper()}", "").strip()
-                if env_dom:
-                    allowed_job_types.extend([x.strip() for x in env_dom.split(",") if x.strip()])
-            if allowed_job_types and job_type not in allowed_job_types:
-                error = ValueError(
-                    f"Job type '{job_type}' not allowed for domain '{domain}'. Allowed: {sorted(set(allowed_job_types))}"
-                )
-                if slides_generation:
-                    existing = self._serialized_slides_generation_replay(
-                        owner_user_id=owner_user_id,
-                        idempotency_key=idempotency_key,
-                        **slides_replay_controls,
-                        rejection=error,
-                    )
-                    if existing is not None:
-                        return AdmissionResult.existing(row=existing)
-                raise error  # noqa: TRY003
-
             max_queued_quota = 0 if quota_exempt else self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id)
             submits_per_minute_quota = (
                 0 if quota_exempt else self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id)
@@ -4942,6 +5182,105 @@ class JobManager:
             job_type="optimization",
         )
 
+    @contextlib.contextmanager
+    def _resource_pg_cursor(self, conn: Any, **kwargs: Any) -> Iterator[tuple[Any, ResourceMutation]]:
+        """Keep lifecycle head and exact-row locks inside the caller's transaction."""
+        with self._pg_cursor(conn) as cur, self._resource_mutation(cur, postgres=True, **kwargs) as mutation:
+            yield cur, mutation
+
+    def _resource_mutation(self, executor: Any, **kwargs: Any) -> contextlib.AbstractContextManager[ResourceMutation]:
+        """Use Jobs' injected clock at the executing, locked lifecycle boundary."""
+        return resource_mutation(executor, clock=self._clock.now_utc, **kwargs)
+
+    @contextlib.contextmanager
+    def _resource_sqlite_transaction(self, conn: Any, **kwargs: Any) -> Iterator[ResourceMutation]:
+        """Reserve SQLite's writer before discovering resource mutation targets."""
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            with self._resource_mutation(conn, **kwargs) as mutation:
+                yield mutation
+
+    def validate_resource_attempt(self, attempt: ResourceAttempt) -> bool:
+        """Read exact live Jobs authority, not a cross-store cancellation promise."""
+        if not isinstance(attempt, ResourceAttempt):
+            return False
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with (
+                    conn,
+                    self._resource_pg_cursor(
+                        conn, where="id=%s AND uuid=%s", params=(attempt.job_id, attempt.job_uuid), read_only=True
+                    ) as (_, mutation),
+                ):
+                    return self._resource_attempt_matches(mutation, attempt)
+            with self._resource_sqlite_transaction(
+                conn, where="id=? AND uuid=?", params=(attempt.job_id, attempt.job_uuid), read_only=True
+            ) as mutation:
+                return self._resource_attempt_matches(mutation, attempt)
+        except (ValueError, RuntimeError, KeyError, TypeError):
+            return False
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _resource_attempt_matches(mutation: ResourceMutation, attempt: ResourceAttempt) -> bool:
+        """Compare the immutable binding as well as the current acquired lease."""
+        row = mutation.rows.get(attempt.job_id)
+        return bool(
+            row
+            and row["status"] == "processing"
+            and mutation.bound.get(attempt.job_id) == attempt.binding.scope
+            and row["resource_authority_uuid"] == attempt.binding.authority_uuid
+            and row["resource_generation"] == attempt.binding.generation
+            and mutation.worker_allowed(attempt.job_id, attempt.worker_id, attempt.lease_id, attempt.job_uuid)
+        )
+
+    def _validate_resource_payload_replacement(self, row: dict[str, Any], payload: Any) -> Any:
+        """Return an equal decrypted contract, leaving opted-out payloads unchanged."""
+        from tldw_Server_API.app.core.claims_cluster_rebuild_contract import validate_cluster_rebuild_payload
+
+        from .operations.resource import resource_scope_for
+        from .resource_contracts import canonical_settings_json, settings_fingerprint
+
+        try:
+            scope = resource_scope_for(row)
+            if scope is None:
+                return payload
+            old_payload = row.get("payload")
+            if old_payload is None and row.get("payload_compressed") is not None:
+                old_payload = self._decode_archive_blob(row["payload_compressed"])
+
+            def validated(value: Any) -> dict[str, Any]:
+                """Decode encryption before neutral contract validation."""
+                return validate_cluster_rebuild_payload(
+                    self._maybe_decrypt_json(
+                        self._parse_json_value(value),
+                        fail_on_error=True,
+                        field_name="payload",
+                    )
+                )
+
+            old, new = validated(old_payload), validated(payload)
+            if (
+                row.get("payload_compressed") is not None
+                and validated(self._decode_archive_blob(row["payload_compressed"])) != old
+            ):
+                raise ValueError("resource_payload_conflict")
+            settings = {key: value for key, value in old.items() if key != "owner_user_id"}
+            if settings["method"] == "exact":
+                settings.pop("similarity_threshold")
+            if (
+                old != new
+                or old["owner_user_id"] != scope.owner_user_id
+                or canonical_settings_json(settings) != row["resource_settings_json"]
+                or settings_fingerprint(settings) != row["resource_settings_fingerprint"]
+            ):
+                raise ValueError("resource_payload_conflict")
+            return new
+        except (ValueError, TypeError, KeyError, OSError, EOFError) as exc:
+            raise ValueError("resource_payload_conflict") from exc
+
     def replace_job_payload(
         self,
         job_id: int,
@@ -4949,6 +5288,9 @@ class JobManager:
         payload: dict[str, Any],
         expected_uuid: str | None = None,
         expected_domain: str | None = None,
+        expected_worker_id: str | None = None,
+        expected_lease_id: str | None = None,
+        expected_payload: dict[str, Any] | None = None,
     ) -> bool:
         """Atomically replace one guarded live Jobs payload."""
         if not isinstance(payload, dict):
@@ -4965,23 +5307,39 @@ class JobManager:
                 if expected_domain is not None:
                     clauses.append("domain = %s")
                     guards.append(str(expected_domain))
+                if expected_worker_id is not None:
+                    clauses.append("worker_id = %s")
+                    guards.append(expected_worker_id)
+                if expected_lease_id is not None:
+                    clauses.append("lease_id = %s")
+                    guards.append(expected_lease_id)
+                if expected_worker_id is not None or expected_lease_id is not None:
+                    clauses.append("status = 'processing'")
                 where_sql = " AND ".join(clauses)
                 with conn:
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where=where_sql, params=tuple(guards), archived=False, payload_replacement=True
+                    ) as (cur, mutation):
+                        where_sql, guards = mutation.where, list(mutation.params)
                         cur.execute(
-                            "SELECT domain, queue, job_type FROM jobs "
-                            f"WHERE {where_sql} FOR UPDATE",  # nosec B608
+                            f"SELECT * FROM jobs WHERE {where_sql} FOR UPDATE",  # nosec B608
                             tuple(guards),
                         )
                         row = cur.fetchone()
                         if not row:
                             return False
+                        if expected_payload is not None:
+                            current_payload = self._maybe_decrypt_json(self._parse_json_value(row["payload"]))
+                            if json.dumps(current_payload, sort_keys=True, allow_nan=False) != json.dumps(expected_payload, sort_keys=True, allow_nan=False):
+                                return False
+                        payload = self._validate_resource_payload_replacement(dict(row), payload)
                         serialized = self._serialize_replacement_payload(
                             payload,
                             domain=str(row["domain"]),
                             queue=str(row["queue"]),
                             job_type=str(row["job_type"]),
                         )
+                        self._validate_resource_payload_replacement(dict(row), serialized)
                         cur.execute(
                             "UPDATE jobs SET payload = %s::jsonb, "
                             f"updated_at = NOW() WHERE {where_sql}",  # nosec B608
@@ -4997,22 +5355,37 @@ class JobManager:
             if expected_domain is not None:
                 clauses.append("domain = ?")
                 guards.append(str(expected_domain))
+            if expected_worker_id is not None:
+                clauses.append("worker_id = ?")
+                guards.append(expected_worker_id)
+            if expected_lease_id is not None:
+                clauses.append("lease_id = ?")
+                guards.append(expected_lease_id)
+            if expected_worker_id is not None or expected_lease_id is not None:
+                clauses.append("status = 'processing'")
             where_sql = " AND ".join(clauses)
-            with conn:
-                conn.execute("BEGIN IMMEDIATE")
+            with self._resource_sqlite_transaction(
+                conn, where=where_sql, params=tuple(guards), archived=False, payload_replacement=True
+            ) as mutation:
+                where_sql, guards = mutation.where, list(mutation.params)
                 row = conn.execute(
-                    "SELECT domain, queue, job_type FROM jobs "
-                    f"WHERE {where_sql}",  # nosec B608
+                    f"SELECT * FROM jobs WHERE {where_sql}",  # nosec B608
                     tuple(guards),
                 ).fetchone()
                 if not row:
                     return False
+                if expected_payload is not None:
+                    current_payload = self._maybe_decrypt_json(self._parse_json_value(row["payload"]))
+                    if json.dumps(current_payload, sort_keys=True, allow_nan=False) != json.dumps(expected_payload, sort_keys=True, allow_nan=False):
+                        return False
+                payload = self._validate_resource_payload_replacement(dict(row), payload)
                 serialized = self._serialize_replacement_payload(
                     payload,
-                    domain=str(row[0]),
-                    queue=str(row[1]),
-                    job_type=str(row[2]),
+                    domain=str(row["domain"]),
+                    queue=str(row["queue"]),
+                    job_type=str(row["job_type"]),
                 )
+                self._validate_resource_payload_replacement(dict(row), serialized)
                 cursor = conn.execute(
                     "UPDATE jobs SET payload = ?, updated_at = DATETIME('now') "
                     f"WHERE {where_sql}",  # nosec B608
@@ -5051,21 +5424,25 @@ class JobManager:
                     guards.append(int(expected_archive_locator))
                 where_sql = " AND ".join(clauses)
                 with conn:
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where=where_sql, params=tuple(guards), archived=True, payload_replacement=True
+                    ) as (cur, mutation):
+                        where_sql, guards = mutation.where, list(mutation.params)
                         cur.execute(
-                            "SELECT domain, queue, job_type FROM jobs_archive "
-                            f"WHERE {where_sql} FOR UPDATE",  # nosec B608
+                            f"SELECT * FROM jobs_archive WHERE {where_sql} FOR UPDATE",  # nosec B608
                             tuple(guards),
                         )
                         row = cur.fetchone()
                         if not row:
                             return False
+                        payload = self._validate_resource_payload_replacement(dict(row), payload)
                         serialized = self._serialize_replacement_payload(
                             payload,
                             domain=str(row["domain"]),
                             queue=str(row["queue"]),
                             job_type=str(row["job_type"]),
                         )
+                        self._validate_resource_payload_replacement(dict(row), serialized)
                         cur.execute(
                             "UPDATE jobs_archive SET payload = %s::jsonb, "
                             f"payload_compressed = NULL WHERE {where_sql}",  # nosec B608
@@ -5085,21 +5462,24 @@ class JobManager:
                 clauses.append("archive_id = ?")
                 guards.append(int(expected_archive_locator))
             where_sql = " AND ".join(clauses)
-            with conn:
-                conn.execute("BEGIN IMMEDIATE")
+            with self._resource_sqlite_transaction(
+                conn, where=where_sql, params=tuple(guards), archived=True, payload_replacement=True
+            ) as mutation:
+                where_sql, guards = mutation.where, list(mutation.params)
                 row = conn.execute(
-                    "SELECT domain, queue, job_type FROM jobs_archive "
-                    f"WHERE {where_sql}",  # nosec B608
+                    f"SELECT * FROM jobs_archive WHERE {where_sql}",  # nosec B608
                     tuple(guards),
                 ).fetchone()
                 if not row:
                     return False
+                payload = self._validate_resource_payload_replacement(dict(row), payload)
                 serialized = self._serialize_replacement_payload(
                     payload,
-                    domain=str(row[0]),
-                    queue=str(row[1]),
-                    job_type=str(row[2]),
+                    domain=str(row["domain"]),
+                    queue=str(row["queue"]),
+                    job_type=str(row["job_type"]),
                 )
+                self._validate_resource_payload_replacement(dict(row), serialized)
                 cursor = conn.execute(
                     "UPDATE jobs_archive SET payload = ?, payload_compressed = NULL "
                     f"WHERE {where_sql}",  # nosec B608
@@ -5313,7 +5693,10 @@ class JobManager:
         """Fetch a job from the active table or the archive table.
 
         Returns a job dict with normalized payload/result and an "archived" flag.
+        ``job_uuid`` binds a detail link to its logical Job even if an archived
+        numeric ID has since been reused; a mismatch never returns a replacement.
         """
+
         job = self.get_job(job_id)
         if (
             job
@@ -6129,18 +6512,24 @@ class JobManager:
                 if job_types is not None:
                     where.append("job_type = ANY(%s)")
                     params.append(list(job_types))
-                with conn, self._pg_cursor(conn) as cur:
-                    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
-                        effect_event_type,
-                        recover_workflow_expiry_in_transaction,
-                        workflow_enrollment_projection,
-                    )
+                from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+                    effect_event_type,
+                    recover_workflow_expiry_in_transaction,
+                    workflow_enrollment_projection,
+                )
 
-                    enrollment = workflow_enrollment_projection(conn, backend=self.backend)
-                    if enrollment == "workflow_capability_version":
-                        where[1] = (
-                            "(leased_until IS NULL OR leased_until <= CASE WHEN workflow_capability_version=1 THEN clock_timestamp() ELSE NOW() END)"
-                        )
+                enrollment = workflow_enrollment_projection(conn, backend=self.backend)
+                if enrollment == "workflow_capability_version":
+                    where[1] = (
+                        "(leased_until IS NULL OR leased_until <= CASE WHEN workflow_capability_version=1 THEN clock_timestamp() ELSE NOW() END)"
+                    )
+                with (
+                    conn,
+                    self._resource_pg_cursor(
+                        conn, where=" AND ".join(where), params=tuple(params), expired_recovery_limit=batch_size
+                    ) as (cur, mutation),
+                ):
+                    where, params = [mutation.where], list(mutation.params)
                     counter_deltas: dict[tuple[str, str, str], tuple[int, int]] = {}
                     cur.execute(
                         (
@@ -6265,8 +6654,10 @@ class JobManager:
                 ).fetchone()
                 if not precheck:
                     return 0
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where=scoped_where, params=tuple(params), expired_recovery_limit=batch_size
+                ) as mutation:
+                    scoped_where, params = mutation.where, list(mutation.params)
                     rows = conn.execute(
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
@@ -7497,36 +7888,23 @@ class JobManager:
             raise ValueError("completion_token required by JOBS_REQUIRE_COMPLETION_TOKEN")  # noqa: TRY003
         if enforce is None:
             enforce = self._should_enforce_ack()
-        # Cap result size if configured
-        max_bytes = int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576")
-        truncate = JobManager._is_truthy(os.getenv("JOBS_JSON_TRUNCATE", ""))
         outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
-        res_obj = result
+        res_obj = _bounded_completion_result(result)
         res_ok = False
         post_commit_side_effects: list[
             tuple[Any, tuple[Any, ...], dict[str, Any]]
         ] = []
-        if res_obj is not None:
-            # Serialize first; only catch serialization errors, not size checks
-            try:
-                res_json = json.dumps(res_obj)
-            except (TypeError, ValueError):
-                # Non-serializable results are handled by DB layer (stored as NULL or fail later)
-                res_json = None
-            if res_json is not None:
-                res_bytes = len(res_json.encode("utf-8"))
-                if res_bytes > max_bytes:
-                    if truncate:
-                        res_obj = {"_truncated": True, "len_bytes": res_bytes}
-                    else:
-                        raise ValueError(f"Result too large: {res_bytes} bytes > limit {max_bytes}")  # noqa: TRY003
         # Optional encryption at rest for result (requires domain; will be resolved per-backend)
         conn = self._connect()
         _test_mode = _is_test_mode()
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where="id=%s", params=(int(job_id),), expected_uuid=expected_uuid
+                    ) as (cur, mutation):
+                        if expected_uuid is not None and int(job_id) not in mutation.rows:
+                            return False
                         if _test_mode:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 logger.info(
@@ -7536,8 +7914,9 @@ class JobManager:
                         cur.execute(
                             "SELECT id, uuid, status, completion_token, worker_id, lease_id, "
                             "domain, queue, job_type, available_at, started_at, acquired_at, "
-                            "trace_id, request_id, owner_user_id FROM jobs WHERE id = %s FOR UPDATE",
-                            (int(job_id),),
+                            "trace_id, request_id, owner_user_id FROM jobs WHERE id = %s "
+                            f"AND ({mutation.where}) FOR UPDATE",  # nosec B608 - closed resource identity predicate; values bound.
+                            (int(job_id), *mutation.params),
                         )
                         base = cur.fetchone()
                         if base is None:
@@ -7547,6 +7926,8 @@ class JobManager:
                             expected_uuid is not None
                             and str(stored_uuid or "") != str(expected_uuid)
                         ):
+                            return False
+                        if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
                             return False
                         st = str(base.get("status"))
                         ct = base.get("completion_token")
@@ -7792,6 +8173,7 @@ class JobManager:
                                 event_type="job.completed",
                                 job=ev,
                             )
+                            mutation.finish()
                             _commit_postgres_transaction(
                                 conn,
                                 operation="job completion",
@@ -7801,8 +8183,11 @@ class JobManager:
                         res_ok = ok
                         # fall through to finally and return
             else:
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where="id=?", params=(int(job_id),), expected_uuid=expected_uuid
+                ) as mutation:
+                    if expected_uuid is not None and int(job_id) not in mutation.rows:
+                        return False
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(
@@ -7823,6 +8208,8 @@ class JobManager:
                         expected_uuid is not None
                         and str(stored_uuid or "") != str(expected_uuid)
                     ):
+                        return False
+                    if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
                         return False
                     st = str(base.get("status"))
                     ct = base.get("completion_token")
@@ -8182,13 +8569,21 @@ class JobManager:
     def batch_complete_jobs(self, items: list[dict[str, Any]], *, enforce: bool | None = None) -> int:
         if enforce is None:
             enforce = self._should_enforce_ack()
+        if not items:
+            return 0
+        ids = tuple(sorted({int(item["job_id"]) for item in items}))
         conn = self._connect()
         done = 0
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(conn, where="id = ANY(%s)", params=(list(ids),), batch=True) as (
+                        cur,
+                        mutation,
+                    ):
                         for it in items:
+                            if not mutation.item_allowed(it):
+                                continue
                             res_obj = it.get("result")
                             # Optional encryption at rest: prefer provided domain, otherwise fetch
                             try:
@@ -8225,8 +8620,12 @@ class JobManager:
                                 )
                             done += cur.rowcount or 0
             else:
-                with conn:
+                with self._resource_sqlite_transaction(
+                    conn, where="id IN (" + ",".join("?" for _ in ids) + ")", params=ids, batch=True
+                ) as mutation:
                     for it in items:
+                        if not mutation.item_allowed(it):
+                            continue
                         res_obj = it.get("result")
                         # Optional encryption at rest (SQLite): prefer provided domain, otherwise fetch
                         try:
@@ -8276,13 +8675,21 @@ class JobManager:
                     raise ValueError("completion_token required by JOBS_REQUIRE_COMPLETION_TOKEN")  # noqa: TRY003
         if enforce is None:
             enforce = self._should_enforce_ack()
+        if not items:
+            return 0
+        ids = tuple(sorted({int(item["job_id"]) for item in items}))
         conn = self._connect()
         cnt = 0
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(conn, where="id = ANY(%s)", params=(list(ids),), batch=True) as (
+                        cur,
+                        mutation,
+                    ):
                         for it in items:
+                            if not mutation.item_allowed(it):
+                                continue
                             if enforce:
                                 cur.execute(
                                     "UPDATE jobs SET status='failed', last_error=%s, error_message=%s, error_code=%s, completed_at=NOW(), leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=%s WHERE id=%s AND status='processing' AND worker_id=%s AND lease_id=%s AND (completion_token IS NULL OR completion_token=%s)",
@@ -8311,8 +8718,12 @@ class JobManager:
                                 )
                             cnt += cur.rowcount or 0
             else:
-                with conn:
+                with self._resource_sqlite_transaction(
+                    conn, where="id IN (" + ",".join("?" for _ in ids) + ")", params=ids, batch=True
+                ) as mutation:
                     for it in items:
+                        if not mutation.item_allowed(it):
+                            continue
                         if enforce:
                             cur = conn.execute(
                                 "UPDATE jobs SET status='failed', last_error=?, error_message=?, error_code=?, completed_at=DATETIME('now'), leased_until=NULL, worker_id=NULL, lease_id=NULL, completion_token=? WHERE id=? AND status='processing' AND worker_id=? AND lease_id=? AND (completion_token IS NULL OR completion_token=?)",
@@ -8373,6 +8784,7 @@ class JobManager:
         error_stack: dict[str, Any] | None = None,
         completion_token: str | None = None,
         quarantine: bool = True,
+        expected_uuid: str | None = None,
     ) -> bool:
         """Mark a job as failed; optionally reschedule with backoff if retryable.
 
@@ -8385,7 +8797,9 @@ class JobManager:
         streak, so a later ``fail_job`` with the default ``quarantine=True`` and the same
         ``error_code`` may quarantine the job at once.
         """
-        # Strong exactly-once finalize (optional): require a completion_token when enabled
+        from .failure_lifecycle import FailureHooks, FailureOperation, execute_failure
+
+        # Keep public validation ahead of connection creation.
         if (
             JobManager._is_truthy(os.getenv("JOBS_REQUIRE_COMPLETION_TOKEN", ""))
             and not completion_token
@@ -8393,1197 +8807,153 @@ class JobManager:
             raise ValueError("completion_token required by JOBS_REQUIRE_COMPLETION_TOKEN")  # noqa: TRY003
         if enforce is None:
             enforce = self._should_enforce_ack()
-        streak_code = str(error_code or error)
-        outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
-        post_commit_side_effects: list[
-            tuple[Any, tuple[Any, ...], dict[str, Any]]
-        ] = []
-        post_commit_cancel_uuid: str | None = None
-        post_commit_cancel_reason: str | None = None
-        conn = self._connect()
-        _test_mode = _is_test_mode()
-        try:
-            if self.backend == "postgres":
-                with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
-                        # For metrics and idempotency
-                        if _test_mode:
-                            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                logger.info(
-                                    f"[JM TEST MUT] fail_job enter job_id={job_id} retryable={retryable} backoff={backoff_seconds} enforce={enforce} backend=pg"
-                                )
-                        cur.execute(
-                            "SELECT status, completion_token, retry_count, failure_streak_code, failure_streak_count, domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at FROM jobs WHERE id = %s",
-                            (int(job_id),),
-                        )
-                        elem = cur.fetchone()
-                        if elem:
-                            st = str(elem.get("status"))
-                            ct = elem.get("completion_token")
-                            if st in {"completed", "failed", "cancelled", "quarantined"}:
-                                replay_states = (
-                                    {"failed", "quarantined"}
-                                    if retryable
-                                    else {"failed"}
-                                )
-                                return bool(
-                                    st in replay_states
-                                    and completion_token
-                                    and ct
-                                    and str(ct) == str(completion_token)
-                                )
-                        if retryable:
-                            cur.execute("SELECT retry_count FROM jobs WHERE id = %s", (int(job_id),))
-                            row = cur.fetchone()
-                            current = int(row["retry_count"]) if row else 0
-                            exp_backoff = max(1, int(backoff_seconds * (2**current)))
-                            test_mode = _is_test_mode()
-                            jitter = (
-                                0
-                                if exp_backoff <= 2 or test_mode
-                                else secrets.randbelow(max(1, exp_backoff // 4) + 1)
-                            )
-                            delay = exp_backoff + jitter
-                            # In tests, enforce a generous minimum when the caller requested
-                            # immediate retry (backoff_seconds=0) so that newer jobs can be
-                            # acquired before recently failed ones.
-                            if test_mode:
-                                _outbox = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
-                                # Permit immediate retry in tests when caller requests backoff=0
-                                # unless outbox mode is enabled (which needs a larger gap).
-                                if not _outbox and exp_backoff <= 1:
-                                    delay = 0
-                                try:
-                                    if _outbox and int(backoff_seconds) <= 0 and delay < 10:
-                                        delay = 10
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    if _outbox and delay < 3:
-                                        delay = 3
-                            # Poison message quarantine check: increment failure_streak_* and quarantine if threshold reached
-                            thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
-                            if not quarantine:
-                                thresh = 10**9
-                            # Update retry path with failure streak bookkeeping
-                            if enforce:
-                                cur.execute(
-                                    (
-                                        "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN 'quarantined' ELSE 'queued' END, "
-                                        "retry_count = retry_count + 1, last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, "
-                                        "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                        "failure_streak_code = %s, "
-                                        "completion_token = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN %s ELSE NULL END, "
-                                        "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN available_at WHEN %s <= 0 THEN NULL ELSE NOW() + (%s || ' seconds')::interval END, "
-                                        "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN NOW() ELSE quarantined_at END, "
-                                        "leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                        "WHERE id = %s AND status = 'processing' AND retry_count < max_retries AND worker_id = %s AND lease_id = %s AND (completion_token IS NULL OR completion_token = %s)"
-                                    ),
-                                    (
-                                        streak_code,
-                                        int(thresh),
-                                        streak_code,
-                                        error,
-                                        error_code,
-                                        error_class,
-                                        (json.dumps(error_stack) if error_stack is not None else None),
-                                        streak_code,
-                                        streak_code,
-                                        streak_code,
-                                        int(thresh),
-                                        completion_token,
-                                        streak_code,
-                                        int(thresh),
-                                        int(delay),
-                                        int(delay),
-                                        streak_code,
-                                        int(thresh),
-                                        int(job_id),
-                                        worker_id,
-                                        lease_id,
-                                        completion_token,
-                                    ),
-                                )
-                            else:
-                                cur.execute(
-                                    (
-                                        "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN 'quarantined' ELSE 'queued' END, "
-                                        "retry_count = retry_count + 1, last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, "
-                                        "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                        "failure_streak_code = %s, "
-                                        "completion_token = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN %s ELSE NULL END, "
-                                        "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN available_at WHEN %s <= 0 THEN NULL ELSE NOW() + (%s || ' seconds')::interval END, "
-                                        "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = %s THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= %s THEN NOW() ELSE quarantined_at END, "
-                                        "leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                        "WHERE id = %s AND status = 'processing' AND retry_count < max_retries AND (completion_token IS NULL OR completion_token = %s)"
-                                    ),
-                                    (
-                                        streak_code,
-                                        int(thresh),
-                                        streak_code,
-                                        error,
-                                        error_code,
-                                        error_class,
-                                        (json.dumps(error_stack) if error_stack is not None else None),
-                                        streak_code,
-                                        streak_code,
-                                        streak_code,
-                                        int(thresh),
-                                        completion_token,
-                                        streak_code,
-                                        int(thresh),
-                                        int(delay),
-                                        int(delay),
-                                        streak_code,
-                                        int(thresh),
-                                        int(job_id),
-                                        completion_token,
-                                    ),
-                                )
-                            retry_transition_changed = cur.rowcount > 0
-                            if retry_transition_changed:
-                                cur.execute(
-                                    "SELECT status, uuid FROM jobs WHERE id = %s",
-                                    (int(job_id),),
-                                )
-                                _srow = cur.fetchone()
-                                transition_status = str((_srow or {}).get("status") or "")
-                                if transition_status == "quarantined":
-                                    post_commit_cancel_uuid = (_srow or {}).get("uuid")
-                                    post_commit_cancel_reason = "dependency_failed"
-                                try:
-                                    if elem:
-                                        if transition_status == "queued":
-                                            post_commit_side_effects.append(
-                                                (
-                                                    increment_retries,
-                                                    (dict(elem),),
-                                                    {},
-                                                )
-                                            )
-                                            try:
-                                                from .metrics import observe_retry_after
+        initial_test_mode = False
 
-                                                post_commit_side_effects.append(
-                                                    (
-                                                        observe_retry_after,
-                                                        (dict(elem), float(delay)),
-                                                        {},
-                                                    )
-                                                )
-                                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                                pass
-                                        # Append to failure_timeline (retryable)
-                                        try:
-                                            cur.execute(
-                                                "SELECT failure_timeline FROM jobs WHERE id = %s", (int(job_id),)
-                                            )
-                                            _tlrow = cur.fetchone()
-                                            tl_val = _tlrow.get("failure_timeline") if _tlrow else None
-                                            if isinstance(tl_val, list):
-                                                tl = tl_val
-                                            elif isinstance(tl_val, str):
-                                                try:
-                                                    tl = json.loads(tl_val)
-                                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                                    tl = []
-                                            else:
-                                                tl = []
-                                            tl.append(
-                                                {
-                                                    "ts": datetime.utcnow().isoformat(),
-                                                    "error_code": (error_code or error),
-                                                    "retry_backoff": int(delay),
-                                                }
-                                            )
-                                            tl = tl[-10:]
-                                            cur.execute(
-                                                "UPDATE jobs SET failure_timeline = %s::jsonb WHERE id = %s",
-                                                (json.dumps(tl), int(job_id)),
-                                            )
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            pass
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                if (
-                                    elem
-                                    and JobManager._is_truthy(
-                                        os.getenv("JOBS_COUNTERS_ENABLED", "")
-                                    )
-                                ):
-                                    will_quarantine = (
-                                        transition_status == "quarantined"
-                                    )
-                                    add_ready = int(
-                                        not will_quarantine and int(delay) <= 0
-                                    )
-                                    add_sched = int(
-                                        not will_quarantine and int(delay) > 0
-                                    )
-                                    add_quar = int(will_quarantine)
-                                    cur.execute(
-                                        (
-                                            "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) VALUES(%s,%s,%s,%s,%s,0,%s) "
-                                            "ON CONFLICT (domain,queue,job_type) DO UPDATE SET "
-                                            "ready_count = job_counters.ready_count + %s, "
-                                            "scheduled_count = job_counters.scheduled_count + %s, "
-                                            "processing_count = GREATEST(job_counters.processing_count - 1, 0), "
-                                            "quarantined_count = job_counters.quarantined_count + %s, "
-                                            "updated_at = NOW()"
-                                        ),
-                                        (
-                                            elem.get("domain"),
-                                            elem.get("queue"),
-                                            elem.get("job_type"),
-                                            add_ready,
-                                            add_sched,
-                                            add_quar,
-                                            add_ready,
-                                            add_sched,
-                                            add_quar,
-                                        ),
-                                    )
-                                if _is_test_mode():
-                                    try:
-                                        # Snapshot after scheduling retry (PG)
-                                        cur.execute("SELECT failure_timeline FROM jobs WHERE id = %s", (int(job_id),))
-                                        _tlrow = cur.fetchone()
-                                        _tl_len = 0
-                                        try:
-                                            _tl_len = (
-                                                len(json.loads(_tlrow.get("failure_timeline")))
-                                                if _tlrow and _tlrow.get("failure_timeline")
-                                                else 0
-                                            )
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            _tl_len = 0
-                                        cur.execute("SELECT COUNT(*) AS c FROM jobs")
-                                        _total = (cur.fetchone() or {}).get("c", 0)
-                                        cur.execute("SELECT status, COUNT(*) AS c FROM jobs GROUP BY status")
-                                        _rows = cur.fetchall() or []
-                                        _dist = {str(x.get("status")): int(x.get("c") or 0) for x in _rows}
-                                        logger.info(
-                                            f"[JM TEST MUT] fail_job retryable scheduled delay={int(delay)} tl_len={_tl_len} total={_total} dist={_dist}"
-                                        )
-                                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                                        pass
-                                if elem:
-                                    post_commit_side_effects.append(
-                                        (
-                                            self._update_gauges,
-                                            (),
-                                            {
-                                                "domain": elem.get("domain"),
-                                                "queue": elem.get("queue"),
-                                                "job_type": elem.get("job_type"),
-                                            },
-                                        )
-                                    )
-                                    event_type = (
-                                        "job.quarantined"
-                                        if transition_status == "quarantined"
-                                        else "job.retry_scheduled"
-                                    )
-                                    attrs = {
-                                        "error_code": (error_code or error),
-                                        "retry_count": int(current + 1),
-                                    }
-                                    if transition_status == "queued":
-                                        attrs["backoff_seconds"] = int(delay)
-                                    event_job = {
-                                        "id": int(job_id),
-                                        "domain": elem.get("domain"),
-                                        "queue": elem.get("queue"),
-                                        "job_type": elem.get("job_type"),
-                                        "owner_user_id": elem.get("owner_user_id"),
-                                        "request_id": elem.get("request_id"),
-                                        "trace_id": elem.get("trace_id"),
-                                    }
-                                    if outbox_enabled:
-                                        _insert_lifecycle_event(
-                                            cur,
-                                            backend=self.backend,
-                                            event_type=event_type,
-                                            job=event_job,
-                                            attrs=attrs,
-                                        )
-                                    _queue_lifecycle_event_observer(
-                                        post_commit_side_effects,
-                                        event_type=event_type,
-                                        job=event_job,
-                                        attrs=attrs,
-                                    )
-                                _commit_postgres_transaction(
-                                    conn,
-                                    operation="job retry scheduling",
-                                )
-                                _run_post_commit_side_effects(post_commit_side_effects)
-                                post_commit_side_effects.clear()
-                                if post_commit_cancel_uuid:
-                                    with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                        self._cancel_dependent_jobs(
-                                            post_commit_cancel_uuid,
-                                            reason=post_commit_cancel_reason or "dependency_failed",
-                                        )
-                                return True
-                            if completion_token:
-                                cur.execute(
-                                    "SELECT status, completion_token FROM jobs WHERE id=%s",
-                                    (int(job_id),),
-                                )
-                                replay = cur.fetchone()
-                                if (
-                                    replay
-                                    and str(replay.get("status"))
-                                    in {"failed", "quarantined"}
-                                    and str(replay.get("completion_token") or "")
-                                    == str(completion_token)
-                                ):
-                                    return True
-                        # terminal failure
-                        failed_from_queued = False
-                        if enforce:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status = 'failed', last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, completion_token = %s, "
-                                    "completed_at = NOW(), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'processing' AND worker_id = %s AND lease_id = %s AND (completion_token IS NULL OR completion_token = %s)"
-                                ),
-                                (
-                                    (error_code or error),
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    completion_token,
-                                    int(job_id),
-                                    worker_id,
-                                    lease_id,
-                                    completion_token,
-                                ),
-                            )
-                            failed_from_processing = cur.rowcount > 0
-                        else:
-                            cur.execute(
-                                (
-                                    "UPDATE jobs SET status = 'failed', last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, completion_token = COALESCE(completion_token, %s), "
-                                    "completed_at = NOW(), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'processing' AND (completion_token IS NULL OR completion_token = %s)"
-                                ),
-                                (
-                                    (error_code or error),
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    completion_token,
-                                    int(job_id),
-                                    completion_token,
-                                ),
-                            )
-                            failed_from_processing = cur.rowcount > 0
-                            if not failed_from_processing:
-                                try:
-                                    allow = {
-                                        d.strip().lower()
-                                        for d in os.getenv(
-                                            "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
-                                            "chatbooks,embeddings",
-                                        ).split(",")
-                                        if d.strip()
-                                    }
-                                    cur.execute("SELECT domain FROM jobs WHERE id = %s", (int(job_id),))
-                                    row_dom = cur.fetchone()
-                                    dom_val = str(row_dom.get("domain") or "").lower() if row_dom else ""
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    allow = {"chatbooks", "embeddings"}
-                                    dom_val = ""
-                                if dom_val in allow:
-                                    cur.execute(
-                                        (
-                                            "UPDATE jobs SET status = 'failed', last_error = %s, error_message = %s, error_code = %s, error_class = %s, error_stack = %s::jsonb, completion_token = COALESCE(completion_token, %s), "
-                                            "completed_at = NOW(), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = %s AND status = 'queued' AND (completion_token IS NULL OR completion_token = %s)"
-                                        ),
-                                        (
-                                            (error_code or error),
-                                            error,
-                                            error_code,
-                                            error_class,
-                                            (json.dumps(error_stack) if error_stack is not None else None),
-                                            completion_token,
-                                            int(job_id),
-                                            completion_token,
-                                        ),
-                                    )
-                                    failed_from_queued = cur.rowcount > 0
-                        ok = failed_from_processing or failed_from_queued
-                        if not ok and completion_token:
-                            cur.execute(
-                                "SELECT status, completion_token FROM jobs WHERE id=%s",
-                                (int(job_id),),
-                            )
-                            replay = cur.fetchone()
-                            if (
-                                replay
-                                and str(replay.get("status")) == "failed"
-                                and str(replay.get("completion_token") or "")
-                                == str(completion_token)
-                            ):
-                                return True
-                        if ok and (error_code or error_class or error_stack is not None):
-                            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                cur.execute(
-                                    (
-                                        "UPDATE jobs SET error_code = COALESCE(%s, error_code), "
-                                        "error_class = COALESCE(%s, error_class), "
-                                        "error_stack = COALESCE(%s::jsonb, error_stack) "
-                                        "WHERE id = %s"
-                                    ),
-                                    (
-                                        error_code,
-                                        error_class,
-                                        (json.dumps(error_stack) if error_stack is not None else None),
-                                        int(job_id),
-                                    ),
-                                )
-                        try:
-                            if ok and elem:
-                                d = dict(elem)
-                                post_commit_side_effects.append(
-                                    (increment_failures, (d,), {"reason": "terminal"})
-                                )
-                                try:
-                                    if error_code:
-                                        from .metrics import increment_failures_by_code
+        def initialize_diagnostics() -> None:
+            """Sample the existing diagnostic flag after opening the connection."""
+            nonlocal initial_test_mode
+            initial_test_mode = _is_test_mode()
 
-                                        post_commit_side_effects.append(
-                                            (
-                                                increment_failures_by_code,
-                                                (d, error_code),
-                                                {},
-                                            )
-                                        )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                try:
-                                    # Append terminal failure to timeline (no backoff)
-                                    cur.execute(
-                                        "UPDATE jobs SET failure_timeline = COALESCE(failure_timeline, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('ts', NOW(), 'error_code', %s::text, 'retry_backoff', 0)) WHERE id = %s",
-                                        ((error_code or error), int(job_id)),
-                                    )
-
-                                    post_commit_side_effects.append(
-                                        (
-                                            _record_job_span,
-                                            ("job.fail", d),
-                                            {
-                                                "attrs": {
-                                                    "retryable": False,
-                                                    "error_code": error_code,
-                                                }
-                                            },
-                                        )
-                                    )
-                                except _PG_ERRORS:
-                                    raise
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                post_commit_side_effects.append(
-                                    (
-                                        self._update_gauges,
-                                        (),
-                                        {
-                                            "domain": d.get("domain"),
-                                            "queue": d.get("queue"),
-                                            "job_type": d.get("job_type"),
-                                        },
-                                    )
-                                )
-                                post_commit_cancel_uuid = d.get("uuid")
-                                post_commit_cancel_reason = "dependency_failed"
-                        except _PG_ERRORS:
-                            raise
-                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        if (
-                            ok
-                            and elem
-                            and JobManager._is_truthy(
-                                os.getenv("JOBS_COUNTERS_ENABLED", "")
-                            )
-                        ):
-                            d_counter = dict(elem)
-                            if failed_from_queued:
-                                is_scheduled = (
-                                    d_counter.get("available_at") is not None
-                                )
-                                cur.execute(
-                                    (
-                                        "UPDATE job_counters SET "
-                                        "ready_count = GREATEST(ready_count - %s, 0), "
-                                        "scheduled_count = GREATEST(scheduled_count - %s, 0), "
-                                        "updated_at = NOW() "
-                                        "WHERE domain=%s AND queue=%s AND job_type=%s"
-                                    ),
-                                    (
-                                        int(not is_scheduled),
-                                        int(is_scheduled),
-                                        d_counter.get("domain"),
-                                        d_counter.get("queue"),
-                                        d_counter.get("job_type"),
-                                    ),
-                                )
-                            else:
-                                cur.execute(
-                                    "UPDATE job_counters SET processing_count = GREATEST(processing_count - 1, 0), updated_at = NOW() WHERE domain=%s AND queue=%s AND job_type=%s",
-                                    (
-                                        d_counter.get("domain"),
-                                        d_counter.get("queue"),
-                                        d_counter.get("job_type"),
-                                    ),
-                                )
-                            if cur.rowcount == 0:
-                                _reconcile_lifecycle_counter_row(
-                                    cur,
-                                    backend=self.backend,
-                                    domain=d_counter.get("domain"),
-                                    queue=d_counter.get("queue"),
-                                    job_type=d_counter.get("job_type"),
-                                )
-                        if ok and elem:
-                            event_job = {
-                                "id": int(job_id),
-                                "domain": elem.get("domain"),
-                                "queue": elem.get("queue"),
-                                "job_type": elem.get("job_type"),
-                                "owner_user_id": elem.get("owner_user_id"),
-                                "request_id": elem.get("request_id"),
-                                "trace_id": elem.get("trace_id"),
-                            }
-                            attrs = {"error_code": (error_code or error)}
-                            if outbox_enabled:
-                                _insert_lifecycle_event(
-                                    cur,
-                                    backend=self.backend,
-                                    event_type="job.failed",
-                                    job=event_job,
-                                    attrs=attrs,
-                                )
-                            _queue_lifecycle_event_observer(
-                                post_commit_side_effects,
-                                event_type="job.failed",
-                                job=event_job,
-                                attrs=attrs,
-                            )
-                        if _is_test_mode():
-                            try:
-                                cur.execute("SELECT COUNT(*) AS c FROM jobs")
-                                _total = (cur.fetchone() or {}).get("c", 0)
-                                cur.execute("SELECT status, COUNT(*) AS c FROM jobs GROUP BY status")
-                                _rows = cur.fetchall() or []
-                                _dist = {str(x.get("status")): int(x.get("c") or 0) for x in _rows}
-                                logger.info(
-                                    f"[JM TEST MUT] fail_job terminal ok={bool(ok)} total={_total} dist={_dist}"
-                                )
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                pass
-                        if ok:
-                            _commit_postgres_transaction(
-                                conn,
-                                operation="terminal job failure",
-                            )
-                            _run_post_commit_side_effects(post_commit_side_effects)
-                            post_commit_side_effects.clear()
-                            if post_commit_cancel_uuid:
-                                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                                    self._cancel_dependent_jobs(
-                                        post_commit_cancel_uuid,
-                                        reason=post_commit_cancel_reason or "dependency_failed",
-                                    )
-                        return ok
-            else:
-                result = False
-                with conn:
-                    if _test_mode:
-                        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                            logger.info(
-                                f"[JM TEST MUT] fail_job enter job_id={job_id} retryable={retryable} backoff={backoff_seconds} enforce={enforce} backend=sqlite"
-                            )
-                    # For metrics, fetch labels
-                    rowl = conn.execute(
-                        "SELECT status, completion_token, domain, queue, job_type, uuid, request_id, trace_id, owner_user_id, available_at FROM jobs WHERE id = ?",
-                        (job_id,),
-                    ).fetchone()
-                    if rowl:
-                        st = str(rowl[0])
-                        ct = rowl[1]
-                        if st in {"completed", "failed", "cancelled", "quarantined"}:
-                            replay_states = (
-                                {"failed", "quarantined"}
-                                if retryable
-                                else {"failed"}
-                            )
-                            return bool(
-                                st in replay_states
-                                and completion_token
-                                and ct
-                                and str(ct) == str(completion_token)
-                            )
-                    retry_scheduled = False
-                    if retryable:
-                        # compute jittered backoff based on current retry_count
-                        row = conn.execute("SELECT retry_count FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                        current = int(row[0]) if row else 0
-                        exp_backoff = max(1, int(backoff_seconds * (2**current)))
-                        test_mode = _is_test_mode()
-                        jitter = (
-                            0
-                            if exp_backoff <= 2 or test_mode
-                            else secrets.randbelow(max(1, exp_backoff // 4) + 1)
-                        )
-                        delay = exp_backoff + jitter
-                        thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
-                        if test_mode:
-                            _outbox = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
-                            if not _outbox and exp_backoff <= 1:
-                                delay = 0
-                            try:
-                                if _outbox and int(backoff_seconds) <= 0 and delay < 10:
-                                    delay = 10
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                if _outbox and delay < 3:
-                                    delay = 3
-                        if not quarantine:
-                            thresh = 10**9
-                        # SQLite retry path with failure streak bookkeeping
-                        if enforce:
-                            retry_cursor = conn.execute(
-                                (
-                                    "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN 'quarantined' ELSE 'queued' END, "
-                                    "retry_count = retry_count + 1, last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, "
-                                    "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                    "failure_streak_code = ?, "
-                                    "completion_token = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN ? ELSE NULL END, "
-                                    "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN available_at WHEN ? <= 0 THEN NULL ELSE DATETIME('now', ?) END, "
-                                    "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN DATETIME('now') ELSE quarantined_at END, "
-                                    "leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                    "WHERE id = ? AND status = 'processing' AND retry_count < max_retries AND worker_id = ? AND lease_id = ? AND (completion_token IS NULL OR completion_token = ?)"
-                                ),
-                                (
-                                    streak_code,
-                                    int(thresh),
-                                    streak_code,
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    streak_code,
-                                    streak_code,
-                                    streak_code,
-                                    int(thresh),
-                                    completion_token,
-                                    streak_code,
-                                    int(thresh),
-                                    int(delay),
-                                    f"+{delay} seconds",
-                                    streak_code,
-                                    int(thresh),
-                                    job_id,
-                                    worker_id,
-                                    lease_id,
-                                    completion_token,
-                                ),
-                            )
-                        else:
-                            retry_cursor = conn.execute(
-                                (
-                                    "UPDATE jobs SET status = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN 'quarantined' ELSE 'queued' END, "
-                                    "retry_count = retry_count + 1, last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, "
-                                    "failure_streak_count = CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END, "
-                                    "failure_streak_code = ?, "
-                                    "completion_token = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN ? ELSE NULL END, "
-                                    "available_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN available_at WHEN ? <= 0 THEN NULL ELSE DATETIME('now', ?) END, "
-                                    "quarantined_at = CASE WHEN (CASE WHEN COALESCE(failure_streak_code, '') = ? THEN COALESCE(failure_streak_count,0) + 1 ELSE 1 END) >= ? THEN DATETIME('now') ELSE quarantined_at END, "
-                                    "leased_until = NULL, worker_id = NULL, lease_id = NULL "
-                                    "WHERE id = ? AND status = 'processing' AND retry_count < max_retries AND (completion_token IS NULL OR completion_token = ?)"
-                                ),
-                                (
-                                    streak_code,
-                                    int(thresh),
-                                    streak_code,
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    streak_code,
-                                    streak_code,
-                                    streak_code,
-                                    int(thresh),
-                                    completion_token,
-                                    streak_code,
-                                    int(thresh),
-                                    int(delay),
-                                    f"+{delay} seconds",
-                                    streak_code,
-                                    int(thresh),
-                                    job_id,
-                                    completion_token,
-                                ),
-                            )
-                        retry_transition_changed = (retry_cursor.rowcount or 0) > 0
-                        if retry_transition_changed:
-                            retry_scheduled = True
-                            rowq = conn.execute(
-                                "SELECT status, uuid FROM jobs WHERE id = ?",
-                                (job_id,),
-                            ).fetchone()
-                            transition_status = str(rowq[0] if rowq else "")
-                            if transition_status == "quarantined":
-                                post_commit_cancel_uuid = rowq[1]
-                                post_commit_cancel_reason = "dependency_failed"
-                            try:
-                                if rowl:
-                                    dtmp = dict(rowl)
-                                    if transition_status == "queued":
-                                        post_commit_side_effects.append(
-                                            (
-                                                increment_retries,
-                                                (dtmp,),
-                                                {},
-                                            )
-                                        )
-                                        try:
-                                            from .metrics import observe_retry_after
-
-                                            post_commit_side_effects.append(
-                                                (
-                                                    observe_retry_after,
-                                                    (dtmp, float(delay)),
-                                                    {},
-                                                )
-                                            )
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            pass
-                                    post_commit_side_effects.append(
-                                        (
-                                            self._update_gauges,
-                                            (),
-                                            {
-                                                "domain": dtmp.get("domain"),
-                                                "queue": dtmp.get("queue"),
-                                                "job_type": dtmp.get("job_type"),
-                                            },
-                                        )
-                                    )
-                                    # Append to failure_timeline
-                                    try:
-                                        row_t = conn.execute(
-                                            "SELECT failure_timeline FROM jobs WHERE id = ?", (job_id,)
-                                        ).fetchone()
-                                        timeline_json = row_t[0] if row_t else None
-                                        try:
-                                            tl = json.loads(timeline_json) if timeline_json else []
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            tl = []
-                                        tl.append(
-                                            {
-                                                "ts": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                                                "error_code": (error_code or error),
-                                                "retry_backoff": int(delay),
-                                            }
-                                        )
-                                        tl = tl[-10:]
-                                        conn.execute(
-                                            "UPDATE jobs SET failure_timeline = ? WHERE id = ?",
-                                            (json.dumps(tl), int(job_id)),
-                                        )
-                                        # Update last-acquired snapshot for test-mode fallbacks to preserve timeline growth
-                                        try:
-                                            if (
-                                                _is_test_mode()
-                                                and rowl
-                                            ):
-                                                rnow = conn.execute(
-                                                    "SELECT * FROM jobs WHERE id = ?", (int(job_id),)
-                                                ).fetchone()
-                                                if rnow:
-                                                    JobManager._LAST_ACQUIRED_TEST[(rowl[2], rowl[3])] = dict(rnow)
-                                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                                            pass
-                                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                                        pass
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                pass
-                            if (
-                                rowl
-                                and JobManager._is_truthy(
-                                    os.getenv("JOBS_COUNTERS_ENABLED", "")
-                                )
-                            ):
-                                will_quarantine = (
-                                    transition_status == "quarantined"
-                                )
-                                add_ready = int(
-                                    not will_quarantine and int(delay) <= 0
-                                )
-                                add_sched = int(
-                                    not will_quarantine and int(delay) > 0
-                                )
-                                add_quar = int(will_quarantine)
-                                conn.execute(
-                                    (
-                                        "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) VALUES(?,?,?, ?, ?, 0, ?) "
-                                        "ON CONFLICT(domain,queue,job_type) DO UPDATE SET ready_count = ready_count + ?, scheduled_count = scheduled_count + ?, processing_count = CASE WHEN processing_count>0 THEN processing_count-1 ELSE 0 END, quarantined_count = quarantined_count + ?, updated_at = DATETIME('now')"
-                                    ),
-                                    (
-                                        rowl[2],
-                                        rowl[3],
-                                        rowl[4],
-                                        add_ready,
-                                        add_sched,
-                                        add_quar,
-                                        add_ready,
-                                        add_sched,
-                                        add_quar,
-                                    ),
-                                )
-                            if rowl:
-                                dtmp = dict(rowl)
-                                event_type = (
-                                    "job.quarantined"
-                                    if transition_status == "quarantined"
-                                    else "job.retry_scheduled"
-                                )
-                                attrs = {
-                                    "error_code": (error_code or error),
-                                    "retry_count": int(current + 1),
-                                }
-                                if transition_status == "queued":
-                                    attrs["backoff_seconds"] = int(delay)
-                                event_job = {
-                                    "id": int(job_id),
-                                    "domain": dtmp.get("domain"),
-                                    "queue": dtmp.get("queue"),
-                                    "job_type": dtmp.get("job_type"),
-                                    "owner_user_id": dtmp.get("owner_user_id"),
-                                    "request_id": dtmp.get("request_id"),
-                                    "trace_id": dtmp.get("trace_id"),
-                                }
-                                if outbox_enabled:
-                                    _insert_lifecycle_event(
-                                        conn,
-                                        backend=self.backend,
-                                        event_type=event_type,
-                                        job=event_job,
-                                        attrs=attrs,
-                                    )
-                                _queue_lifecycle_event_observer(
-                                    post_commit_side_effects,
-                                    event_type=event_type,
-                                    job=event_job,
-                                    attrs=attrs,
-                                )
-                            if _is_test_mode():
-                                try:
-                                    _row = conn.execute(
-                                        "SELECT failure_timeline FROM jobs WHERE id = ?", (int(job_id),)
-                                    ).fetchone()
-                                    _tl_len = 0
-                                    try:
-                                        _tl_len = len(json.loads(_row[0])) if (_row and _row[0]) else 0
-                                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                                        _tl_len = 0
-                                    _total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-                                    _dist = {
-                                        str(r[0]): int(r[1])
-                                        for r in conn.execute(
-                                            "SELECT status, COUNT(*) FROM jobs GROUP BY status"
-                                        ).fetchall()
-                                    }
-                                    logger.info(
-                                        f"[JM TEST MUT] fail_job retryable scheduled delay={int(delay)} tl_len={_tl_len} total={int(_total)} dist={_dist}"
-                                    )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                            result = True
-                        elif completion_token:
-                            replay = conn.execute(
-                                "SELECT status, completion_token FROM jobs WHERE id=?",
-                                (int(job_id),),
-                            ).fetchone()
-                            if (
-                                replay
-                                and str(replay[0])
-                                in {"failed", "quarantined"}
-                                and str(replay[1] or "") == str(completion_token)
-                            ):
-                                return True
-                    if not retry_scheduled:
-                        # terminal failure
-                        failed_from_queued = False
-                        if enforce:
-                            processing_cursor = conn.execute(
-                                (
-                                    "UPDATE jobs SET status = 'failed', last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, completion_token = ?, "
-                                    "completed_at = DATETIME('now'), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = ? AND status = 'processing' AND worker_id = ? AND lease_id = ? AND (completion_token IS NULL OR completion_token = ?)"
-                                ),
-                                (
-                                    (error_code or error),
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    completion_token,
-                                    job_id,
-                                    worker_id,
-                                    lease_id,
-                                    completion_token,
-                                ),
-                            )
-                            failed_from_processing = (
-                                processing_cursor.rowcount or 0
-                            ) > 0
-                        else:
-                            # Enforcement disabled: allow failing processing without matching worker/lease,
-                            # and fall back to failing queued jobs (admin-style terminalization) when appropriate.
-                            processing_cursor = conn.execute(
-                                (
-                                    "UPDATE jobs SET status = 'failed', last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, completion_token = COALESCE(completion_token, ?), "
-                                    "completed_at = DATETIME('now'), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = ? AND status = 'processing' AND (completion_token IS NULL OR completion_token = ?)"
-                                ),
-                                (
-                                    (error_code or error),
-                                    error,
-                                    error_code,
-                                    error_class,
-                                    (json.dumps(error_stack) if error_stack is not None else None),
-                                    completion_token,
-                                    job_id,
-                                    completion_token,
-                                ),
-                            )
-                            failed_from_processing = (
-                                processing_cursor.rowcount or 0
-                            ) > 0
-                            if not failed_from_processing:
-                                # Admin-style finalize: optionally allow failing queued jobs when enforcement is disabled
-                                # Scope via allowlist of domains (default: chatbooks) to avoid global behavior in tests
-                                try:
-                                    allow = {
-                                        d.strip().lower()
-                                        for d in os.getenv(
-                                            "JOBS_ADMIN_COMPLETE_QUEUED_ALLOW_DOMAINS",
-                                            "chatbooks,embeddings",
-                                        ).split(",")
-                                        if d.strip()
-                                    }
-                                    row_dom = conn.execute("SELECT domain FROM jobs WHERE id = ?", (job_id,)).fetchone()
-                                    dom_val = str(row_dom[0]).lower() if row_dom and row_dom[0] else ""
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    allow = {"chatbooks", "embeddings"}
-                                    dom_val = ""
-                                if dom_val in allow:
-                                    cur2 = conn.execute(
-                                        (
-                                            "UPDATE jobs SET status = 'failed', last_error = ?, error_message = ?, error_code = ?, error_class = ?, error_stack = ?, completion_token = COALESCE(completion_token, ?), "
-                                            "completed_at = DATETIME('now'), leased_until = NULL, worker_id = NULL, lease_id = NULL WHERE id = ? AND status = 'queued' AND (completion_token IS NULL OR completion_token = ?)"
-                                        ),
-                                        (
-                                            (error_code or error),
-                                            error,
-                                            error_code,
-                                            error_class,
-                                            (json.dumps(error_stack) if error_stack is not None else None),
-                                            completion_token,
-                                            job_id,
-                                            completion_token,
-                                        ),
-                                    )
-                                    failed_from_queued = (cur2.rowcount or 0) > 0
-                        ok = failed_from_processing or failed_from_queued
-                        if not ok and completion_token:
-                            replay = conn.execute(
-                                "SELECT status, completion_token FROM jobs WHERE id=?",
-                                (int(job_id),),
-                            ).fetchone()
-                            if (
-                                replay
-                                and str(replay[0]) == "failed"
-                                and str(replay[1] or "") == str(completion_token)
-                            ):
-                                return True
-                        try:
-                            if ok and rowl:
-                                d = dict(rowl)
-                                post_commit_side_effects.append(
-                                    (increment_failures, (d,), {"reason": "terminal"})
-                                )
-                                try:
-                                    if error_code:
-                                        from .metrics import increment_failures_by_code
-
-                                        post_commit_side_effects.append(
-                                            (
-                                                increment_failures_by_code,
-                                                (d, error_code),
-                                                {},
-                                            )
-                                        )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                # Append terminal failure to timeline (no backoff)
-                                try:
-                                    row_t2 = conn.execute(
-                                        "SELECT failure_timeline FROM jobs WHERE id = ?", (job_id,)
-                                    ).fetchone()
-                                    timeline_json2 = row_t2[0] if row_t2 else None
-                                    try:
-                                        tl2 = json.loads(timeline_json2) if timeline_json2 else []
-                                    except _JOB_NONCRITICAL_EXCEPTIONS:
-                                        tl2 = []
-                                    tl2.append(
-                                        {
-                                            "ts": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-                                            "error_code": (error_code or error),
-                                            "retry_backoff": 0,
-                                        }
-                                    )
-                                    tl2 = tl2[-10:]
-                                    conn.execute(
-                                        "UPDATE jobs SET failure_timeline = ? WHERE id = ?",
-                                        (json.dumps(tl2), int(job_id)),
-                                    )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                try:
-                                    post_commit_side_effects.append(
-                                        (
-                                            _record_job_span,
-                                            ("job.fail", d),
-                                            {
-                                                "attrs": {
-                                                    "retryable": False,
-                                                    "error_code": error_code,
-                                                }
-                                            },
-                                        )
-                                    )
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                                post_commit_side_effects.append(
-                                    (
-                                        self._update_gauges,
-                                        (),
-                                        {
-                                            "domain": d.get("domain"),
-                                            "queue": d.get("queue"),
-                                            "job_type": d.get("job_type"),
-                                        },
-                                    )
-                                )
-                                try:
-                                    if d.get("uuid"):
-                                        post_commit_cancel_uuid = d.get("uuid")
-                                        post_commit_cancel_reason = "dependency_failed"
-                                except _JOB_NONCRITICAL_EXCEPTIONS:
-                                    pass
-                        except _JOB_NONCRITICAL_EXCEPTIONS:
-                            pass
-                        if (
-                            ok
-                            and rowl
-                            and JobManager._is_truthy(
-                                os.getenv("JOBS_COUNTERS_ENABLED", "")
-                            )
-                        ):
-                            d_counter = dict(rowl)
-                            if failed_from_queued:
-                                is_scheduled = (
-                                    d_counter.get("available_at") is not None
-                                )
-                                counter_cursor = conn.execute(
-                                    (
-                                        "UPDATE job_counters SET "
-                                        "ready_count = CASE WHEN ready_count > ? THEN ready_count - ? ELSE 0 END, "
-                                        "scheduled_count = CASE WHEN scheduled_count > ? THEN scheduled_count - ? ELSE 0 END, "
-                                        "updated_at = DATETIME('now') "
-                                        "WHERE domain=? AND queue=? AND job_type=?"
-                                    ),
-                                    (
-                                        int(not is_scheduled),
-                                        int(not is_scheduled),
-                                        int(is_scheduled),
-                                        int(is_scheduled),
-                                        d_counter.get("domain"),
-                                        d_counter.get("queue"),
-                                        d_counter.get("job_type"),
-                                    ),
-                                )
-                            else:
-                                counter_cursor = conn.execute(
-                                    "UPDATE job_counters SET processing_count = CASE WHEN processing_count>0 THEN processing_count-1 ELSE 0 END, updated_at = DATETIME('now') WHERE domain=? AND queue=? AND job_type=?",
-                                    (
-                                        d_counter.get("domain"),
-                                        d_counter.get("queue"),
-                                        d_counter.get("job_type"),
-                                    ),
-                                )
-                            if (counter_cursor.rowcount or 0) == 0:
-                                _reconcile_lifecycle_counter_row(
-                                    conn,
-                                    backend=self.backend,
-                                    domain=d_counter.get("domain"),
-                                    queue=d_counter.get("queue"),
-                                    job_type=d_counter.get("job_type"),
-                                )
-                        if ok and rowl:
-                            d_event = dict(rowl)
-                            event_job = {
-                                "id": int(job_id),
-                                "domain": d_event.get("domain"),
-                                "queue": d_event.get("queue"),
-                                "job_type": d_event.get("job_type"),
-                                "owner_user_id": d_event.get("owner_user_id"),
-                                "request_id": d_event.get("request_id"),
-                                "trace_id": d_event.get("trace_id"),
-                            }
-                            attrs = {"error_code": (error_code or error)}
-                            if outbox_enabled:
-                                _insert_lifecycle_event(
-                                    conn,
-                                    backend=self.backend,
-                                    event_type="job.failed",
-                                    job=event_job,
-                                    attrs=attrs,
-                                )
-                            _queue_lifecycle_event_observer(
-                                post_commit_side_effects,
-                                event_type="job.failed",
-                                job=event_job,
-                                attrs=attrs,
-                            )
-                        if _is_test_mode():
-                            try:
-                                _total = conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
-                                _dist = {
-                                    str(r[0]): int(r[1])
-                                    for r in conn.execute(
-                                        "SELECT status, COUNT(*) FROM jobs GROUP BY status"
-                                    ).fetchall()
-                                }
-                                logger.info(
-                                    f"[JM TEST MUT] fail_job terminal ok={bool(ok)} total={int(_total)} dist={_dist}"
-                                )
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                pass
-                        result = bool(ok)
-            _run_post_commit_side_effects(post_commit_side_effects)
-            post_commit_side_effects.clear()
-            if post_commit_cancel_uuid:
+        def log_enter(backend: str) -> None:
+            """Retain entry diagnostics in the environment-owning facade."""
+            if initial_test_mode:
                 with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                    self._cancel_dependent_jobs(
-                        post_commit_cancel_uuid,
-                        reason=post_commit_cancel_reason or "dependency_failed",
+                    logger.info(
+                        f"[JM TEST MUT] fail_job enter job_id={job_id} retryable={retryable} backoff={backoff_seconds} enforce={enforce} backend={backend}"
                     )
-            return bool(result)
-        finally:
-            _close_connection_nonfatal(conn, operation="job failure")
+
+        def retry_parameters(current: int, backend: str) -> tuple[int, int]:
+            """Resolve existing jitter, outbox spacing and quarantine policy."""
+            import secrets
+
+            exp_backoff = max(1, int(backoff_seconds * (2**current)))
+            test_mode = _is_test_mode()
+            jitter = 0 if exp_backoff <= 2 or test_mode else secrets.randbelow(max(1, exp_backoff // 4) + 1)
+            delay = exp_backoff + jitter
+            if backend != "postgres":
+                thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
+            if test_mode:
+                _outbox = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
+                if not _outbox and exp_backoff <= 1:
+                    delay = 0
+                try:
+                    if _outbox and int(backoff_seconds) <= 0 and delay < 10:
+                        delay = 10
+                except _JOB_NONCRITICAL_EXCEPTIONS:
+                    if _outbox and delay < 3:
+                        delay = 3
+            if backend == "postgres":
+                thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
+            if not quarantine:
+                thresh = 10**9
+            return delay, thresh
+
+        def snapshot_retry(conn: Any, rowl: Any) -> None:
+            """Retain the SQLite acquisition diagnostic snapshot timing."""
+            try:
+                if _is_test_mode() and rowl:
+                    rnow = conn.execute("SELECT * FROM jobs WHERE id = ?", (int(job_id),)).fetchone()
+                    if rnow:
+                        JobManager._LAST_ACQUIRED_TEST[(rowl[2], rowl[3])] = dict(rnow)
+            except _JOB_NONCRITICAL_EXCEPTIONS:
+                pass
+
+        def log_retry(executor: Any, backend: str, delay: int) -> None:
+            """Observe retry diagnostics without owning the transaction."""
+            if backend == "postgres":
+                if _is_test_mode():
+                    try:
+                        # Snapshot after scheduling retry (PG)
+                        executor.execute("SELECT failure_timeline FROM jobs WHERE id = %s", (int(job_id),))
+                        _tlrow = executor.fetchone()
+                        _tl_len = 0
+                        try:
+                            _tl_len = (
+                                len(json.loads(_tlrow.get("failure_timeline"))) if _tlrow and _tlrow.get("failure_timeline") else 0
+                            )
+                        except _JOB_NONCRITICAL_EXCEPTIONS:
+                            _tl_len = 0
+                        executor.execute("SELECT COUNT(*) AS c FROM jobs")
+                        _total = (executor.fetchone() or {}).get("c", 0)
+                        executor.execute("SELECT status, COUNT(*) AS c FROM jobs GROUP BY status")
+                        _rows = executor.fetchall() or []
+                        _dist = {str(x.get("status")): int(x.get("c") or 0) for x in _rows}
+                        logger.info(
+                            f"[JM TEST MUT] fail_job retryable scheduled delay={int(delay)} tl_len={_tl_len} total={_total} dist={_dist}"
+                        )
+                    except _JOB_NONCRITICAL_EXCEPTIONS:
+                        pass
+            else:
+                if _is_test_mode():
+                    try:
+                        _row = executor.execute("SELECT failure_timeline FROM jobs WHERE id = ?", (int(job_id),)).fetchone()
+                        _tl_len = 0
+                        try:
+                            _tl_len = len(json.loads(_row[0])) if (_row and _row[0]) else 0
+                        except _JOB_NONCRITICAL_EXCEPTIONS:
+                            _tl_len = 0
+                        _total = executor.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                        _dist = {
+                            str(r[0]): int(r[1])
+                            for r in executor.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall()
+                        }
+                        logger.info(
+                            f"[JM TEST MUT] fail_job retryable scheduled delay={int(delay)} tl_len={_tl_len} total={int(_total)} dist={_dist}"
+                        )
+                    except _JOB_NONCRITICAL_EXCEPTIONS:
+                        pass
+
+        def log_terminal(executor: Any, backend: str, ok: bool) -> None:
+            """Observe terminal diagnostics before the owning commit."""
+            if backend == "postgres":
+                if _is_test_mode():
+                    try:
+                        executor.execute("SELECT COUNT(*) AS c FROM jobs")
+                        _total = (executor.fetchone() or {}).get("c", 0)
+                        executor.execute("SELECT status, COUNT(*) AS c FROM jobs GROUP BY status")
+                        _rows = executor.fetchall() or []
+                        _dist = {str(x.get("status")): int(x.get("c") or 0) for x in _rows}
+                        logger.info(f"[JM TEST MUT] fail_job terminal ok={bool(ok)} total={_total} dist={_dist}")
+                    except _JOB_NONCRITICAL_EXCEPTIONS:
+                        pass
+            else:
+                if _is_test_mode():
+                    try:
+                        _total = executor.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+                        _dist = {
+                            str(r[0]): int(r[1])
+                            for r in executor.execute("SELECT status, COUNT(*) FROM jobs GROUP BY status").fetchall()
+                        }
+                        logger.info(f"[JM TEST MUT] fail_job terminal ok={bool(ok)} total={int(_total)} dist={_dist}")
+                    except _JOB_NONCRITICAL_EXCEPTIONS:
+                        pass
+
+        operation = FailureOperation(
+            job_id=job_id,
+            error=error,
+            retryable=retryable,
+            backoff_seconds=backoff_seconds,
+            worker_id=worker_id,
+            lease_id=lease_id,
+            enforce=enforce,
+            error_code=error_code,
+            error_class=error_class,
+            error_stack=error_stack,
+            completion_token=completion_token,
+            quarantine=quarantine,
+            expected_uuid=expected_uuid,
+            streak_code=str(error_code or error),
+            outbox_enabled=JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")),
+            hooks=FailureHooks(
+                initialize_diagnostics=initialize_diagnostics,
+                log_enter=log_enter,
+                retry_parameters=retry_parameters,
+                snapshot_retry=snapshot_retry,
+                log_retry=log_retry,
+                log_terminal=log_terminal,
+            ),
+        )
+        return execute_failure(self, operation)
 
     def cancel_job(
         self,
@@ -9677,7 +9047,11 @@ class JobManager:
             if self.backend == "postgres":
                 identity_sql, identity_params = _identity_guard("%s")
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(conn, where=identity_sql, params=tuple(identity_params)) as (
+                        cur,
+                        mutation,
+                    ):
+                        identity_sql, identity_params = mutation.where, mutation.params
                         if _test_mode:
                             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                                 logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=pg")
@@ -9733,8 +9107,10 @@ class JobManager:
                                     post_commit_cancel_uuid = str(row["uuid"])
             else:
                 identity_sql, identity_params = _identity_guard("?")
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where=identity_sql, params=tuple(identity_params)
+                ) as mutation:
+                    identity_sql, identity_params = mutation.where, mutation.params
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=sqlite")
@@ -9840,9 +9216,8 @@ class JobManager:
                         lease_id=lease_id,
                         reason=reason,
                     ),
-                    counters_enabled=JobManager._is_truthy(
-                        os.getenv("JOBS_COUNTERS_ENABLED", "")
-                    ),
+                    clock=self._clock.now_utc,
+                    counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                 )
                 if result.outcome is OperationOutcome.APPLIED and result.row is not None:
                     released_job = {
@@ -9861,9 +9236,8 @@ class JobManager:
                         lease_id=lease_id,
                         reason=reason,
                     ),
-                    counters_enabled=JobManager._is_truthy(
-                        os.getenv("JOBS_COUNTERS_ENABLED", "")
-                    ),
+                    clock=self._clock.now_utc,
+                    counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                 )
                 if result.outcome is OperationOutcome.APPLIED and result.row is not None:
                     released_job = {
@@ -10197,7 +9571,7 @@ class JobManager:
         if archive_candidate_ids:
             archive_candidate_where_clause = " WHERE id = ANY(%s)"
             archive_candidate_params: tuple[Any, ...] = (archive_candidate_ids,)
-            archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
+            archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS))
             archive_select_projection = ", ".join(
                 (
                     "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
@@ -10205,7 +9579,7 @@ class JobManager:
                     if column in {"leased_until", "lease_id", "worker_id"}
                     else column
                 )
-                for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS)
+                for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS, *RESOURCE_METADATA_FIELDS)
             )
             exact_collisions = self._idempotent_slides_archive_collisions(
                 None,
@@ -10390,6 +9764,37 @@ class JobManager:
         return deleted
 
     # Maintenance
+    @contextlib.contextmanager
+    def _prune_transaction(self, conn: Any, *, dry_run: bool, slides_archive_fence: bool) -> Iterator[None]:
+        """Keep the backend prune fence until unsafe-archive poison commits."""
+        with conn:
+            if self.backend == "postgres" and slides_archive_fence:
+                with self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "SELECT pg_advisory_xact_lock(%s)",
+                        (self._pg_advisory_key(*_SLIDES_GENERATION_CORRELATION_LOCK_PARTS),),
+                    )
+            if not dry_run:
+                if self.backend != "postgres":
+                    conn.execute("BEGIN IMMEDIATE")
+                conn.execute("SAVEPOINT jobs_prune")
+            try:
+                yield
+            except SlidesGenerationJobsUnavailableError:
+                if not dry_run:
+                    # Revert prune/guard writes, retaining the earlier backend fence.
+                    conn.execute("ROLLBACK TO SAVEPOINT jobs_prune")
+                    conn.execute("RELEASE SAVEPOINT jobs_prune")
+                    self._record_slides_generation_diagnostic(
+                        conn,
+                        code="ambiguous_generation_legacy_row",
+                        count=1,
+                    )
+                raise
+            else:
+                if not dry_run:
+                    conn.execute("RELEASE SAVEPOINT jobs_prune")
+
     def prune_jobs(
         self,
         *,
@@ -10420,29 +9825,16 @@ class JobManager:
             and queue in (None, _SLIDES_GENERATION_QUEUE)
             and job_type in (None, _SLIDES_GENERATION_JOB_TYPE)
         )
-        archive_projection = ", ".join(("id", *SLIDES_ARCHIVE_EXACT_FIELDS))
-        archive_select_projection = ", ".join(
-            (
-                "CASE WHEN status IN ('completed','failed','cancelled','quarantined') "
-                f"THEN NULL ELSE {column} END AS {column}"
-                if column in {"leased_until", "lease_id", "worker_id"}
-                else column
-            )
-            for column in ("id", *SLIDES_ARCHIVE_EXACT_FIELDS)
-        )
+        archive_projection, archive_select_projection = _job_archive_projections()
         conn = self._connect()
-        slides_diagnostic_persisted = False
         _test_mode = _is_test_mode()
         deleted = 0
         try:
             if self.backend == "postgres":
-                with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
-                        if slides_archive_fence:
-                            cur.execute(
-                                "SELECT pg_advisory_xact_lock(%s)",
-                                (self._pg_advisory_key(*_SLIDES_GENERATION_CORRELATION_LOCK_PARTS),),
-                            )
+                with self._prune_transaction(  # noqa: SIM117
+                    conn, dry_run=dry_run, slides_archive_fence=slides_archive_fence
+                ):
+                    with self._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
                         where_parts: list[str] = []
                         params: list[Any] = []
                         placeholders = ",".join(["%s"] * len(statuses))
@@ -10502,6 +9894,16 @@ class JobManager:
                                 )
                             return count
 
+                        mutation = lifecycle.enter_context(
+                            self._resource_mutation(
+                                cur,
+                                postgres=True,
+                                where=" AND ".join(where_parts),
+                                params=tuple(params),
+                                pruning=True,
+                            )
+                        )
+                        where_clause, params = " WHERE " + mutation.where, list(mutation.params)
                         # Freeze the exact prune population under row locks before
                         # any archive, counter, or delete mutation. Process that
                         # immutable ID set in bounded batches using the current
@@ -10526,9 +9928,10 @@ class JobManager:
                                 test_mode=_test_mode,
                             )
             else:
-                with conn:
-                    if not dry_run:
-                        conn.execute("BEGIN IMMEDIATE")
+                with (
+                    self._prune_transaction(conn, dry_run=dry_run, slides_archive_fence=slides_archive_fence),
+                    contextlib.ExitStack() as lifecycle,
+                ):
                     if _test_mode:
                         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                             logger.info(
@@ -10590,6 +9993,17 @@ class JobManager:
                             )
                     except _JOB_NONCRITICAL_EXCEPTIONS:
                         pass
+
+                    if not dry_run:
+                        mutation = lifecycle.enter_context(
+                            self._resource_mutation(
+                                conn,
+                                where=" AND ".join(where_parts),
+                                params=tuple(params),
+                                pruning=True,
+                            )
+                        )
+                        where_clause, params = " WHERE " + mutation.where, list(mutation.params)
                     # Compute match count up front for accurate reporting
                     cur_cnt = conn.execute(f"SELECT COUNT(*) FROM jobs{where_clause}", tuple(params))  # nosec B608
                     row = cur_cnt.fetchone()
@@ -10787,8 +10201,7 @@ class JobManager:
                                             row_queue,
                                             row_type,
                                         ):
-                                                conn.execute(
-                                                    """
+                                            conn.execute("""
                                                     UPDATE slides_standalone_reconciliation
                                                     SET diagnostic_code=CASE
                                                           WHEN diagnostic_code='duplicate_archive_uuid'
@@ -10803,9 +10216,8 @@ class JobManager:
                                                           THEN diagnostic_at
                                                           ELSE DATETIME('now') END
                                                     WHERE singleton_id=1
-                                                    """
-                                                )
-                                                continue
+                                                    """)
+                                            continue
                                         p64 = None
                                         r64 = None
                                         if isinstance(pl, str) and pl:
@@ -10941,16 +10353,6 @@ class JobManager:
                 )
             return int(deleted)
 
-        except SlidesGenerationJobsUnavailableError:
-            if not slides_diagnostic_persisted:
-                with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                    with contextlib.closing(self._connect()) as diagnostic_conn:
-                        self._record_slides_generation_diagnostic(
-                            diagnostic_conn,
-                            code="ambiguous_generation_legacy_row",
-                            count=1,
-                        )
-            raise
         finally:
             conn.close()
 
@@ -11097,43 +10499,22 @@ class JobManager:
         affected_runtime = 0
         metric_facts: list[tuple[str, tuple[str, str, str], int]] = []
 
-        def _row_value(row: Any, key: str) -> Any:
-            if isinstance(row, dict):
-                return row.get(key)
-            return row[key]
-
-        def _record_group_counts(
-            rows: list[Any],
-            *,
-            reason: str,
-            counter_deltas: dict[tuple[str, str, str], list[int]],
-            queued: bool,
-        ) -> int:
-            affected = 0
-            for row in rows:
-                key = (
-                    str(_row_value(row, "domain")),
-                    str(_row_value(row, "queue")),
-                    str(_row_value(row, "job_type")),
-                )
-                total = int(_row_value(row, "total_count") or 0)
-                ready = int(_row_value(row, "ready_count") or 0)
-                scheduled = int(_row_value(row, "scheduled_count") or 0)
-                affected += total
-                deltas = counter_deltas.setdefault(key, [0, 0, 0])
-                if queued:
-                    deltas[0] += ready
-                    deltas[1] += scheduled
-                else:
-                    deltas[2] += total
-                metric_facts.append((reason, key, total))
-            return affected
-
+        resource_where_sql, resource_params = _ttl_resource_filter(
+            postgres=self.backend == "postgres", reference_time=ref_dt,
+            age_seconds=age_seconds, runtime_seconds=runtime_seconds,
+            domain=domain, queue=queue, job_type=job_type,
+        )
         conn = self._connect()
         try:
             counter_deltas: dict[tuple[str, str, str], list[int]] = {}
             if self.backend == "postgres":
-                with conn, self._pg_cursor(conn) as cur:
+                with (
+                    conn,
+                    self._resource_pg_cursor(conn, where=resource_where_sql, params=tuple(resource_params)) as (
+                        cur,
+                        mutation,
+                    ),
+                ):
                     if age_seconds is not None:
                         where = [
                             "status='queued'",
@@ -11148,6 +10529,8 @@ class JobManager:
                             if value is not None:
                                 where.append(f"{column} = %s")
                                 where_params.append(value)
+                        where.append(mutation.where)
+                        where_params.extend(mutation.params)
                         terminal_set = (
                             "status='cancelled', cancelled_at=%s, "
                             "cancellation_reason='ttl_age'"
@@ -11172,11 +10555,12 @@ class JobManager:
                             ),
                             (ref_dt, *where_params),
                         )
-                        affected_age = _record_group_counts(
+                        affected_age = _record_ttl_group_counts(
                             list(cur.fetchall() or []),
                             reason="ttl_age",
                             counter_deltas=counter_deltas,
                             queued=True,
+                            metric_facts=metric_facts,
                         )
 
                     if runtime_seconds is not None:
@@ -11194,6 +10578,8 @@ class JobManager:
                             if value is not None:
                                 where.append(f"{column} = %s")
                                 where_params.append(value)
+                        where.append(mutation.where)
+                        where_params.extend(mutation.params)
                         terminal_set = (
                             "status='cancelled', cancelled_at=%s, "
                             "cancellation_reason='ttl_runtime'"
@@ -11218,11 +10604,12 @@ class JobManager:
                             ),
                             (ref_dt, *where_params),
                         )
-                        affected_runtime = _record_group_counts(
+                        affected_runtime = _record_ttl_group_counts(
                             list(cur.fetchall() or []),
                             reason="ttl_runtime",
                             counter_deltas=counter_deltas,
                             queued=False,
+                            metric_facts=metric_facts,
                         )
 
                     if counters_enabled:
@@ -11241,8 +10628,9 @@ class JobManager:
                             )
             else:
                 now_str = ref_dt.strftime("%Y-%m-%d %H:%M:%S.%f")
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where=resource_where_sql, params=tuple(resource_params)
+                ) as mutation:
                     if age_seconds is not None:
                         where = [
                             "status='queued'",
@@ -11257,6 +10645,8 @@ class JobManager:
                             if value is not None:
                                 where.append(f"{column} = ?")
                                 where_params.append(value)
+                        where.append(mutation.where)
+                        where_params.extend(mutation.params)
                         terminal_set = (
                             "status='cancelled', cancelled_at=?, "
                             "cancellation_reason='ttl_age'"
@@ -11280,11 +10670,12 @@ class JobManager:
                             ).fetchall()
                             or []
                         )
-                        affected_age = _record_group_counts(
+                        affected_age = _record_ttl_group_counts(
                             age_rows,
                             reason="ttl_age",
                             counter_deltas=counter_deltas,
                             queued=True,
+                            metric_facts=metric_facts,
                         )
                         cursor = conn.execute(
                             (
@@ -11313,6 +10704,8 @@ class JobManager:
                             if value is not None:
                                 where.append(f"{column} = ?")
                                 where_params.append(value)
+                        where.append(mutation.where)
+                        where_params.extend(mutation.params)
                         terminal_set = (
                             "status='cancelled', cancelled_at=?, "
                             "cancellation_reason='ttl_runtime'"
@@ -11336,11 +10729,12 @@ class JobManager:
                             ).fetchall()
                             or []
                         )
-                        affected_runtime = _record_group_counts(
+                        affected_runtime = _record_ttl_group_counts(
                             runtime_rows,
                             reason="ttl_runtime",
                             counter_deltas=counter_deltas,
                             queued=False,
+                            metric_facts=metric_facts,
                         )
                         cursor = conn.execute(
                             (
@@ -11469,22 +10863,11 @@ class JobManager:
         conn = self._connect()
         try:
             if self.backend == "postgres":
-                with self._pg_cursor(conn) as cur:
-                    where = ["1=1"]
-                    params: list[Any] = []
-                    if domain:
-                        where.append("domain=%s")
-                        params.append(domain)
-                    if queue:
-                        where.append("queue=%s")
-                        params.append(queue)
-                    if job_type:
-                        where.append("job_type=%s")
-                        params.append(job_type)
-                    if status:
-                        where.append("status=%s")
-                        params.append(status)
-                    wh = " AND ".join(where)
+                with self._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
+                    wh, params = _reschedule_filter(
+                        marker="%s", domain=domain, queue=queue, job_type=job_type,
+                        status=status, set_now=set_now,
+                    )
                     if dry_run:
                         dry_run_where = f"{wh} AND available_at IS NOT NULL" if set_now else wh
                         cur.execute(
@@ -11493,6 +10876,16 @@ class JobManager:
                         )
                         count_row = cur.fetchone()
                         return int(count_row.get("c") if isinstance(count_row, dict) else 0)
+                    mutation = lifecycle.enter_context(
+                        self._resource_mutation(
+                            cur,
+                            postgres=True,
+                            where=wh,
+                            params=tuple(params),
+                            read_only=True,
+                        )
+                    )
+                    wh, params = mutation.where, list(mutation.params)
                     if set_now:
                         with conn:
                             cur.execute(
@@ -11605,21 +10998,10 @@ class JobManager:
                                         )
                             return count
             else:
-                where = ["1=1"]
-                params: list[Any] = []
-                if domain:
-                    where.append("domain=?")
-                    params.append(domain)
-                if queue:
-                    where.append("queue=?")
-                    params.append(queue)
-                if job_type:
-                    where.append("job_type=?")
-                    params.append(job_type)
-                if status:
-                    where.append("status=?")
-                    params.append(status)
-                wh = " AND ".join(where)
+                wh, params = _reschedule_filter(
+                    marker="?", domain=domain, queue=queue, job_type=job_type,
+                    status=status, set_now=set_now,
+                )
                 if dry_run:
                     dry_run_where = f"{wh} AND available_at IS NOT NULL" if set_now else wh
                     row = conn.execute(
@@ -11627,9 +11009,18 @@ class JobManager:
                         tuple(params),
                     ).fetchone()
                     return int(row[0]) if row else 0
-                with conn:
+                with conn, contextlib.ExitStack() as lifecycle:
                     if set_now:
                         conn.execute("BEGIN IMMEDIATE")
+                        mutation = lifecycle.enter_context(
+                            self._resource_mutation(
+                                conn,
+                                where=wh,
+                                params=tuple(params),
+                                read_only=True,
+                            )
+                        )
+                        wh, params = mutation.where, list(mutation.params)
                         counter_groups = []
                         if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
                             counter_groups = list(
@@ -11678,6 +11069,15 @@ class JobManager:
                         if delta_seconds is None:
                             raise ValueError("delta_seconds required when set_now=false")  # noqa: TRY003
                         conn.execute("BEGIN IMMEDIATE")
+                        mutation = lifecycle.enter_context(
+                            self._resource_mutation(
+                                conn,
+                                where=wh,
+                                params=tuple(params),
+                                read_only=True,
+                            )
+                        )
+                        wh, params = mutation.where, list(mutation.params)
                         counter_groups = []
                         if JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")):
                             counter_groups = list(
@@ -11740,6 +11140,9 @@ class JobManager:
         By default targets failed jobs with retries remaining. If only_failed is False,
         also adjusts queued scheduled jobs by clearing available_at.
         """
+        eligibility = "(status='failed' AND retry_count < max_retries)"
+        if not only_failed:
+            eligibility += " OR (status='queued' AND available_at IS NOT NULL)"
         conn = self._connect()
         try:
             if self.backend == "postgres":
@@ -11785,7 +11188,10 @@ class JobManager:
                     os.getenv("JOBS_COUNTERS_ENABLED", "")
                 )
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where=f"({wh}) AND ({eligibility})", params=tuple(params), reactivating=True
+                    ) as (cur, mutation):
+                        wh, params = mutation.where, list(mutation.params)
                         cur.execute(
                             (
                                 "WITH changed AS (UPDATE jobs SET status='queued', "
@@ -11905,11 +11311,11 @@ class JobManager:
                     return int(row[0]) if row else 0
 
                 count = 0
-                counters_enabled = JobManager._is_truthy(
-                    os.getenv("JOBS_COUNTERS_ENABLED", "")
-                )
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                counters_enabled = JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", ""))
+                with self._resource_sqlite_transaction(
+                    conn, where=f"({wh}) AND ({eligibility})", params=tuple(params), reactivating=True
+                ) as mutation:
+                    wh, params = mutation.where, list(mutation.params)
                     failed_groups = []
                     if counters_enabled:
                         failed_groups = list(
@@ -12205,141 +11611,90 @@ class JobManager:
         limit: int = 1000,
         dry_run: bool = False,
     ) -> int:
-        """Re-encrypt encrypted JSON envelopes from old key to new key for selected rows.
+        """Re-encrypt live envelopes without changing admitted resource contracts.
 
-        Fields may include 'payload' and/or 'result'. Returns affected row count.
+        The explicit old/new keys support rotation independently of configured
+        read keys. Archive rewrites use replace_archived_job_payload instead.
         """
-        fields = [f for f in (fields or []) if f in {"payload", "result"}]
+        fields = [field for field in (fields or []) if field in {"payload", "result"}]
         if not fields:
-            raise ValueError("fields must include at least one of: payload, result")  # noqa: TRY003
+            raise ValueError("fields must include at least one of: payload, result")
         if not old_key_b64 or not new_key_b64:
-            raise ValueError("old_key_b64 and new_key_b64 are required")  # noqa: TRY003
-        affected = 0
+            raise ValueError("old_key_b64 and new_key_b64 are required")
+        postgres = self.backend == "postgres"
+        p = "%s" if postgres else "?"
+        where = ["1=1"]
+        params: list[Any] = []
+        for column, value in (("domain", domain), ("queue", queue), ("job_type", job_type)):
+            if value:
+                where.append(f"{column}={p}")
+                params.append(value)
+        where_sql = " AND ".join(where)
+
+        def rotate_rows(executor: Any, rows: list[dict[str, Any]], *, count_only: bool = False) -> int:
+            """Rotate already-locked rows, validating resource plaintext before writes."""
+            affected = 0
+            for row in rows:
+                updates = {}
+                for field in fields:
+                    value = self._parse_json_value(row.get(field))
+                    if not isinstance(value, dict):
+                        continue
+                    envelope = value if value.get("_enc") == "aesgcm:v1" else value.get("_encrypted")
+                    if not isinstance(envelope, dict):
+                        continue
+                    if count_only:
+                        affected += 1
+                        break
+                    plaintext = decrypt_json_blob_with_key(envelope, old_key_b64)
+                    if plaintext is None:
+                        continue
+                    replacement = encrypt_json_blob_with_key(plaintext, new_key_b64)
+                    if not replacement:
+                        continue
+                    if field == "payload":
+                        decoded = {**row, "payload": plaintext}
+                        self._validate_resource_payload_replacement(
+                            decoded,
+                            decrypt_json_blob_with_key(replacement, new_key_b64),
+                        )
+                    updates[field] = json.dumps({"_encrypted": replacement})
+                if not updates:
+                    continue
+                assignments = ",".join(f"{field}={p}" + ("::jsonb" if postgres else "") for field in updates)
+                executor.execute(
+                    f"UPDATE jobs SET {assignments} WHERE id={p}",  # nosec B608 - closed field names/backend syntax; values bound.
+                    (*updates.values(), row["id"]),
+                )
+                affected += 1
+            return affected
+
         conn = self._connect()
         try:
-            if self.backend == "postgres":
-                with self._pg_cursor(conn) as cur:
-                    where = ["1=1"]
-                    params: list[Any] = []
-                    if domain:
-                        where.append("domain=%s")
-                        params.append(domain)
-                    if queue:
-                        where.append("queue=%s")
-                        params.append(queue)
-                    if job_type:
-                        where.append("job_type=%s")
-                        params.append(job_type)
-                    cur.execute(
-                        f"SELECT id, payload, result, domain, queue, job_type FROM jobs WHERE {' AND '.join(where)} ORDER BY id ASC LIMIT %s",  # nosec B608
-                        tuple(params + [int(limit)]),
-                    )
-                    rows = cur.fetchall() or []
+            if postgres:
+                with conn, self._pg_cursor(conn) as cur:
                     if dry_run:
-                        # Count candidates that would be re-encrypted
-                        for r in rows:
-                            for fld in fields:
-                                val = r.get(fld)
-                                env = val if isinstance(val, dict) else None
-                                if env and (env.get("_enc") == "aesgcm:v1" or isinstance(env.get("_encrypted"), dict)):
-                                    affected += 1
-                                    break
-                        return affected
-                    with conn:
-                        for r in rows:
-                            upd = {}
-                            for fld in fields:
-                                val = r.get(fld)
-                                obj = None
-                                if isinstance(val, dict) and val.get("_enc") == "aesgcm:v1":
-                                    obj = decrypt_json_blob_with_key(val, old_key_b64)
-                                elif isinstance(val, dict) and isinstance(val.get("_encrypted"), dict):
-                                    obj = decrypt_json_blob_with_key(val.get("_encrypted"), old_key_b64)
-                                if obj is not None:
-                                    env = encrypt_json_blob_with_key(obj, new_key_b64)
-                                    if env:
-                                        upd[fld] = {"_encrypted": env}
-                            if upd:
-                                sets = []
-                                params_upd: list[Any] = []
-                                for k, v in upd.items():
-                                    sets.append(f"{k}=%s::jsonb")
-                                    params_upd.append(json.dumps(v))
-                                params_upd.append(int(r["id"]))
-                                cur.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = %s", tuple(params_upd))  # nosec B608
-                                affected += 1
-                return affected
-            else:
-                where = ["1=1"]
-                params2: list[Any] = []
-                if domain:
-                    where.append("domain=?")
-                    params2.append(domain)
-                if queue:
-                    where.append("queue=?")
-                    params2.append(queue)
-                if job_type:
-                    where.append("job_type=?")
-                    params2.append(job_type)
-                sql = f"SELECT id, payload, result, domain, queue, job_type FROM jobs WHERE {' AND '.join(where)} ORDER BY id ASC LIMIT ?"  # nosec B608
-                rows = conn.execute(sql, tuple(params2 + [int(limit)])).fetchall() or []
-                if dry_run:
-                    for _rid, pl, rs, *_ in rows:
-                        for fld, val in (("payload", pl), ("result", rs)):
-                            if fld not in fields:
-                                continue
-                            try:
-                                if isinstance(val, str) and val:
-                                    obj = json.loads(val)
-                                elif isinstance(val, dict):
-                                    obj = val
-                                else:
-                                    obj = None
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                obj = None
-                            if isinstance(obj, dict) and (
-                                obj.get("_enc") == "aesgcm:v1" or isinstance(obj.get("_encrypted"), dict)
-                            ):
-                                affected += 1
-                                break
-                    return affected
-                with conn:
-                    for rid, pl, rs, *_ in rows:
-                        upd: dict[str, Any] = {}
-                        for fld, val in (("payload", pl), ("result", rs)):
-                            if fld not in fields:
-                                continue
-                            obj = None
-                            try:
-                                if isinstance(val, str) and val:
-                                    val_obj = json.loads(val)
-                                elif isinstance(val, dict):
-                                    val_obj = val
-                                else:
-                                    val_obj = None
-                            except _JOB_NONCRITICAL_EXCEPTIONS:
-                                val_obj = None
-                            if isinstance(val_obj, dict) and val_obj.get("_enc") == "aesgcm:v1":
-                                obj = decrypt_json_blob_with_key(val_obj, old_key_b64)
-                            elif isinstance(val_obj, dict) and isinstance(val_obj.get("_encrypted"), dict):
-                                obj = decrypt_json_blob_with_key(val_obj.get("_encrypted"), old_key_b64)
-                            if obj is not None:
-                                env = encrypt_json_blob_with_key(obj, new_key_b64)
-                                if env:
-                                    upd[fld] = json.dumps({"_encrypted": env})
-                        if upd:
-                            sets = []
-                            params_upd: list[Any] = []
-                            for k, v in upd.items():
-                                sets.append(f"{k} = ?")
-                                params_upd.append(v)
-                            params_upd.append(int(rid))
-                            conn.execute(f"UPDATE jobs SET {', '.join(sets)} WHERE id = ?", tuple(params_upd))  # nosec B608
-                            affected += 1
-                return affected
+                        cur.execute(
+                            f"SELECT * FROM jobs WHERE {where_sql} ORDER BY id LIMIT {p}",  # nosec B608 - internal predicate/placeholders; values bound.
+                            (*params, int(limit)),
+                        )
+                        return rotate_rows(cur, [dict(row) for row in cur.fetchall()], count_only=True)
+                    with self._resource_mutation(
+                        cur, postgres=True, where=where_sql, params=tuple(params), limit=int(limit), read_only=True
+                    ) as mutation:
+                        return rotate_rows(cur, list(mutation.rows.values()))
+            if dry_run:
+                rows = conn.execute(
+                    f"SELECT * FROM jobs WHERE {where_sql} ORDER BY id LIMIT {p}",  # nosec B608 - internal predicate/placeholders; values bound.
+                    (*params, int(limit)),
+                ).fetchall()
+                return rotate_rows(conn, [dict(row) for row in rows], count_only=True)
+            with self._resource_sqlite_transaction(
+                conn, where=where_sql, params=tuple(params), limit=int(limit), read_only=True
+            ) as mutation:
+                return rotate_rows(conn, list(mutation.rows.values()))
         finally:
-            with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
-                conn.close()
+            conn.close()
 
     def finalize_cancelled(
         self,
@@ -12371,17 +11726,23 @@ class JobManager:
         try:
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._resource_pg_cursor(
+                        conn, where="id=%s", params=(int(job_id),), expected_uuid=expected_uuid
+                    ) as (cur, mutation):
+                        if expected_uuid is not None and int(job_id) not in mutation.rows:
+                            return False
                         cur.execute(
                             "SELECT status, domain, queue, job_type, available_at, uuid, "
                             "owner_user_id, request_id, trace_id, worker_id, lease_id "
-                            "FROM jobs WHERE id = %s FOR UPDATE",
-                            (int(job_id),),
+                            f"FROM jobs WHERE {mutation.where} FOR UPDATE",  # nosec B608 - closed resource identity predicate; values bound.
+                            mutation.params,
                         )
                         row = cur.fetchone()
                         if not row:
                             return False
                         if str(row.get("uuid") or "") != expected_uuid:
+                            return False
+                        if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
                             return False
                         state = str(row.get("status") or "")
                         if state == "cancelled":
@@ -12492,8 +11853,11 @@ class JobManager:
                                 ),
                             )
             else:
-                with conn:
-                    conn.execute("BEGIN IMMEDIATE")
+                with self._resource_sqlite_transaction(
+                    conn, where="id=?", params=(int(job_id),), expected_uuid=expected_uuid
+                ) as mutation:
+                    if expected_uuid is not None and int(job_id) not in mutation.rows:
+                        return False
                     row = conn.execute(
                         "SELECT status, domain, queue, job_type, available_at, uuid, "
                         "owner_user_id, request_id, trace_id, worker_id, lease_id "
@@ -12503,6 +11867,8 @@ class JobManager:
                     if not row:
                         return False
                     if str(row["uuid"] or "") != expected_uuid:
+                        return False
+                    if not mutation.worker_allowed(int(job_id), worker_id, lease_id, expected_uuid):
                         return False
                     state = str(row["status"] or "")
                     if state == "cancelled":
@@ -12655,7 +12021,7 @@ class JobManager:
             }
             if self.backend == "postgres":
                 with conn:  # noqa: SIM117
-                    with self._pg_cursor(conn) as cur:
+                    with self._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
                         where_np = [
                             "status <> 'processing'",
                             "(lease_id IS NOT NULL OR worker_id IS NOT NULL OR leased_until IS NOT NULL)",
@@ -12684,7 +12050,18 @@ class JobManager:
                         cur.execute(f"SELECT COUNT(*) AS c FROM jobs WHERE {' AND '.join(where_pr)}", tuple(params_pr))  # nosec B608
                         _pr = cur.fetchone()
                         res["processing_expired"] = int(_pr.get("c") if isinstance(_pr, dict) else 0)
+
                         if fix:
+                            mutation = lifecycle.enter_context(
+                                self._resource_mutation(
+                                    cur,
+                                    postgres=True,
+                                    where=" AND ".join(where_np),
+                                    params=tuple(params_np),
+                                    read_only=True,
+                                )
+                            )
+                            where_np, params_np = [mutation.where], list(mutation.params)
                             # Clear leases for non-processing
                             cur.execute(
                                 f"UPDATE jobs SET lease_id = NULL, leased_until = NULL, worker_id = NULL WHERE {' AND '.join(where_np)}",  # nosec B608
@@ -12723,7 +12100,10 @@ class JobManager:
                 cur2 = conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {' AND '.join(where_pr)}", tuple(params_pr))  # nosec B608
                 res["processing_expired"] = int(cur2.fetchone()[0])
                 if fix:
-                    with conn:
+                    with self._resource_sqlite_transaction(
+                        conn, where=" AND ".join(where_np), params=tuple(params_np), read_only=True
+                    ) as mutation:
+                        where_np, params_np = [mutation.where], list(mutation.params)
                         cur_fix_1 = conn.execute(
                             f"UPDATE jobs SET lease_id = NULL, leased_until = NULL, worker_id = NULL WHERE {' AND '.join(where_np)}",  # nosec B608
                             tuple(params_np),

@@ -84,7 +84,6 @@ async def _assert_admin_rbac_log_sanitized(
 
 
 def _configure_error_mapping_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(admin_rbac, "is_test_mode", lambda: True, raising=False)
     monkeypatch.setattr(admin_rbac, "_get_is_postgres_backend_fn", lambda: _fake_is_pg)
     monkeypatch.setattr(admin_rbac, "_enforce_admin_user_scope", _allow_admin_scope)
     monkeypatch.setattr(

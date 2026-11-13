@@ -4,6 +4,7 @@ import type { CapturedPromptOwnerScope } from "@/services/prompt-local-owner"
 import { ensureLocalProfileId } from "./history-selection"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { isLocalHistoryOwnerKey } from "@/utils/history-selection"
+import { WORKSPACE_RAG_SOURCES_KEY, restoreWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import {
   type ChatHistory as ChatHistoryType,
   type Message as MessageType,
@@ -30,6 +31,7 @@ import { PageAssistDatabase } from "./chat"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { serverChatMirrorOwnerKey } from "./server-chat-mirror"
 import { db as chatDB } from "./schema"
+import { indexMessagesSearchTokens } from "./search-tokens"
 import {
   deletePromptByIdFB,
   getAllPromptsFB,
@@ -384,6 +386,14 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
   // digest, not the message version, so serverMessageVersion stays unset; callers fetch it.
   const ownerKey = capture.snapshot.owner_key
   const serverOwned = Boolean(ownerKey) && !isLocalHistoryOwnerKey(ownerKey)
+  // Display legacy sender names without changing the canonical provider history.
+  const displayRoles = new Map(capture.snapshot.nodes.map(node => {
+    const declared = content.get(node.id)?.extra_metadata?.sender_role
+    const role = typeof declared === "string" && ["user", "assistant", "system", "tool", "function"].includes(declared) ? declared : node.role
+    const sender = role.trim().toLowerCase()
+    const fallback = serverOwned && sender && !sender.startsWith("tool") ? "assistant" : "user"
+    return [node.id, sender === "tool" || sender === "function" ? sender : normalizeChatRole(role, fallback)]
+  }))
   const rows: MessageHistory = capture.rows.map(node => {
     const selected = content.get(node.id)
     if (!selected) throw new Error("selected_content_mismatch")
@@ -398,29 +408,35 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
       ...local,
       ...(serverOwned ? { serverMessageId: node.id } : {}),
       id: node.id, history_id: capture.view.conversation_id,
-      role: node.role, name: typeof metadata.sender_name === "string" ? metadata.sender_name : node.role === "user" ? "You" : "Assistant",
+      role: node.role, name: typeof metadata.sender_name === "string" ? metadata.sender_name : displayRoles.get(node.id) === "user" ? "You" : "Assistant",
       content: selected.message, images: [...selected.images], createdAt: 0,
       parent_message_id: node.parent_id, metadataExtra: { ...metadata },
+      // RAG sources saved with a reply are shown again after reload (CM-04). Rows carry
+      // display source objects, as saveMessage's `source` does, despite Message's type.
+      ...(displayRoles.get(node.id) === "assistant" && !local.sources?.length
+        ? { sources: restoreWorkspaceRagSources(metadata[WORKSPACE_RAG_SOURCES_KEY]) as unknown as Message["sources"] } : {}),
       // Canonical partial status must survive reload into either chat surface.
-      generationInfo: serverOwned && node.role === "assistant" &&
+      generationInfo: serverOwned && displayRoles.get(node.id) === "assistant" &&
         (metadata.generation_status === "stopped" || metadata.generation_status === "interrupted")
         ? { ...local.generationInfo, interrupted: true, stopped: metadata.generation_status === "stopped" }
         : local.generationInfo
     }
   })
   const ids = capture.rows.map(row => row.id)
-  const messages = formatToMessage(rows, ids)
+  const messages = formatToMessage(rows.map(row => ({ ...row, role: displayRoles.get(row.id)! })), ids)
   const nodesById = new Map(capture.rows.map(row => [row.id, row]))
   const alternativesByParent = new Map<string, typeof capture.snapshot.nodes[number][]>()
   for (const node of capture.snapshot.nodes) {
-    if (node.role !== "assistant" || !node.parent_id) continue
+    if (displayRoles.get(node.id) !== "assistant" || !node.parent_id) continue
     const group = alternativesByParent.get(node.parent_id) || []
     group.push(node)
     alternativesByParent.set(node.parent_id, group)
   }
   for (const message of messages) {
+    delete message.variants
+    delete message.activeVariantIndex
     const node = nodesById.get(message.id!)!
-    if (node.role !== "assistant" || !node.parent_id) continue
+    if (displayRoles.get(node.id) !== "assistant" || !node.parent_id) continue
     const alternatives = alternativesByParent.get(node.parent_id) || []
     if (alternatives.length < 2) continue
     message.variants = alternatives.map(row => ({ id: row.id,
@@ -467,9 +483,12 @@ export const restoreChat = async (data: {
   if (data.messages.some(message => message.history_provenance && message.history_provenance.owner_key !== `local-history-v1:${profile}`)) {
     throw new Error("Undo history owner mismatch")
   }
-  await chatDB.transaction('rw', [chatDB.chatHistories, chatDB.messages], async () => {
+  await chatDB.transaction('rw', [chatDB.chatHistories, chatDB.messages, chatDB.searchTokens], async () => {
     await chatDB.chatHistories.add(data.historyInfo)
     for (const message of data.messages) await chatDB.messages.add(message)
+    // Same contract as every other message write path (WP-23): restored
+    // messages must stay findable by content search.
+    await indexMessagesSearchTokens(data.messages)
   })
 
   return data.historyInfo.id
@@ -1048,7 +1067,9 @@ export const exportChatHistory = async () => {
   const results = await Promise.allSettled(
     chatHistories.map(async (history) => {
       const messages = await db.getChatHistory(history.id)
-      return { history, messages }
+      const publicHistory = { ...history }
+      delete publicHistory.tldw_history_legacy_source
+      return { history: publicHistory, messages }
     })
   )
   return results

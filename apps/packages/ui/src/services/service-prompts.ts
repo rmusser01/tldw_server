@@ -602,7 +602,7 @@ const storedConfigMatchesScope = (
   return currentUser === expectedUser
 }
 
-const createServicePromptScopeLease = (
+export const createServicePromptScopeLease = (
   parentSignal?: AbortSignal
 ): ServicePromptScopeLease => {
   const controller = new AbortController()

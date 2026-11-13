@@ -93,6 +93,14 @@ export const scheduleWorkspaceUndoAction = ({
   return { id, expiresAt }
 }
 
+/** Commit one editor action without clearing unrelated workspace Undo history. */
+export const finalizeWorkspaceUndoAction = (id: string): boolean => {
+  const action = clearPendingWorkspaceUndoAction(id)
+  if (!action) return false
+  action.finalize()
+  return true
+}
+
 export const undoWorkspaceAction = (id: string): boolean => {
   const action = clearPendingWorkspaceUndoAction(id)
   if (!action) return false

@@ -649,8 +649,12 @@ def _fill_prompt(template: str, text: str) -> str:
     return f"{template}\n\n{text}"
 
 
-def _llm_reply(prompt: str, *, api_name: str, model_override: str | None) -> str:
+def _llm_reply(
+    prompt: str, *, api_name: str, model_override: str | None, provider_credentials: Any = None
+) -> str:
     """The model's reply to ``prompt``, or "" when the call fails. A quota refusal propagates.
+
+    ``provider_credentials`` is the user's own-key handle, when the call runs on their stored key.
 
     Provider failures raise (raise_on_error), so any text that comes back is the model's,
     even a reply that starts with "Error:".
@@ -668,6 +672,7 @@ def _llm_reply(prompt: str, *, api_name: str, model_override: str | None) -> str
             model_override=model_override,
             input_is_literal_text=True,
             raise_on_error=True,
+            provider_credentials=provider_credentials,
         )
     except LLMQuotaExceededError:
         raise
@@ -683,10 +688,13 @@ def _summarize_single_article(
     api_name: str,
     model_override: str | None = None,
     custom_prompt: str | None = None,
+    provider_credentials: Any = None,
 ) -> str:
     """Synchronously summarize one article; "" when the model gives none. A quota refusal propagates."""
     prompt = _fill_prompt(custom_prompt or _SUMMARIZE_DEFAULT_PROMPT, text[:_SUMMARIZE_MAX_CHARS])
-    return _llm_reply(prompt, api_name=api_name, model_override=model_override)
+    return _llm_reply(
+        prompt, api_name=api_name, model_override=model_override, provider_credentials=provider_credentials
+    )
 
 
 async def summarize_items_for_output(
@@ -695,6 +703,7 @@ async def summarize_items_for_output(
     api_name: str,
     model_override: str | None = None,
     custom_prompt: str | None = None,
+    provider_credentials: Any = None,
 ) -> list[dict[str, Any]]:
     """Give each item an ``llm_summary``: the model's summary, or "" when it gives none.
 
@@ -710,6 +719,7 @@ async def summarize_items_for_output(
             None,
             lambda text=content: _summarize_single_article(
                 text, api_name=api_name, model_override=model_override, custom_prompt=custom_prompt,
+                provider_credentials=provider_credentials,
             ),
         )
     return items

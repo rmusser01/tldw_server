@@ -635,7 +635,7 @@ def test_chunk_template_rolling_summarize_keeps_static_snapshot_at_analyzer_boun
     boundary_calls = []
 
     class TemplateDatabase:
-        def get_chunking_template(self, *, name):
+        def get_chunking_template(self, *, name, owner_user_id):
             assert name == "snapshot-template"
             return {
                 "name": name,

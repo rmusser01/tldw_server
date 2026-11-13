@@ -163,6 +163,7 @@ def test_rag_streaming_generation_provider_override(
     client_with_stream_overrides: TestClient,
 ) -> None:
     import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.tests.helpers.offline_network import block_live_network
 
     captured = {"generation_config": None}
 
@@ -205,10 +206,14 @@ def test_rag_streaming_generation_provider_override(
         "generation_model": "llama-3.3-70b-versatile",
     }
 
-    with client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp:
+    with (
+        block_live_network() as attempts,
+        client_with_stream_overrides.stream("POST", "/api/v1/rag/search/stream", json=payload) as resp,
+    ):
         assert resp.status_code == 200
         list(resp.iter_lines())
 
+    assert attempts == []
     generation_config = captured["generation_config"]
     assert generation_config is not None
     assert generation_config["provider"] == "groq"
@@ -345,6 +350,123 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
     assert generation_config["model"] == "resolved-model"
     assert generation_config["max_tokens"] == 777
     assert generation_config["prompt_template"] == "resolved-prompt"
+
+
+def _stream_on_recorded_providers(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient, payload: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Stream one retrieved document through the real pipeline and generator; record each provider call."""
+    import tldw_Server_API.app.api.v1.endpoints.rag_unified as rag_ep
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.RAG.rag_service.types import DataSource, Document
+
+    calls: list[dict[str, Any]] = []
+
+    class OneDocumentRetriever:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            self.retrievers: dict[str, Any] = {}
+
+        async def retrieve(self, query: str, **kwargs: Any) -> list[Document]:
+            return [
+                Document(
+                    id="doc-1",
+                    content="Rowan directs the observatory.",
+                    metadata={"title": "Observatory"},
+                    source=DataSource.MEDIA_DB,
+                    score=0.9,
+                )
+            ]
+
+    async def provider_call(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        if not kwargs.get("stream"):
+            return {"choices": [{"message": {"content": "A discarded answer."}}]}
+
+        async def chunks() -> Any:
+            yield {"choices": [{"delta": {"content": "The streamed answer."}}]}
+
+        return chunks()
+
+    monkeypatch.setattr(rag_ep, "MultiDatabaseRetriever", OneDocumentRetriever)
+    monkeypatch.setattr(chat_service, "perform_chat_api_call_async", provider_call)
+    request = {"sources": ["media_db"], "enable_generation": True, "enable_cache": False, "enable_query_classification": False, **payload}
+    with client.stream("POST", "/api/v1/rag/search/stream", json=request) as resp:
+        assert resp.status_code == 200
+        events = [json.loads(raw) for raw in resp.iter_lines() if raw]
+    return events, calls
+
+
+def test_rag_stream_makes_one_provider_call_the_streamed_answer(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+) -> None:
+    """The stream's retrieval step makes no answer call, so the one call is the streamed answer (TASK-15482)."""
+    events, calls = _stream_on_recorded_providers(
+        monkeypatch,
+        client_with_stream_overrides,
+        {"query": "Who directs the observatory?", "enable_suggestions": True},
+    )
+
+    assert [call["stream"] for call in calls] == [True]
+    assert [event["text"] for event in events if event["type"] == "delta"] == ["The streamed answer."]
+    assert events[-1]["type"] == "complete"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"query": "Who dirrects the observatory?", "spell_check": True},
+        {
+            "query": "Who directs it?",
+            "chat_history": [{"role": "user", "content": "Tell me about the observatory."}],
+        },
+    ],
+    ids=["spell-correction", "chat-history-reformulation"],
+)
+def test_rag_stream_answers_the_effective_query(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+    extra: dict[str, Any],
+) -> None:
+    """The streamed answer's prompt carries the corrected or reformulated query, not the raw one (TASK-15482)."""
+    from tldw_Server_API.app.core.RAG.rag_service import query_classifier, unified_pipeline
+
+    async def effective_query(*_args: Any, **_kwargs: Any) -> str:
+        return "Who directs the observatory?"
+
+    monkeypatch.setattr(unified_pipeline, "spell_check_query", effective_query)
+    monkeypatch.setattr(query_classifier, "reformulate_query", effective_query)
+    _events, calls = _stream_on_recorded_providers(monkeypatch, client_with_stream_overrides, extra)
+
+    prompts = [call["messages"][-1]["content"] for call in calls if call["stream"]]
+    assert len(prompts) == 1
+    assert "Who directs the observatory?" in prompts[0]
+    assert extra["query"] not in prompts[0]
+
+
+@pytest.mark.parametrize(
+    ("setting", "clarified"),
+    [({}, True), ({"enable_pre_retrieval_clarification": False}, False)],
+    ids=["unset-follows-generation", "turned-off"],
+)
+def test_rag_stream_keeps_its_pre_retrieval_clarification(
+    monkeypatch: pytest.MonkeyPatch,
+    client_with_stream_overrides: TestClient,
+    setting: dict[str, Any],
+    clarified: bool,
+) -> None:
+    """Unset, the clarification gate follows the request's generation switch; an explicit False wins (TASK-15482)."""
+    events, calls = _stream_on_recorded_providers(
+        monkeypatch,
+        client_with_stream_overrides,
+        {"query": "Who directs it?", **setting},
+    )
+
+    if clarified:
+        assert [event["type"] for event in events] == ["clarification", "delta", "complete"]
+        assert calls == []
+    else:
+        assert [call["stream"] for call in calls] == [True]
 
 
 def test_rag_streaming_emits_research_progress_before_generation(

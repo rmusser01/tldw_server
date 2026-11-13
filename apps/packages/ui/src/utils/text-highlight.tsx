@@ -42,7 +42,7 @@ export function highlightText(
 
   const {
     caseSensitive = false,
-    highlightClassName = "bg-warn/20 rounded px-0.5"
+    highlightClassName = "bg-warn/20 text-inherit rounded px-0.5"
   } = options
 
   // Words match one by one; a "quoted phrase" matches as a whole (CS-11).

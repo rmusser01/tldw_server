@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NoteListItem } from '@/components/Notes/types'
 import { moveNotesListRowFocus } from './notes-list-keyboard'
+import { formatBacklinkIdsTooltip } from './notes-backlink-labels'
 
 const LazyNotesListPanelEmptyStates = React.lazy(() => import('./NotesListPanelEmptyStates'))
 
@@ -100,6 +101,12 @@ type NotesListPanelProps = {
   isFetching: boolean
   /** The rows belong to the previous page or search while this one loads. */
   isPlaceholderData?: boolean
+  /**
+   * This list's query has returned at least once, possibly with no rows. Until
+   * then the loading rows stand in for it; after that a refetch keeps what the
+   * list shows, even the empty state.
+   */
+  listLoaded?: boolean
   hasError?: boolean
   errorMessage?: string | null
   demoEnabled: boolean
@@ -151,6 +158,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   isOnline,
   isFetching,
   isPlaceholderData = false,
+  listLoaded = false,
   hasError = false,
   errorMessage = null,
   demoEnabled,
@@ -190,9 +198,10 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   const hasNotes = Array.isArray(notes) && notes.length > 0
   // A refresh of the same list keeps its rows on screen so the scroll position
   // survives (NS-04). Rows held over from another page or search are not this
-  // list's rows, so they give way to the loading state like an empty list.
+  // list's rows, so they give way to the loading state, as does a list that has
+  // not loaded yet. A refresh of a loaded empty list keeps its empty state.
   const isRefreshingRows = isFetching && hasNotes && !isPlaceholderData
-  const isLoadingRows = isFetching && !isRefreshingRows
+  const isLoadingRows = isFetching && !isRefreshingRows && (isPlaceholderData || !listLoaded)
   const hasListError = hasError
   const bulkSelectedIdSet = React.useMemo(
     () => new Set((bulkSelectedIds || []).map((id) => String(id))),
@@ -779,25 +788,26 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         {item.conversation_id &&
                           (() => {
                             const conversationId = String(item.conversation_id)
-                            const conversationLabel = conversationLabelById[conversationId] || conversationId
+                            const conversationLabel = conversationLabelById[conversationId]
                             return (
                               <div className="text-xs text-primary mt-1">
-                                {t('option:notesSearch.linkedConversation', {
-                                  defaultValue: 'Linked to conversation'
-                                })}
-                                {': '}
+                                {conversationLabel
+                                  ? `${t('option:notesSearch.linkedConversation', {
+                                      defaultValue: 'Linked to conversation'
+                                    })}: `
+                                  : null}
                                 <Tooltip
-                                  title={`${t('option:notesSearch.linkedConversationIdLabel', {
-                                    defaultValue: 'Conversation ID'
-                                  })}: ${conversationId}`}
+                                  title={formatBacklinkIdsTooltip(t, conversationId, item.message_id ? String(item.message_id) : null)}
                                 >
-                                  <span className="font-medium">{conversationLabel}</span>
+                                  <span className="font-medium">
+                                    {conversationLabel ||
+                                      t('option:notesSearch.linkedChatUnresolved', { defaultValue: 'Linked chat' })}
+                                  </span>
                                 </Tooltip>
-                                {item.message_id ? ` · msg ${String(item.message_id)}` : ''}
                               </div>
                             )
                           })()}
-                        <div id={`${rowDomId}-date`} className="text-xs text-text-subtle mt-1">
+                        <div id={`${rowDomId}-date`} className="text-xs text-text-muted mt-1">
                           {item.updated_at
                             ? (() => {
                                 const d = new Date(item.updated_at)
@@ -823,7 +833,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       </div>
                     )}
                     <div className="mt-2 flex items-center justify-between gap-2">
-                      <div className="text-xs text-text-subtle">
+                      <div className="text-xs text-text-muted">
                         {t('option:notesSearch.trashedAtLabel', {
                           defaultValue: 'Deleted'
                         })}

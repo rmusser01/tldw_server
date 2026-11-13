@@ -111,7 +111,7 @@ class MediaModule(BaseModule):
             self._semantic_retrievers: dict[tuple[Optional[str], Optional[str]], Any] = {}
             self._ingestion_jobs: dict[str, dict[str, Any]] = {}
             self._ingestion_jobs_lock = asyncio.Lock()
-            self._user_db_cache: OrderedDict[str, tuple[MediaDbLike, float]] = OrderedDict()
+            self._user_db_cache: OrderedDict[tuple[str, str], tuple[MediaDbLike, float]] = OrderedDict()
             self._user_db_cache_lock = threading.Lock()
             # Per-user DB cache bounds (TTL + LRU)
             self._user_db_cache_ttl_seconds = int(self.config.settings.get("user_db_cache_ttl_seconds", 900))
@@ -519,12 +519,13 @@ class MediaModule(BaseModule):
             except _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS:
                 break
 
-    def _get_or_create_user_db(self, db_path: str) -> MediaDbLike:
+    def _get_or_create_user_db(self, db_path: str, client_id: str) -> MediaDbLike:
+        cache_key = (db_path, client_id)
         lock = getattr(self, "_user_db_cache_lock", None)
         if lock is None:
             logger.warning("User DB cache lock not initialized; bypassing cache for {}", db_path)
             return create_media_database(
-                client_id=f"mcp_media_{self.config.name}",
+                client_id=client_id,
                 db_path=db_path,
             )
         with lock:
@@ -534,25 +535,25 @@ class MediaModule(BaseModule):
                 cache = self._user_db_cache
             now_ts = time.monotonic()
             self._evict_user_db_cache_locked(now_ts)
-            cached = cache.get(db_path)
+            cached = cache.get(cache_key)
             if cached is not None:
                 db, last_used = cached
                 ttl = max(1, int(getattr(self, "_user_db_cache_ttl_seconds", 900)))
                 if now_ts - last_used <= ttl:
-                    cache[db_path] = (db, now_ts)
-                    cache.move_to_end(db_path)
+                    cache[cache_key] = (db, now_ts)
+                    cache.move_to_end(cache_key)
                     return db
                 try:
-                    cache.pop(db_path, None)
+                    cache.pop(cache_key, None)
                     self._close_media_db_instance(db)
                 except _MEDIA_MODULE_NONCRITICAL_EXCEPTIONS:
                     pass
             db = create_media_database(
-                client_id=f"mcp_media_{self.config.name}",
+                client_id=client_id,
                 db_path=db_path,
             )
-            cache[db_path] = (db, now_ts)
-            cache.move_to_end(db_path)
+            cache[cache_key] = (db, now_ts)
+            cache.move_to_end(cache_key)
             self._evict_user_db_cache_locked(now_ts)
             return db
 
@@ -573,9 +574,13 @@ class MediaModule(BaseModule):
         user_media_path = db_paths.get("media")
         if not user_media_path:
             raise PermissionError("Media DB path not available in context")
-        if str(user_media_path) == str(getattr(db, "db_path_str", "")):
+        client_id = str(context.user_id)
+        if (
+            str(user_media_path) == str(getattr(db, "db_path_str", ""))
+            and getattr(db, "client_id", None) == client_id
+        ):
             return db
-        return self._get_or_create_user_db(str(user_media_path))
+        return self._get_or_create_user_db(str(user_media_path), client_id)
 
     def _normalize_scores(self, rows: list[dict[str, Any]]) -> list[float]:
         if not rows:
@@ -1850,8 +1855,8 @@ class MediaModule(BaseModule):
                     raise ValueError(f"Media not found: {media_id}")
                 action = "permanently_deleted"
             else:
-                # Soft delete
-                deleted = dbi.soft_delete_media(media_id, cascade=True)
+                # User deletion stays recoverable through the existing Trash workflow.
+                deleted = dbi.mark_as_trash(media_id)
                 if not deleted:
                     raise ValueError(f"Media not found: {media_id}")
                 action = "soft_deleted"

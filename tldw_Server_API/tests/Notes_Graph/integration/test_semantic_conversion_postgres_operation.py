@@ -23,13 +23,17 @@ pytestmark = pytest.mark.integration
 @pytest.fixture
 def pg_db(pg_database_config, tmp_path):
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    db = CharactersRAGDB(tmp_path / "semantic.db", client_id="1", backend=backend)
-    db.close_connection()
+    db = None
     try:
+        db = CharactersRAGDB(tmp_path / "semantic.db", client_id="1", backend=backend)
+        db.close_connection()
         yield db
     finally:
-        db.close_connection()
-        backend.get_pool().close_all()
+        try:
+            if db is not None:
+                db.close_connection()
+        finally:
+            backend.get_pool().close_all()
 
 
 async def test_conversion_lookups_inside_one_operation_do_not_overlap(pg_db):

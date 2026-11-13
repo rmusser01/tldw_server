@@ -1,4 +1,25 @@
 {
+  "requestedWorkspace_localWork": {
+    "message": "Your local draft or saved Chat has been kept. Return to the account where it was created to save or export it, then retry."
+  },
+  "requestedWorkspace_account": {
+    "message": "Check account"
+  },
+  "requestedWorkspace_unavailable": {
+    "message": "Workspace could not be opened"
+  },
+  "requestedWorkspace_recovery": {
+    "message": "Your current workspace and unsaved work have been kept. Check your account and connection, then retry."
+  },
+  "requestedWorkspace_retry": {
+    "message": "Retry"
+  },
+  "requestedWorkspace_back": {
+    "message": "Back to Workspaces"
+  },
+  "requestedWorkspace_opening": {
+    "message": "Opening workspace…"
+  },
   "sharedWorkspace_unavailable": {
     "message": "This shared workspace isn't available."
   },
@@ -2083,6 +2104,9 @@
   },
   "composer_slashGenerateImageDescDefault": {
     "message": "Generate an image (default: {{backend}}). Use /generate-image:<provider> to override."
+  },
+  "composer_slashModelDesc": {
+    "message": "Choose the model for this chat"
   },
   "imageBackend_menuLabel": {
     "message": "Default image provider"
@@ -4448,6 +4472,24 @@
   "historySelection_regenerationUnknownMessage": {
     "message": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically."
   },
+  "historySelection_savedContinuedReplyTitle": {
+    "message": "Continued reply saved"
+  },
+  "historySelection_savedContinuedReplyMessage": {
+    "message": "The continued reply is saved as an alternative to the original reply, which is kept. Open the saved reply when you are ready."
+  },
+  "historySelection_continuationRefusedTitle": {
+    "message": "Continued reply refused"
+  },
+  "historySelection_continuationRefusedMessage": {
+    "message": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before continuing again."
+  },
+  "historySelection_continuationUnknownTitle": {
+    "message": "Continued reply unconfirmed"
+  },
+  "historySelection_continuationUnknownMessage": {
+    "message": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved the continued reply. Reload this chat before continuing again. Recovery will not send it again automatically."
+  },
   "errorRecovery_interruptedSummary": {
     "message": "Generation was interrupted. Any text received is kept."
   },
@@ -4634,6 +4676,12 @@
   "composer_providerStatusConnecting": {
     "message": "Connecting…"
   },
+  "composer_providerStatusOffline": {
+    "message": "Offline"
+  },
+  "composer_serverStatusConnected": {
+    "message": "Server connected"
+  },
   "composer_connectionPendingSend": {
     "message": "Still connecting to your tldw server. Your draft has not been sent."
   },
@@ -4705,6 +4753,9 @@
   },
   "composer_modelScopeAll": {
     "message": "All models"
+  },
+  "composer_modelCatalogLoadFailed": {
+    "message": "Couldn't load all models"
   },
   "composer_modelNotSetUp": {
     "message": "Not set up"

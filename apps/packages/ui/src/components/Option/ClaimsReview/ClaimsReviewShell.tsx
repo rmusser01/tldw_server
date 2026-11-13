@@ -1,6 +1,7 @@
 import React from "react"
 import { Button } from "@/components/Common/Button"
 import { Alert } from "@/components/ui/primitives/Alert"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
@@ -30,10 +31,37 @@ const optionalFields = (notes: string, reason: string) => ({
 
 /** Remount every private state holder when canonical server/account authority changes. */
 export const ClaimsReviewShell = () => {
-  const { config, authorityLoading } = useCanonicalConnectionConfig()
-  if (authorityLoading || !config) return <p role="status">Resolving Claims review connection…</p>
-  return <ClaimsReviewWorkspace key={deriveConnectionAuthorityId(config)} config={config} />
-}
+  const { config, authorityLoading } = useCanonicalConnectionConfig();
+  const authority = usePromptLocalAuthority();
+  const boundary = deriveConnectionAuthorityId(config);
+  if (
+    !config ||
+    authorityLoading ||
+    authority.boundaryKey !== boundary ||
+    (!authority.ready && !authority.unavailable)
+  ) {
+    return <p role="status">Resolving Claims review connection…</p>;
+  }
+  if (!authority.ready || authority.ownerId === null) {
+    return (
+      <Alert variant="error" role="alert">
+        <p>
+          Could not resolve the Claims review account. Check connection settings
+          or retry.
+        </p>
+        <Button type="button" onClick={authority.retry}>
+          Retry account
+        </Button>
+      </Alert>
+    );
+  }
+  return (
+    <ClaimsReviewWorkspace
+      key={boundary + ":" + authority.ownerId}
+      config={config}
+    />
+  );
+};
 
 const ClaimsReviewWorkspace = ({ config }: { config: TldwConfig }) => {
   const [filter, setFilter] = React.useState<ClaimReviewStatus>("pending")

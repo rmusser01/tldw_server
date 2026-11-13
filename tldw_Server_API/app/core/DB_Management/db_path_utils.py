@@ -393,7 +393,6 @@ def normalize_output_storage_filename(
     return candidate_name
 
 
-
 class DatabasePaths:
     """Centralized database path management."""
 
@@ -751,6 +750,28 @@ class DatabasePaths:
         outputs_dir = user_dir / DatabasePaths.OUTPUTS_TEMP_SUBDIR
         _ensure_dir(outputs_dir, label="temp outputs")
         return outputs_dir
+
+    @staticmethod
+    def resolve_user_chroma_directory(
+        user_id: UserId,
+        *,
+        base_dir_override: Optional[Union[str, Path]] = None,
+    ) -> Path:
+        """Resolve canonical owner vector storage without provisioning anything."""
+        base = (
+            _normalize_user_db_base_dir(Path(base_dir_override))
+            if base_dir_override is not None
+            else DatabasePaths.resolve_user_db_base_dir()
+        )
+        expected = base / _resolve_user_id_for_storage(user_id)
+        user_dir = DatabasePaths.resolve_user_base_directory(user_id, base_dir_override=base_dir_override)
+        # Reject aliases rather than assigning a second owner/lock to one store.
+        if user_dir != expected or expected.is_symlink():
+            raise ValueError("Chroma owner directory must not be aliased")
+        path = user_dir / DatabasePaths.CHROMA_SUBDIR
+        if path.is_symlink():
+            raise ValueError("Chroma storage root must not be a symlink")
+        return path
 
     @staticmethod
     def get_user_chroma_dir(

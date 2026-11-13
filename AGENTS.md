@@ -431,10 +431,10 @@ Common backlog-py commands (prefix each with the invocation above):
 - Read: `search "query" --plain`, `task list --plain`, `task <id>` (the whole file; `--plain` prints only the header and description), `board`.
 - Create: `task create "Title" -d "Why and what" --ac "Criterion" --ac "Another" -l label1,label2 --dep TASK-1 [--id TASK-N] [--notes "..."]`.
 - Edit: `task edit <id>` with `-s "In Progress"`, `-t "New title"` (renames the file), `-l labels` (replaces them), `--ac "Added criterion"`, `--remove-ac N`, `--check-ac N`, `--check-dod N`, `--append-notes "..."` (repeatable), `--notes "..."` (replaces them), `--final-summary "..."`, `--dep TASK-1`, `--ref X` (one reference per flag; replaces them), `--remove-preamble` (drops body text above the first `## ` heading; refuses if that text holds a section, or if the task has no frontmatter and the call gives no `-t`).
-- Renumber: `task renumber "<path>" --id <new id> [--append-notes "..."]` gives one task file a new id in place. It takes a path because two files can share an id, keeps the file's directory and name tail, and refuses an id that any file in `backlog/tasks`, `backlog/completed` or `backlog/archive/tasks` holds. A subtask id (`P.n`) also sets `parent_task_id` to `P`.
+- Renumber: `task renumber "<path>" --id <new id> [--append-notes "..."]` gives one task file a new id in place. It takes a path because two files can share an id, keeps the file's directory and name tail, and refuses an id that any file in `backlog/tasks`, `backlog/completed` or `backlog/archive/tasks` holds, and, as `task create` does, a top-level id that `origin/dev` or an open PR holds (your own pushed PR counts too). A subtask id (`P.n`) also sets `parent_task_id` to `P`.
 - Repair: `task normalize [--check] [path...]` rewrites Node-format or nested sections into the canonical format without dropping text; every backlog-py edit already does this for the file it touches.
 
-Task ids collide when concurrent sessions each take the next local id. Before creating a task, find the highest id across `origin/dev` and all open PR branches, and pass a higher one with `--id`:
+`task create` now allocates the next id above local tasks, `origin/dev` (fetched first) and the files of every open PR, and rejects an explicit `--id` that either holds. It warns on stderr for each source it cannot read (`origin/dev`, `open PRs (gh)`) and carries on with the rest. When such a warning appears, fall back to the manual recipe: find the highest id across `origin/dev` and all open PR branches, and pass a higher one with `--id`:
 
 ```bash
 git fetch origin dev --quiet
@@ -442,7 +442,7 @@ git fetch origin dev --quiet
   | sed -nE 's|^backlog/.*task-([0-9]+)[ .].*|\1|p' | sort -n | tail -1
 ```
 
-`gh pr list` lists at most 100 files per PR, so the recipe can miss ids in a large PR. backend-required fails any PR that leaves two task files with one id (`Helper_Scripts/ci/check_backlog_task_ids.py`, backlog-only PRs included); give the newer file a free id with `task renumber`. TASK-15000 to TASK-15281 are the block the 2026-10-31 renumbering used ([ADR-084](Docs/ADR/084-backlog-task-ids-unique-checked-on-every-pr.md)), so new ids continue above TASK-15281.
+`gh pr list` lists at most 100 files per PR, so the manual recipe can miss ids in a large PR (the tool pages those PRs through `gh api`). backend-required fails any PR that leaves two task files with one id (`Helper_Scripts/ci/check_backlog_task_ids.py`, backlog-only PRs included); give the newer file a free id with `task renumber`. TASK-15000 to TASK-15281 are the block the 2026-10-31 renumbering used ([ADR-084](Docs/ADR/084-backlog-task-ids-unique-checked-on-every-pr.md)), so new ids continue above TASK-15281.
 
 Do not hand-edit task files unless backlog-py cannot make the change and the user explicitly approves the exception. If backlog-py itself cannot run, pause before making repo file changes unless the user explicitly approves a temporary exception. Commit Backlog.md task changes with the related work unless the user asks for different staging.
 

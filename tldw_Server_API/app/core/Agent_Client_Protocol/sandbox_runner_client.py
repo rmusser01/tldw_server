@@ -20,6 +20,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.config import ACPSandboxConf
 from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
     bounded_session_update_payload,
     make_session_update_queue,
+    prepare_mcp_servers_for_session,
     redact_agent_output,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
@@ -659,7 +660,7 @@ class ACPSandboxRunnerManager(ACPRuntimePolicySupportMixin):
                 "session/new",
                 {
                     "cwd": "/workspace",
-                    "mcpServers": mcp_servers or [],
+                    "mcpServers": prepare_mcp_servers_for_session(mcp_servers),
                     "agentType": agent_type,
                     **({"env": dict(session_env)} if session_env else {}),
                 },

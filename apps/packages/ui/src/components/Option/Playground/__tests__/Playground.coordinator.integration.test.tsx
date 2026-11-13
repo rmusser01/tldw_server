@@ -1789,7 +1789,8 @@ describe("Playground coordinator integration", () => {
     window.history.pushState({}, "", "/chat?settingsServerChatId=robot")
     const view = render(<><Playground /><AssistantSelect /></>)
     try {
-      await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalled())
+      // Hold all six mounted loaders before the picker changes the selection revision.
+      await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(6))
       fireEvent.click(await screen.findByRole("button", { name: "Robot" }))
       const buttons = await screen.findAllByRole("button", { name: choice })
       fireEvent.click(buttons.at(-1)!)

@@ -434,6 +434,78 @@ describe("fetchAllServerChatMessages", () => {
 })
 
 describe("mapServerChatMessagesToPlaygroundMessages", () => {
+  it("S04 restores strictly recorded workspace citation references with canonical message IDs", () => {
+    const [message] = mapServerChatMessagesToPlaygroundMessages({
+      assistantName: "Assistant",
+      characterId: null,
+      serverMessages: [
+        {
+          id: "source-answer",
+          role: "assistant",
+          content: "The telescope is Selene.",
+          created_at: "2026-10-28T00:00:00Z",
+          metadata_extra: {
+            workspace_rag_sources_v1: {
+              origin: "knowledge_qa",
+              sources: [
+                {
+                  originalId: 42,
+                  excerpt: "Selene is the telescope.",
+                  mediaId: 42,
+                  title: "Rowan field report",
+                  type: "text",
+                  sourceType: "text",
+                },
+              ],
+            },
+            unrelated: "retained",
+          },
+        },
+      ],
+    });
+    expect(message.serverMessageId).toBe("source-answer");
+    expect(message.sources).toEqual([
+      expect.objectContaining({
+        name: "Rowan field report",
+        pageContent: "Selene is the telescope.",
+        metadata: expect.objectContaining({ media_id: 42 }),
+      }),
+    ]);
+    expect(message.metadataExtra?.unrelated).toBe("retained");
+  });
+
+  it("S04 ignores malformed recorded source references without losing the saved answer", () => {
+    const [message] = mapServerChatMessagesToPlaygroundMessages({
+      assistantName: "Assistant",
+      characterId: null,
+      serverMessages: [
+        {
+          id: "source-answer",
+          role: "assistant",
+          content: "Saved answer",
+          created_at: "2026-10-28T00:00:00Z",
+          metadata_extra: {
+            workspace_rag_sources_v1: {
+              origin: "knowledge_qa",
+              sources: [
+                {
+                  originalId: 42,
+                  excerpt: "Stored excerpt",
+                  mediaId: "42junk",
+                  title: "Source",
+                  type: "text",
+                  sourceType: "text",
+                },
+              ],
+            },
+          },
+        },
+      ],
+    });
+    expect(message.message).toBe("Saved answer");
+    expect(message.sources).toEqual([]);
+  });
+
   it("preserves valid dynamic UI metadata from server messages", () => {
     const [message] = mapServerChatMessagesToPlaygroundMessages({
       assistantName: "Assistant",

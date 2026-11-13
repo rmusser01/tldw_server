@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const storageBacking = {
+  watchOutcome: "observe" as "observe" | "unavailable" | "throws",
   values: new Map<string, unknown>(),
   getCalls: [] as string[],
   setCalls: [] as Array<{ key: string; value: unknown }>,
@@ -12,6 +13,19 @@ const storageBacking = {
 
 vi.mock("@/utils/safe-storage", () => ({
   createSafeStorage: ({ area = "local" }: { area?: string } = {}) => ({
+    area,
+    watch: (handlers: Record<string, (change: unknown) => void>) => {
+      if (storageBacking.watchOutcome === "unavailable") return false
+      if (storageBacking.watchOutcome === "throws") throw new Error("Storage watcher unavailable")
+      const listener = (changes: Record<string, unknown>, changedArea: string) => {
+        if (changedArea !== area) return
+        for (const key of Object.keys(handlers)) {
+          if (key in changes) handlers[key](changes[key])
+        }
+      }
+      storageBacking.changeListeners.add(listener)
+      return () => storageBacking.changeListeners.delete(listener)
+    },
     get: async (key: string) => {
       storageBacking.getCalls.push(`${area}::${key}`)
       return storageBacking.values.get(`${area}::${key}`)
@@ -55,6 +69,7 @@ import {
 } from "@/services/settings/registry"
 
 beforeEach(() => {
+  storageBacking.watchOutcome = "observe"
   storageBacking.values.clear()
   storageBacking.getCalls.length = 0
   storageBacking.setCalls.length = 0
@@ -67,6 +82,17 @@ afterEach(() => {
 })
 
 describe("settings registry cache + mirror (WP-20)", () => {
+  it.each(["unavailable", "throws"] as const)(
+    "reads fresh values when the storage watcher is %s", async outcome => {
+      storageBacking.watchOutcome = outcome
+      const setting = defineSetting("unobserved:" + outcome, "default")
+      storageBacking.values.set("local::" + setting.key, "before")
+      expect(await getSetting(setting)).toBe("before")
+      storageBacking.values.set("local::" + setting.key, "after")
+      expect(await getSetting(setting)).toBe("after")
+    }
+  )
+
   it("issues no writes for 100 reads after the first mirror", async () => {
     const setting = defineSetting("cachedTheme", "dark" as string, {
       localStorageKey: "cachedTheme",

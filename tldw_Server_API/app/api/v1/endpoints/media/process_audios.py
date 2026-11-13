@@ -59,6 +59,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
+    first_saved_filename,
     save_uploaded_files,
 )
 from tldw_Server_API.app.core.Prompt_Management.service_prompts import resolve_service_prompt
@@ -342,10 +343,8 @@ async def process_audios_endpoint(
     try:
         if form_data.perform_chunking:
             first_url = (form_data.urls or [None])[0]
-            first_filename = None
             try:
-                if saved_files:
-                    first_filename = saved_files[0].get("original_filename")
+                first_filename = first_saved_filename(saved_files)
             except Exception:
                 first_filename = None
             first_input_source = str(all_inputs[0]) if all_inputs else first_url or first_filename
@@ -365,6 +364,7 @@ async def process_audios_endpoint(
                     form_data=form_data,
                     db=db,
                     chunking_options_dict=chunk_options_dict,
+                    owner_user_id=getattr(current_user, "id", None),
                     TemplateClassifier=TemplateClassifier,
                     first_url=first_url,
                     first_filename=first_filename,

@@ -280,12 +280,6 @@ async def test_create_evaluation_maps_database_error(monkeypatch):
         _BrokenCreateEvaluationManager,
         raising=True,
     )
-    monkeypatch.setattr(
-        evaluations_endpoint,
-        "_is_prompt_studio_test_mode",
-        lambda: True,
-        raising=True,
-    )
 
     _patch_no_credentials_runtime(monkeypatch)
 
@@ -404,12 +398,6 @@ async def test_create_evaluation_sanitizes_unexpected_error(monkeypatch):
         evaluations_endpoint,
         "EvaluationManager",
         _UnexpectedCreateEvaluationManager,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        evaluations_endpoint,
-        "_is_prompt_studio_test_mode",
-        lambda: True,
         raising=True,
     )
 

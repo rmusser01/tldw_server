@@ -1,4 +1,5 @@
 import asyncio
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,7 +13,6 @@ from tldw_Server_API.app.api.v1.schemas.data_tables_schemas import DATA_TABLES_M
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError, InputError
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-
 
 pytestmark = pytest.mark.integration
 
@@ -119,6 +119,7 @@ def test_mark_data_table_generate_failed_sanitizes_update_failure_log(monkeypatc
         table_id=12,
         owner_user_id=1,
         exc=RuntimeError("original failure at /private/original.db"),
+        generation_job=None,
     )
 
     _assert_sanitized_debug_log(
@@ -262,7 +263,7 @@ def test_generate_wait_maps_fetch_database_error(tmp_path, data_tables_app_facto
 
     class _StubJobManager:
         def create_job(self, **kwargs):  # noqa: ANN003
-            return {"id": 106, "uuid": "job-106", "status": "queued"}
+            return {**kwargs, "id": 106, "uuid": str(UUID(int=106)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
@@ -301,7 +302,7 @@ def test_generate_wait_maps_detail_database_error(tmp_path, data_tables_app_fact
 
     class _StubJobManager:
         def create_job(self, **kwargs):  # noqa: ANN003
-            return {"id": 107, "uuid": "job-107", "status": "queued"}
+            return {**kwargs, "id": 107, "uuid": str(UUID(int=107)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
@@ -340,7 +341,7 @@ def test_generate_wait_returns_job_failure_conflict(tmp_path, data_tables_app_fa
 
     class _StubJobManager:
         def create_job(self, **kwargs):  # noqa: ANN003
-            return {"id": 108, "uuid": "job-108", "status": "queued"}
+            return {**kwargs, "id": 108, "uuid": str(UUID(int=108)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
@@ -375,7 +376,7 @@ def test_generate_wait_returns_not_found_when_table_missing(tmp_path, data_table
 
     class _StubJobManager:
         def create_job(self, **kwargs):  # noqa: ANN003
-            return {"id": 109, "uuid": "job-109", "status": "queued"}
+            return {**kwargs, "id": 109, "uuid": str(UUID(int=109)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
@@ -683,7 +684,7 @@ def test_generate_uses_configured_data_tables_queue(tmp_path, data_tables_app_fa
     class _StubJobManager:
         def create_job(self, **kwargs):
             captured.update(kwargs)
-            return {"id": 101, "uuid": "job-101", "status": "queued"}
+            return {**kwargs, "id": 101, "uuid": str(UUID(int=101)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
     try:
@@ -725,7 +726,7 @@ def test_regenerate_uses_configured_data_tables_queue(tmp_path, data_tables_app_
     class _StubJobManager:
         def create_job(self, **kwargs):
             captured.update(kwargs)
-            return {"id": 102, "uuid": "job-102", "status": "queued"}
+            return {**kwargs, "id": 102, "uuid": str(UUID(int=102)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
     try:
@@ -760,7 +761,7 @@ def test_regenerate_after_admin_patch_preserves_table_owner(tmp_path, data_table
     class _StubJobManager:
         def create_job(self, **kwargs):
             captured.update(kwargs)
-            return {"id": 103, "uuid": "job-103", "status": "queued"}
+            return {**kwargs, "id": 103, "uuid": str(UUID(int=103)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
     try:
@@ -938,7 +939,7 @@ def test_regenerate_wait_maps_fetch_database_error(tmp_path, data_tables_app_fac
 
     class _StubJobManager:
         def create_job(self, **kwargs):  # noqa: ANN003
-            return {"id": 104, "uuid": "job-104", "status": "queued"}
+            return {**kwargs, "id": 104, "uuid": str(UUID(int=104)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 
@@ -993,7 +994,7 @@ def test_regenerate_wait_maps_detail_database_error(tmp_path, data_tables_app_fa
 
     class _StubJobManager:
         def create_job(self, **kwargs):  # noqa: ANN003
-            return {"id": 105, "uuid": "job-105", "status": "queued"}
+            return {**kwargs, "id": 105, "uuid": str(UUID(int=105)), "status": "queued"}
 
     app.dependency_overrides[data_tables_endpoint.get_job_manager] = lambda: _StubJobManager()
 

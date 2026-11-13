@@ -37,6 +37,7 @@ import type {
 import { Storage } from "@plasmohq/storage"
 import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage"
 import { bgRequest, bgStream, bgUpload } from "@/services/background-proxy"
+import { captureDocumentGetSignal } from "@/services/document-get-scope"
 import { requestOwnedPrompt } from "@/services/prompt-owner-request"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
@@ -108,7 +109,6 @@ import {
   mapApiDetailToUi,
   mapApiListToUi,
   mapUiSourceToApi,
-  type ApiDataTableGenerateResponse,
   type ApiDataTableJobStatus
 } from "@/services/tldw/data-tables"
 import type { DataTableColumn } from "@/types/data-tables"
@@ -1790,7 +1790,13 @@ export class TldwApiClientBase {
   private headers: HeadersInit = {}
   characterCache = new BoundedTtlCache<any>()
   characterInFlight = new Map<string, Promise<any>>()
-  chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>()
+  // Keys are `${chatId}${query}` (see getChatMessagesCacheKey), so the query
+  // shape's chat is everything before the first "?". ~5 shapes per chat
+  // (WP-31 / TASK-13523) on top of the cache-wide entry/byte caps.
+  chatMessagesCache = new BoundedTtlCache<ServerChatMessage[]>({
+    maxPerGroup: 5,
+    groupOf: (key) => key.split("?")[0]!
+  })
   chatMessagesInFlight = new Map<string, Promise<ServerChatMessage[]>>()
   private domainCacheConfig: TldwConfig | null = null
   private domainCacheAccountRevision = -1
@@ -2085,8 +2091,13 @@ export class TldwApiClientBase {
   }
 
   async request<T = any>(init: any, requireAuth = true): Promise<T> {
+    const documentSignal = captureDocumentGetSignal(init?.method)
+    documentSignal?.throwIfAborted()
     await this.ensureConfigForRequest(requireAuth && !init?.noAuth)
-    return await bgRequest<T>(init)
+    documentSignal?.throwIfAborted()
+    const result = await bgRequest<T>(init)
+    documentSignal?.throwIfAborted()
+    return result
   }
 
   async requestWithCurrentConfig<T = any>(
@@ -2095,12 +2106,16 @@ export class TldwApiClientBase {
   ): Promise<T> {
     const usesConfigFactory = typeof init === "function"
     const staticInit = usesConfigFactory ? null : init
+    const preparedDocument = captureDocumentGetSignal(staticInit?.method)
+    if (!usesConfigFactory) preparedDocument?.throwIfAborted()
     const useDirectWebRequest = getCurrentBrowserSurface() === "webui-page"
     if (useDirectWebRequest) await this.initialize()
     const cfg = await this.ensureConfigForRequest(
       requireAuth && !staticInit?.noAuth
     )
     const resolvedInit = typeof init === "function" ? init(cfg) : init
+    const documentSignal = String(resolvedInit?.method || "GET").toUpperCase() === "GET" ? preparedDocument : undefined
+    documentSignal?.throwIfAborted()
     if (!useDirectWebRequest) {
       return await bgRequest<T>(
         usesConfigFactory
@@ -2110,8 +2125,11 @@ export class TldwApiClientBase {
     }
 
     const response = await tldwRequest(resolvedInit, {
-      getConfig: async () => cfg
+      getConfig: async () => cfg,
+      requestScopeSignal: documentSignal,
+      assertRequestCurrent: () => documentSignal?.throwIfAborted()
     })
+    documentSignal?.throwIfAborted()
     if (!response?.ok && !resolvedInit?.returnResponse) {
       const message =
         typeof response?.error === "string" && response.error.trim()
@@ -2148,7 +2166,10 @@ export class TldwApiClientBase {
     json: () => Promise<any>
     text: () => Promise<string>
   }> {
+    const documentSignal = captureDocumentGetSignal(init?.method)
+    documentSignal?.throwIfAborted()
     await this.ensureConfigForRequest(true)
+    documentSignal?.throwIfAborted()
     const scopeFields = requestScopeFields(init?.requestScope)
     const response = await bgRequest<any, PathOrUrl>({
       ...scopeFields,
@@ -2162,6 +2183,7 @@ export class TldwApiClientBase {
       suppressBackendUnavailableEvent: init?.suppressBackendUnavailableEvent,
       returnResponse: true
     })
+    documentSignal?.throwIfAborted()
     const data = response?.data
     const text = () => {
       if (typeof data === "string") return Promise.resolve(data)
@@ -3731,7 +3753,7 @@ export class TldwApiClientBase {
   // Document Annotations Methods
   async listAnnotations(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     annotations: Array<{
@@ -3765,6 +3787,7 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/annotations`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3777,8 +3800,10 @@ export class TldwApiClientBase {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
       annotation_type?: "highlight" | "page_note"
+      chapter_title?: string
+      percentage?: number
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     id: string
     media_id: number
@@ -3804,8 +3829,9 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/annotations`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: annotation,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3818,7 +3844,7 @@ export class TldwApiClientBase {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     id: string
     media_id: number
@@ -3845,8 +3871,9 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/annotations/${annId}`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: updates,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3854,13 +3881,14 @@ export class TldwApiClientBase {
   async deleteAnnotation(
     mediaId: string | number,
     annotationId: string,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     const annId = encodeURIComponent(annotationId)
     await bgRequest<void>({
       path: `/api/v1/media/${id}/annotations/${annId}`,
       method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3873,9 +3901,11 @@ export class TldwApiClientBase {
       color?: "yellow" | "green" | "blue" | "pink"
       note?: string
       annotation_type?: "highlight" | "page_note"
+      chapter_title?: string
+      percentage?: number
     }>,
     clientIds?: string[],
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     synced_count: number
@@ -3911,11 +3941,12 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/annotations/sync`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: {
         annotations,
         ...(clientIds && { client_ids: clientIds })
       },
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3923,7 +3954,7 @@ export class TldwApiClientBase {
   // Reading Progress Methods
   async getReadingProgress(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     has_progress?: boolean
@@ -3949,6 +3980,7 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/progress`,
       method: "GET",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -3963,7 +3995,7 @@ export class TldwApiClientBase {
       cfi?: string
       percentage?: number
     },
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<{
     media_id: number
     current_page: number
@@ -3987,20 +4019,22 @@ export class TldwApiClientBase {
     }>({
       path: `/api/v1/media/${id}/progress`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...requestScopeFields(options?.requestScope).headers, "Content-Type": "application/json" },
       body: progress,
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
 
   async deleteReadingProgress(
     mediaId: string | number,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope }
   ): Promise<void> {
     const id = encodeURIComponent(String(mediaId))
     await bgRequest<void>({
       path: `/api/v1/media/${id}/progress`,
       method: "DELETE",
+      ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
   }
@@ -4447,12 +4481,14 @@ export class TldwApiClientBase {
   }
 
   async getResearchBundle(
-    run_id: string | number
+    run_id: string | number,
+    options?: { signal?: AbortSignal; requestScope?: ServicePromptRequestScope; timeoutMs?: number }
   ): Promise<ResearchBundleResponse> {
     const rid = String(run_id)
     return await bgRequest<ResearchBundleResponse>({
+      ...requestScopeFields(options?.requestScope),
       path: `/api/v1/research/runs/${encodeURIComponent(rid)}/bundle`,
-      method: "GET"
+      method: "GET", abortSignal: options?.signal, timeoutMs: options?.timeoutMs
     })
   }
 
@@ -4778,6 +4814,7 @@ export class TldwApiClientBase {
               ? senderCandidate
               : undefined,
           content: String(m.content ?? ""),
+          parent_message_id: m.parent_message_id == null ? m.parent_message_id : String(m.parent_message_id),
           created_at,
           version:
             typeof m.version === "number"
@@ -5298,39 +5335,18 @@ export class TldwApiClientBase {
   // ─────────────────────────────────────────────────────────────────────────
 
 
-  async getDataTable(
-    tableId: string,
-    params?: {
-      rows_limit?: number
-      rows_offset?: number
-      include_rows?: boolean
-      include_sources?: boolean
-    }
-  ): Promise<any> {
-    const id = encodeURIComponent(tableId)
-    const query = this.buildQuery({
-      rows_limit: params?.rows_limit,
-      rows_offset: params?.rows_offset,
-      include_rows: params?.include_rows,
-      include_sources: params?.include_sources
-    } as Record<string, any>)
-    const response = await bgRequest<any>({
-      path: `/api/v1/data-tables/${id}${query}`,
-      method: "GET"
-    })
-    return response?.table ? mapApiDetailToUi(response) : response
-  }
-
-
   async updateDataTable(
     tableId: string,
-    payload: { name?: string; description?: string }
+    payload: { name?: string; description?: string },
+    options?: ScopedRequestOptions
   ): Promise<any> {
     const id = encodeURIComponent(tableId)
     return await bgRequest<any>({
       path: `/api/v1/data-tables/${id}`,
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body: payload
     })
   }
@@ -5340,33 +5356,22 @@ export class TldwApiClientBase {
     payload: {
       columns: DataTableColumn[]
       rows: Record<string, any>[]
-    }
+    },
+    options?: ScopedRequestOptions
   ): Promise<any> {
     const id = encodeURIComponent(tableId)
     const body = buildContentPayload(payload.columns, payload.rows)
     const response = await bgRequest<any>({
       path: `/api/v1/data-tables/${id}/content`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      ...requestScopeFields(options?.requestScope),
+      abortSignal: options?.signal,
+      headers: { "Content-Type": "application/json", ...requestScopeFields(options?.requestScope).headers },
       body
     })
     return response?.table ? mapApiDetailToUi(response) : response
   }
 
-
-
-  async regenerateDataTable(
-    tableId: string,
-    payload?: { prompt?: string; model?: string; max_rows?: number }
-  ): Promise<ApiDataTableGenerateResponse> {
-    const id = encodeURIComponent(tableId)
-    return await bgRequest<ApiDataTableGenerateResponse>({
-      path: `/api/v1/data-tables/${id}/regenerate`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload || {}
-    })
-  }
 
 
   // ─────────────────────────────────────────────────────────────────────────────

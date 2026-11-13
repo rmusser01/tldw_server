@@ -10,7 +10,8 @@ const memory: Record<string, any> = vi.hoisted(() => {
     "compareStates",
     "historySelections",
     "historyProjections",
-    "forkOperations"
+    "forkOperations",
+    "searchTokens"
   ]) {
     const rows = new Map<string, any>()
     const key = (v: any) =>
@@ -21,6 +22,8 @@ const memory: Record<string, any> = vi.hoisted(() => {
             ? [v.owner_key, v.operation_id]
           : name === "historyProjections"
             ? [v.owner_key, v.conversation_id, v.projection_id]
+          : name === "searchTokens"
+            ? [v.token, v.history_id]
             : v.id ?? v.sessionId ?? v.history_id
       )
     tables[name] = {
@@ -47,6 +50,11 @@ const memory: Record<string, any> = vi.hoisted(() => {
         rows.set(k, { ...rows.get(k), ...structuredClone(patch) })
       },
       delete: async (id: any) => rows.delete(JSON.stringify(id)),
+      filter: (predicate: (row: any) => boolean) => ({
+        delete: async () => {
+          for (const [k, row] of rows) if (predicate(row)) rows.delete(k)
+        }
+      }),
       where: (field: string) => ({
         equals: (v: any) => ({
           delete: async () => {
@@ -1132,11 +1140,19 @@ it("clean deletion and same-owner undo retain the settled local baseline and row
   const snapshot = await getFullChatData("source")
   await deleteByHistoryId("source")
   expect(memory.messages.rows.size).toBe(0)
+  expect(memory.searchTokens.rows.size).toBe(0)
   await restoreChat(snapshot!)
   expect(
     (await memory.chatHistories.get("source")).local_settings_guard
   ).toEqual(snapshot!.historyInfo.local_settings_guard)
   expect(memory.messages.rows.size).toBe(3)
+  // WP-23: undo is a message write path, so restored rows re-enter the
+  // content-search token index.
+  expect(
+    [...memory.searchTokens.rows.values()].some(
+      (row) => row.history_id === "source"
+    )
+  ).toBe(true)
 })
 it("grouped deletion uses the atomic pending guard before removing any target messages", async () => {
   const { deleteHistoriesByDateRange } = await import("../helpers")

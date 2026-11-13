@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React, { Suspense, useState, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
@@ -45,7 +46,10 @@ import {
   Switch
 } from "antd"
 import { useMobile } from "@/hooks/useMediaQuery"
-import { useWorkspaceStore } from "@/store/workspace"
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { hasWorkspaceArtifactOrigin, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
+import { hasResearchWorkspaceMigrationTombstone, useWorkspaceStore } from "@/store/workspace"
 import type { AudioTtsProvider } from "@/types/workspace"
 import { OUTPUT_TYPES } from "@/types/workspace"
 import type {
@@ -62,6 +66,10 @@ import {
 } from "@/workspace-templates/work-product-templates"
 import { useStoreMessageOption } from "@/store/option"
 import { useStoreChatModelSettings } from "@/store/model"
+import {
+  normalizeApiProviderKey,
+  parseProviderQualifiedModelSelection
+} from "@/utils/resolve-api-provider"
 import { getWorkspaceStudioNoSourcesHint } from "../source-location-copy"
 import { WorkProductTemplateChooser } from "./WorkProductTemplateChooser"
 import {
@@ -120,6 +128,8 @@ export { estimateGenerationSeconds, estimateGenerationTokens, estimateGeneration
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Icon mapping for artifact types
+const StoredAudioArtifactViewer = React.lazy(() => import("./StoredAudioArtifactViewer"))
+
 const ARTIFACT_TYPE_ICONS: Record<ArtifactType, React.ElementType> = {
   audio_overview: Headphones,
   video_overview: Video,
@@ -306,10 +316,10 @@ const isStudioWorkspaceSourceUsable = (source: WorkspaceSource) => {
 const normalizeStudioChatModelId = (value: unknown): string => {
   if (typeof value !== "string") return ""
   const trimmed = value.trim()
-  if (trimmed.toLowerCase().startsWith("tldw:")) {
-    return trimmed.slice(5).trim()
-  }
-  return trimmed
+  const modelId = trimmed.toLowerCase().startsWith("tldw:")
+    ? trimmed.slice(5).trim()
+    : trimmed
+  return parseProviderQualifiedModelSelection(modelId).modelId
 }
 
 const buildSelectedModelUnavailableMessage = (
@@ -789,6 +799,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const { t } = useTranslation(["playground", "common"])
   const isMobile = useMobile()
   const [messageApi, contextHolder] = message.useMessage()
+  const [artifactModal, artifactModalContextHolder] = Modal.useModal()
 
   // Store state
   const selectedSourceIds = useWorkspaceStore((s) => s.selectedSourceIds)
@@ -804,6 +815,16 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   const isGeneratingOutput = useWorkspaceStore((s) => s.isGeneratingOutput)
   const generatingOutputType = useWorkspaceStore((s) => s.generatingOutputType)
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
+  const entryLifetime = useRef({ mounted: false, epoch: 0 })
+  useEffect(() => {
+    const lifetime = entryLifetime.current
+    lifetime.mounted = true
+    lifetime.epoch += 1
+    return () => {
+      lifetime.mounted = false
+      lifetime.epoch += 1
+    }
+  }, [workspaceId])
   const workspaceName = useWorkspaceStore((s) => s.workspaceName)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
   const studyMaterialsPolicy = useWorkspaceStore((s) => s.studyMaterialsPolicy)
@@ -987,6 +1008,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     typeof selectedModel === "string" ? selectedModel.trim() : ""
   const hasSelectedModelValue = selectedModelValue.length > 0
   const selectedModelCatalogKey = normalizeStudioChatModelId(selectedModelValue)
+  const selectedModelSelection = parseProviderQualifiedModelSelection(selectedModelValue)
   const baseModelPrerequisiteMessage = hasSelectedModelValue
     ? null
     : t(
@@ -1111,6 +1133,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     cumulativeUsage,
     handleGenerateOutput,
     handleCancelGeneration,
+    unsavedArtifact,
+    isSavingArtifact,
+    handleRetryArtifactSave,
     loadFlashcardDecks,
   } = artifactGeneration
 
@@ -1158,17 +1183,29 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   const selectedModelMatchesChatCatalog =
     selectedModelCatalogKey.length > 0 &&
-    _chatModels.some(
-      (model) =>
-        typeof model.id === "string" &&
-        normalizeStudioChatModelId(model.id) === selectedModelCatalogKey
-    )
+    _chatModels.some((model) => {
+      if (
+        typeof model.id !== "string" ||
+        normalizeStudioChatModelId(model.id) !== selectedModelCatalogKey
+      )
+        return false
+      if (!selectedModelSelection.provider) return true
+      const catalogProvider =
+        model.chatProvider ||
+        parseProviderQualifiedModelSelection(model.id).provider ||
+        model.provider
+      return (
+        normalizeApiProviderKey(catalogProvider) ===
+        selectedModelSelection.provider
+      )
+    })
   const selectedModelIsStaleTldw =
     selectedModelValue.toLowerCase().startsWith("tldw:") &&
     !selectedModelMatchesChatCatalog
   const selectedModelLooksCatalogBacked =
     selectedModelValue.includes("/") ||
-    selectedModelValue.toLowerCase().startsWith("tldw:")
+    selectedModelValue.toLowerCase().startsWith("tldw:") ||
+    selectedModelSelection.isProviderQualified
   const unavailableSelectedModelMessage =
     hasSelectedModelValue && !selectedModelMatchesChatCatalog
       ? buildSelectedModelUnavailableMessage(
@@ -1290,33 +1327,46 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         messageApi.warning(generationPrerequisiteMessage)
         return
       }
-      let capabilityPayload = researchWorkspaceCapabilities
+      let retired = false
+      const clickEpoch = entryLifetime.current.epoch
+      const clickWorkspace = useWorkspaceStore.getState().workspaceId
+      const stopWatching = watchChatAccountChanges((invalidated) => {
+        if (invalidated) retired = true
+      })
+      const isCurrentClick = () => !retired && entryLifetime.current.mounted &&
+        entryLifetime.current.epoch === clickEpoch &&
+        useWorkspaceStore.getState().workspaceId === clickWorkspace
+      try {
+        let capabilityPayload = researchWorkspaceCapabilities
 
-      if (onRefreshResearchWorkspaceCapabilities) {
-        try {
-          capabilityPayload = await onRefreshResearchWorkspaceCapabilities()
-        } catch {
-          capabilityPayload = researchWorkspaceCapabilities
+        if (onRefreshResearchWorkspaceCapabilities) {
+          try {
+            capabilityPayload = await onRefreshResearchWorkspaceCapabilities()
+          } catch {
+            capabilityPayload = researchWorkspaceCapabilities
+          }
         }
-      }
 
-      const refreshedCapability = getOutputCapability(type, capabilityPayload)
-      if (refreshedCapability?.mode === "block") {
-        messageApi.warning(
-          getCapabilityCopy(refreshedCapability, label) ||
-            t(
-              "playground:studio.outputUnavailable",
-              "{{label}} is unavailable while required services are offline.",
-              { label }
-            )
-        )
-        return
-      }
+        if (!isCurrentClick()) return
+        const refreshedCapability = getOutputCapability(type, capabilityPayload)
+        if (refreshedCapability?.mode === "block") {
+          messageApi.warning(
+            getCapabilityCopy(refreshedCapability, label) ||
+              t(
+                "playground:studio.outputUnavailable",
+                "{{label}} is unavailable while required services are offline.",
+                { label }
+              )
+          )
+          return
+        }
 
-      if (type === "audio_overview" || type === "video_overview") {
-        setShowTtsSettings(true)
-      }
-      await handleGenerateOutput(type, options)
+        if (type === "audio_overview" || type === "video_overview") {
+          setShowTtsSettings(true)
+        }
+        if (!isCurrentClick()) return
+        await handleGenerateOutput(type, options)
+      } finally { stopWatching() }
     },
     [
       generationPrerequisiteMessage,
@@ -1340,6 +1390,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   } = quizParsing
 
   const artifactExport = useArtifactExport({
+    workspaceId,
     messageApi,
     isMobile,
     generatedArtifacts,
@@ -1411,14 +1462,113 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
   }, [generatedArtifacts.length, outputListViewportHeight, useVirtualizedOutputs])
 
+  const openEditors = useRef(new Set<() => void>())
+  useEffect(() => () => {
+    for (const close of [...openEditors.current]) close()
+  }, [workspaceId])
+
+  const createEditorGuard = () => {
+    let open = true
+    let destroy = () => {}
+    const retire = () => {
+      open = false
+      stopWatching()
+      openEditors.current.delete(close)
+    }
+    const close = () => { retire(); destroy() }
+    const stopWatching = watchChatAccountChanges(invalidated => {
+      if (invalidated) close()
+    })
+    return {
+      isCurrent: () => open && useWorkspaceStore.getState().workspaceId === workspaceId,
+      afterClose: retire,
+      attach: (modal: { destroy: () => void }) => {
+        destroy = () => modal.destroy()
+        if (open) openEditors.current.add(close)
+        else destroy()
+      },
+    }
+  }
+
+  const saveEditedArtifact = async (
+    artifact: GeneratedArtifact, patch: Partial<GeneratedArtifact>, editorIsCurrent: () => boolean
+  ) => {
+    const controller = new AbortController()
+    const deadline = performance.now() + 15000
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    const stopWatching = watchChatAccountChanges(invalidated => {
+      if (invalidated) controller.abort()
+    })
+    let scope: ServicePromptSnapshot | undefined
+    const isCurrent = () => {
+      if (!editorIsCurrent() || controller.signal.aborted || scope?.scopeInvalidatedSignal.aborted)
+        return false
+      const current = useWorkspaceStore.getState().generatedArtifacts.find(entry => entry.id === artifact.id)
+      return Boolean(current &&
+        (!scope || hasWorkspaceArtifactOrigin(current, scope.scopeKey, workspaceId!)) &&
+        sameWorkspaceArtifactPayload(workspaceArtifactDraftPayload(current), workspaceArtifactDraftPayload(artifact)))
+    }
+    try {
+      let saved = { ...artifact, ...patch }
+      if (workspaceId && (artifact.workspaceArtifactId ||
+          hasResearchWorkspaceMigrationTombstone(workspaceId) || hasCanonicalArtifactWorkspace(workspaceId))) {
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+        if (!isCurrent() || !hasWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId))
+          throw new Error("Reopen this output in the current account before saving.")
+        saved = await persistWorkspaceArtifact(saved, {
+          workspaceId, scope, isCurrent, deadline,
+          updateOnly: artifact.workspaceArtifactId ? "content" : undefined,
+        })
+      }
+      if (!isCurrent()) throw new DOMException("The editor or workspace changed.", "AbortError")
+      updateArtifactStatus(saved.id, saved.status, saved)
+    } finally {
+      clearTimeout(timeout)
+      stopWatching()
+      scope?.release()
+    }
+  }
+
   // ── View artifact handler ──
+
+  const openArtifactViewer = (config: Parameters<typeof artifactModal.info>[0]) => {
+    const viewer = createEditorGuard()
+    try {
+      const modal = artifactModal.info({ ...config, afterClose: viewer.afterClose })
+      viewer.attach(modal)
+    } catch (error) {
+      viewer.afterClose()
+      throw error
+    }
+  }
 
   const handleViewArtifact = (artifact: GeneratedArtifact) => {
     const responsiveModalProps = (desktopWidth: number) =>
       getResponsiveArtifactModalProps(isMobile, desktopWidth)
 
+    if (artifact.type === "audio_overview" && artifact.audioFormat !== "browser" &&
+        (!artifact.audioUrl || artifact.exportRefs?.some(ref => ref.sourceType === "storage_file"))) {
+      const viewer = createEditorGuard()
+      try {
+        const modal = artifactModal.info({
+          title: artifact.title,
+          content: renderArtifactModalContent(
+            <StoredAudioArtifactViewer artifact={artifact} workspaceId={workspaceId ?? ""} isCurrent={viewer.isCurrent} />,
+            t("playground:studio.loadingOutputViewer", "Loading output viewer...")
+          ),
+          ...responsiveModalProps(560),
+          afterClose: viewer.afterClose,
+        })
+        viewer.attach(modal)
+      } catch (error) {
+        viewer.afterClose()
+        throw error
+      }
+      return
+    }
+
     if (artifact.type === "audio_overview" && artifact.audioUrl) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: (
           <div className="flex flex-col gap-4">
@@ -1451,7 +1601,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       artifact.audioFormat === "browser" &&
       artifact.content
     ) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: (
           <BrowserSpeechArtifactViewer
@@ -1465,7 +1615,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.type === "mindmap" && artifact.content) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <MindMapArtifactViewer content={artifact.content} />,
@@ -1479,7 +1629,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.type === "data_table" && artifact.content) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <DataTableArtifactViewer title={artifact.title} content={artifact.content} />,
@@ -1493,7 +1643,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.type === "video_overview") {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <VideoOverviewArtifactViewer artifact={artifact} />,
@@ -1507,7 +1657,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.type === "infographic") {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <InfographicArtifactViewer artifact={artifact} />,
@@ -1522,20 +1672,22 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
     if (artifact.type === "flashcards") {
       const initialCards = getArtifactFlashcards(artifact)
-      const modal = Modal.info({
+      const editor = createEditorGuard()
+      const modal = artifactModal.info({
+        afterClose: editor.afterClose,
         title: artifact.title,
         content: renderArtifactModalContent(
           <FlashcardArtifactEditor
             cards={initialCards}
-            onSave={(cards) => {
+            onSave={async (cards) => {
               const nextContent = formatFlashcardsContent(cards)
-              updateArtifactStatus(artifact.id, artifact.status, {
+              await saveEditedArtifact(artifact, {
                 content: nextContent,
                 data: {
                   ...(artifact.data || {}),
                   flashcards: cards
                 }
-              })
+              }, editor.isCurrent)
               messageApi.success(
                 t(
                   "playground:studio.flashcardsSaved",
@@ -1551,28 +1703,31 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         footer: null,
         icon: null
       })
+      editor.attach(modal)
       return
     }
 
     if (artifact.type === "quiz") {
       const initialQuestions = getArtifactQuizQuestions(artifact)
-      const modal = Modal.info({
+      const editor = createEditorGuard()
+      const modal = artifactModal.info({
+        afterClose: editor.afterClose,
         title: artifact.title,
         content: renderArtifactModalContent(
           <QuizArtifactEditor
             questions={initialQuestions}
-            onSave={(questions) => {
+            onSave={async (questions) => {
               const nextContent = formatQuizContent(
                 questions,
                 artifact.title
               )
-              updateArtifactStatus(artifact.id, artifact.status, {
+              await saveEditedArtifact(artifact, {
                 content: nextContent,
                 data: {
                   ...(artifact.data || {}),
                   questions
                 }
-              })
+              }, editor.isCurrent)
               messageApi.success(
                 t("playground:studio.quizSaved", "Quiz updated")
               )
@@ -1585,13 +1740,14 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         footer: null,
         icon: null
       })
+      editor.attach(modal)
       return
     }
 
     const proposalVerificationArtifact =
       findProposalDeepResearchVerificationArtifact(artifact, generatedArtifacts)
     if (artifact.content && proposalVerificationArtifact) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: renderArtifactModalContent(
           <ProposalDeepResearchVerificationViewer
@@ -1610,7 +1766,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
 
     if (artifact.content || hasTraceableArtifactMetadata(artifact)) {
-      Modal.info({
+      openArtifactViewer({
         title: artifact.title,
         content: (
           <div className="max-h-[70vh] space-y-4 overflow-y-auto">
@@ -1634,6 +1790,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-y-auto">
       {contextHolder}
+      {artifactModalContextHolder}
 
       {/* Header */}
       <div className="flex items-start justify-between border-b border-border px-4 py-3">
@@ -2092,10 +2249,20 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
               danger
               icon={<Square className="h-3.5 w-3.5 fill-current" />}
               onClick={handleCancelGeneration}
+              disabled={generationPhase === "finalizing"}
             >
               {t("common:cancel", "Cancel")}
             </Button>
             </div>
+          </div>
+        )}
+        {unsavedArtifact && (
+          <div role="alert" className="rounded border border-warning/40 bg-warning/10 p-3 text-sm">
+            <p>{t("playground:studio.outputSaveFailed",
+              "Output is generated but could not be saved. Retry saving without generating again.")}</p>
+            <Button size="small" loading={isSavingArtifact} onClick={() => void handleRetryArtifactSave()}>
+              {t("playground:studio.retrySaving", "Retry saving output")}
+            </Button>
           </div>
         )}
         {(() => {
@@ -2858,7 +3025,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                             )}
                           </p>
                         )}
-                        {artifact.status === "failed" && artifact.errorMessage && (
+                        {artifact.errorMessage && (
                           <p className="mt-1 text-xs text-error">
                             {artifact.errorMessage}
                           </p>
@@ -2940,13 +3107,13 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                             trigger={["click"]}
                             menu={{
                               items: [
-                                {
+                                ...(["video_overview", "infographic"].includes(artifact.type) ? [] : [{
                                   key: "replace",
                                   label: t(
                                     "playground:studio.regenerateReplace",
                                     "Replace existing"
                                   )
-                                },
+                                }]),
                                 {
                                   key: "new_version",
                                   label: t(

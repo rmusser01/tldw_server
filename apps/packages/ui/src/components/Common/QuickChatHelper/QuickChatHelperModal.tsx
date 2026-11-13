@@ -5,6 +5,8 @@ import { Modal, Button, Tooltip, Select, Segmented } from "antd"
 import { ExternalLink, AlertCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { useQuickChat } from "@/hooks/useQuickChat"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { useQuickChatStore } from "@/store/quick-chat"
 import { QuickChatMessage } from "./QuickChatMessage"
 import { QuickChatInput } from "./QuickChatInput"
@@ -35,6 +37,12 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutori
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const { assistantMode, setAssistantMode } = useQuickChatStore()
   const startTutorial = useStartTutorial()
+  const owner = usePromptLocalAuthority()
+  const popoutOwnerRef = useRef<string | null>(null)
+  popoutOwnerRef.current = owner.ready ? owner.ownerId : null
+  useEffect(() => watchChatAccountChanges(invalidated => {
+    if (invalidated) popoutOwnerRef.current = null
+  }), [])
   const [handedOff, setHandedOff] = useState(false)
   const {
     messages,
@@ -76,8 +84,10 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutori
 
   const handlePopOut = useCallback(() => {
     // Serialize current state to sessionStorage
+    const ownerId = popoutOwnerRef.current
     const state = useQuickChatStore.getState().getSerializableState()
-    const popoutState = buildQuickChatPopoutState(state, location.pathname)
+    if (!ownerId || state.messages.length === 0) return
+    const popoutState = buildQuickChatPopoutState(state, location.pathname, ownerId)
     const stateKey = `quickchat_${Date.now()}`
     sessionStorage.setItem(stateKey, JSON.stringify(popoutState))
 
@@ -94,6 +104,8 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutori
     if (popoutWindow) {
       useQuickChatStore.getState().setPopoutWindow(popoutWindow)
       onClose()
+    } else {
+      sessionStorage.removeItem(stateKey)
     }
   }, [location.pathname, onClose])
 
@@ -107,6 +119,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutori
     "option:quickChatHelper.popOutDisabled",
     "Pop-out is disabled when there are no messages. Start a conversation first."
   )
+  const popoutAccountHint = t("option:quickChatHelper.popOutAccountUnavailable", "Reconnect to your account before opening a pop-out.")
   const connectionLabel = isConnectionReady
     ? t("common:connected", "Connected")
     : t("common:notConnected", "Not connected")
@@ -184,7 +197,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutori
         <div className="flex items-center justify-between pr-8">
           <span id="quick-chat-title">{title}</span>
           <Tooltip
-            title={messages.length === 0 ? popOutDisabledTooltip : popOutLabel}
+            title={messages.length === 0 ? popOutDisabledTooltip : !owner.ready || !owner.ownerId ? popoutAccountHint : popOutLabel}
             styles={
               messages.length === 0 ? EMPTY_POP_OUT_TOOLTIP_STYLES : undefined
             }>
@@ -194,7 +207,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutori
               icon={<ExternalLink className="h-4 w-4" />}
               onClick={handlePopOut}
               aria-label={popOutLabel}
-              disabled={messages.length === 0}
+              disabled={messages.length === 0 || !owner.ready || !owner.ownerId}
             />
           </Tooltip>
         </div>

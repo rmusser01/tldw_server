@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import {
   Button,
   Card,
@@ -556,7 +557,7 @@ export function FamilyGuardrailsWizard({
       const target = memberFieldInputRefs.current[`${role}:${memberKey}:${field}`]
       if (!target) return
       if (typeof target.scrollIntoView === "function") {
-        target.scrollIntoView({ block: "center", behavior: "smooth" })
+        target.scrollIntoView({ block: "center", behavior: smoothScrollBehavior() })
       }
       target.focus()
     },

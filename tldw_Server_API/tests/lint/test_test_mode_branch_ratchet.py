@@ -346,5 +346,10 @@ def test_security_functions_read_no_test_signal() -> None:
     assert problems == [], "\n".join(problems)
 
 
+def test_no_private_test_mode_predicates() -> None:
+    """Every private 'is this a test' predicate is gone; there is no bump path (TASK-13950.19)."""
+    assert sum(entry["predicates"] for entry in _app_measurement().values()) == 0
+
+
 if __name__ == "__main__":
     raise SystemExit(_ceilings.main(RATCHET, measure))

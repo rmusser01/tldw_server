@@ -246,7 +246,7 @@ async def get_mcp_hub_tool_registry_dep() -> McpHubToolRegistryService:
     return McpHubToolRegistryService()
 
 
-async def _execute_external_refresh_tool(server_id: str) -> dict[str, Any]:
+async def _execute_external_refresh_tool(server_id: str | None) -> dict[str, Any]:
     """Execute the existing external federation discovery refresh tool."""
     server = get_mcp_server()
     if not getattr(server, "initialized", False):
@@ -261,7 +261,7 @@ async def _execute_external_refresh_tool(server_id: str) -> dict[str, Any]:
     return result.model_dump()
 
 
-async def get_mcp_hub_external_refresh_executor() -> Callable[[str], Awaitable[dict[str, Any]]]:
+async def get_mcp_hub_external_refresh_executor() -> Callable[[str | None], Awaitable[dict[str, Any]]]:
     """Resolve the external discovery refresh executor for route dependency overrides."""
     return _execute_external_refresh_tool
 
@@ -1645,7 +1645,7 @@ async def refresh_single_external_server_discovery(
     principal: AuthPrincipal = Depends(get_auth_principal),
     svc: McpHubService = Depends(get_mcp_hub_service),
     registry: McpHubToolRegistryService = Depends(get_mcp_hub_tool_registry_dep),
-    refresh_executor: Callable[[str], Awaitable[dict[str, Any]]] = Depends(
+    refresh_executor: Callable[[str | None], Awaitable[dict[str, Any]]] = Depends(
         get_mcp_hub_external_refresh_executor
     ),
 ) -> McpServerReadinessResponse:
@@ -1664,7 +1664,10 @@ async def refresh_single_external_server_discovery(
     except TimeoutError as exc:
         raise HTTPException(status_code=409, detail="Discovery refresh is already running") from exc
     try:
-        raw_result = await refresh_executor(server_id)
+        try:
+            raw_result = await svc.refresh_external_server_discovery(server_id, refresh_executor)
+        except McpHubConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     finally:
         lock.release()
 
@@ -3815,6 +3818,7 @@ async def refresh_external_servers_discovery(
     payload: ExternalServerDiscoveryRefreshRequest | None = Body(default=None),
     server_id: str | None = Query(default=None),
     principal: AuthPrincipal = Depends(get_auth_principal),
+    svc: McpHubService = Depends(get_mcp_hub_service),
 ) -> ExternalServerDiscoveryRefreshResponse:
     """Reconcile live MCP external federation discovery with managed storage."""
     _require_mutation_permission(principal)
@@ -3826,7 +3830,15 @@ async def refresh_external_servers_discovery(
             detail="server_id query parameter conflicts with request body server_id",
         )
     effective_server_id = query_server_id if query_server_id is not None else body_server_id
-    return await _refresh_external_server_discovery_runtime(server_id=effective_server_id)
+
+    async def execute_refresh(target_id: str | None) -> dict[str, Any]:
+        return (await _refresh_external_server_discovery_runtime(server_id=target_id)).model_dump()
+
+    try:
+        result = await svc.refresh_external_server_discovery(effective_server_id, execute_refresh)
+    except McpHubConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return ExternalServerDiscoveryRefreshResponse.model_validate(result)
 
 
 @router.post("/external-servers/{server_id}/import", response_model=ExternalServerResponse, status_code=201)

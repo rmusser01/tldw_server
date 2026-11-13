@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, status
+from fastapi.encoders import jsonable_encoder
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
@@ -32,6 +33,7 @@ from tldw_Server_API.app.core.claims_analytics_export_contract import (
     is_valid_persisted_claims_analytics_export_filters,
     is_valid_persisted_claims_analytics_export_pagination,
 )
+from tldw_Server_API.app.core.claims_cluster_rebuild_contract import ClusterRebuildSettings, canonical_cluster_settings
 from tldw_Server_API.app.core.Claims_Extraction import claims_analytics_exports, claims_jobs
 from tldw_Server_API.app.core.Claims_Extraction.alignment import align_claim_span
 from tldw_Server_API.app.core.Claims_Extraction.claims_alert_delivery import (
@@ -61,6 +63,7 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
     resolve_claims_alignment_config,
     resolve_claims_context_window_chars,
     resolve_claims_extraction_passes,
+    resolve_claims_llm_config,
     resolve_claims_prompt_validation_config,
 )
 from tldw_Server_API.app.core.config import settings
@@ -71,12 +74,15 @@ from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, RetryExhaustedError
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
+from tldw_Server_API.app.core.Jobs.resource_contracts import ResourceAdmission, ResourceAdmissionRequest, ResourceScope
+from tldw_Server_API.app.core.Jobs.resource_policy import resource_requirement_for
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
 
 try:
     import psycopg as _psycopg
@@ -579,8 +585,11 @@ def _fva_claims_analyze_call(
         logger.warning(f"FVA analyze call unavailable: {exc}")
         return ""
 
-    provider = str(api_endpoint or settings.get("CLAIMS_LLM_PROVIDER", "openai")).strip() or "openai"
-    model = str(model_override or settings.get("CLAIMS_LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
+    provider = str(api_endpoint or "").strip()
+    model = str(model_override or "").strip() or None
+    if not provider:
+        provider, default_model, _ = resolve_claims_llm_config(settings)
+        model = model or default_model
     try:
         temperature = float(temp if temp is not None else settings.get("CLAIMS_LLM_TEMPERATURE", 0.3))
     except _CLAIMS_NONCRITICAL_EXCEPTIONS:
@@ -2854,7 +2863,7 @@ async def review_claim(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
                     "error": "version_conflict",
-                    "current": updated.get("current"),
+                    "current": jsonable_encoder(updated.get("current")),
                 },
             )
         latency_s = None
@@ -4053,6 +4062,67 @@ def list_claim_clusters(
         "next_offset": pagination.next_offset,
         "pagination": pagination,
     }
+
+
+def authorize_claim_cluster_rebuild_owner(
+    *,
+    user_id: int | None,
+    principal: AuthPrincipal,
+    current_user: User,
+) -> str:
+    """Authorize before Jobs lookup and reject non-routable owner identities."""
+    _ensure_claims_admin(principal)
+    if user_id is not None and not _principal_has_platform_admin_claims(principal):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+    owner = getattr(current_user, "id", None) if user_id is None else user_id
+    if type(owner) is int:
+        owner = str(owner)
+    if not is_routable_claims_owner_id_text(owner):
+        raise HTTPException(status_code=400, detail="Invalid Claims cluster rebuild owner")
+    return owner
+
+
+def admit_claim_cluster_rebuild(
+    *,
+    min_size: int,
+    method: str | None,
+    similarity_threshold: float | None,
+    user_id: int | None,
+    request_key: str | None,
+    principal: AuthPrincipal,
+    current_user: User,
+    job_manager: JobManager,
+) -> ResourceAdmission:
+    """Admit routed work in Task9's Jobs scope inside the executing thread."""
+    owner = authorize_claim_cluster_rebuild_owner(user_id=user_id, principal=principal, current_user=current_user)
+    cluster_method = (method or settings.get("CLAIMS_CLUSTER_METHOD", "embeddings") or "embeddings").strip().lower()
+    if cluster_method not in {"embeddings", "exact"}:
+        raise HTTPException(status_code=400, detail="Invalid clustering method")
+    threshold = similarity_threshold
+    if cluster_method == "embeddings" and threshold is None:
+        threshold = settings.get("CLAIMS_CLUSTER_SIMILARITY_THRESHOLD", 0.85)
+        if isinstance(threshold, str):
+            try:
+                threshold = float(threshold)
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Invalid clustering settings") from None
+    try:
+        effective = ClusterRebuildSettings(1, cluster_method, min_size, threshold, 1)
+        # Validate at the public service boundary, before backend admission.
+        ResourceAdmissionRequest(
+            ResourceScope("claims", owner, "cluster-rebuild"), canonical_cluster_settings(effective), request_key
+        )
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid clustering settings or request key") from None
+    if resource_requirement_for("claims", "claims_rebuild_clusters") != "cluster-rebuild":
+        raise HTTPException(status_code=503, detail="Claims cluster rebuild admission unavailable")
+    return claims_jobs.enqueue_claims_cluster_rebuild(
+        owner_user_id=owner,
+        settings=effective,
+        request_key=request_key,
+        job_manager=job_manager,
+        settings_obj=settings,
+    )
 
 
 def rebuild_claim_clusters(

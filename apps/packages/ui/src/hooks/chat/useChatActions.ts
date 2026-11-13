@@ -1,3 +1,4 @@
+import { updateImageEventSyncMetadataForPayload } from "./useImageEventSync"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import type { NativeHistoryEditResend, NativeHistoryRegenerate, HistoryEditAndSendBoundary, HistoryRegenerateBoundary } from "@/types/chat-modes"
 import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
@@ -28,7 +29,6 @@ import {
   saveMessage,
   updateHistory,
   updateMessage,
-  updateMessageMedia,
   removeMessageById,
   updateMessageById,
   formatToChatHistory,
@@ -437,6 +437,7 @@ const characterIdsMatch = (
 }
 
 type UseChatActionsOptions = {
+  capturePrivateScene?: (commandIsCurrent: () => boolean) => ReturnType<typeof captureActorSceneSend>
   t: TFunction
   notification: NotificationInstance
   abortController: AbortController | null
@@ -620,9 +621,13 @@ export const useChatActions = ({
   inheritedPersonaMemoryMode,
   clearMessageSteering,
   visualIdentityManualExpressionOverride,
-  setVisualIdentityManualExpressionOverride
+  setVisualIdentityManualExpressionOverride,
+  capturePrivateScene
 }: UseChatActionsOptions) => {
   const historySelection = useHistorySelectionContext()
+  const captureSceneForCommand = (isCurrent: () => boolean) => historySelection
+    ? captureActorSceneSend(historySelection, isCurrent)
+    : capturePrivateScene?.(isCurrent) ?? null
   const renderedDraftRevision = useStoreMessageOption.getState().chatDraftRevision
   const renderedSettingsDraft = useStoreMessageOption.getState().chatDraftAddress
   const renderedContinuationFence = historySelection?.fence()
@@ -916,117 +921,11 @@ export const useChatActions = ({
   )
 
   const updateImageEventSyncMetadata = React.useCallback(
-    async (
+    (
       payload: SaveMessagePayload,
-      update: {
-        status: "pending" | "synced" | "failed"
-        policy: ImageGenerationEventSyncPolicy
-        mode: ImageGenerationEventSyncMode
-        serverMessageId?: string
-        error?: string
-      },
+      update: Parameters<typeof updateImageEventSyncMetadataForPayload>[1],
       sourceIsCurrent: () => boolean
-    ) => {
-      const targetMessageId = payload.assistantMessageId
-      if (!targetMessageId) return
-      const targetEventId = resolveImageGenerationEventId({
-        messageId: targetMessageId,
-        messageGenerationInfo: payload.generationInfo
-      })
-      const now = Date.now()
-
-      const generationInfo =
-        payload.generationInfo &&
-        typeof payload.generationInfo === "object" &&
-        !Array.isArray(payload.generationInfo)
-          ? (payload.generationInfo as Record<string, unknown>)
-          : {}
-      const imageGeneration =
-        generationInfo.image_generation &&
-        typeof generationInfo.image_generation === "object" &&
-        !Array.isArray(generationInfo.image_generation)
-          ? (generationInfo.image_generation as Record<string, unknown>)
-          : {}
-      let nextGenerationInfo: Record<string, unknown> = {
-        ...generationInfo,
-        image_generation: {
-          ...imageGeneration,
-          sync: {
-            mode: update.mode,
-            policy: update.policy,
-            status: update.status,
-            serverMessageId: update.serverMessageId,
-            error: update.error,
-            lastAttemptAt: now,
-            mirroredAt: update.status === "synced" ? now : undefined
-          }
-        }
-      }
-      let nextImages = Array.isArray(payload.assistantImages)
-        ? payload.assistantImages.filter(
-            (image): image is string =>
-              typeof image === "string" && image.length > 0
-          )
-        : []
-      // A late acknowledgement belongs to its original payload, even after same-ID reopening.
-      const publishSyncToCurrentEvent = () => {
-        if (sourceIsCurrent())
-          setMessages((prev) => {
-            if (!sourceIsCurrent()) return prev
-            return prev.map((entry) => {
-              if (
-                entry.id !== targetMessageId &&
-                (entry.messageType !== IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE ||
-                  resolveImageGenerationEventId({
-                    messageId: entry.id,
-                    messageGenerationInfo: entry.generationInfo,
-                    variants: entry.variants
-                  }) !== targetEventId)
-              )
-                return entry
-              const currentInfo =
-                entry.generationInfo &&
-                typeof entry.generationInfo === "object" &&
-                !Array.isArray(entry.generationInfo)
-                  ? (entry.generationInfo as Record<string, unknown>)
-                  : generationInfo
-              const currentGeneration =
-                currentInfo.image_generation &&
-                typeof currentInfo.image_generation === "object" &&
-                !Array.isArray(currentInfo.image_generation)
-                  ? (currentInfo.image_generation as Record<string, unknown>)
-                  : imageGeneration
-              nextGenerationInfo = {
-                ...currentInfo,
-                image_generation: {
-                  ...currentGeneration,
-                  sync: (
-                    nextGenerationInfo.image_generation as Record<string, unknown>
-                  ).sync
-                }
-              }
-              nextImages = Array.isArray(entry.images)
-                ? entry.images.filter(
-                    (image): image is string =>
-                      typeof image === "string" && image.length > 0
-                  )
-                : nextImages
-              return { ...entry, generationInfo: nextGenerationInfo }
-            })
-          })
-      }
-      publishSyncToCurrentEvent()
-
-      await updateMessageMedia(targetMessageId, {
-        images: nextImages,
-        generationInfo: nextGenerationInfo
-      }).catch(() => null)
-      publishSyncToCurrentEvent()
-      return {
-        generationInfo: nextGenerationInfo,
-        assistantImages: nextImages
-      }
-    },
+    ) => updateImageEventSyncMetadataForPayload(payload, update, sourceIsCurrent, setMessages),
     [setMessages]
   )
 
@@ -1056,6 +955,10 @@ export const useChatActions = ({
         : payload?.conversationId != null
           ? String(payload.conversationId)
           : null
+    const workspaceReferenceSave =
+      scope?.type === 'workspace' &&
+      payload?.saveToDb === false &&
+      payload.assistantMetadataExtra?.workspace_rag_sources_v1 != null;
     let payloadForLocalPersistence = payload
       ? {
           ...payload,
@@ -1113,10 +1016,12 @@ export const useChatActions = ({
         message: Record<string, unknown>
       ) => {
         throwIfScopeChanged()
+        if (workspaceReferenceSave && !sourceIsCurrent()) throw createServicePromptScopeChangedError();
         const result = mirrorOptions
           ? await tldwClient.addChatMessage(chatId, message, mirrorOptions)
           : await tldwClient.addChatMessage(chatId, message)
         throwIfScopeChanged()
+        if (workspaceReferenceSave && !sourceIsCurrent()) throw createServicePromptScopeChangedError();
         return result
       }
 
@@ -1385,7 +1290,7 @@ export const useChatActions = ({
             payload?.saveToDb === false &&
             isLocalRagDiagnosticInfo(payload?.generationInfo)
           ) &&
-          !payload?.isRegenerate &&
+          (!payload?.isRegenerate || (workspaceReferenceSave && payload?.retryFailedTurn === true)) &&
           !payload?.isContinue &&
           typeof payload?.message === "string" &&
           typeof payload?.fullText === "string"
@@ -1394,27 +1299,87 @@ export const useChatActions = ({
             const cid = resolvedServerConversationId
             const userContent = payload.message.trim()
             const assistantContent = payload.fullText.trim()
+            if (
+              workspaceReferenceSave &&
+              payload.retryFailedTurn &&
+              !payload.userServerMessageId &&
+              useStoreMessageOption.getState().serverChatId === cid &&
+              sourceIsCurrent()
+            ) {
+              const user = messages.find(
+                (row) => row.id === payload?.userMessageId && !row.isBot && row.message === payload?.message
+              );
+              if (user?.serverMessageId) {
+                payload = { ...payload, userServerMessageId: user.serverMessageId };
+                payloadForLocalPersistence = {
+                  ...payloadForLocalPersistence!,
+                  userServerMessageId: user.serverMessageId,
+                };
+              }
+            }
+            const retainReceipt = (role: 'user' | 'assistant', result: { id: unknown }) => {
+              if (!workspaceReferenceSave) return;
+              const id = typeof result?.id === 'string' ? result.id.trim() : '';
+              if (!id) throw new Error('Message save acknowledgement is missing its identity');
+              const field = role === 'user' ? 'userServerMessageId' : 'assistantServerMessageId';
+              const messageId = role === 'user' ? payload?.userMessageId : payload?.assistantMessageId;
+              const content = role === 'user' ? payload?.message : payload?.fullText;
+              payload = { ...payload!, [field]: id };
+              payloadForLocalPersistence = { ...payloadForLocalPersistence!, [field]: id };
+              if (sourceIsCurrent())
+                setMessages((rows) =>
+                  sourceIsCurrent()
+                    ? rows.map((row) =>
+                        row.id === messageId && row.isBot === (role === 'assistant') && row.message === content
+                          ? role === 'assistant'
+                            ? updateActiveVariant(row, { serverMessageId: id })
+                            : { ...row, serverMessageId: id }
+                          : row
+                      )
+                    : rows
+                );
+            };
 
+            const savedParent = (parent: string | null | undefined) => {
+              if (parent == null) return null;
+              const matched = messages.filter(row => row.id === parent || row.serverMessageId === parent);
+              const serverId = matched.length === 1 ? matched[0].serverMessageId?.trim() : null;
+              if (!serverId || messages.filter(row => row.id === serverId || row.serverMessageId === serverId).length !== 1)
+                throw new Error("Message parent has no unique server acknowledgement");
+              return serverId;
+            };
             // Current-turn save receipts take precedence over capability discovery.
             if (userContent.length > 0 && !payload.userServerMessageId?.trim()) {
-              await addMirroredMessage(cid, {
-                role: "user",
-                content: userContent,
-                ...(payload.userMetadataExtra
-                  ? { metadata_extra: payload.userMetadataExtra }
-                  : {})
-              })
+              retainReceipt(
+                'user',
+                await addMirroredMessage(cid, {
+                  role: 'user',
+                  content: userContent,
+                  ...(workspaceReferenceSave ? { parent_message_id: savedParent(payload.userParentMessageId) } : {}),
+                  ...(payload.userMetadataExtra ? { metadata_extra: payload.userMetadataExtra } : {}),
+                })
+              );
             }
 
             if (
               assistantContent.length > 0 &&
               !payload.assistantServerMessageId?.trim()
             ) {
-              await addMirroredMessage(cid, {
-                role: "assistant",
-                content: assistantContent,
-                metadata_extra: payload.assistantMetadataExtra
-              })
+              if (workspaceReferenceSave &&
+                  (!payload.userServerMessageId?.trim() ||
+                    (payload.assistantParentMessageId != null &&
+                     payload.assistantParentMessageId !== payload.userMessageId &&
+                     payload.assistantParentMessageId !== payload.userServerMessageId)))
+                throw new Error("Assistant parent does not match the acknowledged user");
+              retainReceipt(
+                'assistant',
+                await addMirroredMessage(cid, {
+                  role: 'assistant',
+                  content: assistantContent,
+                  ...(workspaceReferenceSave ? { parent_message_id: payload.userServerMessageId } : {}),
+                  metadata_extra: payload.assistantMetadataExtra,
+                })
+              );
             }
           } catch (error) {
             if (
@@ -3587,7 +3552,7 @@ export const useChatActions = ({
       serverChatId: serverChatIdOverride || serverChatId
     })
     const historyOriginIsCurrent = historySelection?.fence()
-    const sceneSendCapture = requestedActorSceneSend ? null : captureActorSceneSend(historySelection, () => actionsMountedRef.current &&
+    const sceneSendCapture = requestedActorSceneSend ? null : captureSceneForCommand(() => actionsMountedRef.current &&
       useStoreMessageOption.getState().chatDraftRevision === renderedDraftRevision && (historyOriginIsCurrent?.() ?? true))
     const commandSession = usePlaygroundSessionStore.getState()
     const commandSessionIsCurrent = () => {
@@ -3909,7 +3874,7 @@ export const useChatActions = ({
         }
       }
       if (historyRegenerate && (!isRegenerate || historyEditResend || historyRetryAdmission || !selectedHistoryTurn))
-        throw new Error("unsupported_history_regeneration")
+        throw new Error(historyRegenerate.action === "continue" ? "unsupported_history_continuation" : "unsupported_history_regeneration")
       if (greetingSeed && (!historySelection || turnResolvedSendMode !== "tracked_character" ||
           !greetingIsCurrent || !greetingIsCurrent() || message || isRegenerate || isContinue ||
           compareModeActive || turnUsesImageMode || turnContextFiles.length || docs?.length ||
@@ -4313,6 +4278,8 @@ export const useChatActions = ({
                 ragModeParamsWithSnapshot.historyId,
               serverChatId: workspaceServerChat.chatId,
               conversationId: workspaceServerChat.chatId,
+              ...(!isContinue && (!isRegenerate || decodeChatErrorPayload(regenerateFromMessage?.message || ""))
+                ? { saveToDb: false } : {}),
               saveMessageOnSuccess: (data: SaveMessageData) =>
                 saveMessageOnSuccess({
                   ...data,
@@ -5136,7 +5103,7 @@ export const useChatActions = ({
     }
 
     const historyIsCurrent = historySelection?.fence()
-    const sceneSendCapture = captureActorSceneSend(historySelection, () => actionsMountedRef.current &&
+    const sceneSendCapture = captureSceneForCommand(() => actionsMountedRef.current &&
       useStoreMessageOption.getState().chatDraftRevision === renderedDraftRevision && (historyIsCurrent?.() ?? true))
     const selectionSource = { model: "explicit", toolChoice: "global" } as const
     const dispatchIsCurrent = captureChatDispatchSource({ selectedModel: modelId, toolChoice, selectionSource })
@@ -5746,7 +5713,7 @@ export const useChatActions = ({
       if (!dispatchIsCurrent()) throw new Error("actor_settings_scope_changed")
     } }
     const capture = selectedHistoryForActions || dispatch?.actorSceneSend ? null :
-      captureActorSceneSend(historySelection, () => actionsMountedRef.current &&
+      captureSceneForCommand(() => actionsMountedRef.current &&
         dispatchIsCurrent() && useStoreMessageOption.getState().chatDraftRevision === renderedDraftRevision)
     try {
       dispatch?.controller?.signal.throwIfAborted()

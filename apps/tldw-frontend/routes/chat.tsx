@@ -1,16 +1,12 @@
 import dynamic from 'next/dynamic';
 import Head from 'next/head';
-import { useActiveChatTitle } from '@/hooks/useActiveChatTitle';
 
-const ChatRoute = dynamic(() => import('@/routes/option-chat'), { ssr: false });
+const ChatRoute = dynamic(() => import('@web/components/ChatPageContent'), { ssr: false });
 
 export default function ChatPage() {
-  const { title } = useActiveChatTitle();
   return (
     <>
-      <Head>
-        <title>{title ? `${title} | tldw` : 'Chat | tldw'}</title>
-      </Head>
+      <Head><title>Chat | tldw</title></Head>
       <ChatRoute />
     </>
   );

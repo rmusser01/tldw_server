@@ -1392,14 +1392,16 @@ async def _call_adapter_async(
                         wrap_sync_stream(stream_iter),
                     )
 
-            if getattr(adapter, "async_chat_is_native", None) is True:
+            strict_native = strict_policy is not None and getattr(adapter, "strict_async_chat_is_native", None) is True
+            if getattr(adapter, "async_chat_is_native", None) is True or strict_native:
                 try:
                     return await _await_with_call_policy_deadline(
                         adapter.achat(request, **timeout_kwargs),
                         strict_policy,
                     )
                 except NotImplementedError:
-                    pass
+                    if strict_native:
+                        raise
             return await _await_with_call_policy_deadline(
                 await_bounded_sync_call(
                     partial(adapter.chat, request, **timeout_kwargs),

@@ -6,7 +6,8 @@ import hashlib
 import json
 from typing import Any
 
-from tldw_Server_API.app.core.DB_Management.media_db.errors import InputError
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError, InputError
 
 
 def persist_data_table_generation(
@@ -21,6 +22,9 @@ def persist_data_table_generation(
     generation_model: str | None = None,
     last_error: Any = None,
     owner_user_id: int | str | None = None,
+    expected_version: int | None = None,
+    expected_uuid: str | None = None,
+    expected_generation_job: str | None = None,
 ) -> dict[str, Any] | None:
     """Persist generated table data and update table metadata."""
     owner_value = None
@@ -60,7 +64,7 @@ def persist_data_table_generation(
                 now,
                 1,
                 write_client_id,
-                0,
+                False,
                 column.get("prev_version"),
                 column.get("merge_parent_uuid"),
             )
@@ -91,7 +95,7 @@ def persist_data_table_generation(
                 now,
                 1,
                 write_client_id,
-                0,
+                False,
                 row.get("prev_version"),
                 row.get("merge_parent_uuid"),
             )
@@ -122,7 +126,7 @@ def persist_data_table_generation(
                     now,
                     1,
                     write_client_id,
-                    0,
+                    False,
                     src.get("prev_version"),
                     src.get("merge_parent_uuid"),
                 )
@@ -151,6 +155,32 @@ def persist_data_table_generation(
                 raise InputError("data_table_not_found")  # noqa: TRY003
             if actual_owner != owner_value:
                 raise InputError("data_table_owner_mismatch")  # noqa: TRY003
+        if expected_version is not None or self.backend_type == BackendType.POSTGRESQL:
+            # Editors and publishers take the parent lock before any child writes.
+            query = "SELECT * FROM data_tables WHERE id = ? AND client_id = ? AND deleted = 0"
+            if self.backend_type == BackendType.POSTGRESQL:
+                query += " FOR UPDATE"
+            current = self._fetchone_with_connection(conn, query, (int(table_id), write_client_id))
+            if not current:
+                raise ConflictError("Data table identity changed")
+        if expected_version is not None:
+            if current["uuid"] != expected_uuid:
+                raise ConflictError("Data table identity changed")
+            # Both sentinels were inserted atomically; tombstones survive ordinary edits.
+            applied_column = self._fetchone_with_connection(
+                conn, "SELECT 1 FROM data_table_columns WHERE table_id = ? AND client_id = ? AND column_id = ?",
+                (int(table_id), owner_value, column_rows[0][1]),
+            )
+            applied_row = self._fetchone_with_connection(
+                conn, "SELECT 1 FROM data_table_rows WHERE table_id = ? AND client_id = ? AND row_id = ?",
+                (int(table_id), owner_value, row_rows[0][1]),
+            ) if row_rows else None
+            if applied_column and applied_row:
+                return current
+            if expected_generation_job is not None and current.get("generation_job_json") != expected_generation_job:
+                raise ConflictError("Data table generation was superseded")
+            if applied_column or applied_row or int(current["version"]) != expected_version:
+                raise ConflictError("Saved data table changed during generation")
         self._execute_with_connection(
             conn,
             """

@@ -1,3 +1,4 @@
+import { WORKSPACE_RAG_SOURCES_KEY, projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
 import type { BaseMessage } from "@/types/messages"
 import {
@@ -80,11 +81,27 @@ import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError 
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { isOutputLimitFinishReason, markOutputLimitedReply } from "@/utils/output-limit-reply"
 
+// Only a structured pre-admission policy refusal makes an ordinary Send safe again.
+const isProviderDisabledHttpRefusal = (error: unknown): boolean => {
+  let current = error
+  for (let depth = 0; depth < 8 && current && typeof current === "object"; depth++) {
+    const record = current as {
+      status?: unknown; details?: { detail?: unknown }; detail?: unknown; cause?: unknown
+    }
+    const detail = record.details?.detail ?? record.detail
+    if (record.status === 403 && detail && typeof detail === "object" &&
+        (detail as { error_code?: unknown }).error_code === "provider_disabled") return true
+    current = record.cause
+  }
+  return false
+}
+
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
 let didLogPipelineSetHistoryMissing = false
 
 export type ChatModeParamsBase = {
+  saveToDb?: boolean
   onResponseDispatch?: () => void
   historyTurn?: HistorySendTurn
   actorSceneSend?: ActorSceneSend
@@ -882,6 +899,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       model: rawSelectedModel,
       toolChoice,
       conversationId,
+      ...(params.saveToDb !== undefined ? { saveToDb: params.saveToDb } : {}),
       ...(historyTurn ? nativeCompletion && historyTurn.owner.kind === "native"
         ? { saveToDb: true, conversationId: historyTurn.owner.conversation_id, scope: historyTurn.owner.scope ? structuredClone(historyTurn.owner.scope) : undefined }
         : { clientManagedHistory: true, saveToDb: false } : {}),
@@ -1142,9 +1160,26 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       params.dynamicUIRequest?.renderer === "openui"
         ? buildDynamicUIEnvelope("openui", fullText)
         : null
-    const assistantMetadataExtra = dynamicUIEnvelope
-      ? { dynamic_ui: dynamicUIEnvelope }
-      : undefined
+    const sourceProvenance =
+      mode.id === "rag" && params.saveToDb === false && sources.length
+        ? projectWorkspaceRagSources(sources)
+        : null;
+    if (
+      mode.id === "rag" &&
+      params.saveToDb === false &&
+      sources.length &&
+      !sourceProvenance
+    )
+      throw new Error("Source history is invalid or too large to save");
+    const assistantMetadataExtra =
+      dynamicUIEnvelope || sourceProvenance
+        ? {
+            ...(dynamicUIEnvelope ? { dynamic_ui: dynamicUIEnvelope } : {}),
+            ...(sourceProvenance
+              ? { [WORKSPACE_RAG_SOURCES_KEY]: sourceProvenance }
+              : {}),
+          }
+        : undefined;
     setMessagesWithTransition((prev) =>
       prev.map((msg) =>
         msg.id === generateMessageId
@@ -1355,7 +1390,15 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
         if (historyTurn.persistence === "server" && !historyTurn.resultId) {
           setMessagesWithTransition(prev => prev.filter(row => row.id !== resolvedAssistantMessageId && row.id !== resolvedUserMessageId))
-          return chatSubmitFailed(e instanceof Error ? e.message : "Server response outcome unknown")
+          return {
+            ...chatSubmitFailed(e instanceof Error ? e.message : "Server response outcome unknown"),
+            ...(!historyTurn.admission && !historyTurn.existingSelection && !historyTurn.retryAdmission &&
+              isProviderDisabledHttpRefusal(e) ? {
+                restoreDraft: true as const,
+                restoreDraftIsCurrent: () => historyTurn.owner.kind !== "unavailable" &&
+                  historyTurn.canUpdateView() && historyTurn.owner.validate_lease?.() !== false
+              } : {})
+          }
         }
         if (outcome) {
           const marker = interruptionGenerationInfo(outcome, keptReason)

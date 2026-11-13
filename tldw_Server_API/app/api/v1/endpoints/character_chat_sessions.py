@@ -306,7 +306,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     server_origin_stable_key,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
-from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.testing import is_test_context, is_truthy
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.app.core.Utils.common import parse_boolean
 from tldw_Server_API.app.core.Utils.image_validation import MAX_IMAGE_PIXELS
@@ -845,18 +845,6 @@ def _config_default_llm_provider() -> str | None:
     return _extract("llm_api_settings") or _extract("API")
 
 
-def _is_char_chat_test_mode() -> bool:
-    """Return True when running under test-mode semantics."""
-    for env_key in ("TEST_MODE", "TLDW_TEST_MODE", "PYTEST_CURRENT_TEST"):
-        raw = os.getenv(env_key)
-        if isinstance(raw, str) and raw.strip():
-            if env_key == "PYTEST_CURRENT_TEST":
-                return True
-            if is_truthy(raw):
-                return True
-    return False
-
-
 def _get_default_provider() -> str:
     """Resolve default provider: config, then env, then test fallback, then get_default_provider()."""
     cfg_default = _config_default_llm_provider()
@@ -867,7 +855,7 @@ def _get_default_provider() -> str:
     if isinstance(env_default, str) and env_default.strip():
         return env_default.strip()
 
-    if _is_char_chat_test_mode():
+    if is_test_context():
         return "local-llm"
 
     return get_default_provider()
@@ -878,7 +866,7 @@ def _should_enforce_char_chat_strict_model_selection() -> bool:
     raw = os.getenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION")
     if raw is not None:
         return is_truthy(raw)
-    return not _is_char_chat_test_mode()
+    return not is_test_context()
 
 
 def _safe_replace_placeholders(value: Any, char_name: str, user_name: str) -> str:
@@ -1356,6 +1344,31 @@ def _validate_and_truncate_tool_calls(tool_calls: Any) -> Optional[list]:
         return None
 
     return tool_calls
+
+
+def _validate_character_answer(assistant_text: str, assistant_tool_calls: Any) -> Optional[list]:
+    """Reject empty provider answers before any conversation writes."""
+    validated_tool_calls = (
+        _validate_and_truncate_tool_calls(assistant_tool_calls)
+        if assistant_tool_calls
+        else None
+    )
+    has_usable_tool_call = any(
+        isinstance(call, dict)
+        and isinstance(call.get("function"), dict)
+        and isinstance(call["function"].get("name"), str)
+        and call["function"]["name"].strip()
+        for call in validated_tool_calls or []
+    )
+    if not assistant_text.strip() and not has_usable_tool_call:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "error_code": "empty_provider_response",
+                "message": "The provider returned no usable answer. No new messages were saved; please retry.",
+            },
+        )
+    return validated_tool_calls
 
 
 def _build_stream_persist_fingerprint(
@@ -7917,6 +7930,7 @@ async def character_chat_completion(
             fallback_mood_topic=resolved_mood_topic,
         )
         assistant_text = resolved_emotes.clean_text
+        validated_tool_calls = _validate_character_answer(assistant_text, assistant_tool_calls)
         resolved_mood_label = resolved_emotes.mood_label
         resolved_mood_confidence = resolved_emotes.mood_confidence
         resolved_mood_topic = resolved_emotes.mood_topic
@@ -7986,11 +8000,6 @@ async def character_chat_completion(
                 metadata_extra["prompt_guardrails"] = turn_prompt_guardrail_diagnostics
             if visual_identity_metadata:
                 metadata_extra.update(visual_identity_metadata)
-            validated_tool_calls = (
-                _validate_and_truncate_tool_calls(assistant_tool_calls)
-                if assistant_tool_calls
-                else None
-            )
             try:
                 db.add_message_metadata(
                     assistant_msg_id,
@@ -9797,12 +9806,15 @@ async def export_lorebook_diagnostics(
         "asc",
         description="Sort order for turns by assistant turn number",
     ),
+    scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
+    workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ):
     """Iterate assistant messages and collect lorebook_diagnostics from message metadata."""
+    scope = _resolve_chat_scope(scope_type, workspace_id)
     conversation = db.get_conversation_by_id(chat_id)
-    _verify_chat_ownership(conversation, current_user.id, chat_id)
+    _verify_chat_ownership(conversation, current_user.id, chat_id, scope)
 
     character_id = conversation.get("character_id")
     settings_row = db.get_conversation_settings(chat_id)
@@ -9843,9 +9855,12 @@ async def export_lorebook_diagnostics(
             continue
 
         content = msg.get("content") or ""
+        timestamp = msg.get("timestamp")
+        if isinstance(timestamp, datetime):
+            timestamp = timestamp.isoformat()
         turns_with_diags.append(DiagnosticTurnEntry(
             message_id=msg["id"],
-            timestamp=msg.get("timestamp"),
+            timestamp=timestamp,
             turn_number=turn_counter,
             message_preview=content[:120],
             diagnostics=diags,

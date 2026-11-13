@@ -388,3 +388,20 @@ def test_postgres_keyword_lookups_can_use_indexes(pg_database_config, monkeypatc
                 assert "Index" in " ".join(str(row) for row in plan), query
     finally:
         db.close_connection()
+
+@pytest.mark.integration
+@pytest.mark.parametrize("index", ["idx_keywords_lower_keyword", "idx_keywords_non_ascii"])
+def test_postgres_reopen_restores_missing_keyword_lookup_index(pg_database_config, index) -> None:
+    """The owner must restore required lookup indexes instead of accepting the reopen shortcut."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = None
+    try:
+        db = MediaDatabase(db_path=":memory:", client_id="913950", backend=backend)
+        backend.execute("DROP INDEX " + backend.escape_identifier(index))
+        db._initialize_schema()
+        restored = backend.execute("SELECT to_regclass(%s)", (index,)).scalar
+        assert restored is not None  # nosec B101 -- Owner reopening must restore this package-owned index.
+    finally:
+        if db is not None:
+            db.close_connection()
+        backend.get_pool().close_all()

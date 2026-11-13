@@ -37,3 +37,25 @@ def test_provider_requires_key_map_basic():
 
     # Unknown providers default to requiring keys
     assert provider_requires_api_key("unknown-provider") is True
+
+
+@pytest.mark.parametrize(
+    ("provider", "requires_key"),
+    [
+        ("llamacpp", False),
+        (" LLAMA_CPP ", False),
+        ("koboldcpp", False),
+        ("oobabooga", False),
+        ("tabby_api", False),
+        ("local_llm", False),
+        ("openai-compatible-99", False),
+        ("oai", True),
+        ("aws-bedrock", True),
+        ("unknown-provider", True),
+        ("", True),
+    ],
+)
+def test_registered_alias_uses_provider_credential_policy(provider, requires_key):
+    from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+
+    assert provider_requires_api_key(provider) is requires_key  # nosec B101 -- credential-policy regression.

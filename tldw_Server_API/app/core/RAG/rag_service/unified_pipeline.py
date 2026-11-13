@@ -588,6 +588,37 @@ class _SearchDepthPreset(TypedDict):
     enable_multi_vector_passages: bool
 
 
+_SEARCH_DEPTH_PRESETS: dict[str, _SearchDepthPreset] = {
+    "speed": {
+        "top_k": 3,
+        "enable_reranking": False,
+        "reranking_strategy": "none",
+        "expand_query": False,
+        "enable_hyde": False,
+        "enable_web_fallback": False,
+        "enable_multi_vector_passages": False,
+    },
+    "balanced": {
+        "top_k": 10,
+        "enable_reranking": True,
+        "reranking_strategy": "flashrank",
+        "expand_query": True,
+        "enable_hyde": False,
+        "enable_web_fallback": False,
+        "enable_multi_vector_passages": False,
+    },
+    "quality": {
+        "top_k": 25,
+        "enable_reranking": True,
+        "reranking_strategy": "two_tier",
+        "expand_query": True,
+        "enable_hyde": True,
+        "enable_web_fallback": True,
+        "enable_multi_vector_passages": True,
+    },
+}
+
+
 def _consume_bound_sgl_response(
     response: Any,
     provider: str,
@@ -2387,8 +2418,8 @@ async def unified_rag_pipeline(
     if retrieval_plan is None:
         retrieval_plan = build_retrieval_plan(resolved_request)
 
-    def _resolve_effective_enable_generation() -> bool:
-        return bool((resolved_request.payload or {}).get("enable_generation", enable_generation))
+    def _resolve_effective_enable_generation() -> bool:  # an explicit False is retrieval only (TASK-15482)
+        return bool(enable_generation) and bool((resolved_request.payload or {}).get("enable_generation", True))
 
     effective_enable_generation = _resolve_effective_enable_generation()
 
@@ -2567,63 +2598,53 @@ async def unified_rag_pipeline(
             )
 
     # Normalize common alias/compat args
-    expand_query = expand_query or kwargs.get("enable_expansion", False)
+    explicit_fields = resolved_request.explicit_fields
+    explicit_payload = resolved_request.payload
+    if "expand_query" in explicit_fields:
+        expand_query = explicit_payload["expand_query"]
+    else:
+        expand_query = expand_query or kwargs.get("enable_expansion", False)
     media_db_path = _resolve_sqlite_rag_db_path(media_db_path, db=media_db)
 
     # ========== SEARCH DEPTH MODE PRESETS ==========
     # Apply parameter presets based on search_depth_mode. Individual parameter
-    # overrides (if explicitly non-default) take precedence over mode presets.
+    # overrides take precedence; legacy calls retain their default-value heuristic.
     retrieval_scalar_overrides_applied = False
     if search_depth_mode is not None:
-        _mode_presets: dict[str, _SearchDepthPreset] = {
-            "speed": {
-                "top_k": 3,
-                "enable_reranking": False,
-                "reranking_strategy": "none",
-                "expand_query": False,
-                "enable_hyde": False,
-                "enable_web_fallback": False,
-                "enable_multi_vector_passages": False,
-            },
-            "balanced": {
-                "top_k": 10,
-                "enable_reranking": True,
-                "reranking_strategy": "flashrank",
-                "expand_query": True,
-                "enable_hyde": False,
-                "enable_web_fallback": False,
-                "enable_multi_vector_passages": False,
-            },
-            "quality": {
-                "top_k": 25,
-                "enable_reranking": True,
-                "reranking_strategy": "two_tier",
-                "expand_query": True,
-                "enable_hyde": True,
-                "enable_web_fallback": True,
-                "enable_multi_vector_passages": True,
-            },
-        }
-        presets = _mode_presets.get(search_depth_mode)
-        # Only apply preset if the caller didn't explicitly set the param
-        # (we check against the function defaults)
+        presets = _SEARCH_DEPTH_PRESETS.get(search_depth_mode)
+        # Canonical requests distinguish an omitted value from an explicit default.
         if presets:
-            if top_k == 10:
+            if "top_k" in explicit_fields:
+                top_k = explicit_payload["top_k"]
+                retrieval_plan = replace(retrieval_plan, top_k=top_k)
+            elif top_k == 10:
                 preset_top_k = presets.get("top_k", top_k)
                 if preset_top_k != top_k:
                     retrieval_scalar_overrides_applied = True
                 top_k = preset_top_k
-            if enable_reranking is True and "enable_reranking" in presets:
+            if "enable_reranking" in explicit_fields:
+                enable_reranking = explicit_payload["enable_reranking"]
+            elif enable_reranking is True and "enable_reranking" in presets:
                 enable_reranking = presets["enable_reranking"]
-            if reranking_strategy == "flashrank" and "reranking_strategy" in presets:
+            if "reranking_strategy" in explicit_fields:
+                reranking_strategy = explicit_payload["reranking_strategy"]
+            elif reranking_strategy == "flashrank" and "reranking_strategy" in presets:
                 reranking_strategy = presets["reranking_strategy"]
-            if not expand_query and presets.get("expand_query"):
+            if "expand_query" in explicit_fields:
+                expand_query = explicit_payload["expand_query"]
+            elif not expand_query and presets.get("expand_query"):
                 expand_query = True
-            if not enable_hyde and presets.get("enable_hyde"):
+            if "enable_hyde" in explicit_fields:
+                enable_hyde = explicit_payload["enable_hyde"]
+            elif not enable_hyde and presets.get("enable_hyde"):
                 enable_hyde = True
-            if not enable_web_fallback and presets.get("enable_web_fallback"):
+            if "enable_web_fallback" in explicit_fields:
+                enable_web_fallback = explicit_payload["enable_web_fallback"]
+            elif not enable_web_fallback and presets.get("enable_web_fallback"):
                 enable_web_fallback = True
-            if not enable_multi_vector_passages and presets.get("enable_multi_vector_passages"):
+            if "enable_multi_vector_passages" in explicit_fields:
+                enable_multi_vector_passages = explicit_payload["enable_multi_vector_passages"]
+            elif not enable_multi_vector_passages and presets.get("enable_multi_vector_passages"):
                 enable_multi_vector_passages = True
 
     _refresh_retrieval_snapshot_from_current_knobs(

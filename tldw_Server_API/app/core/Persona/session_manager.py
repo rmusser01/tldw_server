@@ -12,6 +12,10 @@ from datetime import datetime, timedelta, timezone
 from threading import RLock
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.chacha.persona_transcript_limits import (
+    TURN_METADATA_DIAGNOSTIC_CHARS,
+)
+
 _VALID_PERSONA_PLAN_STEP_TYPES = frozenset({"mcp_tool", "skill", "rag_query", "final_answer"})
 _TRUNCATION_SUFFIX = "... [truncated]"
 _MAX_PENDING_PLAN_REVIEW_STEPS = 100
@@ -112,6 +116,9 @@ class Session:
     preferences: dict[str, Any] = field(default_factory=dict)
     turns: list[dict] = field(default_factory=list)
     pending_plans: dict[str, PendingPlan] = field(default_factory=dict)
+    transcript_revision: int = 0
+    transcript_retired: bool = False
+    persisted: bool = False
 
 
 class PlanConfirmationError(ValueError):
@@ -194,7 +201,9 @@ class SessionManager:
         for session_id in drop_ids:
             self._sessions.pop(session_id, None)
 
-    def create(self, user_id: str, persona_id: str, resume_session_id: str | None = None) -> Session:
+    def create(
+        self, user_id: str, persona_id: str, resume_session_id: str | None = None, *, persisted: bool = False
+    ) -> Session:
         with self._lock:
             self._prune_expired_sessions_locked()
             if resume_session_id and resume_session_id in self._sessions:
@@ -203,6 +212,7 @@ class SessionManager:
                     raise ValueError("session ownership mismatch")
                 if existing.persona_id != persona_id:
                     raise ValueError("session persona mismatch")
+                existing.persisted = existing.persisted or persisted
                 self._touch_session(existing)
                 return existing
             sid = resume_session_id or str(uuid.uuid4())
@@ -211,6 +221,7 @@ class SessionManager:
                 user_id=user_id,
                 persona_id=persona_id,
                 preferences={"use_memory_context": True},
+                persisted=persisted,
             )
             self._sessions[sid] = sess
             self._enforce_user_session_cap_locked(user_id)
@@ -238,6 +249,7 @@ class SessionManager:
         with self._lock:
             self._prune_expired_sessions_locked()
             session = self.create(user_id=user_id, persona_id=persona_id, resume_session_id=session_id)
+            session.persisted = session.persisted or requires_persisted_session
             normalized_steps: list[PlanStep] = []
             for raw in steps:
                 if not isinstance(raw, dict):
@@ -277,7 +289,7 @@ class SessionManager:
                 session_id=session_id,
                 created_at=datetime.now(timezone.utc),
                 steps=normalized_steps,
-                requires_persisted_session=requires_persisted_session,
+                requires_persisted_session=session.persisted,
             )
             session.pending_plans[plan_id] = pending
             self._trim_pending_plans_locked(session)
@@ -328,14 +340,69 @@ class SessionManager:
             pending = self.get_plan(session_id=session_id, plan_id=plan_id, user_id=user_id)
             if pending is None:
                 raise PlanConfirmationError("PLAN_NOT_FOUND", "Invalid plan_id/session_id")
+            session = self._sessions[session_id]
+            session.persisted = session.persisted or session_exists
             if session_terminal:
                 raise PlanConfirmationError("SESSION_TERMINAL", "Persona session is stopped.")
-            if pending.requires_persisted_session and not session_exists:
+            if (pending.requires_persisted_session or session.persisted) and not session_exists:
                 raise PlanConfirmationError("SESSION_NOT_FOUND", "Persona session is unavailable.")
-            session = self._sessions[session_id]
             session.pending_plans.pop(plan_id)
             self._touch_session(session)
             return pending
+
+    def admit_tool_session(self, expected: Session, *, user_id: str, persona_id: str, persisted: bool) -> bool:
+        """Fence a completed storage preflight against runtime replacement or promotion."""
+        with self._lock:
+            current = self.get(expected.session_id)
+            if (
+                current is not expected
+                or current.user_id != user_id
+                or current.persona_id != persona_id
+                or (current.persisted and not persisted)
+            ):
+                return False
+            current.persisted = current.persisted or persisted
+            return True
+
+    def put_retry_approval(self, *, session_id: str, user_id: str, key: str, approval: dict[str, Any]) -> None:
+        """Retain one server-owned approval without reviving consumed entries."""
+        with self._lock:
+            session = self.get(session_id)
+            if session is None or session.user_id != user_id:
+                raise ValueError("Persona retry session is unavailable.")
+            raw = session.preferences.get("pending_retry_approvals")
+            retries = (
+                {k: dict(v) for k, v in raw.items() if isinstance(k, str) and isinstance(v, dict)}
+                if isinstance(raw, dict)
+                else {}
+            )
+            retries[key] = dict(approval)
+            session.preferences["pending_retry_approvals"] = retries
+            self._touch_session(session)
+
+    def consume_retry_approval(
+        self, *, session_id: str, user_id: str, key: str, session_exists: bool
+    ) -> dict[str, Any] | None:
+        """Consume exactly once and reject a promotion after the database preflight."""
+        with self._lock:
+            session = self.get(session_id)
+            if session is None or session.user_id != user_id:
+                return None
+            if session.persisted and not session_exists:
+                raise PlanConfirmationError("SESSION_NOT_FOUND", "Persona session is unavailable.")
+            raw = session.preferences.get("pending_retry_approvals")
+            retries = (
+                {k: dict(v) for k, v in raw.items() if isinstance(k, str) and isinstance(v, dict)}
+                if isinstance(raw, dict)
+                else {}
+            )
+            entry = retries.pop(key, None)
+            if entry is None:
+                return None
+            session.persisted = session.persisted or session_exists
+            session.preferences["pending_retry_approvals"] = retries
+            self._touch_session(session)
+            return entry
 
     def get_latest_plan_snapshot(
         self,
@@ -411,10 +478,29 @@ class SessionManager:
         content: str,
         turn_type: str = "text",
         metadata: dict[str, Any] | None = None,
+        ephemeral_only: bool = False,
     ) -> dict[str, Any]:
+        turn = self.prepare_turn(role=role, content=content, turn_type=turn_type, metadata=metadata)
         with self._lock:
             self._prune_expired_sessions_locked()
             session = self.create(user_id=user_id, persona_id=persona_id, resume_session_id=session_id)
+            if ephemeral_only and session.persisted:
+                raise ValueError("Saved Persona sessions require durable turn storage.")
+            session.turns.append(turn)
+            self._trim_turns_locked(session)
+            self._touch_session(session)
+            return turn
+
+    def prepare_turn(
+        self,
+        *,
+        role: str,
+        content: str,
+        turn_type: str = "text",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Prepare the actual bounded identity once, without publishing completion."""
+        with self._lock:
             bounded_content, content_truncated, original_content_length = _truncate_text(
                 content,
                 max_chars=self._max_turn_content_chars,
@@ -439,6 +525,16 @@ class SessionManager:
                     }
                 )
                 bounded_metadata["_retention"] = retention_meta
+            bounded_metadata = json.loads(json.dumps(bounded_metadata, ensure_ascii=True, sort_keys=True, default=str))
+            if (
+                len(json.dumps(bounded_metadata, ensure_ascii=True, sort_keys=True))
+                > self._max_turn_metadata_chars + TURN_METADATA_DIAGNOSTIC_CHARS
+            ):
+                bounded_metadata = {
+                    "_truncated": True,
+                    "original_char_count": original_metadata_length,
+                    "_retention": bounded_metadata.get("_retention", {}),
+                }
             turn: dict[str, Any] = {
                 "turn_id": uuid.uuid4().hex,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -447,10 +543,35 @@ class SessionManager:
                 "content": bounded_content,
                 "metadata": bounded_metadata,
             }
-            session.turns.append(turn)
-            self._trim_turns_locked(session)
-            self._touch_session(session)
             return turn
+
+    def publish_transcript(
+        self, *, user_id: str, snapshot: dict[str, Any], touch: bool = False, expected_turn: dict[str, Any] | None = None
+    ) -> bool:
+        """Publish only a current owned snapshot; retirement cannot recreate a session."""
+        with self._lock:
+            self._prune_expired_sessions_locked()
+            session = self._sessions.get(str(snapshot["session_id"]))
+            if session is None or session.user_id != user_id or session.persona_id != snapshot["persona_id"]:
+                return False
+            revision = int(snapshot["revision"])
+            if revision < session.transcript_revision:
+                # Another connection can publish a later commit which already contains this turn.
+                return expected_turn is not None and expected_turn in session.turns
+            turns = snapshot.get("turns") or []
+            retired = bool(snapshot.get("retired", not turns))
+            if revision == session.transcript_revision:
+                if session.transcript_retired and not retired:
+                    return False
+                if not retired and session.turns != turns:
+                    return False
+            session.persisted = True
+            session.transcript_revision = revision
+            session.transcript_retired = retired
+            session.turns = [] if retired else json.loads(json.dumps(turns))
+            if touch:
+                self._touch_session(session)
+            return True
 
     def list_turns(
         self,

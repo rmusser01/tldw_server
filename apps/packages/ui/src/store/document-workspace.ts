@@ -61,6 +61,7 @@ const captureViewerState = (state: DocumentWorkspaceStore): DocumentViewerState 
 export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
   (set, get) => ({
     // Initial state
+    workspaceAuthority: null,
     activeDocumentId: null,
     activeDocumentType: null,
     openDocuments: [],
@@ -474,21 +475,48 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
     },
 
     removeAnnotation: (id: string) => {
-      set((state) => ({
-        annotations: state.annotations.filter((ann) => ann.id !== id),
-        annotationSyncStatus: "pending"
-      }))
+      set((state) => {
+        const pendingAnnotations = state.pendingAnnotations.filter((ann) => ann.id !== id)
+        return {
+          annotations: state.annotations.filter((ann) => ann.id !== id),
+          pendingAnnotations,
+          annotationSyncStatus: pendingAnnotations.length ? "pending" : "synced"
+        }
+      })
     },
 
-    setAnnotations: (annotations: Annotation[]) => {
-      set({ annotations, pendingAnnotations: [], annotationSyncStatus: "synced" })
+    setAnnotations: (annotations: Annotation[], mediaId?: number) => {
+      set((state) => {
+        const documentId = mediaId ?? state.activeDocumentId
+        if (documentId === null) return state
+        const saved = new Map(annotations.filter(a => a.documentId === documentId).map(a => [a.id, a]))
+        for (const pending of state.pendingAnnotations) {
+          if (pending.documentId === documentId) saved.set(pending.id, pending)
+        }
+        return { annotations: [...state.annotations.filter(a => a.documentId !== documentId), ...saved.values()] }
+      })
+    },
+
+    acknowledgeAnnotations: (submitted: Annotation[], saved: Annotation[], idMapping: Record<string, string> = {}) => {
+      set((state) => {
+        const snapshots = new Map(submitted.map(annotation => [annotation.id, annotation]))
+        const returned = new Map(saved.map(annotation => [annotation.id, annotation]))
+        const pendingAnnotations = state.pendingAnnotations.filter(annotation => snapshots.get(annotation.id) !== annotation)
+        const annotations = state.annotations.map(annotation => {
+          const acknowledgedId = snapshots.get(annotation.id) === annotation ? idMapping[annotation.id] : submitted.length === 0 ? annotation.id : undefined
+          return acknowledgedId ? returned.get(acknowledgedId) ?? annotation : annotation
+        })
+        if (submitted.length === 0) {
+          for (const annotation of saved) {
+            if (!annotations.some(current => current.id === annotation.id)) annotations.push(annotation)
+          }
+        }
+        return { annotations: [...new Map(annotations.map(annotation => [annotation.id, annotation])).values()], pendingAnnotations, annotationSyncStatus: pendingAnnotations.length ? "pending" : "synced" }
+      })
     },
 
     setAnnotationSyncStatus: (status: AnnotationSyncStatus) => {
-      set({ annotationSyncStatus: status })
-      if (status === "synced") {
-        set({ pendingAnnotations: [] })
-      }
+      set((state) => ({ annotationSyncStatus: status === "synced" && state.pendingAnnotations.length ? "pending" : status }))
     },
     setAnnotationsHealth: (status: WorkspaceHealthStatus) => {
       set({ annotationsHealth: status })
@@ -500,6 +528,7 @@ export const useDocumentWorkspaceStore = create<DocumentWorkspaceStore>(
     // Reset
     reset: () => {
       set({
+        workspaceAuthority: null,
         activeDocumentId: null,
         activeDocumentType: null,
         openDocuments: [],

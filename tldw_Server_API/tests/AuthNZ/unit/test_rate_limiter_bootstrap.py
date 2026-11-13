@@ -13,6 +13,9 @@ class _StubConn:
     async def execute(self, sql, *params):
         self.queries.append(sql)
 
+    async def fetchval(self, sql, *params):
+        return True  # This unit fixture represents the migration owner.
+
     async def fetch(self, sql, *params):
         if "information_schema.columns" in sql:
             return [

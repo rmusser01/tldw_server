@@ -184,7 +184,7 @@ from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import
 from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
-from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode, is_truthy
+from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_context, is_test_mode, is_truthy
 from tldw_Server_API.app.core.Usage.usage_tracker import (
     backfill_legacy_tokens_to_ledger,
     log_llm_usage,
@@ -903,20 +903,11 @@ def _record_oauth_401_retry(provider: str, outcome: str) -> None:
         pass
 
 
-def _is_test_context() -> bool:
-    try:
-        if os.getenv("PYTEST_CURRENT_TEST"):
-            return True
-    except _EMBEDDINGS_NONCRITICAL_EXCEPTIONS:
-        pass
-    return env_flag_enabled("TESTING") or is_test_mode()
-
-
 def _should_skip_missing_key(
     provider: str,
     credentials: ResolvedByokCredentials | None = None,
 ) -> bool:
-    if not _is_test_context():
+    if not is_test_context():
         return False
     if credentials is None:
         return True
@@ -1490,7 +1481,7 @@ def _embedding_cache_key_secret() -> bytes:
     try:
         return derive_hmac_key()
     except ValueError:
-        if _is_test_context():
+        if is_test_context():
             # Keep cache keys deterministic in test contexts when AuthNZ secrets are absent.
             return b"tldw_embeddings_cache_hmac_fallback"
         raise

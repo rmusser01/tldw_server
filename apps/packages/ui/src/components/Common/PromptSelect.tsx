@@ -107,11 +107,23 @@ type RecipeSystemPromptUndoSnapshot = SystemPromptUndoSnapshot & {
 
 export const PromptSelect: React.FC<Props> = (props) => {
   const authority = usePromptLocalAuthority()
-  return <PromptSelectForOwner key={authority.ready ? authority.ownerId ?? "local" : "resolving"} {...props} expectedOwnerId={authority.ownerId} />
+  return <PromptSelectForOwner key={authority.ready ? authority.ownerId ?? "local" : "resolving"} {...props}
+    expectedOwnerId={authority.ownerId}
+    ownerPending={!authority.ready && !authority.localOnlyReady && !authority.unavailable}
+    ownerUnavailable={authority.unavailable}
+    onRetryOwner={authority.retry} />
 }
 
-const PromptSelectForOwner: React.FC<Props & { expectedOwnerId: string | null }> = ({
+const PromptSelectForOwner: React.FC<Props & {
+  expectedOwnerId: string | null
+  ownerPending: boolean
+  ownerUnavailable: boolean
+  onRetryOwner: () => void
+}> = ({
   expectedOwnerId,
+  ownerPending,
+  ownerUnavailable,
+  onRetryOwner,
   setSelectedQuickPrompt,
   setSelectedSystemPrompt,
   selectedSystemPrompt,
@@ -407,12 +419,12 @@ const PromptSelectForOwner: React.FC<Props & { expectedOwnerId: string | null }>
     staleTime: 60_000,
     retry: false
   })
-  const serverPromptsPending = serverPromptsFetching && !serverLibrary
+  const serverPromptsPending = ownerPending || (serverPromptsFetching && !serverLibrary)
   // "No server configured" is not an outage: the picker just stays local.
-  const serverPromptsUnavailable =
+  const serverPromptsUnavailable = ownerUnavailable || (
     serverPromptsFailed &&
     !serverPromptsFetching &&
-    !isServerPromptLibraryUnconfiguredError(serverPromptsError)
+    !isServerPromptLibraryUnconfiguredError(serverPromptsError))
 
   const mergedLibrary = useMemo(
     () => mergePromptLibraries(data ?? [], serverLibrary?.prompts ?? []),
@@ -883,7 +895,8 @@ const PromptSelectForOwner: React.FC<Props & { expectedOwnerId: string | null }>
           label: serverRetryLabel,
           onClick: () => {
             holdMenuOpen()
-            void refetchServerPrompts()
+            if (ownerUnavailable) onRetryOwner()
+            else void refetchServerPrompts()
           }
         }
       )
@@ -915,10 +928,10 @@ const PromptSelectForOwner: React.FC<Props & { expectedOwnerId: string | null }>
           label: (
             <Empty
               description={
-                searchText
-                  ? t("noMatchingPrompts", "No matching prompts")
-                  : serverPromptsUnavailable
-                    ? noLocalPromptsLabel
+                serverPromptsUnavailable
+                  ? noLocalPromptsLabel
+                  : searchText
+                    ? t("noMatchingPrompts", "No matching prompts")
                     : t("promptSelect.noSavedPrompts", "No saved prompts")
               }
             />
@@ -1037,6 +1050,8 @@ const PromptSelectForOwner: React.FC<Props & { expectedOwnerId: string | null }>
     refetchPrompts,
     serverLibrary,
     serverPromptsPending,
+    ownerUnavailable,
+    onRetryOwner,
     serverPromptsUnavailable,
     serverPromptSelection,
     serverLibraryLabel,

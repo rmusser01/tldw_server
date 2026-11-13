@@ -34,6 +34,28 @@ describe("TldwApiClient presentations normalization", () => {
     vi.clearAllMocks()
   })
 
+  it.each([undefined, 4096])("forwards the selected slides token budget %s without inventing a default", async (maxTokens) => {
+    const client: TldwApiClientCore = {
+      ensureConfigForRequest: vi.fn(),
+      request: vi.fn(async () => ({})) as TldwApiClientCore["request"],
+      resolveApiPath: vi.fn(),
+      fillPathParams: vi.fn()
+    }
+    const controller = new AbortController()
+
+    await presentationsMethods.generateSlidesFromMedia.call(client, 7, {
+      maxTokens,
+      signal: controller.signal
+    })
+
+    expect(client.request).toHaveBeenCalledExactlyOnceWith({
+      path: "/api/v1/slides/generate/from-media",
+      method: "POST",
+      body: maxTokens === undefined ? { media_id: 7 } : { media_id: 7, max_tokens: maxTokens },
+      abortSignal: controller.signal
+    })
+  })
+
   it("trims and filters array-based visual style metadata fields", async () => {
     const client: TldwApiClientCore = {
       ensureConfigForRequest: vi.fn(async () => ({})),

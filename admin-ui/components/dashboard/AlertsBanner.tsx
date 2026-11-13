@@ -24,6 +24,7 @@ type DashboardAlertFull = DashboardAlertSummaryItem & {
 
 type AlertsBannerProps = {
   alerts: DashboardAlertFull[];
+  acknowledging?: boolean;
   onAcknowledgeAll?: () => void;
 };
 
@@ -98,7 +99,7 @@ const getAlertToneClasses = (critical: number, warning: number) => {
   };
 };
 
-export const AlertsBanner = ({ alerts, onAcknowledgeAll }: AlertsBannerProps) => {
+export const AlertsBanner = ({ alerts, acknowledging, onAcknowledgeAll }: AlertsBannerProps) => {
   if (alerts.length <= 0) return null;
 
   const summary = summarizeAlertSeverities(alerts);
@@ -137,6 +138,7 @@ export const AlertsBanner = ({ alerts, onAcknowledgeAll }: AlertsBannerProps) =>
               size="sm"
               variant="ghost"
               className="h-7 px-2 text-xs"
+              disabled={acknowledging}
               onClick={onAcknowledgeAll}
               title="Acknowledge all alerts"
               data-testid="acknowledge-alerts-btn"

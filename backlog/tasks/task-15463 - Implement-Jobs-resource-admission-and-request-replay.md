@@ -1,0 +1,56 @@
+---
+id: TASK-15463
+title: Implement Jobs resource admission and request replay
+status: Done
+labels:
+- claims
+- jobs
+- implementation
+dependencies:
+- TASK-15462
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Atomic resource admission/replay, independent receipt-facade guards and scoped Jobs RLS context.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 The approved task's interfaces, safety invariants and scope are implemented without Claims-owned lifecycle state.
+- [x] #2 Test-first RED/GREEN, appropriate characterization and official backend fixture evidence are recorded with exact results and skips.
+- [x] #3 Focused lint, compilation, touched-production Bandit, normal hooks, local commit and independent spec/quality review are recorded.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Approved plan task 2: Docs/superpowers/plans/2026-11-01-claims-jobs-stage2c-cluster-rebuilds.md. ADR required: no additional ADR; accepted Docs/ADR/085-jobs-resource-admission-and-domain-publication.md governs the approved resource/publication boundary with ADR-003 and ADR-058. Execute only in the existing linked worktree/branch, test first, use shared Jobs lifecycle APIs, official backend fixtures, focused verification and touched-code Bandit, normal hooks and scoped commits. Task-ID audit explicitly targeted rmusser01/tldw_server after discovering gh defaults to upstream: fetched dev 61d02ed484a3c80f5423676b959cf14e7b572a62, checked all 37 open PR paginated file lists (223 selected Backlog/ADR records, no truncation) and current branch; highest observed id 15410. Reserved TASK-15411 through TASK-15421 for the eleven reviewable plan tasks. No collision with planning records TASK-15282/TASK-15283 or ADR-085. Preserve unrelated main-checkout changes; no push/PR/merge authorized.
+Task 1 prerequisites completed in commits 5b12a5f3fa and 3a3c0991ce; independent spec/quality review and fix re-review are clean. Begin approved plan Task 2 using shared contracts/schema, task-1-interfaces.md and task-2-integration-notes.md in this plans isolated SDD workspace. Resource bindings are immutable on UPDATE and therefore must be inserted atomically as complete metadata; schema permits payload representation rewrites while Task 3 later guards semantic replacement. Queue/fair-share/payload preparation must remain shared with ordinary admission while retained replay runs first under the resource lock. This task also closes independent receipt-facade bypasses and defines token-restoring Jobs-specific RLS context. Test first with official PostgreSQL fixtures; no Claims lifecycle, producer enablement, push or PR.
+Task 2 implementation evidence: shared deferred _prepare_job_admission plus existing backend insert/quota/counter/event path; complete immutable binding INSERT; retained replay/active reuse under resource-head serialization; receipt facade/backend guards; token-restoring Jobs scoped context. Initial RED log /tmp/task15412-red.log (58 valid missing-feature/guard/context failures plus 24 receipt setup failures, corrected and independently rerun meaningful RED: /tmp/task15412-receipt-red.log, 24 failed). Restricted Jobs role admission RED reproduced missing INSERT permission; minimal existing migration grants fixed it under real RLS. Interim GREEN 84 passed, no skips. Required/extended RUN_JOBS=1 verification in progress. ADR assessment: ADR-085 governs; no new durable architecture decision. Full report: .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-2-report.md. Keep In Progress for controller independent review; Task 3 semantic/lifecycle work remains unimplemented.
+Final required Task 2 verification: RUN_JOBS=1 pytest of the 4 new files and 5 required characterizations, 247 passed, 0 skipped (/tmp/task15412-required-complete.log). Final compilation (14 files), Ruff, 6-file Black check and diff check pass. Touched-production Bandit: zero new findings; one unchanged B608 in manager archive-candidate SQL verified against BASE (/tmp/bandit_task15412.json, /tmp/bandit_task15412_manager_base.json). Extra characterization concern: unchanged Task 1 test_fingerprint_is_independent_of_mapping_insertion_order hit Hypothesis input-generation health checks in extended (191 passed/1 failed) and combined (432 passed/1 failed) runs; same first seed passed isolated; not suppressed or modified. Added RED/GREEN safeguards for orphaned terminal authority (2 failed -> 2 passed) and unregistered alias lookalikes (6 failed -> final required GREEN). Report includes exact Task 3 APIs/hooks, fault/RLS evidence, commands and scope limitations. Remains In Progress pending independent controller review.
+Controller corrections before commit: official restricted-role fair-share regression confirmed cross-domain owner-count bypass (1 failed RED, /tmp/task15412-fairshare-red.log); shared Jobs _count_active_jobs_for_user now uses token-restoring non-admin scalar aggregate scope across domains without rebinding a non-admin owner or widening actual admission/returned rows (1 passed GREEN, /tmp/task15412-fairshare-green.log). Controller authorized bounded generation in Task 1 fingerprint-order property; original assertion/UTF-8/surrogate tests and default health checks/examples retained. First bounded text/integer strategy still failed full combined health check (439 passed/1 failed), so profiling/source inspection identified provider local-constant mining cost; final finite Unicode key/value palette uses boolean-only draws and final same-code combined qualification is running. All earlier failures and exact commands retained in task-2-report.md. No fingerprint production change or health-check suppression. Task remains In Progress.
+Final controller-corrected same-code combined qualification: RUN_JOBS=1 pytest of all 19 required+extended test files, including the bounded Task 1 property and real restricted-role cross-domain fair-share regression: 440 passed, 0 skipped, 941 warnings, 91.77s (/tmp/task15412-final-same-code-v2.log). Final compilation of 15 Python files, Ruff, seven-file Black check and staged/unstaged diff checks pass. Earlier health-check failures remain fully documented; final boolean-only finite Unicode-key/integer palette avoids measured provider constant-mining without reducing examples, suppressing checks or altering fingerprint production semantics. Only remaining quality caveat is proven unchanged manager B608 at BASE; zero new Bandit findings. Normal scoped hooks/local commit evidence and exact integration signatures in task-2-report.md. Keep In Progress pending controller independent review; no Task 3 semantic/lifecycle completion claimed.
+Pre-independent-review correction at BASE a205a219344e093105af02f78865d464d4d07f19: controller identified two approved-spec integration gaps: conflicts need a bounded authorized reference to their exact locked target, and a valid older active generation may be below a monotonic head counter after fixture-seeded reactivation. Added both-backend exact-target/ref/no-mutation/owner-isolation tests, actual restricted-role reference/non-disclosure checks, older-active/corrupt-above-counter cases, and property accounting based on successful kinds rather than Job presence. Running meaningful RED before production edits. Same Task 2 scope, no lifecycle/reactivation API or metadata mutation; record will remain In Progress.
+Pre-review correction RED/GREEN: 19 expected failures + 2 passing above-counter corruption controls -> 21 passed, 128 deselected, zero skips (/tmp/task15412-correction2-red.log, /tmp/task15412-correction2-green.log). Minimal resource.py fix returns only id/uuid/domain/owner_user_id/job_type/resource from validated exact targets for request_conflict/active_conflict; full Jobs/payload/result/raw errors are not exposed. Removed only active generation==head counter assumption; existing positive generation<=counter, same authority, exact UUID/state/uniqueness guards remain. Same-code full affected RUN_JOBS=1 run of all 19 required+extended files: 460 passed, 0 skipped, 981 warnings, 75.25s (/tmp/task15412-correction2-final.log), including real restricted-role references/non-disclosure and both-backend older-generation fixtures. Four touched Python files compile; Ruff/Black/diff checks pass; touched-production Bandit zero findings/errors (/tmp/bandit_task15412_correction2.json). Report obsolete no-Job conflict claim corrected; exact outcome shape/Task10 integration and evidence appended to task-2-report.md. No Task3 reactivation API or immutable metadata changes; remains In Progress pending controller review.
+Independent Task 2 review at 996a70c7a54cd6ae17d6c0f87cf92b0a0676fd7a: spec compliant and quality Approved, zero Critical/Important findings. Reviewer checked full two-commit range from 078c57767b, correction appendix and actual evidence without rerunning suites. Controller verified final log 460 passed/zero skips and minimal exact-target conflict projection/older-generation correction. Cannot-verify items are explicitly subsequent Tasks 3-10, not Task 2 omissions or rollout authorization. Minor observations retained for final qualification: warning-bearing output (981 warnings) and unchanged manager archive-query B608 (zero new findings/errors, no suppression). Review report: .superpowers/sdd/2026-11-01-claims-jobs-stage2c-cluster-rebuilds/task-2-review.md. No producer enabled; no push or PR.
+Identifier-only repair under TASK-15421 after current dev and all39openPR paginated audit. This Claims record is renumbered to avoid another owners published/open task. Existing status, acceptance, rationale and historical evidence are preserved; current governing Claims ADR is086 after metadata-only move. No production behavior or publication authorization changed.
+Publication-time namespace correction under TASK-15465: only this private Claims record renumbered; historical IDs/commits in prior notes remain historical. Current accepted resource ADR094 and Proposed SDK ADR095 preserve prior rationale/status.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Completed atomic shared Jobs resource admission and retained replay in a205a21934 and 996a70c7a5. Existing preparation/insert/quota/counter/event transactions remain shared; alternate receipt paths fail closed, owner RLS context restores tokens, global owner fair-share is preserved, conflicts carry bounded authorized identity, and older active generations retain monotonic authority. Final affected verification: 460 passed, zero skips including official PostgreSQL/restricted-role coverage; compilation/lint/format/hooks pass; zero new Bandit findings with unchanged baseline B608 explicitly recorded. Independent spec/quality review approved. Lifecycle, semantic replacement, retention and producer adoption remain subsequent tasks.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

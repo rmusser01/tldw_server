@@ -1,4 +1,13 @@
 {
+  "requestedWorkspace": {
+    "localWork": "Your local draft or saved Chat has been kept. Return to the account where it was created to save or export it, then retry.",
+    "account": "Check account",
+    "unavailable": "Workspace could not be opened",
+    "recovery": "Your current workspace and unsaved work have been kept. Check your account and connection, then retry.",
+    "retry": "Retry",
+    "back": "Back to Workspaces",
+    "opening": "Opening workspace…"
+  },
   "header": {
     "newTemporaryChat": "Temporary chat (on this device)",
     "shareShort": "Share"
@@ -524,6 +533,7 @@
     "slashGenerateImage": "Generate image",
     "slashGenerateImageDesc": "Generate an image. Use /generate-image:<provider> <prompt>.",
     "slashGenerateImageDescDefault": "Generate an image (default: {{backend}}). Use /generate-image:<provider> to override.",
+    "slashModelDesc": "Choose the model for this chat",
     "captureTools": "Capture and assist tools",
     "actions": "Send options",
     "moreTools": "More tools",
@@ -755,11 +765,14 @@
     "sceneDetails": "Scene details",
     "connectingNotice": "Connecting to your tldw server…",
     "providerStatusConnecting": "Connecting…",
+    "providerStatusOffline": "Offline",
+    "serverStatusConnected": "Server connected",
     "connectionPendingSend": "Still connecting to your tldw server. Your draft has not been sent.",
     "modelCatalogSearchPlaceholder": "Search all models",
     "modelScopeLabel": "Models to show",
     "modelScopeReady": "Ready to use",
     "modelScopeAll": "All models",
+    "modelCatalogLoadFailed": "Couldn't load all models",
     "modelNotSetUp": "Not set up",
     "modelNotSetUpTitle": "This model's provider is not set up on your server yet.",
     "modelReadiness": {
@@ -1480,6 +1493,12 @@
     "regenerationRefusedMessage": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again.",
     "regenerationUnknownTitle": "New reply unconfirmed",
     "regenerationUnknownMessage": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically.",
+    "savedContinuedReplyTitle": "Continued reply saved",
+    "savedContinuedReplyMessage": "The continued reply is saved as an alternative to the original reply, which is kept. Open the saved reply when you are ready.",
+    "continuationRefusedTitle": "Continued reply refused",
+    "continuationRefusedMessage": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before continuing again.",
+    "continuationUnknownTitle": "Continued reply unconfirmed",
+    "continuationUnknownMessage": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved the continued reply. Reload this chat before continuing again. Recovery will not send it again automatically.",
     "roleplayReplyUnconfirmedMessage": "Your message is saved. Any reply that arrived is retained here. Explicit Retry may generate another reply if none is already saved, including while an earlier request is still running. It does not add another user message.",
     "roleplayInputUnconfirmedMessage": "The server may have received this message. Explicit Retry may generate a reply if none is already saved. It keeps the original message identity and your retained input."
   },

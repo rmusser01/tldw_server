@@ -1,11 +1,12 @@
 import React, { useMemo } from 'react'
-import { Button, Dropdown, Tooltip, Typography } from 'antd'
+import { Button, Dropdown, Tooltip, Typography, theme } from 'antd'
 import type { MenuProps } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { useMobile } from '@/hooks/useMediaQuery'
 import { useTutorialStore } from '@/store/tutorials'
 import type { SaveIndicatorState } from './notes-manager-types'
 import NotesSaveStatus from './NotesSaveStatus'
+import { formatBacklinkIdsTooltip } from './notes-backlink-labels'
 import {
   Link2 as LinkIcon,
   Sparkles as SparklesIcon,
@@ -109,6 +110,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   studioBadgeLabel = null,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const { token } = theme.useToken()
   const isMobileViewport = useMobile()
   const toolbarButtonSize: 'small' | 'large' = isMobileViewport ? 'large' : 'small'
   const touchTargetClass = isMobileViewport ? 'min-h-[44px]' : undefined
@@ -121,12 +123,13 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         t('option:notesSearch.untitledNote', {
           defaultValue: `Note ${selectedId}`
         })
-  const conversationDisplayText = backlinkConversationLabel || backlinkConversationId
+  // Raw ids stay in the tooltip; an unresolved chat reads "Linked chat" (XP-14).
+  const conversationDisplayText =
+    backlinkConversationLabel ||
+    t('option:notesSearch.linkedChatUnresolved', { defaultValue: 'Linked chat' })
   const conversationDebugTooltip =
     backlinkConversationId != null
-      ? `${t('option:notesSearch.linkedConversationIdLabel', {
-          defaultValue: 'Conversation ID'
-        })}: ${backlinkConversationId}`
+      ? formatBacklinkIdsTooltip(t, backlinkConversationId, backlinkMessageId)
       : null
   // The editor's save state machine already folds in unsaved edits (NS-06).
   const displayedSaveState = saveIndicator
@@ -428,7 +431,11 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
     <div className="flex flex-col gap-3 border-b border-border bg-surface px-4 py-3 md:flex-row md:flex-wrap md:items-center md:justify-between">
       <div className="flex min-w-0 flex-col gap-0.5 md:flex-1 md:basis-64">
         <div className="flex flex-wrap items-center gap-2">
-          <Typography.Title level={5} className="!mb-0 max-w-full truncate !text-text">
+          <Typography.Title
+            level={2}
+            className="!mb-0 max-w-full truncate !text-text"
+            style={{ fontSize: token.fontSizeHeading5, lineHeight: token.lineHeightHeading5 }}
+          >
             {displayTitle}
           </Typography.Title>
           {studioBadgeLabel ? (
@@ -445,13 +452,14 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
         </div>
         {backlinkConversationId && (
           <div className="text-xs text-primary">
-            {t('option:notesSearch.linkedConversation', {
-              defaultValue: 'Linked to conversation'
-            })}{': '}
+            {backlinkConversationLabel
+              ? `${t('option:notesSearch.linkedConversation', {
+                  defaultValue: 'Linked to conversation'
+                })}: `
+              : null}
             <Tooltip title={conversationDebugTooltip}>
               <span className="font-medium">{conversationDisplayText}</span>
             </Tooltip>
-            {backlinkMessageId ? ` · msg ${backlinkMessageId}` : ''}
           </div>
         )}
         {sourceLinks.length > 0 && (

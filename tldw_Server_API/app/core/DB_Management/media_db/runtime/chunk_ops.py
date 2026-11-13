@@ -67,6 +67,8 @@ def delete_chunking_template(
     name: str | None = None,
     uuid: str | None = None,
     hard_delete: bool = False,
+    *,
+    owner_user_id: str | None = None,
 ) -> bool:
     return chunk_template_ops.delete_chunking_template(
         self,
@@ -74,6 +76,7 @@ def delete_chunking_template(
         name=name,
         uuid=uuid,
         hard_delete=hard_delete,
+        owner_user_id=owner_user_id,
     )
 
 
@@ -83,6 +86,8 @@ def get_chunking_template(
     name: str | None = None,
     uuid: str | None = None,
     include_deleted: bool = False,
+    *,
+    owner_user_id: str | None = None,
 ) -> dict[str, Any] | None:
     return chunk_template_ops.get_chunking_template(
         self,
@@ -90,6 +95,7 @@ def get_chunking_template(
         name=name,
         uuid=uuid,
         include_deleted=include_deleted,
+        owner_user_id=owner_user_id,
     )
 
 
@@ -115,6 +121,8 @@ def update_chunking_template(
     template_json: str | None = None,
     description: str | None = None,
     tags: list[str] | None = None,
+    *,
+    owner_user_id: str | None = None,
 ) -> bool:
     return chunk_template_ops.update_chunking_template(
         self,
@@ -124,6 +132,7 @@ def update_chunking_template(
         template_json=template_json,
         description=description,
         tags=tags,
+        owner_user_id=owner_user_id,
     )
 
 __all__ = [

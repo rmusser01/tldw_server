@@ -6,7 +6,7 @@
  * directly. The outcome is keyed by the request's own provider and model.
  */
 import {
-  isChatModelUnreachableError,
+  isChatProviderFailureError,
   recordChatModelSendOutcome,
   type ChatModelSendOutcome
 } from "@/utils/chat-model-readiness"
@@ -43,15 +43,16 @@ export const recordChatModelAnswered = (target: ChatModelOutcomeTarget | null) =
   recordOutcome(target, "working")
 
 /**
- * A request that failed. Only a 5xx or a provider-unavailable error marks the
- * model unreachable; validation errors, aborts and timeouts are not evidence
- * either way.
+ * A request that failed. Only a failure shaped like the provider not
+ * answering (a provider error code, or a 502/504) marks the model
+ * unreachable. Any other 5xx (a 503 for missing credentials, a server fault),
+ * validation errors, aborts and timeouts are not evidence either way (#3343).
  */
 export const recordChatModelFailure = (
   target: ChatModelOutcomeTarget | null,
   error: unknown
 ) => {
-  if (isChatModelUnreachableError(error)) recordOutcome(target, "unreachable")
+  if (isChatProviderFailureError(error)) recordOutcome(target, "unreachable")
 }
 
 const isErrorFrame = (chunk: unknown): boolean =>

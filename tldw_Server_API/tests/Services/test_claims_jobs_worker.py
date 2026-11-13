@@ -65,5 +65,13 @@ async def test_start_claims_jobs_worker_uses_worker_sdk_without_owner_filter(
     assert observed["config"].domain == "claims"
     assert observed["config"].queue == "default"
     assert observed["run_kwargs"]["handler"] is claims_jobs_worker.process_claims_job
+    assert set(observed["run_kwargs"]["job_types"]) == {
+        "claims_rebuild_media",
+        "claims_deliver_review_notification",
+        "claims_deliver_alert",
+        "claims_generate_analytics_export",
+        "claims_aggregate_review_metrics",
+        "claims_rebuild_clusters",
+    }
     assert "owner_user_id" not in observed["run_kwargs"]
     assert observed["stopped"] is True

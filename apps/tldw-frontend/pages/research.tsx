@@ -1538,6 +1538,22 @@ export default function ResearchRunsPage() {
               {runsQuery.isFetching && <span className="text-xs text-muted-foreground">Refreshing…</span>}
             </div>
             <div className="space-y-2">
+              {runsQuery.isError && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-danger/30 bg-danger/5 px-3 py-3 text-sm text-danger"
+                >
+                  <p>Unable to load research runs.</p>
+                  <button
+                    type="button"
+                    className="mt-2 underline disabled:opacity-50"
+                    disabled={runsQuery.isFetching}
+                    onClick={() => void runsQuery.refetch()}
+                  >
+                    Retry loading runs
+                  </button>
+                </div>
+              )}
               {runsQuery.data?.map((run) => {
                 const selected = run.id === effectiveSelectedRunId;
                 return (
@@ -1561,7 +1577,9 @@ export default function ResearchRunsPage() {
                   </button>
                 );
               })}
-              {!runsQuery.isLoading && (!runsQuery.data || runsQuery.data.length === 0) && (
+              {!runsQuery.isLoading &&
+                !runsQuery.isError &&
+                (!runsQuery.data || runsQuery.data.length === 0) && (
                 <div className="rounded-2xl border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
                   No research runs yet.
                 </div>

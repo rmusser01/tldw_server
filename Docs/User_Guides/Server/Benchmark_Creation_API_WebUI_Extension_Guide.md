@@ -114,6 +114,7 @@ Typical response shape:
     "total_evaluated": 25,
     "successful": 25,
     "failed": 0,
+    "unscored": 0,
     "average_score": 0.84,
     "min_score": 0.5,
     "max_score": 1.0
@@ -146,8 +147,8 @@ If your goal is a custom quality test today without backend benchmark registrati
 
 ### 402 LLM quota
 
-- The user is over an LLM limit: `detail.error` is `limit_exceeded`, and `Retry-After` says when to try again. The run is refused before its dataset loads, so nothing is evaluated.
-- An admitted run runs to completion, even if it takes the user past the limit; no item is refused mid-run. The next run is refused.
+- The user is over an LLM limit: `detail.error` is `limit_exceeded`, and `Retry-After` says when to try again. The run is refused before its dataset loads, so nothing is evaluated. A run whose `api_name` runs on a key the user stored that bills them (see `Docs/User_Guides/Server/BYOK_User_Guide.md`) is not refused: every item's model response and judge call run on that key and do not count. This route takes no `api_key`; only the standalone `POST /api/v1/benchmarks/{name}/run` does, and a run there that sends one is refused, because that key counts.
+- An admitted run runs to completion, even if it takes the user past the limit; no item is refused mid-run. The next run on the server's key is refused.
 
 ### 404 benchmark not found
 
@@ -159,9 +160,17 @@ If your goal is a custom quality test today without backend benchmark registrati
 
 ### Run failures in summary
 
-- `failed > 0` means per-item evaluator errors occurred.
+- `failed > 0` counts items whose evaluation raised outside the model and judge calls, such as an item whose data could not be built into a prompt. A failed model or judge call is never `failed`: it is `unscored`.
+- `unscored > 0` counts items with no score: the model's own answer call failed or raised (provider error, timeout, rate limit, or a local server that is down), the judge call failed or raised (the same, or an empty or truncated reply), or the judge's reply held no readable score. They are neither `successful` nor `failed`, and they are left out of `average_score`, `min_score`, `max_score`, `by_category` and the stored scores. The server logs `Model response generation failed`, `Judge call failed for metric`, `Custom metric evaluation failed` or `Could not parse valid score`.
+- If every item is unscored or failed, `successful` is 0 and the three scores read 0.0; they are not a measured zero.
 - Reduce `parallel` and retry.
 - Confirm provider credentials (`api_name`) are valid server-side.
+
+### Every item scored 0.5
+
+- Before the November 2026 fix (TASK-15485), the judge's call never reached the provider, so every item got the 0.5 default. The `average_score`, `min_score`, `max_score` and `by_category` of those runs, and the results they stored (`save_results`), carry no information.
+- Re-run `simple_bench` or `bullshit_benchmark`: their scores are now the judge's. Do not re-run the others expecting meaningful scores. `mmlu_pro` rows are not yet mapped to the benchmark's fields, so its judge is told the correct answer is "None", and its scores look real but carry no information. `simpleqa_verified` has no loader entry and `gpqa_diamond` most likely fails the same way (404), `mmlu_pro` and `gpqa_diamond` also need the `datasets` package (the `data-tools` extra), and six more benchmarks answer 501.
+- Each item's score is the judge's reply mapped to 0-1: a 1-10 score (10 is 1.0, 1 is 0.0). A reply with no score, a failed judge call or a failed model answer leaves the item unscored (see "Run failures in summary"). The run's response does not show per-item explanations, so look in the server log; the CLI's saved results keep a `null` score and the explanation (the `Error:` text for a failed call). Re-running such an item may succeed.
 
 ### Rate limiting
 

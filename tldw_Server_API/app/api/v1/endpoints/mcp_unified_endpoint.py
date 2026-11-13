@@ -644,7 +644,7 @@ async def _attach_api_key_metadata(
     log_on_error: bool = False,
     log_prefix: str = "HTTP",
 ) -> dict[str, Any]:
-    """Attach API-key-derived metadata (org/team) for MCP HTTP endpoints.
+    """Attach authentication scope and configured policy context for MCP HTTP endpoints.
 
     Prefers any API key info already attached to the auth context and falls back
     to validating the raw API key when needed.
@@ -717,6 +717,7 @@ async def _attach_api_key_metadata(
 
     _attach_rg_ingress_metadata(metadata, http_request)
     _attach_workspace_ingress_metadata(metadata, http_request)
+    metadata["mcp_policy_context_enabled"] = is_mcp_hub_policy_enforcement_enabled()
     if http_request is not None:
         app = http_request.scope.get("app")
         if app is not None:
@@ -1021,7 +1022,6 @@ async def mcp_request(
         if auth.user.permissions:
             metadata.setdefault("permissions", auth.user.permissions)
 
-    metadata["mcp_policy_context_enabled"] = is_mcp_hub_policy_enforcement_enabled()
     if mcp_session_id:
         metadata["session_id"] = mcp_session_id
     if safe_config:
@@ -1126,7 +1126,6 @@ async def mcp_request_batch(
             metadata.setdefault("roles", auth.user.roles)
         if auth.user.permissions:
             metadata.setdefault("permissions", auth.user.permissions)
-    metadata["mcp_policy_context_enabled"] = is_mcp_hub_policy_enforcement_enabled()
     if mcp_session_id:
         metadata["session_id"] = mcp_session_id
     if safe_config:

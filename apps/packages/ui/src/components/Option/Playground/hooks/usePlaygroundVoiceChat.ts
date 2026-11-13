@@ -8,6 +8,7 @@ import type { SttSettings } from "@/hooks/useSttSettings"
 import { appendDictationTranscript } from "@/components/Chat/composer/utils"
 import { useComposerVoiceChat } from "@/components/Chat/composer/hooks/useComposerVoiceChat"
 import { withTemplateFallback } from "@/utils/template-guards"
+import { useHeldDocumentTitle } from "@/utils/document-title"
 import type { VoiceConversationAvailability } from "@/services/tldw/voice-conversation"
 
 /**
@@ -268,24 +269,20 @@ export function usePlaygroundVoiceChat(deps: UsePlaygroundVoiceChatDeps) {
     }
   }, [t, voiceChat.state])
 
-  // Update window title when voice chat is active
-  React.useEffect(() => {
-    if (!voiceChatEnabled || voiceChat.state === "idle") return
-    const originalTitle = document.title
-    const emoji = {
-      connecting: "\u{1F50C}",
-      listening: "\u{1F3A4}",
-      thinking: "\u{1F4AD}",
-      speaking: "\u{1F50A}",
-      error: "\u26A0\uFE0F"
-    }[voiceChat.state] || ""
-    if (emoji) {
-      document.title = `${emoji} ${voiceChatStatusLabel} - Chat`
-    }
-    return () => {
-      document.title = originalTitle
-    }
-  }, [voiceChatEnabled, voiceChat.state, voiceChatStatusLabel])
+  // Name the tab after a live voice chat. Leaving the page keeps the next
+  // route's title rather than restoring this page's (G14).
+  const voiceChatEmoji = voiceChatEnabled
+    ? {
+        connecting: "\u{1F50C}",
+        listening: "\u{1F3A4}",
+        thinking: "\u{1F4AD}",
+        speaking: "\u{1F50A}",
+        error: "\u26A0\uFE0F"
+      }[voiceChat.state]
+    : undefined
+  useHeldDocumentTitle(
+    voiceChatEmoji ? `${voiceChatEmoji} ${voiceChatStatusLabel} - Chat` : null
+  )
 
   const voiceChatUnavailableMessage = React.useMemo(() => {
     const fallback = t(

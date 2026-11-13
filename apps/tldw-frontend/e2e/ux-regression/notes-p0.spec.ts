@@ -251,13 +251,13 @@ test.describe("Notes P0 reproductions", () => {
         } else {
           await notes.goto()
         }
-        await openSeededNote(page, note.id)
         if (extension) {
           const onboardingPrompt = page.getByText("New to this page?", { exact: true })
           await expect(onboardingPrompt).toBeVisible()
           await page.getByRole("button", { name: "Not now", exact: true }).click()
           await expect(onboardingPrompt).toBeHidden()
         }
+        await openSeededNote(page, note.id)
         // The recorder must work before its silence can mean anything.
         await page.evaluate(() => window.print())
         await expect.poll(() => printed.length).toBe(1)

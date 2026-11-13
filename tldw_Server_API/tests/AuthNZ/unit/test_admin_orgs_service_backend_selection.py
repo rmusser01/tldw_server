@@ -488,7 +488,7 @@ async def test_get_org_watchlists_settings_postgres_path_uses_fetchrow_and_pg_pl
     assert response.org_id == 88
     assert response.require_include_default is True
     assert db.fetchrow_calls and "$1" in db.fetchrow_calls[0][0]
-    assert not db.execute_calls
+    assert not db.execute_calls  # nosec B101 -- request-time readiness must not issue DDL.
 
 
 @pytest.mark.asyncio
@@ -600,16 +600,22 @@ async def test_get_org_stt_settings_falls_back_to_stt_defaults_when_org_row_miss
 
 
 @pytest.mark.asyncio
-async def test_org_stt_settings_repo_ensure_tables_uses_pg_connection_execute() -> None:
+async def test_org_stt_settings_repo_ensure_tables_validates_pg_connection_without_ddl(monkeypatch) -> None:
     from tldw_Server_API.app.core.AuthNZ.repos.org_stt_settings_repo import AuthnzOrgSttSettingsRepo
 
     db = _PostgresTxConnWithSqliteTrap(metadata_json=None)
 
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.AuthNZ import postgres_runtime_schema
+
+    validator = AsyncMock()
+    monkeypatch.setattr(postgres_runtime_schema, "validate_postgres_org_stt_runtime", validator)
     repo = AuthnzOrgSttSettingsRepo(db)
     await repo.ensure_tables()
 
-    assert db.execute_calls
-    assert any("create table if not exists org_stt_settings" in q.lower() for q, _ in db.execute_calls)
+    validator.assert_awaited_once_with(db)
+    assert not db.execute_calls
 
 
 @pytest.mark.asyncio

@@ -27,7 +27,7 @@ concurrency:
 jobs:
   ux-regression:
     name: UX regression reproductions (isolated live backend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python

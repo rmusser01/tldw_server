@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { PersonaVisualAssetImage } from "@/components/Common/PersonaBuddy/usePersonaVisualAssetUrls"
 import { Button, Modal, Tag, Typography } from "antd"
 import {
@@ -399,7 +400,7 @@ const focusPersonaVisualSection = (
 ): void => {
   if (!element) return
   element.focus({ preventScroll: true })
-  element.scrollIntoView?.({ block, behavior: "smooth" })
+  element.scrollIntoView?.({ block, behavior: smoothScrollBehavior() })
 }
 
 const getGenerationReadinessCopy = (

@@ -213,24 +213,25 @@ def _rag_provider_http_exception(exc: BaseException) -> HTTPException:
 # Request settings whose stage makes an LLM call besides the answer, on a provider the boundary cannot
 # name before the pipeline runs (its own field, a config default or "openai"). TASK-13956.
 _RAG_OTHER_LLM_STAGES = (
-    "enable_query_classification", "enable_research_loop", "enable_query_rewriting_loop",
-    "enable_document_grading", "enable_knowledge_strips", "enable_fast_hallucination_check",
-    "enable_utility_grading", "enable_claims", "enable_post_verification", "enable_multi_turn_synthesis",
-    "enable_suggestions", "enable_web_fallback", "enable_faithfulness_eval", "enable_evidence_accumulation",
-    "enable_evidence_chains", "enable_abstention", "adaptive_rerun_on_low_confidence", "adaptive_advanced_rewrites",
+    "enable_query_classification", "enable_research_loop", "enable_document_grading",
+    "enable_fast_hallucination_check", "enable_utility_grading", "enable_claims", "enable_post_verification",
+    "enable_multi_turn_synthesis", "enable_suggestions", "enable_faithfulness_eval", "enable_evidence_accumulation",
+    "enable_evidence_chains",
 )
-# Not listed, no LLM call of their own: structured response (the answer's prompt), image and video search (inside the
-# research loop), query decomposition, intent routing and dynamic granularity (rule-based).
+# Every other switch of the RAG request schemas makes no LLM call of its own, or makes it only inside a listed
+# stage; test_rag_agentic_api.py's _NO_OTHER_LLM_CALL declares each one (TASK-15427).
 
 
 def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
     """The provider of each LLM call a RAG request makes, for ``enforce_llm_quota`` (TASK-13956).
 
     The answer's provider, as the generator resolves it, and the reformulation's when a chat history
-    is reformulated. Any other LLM stage adds None, so an over-limit user is refused as before.
+    is reformulated, both canonical (TASK-15427). Any other LLM stage adds None, so an over-limit user
+    is refused as before.
     """
     # ponytail: a stage this list misses is still checked at its own call (refused there, never counted).
     from tldw_Server_API.app.core.config import load_and_log_configs
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
     from tldw_Server_API.app.core.RAG.rag_service.generation_defaults import resolve_generation_defaults
 
     named = settings.get("generation_provider")
@@ -238,7 +239,7 @@ def _rag_llm_providers(settings: Mapping[str, Any]) -> list[str | None]:
         resolve_generation_defaults(load_and_log_configs() or {}, named, settings.get("generation_model"))[0]
     ]
     if settings.get("chat_history") and settings.get("enable_query_reformulation", True):
-        providers.append(settings.get("classifier_provider") or named or "openai")
+        providers.append(canonical_provider_name(settings.get("classifier_provider") or named or "openai"))
     if (
         str(settings.get("strategy") or "standard") != "standard"
         or settings.get("search_depth_mode") == "quality"

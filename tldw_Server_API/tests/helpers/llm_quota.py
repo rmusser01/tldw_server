@@ -60,6 +60,43 @@ def own_keys_for_every_provider(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return asked
 
 
+def users_own_key(monkeypatch: pytest.MonkeyPatch, provider: str = "openai", api_key: str = "sk-users-own-key") -> list[str]:
+    """The user stored their own key for ``provider``; returns each provider a boundary asks about.
+
+    The quota's lookup answers True for ``provider`` and False for every other, and the credential
+    runtime resolves that key for any user id (source ``user``), with the server's model for it and no base
+    URL: a base URL another test left in the environment (``MOCK_OPENAI_BASE_URL``) would make it
+    ``user_unmetered``. Every other provider resolves as before.
+    """
+    from tldw_Server_API.app.api.v1.API_Deps import usage_quota_deps
+    from tldw_Server_API.app.core.Provider_Credentials import provider_credential_runtime as runtime_module
+    from tldw_Server_API.app.core.Provider_Credentials.byok_config import PROVIDER_APP_CONFIG_KEYS
+    from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ResolvedByokCredentials
+
+    asked: list[str] = []
+    real_resolver = runtime_module.resolve_byok_credentials
+
+    async def _own_key(_uid: object, name: str) -> bool:
+        """Only ``provider`` runs on the user's own key."""
+        asked.append(name)
+        return name == provider
+
+    async def _resolve(name: str, **kwargs: Any) -> Any:
+        """The user's key for ``provider``; the real resolution for everything else."""
+        if name != provider or kwargs.get("user_id") is None:
+            return await real_resolver(name, **kwargs)
+        section = PROVIDER_APP_CONFIG_KEYS[name]
+        model = ((kwargs.get("server_config_snapshot") or {}).get(section) or {}).get("model")
+        return ResolvedByokCredentials(
+            provider=name, api_key=api_key, app_config={section: {"model": model}}, credential_fields={},
+            source="user", allowlisted=True,
+        )
+
+    monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
+    monkeypatch.setattr(runtime_module, "resolve_byok_credentials", _resolve)
+    return asked
+
+
 def assert_llm_quota_402(response: Any) -> None:
     """The response is the public LLM quota refusal: 402, limit_exceeded, Retry-After."""
     assert response.status_code == 402, response.text
