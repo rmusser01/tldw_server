@@ -39,12 +39,13 @@ def legacy(tmp_path):
 def snapshot(path):
     with closing(sqlite3.connect(path)) as conn:
         return {
-            table: conn.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
-            for table in (
-                "moderation_review_items",
-                "moderation_review_decisions",
-                "moderation_review_audit_events",
-            )
+            "moderation_review_items": conn.execute("SELECT * FROM moderation_review_items ORDER BY id").fetchall(),
+            "moderation_review_decisions": conn.execute(
+                "SELECT * FROM moderation_review_decisions ORDER BY id"
+            ).fetchall(),
+            "moderation_review_audit_events": conn.execute(
+                "SELECT * FROM moderation_review_audit_events ORDER BY id"
+            ).fetchall(),
         }
 
 

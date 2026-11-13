@@ -63,3 +63,12 @@ conflicts; validated integration source1e2a4e801f. Post-rebase manifest271passed
 canonical OpenAPI/path check passes,77 PR Python paths compile. Independent
 integration review accepted with no actionable findings. Final evidence update
 and exact-lease publication follow; required CI remains pending.
+
+## November 13 Follow-Up
+
+The requester now authorizes merging once current-head CI is green and review
+is clear. Rebase onto dev, verify the browser and Notes/Persona changes already
+landed there, repair the Chat audit override leak and preserve the authenticated
+Rules audit introduced by dev. Refresh the canonical API fingerprint and run
+the moderation regression suites and static checks before publishing. Stage 3
+remains in progress until GitHub has evaluated the new head.

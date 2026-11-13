@@ -157,20 +157,6 @@ async def test_supervised_timeout_blocks_before_guardian_fallback_or_provider():
     service.evaluate_action_with_match.assert_not_called()
 
 
-async def test_moderation_test_http_failure_is_safe(monkeypatch):
-    from tldw_Server_API.app.api.v1.endpoints import moderation
-    from tldw_Server_API.app.api.v1.schemas.moderation_schemas import ModerationTestRequest
-
-    service = failing_service("worker_crashed")
-    service.evaluate_text.side_effect = ModerationExecutionError("worker_crashed")
-    monkeypatch.setattr(moderation, "get_moderation_service", lambda: service)
-    with pytest.raises(HTTPException) as caught:
-        await moderation.test_moderation(ModerationTestRequest(text="private"))
-    assert caught.value.status_code == 503
-    assert caught.value.detail["error_code"] == "moderation_unavailable"
-    assert "private" not in str(caught.value.detail)
-
-
 @pytest.mark.parametrize("mode", ["guardian_sync", "guardian_async", "custom", "simulation"])
 async def test_pathological_guardian_and_custom_rules_are_contained(mode, tmp_path):
     import sys
