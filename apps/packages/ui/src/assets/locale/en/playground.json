@@ -1816,5 +1816,8 @@
     "viewToolbar": "Conversation view",
     "noArtifactsYet": "No artifacts yet",
     "artifactsShort": "Artifacts"
+  },
+  "focusBar": {
+    "openChatList": "Open chat list"
   }
 }

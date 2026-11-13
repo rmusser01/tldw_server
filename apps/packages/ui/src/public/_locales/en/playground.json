@@ -4916,5 +4916,8 @@
   },
   "regions_artifactsShort": {
     "message": "Artifacts"
+  },
+  "focusBar_openChatList": {
+    "message": "Open chat list"
   }
 }

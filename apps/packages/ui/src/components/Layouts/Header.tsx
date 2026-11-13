@@ -14,6 +14,7 @@ import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConf
 import { TtsClipsDrawer } from "@/components/Sidepanel/Chat/TtsClipsDrawer"
 import { useDarkMode } from "@/hooks/useDarkmode"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
+import { startSavedChat as startNewSavedChat } from "@/hooks/chat/start-saved-chat"
 import type { Character } from "@/types/character"
 import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events"
 import { dispatchCharacterChatModeIntent } from "@/utils/character-chat-mode-intent"
@@ -154,9 +155,7 @@ export const Header: React.FC<Props> = ({
   )
 
   const startSavedChat = React.useCallback(() => {
-    if (clearChat() === false) return
-    setTemporaryChat(false)
-    void setSelectedCharacter(null)
+    startNewSavedChat({ clearChat, setTemporaryChat, setSelectedCharacter })
   }, [clearChat, setSelectedCharacter, setTemporaryChat])
 
   const startTemporaryChat = React.useCallback(() => {

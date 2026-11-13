@@ -17,6 +17,7 @@ import { PlaygroundForm, type ApplyCharacterRoute } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
 import { MessageViewSelect } from "@/components/Common/Playground/MessageViewSelect";
 import type { ChatTimelineNavigation } from "./VirtualChatTimeline";
+import { PlaygroundFocusBar } from "./PlaygroundFocusBar";
 import {
   PlaygroundCockpitShell,
   type PlaygroundCockpitMode,
@@ -921,6 +922,9 @@ const PlaygroundContent = () => {
   const exitFocusLabel = toText(
     t("playground:cockpit.exitFocus", "Exit focus"),
   );
+  // Phones get Exit focus in the focus bar (CO-01). Wider screens keep the
+  // floating pill, and the transcript starts below it (CO-N1).
+  const exitFocusPillVisible = focusModeActive && !isMobileViewport;
 
   React.useEffect(() => {
     setRouteContext({ routeId: "chat", surface: "webui" });
@@ -3743,7 +3747,7 @@ const PlaygroundContent = () => {
         </div>
       )}
 
-      {focusModeActive && (
+      {exitFocusPillVisible && (
         <button
           type="button"
           data-testid="playground-chat-layout-mode-trigger"
@@ -3775,6 +3779,12 @@ const PlaygroundContent = () => {
             data-testid="playground-chat-shell"
             className="flex h-full min-h-0 min-w-0 flex-1 flex-col"
           >
+            {focusModeActive && isMobileViewport && (
+              <PlaygroundFocusBar
+                exitFocusLabel={exitFocusLabel}
+                onExitFocus={() => handleChatLayoutModeChange("cockpit")}
+              />
+            )}
             {!focusModeActive && parentMeta?.parentHistoryId && (
               <div className="flex w-full justify-center px-5 pt-2">
                 <div className="inline-flex flex-wrap items-center justify-center gap-2">
@@ -4101,7 +4111,9 @@ const PlaygroundContent = () => {
               aria-live="polite"
               aria-relevant="additions"
               aria-label={t("playground:aria.chatTranscript", "Chat messages")}
-              className="custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4"
+              className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 ${
+                exitFocusPillVisible ? "pt-14 scroll-pt-14" : ""
+              }`}
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
