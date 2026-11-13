@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { act, render, screen, within } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom"
 
 import { AdminRouteShell } from "../AdminRouteShell"
@@ -92,11 +92,14 @@ describe("AdminRouteShell", () => {
   // G14 follow-up: leaving an admin page must not bring its title back over
   // the next route's title (XP-19).
   it("leaves the next route's title alone when it unmounts", () => {
-    let navigate: ReturnType<typeof useNavigate> | null = null
     const RouteShell = () => {
       useRouteDocumentTitle("tldw")
-      navigate = useNavigate()
+      const navigate = useNavigate()
       return (
+        <>
+        <button type="button" onClick={() => navigate("/notes")}>
+          Go to Notes
+        </button>
         <Routes>
           <Route
             path="/admin/server"
@@ -108,6 +111,7 @@ describe("AdminRouteShell", () => {
           />
           <Route path="/notes" element={<div>notes</div>} />
         </Routes>
+        </>
       )
     }
     render(
@@ -117,7 +121,7 @@ describe("AdminRouteShell", () => {
     )
     expect(document.title).toBe("Server Admin · Admin · tldw")
 
-    act(() => navigate?.("/notes"))
+    fireEvent.click(screen.getByRole("button", { name: "Go to Notes" }))
 
     expect(document.title).toBe(getRouteDocumentTitle("/notes"))
   })
