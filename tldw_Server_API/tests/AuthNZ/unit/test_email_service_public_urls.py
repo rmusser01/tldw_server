@@ -20,7 +20,8 @@ async def test_password_reset_uses_public_web_base_url_and_path(
     email_service, monkeypatch
 ):
     monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.com")
-    monkeypatch.setenv("PUBLIC_PASSWORD_RESET_PATH", "/auth/reset-password")
+    monkeypatch.setenv("PUBLIC_PASSWORD_RESET_PATH", "/account/recover")
+    email_service.app_name = "Test & App"
 
     captured: dict[str, str] = {}
 
@@ -41,8 +42,15 @@ async def test_password_reset_uses_public_web_base_url_and_path(
     )
 
     assert result is True
-    assert "https://app.example.com/auth/reset-password?token=reset-token-123" in captured["html_body"]
-    assert "https://app.example.com/auth/reset-password?token=reset-token-123" in captured["text_body"]
+    reset_url = "https://app.example.com/account/recover?token=reset-token-123"
+    assert captured["subject"] == "Reset your Test & App password"
+    assert "Test &amp; App" in captured["html_body"]
+    assert captured["html_body"].count("<a ") == 1
+    assert f'href="{reset_url}"' in captured["html_body"]
+    assert "Choose a new password</a>" in captured["html_body"]
+    assert f"Choose a new password:\n{reset_url}" in captured["text_body"]
+    assert "127.0.0.1" in captured["html_body"]
+    assert "127.0.0.1" in captured["text_body"]
 
 
 @pytest.mark.asyncio
@@ -79,7 +87,7 @@ async def test_magic_link_uses_public_web_base_url_and_path(
     email_service, monkeypatch
 ):
     monkeypatch.setenv("PUBLIC_WEB_BASE_URL", "https://app.example.com")
-    monkeypatch.setenv("PUBLIC_MAGIC_LINK_PATH", "/auth/magic-link")
+    monkeypatch.setenv("PUBLIC_MAGIC_LINK_PATH", "/account/sign-in")
 
     captured: dict[str, str] = {}
 
@@ -100,8 +108,14 @@ async def test_magic_link_uses_public_web_base_url_and_path(
     )
 
     assert result is True
-    assert "https://app.example.com/auth/magic-link?token=magic-token-123" in captured["html_body"]
-    assert "https://app.example.com/auth/magic-link?token=magic-token-123" in captured["text_body"]
+    sign_in_url = "https://app.example.com/account/sign-in?token=magic-token-123"
+    assert captured["subject"] == "Your sign-in link for Test App"
+    assert captured["html_body"].count("<a ") == 1
+    assert f'href="{sign_in_url}"' in captured["html_body"]
+    assert "Sign in</a>" in captured["html_body"]
+    assert ">magic-token-123</div>" in captured["html_body"]
+    assert f"Sign in:\n{sign_in_url}" in captured["text_body"]
+    assert "Copy this token into the extension:\nmagic-token-123" in captured["text_body"]
 
 
 @pytest.mark.asyncio
