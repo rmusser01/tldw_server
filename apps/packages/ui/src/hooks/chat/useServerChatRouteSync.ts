@@ -6,10 +6,11 @@ import { useStoreMessageOption } from "@/store/option"
 import {
   historyHandoffState,
   isAddressableServerChatId,
-  isCharacterChatRouteSearch,
+  isCharacterChatRouteLocation,
   isServerChatNavigationPending,
   readServerChatRouteId,
   reportMountedChatRoute,
+  serverChatNavigationWaitMs,
   settleServerChatNavigation,
   withoutConsumedParams,
   withServerChatRouteId
@@ -21,10 +22,12 @@ import {
  * - When the address changes (Back, Forward, a pasted `/chat?chat=<id>` link)
  *   and names another chat, open that chat.
  * - When the open chat changes without a navigation (a restored session, a new
- *   chat's first saved turn, New chat, a chat the server no longer has),
- *   rewrite the address in place so reloading reopens what is on screen.
+ *   chat's first saved turn, a chat the server no longer has), rewrite the
+ *   address in place so reloading reopens what is on screen. New chat plans
+ *   its own navigation, which adds a history entry.
  *
- * Character chat routes (`?mode=character`) keep their own address handling.
+ * Character chat routes (`?mode=character`, also in a hash route) keep their
+ * own address handling.
  */
 export const useServerChatRouteSync = () => {
   const location = useLocation()
@@ -34,8 +37,10 @@ export const useServerChatRouteSync = () => {
   const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
   const search = location.search ?? ""
   const routeChatId = readServerChatRouteId(search)
-  const characterRoute = isCharacterChatRouteSearch(search)
+  const characterRoute = isCharacterChatRouteLocation(search, location.hash)
   const handledLocationKey = React.useRef<string | null>(null)
+  // Bumped when a planned navigation is given up, to write the address then.
+  const [plannedNavigationExpiry, setPlannedNavigationExpiry] = React.useState(0)
 
   React.useEffect(() => {
     reportMountedChatRoute({ namesChat: characterRoute || routeChatId !== null })
@@ -47,8 +52,8 @@ export const useServerChatRouteSync = () => {
     handledLocationKey.current = location.key
     if (characterRoute) return
     const state = useStoreMessageOption.getState()
+    if (locationChanged) settleServerChatNavigation()
     if (locationChanged && routeChatId) {
-      settleServerChatNavigation(routeChatId)
       if (routeChatId === state.serverChatId) return
       const opened = selectServerChat(
         { id: routeChatId } as ServerChatSummary,
@@ -64,8 +69,15 @@ export const useServerChatRouteSync = () => {
     const activeChatId =
       openChatId && isAddressableServerChatId(openChatId) ? openChatId : null
     if (activeChatId === routeChatId) return
-    // A navigation that names this chat is on its way; let it land.
-    if (isServerChatNavigationPending(activeChatId)) return
+    // A navigation that names this chat is on its way; let it land, and look
+    // again if it never does.
+    if (isServerChatNavigationPending(activeChatId)) {
+      const timer = setTimeout(
+        () => setPlannedNavigationExpiry((count) => count + 1),
+        serverChatNavigationWaitMs()
+      )
+      return () => clearTimeout(timer)
+    }
     // A history handoff link is consumed by the Playground first; writing the
     // address meanwhile would drop it. Once it and any Settings or research
     // return parameters are consumed, writing from the router's stale query
@@ -86,6 +98,7 @@ export const useServerChatRouteSync = () => {
     location.key,
     location.pathname,
     navigate,
+    plannedNavigationExpiry,
     routeChatId,
     search,
     selectServerChat,

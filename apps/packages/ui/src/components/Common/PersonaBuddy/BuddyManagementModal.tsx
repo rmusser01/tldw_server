@@ -1,5 +1,6 @@
 import React from "react"
-import { Button, Modal } from "antd"
+import { Button, Modal, Tooltip } from "antd"
+import { Info } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { WorkspaceApiResponse } from "@/services/tldw/domains/workspace-api"
@@ -42,8 +43,21 @@ const StarterChoice = ({
         onReadyChange={setReady}
       />
       <div className="space-y-2 p-3">
-        <h4 className="font-semibold">{starter.title}</h4>
-        <p className="text-sm text-text-muted">{starter.license_label}</p>
+        <div className="flex items-center gap-1">
+          <h4 className="font-semibold">{starter.title}</h4>
+          {/* The licence caption is provenance, not the choice (XP-14). */}
+          {starter.license_label ? (
+            <Tooltip title={starter.license_label} trigger={["hover", "focus"]}>
+              <button
+                type="button"
+                className="inline-flex size-6 items-center justify-center rounded text-text-muted hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                aria-label={`${t("buddyManagement.licenceInfo", { defaultValue: "Artwork licence" })}: ${starter.title}`}
+              >
+                <Info className="size-4" aria-hidden="true" />
+              </button>
+            </Tooltip>
+          ) : null}
+        </div>
         <Button disabled={!ready} onClick={onSelect}>
           {selected
             ? t("buddyManagement.selected", { defaultValue: "Selected" })

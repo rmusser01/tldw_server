@@ -32,12 +32,6 @@ const NOTIFICATION_KEY = "tutorial-prompt-global"
 export const TutorialPrompt: React.FC = () => {
   const { t } = useTranslation(["tutorials", "common"])
   const location = useLocation()
-  const route = JSON.stringify([
-    location.key,
-    location.pathname,
-    location.search,
-    location.hash
-  ])
   const [api, contextHolder] = notification.useNotification()
   const timeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
     null
@@ -52,7 +46,9 @@ export const TutorialPrompt: React.FC = () => {
     (state) => state.hasSeenPromptForPage
   )
   const markPromptSeen = useTutorialStore((state) => state.markPromptSeen)
-  const startTutorial = useStartTutorial()
+  // The prompt is about the page, so a same-page address change (opening a
+  // note writes /notes?note=<id>) neither closes it nor stales its Start.
+  const startTutorial = useStartTutorial({ fence: "page" })
   const launcherRef = useRef(startTutorial)
   useLayoutEffect(() => {
     launcherRef.current = startTutorial
@@ -117,9 +113,9 @@ export const TutorialPrompt: React.FC = () => {
       return
     }
 
-    // The page counts as prompted once the prompt appears. A same-page address
-    // change before then (opening a note writes /notes?note=<id>, XP-05)
-    // cancels the pending prompt, and this lets it be scheduled again.
+    // The page counts as prompted once the prompt appears; leaving the page
+    // before then cancels the pending prompt, and this lets it be scheduled
+    // again on a later visit.
     const now = Date.now()
     const elapsedSinceLastPrompt = now - lastPromptShownAtRef.current
     const cooldownRemaining = Math.max(
@@ -225,7 +221,6 @@ export const TutorialPrompt: React.FC = () => {
       }
     }
   }, [
-    route,
     location.pathname,
     activeTutorialId,
     api,

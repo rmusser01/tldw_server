@@ -302,7 +302,7 @@ export const SidepanelForm = ({
   }, [isConnectionReady])
   const { data: chatModels, isFetching: chatModelsLoading } = useChatModelCatalog(isConnectionReady)
   useSidepanelStartupModel({ enabled: isConnectionReady, models: chatModels })
-  // Opens the model picker (Casual chip or Pro control row) when a send is blocked by the model (XS-02).
+  // Opens the model picker (the chip in Casual and v5, else the Pro control row) when a send is blocked by the model (XS-02).
   const modelPickerRef = React.useRef<ModelSelectHandle>(null)
   useModelPickerOpenRequests(modelPickerRef) // the history review's "Switch model" (CC-02)
   const voiceChatModelOptions = React.useMemo(() => {
@@ -3902,7 +3902,7 @@ export const SidepanelForm = ({
                       const composerInlineMessagesNode = (
                         <>
                           {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
-                          {isConnectionReady && !isProMode && <ModelSelect
+                          {isConnectionReady && (!isProMode || isNextgenV5Composer) && <ModelSelect
                             ref={modelPickerRef}
                             iconClassName="size-4"
                             showSelectedName

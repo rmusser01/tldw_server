@@ -150,6 +150,20 @@ it("resolves a composer conversation into its workspace before allowing Apply", 
     expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled()
   )
 })
+// XP-14 (#3115): the starter picker shows titles, not licence captions; the
+// licence stays one hover or focus away.
+it("keeps a starter's licence caption behind an info button", async () => {
+  mocks.catalog.mockResolvedValue({
+    starter_packs: [
+      { id: "lens", title: "Lens", production_status: "art_ready", license_label: "CC BY 4.0 · Example Artist" }
+    ]
+  })
+  render(<BuddyManagementModal {...props} profiles={[]} />)
+  const info = await screen.findByRole("button", { name: "Artwork licence: Lens" })
+  expect(screen.queryByText("CC BY 4.0 · Example Artist")).not.toBeInTheDocument()
+  fireEvent.mouseEnter(info)
+  expect(await screen.findByText("CC BY 4.0 · Example Artist")).toBeInTheDocument()
+})
 it("waits for preview and prevents follow-up attachment writes after unmount", async () => {
   mocks.catalog.mockResolvedValue({
     starter_packs: [

@@ -4673,6 +4673,12 @@
   "composer_providerStatusConnecting": {
     "message": "Connecting…"
   },
+  "composer_providerStatusOffline": {
+    "message": "Offline"
+  },
+  "composer_serverStatusConnected": {
+    "message": "Server connected"
+  },
   "composer_connectionPendingSend": {
     "message": "Still connecting to your tldw server. Your draft has not been sent."
   },
@@ -4744,6 +4750,9 @@
   },
   "composer_modelScopeAll": {
     "message": "All models"
+  },
+  "composer_modelCatalogLoadFailed": {
+    "message": "Couldn't load all models"
   },
   "composer_modelNotSetUp": {
     "message": "Not set up"

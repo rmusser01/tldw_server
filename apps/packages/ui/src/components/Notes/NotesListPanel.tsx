@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NoteListItem } from '@/components/Notes/types'
 import { moveNotesListRowFocus } from './notes-list-keyboard'
+import { formatBacklinkIdsTooltip } from './notes-backlink-labels'
 
 const LazyNotesListPanelEmptyStates = React.lazy(() => import('./NotesListPanelEmptyStates'))
 
@@ -787,21 +788,22 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         {item.conversation_id &&
                           (() => {
                             const conversationId = String(item.conversation_id)
-                            const conversationLabel = conversationLabelById[conversationId] || conversationId
+                            const conversationLabel = conversationLabelById[conversationId]
                             return (
                               <div className="text-xs text-primary mt-1">
-                                {t('option:notesSearch.linkedConversation', {
-                                  defaultValue: 'Linked to conversation'
-                                })}
-                                {': '}
+                                {conversationLabel
+                                  ? `${t('option:notesSearch.linkedConversation', {
+                                      defaultValue: 'Linked to conversation'
+                                    })}: `
+                                  : null}
                                 <Tooltip
-                                  title={`${t('option:notesSearch.linkedConversationIdLabel', {
-                                    defaultValue: 'Conversation ID'
-                                  })}: ${conversationId}`}
+                                  title={formatBacklinkIdsTooltip(t, conversationId, item.message_id ? String(item.message_id) : null)}
                                 >
-                                  <span className="font-medium">{conversationLabel}</span>
+                                  <span className="font-medium">
+                                    {conversationLabel ||
+                                      t('option:notesSearch.linkedChatUnresolved', { defaultValue: 'Linked chat' })}
+                                  </span>
                                 </Tooltip>
-                                {item.message_id ? ` · msg ${String(item.message_id)}` : ''}
                               </div>
                             )
                           })()}

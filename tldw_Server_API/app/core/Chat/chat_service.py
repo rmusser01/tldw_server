@@ -61,6 +61,7 @@ from tldw_Server_API.app.core.Chat.chat_exceptions import get_request_id
 
 # Reuse existing helpers from chat_helpers and prompt templating
 from tldw_Server_API.app.core.Chat.chat_helpers import (
+    first_user_message_text,
     get_or_create_character_context,
     get_or_create_conversation,
 )
@@ -3308,6 +3309,7 @@ async def build_context_and_messages(
                 character_card.get("name", "Chat"),
                 client_id_from_db,
                 loop,
+                first_user_message=first_user_message_text(request_data.messages),
             )
     else:
         if not conv_id:
