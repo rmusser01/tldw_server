@@ -140,7 +140,7 @@ describe("NotesGraphWorkspace focus fallback hint (NL-14)", () => {
     renderWorkspace(null)
 
     expect(screen.getByTestId("notes-graph-focus-fallback-hint")).toHaveTextContent(
-      "No note is open, so the graph is centred on “Sourdough log”. Pick a note to focus the graph."
+      "No note is open, so the graph is centered on “Sourdough log”. Pick a note to focus the graph."
     )
   })
 

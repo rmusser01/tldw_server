@@ -986,6 +986,9 @@
   "commandPalette_searchingContent": {
     "message": "Searching chats and notes…"
   },
+  "commandPalette_contentSearchFailed": {
+    "message": "Chats and notes could not be searched."
+  },
   "commandPalette_newNote": {
     "message": "New note"
   },

@@ -7026,7 +7026,7 @@
     "message": "Node shapes"
   },
   "notesSearch_graphFocusFallbackHint": {
-    "message": "No note is open, so the graph is centred on “{{title}}”. Pick a note to focus the graph."
+    "message": "No note is open, so the graph is centered on “{{title}}”. Pick a note to focus the graph."
   },
   "notesSearch_graphPassageSimilarityShort": {
     "message": "passage similarity"

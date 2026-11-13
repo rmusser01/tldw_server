@@ -10,15 +10,33 @@ import { updatePageTitle } from "@/utils/update-page-title"
  */
 export const NOTE_ROUTE_PARAM = "note"
 export const LEGACY_NOTE_ROUTE_PARAM = "source_ref_id"
-/** `/notes?new=1` asks the Notes page for a new note, then leaves the address (XP-06). */
+/**
+ * `/notes?new=<any value>` asks the Notes page for a new note, then leaves the
+ * address (XP-06). An address that also names a note opens that note instead.
+ */
 export const NEW_NOTE_ROUTE_PARAM = "new"
 export const NEW_NOTE_PATH = `/notes?${NEW_NOTE_ROUTE_PARAM}=1`
+
+let newNoteRequestCount = 0
+/**
+ * A new-note address unique to this request. The web build's router keys a
+ * location by its address, so repeated requests must not share one.
+ */
+export const buildNewNotePath = (): string => {
+  newNoteRequestCount += 1
+  return `/notes?${NEW_NOTE_ROUTE_PARAM}=${Date.now().toString(36)}${newNoteRequestCount.toString(36)}`
+}
 
 const toSearchParams = (search: string | null | undefined) =>
   new URLSearchParams((search ?? "").replace(/^\?/, ""))
 
-const asksForNewNote = (search: string | null | undefined): boolean =>
-  toSearchParams(search).get(NEW_NOTE_ROUTE_PARAM) === "1"
+/** The new-note request an address carries, or null (none, or the address names a note). */
+const readNewNoteRequest = (search: string | null | undefined): string | null => {
+  const params = toSearchParams(search)
+  const request = params.get(NEW_NOTE_ROUTE_PARAM)?.trim() ?? ""
+  if (!request || params.get(NOTE_ROUTE_PARAM)?.trim() || params.get(LEGACY_NOTE_ROUTE_PARAM)?.trim()) return null
+  return request
+}
 
 export const readNoteRouteId = (search: string | null | undefined): string | null => {
   const params = toSearchParams(search)
@@ -27,9 +45,11 @@ export const readNoteRouteId = (search: string | null | undefined): string | nul
   return trimmed || null
 }
 
+/** `search` naming `noteId` (or no note); a new-note request never carries over. */
 export const withNoteRouteId = (search: string | null | undefined, noteId: string | null): string => {
   const params = toSearchParams(search)
   params.delete(LEGACY_NOTE_ROUTE_PARAM)
+  params.delete(NEW_NOTE_ROUTE_PARAM)
   if (noteId) params.set(NOTE_ROUTE_PARAM, noteId)
   else params.delete(NOTE_ROUTE_PARAM)
   const next = params.toString()
@@ -48,9 +68,10 @@ export const buildNotePath = (noteId: string): string => `/notes${withNoteRouteI
  * - When the address changes (Back, Forward, a link) to a note other than
  *   the open one, `sourceNoteId` asks the page to open it.
  * - /notes without a note reopens the note opened last.
- * - /notes?new=1 asks for a new note instead (`newNoteRequestKey`, once per
- *   navigation); `onNewNoteRequestHandled` then drops the request from the
- *   address without a history entry.
+ * - /notes?new=<value> asks for a new note instead (`newNoteRequestKey`,
+ *   once per navigation). `onNewNoteRequestHandled` then drops the request
+ *   from the address without a history entry; if no draft was started (the
+ *   user stayed on unsaved edits) the address names the open note again.
  */
 export const useNotesRouteAddress = () => {
   const location = useLocation()
@@ -95,8 +116,14 @@ export const useNotesRouteAddress = () => {
 
       if (report.noteId) {
         if (report.noteId === address) {
-          // A legacy source_ref_id link: name the note the current way.
-          if (toSearchParams(current.search).get(NOTE_ROUTE_PARAM) !== report.noteId) {
+          // A legacy source_ref_id link, or one that also asked for a new
+          // note: name the note the current way.
+          const params = toSearchParams(current.search)
+          if (
+            params.get(NOTE_ROUTE_PARAM) !== report.noteId ||
+            params.has(LEGACY_NOTE_ROUTE_PARAM) ||
+            params.has(NEW_NOTE_ROUTE_PARAM)
+          ) {
             go(report.noteId, true)
           }
           return
@@ -109,7 +136,7 @@ export const useNotesRouteAddress = () => {
         if (address) go(null, true)
         return
       }
-      if (!address && !asksForNewNote(current.search) && report.lastOpenedNoteId && !restoredRef.current) {
+      if (!address && !readNewNoteRequest(current.search) && report.lastOpenedNoteId && !restoredRef.current) {
         restoredRef.current = true
         go(report.lastOpenedNoteId, true)
       }
@@ -117,13 +144,17 @@ export const useNotesRouteAddress = () => {
     [navigate]
   )
 
-  const onNewNoteRequestHandled = React.useCallback(() => {
+  const onNewNoteRequestHandled = React.useCallback((started: boolean) => {
     // A new note replaces any restore of the note opened last.
     restoredRef.current = true
     const current = locationRef.current
-    if (!asksForNewNote(current.search)) return
     const params = toSearchParams(current.search)
+    if (!params.has(NEW_NOTE_ROUTE_PARAM)) return
     params.delete(NEW_NOTE_ROUTE_PARAM)
+    // No draft was started: the note still open keeps its address (XP-05).
+    if (!started && openNoteIdRef.current && !params.get(NOTE_ROUTE_PARAM)) {
+      params.set(NOTE_ROUTE_PARAM, openNoteIdRef.current)
+    }
     const search = params.toString()
     navigate(
       { pathname: current.pathname, search: search ? `?${search}` : "", hash: current.hash },
@@ -131,7 +162,8 @@ export const useNotesRouteAddress = () => {
     )
   }, [navigate])
 
-  const newNoteRequestKey = asksForNewNote(location.search) ? location.key : null
+  const newNoteRequest = readNewNoteRequest(location.search)
+  const newNoteRequestKey = newNoteRequest ? `${location.key}|${newNoteRequest}` : null
 
   return { sourceNoteId, onNoteSelectionChange, newNoteRequestKey, onNewNoteRequestHandled }
 }

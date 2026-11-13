@@ -316,7 +316,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
       data-testid="notes-graph-focus-fallback-hint">
       {t("option:notesSearch.graphFocusFallbackHint", {
         defaultValue:
-          "No note is open, so the graph is centred on “{{title}}”. Pick a note to focus the graph.",
+          "No note is open, so the graph is centered on “{{title}}”. Pick a note to focus the graph.",
         title: focusFallbackLabel
       })}
     </p>

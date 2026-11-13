@@ -27,6 +27,19 @@ const readNoteRows = (response: unknown): Array<Record<string, unknown>> => {
 
 const text = (value: unknown): string => (typeof value === "string" ? value.trim() : "")
 
+/** A search snippet's segments as one line of plain text (NL-07). */
+const snippetText = (snippet: unknown): string =>
+  Array.isArray(snippet)
+    ? snippet
+        .map((segment) => {
+          const value = segment && typeof segment === "object" ? (segment as { text?: unknown }).text : null
+          return typeof value === "string" ? value : ""
+        })
+        .join("")
+        .replace(/\s+/g, " ")
+        .trim()
+    : ""
+
 /**
  * The web palette's content providers (XP-06 slice 1): saved chats and notes
  * matching the query, searched on the server by title and body. Enter opens
@@ -82,7 +95,7 @@ export const useCommandPaletteContentProviders = (): CommandPaletteContentProvid
         search: async (query, signal) => {
           const response = await tldwClient.searchNotes(
             query,
-            { limit: COMMAND_PALETTE_CONTENT_LIMIT },
+            { limit: COMMAND_PALETTE_CONTENT_LIMIT, legacy_aliases: false },
             { signal }
           )
           return readNoteRows(response)
@@ -95,6 +108,7 @@ export const useCommandPaletteContentProviders = (): CommandPaletteContentProvid
                 label:
                   text(note.title) ||
                   translateRef.current("common:commandPalette.untitledNote", "Untitled note"),
+                description: snippetText(note.snippet) || undefined,
                 icon: <StickyNote className="size-4" />,
                 targetPath: path,
                 category: "note",

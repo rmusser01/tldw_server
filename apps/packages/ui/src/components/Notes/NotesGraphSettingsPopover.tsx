@@ -30,7 +30,8 @@ type NotesGraphSettingsPopoverProps = {
 /**
  * The graph's tuning controls, out of the toolbar and in plain words (NL-14):
  * how far from the focus note to reach, how many items to show at most, and
- * the layout (Tree, Circle, Grid or Rings). Escape or a click outside closes it.
+ * the layout (Tree, Circle, Grid or Rings). Escape, a click outside, or focus
+ * moving to a control outside closes it.
  */
 const NotesGraphSettingsPopover: React.FC<NotesGraphSettingsPopoverProps> = ({
   radius,
@@ -65,8 +66,15 @@ const NotesGraphSettingsPopover: React.FC<NotesGraphSettingsPopoverProps> = ({
     buttonRef.current?.focus()
   }
 
+  const closeOnFocusOut = (event: React.FocusEvent) => {
+    // No next target (a click on the panel itself) is not leaving it.
+    const next = event.relatedTarget as Node | null
+    if (!open || !next || rootRef.current?.contains(next)) return
+    setOpen(false)
+  }
+
   return (
-    <div ref={rootRef} className="relative" onKeyDown={closeOnEscape}>
+    <div ref={rootRef} className="relative" onKeyDown={closeOnEscape} onBlur={closeOnFocusOut}>
       <button
         ref={buttonRef}
         type="button"

@@ -997,6 +997,25 @@ describe("NotesGraphToolbar controls", () => {
     expect(settings).toHaveFocus()
   })
 
+  it("closes Graph settings when focus moves out of it, not within it", () => {
+    render(<NotesGraphToolbar {...toolbarProps} />)
+    const settings = screen.getByRole("button", { name: "Graph settings" })
+    fireEvent.click(settings)
+    const panel = screen.getByRole("group", { name: "Graph settings" })
+    const layout = within(panel).getByRole("combobox", { name: "Graph layout" })
+    const distance = within(panel).getByRole("combobox", { name: "Distance from focus note" })
+
+    // Within the popover, and a blur with nowhere to go (a click on the panel), keep it open.
+    fireEvent.blur(layout, { relatedTarget: distance })
+    fireEvent.blur(layout, { relatedTarget: null })
+    expect(settings).toHaveAttribute("aria-expanded", "true")
+
+    // Tabbing on to the next toolbar control closes it.
+    fireEvent.blur(layout, { relatedTarget: screen.getByRole("button", { name: "Focused" }) })
+    expect(settings).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByRole("group", { name: "Graph settings" })).not.toBeInTheDocument()
+  })
+
   it("uses the semantic foreground token for the selected scope", () => {
     render(<NotesGraphToolbar {...toolbarProps} />)
 

@@ -58,7 +58,18 @@ describe("useCommandPaletteContentProviders (XP-06)", () => {
       total: 2
     })
     mocks.searchNotes.mockResolvedValue({
-      items: [{ id: "n1", title: "LoRA notes", content: "Low-rank adapters" }]
+      items: [
+        {
+          id: "n1",
+          title: "LoRA notes",
+          content: "Low-rank adapters",
+          snippet: [
+            { text: "Fine-tune with ", match: false },
+            { text: "LoRA", match: true },
+            { text: " adapters", match: false }
+          ]
+        }
+      ]
     })
   })
 
@@ -96,10 +107,17 @@ describe("useCommandPaletteContentProviders (XP-06)", () => {
 
     const items = await notes.search("lora", signal)
 
-    expect(mocks.searchNotes).toHaveBeenCalledWith("lora", { limit: 5 }, { signal })
+    // Only `items`: the deprecated `notes`/`results` copies are not needed.
+    expect(mocks.searchNotes).toHaveBeenCalledWith(
+      "lora",
+      { limit: 5, legacy_aliases: false },
+      { signal }
+    )
     expect(items.map((entry) => [entry.category, entry.label, entry.targetPath])).toEqual([
       ["note", "LoRA notes", "/notes?note=n1"]
     ])
+    // The match in context, as plain text.
+    expect(items[0].description).toBe("Fine-tune with LoRA adapters")
 
     act(() => items[0].action())
     expect(location.current).toBe("/notes?note=n1")

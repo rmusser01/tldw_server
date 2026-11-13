@@ -40,8 +40,9 @@ type RevealFirstSearchHitOptions = {
 
 /**
  * NL-07: when a note opens while a search is active, scroll its Markdown
- * editor to the first hit. Focus and the caret stay where they are, and a
- * note the user is typing in (a new draft getting its id) is left alone.
+ * editor to the first hit and put the caret there, so tabbing into the editor
+ * starts at the hit. Focus stays where it is, and a note the user is typing
+ * in (a new draft getting its id) is left alone.
  */
 export const useRevealFirstSearchHit = ({
   selectedId,
@@ -62,7 +63,12 @@ export const useRevealFirstSearchHit = ({
     const offset = findFirstSearchHit(content, query)
     if (offset < 0) return
     window.requestAnimationFrame(() => {
-      if (textareaRef.current === textarea) revealTextareaOffset(textarea, offset)
+      if (textareaRef.current !== textarea) return
+      revealTextareaOffset(textarea, offset)
+      // A collapsed caret: tabbing in and typing must not replace the hit.
+      if (textarea.ownerDocument.activeElement !== textarea && offset <= textarea.value.length) {
+        textarea.setSelectionRange(offset, offset)
+      }
     })
   }, [content, enabled, query, selectedId, textareaRef])
 }

@@ -188,6 +188,78 @@ describe("CommandPalette chats and notes (XP-06)", () => {
     expect(option).toHaveAttribute("aria-selected", "true")
 
     fireEvent.keyDown(input, { key: "Enter" })
-    await waitFor(() => expect(screen.getByTestId("address")).toHaveTextContent("/notes?new=1"))
+    // Each request gets its own address: the web router keys locations by address.
+    await waitFor(() => expect(screen.getByTestId("address").textContent).toMatch(/^\/notes\?new=[0-9a-z]+$/))
+    const first = screen.getByTestId("address").textContent
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+    await screen.findByRole("dialog")
+    const again = screen.getByRole("textbox", { name: "Search commands" })
+    fireEvent.change(again, { target: { value: "new note" } })
+    fireEvent.keyDown(again, { key: "Enter" })
+    await waitFor(() => expect(screen.getByTestId("address").textContent).not.toBe(first))
+    expect(screen.getByTestId("address").textContent).toMatch(/^\/notes\?new=[0-9a-z]+$/)
+  })
+
+  it("keeps Enter on the command the user saw highlighted when results arrive", async () => {
+    const Address = () => {
+      const location = useLocation()
+      return <output data-testid="address">{location.pathname}</output>
+    }
+    const openNote = vi.fn()
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <Address />
+        <CommandPalette
+          contentProviders={[{ id: "notes", search: async () => [item("note", "n1", openNote)] }]}
+        />
+      </MemoryRouter>
+    )
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+    await screen.findByRole("dialog")
+    const input = screen.getByRole("textbox", { name: "Search commands" })
+
+    fireEvent.change(input, { target: { value: "notes" } })
+    const highlighted = () =>
+      screen.getAllByRole("option").find((option) => option.getAttribute("aria-selected") === "true")
+    expect(highlighted()).toHaveAttribute("data-command-id", "nav-notes")
+    // The Notes group lands above Navigation while the user reaches for Enter.
+    await waitFor(() => expect(groupItems("Notes")).toHaveLength(1), {
+      timeout: COMMAND_PALETTE_CONTENT_DEBOUNCE_MS + 1000
+    })
+    expect(highlighted()).toHaveAttribute("data-command-id", "nav-notes")
+
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(openNote).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByTestId("address")).toHaveTextContent(/^\/notes$/))
+  })
+
+  it("says it is still searching while commands already match", async () => {
+    const pending = deferred<CommandItem[]>()
+    const input = await renderPalette([{ id: "notes", search: () => pending.promise }])
+
+    fireEvent.change(input, { target: { value: "notes" } })
+    expect(screen.getByRole("option", { name: /Go to Notes/ })).toBeInTheDocument()
+    expect(await screen.findByText("Searching chats and notes…")).toBeInTheDocument()
+
+    await act(async () => {
+      pending.resolve([item("note", "n1")])
+    })
+    await waitFor(() => expect(screen.queryByText("Searching chats and notes…")).not.toBeInTheDocument())
+    expect(groupItems("Notes")).toHaveLength(1)
+  })
+
+  it("says the search failed instead of finding nothing", async () => {
+    const input = await renderPalette([
+      { id: "notes", search: async () => Promise.reject(new Error("offline")) }
+    ])
+
+    fireEvent.change(input, { target: { value: "zzz-only-content" } })
+
+    expect(
+      await screen.findByText("Chats and notes could not be searched.", undefined, {
+        timeout: COMMAND_PALETTE_CONTENT_DEBOUNCE_MS + 1000
+      })
+    ).toBeInTheDocument()
+    expect(screen.queryByText("No results found")).not.toBeInTheDocument()
   })
 })

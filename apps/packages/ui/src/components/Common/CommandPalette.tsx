@@ -42,7 +42,7 @@ import {
 import { ADMIN_MODULES } from "@/components/Option/Admin/admin-modules"
 import { CLAIMS_REVIEW_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
-import { NEW_NOTE_PATH } from "@/routes/hooks/useNotesRouteAddress"
+import { NEW_NOTE_PATH, buildNewNotePath } from "@/routes/hooks/useNotesRouteAddress"
 import { cn } from "@/libs/utils"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import {
@@ -457,7 +457,8 @@ export function CommandPalette({
               label: t("common:commandPalette.newNote", "New note"),
               icon: <StickyNote className="size-4" />,
               targetPath: NEW_NOTE_PATH,
-              action: () => navigate(NEW_NOTE_PATH),
+              // A fresh address per request: the web router keys locations by address.
+              action: () => navigate(buildNewNotePath()),
               category: "action",
               keywords: ["create", "write", "capture", "note"],
             }
@@ -761,16 +762,28 @@ export function CommandPalette({
     [groupedCommands]
   )
 
-  // Clamp selection when the shown commands change
+  // The highlight follows a command, not a row: when chats and notes arrive
+  // above it, the command the user saw highlighted is still the one Enter
+  // runs. If it is gone, the row index is clamped instead.
+  const highlightedIdRef = useRef<string | null>(null)
+  const shownIds = useMemo(() => orderedCommands.map((command) => command.id).join("\n"), [orderedCommands])
+  const shownIdsRef = useRef(shownIds)
   useEffect(() => {
-    const clampedIndex =
+    let nextIndex = selectedIndex
+    if (shownIdsRef.current !== shownIds && highlightedIdRef.current != null) {
+      const keptIndex = orderedCommands.findIndex((command) => command.id === highlightedIdRef.current)
+      if (keptIndex >= 0) nextIndex = keptIndex
+    }
+    shownIdsRef.current = shownIds
+    nextIndex =
       orderedCommands.length === 0
         ? 0
-        : Math.max(0, Math.min(selectedIndex, orderedCommands.length - 1))
-    if (clampedIndex !== selectedIndex) {
-      setSelectedIndex(clampedIndex)
+        : Math.max(0, Math.min(nextIndex, orderedCommands.length - 1))
+    highlightedIdRef.current = orderedCommands[nextIndex]?.id ?? null
+    if (nextIndex !== selectedIndex) {
+      setSelectedIndex(nextIndex)
     }
-  }, [orderedCommands, selectedIndex])
+  }, [orderedCommands, selectedIndex, shownIds])
 
   // Reset selection when filtered results change
   useEffect(() => {
@@ -894,6 +907,13 @@ export function CommandPalette({
     note: t("common:commandPalette.categoryNotes", "Notes"),
   }
 
+  // Chats and notes are still being searched, or could not be.
+  const contentStatus = contentResults.pending
+    ? t("common:commandPalette.searchingContent", "Searching chats and notes…")
+    : contentResults.failed
+      ? t("common:commandPalette.contentSearchFailed", "Chats and notes could not be searched.")
+      : null
+
   const modalContent = (
     <div ref={paletteRootRef}>
       {/* Backdrop */}
@@ -941,9 +961,7 @@ export function CommandPalette({
         >
           {orderedCommands.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-text-subtle" role="status">
-              {contentResults.pending
-                ? t("common:commandPalette.searchingContent", "Searching chats and notes…")
-                : t("common:commandPalette.noResults", "No results found")}
+              {contentStatus ?? t("common:commandPalette.noResults", "No results found")}
             </div>
           ) : (
             <>
@@ -1013,6 +1031,15 @@ export function CommandPalette({
             </>
           )}
         </div>
+
+        {orderedCommands.length > 0 && contentStatus ? (
+          <div
+            className="border-t border-border px-4 py-1.5 text-xs text-text-subtle"
+            role="status"
+          >
+            {contentStatus}
+          </div>
+        ) : null}
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-border px-4 py-2 text-xs text-text-subtle">
