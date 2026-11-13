@@ -112,16 +112,11 @@ async def test_run_benchmark_sanitizes_generic_failure(monkeypatch):
         "load_benchmark_dataset",
         lambda *args, **kwargs: [{"question": "What is 2+2?", "category": "math"}],
     )
-    monkeypatch.setattr(
-        benchmark_module.evaluation_manager,
-        "evaluate_custom_metric",
-        AsyncMock(return_value={"score": 1.0, "explanation": "ok"}),
+    manager = SimpleNamespace(
+        evaluate_custom_metric=AsyncMock(return_value={"score": 1.0, "explanation": "ok"}),
+        store_evaluation=AsyncMock(side_effect=RuntimeError("benchmark storage exploded at /private/evals.db")),
     )
-    monkeypatch.setattr(
-        benchmark_module.evaluation_manager,
-        "store_evaluation",
-        AsyncMock(side_effect=RuntimeError("benchmark storage exploded at /private/evals.db")),
-    )
+    monkeypatch.setattr(benchmark_module, "EvaluationManager", lambda **_kwargs: manager)
     monkeypatch.setattr(benchmark_module, "logger", logger_stub)
 
     request = benchmark_module.BenchmarkRunRequest(
@@ -135,7 +130,7 @@ async def test_run_benchmark_sanitizes_generic_failure(monkeypatch):
         await benchmark_module.run_benchmark(
             "demo-benchmark",
             request,
-            user_id="user-1",
+            current_user=SimpleNamespace(id=1),
         )
 
     assert exc_info.value.status_code == 500
@@ -170,11 +165,10 @@ async def test_run_benchmark_sanitizes_item_evaluation_failure_log(monkeypatch):
         "load_benchmark_dataset",
         lambda *args, **kwargs: [{"question": "What is 2+2?", "category": "math"}],
     )
-    monkeypatch.setattr(
-        benchmark_module.evaluation_manager,
-        "evaluate_custom_metric",
-        AsyncMock(side_effect=RuntimeError("benchmark item exploded at /private/evals.db")),
+    manager = SimpleNamespace(
+        evaluate_custom_metric=AsyncMock(side_effect=RuntimeError("benchmark item exploded at /private/evals.db")),
     )
+    monkeypatch.setattr(benchmark_module, "EvaluationManager", lambda **_kwargs: manager)
     monkeypatch.setattr(benchmark_module, "logger", logger_stub)
 
     request = benchmark_module.BenchmarkRunRequest(
@@ -187,7 +181,7 @@ async def test_run_benchmark_sanitizes_item_evaluation_failure_log(monkeypatch):
     response = await benchmark_module.run_benchmark(
         "demo-benchmark",
         request,
-        user_id="user-1",
+        current_user=SimpleNamespace(id=1),
     )
 
     assert response.total_samples == 1
@@ -234,11 +228,13 @@ async def test_run_benchmark_counts_an_unscored_item_apart(monkeypatch):
         "load_benchmark_dataset",
         lambda *args, **kwargs: [{"question": question, "category": "math"} for question in replies],
     )
-    monkeypatch.setattr(benchmark_module.evaluation_manager, "evaluate_custom_metric", _evaluate)
-    monkeypatch.setattr(benchmark_module.evaluation_manager, "store_evaluation", store)
+    manager = SimpleNamespace(evaluate_custom_metric=_evaluate, store_evaluation=store)
+    monkeypatch.setattr(benchmark_module, "EvaluationManager", lambda **_kwargs: manager)
 
     request = benchmark_module.BenchmarkRunRequest(limit=3, api_name="openai", parallel=3, save_results=True)
-    response = await benchmark_module.run_benchmark("demo-benchmark", request, user_id="user-1")
+    response = await benchmark_module.run_benchmark(
+        "demo-benchmark", request, current_user=SimpleNamespace(id=1)
+    )
 
     summary = response.results_summary
     assert [summary[k] for k in ("total_evaluated", "successful", "failed", "unscored")] == [3, 1, 1, 1]
