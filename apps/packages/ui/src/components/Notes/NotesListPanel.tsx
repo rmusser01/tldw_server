@@ -217,6 +217,14 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
     [pinnedNoteIds]
   )
   const searchTerms = React.useMemo(() => extractSearchTerms(searchQuery), [searchQuery])
+  // Previews depend only on the rows, not on focus, selection or pins.
+  const previewTextById = React.useMemo(() => {
+    const previews = new Map<string, string>()
+    for (const note of notes ?? []) {
+      if (note.content) previews.set(String(note.id), derivePreviewText(note.content, note.title))
+    }
+    return previews
+  }, [notes])
   const selectedOnPage = hasNotes ? notes.filter((note) => bulkSelectedIdSet.has(String(note.id))).length : 0
   const allOnPageSelected = hasNotes && selectedOnPage === notes.length
   const showSelectAllOnPage = Boolean(onToggleSelectAllOnPage) && hasNotes
@@ -617,7 +625,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                   selectedId != null && String(selectedId) === itemIdText
                 const isPinned = pinnedNoteIdSet.has(itemIdText)
                 const rowDomId = `${listDomId}-row-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
-                const previewText = item.content ? derivePreviewText(item.content, item.title) : ''
+                const previewText = previewTextById.get(itemIdText) ?? ''
                 const hasRowKeywords = Array.isArray(item.keywords) && item.keywords.length > 0
                 const rowDate = parseRowDate(item.updated_at)
                 const rowDateTestId = `notes-row-date-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
