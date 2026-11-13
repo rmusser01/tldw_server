@@ -6,11 +6,11 @@ import { useNotesRouteAddress } from "@/routes/hooks/useNotesRouteAddress"
 
 const OptionNotes = () => {
   // The address names the open note: /notes?note=<id> (XP-05).
-  const { sourceNoteId, onNoteSelectionChange } = useNotesRouteAddress()
+  const { sourceNoteId, onNoteSelectionChange, newNoteRequestKey, onNewNoteRequestHandled } = useNotesRouteAddress()
   return (
     <OptionLayout>
       <RouteErrorBoundary routeId="notes" routeLabel="Notes">
-        <NotesManagerPage sourceNoteId={sourceNoteId} onNoteSelectionChange={onNoteSelectionChange} LeaveGuard={RouteLeaveGuard} />
+        <NotesManagerPage sourceNoteId={sourceNoteId} onNoteSelectionChange={onNoteSelectionChange} newNoteRequestKey={newNoteRequestKey} onNewNoteRequestHandled={onNewNoteRequestHandled} LeaveGuard={RouteLeaveGuard} />
       </RouteErrorBoundary>
     </OptionLayout>
   )

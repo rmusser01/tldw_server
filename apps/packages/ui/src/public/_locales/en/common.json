@@ -977,6 +977,24 @@
   "commandPalette_categoryRecent": {
     "message": "Recent"
   },
+  "commandPalette_categoryChats": {
+    "message": "Chats"
+  },
+  "commandPalette_categoryNotes": {
+    "message": "Notes"
+  },
+  "commandPalette_searchingContent": {
+    "message": "Searching chats and notes…"
+  },
+  "commandPalette_newNote": {
+    "message": "New note"
+  },
+  "commandPalette_untitledChat": {
+    "message": "Untitled chat"
+  },
+  "commandPalette_untitledNote": {
+    "message": "Untitled note"
+  },
   "featureHints_knowledge_title": {
     "message": "Search your knowledge"
   },

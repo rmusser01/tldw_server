@@ -140,6 +140,7 @@ const BrowserChrome = () => {
       <output data-testid="harness-address">{`${location.pathname}${location.search}`}</output>
       <button type="button" onClick={() => navigate(-1)}>Browser Back</button>
       <button type="button" onClick={() => navigate(1)}>Browser Forward</button>
+      <button type="button" onClick={() => navigate("/notes?new=1")}>Palette New note</button>
     </>
   )
 }
@@ -282,6 +283,43 @@ describe("Notes addresses (XP-05)", { timeout: 60_000 }, () => {
 
     await waitFor(() => expect(editor()).toHaveValue(""))
     await waitFor(() => expect(address()).toBe("/notes"))
+  })
+
+  it("starts a new note at /notes?new=1 instead of reopening the last note (XP-06)", async () => {
+    mockGetSetting.mockImplementation(async (setting: { key?: string }) => {
+      const key = String(setting?.key || "")
+      if (key.startsWith("tldw:notesRecentOpened:")) return [{ id: "12", title: "Beta note" }]
+      if (key === "tldw:lastNoteId") return "11"
+      return null
+    })
+
+    renderNotesRoute(["/chat", "/notes?new=1"])
+    await waitForNotesReady()
+
+    await waitFor(() => expect(address()).toBe("/notes"))
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Note title" })).toHaveFocus())
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    })
+    expect(editor()).toHaveValue("")
+    const openedNotes = mockBgRequest.mock.calls
+      .map(([request]) => String(request?.path || ""))
+      .filter((path) => /^\/api\/v1\/notes\/\d+$/.test(path))
+    expect(openedNotes).toEqual([])
+    // The request is consumed: Back returns to the chat page.
+    fireEvent.click(screen.getByRole("button", { name: "Browser Back" }))
+    await waitFor(() => expect(address()).toBe("/chat"))
+  })
+
+  it("starts a new note when the palette asks while a note is open (XP-06)", async () => {
+    renderNotesRoute(["/notes?note=11"])
+    await waitFor(() => expect(editor()).toHaveValue("Alpha body"))
+
+    fireEvent.click(screen.getByRole("button", { name: "Palette New note" }))
+
+    await waitFor(() => expect(editor()).toHaveValue(""))
+    await waitFor(() => expect(address()).toBe("/notes"))
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Note title" })).toHaveFocus())
   })
 
   it("names the open note in the page title", async () => {
