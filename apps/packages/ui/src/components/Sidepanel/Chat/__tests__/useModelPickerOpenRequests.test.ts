@@ -9,7 +9,8 @@ describe("useModelPickerOpenRequests (CC-02)", () => {
     const picker = { openAndFocus: vi.fn() }
     renderHook(() => useModelPickerOpenRequests({ current: picker }))
 
-    openModelSelector()
+    // Taking the request tells the command palette not to fall back (AX-01).
+    expect(openModelSelector()).toBe(true)
 
     expect(picker.openAndFocus).toHaveBeenCalledTimes(1)
   })
@@ -26,6 +27,6 @@ describe("useModelPickerOpenRequests (CC-02)", () => {
 
   it("does nothing while the picker is not mounted", () => {
     renderHook(() => useModelPickerOpenRequests({ current: null }))
-    expect(() => openModelSelector()).not.toThrow()
+    expect(openModelSelector()).toBe(false)
   })
 })

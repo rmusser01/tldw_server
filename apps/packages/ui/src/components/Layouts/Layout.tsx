@@ -44,6 +44,7 @@ import { CHAT_BACKGROUND_IMAGE_SETTING } from "@/services/settings/ui-settings"
 import { useStoreMessageOption } from "@/store/option"
 import { usePromptPaletteCommands } from "@/components/Option/Prompt/usePromptPaletteCommands"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
+import { openModelSelector } from "@/utils/model-selector-events"
 import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 
 // Lazy-load Timeline to reduce initial bundle size (~1.2MB cytoscape)
@@ -280,7 +281,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     onToggleRag: () => setChatMode(chatMode === "rag" ? "normal" : "rag"),
     onToggleWebSearch: () => setWebSearch(!webSearch),
     onIngestPage: handleIngestPage,
-    onSwitchModel: hideHeader ? undefined : () => setOpenModelSettings(true),
+    // The composer's model picker when /chat is open, else chat settings (AX-01).
+    onSwitchModel: hideHeader ? undefined : () => openModelSelector() || setOpenModelSettings(true),
     onToggleSidebar: shellSidebarEnabled ? toggleSidebar : undefined,
     additionalCommands: promptPaletteCommands
   }

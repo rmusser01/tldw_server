@@ -43,6 +43,8 @@ type PlaygroundCompareClusterProps = {
   isEmbedding: boolean
   selectedCharacter: any
   characterIdentityEnabled: boolean
+  /** Role-play steering runs here: a character chat that is not a saved role-play chat (CM-01). */
+  messageSteeringEnabled: boolean
   normalizedSearchQuery: string
   historyId: string | null
   stableHistoryId: string | null
@@ -186,6 +188,7 @@ export const PlaygroundCompareCluster = ({
   isEmbedding,
   selectedCharacter,
   characterIdentityEnabled,
+  messageSteeringEnabled,
   normalizedSearchQuery,
   historyId,
   stableHistoryId,
@@ -473,7 +476,7 @@ export const PlaygroundCompareCluster = ({
         temporaryChat={temporaryChat}
         onStopStreaming={stopStreamingRequest}
         onContinue={runContinue}
-        onRunSteeredContinue={runSteeredContinue}
+        onRunSteeredContinue={messageSteeringEnabled ? runSteeredContinue : undefined}
         documents={userMessage?.documents}
         actionInfo={actionInfo}
         serverChatId={serverChatId}
@@ -513,10 +516,10 @@ export const PlaygroundCompareCluster = ({
         onSwipePrev={() => handleVariantSwipe(userMessage.id, "prev")}
         onSwipeNext={() => handleVariantSwipe(userMessage.id, "next")}
         messageSteeringMode={messageSteeringMode}
-        onMessageSteeringModeChange={characterIdentityEnabled ? setMessageSteeringMode : undefined}
+        onMessageSteeringModeChange={messageSteeringEnabled ? setMessageSteeringMode : undefined}
         messageSteeringForceNarrate={messageSteeringForceNarrate}
-        onMessageSteeringForceNarrateChange={characterIdentityEnabled ? setMessageSteeringForceNarrate : undefined}
-        onClearMessageSteering={characterIdentityEnabled ? clearMessageSteering : undefined}
+        onMessageSteeringForceNarrateChange={messageSteeringEnabled ? setMessageSteeringForceNarrate : undefined}
+        onClearMessageSteering={messageSteeringEnabled ? clearMessageSteering : undefined}
       />
       <div className="ml-10 space-y-2 border-l border-dashed border-border pl-4">
         <div className="mb-1 flex items-center justify-between text-[11px] text-text-muted">
@@ -1032,7 +1035,7 @@ export const PlaygroundCompareCluster = ({
                 temporaryChat={temporaryChat}
                 onStopStreaming={stopStreamingRequest}
                 onContinue={runContinue}
-                onRunSteeredContinue={runSteeredContinue}
+                onRunSteeredContinue={messageSteeringEnabled ? runSteeredContinue : undefined}
                 documents={message?.documents}
                 actionInfo={actionInfo}
                 serverChatId={serverChatId}
@@ -1078,10 +1081,10 @@ export const PlaygroundCompareCluster = ({
                 onSwipePrev={() => handleVariantSwipe(message.id, "prev")}
                 onSwipeNext={() => handleVariantSwipe(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
-                onMessageSteeringModeChange={characterIdentityEnabled ? setMessageSteeringMode : undefined}
+                onMessageSteeringModeChange={messageSteeringEnabled ? setMessageSteeringMode : undefined}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}
-                onMessageSteeringForceNarrateChange={characterIdentityEnabled ? setMessageSteeringForceNarrate : undefined}
-                onClearMessageSteering={characterIdentityEnabled ? clearMessageSteering : undefined}
+                onMessageSteeringForceNarrateChange={messageSteeringEnabled ? setMessageSteeringForceNarrate : undefined}
+                onClearMessageSteering={messageSteeringEnabled ? clearMessageSteering : undefined}
               />
 
               {threadPreviewItems.length > 1 ? (

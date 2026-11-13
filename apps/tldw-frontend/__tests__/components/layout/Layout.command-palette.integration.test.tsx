@@ -87,7 +87,10 @@ vi.mock("@/components/Common/PersonaBuddy", () => ({
   BuddyShellHost: () => null,
   BuddyShellRenderContextProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>
 }))
-vi.mock("@/components/Common/Settings/CurrentChatModelSettings", () => ({ CurrentChatModelSettings: () => null }))
+vi.mock("@/components/Common/Settings/CurrentChatModelSettings", () => ({
+  CurrentChatModelSettings: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="current-chat-model-settings" /> : null
+}))
 vi.mock("@/components/Common/Workflow", () => ({ WorkflowIntegrationHost: () => null }))
 vi.mock("@/components/Common/confirm-danger", () => ({ useConfirmDanger: () => vi.fn() }))
 vi.mock("@/components/Common/BackendRecoveryUiContext", () => ({
@@ -173,6 +176,48 @@ for (const { name, Layout } of layouts) {
       act(() => window.dispatchEvent(new CustomEvent("tldw:open-help-modal")))
       expect(await screen.findByRole("dialog", { name: "Page help" })).toBeInTheDocument()
       expect(screen.getAllByRole("dialog", { name: "Page help" })).toHaveLength(1)
+    })
+  })
+}
+
+// AX-01: the palette's Switch Model opens the composer's model picker when a
+// chat composer is on the page, and the chat settings everywhere else.
+for (const { name, Layout } of layouts) {
+  describe(`${name} palette Switch Model`, () => {
+    const chooseSwitchModel = async () => {
+      render(
+        <MemoryRouter initialEntries={["/chat"]}>
+          <Layout>
+            <button type="button">Focus before palette</button>
+          </Layout>
+        </MemoryRouter>
+      )
+      const trigger = screen.getByRole("button", { name: "Focus before palette" })
+      trigger.focus()
+      fireEvent.keyDown(trigger, { key: "k", ctrlKey: true })
+      const input = await screen.findByRole("textbox", { name: "Search commands" })
+      fireEvent.change(input, { target: { value: "Switch Model" } })
+      fireEvent.click(screen.getByRole("option", { name: /^Switch Model/ }))
+    }
+
+    it("opens the composer's model picker when one is on the page", async () => {
+      const picker = vi.fn((event: Event) => event.preventDefault())
+      window.addEventListener("tldw:open-model-selector", picker)
+      try {
+        await chooseSwitchModel()
+        expect(picker).toHaveBeenCalledTimes(1)
+        await act(async () => {
+          await new Promise((resolve) => window.setTimeout(resolve, 10))
+        })
+        expect(screen.queryByTestId("current-chat-model-settings")).toBeNull()
+      } finally {
+        window.removeEventListener("tldw:open-model-selector", picker)
+      }
+    })
+
+    it("falls back to the chat settings when no model picker is on the page", async () => {
+      await chooseSwitchModel()
+      expect(await screen.findByTestId("current-chat-model-settings")).toBeInTheDocument()
     })
   })
 }

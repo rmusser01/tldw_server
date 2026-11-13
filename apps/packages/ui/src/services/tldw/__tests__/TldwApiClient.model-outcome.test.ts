@@ -96,7 +96,7 @@ describe("chat model send outcomes recorded at the transport (CC-01)", () => {
   })
 
   it("records a non-streaming character turn", async () => {
-    mocks.bgRequest.mockRejectedValueOnce(httpError(503))
+    mocks.bgRequest.mockRejectedValueOnce(httpError(502))
     await expect(
       new TldwApiClient().completeCharacterChatTurn("chat-1", characterPayload)
     ).rejects.toThrow()
@@ -124,6 +124,21 @@ describe("chat model send outcomes recorded at the transport (CC-01)", () => {
     })
     await new TldwApiClient().createChatCompletion(chatRequest)
     expect(getChatModelSendOutcome("ollama", "llama3.2:3b")).toBe("working")
+  })
+
+  // #3343: the server also answers 503 for missing provider credentials and
+  // while it is busy, and 500 for its own faults; neither says the model's
+  // provider failed to answer.
+  it.each([
+    ["a bare 503", httpError(503)],
+    ["a 503 for missing credentials", Object.assign(httpError(503), { detail: { error_code: "missing_provider_credentials" } })],
+    ["a server 500", httpError(500)]
+  ])("does not mark the model unreachable for %s", async (_label, error) => {
+    mocks.bgRequest.mockRejectedValueOnce(error)
+    await expect(
+      new TldwApiClient().completeCharacterChatTurn("chat-1", characterPayload)
+    ).rejects.toThrow()
+    expect(getChatModelSendOutcome("ollama", "llama3.2:3b")).toBeNull()
   })
 
   it("does not treat a validation error or an abort as evidence either way", async () => {

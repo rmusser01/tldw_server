@@ -395,8 +395,8 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
     const assistant = messageCard("assistant")
 
     openMoreActions(assistant)
-    expect(within(assistant).getByRole("button", { name: "Save to Flashcards" })).toBeInTheDocument()
-    fireEvent.click(within(assistant).getByRole("button", { name: "Save to Notes" }))
+    expect(within(assistant).getByRole("menuitem", { name: "Save to Flashcards" })).toBeInTheDocument()
+    fireEvent.click(within(assistant).getByRole("menuitem", { name: "Save to Notes" }))
 
     // conversation_id + message_id are what the note's back-link points at.
     await waitFor(() =>
@@ -428,13 +428,49 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
 
     if (pinsMessages) {
       openMoreActions(user)
-      fireEvent.click(within(user).getByRole("button", { name: "Pin" }))
+      fireEvent.click(within(user).getByRole("menuitem", { name: "Pin" }))
       expect(chatState.toggleMessagePinned).toHaveBeenCalledWith(0)
     }
     expect(user).toHaveAttribute("data-server-message-id", USER_ID)
   })
 })
 
+
+describe("message Copy feedback (G17)", () => {
+  const props: React.ComponentProps<typeof PlaygroundMessage> = {
+    isBot: true, name: "Persona", message: ANSWER, isProcessing: false, isStreaming: false,
+    onEditFormSubmit: vi.fn(), onRegenerate: vi.fn(), currentMessageIndex: 1, totalMessages: 2,
+    conversationInstanceId: SERVER_CHAT_ID
+  }
+
+  const original = Object.getOwnPropertyDescriptor(navigator, "clipboard")
+  const setClipboard = (writeText: unknown) =>
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+  afterEach(() => {
+    if (original) Object.defineProperty(navigator, "clipboard", original)
+    else Reflect.deleteProperty(navigator, "clipboard")
+  })
+
+  it("announces Copied next to the Copy button once the reply is on the clipboard", async () => {
+    const copy = vi.fn().mockResolvedValue(undefined)
+    setClipboard(copy)
+    render(<PlaygroundMessage {...props} />)
+    const button = screen.getByRole("button", { name: "copyToClipboard" })
+    fireEvent.click(button)
+    const copied = await screen.findByText("Copied")
+    expect(copy).toHaveBeenCalledWith(ANSWER)
+    expect(copied.closest('[role="status"]')).not.toBeNull()
+    expect(button).not.toContainElement(copied)
+  })
+
+  it("says the copy failed instead of confirming it", async () => {
+    setClipboard(vi.fn().mockRejectedValue(new Error("Denied")))
+    render(<PlaygroundMessage {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "copyToClipboard" }))
+    expect(await screen.findByText("Couldn't copy")).toBeInTheDocument()
+    expect(screen.queryByText("Copied")).toBeNull()
+  })
+})
 
 describe("rendered research actions after a parent or policy change", () => {
   beforeEach(() => {
@@ -637,7 +673,7 @@ describe.each(surfaces)(
         const view = renderChat()
         openMoreActions(messageCard("assistant"))
         fireEvent.click(
-          within(messageCard("assistant")).getByRole("button", {
+          within(messageCard("assistant")).getByRole("menuitem", {
             name: "Delete"
           })
         )
@@ -652,7 +688,7 @@ describe.each(surfaces)(
         messageApiMock.success.mockClear()
         openMoreActions(messageCard("assistant"))
         fireEvent.click(
-          within(messageCard("assistant")).getByRole("button", {
+          within(messageCard("assistant")).getByRole("menuitem", {
             name: "Delete"
           })
         )
@@ -858,7 +894,8 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
     await user.keyboard("{Enter}")
     const menu = await activeMenu()
     expect(menu.closest("#tldw-portal-root")).not.toBeNull()
-    const actions = within(menu).getAllByRole("button")
+    // The reply's overflow is a menu (AX-02); the user bubble's is a toolbar.
+    const actions = within(menu).getAllByRole(role === "assistant" ? "menuitem" : "button")
       .filter(button => !(button as HTMLButtonElement).disabled)
     expect(actions.length).toBeGreaterThanOrEqual(2)
     return { user, trigger, menu, actions }
@@ -932,7 +969,7 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
       const card = messageCard("assistant")
       expect(within(card).getAllByRole("button", { name: "More actions", hidden: true })).toHaveLength(1)
       fireEvent.click(within(card).getByRole("button", { name: "More actions" }))
-      expect(within(await activeMenu()).getByRole("button", { name: "Save to Notes" })).toBeVisible()
+      expect(within(await activeMenu()).getByRole("menuitem", { name: "Save to Notes" })).toBeVisible()
     })
 
     it(`${surface} keeps older assistant overflow reachable while primary actions remain hover-revealed`, async () => {
@@ -942,7 +979,7 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
       const older = messageCard("assistant")
       expect(within(older).queryByRole("button", { name: "copyToClipboard" })).toBeNull()
       fireEvent.click(within(older).getByRole("button", { name: "More actions" }))
-      expect(within(await activeMenu()).getByRole("button", { name: "Save to Notes" })).toBeVisible()
+      expect(within(await activeMenu()).getByRole("menuitem", { name: "Save to Notes" })).toBeVisible()
     })
 
     it(`${surface} opens an older user bubble's real actions with the keyboard`, async () => {
@@ -964,12 +1001,18 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
         await waitFor(() => expect(actions[0]).toHaveFocus())
       })
 
-      it(`${surface} ${role} Tab reaches the next real overflow action before later composer controls`, async () => {
-        const { user, actions } = await openKeyboardMenu(renderChat, role)
+      it(`${surface} ${role} Tab ${role === "assistant" ? "closes the menu onto its trigger" : "reaches the next real overflow action"} before later composer controls`, async () => {
+        const { user, trigger, menu, actions } = await openKeyboardMenu(renderChat, role)
         // Qualify Tab independently of the first-focus assertion above.
         actions[0].focus()
         await user.tab()
-        expect(actions[1]).toHaveFocus()
+        if (role === "assistant") {
+          // The reply's overflow is a menu: Tab leaves it (AX-02).
+          await expectClosedMenu(menu)
+          expect(trigger).toHaveFocus()
+        } else {
+          expect(actions[1]).toHaveFocus()
+        }
         expect(screen.getByRole("textbox", { name: "Later composer input" })).not.toHaveFocus()
       })
 
@@ -986,7 +1029,7 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
         const { user, trigger, menu } = await openKeyboardMenu(renderChat, role)
         const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
         try {
-          const action = within(menu).getByRole("button", {
+          const action = within(menu).getByRole(role === "assistant" ? "menuitem" : "button", {
             name: role === "assistant" ? "Save to Notes" : "copyToClipboard"
           })
           action.focus()
@@ -1040,7 +1083,7 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
     it.each(["Save to Notes", "Save to Flashcards", "Delete"])(`${surface} gives real secondary action %s a 44px menu row`, async name => {
       renderChat()
       fireEvent.click(within(messageCard("assistant")).getByRole("button", { name: "More actions" }))
-      const button = within(await activeMenu()).getByRole("button", { name })
+      const button = within(await activeMenu()).getByRole("menuitem", { name })
       expect(button).toBeVisible()
       for (const client of ["tldw-frontend", "extension"]) {
         for (const viewport of [320, 1280]) {

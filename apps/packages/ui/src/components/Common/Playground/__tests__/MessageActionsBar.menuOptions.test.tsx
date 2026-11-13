@@ -71,6 +71,27 @@ describe("MessageActionsBar menu options", () => {
     expect(screen.getByRole("button", { name: "edit" })).toBeEnabled()
   })
 
+  it("announces Copied from a status region outside the Copy button", () => {
+    render(<MessageActionsBar {...baseProps()} copyPressed />)
+    const copied = screen.getByText("Copied")
+    expect(copied.closest('[role="status"]')).not.toBeNull()
+    expect(screen.getByRole("button", { name: "copyToClipboard" })).not.toContainElement(copied)
+  })
+
+  it("announces a repeated copy again", () => {
+    const view = render(<MessageActionsBar {...baseProps()} copyPressed copyAttempt={1} />)
+    const first = screen.getByText("Copied")
+    view.rerender(<MessageActionsBar {...baseProps()} copyPressed copyAttempt={2} />)
+    expect(screen.getByText("Copied")).not.toBe(first)
+  })
+
+  it("says when copying failed, with a hint, and keeps the Copy button usable", () => {
+    render(<MessageActionsBar {...baseProps()} copyFailed />)
+    expect(screen.getByText("Couldn't copy").closest('[role="status"]')).toHaveTextContent(/select the text/i)
+    expect(screen.queryByText("Copied")).toBeNull()
+    expect(screen.getByRole("button", { name: "copyToClipboard" })).toBeEnabled()
+  })
+
   it("keeps New Branch available even when temporary chat is enabled", () => {
     render(
       <MessageActionsBar
@@ -168,7 +189,7 @@ describe("MessageActionsBar menu options", () => {
     expect(nextButton.className).toContain("min-w-[44px]")
     expect(overflowTrigger.className).toContain("min-h-[44px]")
     expect(overflowTrigger.className).toContain("min-w-[44px]")
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }))
     expect(onDelete).toHaveBeenCalledTimes(1)
   })
 })

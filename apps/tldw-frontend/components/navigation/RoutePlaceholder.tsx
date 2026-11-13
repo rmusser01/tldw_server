@@ -1,6 +1,7 @@
 import React, { startTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { useHeldDocumentTitle } from '@/utils/document-title';
 
 export type RoutePlaceholderProps = {
   title: string;
@@ -21,14 +22,8 @@ export const RoutePlaceholder: React.FC<RoutePlaceholderProps> = ({
   const routeLabel = String(router.asPath || '/');
   const showSettingsShortcut = !primaryCtaHref.startsWith('/settings');
   // Placeholder routes were the only pages with no document title (#2897).
-  React.useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const previous = document.title;
-    document.title = `${title} · tldw`;
-    return () => {
-      document.title = previous;
-    };
-  }, [title]);
+  // The next page's title survives this one unmounting (G14).
+  useHeldDocumentTitle(`${title} · tldw`);
   // When the visitor is already on the planned path, "Requested route" and
   // "Planned route" print the same value twice - show it once.
   const plannedDiffers = Boolean(plannedPath) && plannedPath !== routeLabel;

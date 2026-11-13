@@ -1,8 +1,10 @@
 import { validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { useStoreChatModelSettings } from "@/store/model"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import React from "react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ModelSelect } from "../ModelSelect"
 import {
@@ -103,6 +105,10 @@ vi.mock("antd", () => ({
   )
 }))
 
+const initialConnection = useConnectionStore.getState().state
+const setConnection = (state: Partial<typeof initialConnection>) =>
+  useConnectionStore.setState({ state: { ...initialConnection, ...state } })
+
 describe("compact explicit model selection", () => {
   beforeEach(() => {
     selection.mockClear()
@@ -110,6 +116,10 @@ describe("compact explicit model selection", () => {
     discovery.retry.mockClear()
     useStoreChatModelSettings.getState().reset()
     resetChatModelSendOutcomes()
+    setConnection({ phase: ConnectionPhase.CONNECTED, isConnected: true, lastCheckedAt: Date.now() })
+  })
+  afterEach(() => {
+    useConnectionStore.setState({ state: initialConnection })
   })
   it("offers a keyboard accessible Retry when discovery fails", () => {
     discovery.failed = true
@@ -180,14 +190,33 @@ describe("compact explicit model selection", () => {
     )
   })
 
-  it("XS-02: the chip shows a model that answered as working, and an unproven one as not checked", () => {
+  // #3343 (CC-01 parity): like the full page, the chip claims nothing about a
+  // model it has no evidence for; it names the server connection instead.
+  it("shows no readiness for an unproven model and names the server connection", () => {
     render(<ModelSelect showSelectedName />)
     fireEvent.click(screen.getByRole("menuitem", { name: /hosted gemma/i }))
 
-    expect(screen.getByTestId("chat-model-readiness")).toHaveAttribute(
-      "data-model-readiness",
-      "not_checked"
+    expect(screen.queryByTestId("chat-model-readiness")).not.toBeInTheDocument()
+    const chip = screen.getByTestId("chat-model-select")
+    expect(chip).toHaveAccessibleName(expect.stringContaining("Server connected"))
+    expect(chip).not.toHaveAccessibleName(expect.stringContaining("Not checked"))
+  })
+
+  it("names the connection, not the model's readiness, while the server is offline", () => {
+    setConnection({ phase: ConnectionPhase.ERROR, isConnected: false, lastCheckedAt: Date.now(), consecutiveFailures: 1 })
+    render(<ModelSelect showSelectedName />)
+    fireEvent.click(screen.getByRole("menuitem", { name: /llama3\.2:3b/i }))
+
+    expect(screen.queryByTestId("chat-model-readiness")).not.toBeInTheDocument()
+    expect(screen.getByTestId("chat-model-select")).toHaveAccessibleName(
+      expect.stringContaining("Offline")
     )
+  })
+
+  it("XS-02: the chip shows a model that answered as working", () => {
+    render(<ModelSelect showSelectedName />)
+    fireEvent.click(screen.getByRole("menuitem", { name: /hosted gemma/i }))
+
     act(() => {
       recordChatModelSendOutcome("openai", "Gemma:Q4", "working")
     })

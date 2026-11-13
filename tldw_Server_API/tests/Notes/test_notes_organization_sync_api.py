@@ -1517,6 +1517,92 @@ def test_inline_note_create_captures_one_complete_ordered_group(
     assert stored_note["version"] == 1
 
 
+def _organization_labels(note: dict) -> tuple[list[str], list[str]]:
+    keywords = sorted(item["keyword"] for item in note.get("keywords") or [])
+    folders = sorted(item["path"] for item in note.get("folders") or [])
+    return keywords, folders
+
+
+@pytest.mark.parametrize("sync_active", [True, False], ids=["sync-v2", "local"])
+@pytest.mark.parametrize(
+    ("first_body", "stale_body"),
+    [
+        ({"keywords": ["Alpha"]}, {"keywords": ["Beta"]}),
+        ({"folder_paths": ["Work"]}, {"folder_paths": ["Home"]}),
+    ],
+    ids=["keywords", "folders"],
+)
+def test_organization_only_patch_bumps_version_so_a_stale_patch_conflicts(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_active: bool,
+    first_body: dict,
+    stale_body: dict,
+) -> None:
+    """Two clients that read the same version must not both win a tags-only edit (#3157)."""
+    if not sync_active:
+        monkeypatch.setattr(
+            notes_endpoint,
+            "get_active_server_origin_sync_service_for_user",
+            lambda user_id: None,
+        )
+    created = client.post("/api/v1/notes/", json={"title": "Tagged", "content": "Body"})
+    assert created.status_code == 201, created.text
+    note_id = created.json()["id"]
+    read_version = created.json()["version"]
+
+    first = client.patch(
+        f"/api/v1/notes/{note_id}",
+        headers={"expected-version": str(read_version)},
+        json=first_body,
+    )
+    assert first.status_code == 200, first.text
+    assert first.json()["version"] == read_version + 1
+
+    stale = client.patch(
+        f"/api/v1/notes/{note_id}",
+        headers={"expected-version": str(read_version)},
+        json=stale_body,
+    )
+    assert stale.status_code == 409, stale.text
+
+    stored = chacha_db.get_note_by_id(note_id)
+    assert stored is not None
+    assert stored["version"] == read_version + 1
+    reread = client.get(f"/api/v1/notes/{note_id}")
+    assert reread.status_code == 200, reread.text
+    assert _organization_labels(reread.json()) == _organization_labels(first.json())
+
+
+def test_local_patch_with_unchanged_keywords_keeps_version(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+) -> None:
+    """Re-sending the same tags changes nothing, so other clients see no remote edit."""
+    monkeypatch.setattr(
+        notes_endpoint,
+        "get_active_server_origin_sync_service_for_user",
+        lambda user_id: None,
+    )
+    created = client.post(
+        "/api/v1/notes/",
+        json={"title": "Tagged", "content": "Body", "keywords": ["Alpha"]},
+    )
+    assert created.status_code == 201, created.text
+    note_id = created.json()["id"]
+    read_version = created.json()["version"]
+
+    same = client.patch(
+        f"/api/v1/notes/{note_id}",
+        headers={"expected-version": str(read_version)},
+        json={"keywords": ["alpha"]},
+    )
+
+    assert same.status_code == 200, same.text
+    assert same.json()["version"] == read_version
+
+
 @pytest.mark.parametrize(("method", "path"), [("put", ""), ("patch", "")])
 def test_inline_note_update_and_patch_capture_note_and_relationship_deltas(
     method: str,

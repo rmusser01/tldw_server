@@ -34,6 +34,11 @@ type SidepanelHeaderSimpleProps = {
    */
   loadEditableTitle?: () => Promise<string | null>
   onOpenChatInWebUi?: () => Promise<boolean | void> | boolean | void
+  /**
+   * The page's visually hidden h1; the chat page leaves it as "Chat"
+   * (AX-14). `null` for a page that renders its own h1.
+   */
+  heading?: string | null
 }
 
 /**
@@ -52,7 +57,8 @@ export const SidepanelHeaderSimple = ({
   activeTitle,
   onRenameTitle,
   loadEditableTitle,
-  onOpenChatInWebUi
+  onOpenChatInWebUi,
+  heading
 }: SidepanelHeaderSimpleProps = {}) => {
   const historySelection = useHistorySelectionContext()
   const { temporaryChat } = useMessage()
@@ -226,6 +232,11 @@ export const SidepanelHeaderSimple = ({
       data-testid="chat-header"
       className="absolute top-0 z-10 flex h-11 w-full items-center justify-between border-b border-border bg-surface/95 px-2 py-2 sm:px-3 text-body text-text backdrop-blur data-[istemporary-chat='true']:bg-purple-50 data-[istemporary-chat='true']:dark:bg-purple-900/30"
     >
+      {heading === null ? null : (
+        <h1 className="sr-only">
+          {heading ?? t("sidepanel:header.modePlayground", "Chat")}
+        </h1>
+      )}
       {/* Left: Sidebar toggle + Status dot + Logo + Title */}
       <div className="flex min-w-0 flex-1 items-center gap-1 pr-1 sm:gap-2">
         <Tooltip

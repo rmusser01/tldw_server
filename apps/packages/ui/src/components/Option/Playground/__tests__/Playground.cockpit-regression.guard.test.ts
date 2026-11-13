@@ -73,10 +73,14 @@ describe("Playground cockpit regression guard", () => {
 
   it("keeps chat recovery wired to the existing compact model selector", () => {
     const source = readFileSync(playgroundFormPath, "utf8");
+    const requestsSource = readFileSync(
+      path.resolve(testDir, "../hooks/useModelSelectorOpenRequests.ts"),
+      "utf8",
+    );
 
-    expect(source).toContain("OPEN_MODEL_SELECTOR_EVENT");
-    expect(source).toContain("window.addEventListener(OPEN_MODEL_SELECTOR_EVENT");
-    expect(source).toContain("window.removeEventListener(OPEN_MODEL_SELECTOR_EVENT");
-    expect(source).toContain("openModelApiSelector();");
+    expect(source).toContain("useModelSelectorOpenRequests({ openModelApiSelector,");
+    expect(requestsSource).toContain("window.addEventListener(OPEN_MODEL_SELECTOR_EVENT");
+    expect(requestsSource).toContain("window.removeEventListener(OPEN_MODEL_SELECTOR_EVENT");
+    expect(requestsSource).toContain("openModelApiSelector()");
   });
 });

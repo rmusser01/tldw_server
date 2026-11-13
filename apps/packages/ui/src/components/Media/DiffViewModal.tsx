@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, type RefObject } from 'react'
+import { smoothScrollBehavior } from '@/utils/reduced-motion'
 import { Modal, Radio } from 'antd'
 import { useTranslation } from 'react-i18next'
 import {
@@ -335,22 +336,22 @@ export function DiffViewModal({
           const pageScrollAmount = 400
           if (e.key === 'ArrowDown' || e.key === 'j') {
             e.preventDefault()
-            contentRef.current?.scrollBy({ top: scrollAmount, behavior: 'smooth' })
+            contentRef.current?.scrollBy({ top: scrollAmount, behavior: smoothScrollBehavior() })
           } else if (e.key === 'ArrowUp' || e.key === 'k') {
             e.preventDefault()
-            contentRef.current?.scrollBy({ top: -scrollAmount, behavior: 'smooth' })
+            contentRef.current?.scrollBy({ top: -scrollAmount, behavior: smoothScrollBehavior() })
           } else if (e.key === 'PageDown' || e.key === ' ') {
             e.preventDefault()
-            contentRef.current?.scrollBy({ top: pageScrollAmount, behavior: 'smooth' })
+            contentRef.current?.scrollBy({ top: pageScrollAmount, behavior: smoothScrollBehavior() })
           } else if (e.key === 'PageUp') {
             e.preventDefault()
-            contentRef.current?.scrollBy({ top: -pageScrollAmount, behavior: 'smooth' })
+            contentRef.current?.scrollBy({ top: -pageScrollAmount, behavior: smoothScrollBehavior() })
           } else if (e.key === 'Home') {
             e.preventDefault()
-            contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+            contentRef.current?.scrollTo({ top: 0, behavior: smoothScrollBehavior() })
           } else if (e.key === 'End') {
             e.preventDefault()
-            contentRef.current?.scrollTo({ top: contentRef.current.scrollHeight, behavior: 'smooth' })
+            contentRef.current?.scrollTo({ top: contentRef.current.scrollHeight, behavior: smoothScrollBehavior() })
           }
         }}
         role="region"

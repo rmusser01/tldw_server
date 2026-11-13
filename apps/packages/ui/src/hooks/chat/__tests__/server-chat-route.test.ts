@@ -1,14 +1,18 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   buildServerChatPath,
   historyHandoffState,
   isAddressableServerChatId,
+  isCharacterChatRouteLocation,
   isCharacterChatRouteSearch,
   isServerChatNavigationPending,
+  PLANNED_CHAT_NAVIGATION_TIMEOUT_MS,
   planServerChatNavigation,
   readServerChatRouteId,
   reportMountedChatRoute,
   resetServerChatRouteState,
+  serverChatNavigationWaitMs,
+  settleHistoryHandoff,
   settleServerChatNavigation,
   withoutConsumedParams,
   withServerChatRouteId
@@ -39,6 +43,14 @@ describe("chat page addresses (XP-05)", () => {
     expect(isCharacterChatRouteSearch("?chat=abc")).toBe(false)
   })
 
+  // The Playground also reads a character intent from a hash route outside a
+  // hash router (/options.html?keep=1#/chat?mode=character&...).
+  it("leaves a character chat route carried in the hash to the character intent", () => {
+    expect(isCharacterChatRouteLocation("?keep=1", "#/chat?mode=character&characterId=5&chatId=robot")).toBe(true)
+    expect(isCharacterChatRouteLocation("?mode=character", "")).toBe(true)
+    expect(isCharacterChatRouteLocation("?chat=abc", "#anchor")).toBe(false)
+  })
+
   it("adds a history entry when switching from one saved chat to another", () => {
     reportMountedChatRoute({ namesChat: true })
     expect(planServerChatNavigation("chat-b")).toEqual({ to: "/chat?chat=chat-b", replace: false })
@@ -54,12 +66,61 @@ describe("chat page addresses (XP-05)", () => {
     expect(planServerChatNavigation("chat-b").replace).toBe(false)
   })
 
+  it("plans New chat as a history entry of its own when it leaves a saved chat (#3119)", () => {
+    reportMountedChatRoute({ namesChat: true })
+    expect(planServerChatNavigation(null)).toEqual({ to: "/chat", replace: false })
+    expect(isServerChatNavigationPending(null)).toBe(true)
+    settleServerChatNavigation()
+    expect(isServerChatNavigationPending(null)).toBe(false)
+  })
+
   it("holds the address sync until the planned navigation lands", () => {
     planServerChatNavigation("chat-b")
     expect(isServerChatNavigationPending("chat-b")).toBe(true)
     expect(isServerChatNavigationPending("chat-a")).toBe(false)
-    settleServerChatNavigation("chat-b")
+    settleServerChatNavigation()
     expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+})
+
+// #3119: a planned navigation that never lands (cancelled, or the page left
+// before it arrived) must not block the address for that chat for the rest
+// of the session.
+describe("a planned chat navigation that never lands", () => {
+  afterEach(() => {
+    resetServerChatRouteState()
+    vi.useRealTimers()
+  })
+
+  it("is forgotten when the chat page unmounts", () => {
+    reportMountedChatRoute({ namesChat: true })
+    planServerChatNavigation("chat-b")
+    reportMountedChatRoute(null)
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+
+  it("is forgotten when a location that does not name its chat arrives", () => {
+    planServerChatNavigation("chat-b")
+    settleServerChatNavigation()
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+
+  it("is replaced when another chat is planned", () => {
+    planServerChatNavigation("chat-b")
+    planServerChatNavigation("chat-c")
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+    expect(isServerChatNavigationPending("chat-c")).toBe(true)
+  })
+
+  it("is given up after a short wait", () => {
+    vi.useFakeTimers()
+    planServerChatNavigation("chat-b")
+    expect(serverChatNavigationWaitMs()).toBe(PLANNED_CHAT_NAVIGATION_TIMEOUT_MS)
+    vi.advanceTimersByTime(PLANNED_CHAT_NAVIGATION_TIMEOUT_MS - 1)
+    expect(isServerChatNavigationPending("chat-b")).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(isServerChatNavigationPending("chat-b")).toBe(false)
+    expect(serverChatNavigationWaitMs()).toBe(0)
   })
 })
 
@@ -80,6 +141,23 @@ describe("chat address and the history handoff link", () => {
 
   it("treats a handoff only the router still sees as consumed", () => {
     expect(historyHandoffState(handoff, "http://app.test/chat")).toBe("consumed")
+  })
+
+  // #3119: a link the page could not load stays in the address; once the
+  // page has settled it, the address sync stops waiting and drops it.
+  it("stops waiting for a handoff the page has settled, and drops it", () => {
+    const browser = `http://app.test/chat${handoff}`
+    settleHistoryHandoff(browser)
+    expect(historyHandoffState(handoff, browser)).toBe("consumed")
+    expect(withoutConsumedParams(`${handoff}&tab=x`, browser)).toBe("?tab=x")
+    resetServerChatRouteState()
+  })
+
+  it("forgets a settled handoff when the chat page unmounts", () => {
+    const browser = `http://app.test/chat${handoff}`
+    settleHistoryHandoff(browser)
+    reportMountedChatRoute(null)
+    expect(historyHandoffState(handoff, browser)).toBe("pending")
   })
 
   it("drops a consumed handoff from the query it writes", () => {

@@ -15,6 +15,7 @@ import { cleanupAntOverlays } from "@/utils/cleanup-ant-overlays"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
+import { planServerChatNavigation } from "@/hooks/chat/server-chat-route"
 
 type UseClearChatOptions = {
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>
@@ -116,7 +117,10 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
       Modal.destroyAll()
       cleanupAntOverlays()
     }
-    navigate(destination)
+    // New chat is a navigation of its own: Back returns to the chat it left (#3119).
+    const target = destination === "/chat" ? planServerChatNavigation(null) : { to: destination, replace: false }
+    if (target.replace) navigate(target.to, { replace: true })
+    else navigate(target.to)
     const resetBaseState = (base: ResettableChatBase) => {
       base.setMessages([])
       base.setHistory([])

@@ -3,6 +3,7 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { PageAssistContext } from "@/context"
 import { SidePanelBody } from "../body"
 
 // Per-row render counts for the memoized row spy, keyed by messageId.
@@ -48,6 +49,7 @@ vi.mock("~/components/Common/Playground/Message", () => ({
   PlaygroundMessage: React.memo(function PlaygroundMessageSpy(props: {
     messageId?: string
     isStreaming: boolean
+    isPending?: boolean
     message: string
   }) {
     const key = props.messageId ?? "unknown"
@@ -56,6 +58,7 @@ vi.mock("~/components/Common/Playground/Message", () => ({
       <article
         data-testid="sidepanel-row"
         data-is-streaming={props.isStreaming ? "true" : "false"}
+        data-is-pending={props.isPending ? "true" : "false"}
       >
         {props.message}
       </article>
@@ -158,6 +161,52 @@ const replaceLastMessage = (
 
 const countRowsRendered = () =>
   Array.from(rowRenderCounts.values()).filter((count) => count > 0).length
+
+describe("SidePanelBody pending reply (G19)", () => {
+  const renderWithRequest = (controller: AbortController, lastMessage = "▋") => {
+    sidepanelMessageState.value = {
+      ...sidepanelMessageState.value,
+      streaming: false,
+      isProcessing: false,
+      messages: replaceLastMessage(buildMessages(4), lastMessage)
+    }
+    const context = {
+      controller,
+      setController: vi.fn(),
+      embeddingController: null,
+      setEmbeddingController: vi.fn()
+    }
+    render(
+      <PageAssistContext.Provider value={context}>
+        <SidePanelBody />
+      </PageAssistContext.Provider>
+    )
+    return screen
+      .getAllByTestId("sidepanel-row")
+      .map((row) => row.getAttribute("data-is-pending"))
+  }
+
+  it("marks only the last reply as pending while a request is in flight before streaming", () => {
+    expect(renderWithRequest(new AbortController())).toEqual(["false", "false", "false", "true"])
+  })
+
+  it("does not mark the previous finished reply while the request is still being prepared", () => {
+    // The controller is set before the pipeline adds the "▋" placeholder, and a
+    // queued "Send after this reply" starts with the finished answer still last.
+    expect(renderWithRequest(new AbortController(), "final assistant reply")).toEqual([
+      "false",
+      "false",
+      "false",
+      "false"
+    ])
+  })
+
+  it("stops marking the reply as pending once the request is stopped", () => {
+    const stopped = new AbortController()
+    stopped.abort()
+    expect(renderWithRequest(stopped)).toEqual(["false", "false", "false", "false"])
+  })
+})
 
 describe("SidePanelBody row memoization (WP-02/WP-03/WP-09)", () => {
   beforeEach(() => {

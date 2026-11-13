@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { smoothScrollBehavior } from '@/utils/reduced-motion'
 import type { MediaResultItem } from '../types'
 import { buildReadAlongSegments } from '../read-along/media-read-along-segments'
 import type { ReadAlongSegment } from '../read-along/types'
@@ -77,7 +78,7 @@ const scrollToCharOffset = (
   if (Number.isFinite(containerMaxScroll) && containerMaxScroll > 0) {
     const top = Math.round(containerMaxScroll * ratio)
     if (typeof container.scrollTo === 'function') {
-      container.scrollTo({ top, behavior: 'smooth' })
+      container.scrollTo({ top, behavior: smoothScrollBehavior() })
     } else {
       container.scrollTop = top
     }
@@ -98,9 +99,9 @@ const scrollToCharOffset = (
   const top = Math.round(docMaxScroll * ratio)
 
   if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
-    window.scrollTo({ top, behavior: 'smooth' })
+    window.scrollTo({ top, behavior: smoothScrollBehavior() })
   } else if (typeof docScroller.scrollTo === 'function') {
-    docScroller.scrollTo({ top, behavior: 'smooth' })
+    docScroller.scrollTo({ top, behavior: smoothScrollBehavior() })
   } else {
     docScroller.scrollTop = top
   }
@@ -565,7 +566,7 @@ export function useTranscriptDisplay(deps: UseTranscriptDisplayDeps) {
 
     const activeNode = findMatchElementRefs.current[activeFindMatchIndex]
     if (activeNode && typeof activeNode.scrollIntoView === 'function') {
-      activeNode.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      activeNode.scrollIntoView({ behavior: smoothScrollBehavior(), block: 'center' })
       return
     }
 

@@ -1,6 +1,7 @@
 import type { ChatMessageView } from "@/services/settings/ui-settings"
 import React from "react"
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
+import { moveMenuFocus } from "@/utils/menu-keyboard"
 import type { TFunction } from "i18next"
 import { Popover, Tooltip } from "antd"
 import {
@@ -33,12 +34,16 @@ import {
   Trash2
 } from "lucide-react"
 import { IconButton } from "../IconButton"
+import { CopyStatus, useCopyFailedHint } from "../CopyStatus"
 import { GenerationInfo } from "./GenerationInfo"
 import { FeedbackButtons } from "@/components/Sidepanel/Chat/FeedbackButtons"
 import type { FeedbackThumb } from "@/store/feedback"
 import type { GenerationInfo as GenerationInfoType } from "./types"
 import type { MessageSteeringMode } from "@/types/message-steering"
 import type { QuickMessageAction } from "./quick-message-actions"
+
+/** Every focusable kind of menu item; the first one takes focus on open. */
+const MENU_ITEMS = "[role='menuitem']:not(:disabled), [role='menuitemcheckbox']:not(:disabled)"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
@@ -67,19 +72,32 @@ const OverflowMenuItem: React.FC<{
   disabledReason?: string | null
   danger?: boolean
   active?: boolean
-}> = ({ icon, label, onClick, disabled, disabledReason, danger, active }) => {
+  /** Makes the item a toggle (menuitemcheckbox) in this state. */
+  checked?: boolean
+}> = ({ icon, label, onClick, disabled, disabledReason, danger, active, checked }) => {
   const reasonId = React.useId()
   const reason = disabled && disabledReason ? disabledReason : null
   return (
     <>
       <button
         type="button"
-        onClick={onClick}
-        disabled={disabled}
-        aria-disabled={disabled}
+        role={checked === undefined ? "menuitem" : "menuitemcheckbox"}
+        aria-checked={checked}
+        // Roving focus: the arrow keys move between items and Tab leaves.
+        tabIndex={-1}
+        onClick={(event) => {
+          // A disabled item stays focusable, so its reason is read, but does
+          // nothing and leaves the menu open.
+          if (disabled) {
+            event.stopPropagation()
+            return
+          }
+          onClick?.()
+        }}
+        aria-disabled={disabled || undefined}
         aria-describedby={reason ? reasonId : undefined}
         title={reason ?? undefined}
-        className={`flex min-h-[44px] min-w-[44px] w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`flex min-h-[44px] min-w-[44px] w-full items-center gap-2 rounded-md px-3 py-2 text-xs transition hover:bg-surface2 aria-disabled:cursor-not-allowed aria-disabled:opacity-50 ${
           danger
             ? "text-danger hover:text-danger"
             : active
@@ -93,6 +111,8 @@ const OverflowMenuItem: React.FC<{
       {reason ? (
         <p
           id={reasonId}
+          // Read as the item's description, not as a child of the menu.
+          role="none"
           className="-mt-1 max-w-[240px] px-3 pb-2 pl-9 text-[11px] leading-snug text-text-muted"
         >
           {reason}
@@ -137,6 +157,10 @@ type MessageActionsBarProps = {
   onToggleTts: () => void
   hideCopy?: boolean
   copyPressed: boolean
+  /** The last copy failed; the bar says so and keeps the copy icon. */
+  copyFailed?: boolean
+  /** Changes on every copy, so a repeated result is announced again. */
+  copyAttempt?: number
   onCopy: () => void | Promise<void>
   canReply: boolean
   onReply: () => void
@@ -203,6 +227,8 @@ export function MessageActionsBar({
   onToggleTts,
   hideCopy,
   copyPressed,
+  copyFailed = false,
+  copyAttempt,
   onCopy,
   canReply,
   onReply,
@@ -264,10 +290,11 @@ export function MessageActionsBar({
   React.useEffect(() => {
     const menu = actionMenuRef.current
     if (!overflowOpen || !menu) return
-    scheduleFocusFirstVisibleElement("button:not(:disabled)", menu, () =>
+    scheduleFocusFirstVisibleElement(MENU_ITEMS, menu, () =>
       actionMenuOpenRef.current && actionMenuRef.current === menu && menu.isConnected)
   }, [overflowOpen])
   const showLeftFeedback = !editMode && showFeedbackControls
+  const copyFailedHint = useCopyFailedHint()
 
   // Build overflow menu items, grouped: reuse · role-play steering ·
   // transform · listen/feedback/pin · delete, with dividers between groups.
@@ -334,6 +361,7 @@ export function MessageActionsBar({
             )
           }}
           active={messageSteeringMode === "continue_as_user"}
+          checked={onRunSteeredContinue ? undefined : messageSteeringMode === "continue_as_user"}
         />
       )
       steering.push(
@@ -355,6 +383,7 @@ export function MessageActionsBar({
             )
           }}
           active={messageSteeringMode === "impersonate_user"}
+          checked={onRunSteeredContinue ? undefined : messageSteeringMode === "impersonate_user"}
         />
       )
       steering.push(
@@ -366,6 +395,7 @@ export function MessageActionsBar({
             onMessageSteeringForceNarrateChange(!messageSteeringForceNarrate)
           }
           active={messageSteeringForceNarrate}
+          checked={Boolean(messageSteeringForceNarrate)}
         />
       )
       const steeringActive =
@@ -583,7 +613,7 @@ export function MessageActionsBar({
           <div className="flex flex-wrap items-center gap-1">
             {/* Primary actions: Copy, Edit, Regenerate */}
             {!hideCopy && (
-              <Tooltip title={t("copyToClipboard")}>
+              <Tooltip title={copyFailed ? copyFailedHint : t("copyToClipboard")}>
                 <IconButton
                   ariaLabel={t("copyToClipboard") as string}
                   onClick={() => { void onCopy() }}
@@ -603,6 +633,7 @@ export function MessageActionsBar({
                 </IconButton>
               </Tooltip>
             )}
+            {!hideCopy && <CopyStatus status={copyFailed ? "failed" : copyPressed ? "copied" : "idle"} attempt={copyAttempt} />}
             {!hideEditAndRegenerate && (
               <Tooltip title={t("edit")}>
                 <IconButton
@@ -641,6 +672,9 @@ export function MessageActionsBar({
               <Popover
                 content={<GenerationInfo generationInfo={generationInfo} />}
                 title={t("generationInfo")}
+                // Keyboard users open it too (AX-02). Not "click": a click
+                // would close what the hover or the click's own focus opened.
+                trigger={["hover", "focus"]}
               >
                 <IconButton
                   ariaLabel={t("generationInfo") as string}
@@ -668,10 +702,25 @@ export function MessageActionsBar({
               <div
                 id={actionMenuId}
                 ref={actionMenuRef}
+                role="menu"
+                aria-label={t("common:moreActions", "More actions") as string}
                 className="flex min-w-[180px] flex-col py-1"
                 onClick={() => changeActionMenu(false)}
+                onBlur={event => {
+                  // Focus left the menu: close it. Clicking the trigger
+                  // toggles it itself; focus lost to nowhere returns to it.
+                  const next = event.relatedTarget
+                  if (next && (event.currentTarget.contains(next) || next === actionTriggerRef.current)) return
+                  changeActionMenu(false)
+                  if (!next) actionTriggerRef.current?.focus()
+                }}
                 onKeyDown={event => {
-                  if (event.key !== "Escape") return
+                  // Arrow, Home and End move between actions (AX-02).
+                  if (moveMenuFocus(event.currentTarget, event.key)) {
+                    event.preventDefault()
+                    return
+                  }
+                  if (event.key !== "Escape" && event.key !== "Tab") return
                   event.preventDefault()
                   event.stopPropagation()
                   changeActionMenu(false)
@@ -683,6 +732,7 @@ export function MessageActionsBar({
             <IconButton
               ref={actionTriggerRef}
               ariaLabel={t("common:moreActions", "More actions") as string}
+              hasPopup="menu"
               ariaExpanded={overflowOpen}
               ariaControls={overflowOpen ? actionMenuId : undefined}
               className={actionButtonClass}
