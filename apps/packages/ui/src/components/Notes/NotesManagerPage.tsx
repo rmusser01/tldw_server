@@ -120,6 +120,7 @@ import {
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
 import { collectConversationIdsToResolve, settleInBatches } from './notes-conversation-labels'
+import { useNotesBulkRun } from './hooks/useNotesBulkRun'
 import { isEditableTarget } from "@/utils/editable-target"
 import { useConnectionsMemory } from './notes-connections'
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
@@ -239,6 +240,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const message = useAntdMessage()
   const modal = useAntdModal()
   const { showUndoNotification } = useUndoNotification()
+  const bulkRun = useNotesBulkRun(notesGraphAuthorityScope)
   const rawConfirmDanger = useConfirmDanger()
   const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {
     useTutorialStore.getState().endTutorial()
@@ -1562,18 +1564,22 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     } finally { operation.release() }
   }
 
-  // Bulk operations
-  const deleteSelectedBulk = React.useCallback(async () => {
-    const targets = list.selectedBulkNotes.slice()
+  // Bulk operations: one run at a time, with n/N progress and Retry for failures (NL-05).
+  // Retry passes the failed notes back in and skips the confirm the user already gave.
+  const deleteSelectedBulk = React.useCallback(async (retryTargets?: NoteListItem[]) => {
+    const targets = (retryTargets ?? list.selectedBulkNotes).slice()
     if (targets.length === 0) {
       message.info('No selected notes to delete')
       return
     }
+    const run = bulkRun.begin('delete')
+    if (!run) return
+    const failedNotes: NoteListItem[] = []
     const operation = beginNoteMutation()
     try {
       const okToLeave = await ed.confirmDiscardIfDirty(operation.acceptSavedDraft)
       if (!okToLeave || !operation.isCurrent() || !operation.isEditorCurrent()) return
-      const confirmed = await confirmDanger({
+      const confirmed = retryTargets != null || await confirmDanger({
         title: 'Delete selected notes?',
         content: `Delete ${targets.length} selected notes? This moves them to trash.`,
         okText: 'Delete selected',
@@ -1583,8 +1589,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const ownedRequest = await operation.requestOptions()
 
       let deleted = 0
-      let failed = 0
       const deletedIds = new Set<string>()
+      run.start(targets.length)
 
       for (const note of targets) {
         const noteId = String(note.id)
@@ -1601,7 +1607,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
             operation.requireCurrent()
             expectedVersion = toNoteVersion(detail)
           }
-          if (expectedVersion == null) { failed += 1; continue }
+          if (expectedVersion == null) { failedNotes.push(note); continue }
           await bgRequest<any>({
             ...ownedRequest,
             path: `/api/v1/notes/${encodeURIComponent(noteId)}?expected_version=${encodeURIComponent(
@@ -1615,9 +1621,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           deletedIds.add(noteId)
         } catch {
           operation.requireCurrent()
-          failed += 1
+          // A retry reads the version again, in case a stale one caused the failure.
+          failedNotes.push({ ...note, version: undefined })
+        } finally {
+          run.step()
         }
       }
+      const failed = failedNotes.length
 
       if (deleted > 0) {
         message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)
@@ -1635,8 +1645,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
     } catch (error) {
       if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
-    } finally { operation.release() }
-  }, [beginNoteMutation, confirmDanger, ed, list, message, resetEditorToEmptyState])
+    } finally {
+      operation.release()
+      run.finish(failedNotes)
+    }
+  }, [beginNoteMutation, bulkRun, confirmDanger, ed, list, message, resetEditorToEmptyState])
 
   const refreshAfterBulkTagChange = React.useCallback(async (noteIds: readonly string[], operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
     operation.requireCurrent()
@@ -1708,17 +1721,21 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     [beginNoteMutation, refreshAfterBulkTagChange]
   )
 
-  const addTagsToSelectedBulk = React.useCallback(async () => {
-    const targets = list.selectedBulkNotes.slice()
+  const addTagsToSelectedBulk = React.useCallback(async (retry?: { notes: NoteListItem[]; tags: string[] }) => {
+    const targets = (retry?.notes ?? list.selectedBulkNotes).slice()
     if (targets.length === 0) {
       message.info('No selected notes to update')
       return
     }
+    const run = bulkRun.begin('addTags')
+    if (!run) return
+    const failedNotes: NoteListItem[] = []
+    let additions: string[] = []
     const operation = beginNoteMutation()
     try {
       const okToLeave = await ed.confirmDiscardIfDirty(operation.acceptSavedDraft)
       if (!okToLeave || !operation.isCurrent() || !operation.isEditorCurrent()) return
-      const picked = await promptBulkAddTags(modal, {
+      const picked = retry ? retry.tags : await promptBulkAddTags(modal, {
         noteCount: targets.length,
         suggestions: kw.availableKeywords,
         renderSuggestionLabel: (tag) =>
@@ -1729,7 +1746,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         t
       })
       if (picked == null || !operation.isCurrent()) return
-      const additions = normalizeTagList(picked)
+      additions = normalizeTagList(picked)
       if (additions.length === 0) {
         message.warning('Choose at least one tag to add')
         return
@@ -1741,6 +1758,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const failed: string[] = []
       const partiallyTagged: string[] = []
       const ownedRequest = await operation.requestOptions()
+      run.start(targets.length)
       for (const note of targets) {
         const noteId = String(note.id)
         const label = toBulkNoteLabel(note)
@@ -1753,6 +1771,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           const version = toNoteVersion(current)
           if (version == null) {
             failed.push(label)
+            failedNotes.push(note)
             continue
           }
           const previousTags = normalizeTagList(extractKeywords(current))
@@ -1775,6 +1794,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           operation.requireCurrent()
           if (ed.isVersionConflictError(error)) conflicted.push(label)
           else failed.push(label)
+          failedNotes.push(note)
+        } finally {
+          run.step()
         }
       }
 
@@ -1808,8 +1830,18 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       if (problems.length > 0) message.warning(problems.join(' '))
     } catch (error) {
       if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
-    } finally { operation.release() }
-  }, [beginNoteMutation, ed, kw, list, message, modal, refreshAfterBulkTagChange, showUndoNotification, t, undoBulkTagAdd])
+    } finally {
+      operation.release()
+      run.finish(failedNotes, additions)
+    }
+  }, [beginNoteMutation, bulkRun, ed, kw, list, message, modal, refreshAfterBulkTagChange, showUndoNotification, t, undoBulkTagAdd])
+
+  const retryBulkFailures = () => {
+    const failures = bulkRun.failures
+    if (!failures || bulkRun.isRunning) return
+    if (failures.action === 'delete') void deleteSelectedBulk(failures.notes)
+    else if (failures.action === 'addTags') void addTagsToSelectedBulk({ notes: failures.notes, tags: failures.tags ?? [] })
+  }
 
   // Editor input handlers
   const handleEditorChange = React.useCallback(
@@ -2890,6 +2922,12 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         toggleNotePinned={ed.toggleNotePinned}
         restoreNote={restoreNote}
         openLinkedChat={(conversationId) => { void openLinkedConversation(conversationId) }}
+        bulkRun={{
+          progress: bulkRun.progress,
+          failures: bulkRun.failures,
+          onRetryFailures: retryBulkFailures,
+          onDismissFailures: bulkRun.dismissFailures
+        }}
         exportAll={exp.exportAll}
         exportAllCSV={exp.exportAllCSV}
         exportAllJSON={exp.exportAllJSON}

@@ -1253,6 +1253,33 @@
   "notesSearch_fromChatTooltip": {
     "message": "Open the chat this note was saved from"
   },
+  "notesSearch_bulkProgressDelete": {
+    "message": "Deleting {{done}}/{{total}}…"
+  },
+  "notesSearch_bulkProgressAddTags": {
+    "message": "Adding tags {{done}}/{{total}}…"
+  },
+  "notesSearch_bulkProgressRestore": {
+    "message": "Restoring {{done}}/{{total}}…"
+  },
+  "notesSearch_bulkFailedDelete": {
+    "message": "Delete failed for {{count}}:"
+  },
+  "notesSearch_bulkFailedAddTags": {
+    "message": "Adding tags failed for {{count}}:"
+  },
+  "notesSearch_bulkFailedRestore": {
+    "message": "Restore failed for {{count}}:"
+  },
+  "notesSearch_bulkFailedMore": {
+    "message": "+{{count}} more"
+  },
+  "notesSearch_bulkRetry": {
+    "message": "Retry"
+  },
+  "notesSearch_bulkDismissFailures": {
+    "message": "Dismiss"
+  },
   "notesSearch_linkedConversationIdLabel": {
     "message": "Conversation ID"
   },

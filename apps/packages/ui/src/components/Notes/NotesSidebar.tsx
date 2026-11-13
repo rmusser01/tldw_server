@@ -8,6 +8,7 @@ import {
   X as CloseIcon,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import NotesBulkActionsBar, { type NotesBulkRunControls } from './NotesBulkActionsBar'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import NotesCollectionControls from '@/components/Notes/NotesCollectionControls'
@@ -172,6 +173,8 @@ export interface NotesSidebarProps {
   deleteSelectedBulk: () => Promise<void>
   /** Opens the chat a list row came from (NL-04). */
   openLinkedChat?: (conversationId: string) => void
+  /** The running bulk action and its failures (NL-05). */
+  bulkRun?: NotesBulkRunControls
   toggleNotePinned: (id: string | number) => Promise<void>
   restoreNote: (id: string | number, version?: number) => Promise<void>
   exportAll: () => Promise<void>
@@ -313,6 +316,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   addTagsToSelectedBulk,
   deleteSelectedBulk,
   openLinkedChat,
+  bulkRun,
   toggleNotePinned,
   restoreNote,
   exportAll,
@@ -1445,74 +1449,20 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           )}
 
           {/* Sticky bulk actions bar at bottom */}
-          {listMode === 'active' && bulkSelectedIds.length > 0 && (
-            <div
-              className="flex-shrink-0 border-t border-border bg-surface2 px-4 py-2"
-              role="status"
-              aria-live="polite"
-              data-testid="notes-bulk-actions-bar"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <Typography.Text
-                  className="text-xs font-medium text-text"
-                  data-testid="notes-bulk-selected-count"
-                >
-                  {t('option:notesSearch.bulkSelectedCount', {
-                    defaultValue: '{{count}} selected',
-                    count: bulkSelectedIds.length
-                  })}
-                </Typography.Text>
-                <Button
-                  size="small"
-                  type="link"
-                  className="!px-0 text-xs"
-                  onClick={clearBulkSelection}
-                  data-testid="notes-bulk-clear-selection"
-                >
-                  {t('option:notesSearch.bulkClearSelection', {
-                    defaultValue: 'Clear selection'
-                  })}
-                </Button>
-              </div>
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                <Button
-                  size="small"
-                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
-                  onClick={exportSelectedBulk}
-                  data-testid="notes-bulk-export"
-                >
-                  {t('option:notesSearch.bulkExport', {
-                    defaultValue: 'Export selected'
-                  })}
-                </Button>
-                <Button
-                  size="small"
-                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
-                  onClick={() => {
-                    void addTagsToSelectedBulk()
-                  }}
-                  data-testid="notes-bulk-assign-keywords"
-                >
-                  {t('option:notesSearch.bulkAddTags', {
-                    defaultValue: 'Add tags'
-                  })}
-                </Button>
-                <Button
-                  size="small"
-                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
-                  danger
-                  onClick={() => {
-                    void deleteSelectedBulk()
-                  }}
-                  data-testid="notes-bulk-delete"
-                >
-                  {t('option:notesSearch.bulkDelete', {
-                    defaultValue: 'Delete selected'
-                  })}
-                </Button>
-              </div>
-            </div>
-          )}
+          <NotesBulkActionsBar
+            listMode={listMode}
+            selectedCount={bulkSelectedIds.length}
+            isMobileViewport={isMobileViewport}
+            run={bulkRun}
+            onClearSelection={clearBulkSelection}
+            onExport={exportSelectedBulk}
+            onAddTags={() => {
+              void addTagsToSelectedBulk()
+            }}
+            onDelete={() => {
+              void deleteSelectedBulk()
+            }}
+          />
         </div>
       </aside>
   )
