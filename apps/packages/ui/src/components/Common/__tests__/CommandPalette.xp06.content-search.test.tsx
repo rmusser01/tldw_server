@@ -188,6 +188,15 @@ describe("CommandPalette chats and notes (XP-06)", () => {
     expect(option).toHaveAttribute("aria-selected", "true")
 
     fireEvent.keyDown(input, { key: "Enter" })
-    await waitFor(() => expect(screen.getByTestId("address")).toHaveTextContent("/notes?new=1"))
+    // Each request gets its own address: the web router keys locations by address.
+    await waitFor(() => expect(screen.getByTestId("address").textContent).toMatch(/^\/notes\?new=[0-9a-z]+$/))
+    const first = screen.getByTestId("address").textContent
+    window.dispatchEvent(new CustomEvent("tldw:open-command-palette"))
+    await screen.findByRole("dialog")
+    const again = screen.getByRole("textbox", { name: "Search commands" })
+    fireEvent.change(again, { target: { value: "new note" } })
+    fireEvent.keyDown(again, { key: "Enter" })
+    await waitFor(() => expect(screen.getByTestId("address").textContent).not.toBe(first))
+    expect(screen.getByTestId("address").textContent).toMatch(/^\/notes\?new=[0-9a-z]+$/)
   })
 })

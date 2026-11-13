@@ -227,10 +227,10 @@ type NotesManagerPageProps = {
   LeaveGuard?: React.ComponentType<NotesLeaveGuardState>
   /** Told which note is open, so the route can keep its address in step (XP-05). */
   onNoteSelectionChange?: NotesSelectionListener
-  /** Set once per navigation that asks for a new note (/notes?new=1, ⌘K "New note", XP-06). */
+  /** Set once per navigation that asks for a new note (/notes?new=<value>, ⌘K "New note", XP-06). */
   newNoteRequestKey?: string | null
-  /** The new-note request was handled (or declined); the route drops it from the address. */
-  onNewNoteRequestHandled?: () => void
+  /** The new-note request was handled; `started` is false when no draft was started. */
+  onNewNoteRequestHandled?: (started: boolean) => void
 }
 
 const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard, onNoteSelectionChange, newNoteRequestKey = null, onNewNoteRequestHandled }) => {
@@ -1075,14 +1075,15 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   // ---- Handlers remaining in component ----
 
-  const handleNewNote = React.useCallback(async (templateId?: string) => {
-    if (preparingDraftRef.current) return
+  /** Start a new draft; resolves false when none was started (the user stayed, another was preparing). */
+  const startNewNote = React.useCallback(async (templateId?: string): Promise<boolean> => {
+    if (preparingDraftRef.current) return false
     const transition = ed.captureNoteMutation()
     preparingDraftRef.current = transition
     setPreparingDraft(true)
     try {
       const ok = await ed.confirmDiscardIfDirty()
-      if (!ok || preparingDraftRef.current !== transition || !transition.isOwnerCurrent()) return
+      if (!ok || preparingDraftRef.current !== transition || !transition.isOwnerCurrent()) return false
       if (list.listMode !== 'active') list.setListMode('active')
       if (isMobileViewport) setMobileSidebarOpen(false)
       startDraftSession()
@@ -1097,6 +1098,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       setTimeout(() => {
         ed.titleInputRef.current?.focus()
       }, 0)
+      return true
     } finally {
       if (preparingDraftRef.current === transition) retireDraftTransition()
     }
@@ -1115,6 +1117,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     message,
     startDraftSession
   ])
+  const handleNewNote = React.useCallback(async (templateId?: string) => {
+    await startNewNote(templateId)
+  }, [startNewNote])
 
   const saveAndStartNew = React.useCallback(async () => {
     if (preparingDraftRef.current) return
@@ -2721,10 +2726,18 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // the Notes owner is known, then let the route drop the request.
   const handledNewNoteRequestRef = React.useRef<string | null>(null)
   React.useEffect(() => {
-    if (!newNoteRequestKey || !notesGraphAuthorityScope || handledNewNoteRequestRef.current === newNoteRequestKey) return
+    if (!newNoteRequestKey) {
+      // The route dropped the request. The web build keys locations by
+      // address, so the next request may arrive with the same key.
+      handledNewNoteRequestRef.current = null
+      return
+    }
+    if (!notesGraphAuthorityScope || handledNewNoteRequestRef.current === newNoteRequestKey) return
     handledNewNoteRequestRef.current = newNoteRequestKey
-    void handleNewNote().finally(() => onNewNoteRequestHandled?.())
-  }, [handleNewNote, newNoteRequestKey, notesGraphAuthorityScope, onNewNoteRequestHandled])
+    void startNewNote()
+      .catch(() => false)
+      .then((started) => onNewNoteRequestHandled?.(started))
+  }, [newNoteRequestKey, notesGraphAuthorityScope, onNewNoteRequestHandled, startNewNote])
 
   React.useEffect(() => {
     if (!isMobileViewport && !wasMobileViewportRef.current) {

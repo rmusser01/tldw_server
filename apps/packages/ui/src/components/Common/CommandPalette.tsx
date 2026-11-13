@@ -42,7 +42,7 @@ import {
 import { ADMIN_MODULES } from "@/components/Option/Admin/admin-modules"
 import { CLAIMS_REVIEW_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
-import { NEW_NOTE_PATH } from "@/routes/hooks/useNotesRouteAddress"
+import { NEW_NOTE_PATH, buildNewNotePath } from "@/routes/hooks/useNotesRouteAddress"
 import { cn } from "@/libs/utils"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import {
@@ -457,7 +457,8 @@ export function CommandPalette({
               label: t("common:commandPalette.newNote", "New note"),
               icon: <StickyNote className="size-4" />,
               targetPath: NEW_NOTE_PATH,
-              action: () => navigate(NEW_NOTE_PATH),
+              // A fresh address per request: the web router keys locations by address.
+              action: () => navigate(buildNewNotePath()),
               category: "action",
               keywords: ["create", "write", "capture", "note"],
             }
