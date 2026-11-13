@@ -71,6 +71,20 @@ describe("MessageActionsBar menu options", () => {
     expect(screen.getByRole("button", { name: "edit" })).toBeEnabled()
   })
 
+  it("announces Copied from a status region outside the Copy button", () => {
+    render(<MessageActionsBar {...baseProps()} copyPressed />)
+    const copied = screen.getByText("Copied")
+    expect(copied.closest('[role="status"]')).not.toBeNull()
+    expect(screen.getByRole("button", { name: "copyToClipboard" })).not.toContainElement(copied)
+  })
+
+  it("says when copying failed, with a hint, and keeps the Copy button usable", () => {
+    render(<MessageActionsBar {...baseProps()} copyFailed />)
+    expect(screen.getByText("Couldn't copy").closest('[role="status"]')).toHaveTextContent(/select the text/i)
+    expect(screen.queryByText("Copied")).toBeNull()
+    expect(screen.getByRole("button", { name: "copyToClipboard" })).toBeEnabled()
+  })
+
   it("keeps New Branch available even when temporary chat is enabled", () => {
     render(
       <MessageActionsBar

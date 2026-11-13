@@ -6,6 +6,7 @@ import { focusComposer } from "@/hooks/useComposerFocus"
 import { classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { Button } from "@/components/Common/Button"
+import { ContinuedReplyRecovery } from "@/components/Common/Playground/ContinuedReplyRecovery"
 import { openModelSelector } from "@/components/Option/Playground/playground-cockpit-actions"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
@@ -692,6 +693,8 @@ export function HistorySelectionReview({
               ? text("roleplayReplyUnconfirmedMessage", "Your message is saved. Any reply that arrived is retained here. Explicit Retry may generate another reply if none is already saved, including while an earlier request is still running. It does not add another user message.")
               : text("roleplayInputUnconfirmedMessage", "The server may have received this message. Explicit Retry may generate a reply if none is already saved. It keeps the original message identity and your retained input.")}</p>
         </>
+      ) : entry.turn.action === "continue" ? (
+        <ContinuedReplyRecovery turn={entry.turn} text={text} />
       ) : (entry.turn.action === "edit_resend" ||
         entry.turn.action === "regenerate") &&
       entry.turn.outcome === "complete" &&
@@ -945,6 +948,7 @@ export function HistorySelectionReview({
       </Button>
       {(((entry.turn.action === 'edit_resend' ||
         entry.turn.action === 'regenerate' ||
+        entry.turn.action === 'continue' ||
         entry.turn.roleplay_resume?.completion?.saved) &&
         entry.turn.outcome === 'complete') ||
         (entry.turn.persistence === 'server' &&

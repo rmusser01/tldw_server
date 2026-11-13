@@ -94,6 +94,8 @@
   "copyToClipboard": "Copy to clipboard",
   "copyCode": "Copy code",
   "codeCopied": "Copied",
+  "copyFailed": "Couldn't copy",
+  "copyFailedHint": "Select the text and copy it with Ctrl+C (⌘C on a Mac).",
   "table": {
     "copyCsv": "Copy as CSV",
     "downloadCsv": "Download CSV",

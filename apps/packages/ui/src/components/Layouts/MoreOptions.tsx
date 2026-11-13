@@ -213,6 +213,20 @@ export const MoreOptions = ({
   const canonicalByCluster = useStoreMessageOption(
     (state) => state.compareCanonicalByCluster
   )
+  // Confirm only a copy that happened; a refused write is shown, not left uncaught (G17).
+  const copyAndReport = async (
+    write: () => Promise<void>,
+    afterCopy?: () => void
+  ) => {
+    try {
+      await write()
+    } catch {
+      message.error(t("common:copyFailed", "Couldn't copy"))
+      return
+    }
+    afterCopy?.()
+    message.success(t("more.copy.success"))
+  }
   const baseItems: MenuProps["items"] = [
     {
       type: "group",
@@ -222,13 +236,13 @@ export const MoreOptions = ({
           key: "copy-text",
           label: t("more.copy.asText"),
           icon: <FileText className="w-4 h-4" />,
-          onClick: async () => {
-            await copyToClipboard({
-              text: formatAsText(messages),
-              formatted: false
-            })
-            message.success(t("more.copy.success"))
-          }
+          onClick: () =>
+            copyAndReport(() =>
+              copyToClipboard({
+                text: formatAsText(messages),
+                formatted: false
+              })
+            )
         },
         {
           key: "copy-as-formatted-text",
@@ -236,26 +250,25 @@ export const MoreOptions = ({
             "settings:generalSettings.settings.copyAsFormattedText.label"
           ),
           icon: <FileText className="w-4 h-4" />,
-          onClick: async () => {
-            const mkd = formatAsMarkdown(messages)
-            await copyToClipboard({
-              text: mkd,
-              formatted: true
-            })
-            message.success(t("more.copy.success"))
-          }
+          onClick: () =>
+            copyAndReport(() =>
+              copyToClipboard({
+                text: formatAsMarkdown(messages),
+                formatted: true
+              })
+            )
         },
         {
           key: "copy-markdown",
           label: t("more.copy.asMarkdown"),
           icon: <FileCode className="w-4 h-4" />,
-          onClick: async () => {
-            await copyToClipboard({
-              text: formatAsMarkdown(messages),
-              formatted: false
-            })
-            message.success(t("more.copy.success"))
-          }
+          onClick: () =>
+            copyAndReport(() =>
+              copyToClipboard({
+                text: formatAsMarkdown(messages),
+                formatted: false
+              })
+            )
         },
         {
           key: "copy-canonical-markdown",
@@ -263,17 +276,19 @@ export const MoreOptions = ({
             defaultValue: "Copy canonical transcript"
           }),
           icon: <FileCode className="w-4 h-4" />,
-          onClick: async () => {
+          onClick: () => {
             const canonicalMessages = buildCanonicalMessages(
               messages,
               canonicalByCluster || {}
             )
-            await copyToClipboard({
-              text: formatAsMarkdown(canonicalMessages),
-              formatted: false
-            })
-            void trackCompareMetric({ type: "export_canonical" })
-            message.success(t("more.copy.success"))
+            return copyAndReport(
+              () =>
+                copyToClipboard({
+                  text: formatAsMarkdown(canonicalMessages),
+                  formatted: false
+                }),
+              () => void trackCompareMetric({ type: "export_canonical" })
+            )
           }
         }
       ]

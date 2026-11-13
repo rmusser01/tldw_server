@@ -3058,7 +3058,13 @@ async def build_context_and_messages(
             project_history_context,
             selected_unanswered_text_question,
         )
-        from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError, HistorySelectionSnapshotV1
+        from tldw_Server_API.app.core.Chat.history_selection import (
+            REPLY_ACTION_REFUSED_QUESTION,
+            REPLY_ACTION_REFUSED_REQUEST,
+            HistorySelectionError,
+            HistorySelectionSnapshotV1,
+            reply_action_refusal,
+        )
 
         if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
             raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
@@ -3117,7 +3123,7 @@ async def build_context_and_messages(
                     accepted = None
                 elif reused_reply_id is not None:
                     if getattr(request_data, "tldw_history_branch", None) is not True:
-                        raise HistorySelectionError(unsupported_code)
+                        raise reply_action_refusal(unsupported_code, REPLY_ACTION_REFUSED_REQUEST)
                     inputs = [
                         message.model_dump(exclude_none=True)
                         for message in request_data.messages
@@ -3136,7 +3142,8 @@ async def build_context_and_messages(
                         )
                     except HistorySelectionError as exc:
                         if exc.code == "unsupported_history_regeneration":
-                            raise HistorySelectionError(unsupported_code) from exc
+                            # Keep the reason: a question that can't be reused refuses both actions.
+                            raise HistorySelectionError(unsupported_code, details=exc.details) from exc
                         raise
                     original = next(item for item in content if item["id"] == accepted["input_message_id"])
                     extra = original.get("extra_metadata") or {}
@@ -3145,7 +3152,7 @@ async def build_context_and_messages(
                         or extra.get("function_call") is not None
                         or extra.get("tool_call_id") is not None
                     ):
-                        raise HistorySelectionError(unsupported_code)
+                        raise reply_action_refusal(unsupported_code, REPLY_ACTION_REFUSED_QUESTION)
                     text = _saved_image_text(
                         {
                             "sender": "user",
@@ -3688,6 +3695,10 @@ async def build_context_and_messages(
         if regenerate_reply_id is not None or continue_reply_id is not None:
             overlap_cut = len(request_messages)
         formatted_history = _format_selected_history_messages(history_snapshot, selected_content, character_card)
+        if continue_prefix is not None:
+            # The continued reply is the final context message. Some providers
+            # (for example Anthropic) refuse one that ends in whitespace.
+            formatted_history[-1]["content"] = formatted_history[-1]["content"].rstrip()
         if server_existing_input is not None:
             existing_dictionary_content = assistant_context.pop("history_dictionary_user_content", [])
             if existing_dictionary_content:

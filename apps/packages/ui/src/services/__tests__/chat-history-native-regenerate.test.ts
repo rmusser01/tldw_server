@@ -283,6 +283,21 @@ describe("explicit native regeneration service contract", () => {
       ).toThrow("unsupported_history_regeneration")
     }
   )
+  it("refuses a Continue in Continue's own words, not Regenerate's", async () => {
+    const native = owner(),
+      source = await service.captureHistorySnapshot(native, capture().view, "send")
+    if (source.status !== "captured") throw new Error("missing fixture capture")
+    const continuing = { ...intent(), action: "continue" as const }
+    const legacy = { ...source.view, interpretation: { kind: "legacy_linear_v1" as const, projection_id: "p" } }
+    expect(() => service.nativeRegenerateView(native, legacy, source, continuing))
+      .toThrow("unsupported_history_continuation")
+    const toolReply = { ...source, rows: source.rows.map(row => row.id === "a" ? { ...row, role: "tool" as const } : row) }
+    expect(() => service.nativeRegenerateView(native, source.view, toolReply, continuing))
+      .toThrow("unsupported_history_continuation")
+    const toolInput = capture({ extra_metadata: { sender_role: "user", tool_call_id: "tool" } })
+    expect(() => service.nativeRegenerationMessage(toolInput, continuing, 1))
+      .toThrow("unsupported_history_continuation")
+  })
   it("qualifies an original admission without replacing its original selection provenance", async () => {
     const native = owner(),
       source = await service.captureHistorySnapshot(
