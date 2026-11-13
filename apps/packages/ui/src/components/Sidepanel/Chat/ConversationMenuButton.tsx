@@ -19,9 +19,16 @@ export const ConversationMenuContext = React.createContext<{
  */
 export const ConversationMenuButton = () => {
   const menu = React.useContext(ConversationMenuContext)
+  const [open, setOpen] = React.useState(false)
   if (!menu) return null
   return (
-    <Dropdown menu={{ items: menu.items }} trigger={["click"]} destroyPopupOnHide>
+    <Dropdown
+      menu={{ items: menu.items, onClick: () => setOpen(false) }}
+      trigger={["click"]}
+      open={open}
+      onOpenChange={setOpen}
+      destroyPopupOnHide
+    >
       <button
         type="button"
         onClick={(event) => event.stopPropagation()}
@@ -29,6 +36,7 @@ export const ConversationMenuButton = () => {
         aria-label={menu.label}
         title={menu.label}
         aria-haspopup="menu"
+        aria-expanded={open}
       >
         <MoreHorizontal className="size-3" aria-hidden="true" />
       </button>

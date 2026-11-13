@@ -8,7 +8,7 @@ vi.mock("@/utils/chat-transcript", async (original) => ({
   downloadTranscript: download.transcript
 }))
 
-import { exportServerChat, readServerChatTranscript } from "../chat-transcript-export"
+import { ChatExportTooLargeError, exportServerChat, readServerChatTranscript } from "../chat-transcript-export"
 
 const message = (id: string, parent: string | null, role: "user" | "assistant", content: string, second: number) => ({
   id, parent_message_id: parent, role, content, created_at: `2026-11-01T09:00:0${second}Z`
@@ -71,5 +71,34 @@ describe("server chat export (CS-09)", () => {
     client.listChatMessages.mockResolvedValue([message("u1", null, "user", "Hi", 0)])
     await exportServerChat("chat-1", "json")
     expect(download.transcript).toHaveBeenCalledWith(expect.objectContaining({ id: "chat-1", title: "Trip plan" }), "json")
+  })
+})
+
+describe("server chat export limits (review follow-up)", () => {
+  beforeEach(() => {
+    client.getChat.mockReset()
+    client.listChatMessages.mockReset()
+    download.transcript.mockReset()
+  })
+
+  it("marks the export when the chat has images it leaves out", async () => {
+    client.getChat.mockResolvedValue({ id: "chat-1", title: "Photos" })
+    client.listChatMessages.mockResolvedValue([{ ...message("u1", null, "user", "Look", 0), has_image: true }])
+    expect((await readServerChatTranscript("chat-1")).imagesOmitted).toBe(true)
+  })
+
+  it("leaves the mark out when the chat has no images", async () => {
+    client.getChat.mockResolvedValue({ id: "chat-1", title: "Words" })
+    client.listChatMessages.mockResolvedValue([message("u1", null, "user", "Hi", 0)])
+    expect((await readServerChatTranscript("chat-1")).imagesOmitted).toBeUndefined()
+  })
+
+  it("says the chat is too large when it reaches the reading limit", async () => {
+    client.getChat.mockResolvedValue({ id: "chat-1", title: "Huge" })
+    client.listChatMessages.mockImplementation(async (_id: string, params: { limit: number; offset: number }) =>
+      Array.from({ length: params.limit }, (_unused, index) =>
+        message(`m${params.offset + index}`, null, "user", "x", 0)))
+    await expect(exportServerChat("chat-1", "json")).rejects.toBeInstanceOf(ChatExportTooLargeError)
+    expect(download.transcript).not.toHaveBeenCalled()
   })
 })

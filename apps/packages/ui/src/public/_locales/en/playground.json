@@ -4961,5 +4961,11 @@
   },
   "focusBar_openChatList": {
     "message": "Open chat list"
+  },
+  "historySelection_backToParentStale": {
+    "message": "That branch is no longer open"
+  },
+  "historySelection_backToParentStaleDetail": {
+    "message": "Open the original chat from the chat list."
   }
 }

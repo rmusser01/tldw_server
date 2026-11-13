@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * CS-09: a saved chat's row menu offers Export (Markdown or JSON) and Move to
+ * CS-09: a saved chat's row menu offers Export (Markdown or JSON) and Add to
  * folder, and calls its settings item "Chat settings".
  */
 import React from "react"
@@ -50,7 +50,7 @@ const chat: ServerChatHistoryItem = {
 const renderRow = (overrides: Record<string, unknown> = {}) => {
   const handlers = {
     onExportChat: vi.fn(),
-    onMoveToFolder: vi.fn(),
+    onEditFolders: vi.fn(),
     onOpenSettings: vi.fn()
   }
   render(
@@ -86,10 +86,11 @@ describe("ServerChatRow per-chat actions (CS-09)", () => {
     expect(onExportChat.mock.calls).toEqual([[chat, "markdown"], [chat, "json"]])
   })
 
-  it("moves the chat to a folder", () => {
-    const { onMoveToFolder } = renderRow()
-    fireEvent.click(screen.getByRole("button", { name: "Move to folder…" }))
-    expect(onMoveToFolder).toHaveBeenCalledWith(chat)
+  it("edits the chat's folders", () => {
+    const { onEditFolders } = renderRow()
+    expect(screen.queryByRole("button", { name: /Move/ })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Add to folder…" }))
+    expect(onEditFolders).toHaveBeenCalledWith(chat)
   })
 
   it("calls its settings item Chat settings", () => {
@@ -99,9 +100,9 @@ describe("ServerChatRow per-chat actions (CS-09)", () => {
     expect(onOpenSettings).toHaveBeenCalledWith(chat)
   })
 
-  it("offers no export or folder move in Trash", () => {
+  it("offers no export or folder change in Trash", () => {
     renderRow({ isTrashView: true })
     expect(screen.queryByRole("button", { name: "Export" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Move to folder…" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Add to folder…" })).toBeNull()
   })
 })

@@ -1,7 +1,7 @@
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
-import { savedReplyActionAvailability, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
+import { savedReplyActionAvailability, savedReplyRegenerateUnavailableReason, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
 import { isReplyRequestPending } from "@/hooks/chat/pending-reply"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -508,7 +508,7 @@ export const SidePanelBody = ({
                   currentMessageIndex={index}
                   totalMessages={messages.length}
                   onRegenerate={handleRegenerateRow}
-                  regenerateDisabledReason={regenerateDisabledReason}
+                  regenerateDisabledReason={regenerateDisabledReason ?? savedReplyRegenerateUnavailableReason(savedReplyActions.regenerate, t)}
                   onContinue={savedReplyActions.continue ? undefined : handleContinueRow}
                   continueDisabledReason={regenerateDisabledReason}
                   savedStatusActions={savedStatusActions && index === messages.length - 1}

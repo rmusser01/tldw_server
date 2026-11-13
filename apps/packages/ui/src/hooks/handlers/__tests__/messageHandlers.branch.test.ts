@@ -634,13 +634,14 @@ describe("native branch lineage (CM-12)", () => {
       historyId: null,
       chatTitle,
       historySelection,
-      notification: { error: vi.fn(), warning: vi.fn(), success: vi.fn() },
+      notification: { error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() },
       setServerChatId: vi.fn(),
       setServerChatMetaLoaded: vi.fn()
     })
   }
+  const preparedRows = [{ role: "user" }, { role: "assistant" }, { role: "user" }]
   beforeEach(() => {
-    nativeForks.prepare.mockResolvedValue({ request: lineageRequest })
+    nativeForks.prepare.mockResolvedValue({ request: lineageRequest, rows: preparedRows })
     nativeForks.commit.mockImplementation(async (_prepared, candidate) => {
       await candidate("child")
       return { ...nativeFinderResult }
@@ -661,6 +662,42 @@ describe("native branch lineage (CM-12)", () => {
     })
   })
 
+  it("counts only the chat's questions and replies, not system rows", async () => {
+    const withSystem: any = {
+      ...lineageRequest,
+      input: {
+        ...lineageRequest.input,
+        selection: {
+          ...lineageRequest.input.selection,
+          messages: [{ id: "s0", revision: "1" }, ...lineageRequest.input.selection.messages]
+        }
+      }
+    }
+    nativeForks.prepare.mockResolvedValue({
+      request: withSystem,
+      rows: [{ role: "system" }, ...preparedRows]
+    })
+    await createBranchMessage(lineageOptions())(withSystem)
+    expect(nativeForks.commit).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
+      title: "Trip plan — branch at message 3"
+    })
+  })
+
+  it("replaces a branch's own suffix instead of adding another when a branch is branched", async () => {
+    await createBranchMessage(lineageOptions("Trip plan — branch at message 7"))(lineageRequest)
+    expect(nativeForks.commit).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
+      title: "Trip plan — branch at message 3"
+    })
+  })
+
+  it("shortens a long parent title to 60 characters", async () => {
+    const long = "A".repeat(55) + " and then some more words"
+    await createBranchMessage(lineageOptions(long))(lineageRequest)
+    expect(nativeForks.commit).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
+      title: `${"A".repeat(55)} and — branch at message 3`
+    })
+  })
+
   it("announces the open branch with a way back to its parent", async () => {
     const { render, screen, fireEvent, waitFor } = await import("@testing-library/react")
     const options = lineageOptions()
@@ -678,5 +715,21 @@ describe("native branch lineage (CM-12)", () => {
       undefined,
       expect.any(Function)
     )
+  })
+
+  it("says the notice no longer applies once another chat is open, instead of doing nothing", async () => {
+    const { render, screen, fireEvent } = await import("@testing-library/react")
+    const options = lineageOptions()
+    await createBranchMessage(options)(lineageRequest)
+    const toast = options.notification.success.mock.calls[0][0]
+    // The user opens another chat before using the notice.
+    await options.historySelection.loadConversation({ serverChatId: "elsewhere" }, undefined, () => {})
+    const loads = options.historySelection.loadConversation.mock.calls.length
+    render(toast.actions)
+    fireEvent.click(screen.getByRole("button", { name: "Back to parent" }))
+    expect(options.notification.info).toHaveBeenCalledWith(expect.objectContaining({
+      message: "That branch is no longer open"
+    }))
+    expect(options.historySelection.loadConversation).toHaveBeenCalledTimes(loads)
   })
 })

@@ -15,7 +15,8 @@ export type TranscriptMessage = {
   /** With `parentId`, lets the Markdown export follow the chat's newest path. */
   id?: string
   parentId?: string | null
-  role: TranscriptRole
+  /** "user", "assistant" or "system"; another role the server records (for example "tool") is kept as is. */
+  role: TranscriptRole | (string & {})
   /** The server's sender name, when it records one. */
   sender?: string | null
   content: string
@@ -37,19 +38,25 @@ export type ChatTranscript = {
   updatedAt?: string | null
   model?: string | null
   messages: TranscriptMessage[]
+  /** The chat has images this export doesn't carry; JSON says so as `images_omitted`. */
+  imagesOmitted?: boolean
 }
 
-const ROLE_LABEL: Record<TranscriptRole, string> = {
+const ROLE_LABEL: Record<string, string> = {
   user: "You",
   assistant: "Assistant",
   system: "System"
 }
 
+/** "You", "Assistant", "System", or another role's own name, capitalized. */
+const roleLabel = (role: string) =>
+  ROLE_LABEL[role] ?? (role ? role.charAt(0).toUpperCase() + role.slice(1) : "Message")
+
 /** One "## Speaker" section per message, for a copy or the body of an export. */
 export const formatTranscriptMessagesMarkdown = (messages: readonly TranscriptMessage[]): string =>
   messages
     .map((message) => {
-      const lines = [`## ${message.speaker?.trim() || ROLE_LABEL[message.role]}`]
+      const lines = [`## ${message.speaker?.trim() || roleLabel(message.role)}`]
       if (message.timestamp) lines.push(`*${new Date(message.timestamp).toLocaleString()}*`)
       lines.push("", message.content)
       for (const image of message.images ?? []) if (image) lines.push("", `![Image](${image})`)
@@ -78,8 +85,21 @@ export const formatTranscriptMarkdown = (transcript: ChatTranscript): string => 
   return `${header.join("\n")}\n${formatTranscriptMessagesMarkdown(path)}\n`
 }
 
-export const formatTranscriptJson = (transcript: ChatTranscript): string =>
-  JSON.stringify(transcript, null, 2)
+/** The JSON export's own name and version, so a reader can recognize it. */
+export const TRANSCRIPT_EXPORT_FORMAT = "tldw-chat-export"
+export const TRANSCRIPT_EXPORT_VERSION = 1
+
+export const formatTranscriptJson = ({ imagesOmitted, ...transcript }: ChatTranscript): string =>
+  JSON.stringify(
+    {
+      format: TRANSCRIPT_EXPORT_FORMAT,
+      version: TRANSCRIPT_EXPORT_VERSION,
+      ...transcript,
+      ...(imagesOmitted ? { images_omitted: true } : {})
+    },
+    null,
+    2
+  )
 
 /** "<title>_<time>.<ext>", without characters a file name can't hold. */
 export const transcriptFileName = (title: string, extension: "md" | "json", time = Date.now()): string => {

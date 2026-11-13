@@ -11,19 +11,57 @@
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
 
 type Link = { id: string; parentId: string | null | undefined }
+type LinkedNode = { id: string; parent_id: string | null }
 
 /**
- * Walk parents back from the newest leaf of `rows`, which are in conversation
- * order (a reply after the message it answers).
+ * Owner order, except that a message never comes before the message it
+ * answers: a reply listed ahead of its question is moved after it.
+ */
+export const chronologicalHistoryNodes = <T extends LinkedNode>(
+  nodes: readonly T[]
+): T[] => {
+  const byId = new Map(nodes.map((node) => [node.id, node]))
+  const ordered: T[] = []
+  const placed = new Set<string>()
+  for (const node of nodes) {
+    // Walk up to the first placed ancestor without recursion, so a long
+    // child-first chain can't overflow the stack; a cycle stops the walk.
+    const chain: T[] = []
+    const inChain = new Set<string>()
+    let current: T | undefined = node
+    while (current && !placed.has(current.id) && !inChain.has(current.id)) {
+      chain.push(current)
+      inChain.add(current.id)
+      current = current.parent_id === null ? undefined : byId.get(current.parent_id)
+    }
+    for (let index = chain.length - 1; index >= 0; index -= 1) {
+      placed.add(chain[index].id)
+      ordered.push(chain[index])
+    }
+  }
+  return ordered
+}
+
+/**
+ * Walk parents back from the newest leaf of `listed`, in conversation order
+ * (owner order, with each reply after the message it answers).
  *
  * Legacy rows often have no parent. A row whose parent is missing, unknown or
  * listed after it continues the row before it, so an unlinked legacy chat
  * stays one linear thread and only explicit links create branches.
  */
 export const newestLeafPath = <T>(
-  rows: readonly T[],
+  listed: readonly T[],
   link: (row: T) => Link
 ): { path: T[]; hasAlternatives: boolean } => {
+  // A reply listed before its question (for example with equal timestamps)
+  // is moved after it first, so its explicit link is kept.
+  const rows = chronologicalHistoryNodes(
+    listed.map((row) => {
+      const entry = link(row)
+      return { id: entry.id, parent_id: entry.parentId ?? null, row }
+    })
+  ).map((entry) => entry.row)
   const links = rows.map(link)
   const position = new Map<string, number>()
   links.forEach((entry, index) => {

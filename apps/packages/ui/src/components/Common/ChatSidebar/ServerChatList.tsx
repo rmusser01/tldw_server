@@ -47,11 +47,15 @@ import {
 } from "@/services/settings/ui-settings"
 import { ServerChatRow } from "./ServerChatRow"
 import { exportServerChat } from "@/services/chat-transcript-export"
+import { runChatExport } from "@/components/Common/chat-export-action"
 import type { TranscriptFormat } from "@/utils/chat-transcript"
 import { CHAT_RECENCY_GROUP_LABELS, groupChatsByRecency } from "./chat-history-groups"
 import { showMovedToTrashNotice } from "./server-chat-trash-notice"
 import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
 
+const FolderPickerModal = React.lazy(
+  () => import("@/components/Sidepanel/Chat/FolderPickerModal")
+)
 const BulkFolderPickerModal = React.lazy(
   () => import("@/components/Sidepanel/Chat/BulkFolderPickerModal")
 )
@@ -170,8 +174,8 @@ export function ServerChatList({
     [selectedChatIds]
   )
   const [bulkFolderPickerOpen, setBulkFolderPickerOpen] = React.useState(false)
-  // A row's "Move to folder…" reuses the bulk picker for one chat (CS-09).
-  const [folderTargetIds, setFolderTargetIds] = React.useState<string[] | null>(null)
+  // A row's "Add to folder…" edits that one chat's folders (CS-09).
+  const [folderChatId, setFolderChatId] = React.useState<string | null>(null)
   const [bulkTagPickerOpen, setBulkTagPickerOpen] = React.useState(false)
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] =
     React.useState(false)
@@ -199,6 +203,7 @@ export function ServerChatList({
     setEditingTopicChat(null)
     setSelectedChatIds([])
     setBulkFolderPickerOpen(false)
+    setFolderChatId(null)
     setBulkTagPickerOpen(false)
     setBulkDeleteConfirmOpen(false)
   })
@@ -553,6 +558,7 @@ export function ServerChatList({
     setEditingTopicChat(null)
     setSelectedChatIds([])
     setBulkFolderPickerOpen(false)
+    setFolderChatId(null)
     setBulkTagPickerOpen(false)
     setBulkDeleteConfirmOpen(false)
     setIsBulkDeleting(false)
@@ -1217,7 +1223,6 @@ export function ServerChatList({
 
   const handleBulkFolderPickerClose = React.useCallback(() => {
     setBulkFolderPickerOpen(false)
-    setFolderTargetIds(null)
   }, [])
 
   // CS-09: export reads the saved chat from the server, so it works for chats
@@ -1226,25 +1231,20 @@ export function ServerChatList({
     async (chat: ServerChatHistoryItem, format: TranscriptFormat) => {
       const action = captureAction([chat.id])
       if (!action) return
-      try {
-        await exportServerChat(chat.id, format, {
+      await runChatExport({
+        chatId: chat.id,
+        t,
+        isCurrent: action.isCurrent,
+        run: () => exportServerChat(chat.id, format, {
           title: chat.title,
           requestScope: action.requestScope
         })
-        if (action.isCurrent())
-          message.success(t("common:chatSidebar.exportSuccess", "Chat exported."))
-      } catch (error) {
-        console.warn("[chat-sidebar] Could not export the chat", error)
-        if (action.isCurrent())
-          message.error(
-            t("common:chatSidebar.exportFailed", "Couldn't export this chat. Try again.")
-          )
-      }
+      })
     },
     [captureAction, t]
   )
 
-  const handleMoveToFolder = React.useCallback(
+  const handleEditFolders = React.useCallback(
     (chat: ServerChatHistoryItem) => {
       if (folderApiAvailable === false) {
         message.error(
@@ -1258,8 +1258,7 @@ export function ServerChatList({
       const action = captureAction([chat.id])
       if (!action) return
       managementAction.current = action
-      setFolderTargetIds([chat.id])
-      setBulkFolderPickerOpen(true)
+      setFolderChatId(chat.id)
     },
     [captureAction, folderApiAvailable, t]
   )
@@ -1541,7 +1540,7 @@ export function ServerChatList({
       onCreateTable={handleCreateTable}
       onEditTopic={handleEditTopic}
       onExportChat={handleExportChat}
-      onMoveToFolder={handleMoveToFolder}
+      onEditFolders={handleEditFolders}
       onDeleteChat={isTrashView ? handleHardDeleteChat : handleMoveChatToTrash}
       onRestoreChat={handleRestoreChat}
       onUpdateState={handleUpdateState}
@@ -1788,7 +1787,6 @@ export function ServerChatList({
                     const action = captureAction(selectedConversationIds)
                     if (action) {
                       managementAction.current = action
-                      setFolderTargetIds(null)
                       openBulkFolderPicker()
                     }
                   }}
@@ -1958,9 +1956,17 @@ export function ServerChatList({
           <BulkFolderPickerModal
             open={bulkFolderPickerOpen}
             operation={managementAction.current}
-            conversationIds={folderTargetIds ?? selectedConversationIds}
+            conversationIds={selectedConversationIds}
             onClose={handleBulkFolderPickerClose}
-            onSuccess={folderTargetIds ? undefined : clearSelection}
+            onSuccess={clearSelection}
+          />
+        )}
+        {folderChatId && managementAction.current?.isCurrent() && (
+          <FolderPickerModal
+            open
+            conversationId={folderChatId}
+            operation={managementAction.current}
+            onClose={() => setFolderChatId(null)}
           />
         )}
         {bulkTagPickerOpen && managementAction.current?.isCurrent() && (

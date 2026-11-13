@@ -38,8 +38,20 @@ describe("chat transcript formatting (CS-09)", () => {
     expect(markdown).toBe("## You\n\nLook\n\n![Image](data:image/png;base64,AAA)\n\n## Assistant\n\nSeen")
   })
 
-  it("writes JSON with the conversation fields and its messages", () => {
-    expect(JSON.parse(formatTranscriptJson(transcript))).toEqual(transcript)
+  it("writes JSON with the export format, the conversation fields and its messages", () => {
+    expect(JSON.parse(formatTranscriptJson(transcript))).toEqual({ format: "tldw-chat-export", version: 1, ...transcript })
+  })
+
+  it("says in the JSON when images were left out", () => {
+    const json = JSON.parse(formatTranscriptJson({ ...transcript, imagesOmitted: true }))
+    expect(json.images_omitted).toBe(true)
+    expect(json).not.toHaveProperty("imagesOmitted")
+    expect(JSON.parse(formatTranscriptJson(transcript))).not.toHaveProperty("images_omitted")
+  })
+
+  it("names a message of another role after its role instead of 'undefined'", () => {
+    const markdown = formatTranscriptMessagesMarkdown([{ role: "tool", content: "42" }])
+    expect(markdown).toBe("## Tool\n\n42")
   })
 
   it("names the file after the chat, without characters a file name can't hold", () => {
@@ -76,6 +88,25 @@ describe("lossless JSON and newest-path Markdown (CS-09 follow-up)", () => {
     const linear = { ...branched, messages: branched.messages.slice(0, 2) }
     const markdown = formatTranscriptMarkdown(linear)
     expect(markdown).toContain("Porto.")
+    expect(markdown).not.toMatch(/alternative replies/i)
+  })
+})
+
+describe("Markdown order when a reply is listed before its question (review follow-up)", () => {
+  it("keeps every turn of the newest path", () => {
+    const markdown = formatTranscriptMarkdown({
+      id: "chat-1",
+      title: "Order",
+      messages: [
+        { id: "u1", parentId: null, role: "user", content: "Q1" },
+        { id: "a1", parentId: "u1", role: "assistant", content: "A1" },
+        { id: "a2", parentId: "u2", role: "assistant", content: "A2" },
+        { id: "u2", parentId: "a1", role: "user", content: "Q2" }
+      ]
+    })
+    const order = ["Q1", "A1", "Q2", "A2"].map((text) => markdown.indexOf(text))
+    expect(order.every((at) => at >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
     expect(markdown).not.toMatch(/alternative replies/i)
   })
 })

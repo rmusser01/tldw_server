@@ -2255,8 +2255,8 @@
   "chatSidebar_chatSettings": {
     "message": "Chat settings"
   },
-  "chatSidebar_moveToFolder": {
-    "message": "Move to folder…"
+  "chatSidebar_addToFolder": {
+    "message": "Add to folder…"
   },
   "chatSidebar_exportMarkdown": {
     "message": "Markdown"
@@ -2269,5 +2269,11 @@
   },
   "chatSidebar_exportFailed": {
     "message": "Couldn't export this chat. Try again."
+  },
+  "chatSidebar_exporting": {
+    "message": "Exporting chat…"
+  },
+  "chatSidebar_exportTooLarge": {
+    "message": "This chat is too large to export here. Use Chatbooks to export it."
   }
 }

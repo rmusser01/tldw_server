@@ -21,13 +21,18 @@ const messageOptionState = {
 
 let selectedCharacter: { id: string; name: string } | null = null
 const forkParent = vi.hoisted(() => ({ value: null as { id: string; title: string } | null, requested: [] as unknown[] }))
-const chatFiles = vi.hoisted(() => ({ exportServerChat: vi.fn(), success: vi.fn(), error: vi.fn() }))
+const chatFiles = vi.hoisted(() => ({ exportServerChat: vi.fn(), success: vi.fn(), error: vi.fn(), loading: vi.fn(), destroy: vi.fn() }))
 vi.mock("@/services/chat-transcript-export", () => ({
-  exportServerChat: (...args: unknown[]) => chatFiles.exportServerChat(...args)
+  exportServerChat: (...args: unknown[]) => chatFiles.exportServerChat(...args),
+  ChatExportTooLargeError: class ChatExportTooLargeError extends Error {}
 }))
-vi.mock("@/components/Sidepanel/Chat/BulkFolderPickerModal", () => ({
-  default: ({ open, conversationIds }: { open: boolean; conversationIds: string[] }) =>
-    open ? <div data-testid="folder-picker" data-ids={conversationIds.join(",")} /> : null
+vi.mock("@/components/Sidepanel/Chat/FolderPickerModal", () => ({
+  default: ({ open, conversationId, operation }: { open: boolean; conversationId: string; operation?: { requestScope: { userId: string }; isCurrent: () => boolean } }) =>
+    open ? <div data-testid="folder-picker" data-chat={conversationId} data-user={operation?.requestScope.userId}
+      data-current={String(operation?.isCurrent())} /> : null
+}))
+vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "https://chat.test", authMode: "multi-user" }, userId: "U1" })
 }))
 
 const mockT = (
@@ -65,7 +70,7 @@ vi.mock("antd", () => ({
   Input: ({ value, onChange, placeholder }: any) => (
     <input value={value} onChange={onChange} placeholder={placeholder} />
   ),
-  message: { success: chatFiles.success, error: chatFiles.error },
+  message: { success: chatFiles.success, error: chatFiles.error, loading: chatFiles.loading, destroy: chatFiles.destroy },
   InputNumber: ({ value, onChange }: any) => (
     <input
       type="number"
@@ -113,7 +118,7 @@ vi.mock("../ChatHeader", () => ({
     parentChatTitle,
     onOpenParentChat,
     onExportChat,
-    onMoveToFolder,
+    onEditFolders,
     onOpenCommandPalette,
     onStartSavedChat,
     onStartTemporaryChat,
@@ -129,14 +134,14 @@ vi.mock("../ChatHeader", () => ({
     parentChatTitle?: string | null
     onOpenParentChat?: () => void
     onExportChat?: (format: "markdown" | "json") => void
-    onMoveToFolder?: () => void
+    onEditFolders?: () => void
   }) => (
     <div>
       {onExportChat ? (
         <button type="button" onClick={() => onExportChat("json")}>Export JSON</button>
       ) : null}
-      {onMoveToFolder ? (
-        <button type="button" onClick={() => onMoveToFolder()}>Move to folder</button>
+      {onEditFolders ? (
+        <button type="button" onClick={() => onEditFolders()}>Add to folder</button>
       ) : null}
       {onOpenParentChat ? (
         <button type="button" onClick={() => onOpenParentChat()}>
@@ -227,27 +232,30 @@ describe("Header per-chat Export and Move to folder (CS-09)", () => {
     await vi.waitFor(() =>
       expect(chatFiles.exportServerChat).toHaveBeenCalledWith("saved-chat", "json", expect.any(Object))
     )
-    await vi.waitFor(() => expect(chatFiles.success).toHaveBeenCalledWith("Chat exported."))
+    await vi.waitFor(() => expect(chatFiles.success).toHaveBeenCalledWith(expect.objectContaining({ content: "Chat exported." })))
   })
 
   it("says when the export fails", async () => {
     chatFiles.exportServerChat.mockRejectedValue(new Error("HTTP 503"))
     render(<Header />)
     fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
-    await vi.waitFor(() => expect(chatFiles.error).toHaveBeenCalledWith("Couldn't export this chat. Try again."))
+    await vi.waitFor(() => expect(chatFiles.error).toHaveBeenCalledWith(expect.objectContaining({ content: "Couldn't export this chat. Try again." })))
   })
 
-  it("moves the open saved chat to a folder", async () => {
+  it("edits the open saved chat's folders for the current account", async () => {
     render(<Header />)
-    fireEvent.click(screen.getByRole("button", { name: "Move to folder" }))
-    expect(await screen.findByTestId("folder-picker")).toHaveAttribute("data-ids", "saved-chat")
+    fireEvent.click(screen.getByRole("button", { name: "Add to folder" }))
+    const picker = await screen.findByTestId("folder-picker")
+    expect(picker).toHaveAttribute("data-chat", "saved-chat")
+    expect(picker).toHaveAttribute("data-user", "U1")
+    expect(picker).toHaveAttribute("data-current", "true")
   })
 
   it("offers neither for a chat that isn't saved on the server", () => {
     messageOptionState.serverChatId = null
     render(<Header />)
     expect(screen.queryByRole("button", { name: "Export JSON" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Move to folder" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Add to folder" })).toBeNull()
   })
 })
 

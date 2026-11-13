@@ -11,36 +11,8 @@ import type {
 } from "@/types/history-selection"
 import { latestHistoryTipId, resolveHistorySelection } from "@/utils/history-selection"
 
-type LinkedNode = Pick<HistoryNodeV1, "id" | "parent_id">
-
-/**
- * Owner order, except that a message never comes before the message it
- * answers: a reply listed ahead of its question is moved after it.
- */
-export const chronologicalHistoryNodes = <T extends LinkedNode>(
-  nodes: readonly T[]
-): T[] => {
-  const byId = new Map(nodes.map((node) => [node.id, node]))
-  const ordered: T[] = []
-  const placed = new Set<string>()
-  for (const node of nodes) {
-    // Walk up to the first placed ancestor without recursion, so a long
-    // child-first chain can't overflow the stack; a cycle stops the walk.
-    const chain: T[] = []
-    const inChain = new Set<string>()
-    let current: T | undefined = node
-    while (current && !placed.has(current.id) && !inChain.has(current.id)) {
-      chain.push(current)
-      inChain.add(current.id)
-      current = current.parent_id === null ? undefined : byId.get(current.parent_id)
-    }
-    for (let index = chain.length - 1; index >= 0; index -= 1) {
-      placed.add(chain[index].id)
-      ordered.push(chain[index])
-    }
-  }
-  return ordered
-}
+// Shared with the newest-path walk (utils/newest-leaf-path.ts).
+export { chronologicalHistoryNodes } from "@/utils/newest-leaf-path"
 
 /** A one-line, plain-text preview of message text that may contain markdown. */
 export const plainHistoryPreview = (value: string | null | undefined): string =>

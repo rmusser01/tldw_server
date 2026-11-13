@@ -1,35 +1,67 @@
-import React from "react"
+import { useQuery, type QueryClient } from "@tanstack/react-query"
+import type { ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
+import { getQueryClient } from "@/services/query-client"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 export type ForkParentChat = { id: string; title: string }
+
+const parentIdOf = (chat: { parent_conversation_id?: string | null } | null | undefined, chatId: string) => {
+  const parentId = typeof chat?.parent_conversation_id === "string" ? chat.parent_conversation_id.trim() : ""
+  return parentId && parentId !== chatId ? parentId : null
+}
+
+/**
+ * The parent from a chat list the sidebar already read, so opening a listed
+ * chat costs no extra read. `undefined` when no cached list has the chat.
+ */
+const listedParentId = (client: QueryClient, chatId: string): string | null | undefined => {
+  for (const [, data] of client.getQueriesData<{ items?: ServerChatHistoryItem[] }>({ queryKey: ["serverChatHistory"] })) {
+    const listed = data?.items?.find((chat) => chat.id === chatId)
+    if (listed) return parentIdOf(listed, chatId)
+  }
+  return undefined
+}
 
 /**
  * The saved chat the open chat was branched from (CM-12), or `null` for a chat
  * that isn't a branch or whose parent can't be read (for example a deleted
  * one). The chat page's header uses it to lead back to the parent.
+ *
+ * A chat's parent never changes, so it is read once per chat (from the
+ * sidebar's list when it has the chat), and the parent's title once per
+ * parent, through the app's shared query cache.
  */
 export const useForkParentChat = (serverChatId: string | null | undefined): ForkParentChat | null => {
-  const [found, setFound] = React.useState<{ chatId: string; parent: ForkParentChat | null } | null>(null)
-  React.useEffect(() => {
-    if (!serverChatId) return
-    const controller = new AbortController()
-    const settle = (parent: ForkParentChat | null) => {
-      if (!controller.signal.aborted) setFound({ chatId: serverChatId, parent })
-    }
-    void (async () => {
-      try {
-        const chat = await tldwClient.getChat(serverChatId, { signal: controller.signal })
-        const parentId = typeof chat?.parent_conversation_id === "string" ? chat.parent_conversation_id.trim() : ""
-        if (controller.signal.aborted) return
-        if (!parentId || parentId === serverChatId) return settle(null)
-        const parent = await tldwClient.getChat(parentId, { signal: controller.signal })
-        settle({ id: parentId, title: typeof parent?.title === "string" ? parent.title : "" })
-      } catch {
-        // Lineage is a convenience: a chat whose parent can't be read shows none.
-        settle(null)
+  // The app's provider holds this same client; passing it keeps the hook
+  // usable where no provider is mounted.
+  const client = getQueryClient()
+  const lineage = useQuery(
+    {
+      queryKey: ["chat-lineage", serverChatId],
+      enabled: Boolean(serverChatId),
+      staleTime: Infinity,
+      retry: false,
+      queryFn: async ({ signal }) => {
+        const listed = listedParentId(client, serverChatId!)
+        if (listed !== undefined) return listed
+        return parentIdOf(await tldwClient.getChat(serverChatId!, { signal }), serverChatId!)
       }
-    })()
-    return () => controller.abort()
-  }, [serverChatId])
-  return serverChatId && found?.chatId === serverChatId ? found.parent : null
+    },
+    client
+  )
+  const parentId = serverChatId ? lineage.data ?? null : null
+  const parent = useQuery(
+    {
+      queryKey: ["chat-title", parentId],
+      enabled: Boolean(parentId),
+      staleTime: 5 * 60 * 1000,
+      retry: false,
+      queryFn: async ({ signal }) => {
+        const chat = await tldwClient.getChat(parentId!, { signal })
+        return typeof chat?.title === "string" ? chat.title : ""
+      }
+    },
+    client
+  )
+  return parentId && parent.isSuccess ? { id: parentId, title: parent.data } : null
 }

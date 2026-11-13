@@ -32,7 +32,9 @@ const storeState = vi.hoisted(() => ({
 const antdMessage = vi.hoisted(() => ({
   error: vi.fn(),
   success: vi.fn(),
-  warning: vi.fn()
+  warning: vi.fn(),
+  loading: vi.fn(),
+  destroy: vi.fn()
 }))
 
 const mocks = vi.hoisted(() => ({
@@ -211,20 +213,20 @@ vi.mock("../ServerChatRow", async () => {
     onDeleteChat,
     onSelectChat,
     onExportChat,
-    onMoveToFolder
+    onEditFolders
   }: {
     chat: { id: string; title: string }
     onDeleteChat: (chat: { id: string; title: string }) => void | Promise<void>
     onSelectChat: (chat: { id: string; title: string }) => void
     onExportChat?: (chat: { id: string; title: string }, format: "markdown" | "json") => void
-    onMoveToFolder?: (chat: { id: string; title: string }) => void
+    onEditFolders?: (chat: { id: string; title: string }) => void
   }) => (
     <div>
       <span>{chat.title}</span>
       <button onClick={() => onSelectChat(chat)}>Select {chat.title}</button>
       <button onClick={() => void onDeleteChat(chat)}>delete</button>
       {onExportChat ? <button onClick={() => onExportChat(chat, "markdown")}>export {chat.title}</button> : null}
-      {onMoveToFolder ? <button onClick={() => onMoveToFolder(chat)}>move {chat.title}</button> : null}
+      {onEditFolders ? <button onClick={() => onEditFolders(chat)}>folders {chat.title}</button> : null}
     </div>
   )
   return {
@@ -236,11 +238,16 @@ vi.mock("../ServerChatRow", async () => {
 
 vi.mock("@/db/dexie/server-chat-mirror", () => ({ removeServerChatMirror: (...args: unknown[]) => mocks.removeMirror(...args) }))
 vi.mock("@/services/chat-transcript-export", () => ({
-  exportServerChat: (...args: unknown[]) => mocks.exportServerChat(...args)
+  exportServerChat: (...args: unknown[]) => mocks.exportServerChat(...args),
+  ChatExportTooLargeError: class ChatExportTooLargeError extends Error {}
 }))
 vi.mock("@/components/Sidepanel/Chat/BulkFolderPickerModal", () => ({
   default: ({ open, conversationIds }: { open: boolean; conversationIds: string[] }) =>
-    open ? <div data-testid="folder-picker" data-ids={conversationIds.join(",")} /> : null
+    open ? <div data-testid="bulk-folder-picker" data-ids={conversationIds.join(",")} /> : null
+}))
+vi.mock("@/components/Sidepanel/Chat/FolderPickerModal", () => ({
+  default: ({ open, conversationId, operation }: { open: boolean; conversationId: string; operation?: { requestScope: { userId: string } } }) =>
+    open ? <div data-testid="folder-picker" data-chat={conversationId} data-user={operation?.requestScope.userId} /> : null
 }))
 import { ServerChatList } from "../ServerChatList"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -420,7 +427,7 @@ describe("per-chat Export and Move to folder (CS-09)", () => {
         expect.objectContaining({ title: "Trip plan", requestScope: expect.objectContaining({ userId: "A" }) })
       )
     )
-    await waitFor(() => expect(antdMessage.success).toHaveBeenCalledWith("Chat exported."))
+    await waitFor(() => expect(antdMessage.success).toHaveBeenCalledWith(expect.objectContaining({ content: "Chat exported." })))
   })
 
   it("says when an export fails", async () => {
@@ -428,13 +435,16 @@ describe("per-chat Export and Move to folder (CS-09)", () => {
     showHistory([createChat({ id: "chat-1", title: "Trip plan" })])
     render(<ServerChatList searchQuery="" />)
     fireEvent.click(screen.getByRole("button", { name: "export Trip plan" }))
-    await waitFor(() => expect(antdMessage.error).toHaveBeenCalledWith("Couldn't export this chat. Try again."))
+    await waitFor(() => expect(antdMessage.error).toHaveBeenCalledWith(expect.objectContaining({ content: "Couldn't export this chat. Try again." })))
   })
 
-  it("moves one chat to a folder with the folder picker", async () => {
+  it("edits one chat's folders with the membership picker, for the captured account", async () => {
     showHistory([createChat({ id: "chat-1", title: "Trip plan" }), createChat({ id: "chat-2", title: "Other" })])
     render(<ServerChatList searchQuery="" />)
-    fireEvent.click(screen.getByRole("button", { name: "move Trip plan" }))
-    expect(await screen.findByTestId("folder-picker")).toHaveAttribute("data-ids", "chat-1")
+    fireEvent.click(screen.getByRole("button", { name: "folders Trip plan" }))
+    const picker = await screen.findByTestId("folder-picker")
+    expect(picker).toHaveAttribute("data-chat", "chat-1")
+    expect(picker).toHaveAttribute("data-user", "A")
+    expect(screen.queryByTestId("bulk-folder-picker")).toBeNull()
   })
 })

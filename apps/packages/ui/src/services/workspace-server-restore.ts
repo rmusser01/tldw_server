@@ -531,12 +531,19 @@ export const restoreMigratedResearchWorkspace = async (options: {
       const retainLegacyLinearParent = !!mirror && serverMessages.length === 2 &&
         serverMessages[0].role === "user" && serverMessages[1].role === "assistant" &&
         serverMessages.every(row => row.parent_message_id === null && row.version === 1);
-      const matches = (legacy: boolean) => cachedMessagesMatchCanonical(cachedChat.messages, canonical, legacy) &&
+      const matchesView = (view: Message[], legacy = false) =>
+        cachedMessagesMatchCanonical(cachedChat.messages, view, legacy) &&
         (!mirrorMessages || (mirror!.rows.length === mirrorMessages.length &&
-          cachedMessagesMatchCanonical(mirrorMessages, canonical, legacy)));
-      if ((matches(false) || (retainLegacyLinearParent && matches(true))) &&
-          (cachedChat.history.length === 0 ||
-            canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical))))
+          cachedMessagesMatchCanonical(mirrorMessages, view, legacy))) &&
+        (cachedChat.history.length === 0 ||
+          canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(view)));
+      // Transition: a cache written before CM-N2 holds every saved message of
+      // a branched chat, as the flat list showed it; it is still the user's own.
+      const flatCanonical = serverMessages.length !== listedMessages.length
+        ? mapServerChatMessagesToPlaygroundMessages({ serverMessages: listedMessages, assistantName: "AI", characterId: null })
+        : null;
+      if (matchesView(canonical) || (retainLegacyLinearParent && matchesView(canonical, true)) ||
+          (flatCanonical && matchesView(flatCanonical)))
         verifiedCachedChat = cachedSelection!;
     }
     if (provisional && verifiedCachedChat) {

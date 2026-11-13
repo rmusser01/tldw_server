@@ -56,8 +56,8 @@ type ServerChatRowCommonProps = {
   onEditTopic: (chat: ServerChatHistoryItem) => void
   /** Export the saved chat from the server (CS-09). */
   onExportChat?: (chat: ServerChatHistoryItem, format: TranscriptFormat) => void
-  /** Choose the folders this chat belongs to (CS-09). */
-  onMoveToFolder?: (chat: ServerChatHistoryItem) => void
+  /** Choose the folders this chat belongs to: add it to some, remove it from others (CS-09). */
+  onEditFolders?: (chat: ServerChatHistoryItem) => void
   onDeleteChat: (chat: ServerChatHistoryItem) => void | Promise<void>
   onRestoreChat: (chat: ServerChatHistoryItem) => void | Promise<void>
   onUpdateState?: (
@@ -99,7 +99,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
     onCreateTable,
     onEditTopic,
     onExportChat,
-    onMoveToFolder,
+    onEditFolders,
     onDeleteChat,
     onRestoreChat,
     onUpdateState,
@@ -177,17 +177,17 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
       label: t("sidepanel:contextMenu.status", "Status"),
       children: stateMenuItems
     },
-    ...(onMoveToFolder
+    ...(onEditFolders
       ? [
           {
-            key: "move-to-folder",
+            key: "add-to-folder",
             icon: <FolderInput className="size-3" />,
-            label: t("common:chatSidebar.moveToFolder", {
-              defaultValue: "Move to folder…"
+            label: t("common:chatSidebar.addToFolder", {
+              defaultValue: "Add to folder…"
             }),
             onClick: () => {
               setOpenMenuFor(null)
-              onMoveToFolder(chat)
+              onEditFolders(chat)
             }
           }
         ]

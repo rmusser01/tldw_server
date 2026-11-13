@@ -208,6 +208,33 @@ describe("SidePanelBody Continue and saved-status actions (CM-03)", () => {
   })
 })
 
+describe("SidePanelBody saved-reply refusals (review follow-up)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetSavedReplyRefusals()
+  })
+
+  it("disables Retry and withdraws Continue after the server refuses the saved question", () => {
+    selection.current = savedChat()
+    const refused: NativeHistoryRegenerate = {
+      owner_key: "owner",
+      conversation_id: "chat-1",
+      message_id: "a1",
+      message_revision: "1",
+      input_message_id: "u1",
+      input_message_revision: "1",
+      action: "regenerate",
+      isCurrent: () => true,
+      isOriginCurrent: () => true
+    }
+    rememberSavedReplyRefusal(refused, { status: 409, details: { detail: { reason: "question" } } })
+    renderBody()
+    const last = rowProps.get("a1")!
+    expect(last.onContinue).toBeUndefined()
+    expect(last.regenerateDisabledReason).toMatch(/can't be regenerated here/)
+  })
+})
+
 describe("SidePanelBody alternative replies (CM-N2)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
