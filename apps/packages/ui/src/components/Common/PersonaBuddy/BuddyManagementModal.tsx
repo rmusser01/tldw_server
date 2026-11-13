@@ -33,6 +33,7 @@ const StarterChoice = ({
 }) => {
   const { t } = useTranslation("sidepanel")
   const [ready, setReady] = React.useState(false)
+  const licenceId = React.useId()
   return (
     <div
       className={`overflow-hidden rounded-md border ${selected ? "border-primary" : "border-border"}`}
@@ -45,17 +46,28 @@ const StarterChoice = ({
       <div className="space-y-2 p-3">
         <div className="flex items-center gap-1">
           <h4 className="font-semibold">{starter.title}</h4>
-          {/* The licence caption is provenance, not the choice (XP-14). */}
+          {/* The licence caption is provenance, not the choice (XP-14). A tap
+              opens it on touch, and the button's description reads it out. */}
           {starter.license_label ? (
-            <Tooltip title={starter.license_label} trigger={["hover", "focus"]}>
-              <button
-                type="button"
-                className="inline-flex size-6 items-center justify-center rounded text-text-muted hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
-                aria-label={`${t("buddyManagement.licenceInfo", { defaultValue: "Artwork licence" })}: ${starter.title}`}
-              >
-                <Info className="size-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
+            <>
+              <Tooltip title={starter.license_label} trigger={["hover", "focus", "click"]}>
+                {/* The Tooltip clears aria-describedby on its own child while
+                    closed, so it wraps the button rather than being it. */}
+                <span className="inline-flex">
+                  <button
+                    type="button"
+                    className="inline-flex size-6 items-center justify-center rounded text-text-muted hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                    aria-label={`${t("buddyManagement.licenceInfo", { defaultValue: "Artwork licence" })}: ${starter.title}`}
+                    aria-describedby={licenceId}
+                  >
+                    <Info className="size-4" aria-hidden="true" />
+                  </button>
+                </span>
+              </Tooltip>
+              <span id={licenceId} className="sr-only">
+                {starter.license_label}
+              </span>
+            </>
           ) : null}
         </div>
         <Button disabled={!ready} onClick={onSelect}>

@@ -24,4 +24,16 @@ describe("holdDocumentTitle", () => {
     release()
     expect(document.title).toBe("Notes | tldw")
   })
+
+  // Review of #3115: two holders released out of order (an admin page under a
+  // live voice chat) still end on the title from before either of them.
+  it("ends on the original title when holds are released out of order", () => {
+    document.title = "Chat | tldw"
+    const releaseFirst = holdDocumentTitle("First")
+    const releaseSecond = holdDocumentTitle("Second")
+    releaseFirst()
+    expect(document.title).toBe("Second")
+    releaseSecond()
+    expect(document.title).toBe("Chat | tldw")
+  })
 })

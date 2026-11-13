@@ -47,7 +47,8 @@ export const TutorialPrompt: React.FC = () => {
   )
   const markPromptSeen = useTutorialStore((state) => state.markPromptSeen)
   // The prompt is about the page, so a same-page address change (opening a
-  // note writes /notes?note=<id>) neither closes it nor stales its Start.
+  // note writes /notes?note=<id>) or a chat change (switch, New chat) neither
+  // closes it nor stales its Start; leaving the page does both.
   const startTutorial = useStartTutorial({ fence: "page" })
   const launcherRef = useRef(startTutorial)
   useLayoutEffect(() => {
