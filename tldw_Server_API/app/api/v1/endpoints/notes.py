@@ -2717,6 +2717,14 @@ async def list_deleted_notes(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         limit: int = Query(100, ge=1, le=1000, description="Number of trashed notes to return"),
         offset: int = Query(0, ge=0, description="Offset for pagination"),
+        query: Optional[str] = Query(
+            None,
+            max_length=200,
+            description=(
+                "Only trashed notes whose title or content contains this text, ignoring case. "
+                "The total counts only matching notes."
+            ),
+        ),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
         legacy_aliases: Annotated[
             bool, Query(description=_LEGACY_ALIASES_DESCRIPTION)
@@ -2732,7 +2740,11 @@ async def list_deleted_notes(
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.list")),
 ):
-    """Returns only soft-deleted notes with the same list payload shape as `/notes/`."""
+    """Returns only soft-deleted notes with the same list payload shape as `/notes/`.
+
+    With ``query``, only trashed notes whose title or content contains that text
+    (case-insensitive; ``%`` and ``_`` match literally) are listed and counted.
+    """
     try:
         try:
             allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.list")
@@ -2743,11 +2755,12 @@ async def list_deleted_notes(
                                 detail="Rate limit exceeded for notes.list",
                                 headers={"Retry-After": str(meta.get("retry_after", 60))})
 
+        text_query = (query or "").strip() or None
         logger.debug(
             f"User (DB client_id: {db.client_id}) listing deleted notes: limit={limit}, offset={offset}, "
-            f"sort_by={sort_by}, sort_order={sort_order}")
-        notes_data = db.list_deleted_notes(
-            limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order
+            f"sort_by={sort_by}, sort_order={sort_order}, filtered={text_query is not None}")
+        notes_data = db.note_store.list_deleted_notes(
+            limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order, text_query=text_query
         )
         _attach_folders_bulk(db, notes_data)
         if include_keywords:
@@ -2758,7 +2771,7 @@ async def list_deleted_notes(
 
         total = None
         try:
-            total = db.count_deleted_notes()
+            total = db.note_store.count_deleted_notes(text_query=text_query)
         except _NOTES_NONCRITICAL_EXCEPTIONS:
             total = None
 

@@ -119,6 +119,9 @@ import {
   hasNotesGraphActiveNotes,
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
+import { collectConversationIdsToResolve, settleInBatches } from './notes-conversation-labels'
+import { useNotesBulkRun } from './hooks/useNotesBulkRun'
+import { showNoteRestoredToast } from './notes-restore-toast'
 import { isEditableTarget } from "@/utils/editable-target"
 import { useConnectionsMemory } from './notes-connections'
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
@@ -143,12 +146,6 @@ const isMissingConversationLookupError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error)
   return /\b(not found|404)\b/i.test(message)
 }
-
-const UUID_LIKE_CONVERSATION_ID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-const shouldAutoResolveConversationLabel = (conversationId: string): boolean =>
-  !UUID_LIKE_CONVERSATION_ID.test(conversationId)
 
 const CONVERSATION_LABEL_MAX_RETRIES = 3
 const CONVERSATION_LABEL_RETRY_DELAY_MS = 1500
@@ -190,6 +187,14 @@ const patchNoteTags = (noteId: string, expectedVersion: number, tags: string[], 
       'expected-version': String(expectedVersion)
     },
     body: { keywords: tags }
+  })
+
+/** Restore a trashed note, guarded by its deleted version. */
+const postNoteRestore = (noteId: string, expectedVersion: number, ownedRequest: NotesOwnedRequestOptions) =>
+  bgRequest<{ id?: string | number } | null>({
+    ...ownedRequest,
+    path: `${notePath(noteId)}/restore?expected_version=${encodeURIComponent(String(expectedVersion))}`,
+    method: 'POST'
   })
 
 const toBulkNoteLabel = (note: { id: string | number; title?: string }) =>
@@ -244,6 +249,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const message = useAntdMessage()
   const modal = useAntdModal()
   const { showUndoNotification } = useUndoNotification()
+  const bulkRun = useNotesBulkRun(notesGraphAuthorityScope)
   const rawConfirmDanger = useConfirmDanger()
   const confirmDanger = React.useCallback((options: ConfirmDangerOptions) => {
     useTutorialStore.getState().endTutorial()
@@ -953,23 +959,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     return conversationLabelById[id] || null
   }, [ed.backlinkConversationId, conversationLabelById])
 
-  const conversationIdsToResolve = React.useMemo(() => {
-    const ids = new Set<string>()
-    const selectedConversationId = normalizeConversationId(ed.backlinkConversationId)
-    for (const note of visibleNotes) {
-      const normalized = normalizeConversationId(note?.conversation_id)
-      if (!normalized) continue
-      if (shouldAutoResolveConversationLabel(normalized)) {
-        ids.add(normalized)
-        continue
-      }
-      if (selectedConversationId && normalized === selectedConversationId) {
-        ids.add(normalized)
-      }
-    }
-    if (selectedConversationId) ids.add(selectedConversationId)
-    return Array.from(ids)
-  }, [ed.backlinkConversationId, visibleNotes])
+  const conversationIdsToResolve = React.useMemo(
+    () => collectConversationIdsToResolve(visibleNotes, ed.backlinkConversationId),
+    [ed.backlinkConversationId, visibleNotes]
+  )
 
   const resolveConversationLabels = React.useCallback(
     async (conversationIds: string[]) => {
@@ -986,13 +979,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       )
       try {
         await tldwClient.initialize().catch(() => null)
-        const settled = await Promise.allSettled(
-          pending.map(async (conversationId) => {
-            const chat = await tldwClient.getChat(conversationId)
-            const label = toConversationLabel(chat)
-            return { conversationId, label }
-          })
-        )
+        const settled = await settleInBatches(pending, async (conversationId) => {
+          const chat = await tldwClient.getChat(conversationId)
+          return { conversationId, label: toConversationLabel(chat) }
+        })
         setConversationLabelById((current) => {
           let next: Record<string, string> | null = null
           for (const result of settled) {
@@ -1555,24 +1545,19 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     const operation = beginNoteMutation()
     try {
       const ownedRequest = await operation.requestOptions()
-      const restored = await bgRequest<any>({
-        ...ownedRequest,
-        path: `/api/v1/notes/${encodeURIComponent(target)}/restore?expected_version=${encodeURIComponent(
-          String(expectedVersion)
-        )}` as any,
-        method: 'POST' as any
-      })
+      const restored = await postNoteRestore(target, expectedVersion, ownedRequest)
       operation.requireCurrent()
       dismissNoteDeletedToast(message, target)
-      message.success('Note restored')
-      list.setListMode('active')
-      list.setPage(1)
+      // Stay in Trash so several notes can be restored in a row (NL-05).
       await operation.refetch()
       operation.requireCurrent()
       const restoredId = String(restored?.id || target)
-      if (operation.isEditorCurrent()) {
-        await latestEditorRef.current.loadDetail(restoredId, ownedRequest, operation.editRevision)
-      }
+      showNoteRestoredToast(message, {
+        noteId: restoredId,
+        label: t('option:notesSearch.noteRestored', { defaultValue: 'Note restored' }),
+        openLabel: t('option:notesSearch.restoredOpenNote', { defaultValue: 'Open note' }),
+        onOpen: () => { void openRestoredNote(restoredId, operation) }
+      })
     } catch (error: any) {
       if (!operation.isCurrent()) return
       if (ed.isVersionConflictError(error)) {
@@ -1583,18 +1568,81 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     } finally { operation.release() }
   }
 
-  // Bulk operations
-  const deleteSelectedBulk = React.useCallback(async () => {
-    const targets = list.selectedBulkNotes.slice()
+  /** "Open note" in the restore toast: leave Trash and open the restored note. */
+  const openRestoredNote = async (noteId: string, original: MutationOwner) => {
+    if (!original.isOwnerCurrent()) return
+    const editor = latestEditorRef.current
+    await editor.switchListMode('active')
+    if (!original.isOwnerCurrent()) return
+    await latestEditorRef.current.handleSelectNote(noteId)
+  }
+
+  const restoreSelectedBulk = React.useCallback(async (retryTargets?: NoteListItem[]) => {
+    const targets = (retryTargets ?? list.selectedBulkNotes).slice()
+    if (targets.length === 0) {
+      message.info('No selected notes to restore')
+      return
+    }
+    const run = bulkRun.begin('restore')
+    if (!run) return
+    const failedNotes: NoteListItem[] = []
+    const operation = beginNoteMutation()
+    try {
+      const ownedRequest = await operation.requestOptions()
+      const restoredIds = new Set<string>()
+      run.start(targets.length)
+      for (const note of targets) {
+        const noteId = String(note.id)
+        try {
+          operation.requireCurrent()
+          const version = typeof note.version === 'number' && Number.isFinite(note.version)
+            ? note.version
+            : await lookupDeletedNoteVersion(noteId, operation, ownedRequest)
+          if (version == null) { failedNotes.push(note); continue }
+          await postNoteRestore(noteId, version, ownedRequest)
+          operation.requireCurrent()
+          restoredIds.add(noteId)
+          dismissNoteDeletedToast(message, noteId)
+        } catch {
+          operation.requireCurrent()
+          failedNotes.push({ ...note, version: undefined })
+        } finally {
+          run.step()
+        }
+      }
+      if (restoredIds.size > 0) {
+        message.success(`Restored ${formatNoteCount(restoredIds.size)}`)
+        list.setBulkSelectedIds((current) => current.filter((id) => !restoredIds.has(id)))
+        await operation.refetch()
+        operation.requireCurrent()
+      }
+      if (failedNotes.length > 0) {
+        message.warning(`${failedNotes.length} selected note${failedNotes.length === 1 ? '' : 's'} failed to restore`)
+      }
+    } catch (error) {
+      if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
+    } finally {
+      operation.release()
+      run.finish(failedNotes)
+    }
+  }, [beginNoteMutation, bulkRun, list, lookupDeletedNoteVersion, message])
+
+  // Bulk operations: one run at a time, with n/N progress and Retry for failures (NL-05).
+  // Retry passes the failed notes back in and skips the confirm the user already gave.
+  const deleteSelectedBulk = React.useCallback(async (retryTargets?: NoteListItem[]) => {
+    const targets = (retryTargets ?? list.selectedBulkNotes).slice()
     if (targets.length === 0) {
       message.info('No selected notes to delete')
       return
     }
+    const run = bulkRun.begin('delete')
+    if (!run) return
+    const failedNotes: NoteListItem[] = []
     const operation = beginNoteMutation()
     try {
       const okToLeave = await ed.confirmDiscardIfDirty(operation.acceptSavedDraft)
       if (!okToLeave || !operation.isCurrent() || !operation.isEditorCurrent()) return
-      const confirmed = await confirmDanger({
+      const confirmed = retryTargets != null || await confirmDanger({
         title: 'Delete selected notes?',
         content: `Delete ${targets.length} selected notes? This moves them to trash.`,
         okText: 'Delete selected',
@@ -1604,8 +1652,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const ownedRequest = await operation.requestOptions()
 
       let deleted = 0
-      let failed = 0
       const deletedIds = new Set<string>()
+      run.start(targets.length)
 
       for (const note of targets) {
         const noteId = String(note.id)
@@ -1622,7 +1670,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
             operation.requireCurrent()
             expectedVersion = toNoteVersion(detail)
           }
-          if (expectedVersion == null) { failed += 1; continue }
+          if (expectedVersion == null) { failedNotes.push(note); continue }
           await bgRequest<any>({
             ...ownedRequest,
             path: `/api/v1/notes/${encodeURIComponent(noteId)}?expected_version=${encodeURIComponent(
@@ -1636,9 +1684,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           deletedIds.add(noteId)
         } catch {
           operation.requireCurrent()
-          failed += 1
+          // A retry reads the version again, in case a stale one caused the failure.
+          failedNotes.push({ ...note, version: undefined })
+        } finally {
+          run.step()
         }
       }
+      const failed = failedNotes.length
 
       if (deleted > 0) {
         message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)
@@ -1656,8 +1708,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
     } catch (error) {
       if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
-    } finally { operation.release() }
-  }, [beginNoteMutation, confirmDanger, ed, list, message, resetEditorToEmptyState])
+    } finally {
+      operation.release()
+      run.finish(failedNotes)
+    }
+  }, [beginNoteMutation, bulkRun, confirmDanger, ed, list, message, resetEditorToEmptyState])
 
   const refreshAfterBulkTagChange = React.useCallback(async (noteIds: readonly string[], operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
     operation.requireCurrent()
@@ -1729,17 +1784,21 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     [beginNoteMutation, refreshAfterBulkTagChange]
   )
 
-  const addTagsToSelectedBulk = React.useCallback(async () => {
-    const targets = list.selectedBulkNotes.slice()
+  const addTagsToSelectedBulk = React.useCallback(async (retry?: { notes: NoteListItem[]; tags: string[] }) => {
+    const targets = (retry?.notes ?? list.selectedBulkNotes).slice()
     if (targets.length === 0) {
       message.info('No selected notes to update')
       return
     }
+    const run = bulkRun.begin('addTags')
+    if (!run) return
+    const failedNotes: NoteListItem[] = []
+    let additions: string[] = []
     const operation = beginNoteMutation()
     try {
       const okToLeave = await ed.confirmDiscardIfDirty(operation.acceptSavedDraft)
       if (!okToLeave || !operation.isCurrent() || !operation.isEditorCurrent()) return
-      const picked = await promptBulkAddTags(modal, {
+      const picked = retry ? retry.tags : await promptBulkAddTags(modal, {
         noteCount: targets.length,
         suggestions: kw.availableKeywords,
         renderSuggestionLabel: (tag) =>
@@ -1750,7 +1809,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         t
       })
       if (picked == null || !operation.isCurrent()) return
-      const additions = normalizeTagList(picked)
+      additions = normalizeTagList(picked)
       if (additions.length === 0) {
         message.warning('Choose at least one tag to add')
         return
@@ -1762,6 +1821,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const failed: string[] = []
       const partiallyTagged: string[] = []
       const ownedRequest = await operation.requestOptions()
+      run.start(targets.length)
       for (const note of targets) {
         const noteId = String(note.id)
         const label = toBulkNoteLabel(note)
@@ -1774,6 +1834,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           const version = toNoteVersion(current)
           if (version == null) {
             failed.push(label)
+            failedNotes.push(note)
             continue
           }
           const previousTags = normalizeTagList(extractKeywords(current))
@@ -1796,6 +1857,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           operation.requireCurrent()
           if (ed.isVersionConflictError(error)) conflicted.push(label)
           else failed.push(label)
+          failedNotes.push(note)
+        } finally {
+          run.step()
         }
       }
 
@@ -1829,8 +1893,19 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       if (problems.length > 0) message.warning(problems.join(' '))
     } catch (error) {
       if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
-    } finally { operation.release() }
-  }, [beginNoteMutation, ed, kw, list, message, modal, refreshAfterBulkTagChange, showUndoNotification, t, undoBulkTagAdd])
+    } finally {
+      operation.release()
+      run.finish(failedNotes, additions)
+    }
+  }, [beginNoteMutation, bulkRun, ed, kw, list, message, modal, refreshAfterBulkTagChange, showUndoNotification, t, undoBulkTagAdd])
+
+  const retryBulkFailures = () => {
+    const failures = bulkRun.failures
+    if (!failures || bulkRun.isRunning) return
+    if (failures.action === 'delete') void deleteSelectedBulk(failures.notes)
+    else if (failures.action === 'addTags') void addTagsToSelectedBulk({ notes: failures.notes, tags: failures.tags ?? [] })
+    else void restoreSelectedBulk(failures.notes)
+  }
 
   // Editor input handlers
   const handleEditorChange = React.useCallback(
@@ -2405,8 +2480,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const linkedChatRequestRef = React.useRef<AbortController | null>(null)
   React.useEffect(() => () => { linkedChatRequestRef.current?.abort() }, [linkedChatSourceKey])
 
-  const openLinkedConversation = async () => {
-    const conversationId = ed.backlinkConversationId
+  // A list row's "From chat" link names its own chat (NL-04); the editor opens the open note's.
+  const openLinkedConversation = async (rowConversationId?: string) => {
+    const conversationId = rowConversationId ?? ed.backlinkConversationId
     if (!conversationId) {
       message.warning(t("option:notesSearch.noLinkedConversation", { defaultValue: "No linked conversation to open." }))
       return
@@ -2909,6 +2985,17 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         deleteSelectedBulk={deleteSelectedBulk}
         toggleNotePinned={ed.toggleNotePinned}
         restoreNote={restoreNote}
+        restoreSelectedBulk={restoreSelectedBulk}
+        trashQuery={list.trashQuery}
+        setTrashQuery={list.setTrashQuery}
+        openLinkedChat={(conversationId) => { void openLinkedConversation(conversationId) }}
+        bulkSelection={list.bulkSelectionControls}
+        bulkRun={{
+          progress: bulkRun.progress,
+          failures: bulkRun.failures,
+          onRetryFailures: retryBulkFailures,
+          onDismissFailures: bulkRun.dismissFailures
+        }}
         exportAll={exp.exportAll}
         exportAllCSV={exp.exportAllCSV}
         exportAllJSON={exp.exportAllJSON}

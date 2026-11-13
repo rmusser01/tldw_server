@@ -319,7 +319,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(await screen.findByText("Verified session")).toBeInTheDocument()
   })
 
-  it("shows conversation title labels with UUID debug tooltip in list and header", async () => {
+  it("shows conversation title labels in the list's 'From chat' link and the header", async () => {
     configureCommonRequests("conv-1234")
     mockGetChat.mockResolvedValue({
       id: "conv-1234",
@@ -330,8 +330,8 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     renderPage()
 
     const listLabel = await screen.findByText("Research session")
-    fireEvent.mouseEnter(listLabel)
-    expect(await screen.findByText(/^Conversation ID: conv-1234/)).toBeInTheDocument()
+    // NL-04: the row names the chat; its ids stay out of the list.
+    expect(screen.getByTestId("notes-from-chat-note-backlink-1")).toContainElement(listLabel)
 
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
     await waitFor(() => {
@@ -359,7 +359,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     mockGetChat.mockRejectedValue(new Error("missing chat"))
 
     renderPage()
-    expect(await screen.findByText("Linked chat")).toBeInTheDocument()
+    expect(await screen.findByText("From chat")).toBeInTheDocument()
     expect(screen.queryByText("conv-unavailable")).not.toBeInTheDocument()
     await waitFor(() => {
       expect(mockGetChat).toHaveBeenCalledWith("conv-unavailable")
@@ -378,7 +378,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
 
     renderPage()
 
-    expect(await screen.findByText("Linked chat")).toBeInTheDocument()
+    expect(await screen.findByText("From chat")).toBeInTheDocument()
     expect(mockGetChat).toHaveBeenCalledTimes(1)
 
     await waitFor(
@@ -395,7 +395,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     mockGetChat.mockRejectedValue(new Error("Chat session conv-unavailable not found"))
 
     renderPage()
-    expect(await screen.findByText("Linked chat")).toBeInTheDocument()
+    expect(await screen.findByText("From chat")).toBeInTheDocument()
 
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
     await waitFor(() => {
@@ -405,27 +405,39 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(mockGetChat).toHaveBeenCalledTimes(1)
   })
 
-  it("does not auto-fetch UUID conversation labels until the linked note is opened", async () => {
+  // NL-04: visible rows resolve their chat titles, UUID ids included.
+  it("resolves UUID conversation titles for the visible rows without opening the note", async () => {
     const uuidConversationId = "acd86f3a-492e-4a8b-90fb-ff282b9721fb"
     configureCommonRequests(uuidConversationId)
-    mockGetChat.mockRejectedValue(
-      new Error(`Chat session ${uuidConversationId} not found`)
-    )
+    mockGetChat.mockResolvedValue({ id: uuidConversationId, title: "Saved research chat" })
 
     renderPage()
-    expect(await screen.findByText("Linked chat")).toBeInTheDocument()
-    expect(screen.queryByText(uuidConversationId)).not.toBeInTheDocument()
-
-    await waitFor(() => {
-      expect(mockGetChat).not.toHaveBeenCalled()
-    })
-
-    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
-
-    await waitFor(() => {
-      expect(mockGetChat).toHaveBeenCalledTimes(1)
-    })
+    const label = await screen.findByText("Saved research chat")
+    expect(screen.getByTestId("notes-from-chat-note-backlink-1")).toContainElement(label)
     expect(mockGetChat).toHaveBeenCalledWith(uuidConversationId)
+    expect(screen.queryByText(uuidConversationId)).not.toBeInTheDocument()
+  })
+
+  it("opens the linked chat from a row's 'From chat' link without opening the note", async () => {
+    configureCommonRequests("conv-row")
+    mockGetChat.mockResolvedValue({
+      id: "conv-row",
+      title: "Row chat",
+      state: "in-progress",
+      source: "chat",
+      external_ref: null
+    })
+    mockListChatMessages.mockResolvedValue([
+      { id: "msg-1", role: "user", content: "hello", created_at: "2026-02-18T10:01:00.000Z", version: 1 }
+    ])
+
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-from-chat-note-backlink-1"))
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=conv-row")
+    })
+    expect(mockBgRequest.mock.calls.some(([request]) => request?.path === "/api/v1/notes/note-backlink-1")).toBe(false)
   })
 
   it("opens linked conversations in the same tab by default", async () => {

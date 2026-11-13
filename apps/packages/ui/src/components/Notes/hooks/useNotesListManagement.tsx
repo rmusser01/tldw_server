@@ -35,8 +35,41 @@ import {
 } from '../notes-manager-utils'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 import { isSameNotesListRowsKind } from '../notes-list-cache'
+import {
+  SELECT_ALL_MATCHING_CAP,
+  useNotesMatchingSelection,
+  type NotesBulkSelectionControls
+} from './useNotesMatchingSelection'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
+
+/** A list, search or Trash row as the list shows it. */
+const mapNoteListItem = (n: any): NoteListItem => {
+  const links = extractBacklink(n)
+  const keywords = extractKeywords(n)
+  return {
+    id: n?.id,
+    title: n?.title,
+    content: n?.content ?? n?.content_preview,
+    content_preview: n?.content_preview ?? null,
+    updated_at: n?.updated_at ?? n?.last_modified ?? n?.lastModified,
+    deleted: Boolean(n?.deleted),
+    conversation_id: links.conversation_id,
+    message_id: links.message_id,
+    keywords,
+    cover_image_url:
+      typeof n?.cover_image_url === 'string' && n.cover_image_url.trim().length > 0
+        ? n.cover_image_url
+        : null,
+    membership_source:
+      n?.membership_source === 'manual' ||
+      n?.membership_source === 'smart' ||
+      n?.membership_source === 'both'
+        ? n.membership_source
+        : undefined,
+    version: toNoteVersion(n) ?? undefined
+  }
+}
 type NotesAuthorityScope = string | null | undefined
 type NotesAuthorityOwner = {
   scope: NotesAuthorityScope
@@ -156,6 +189,12 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     authorityOwner,
     isCurrentAuthority,
     0
+  )
+  /** Trash search (NL-05): a title or content substring, matched on the server. */
+  const [trashQuery, setTrashQueryState] = useAuthorityOwnedState(
+    authorityOwner,
+    isCurrentAuthority,
+    ''
   )
   const [bulkSelectedIds, setBulkSelectedIds] = useAuthorityOwnedState(
     authorityOwner,
@@ -312,49 +351,33 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     return { items: sortNoteRows(items, sortOption), total: totalVal }
   }, [authorityOwner, isCurrentAuthority, sortOption, tagMatch])
 
-  const fetchNotes = React.useCallback(async (): Promise<NoteListItem[]> => {
+  /**
+   * One page of the current list: Trash, a search or tag filter, or the whole
+   * library. Null when the account changed while it loaded. The list reads its
+   * page through this, and "Select all matching" reads every page (NL-05).
+   */
+  const fetchListPage = React.useCallback(async (
+    fetchPage: number,
+    fetchPageSize: number,
+    signal?: AbortSignal
+  ): Promise<{ items: any[]; total: number } | null> => {
     const requestOwner = authorityOwner
-    if (!isCurrentAuthority(requestOwner)) return []
-    const mapNoteListItem = (n: any): NoteListItem => {
-      const links = extractBacklink(n)
-      const keywords = extractKeywords(n)
-      return {
-        id: n?.id,
-        title: n?.title,
-        content: n?.content ?? n?.content_preview,
-        content_preview: n?.content_preview ?? null,
-        updated_at: n?.updated_at ?? n?.last_modified ?? n?.lastModified,
-        deleted: Boolean(n?.deleted),
-        conversation_id: links.conversation_id,
-        message_id: links.message_id,
-        keywords,
-        cover_image_url:
-          typeof n?.cover_image_url === 'string' && n.cover_image_url.trim().length > 0
-            ? n.cover_image_url
-            : null,
-        membership_source:
-          n?.membership_source === 'manual' ||
-          n?.membership_source === 'smart' ||
-          n?.membership_source === 'both'
-            ? n.membership_source
-            : undefined,
-        version: toNoteVersion(n) ?? undefined
-      }
-    }
-
+    if (!isCurrentAuthority(requestOwner)) return null
     if (listMode === 'trash') {
       const params = new URLSearchParams()
-      params.set('limit', String(pageSize))
-      params.set('offset', String((page - 1) * pageSize))
+      params.set('limit', String(fetchPageSize))
+      params.set('offset', String((fetchPage - 1) * fetchPageSize))
       params.set('include_keywords', 'true')
       params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
       params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
       params.set('legacy_aliases', 'false')
+      if (trashQuery) params.set('query', trashQuery)
       const res = await bgRequest<any>({
         path: `/api/v1/notes/trash?${params.toString()}` as any,
-        method: 'GET' as any
+        method: 'GET' as any,
+        abortSignal: signal
       })
-      if (!isCurrentAuthority(requestOwner)) return []
+      if (!isCurrentAuthority(requestOwner)) return null
       const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
       const totalItems =
         Number(
@@ -364,11 +387,43 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
             items.length ??
             0
         ) || 0
-      setTotal(totalItems)
-      return sortNoteRows(items, sortOption).map(mapNoteListItem)
+      return { items: sortNoteRows(items, sortOption), total: totalItems }
     }
+    const q = query.trim()
+    const toks = effectiveKeywordTokens.map((k) => k.toLowerCase())
+    if (q || toks.length > 0) {
+      return fetchFilteredNotesRaw(q, toks, fetchPage, fetchPageSize, signal)
+    }
+    // GET /api/v1/notes/ pages with limit/offset and sorts the whole library
+    // server-side; it ignores page/results_per_page.
+    const params = new URLSearchParams()
+    params.set('limit', String(fetchPageSize))
+    params.set('offset', String((fetchPage - 1) * fetchPageSize))
+    params.set('include_keywords', 'true')
+    params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
+    params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+    params.set('legacy_aliases', 'false')
+    const res = await bgRequest<any>({
+      path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
+      method: 'GET' as any,
+      abortSignal: signal
+    })
+    if (!isCurrentAuthority(requestOwner)) return null
+    const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
+    const totalItems =
+      Number(
+        res?.pagination?.total ??
+          res?.total ??
+          res?.pagination?.total_items ??
+          items.length
+      ) || 0
+    return { items: sortNoteRows(items, sortOption), total: totalItems }
+  }, [authorityOwner, effectiveKeywordTokens, fetchFilteredNotesRaw, isCurrentAuthority, listMode, query, sortOption, trashQuery])
 
-    if (listViewMode === 'moodboard') {
+  const fetchNotes = React.useCallback(async (): Promise<NoteListItem[]> => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return []
+    if (listMode !== 'trash' && listViewMode === 'moodboard') {
       if (selectedMoodboardId == null) {
         setTotal(0)
         return []
@@ -400,38 +455,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       return items.map(mapNoteListItem)
     }
 
-    const q = query.trim()
-    const toks = effectiveKeywordTokens.map((k) => k.toLowerCase())
-    if (q || toks.length > 0) {
-      const { items, total: totalVal } = await fetchFilteredNotesRaw(q, toks, page, pageSize)
-      setTotal(totalVal)
-      return items.map(mapNoteListItem)
-    }
-    // GET /api/v1/notes/ pages with limit/offset and sorts the whole library
-    // server-side; it ignores page/results_per_page.
-    const params = new URLSearchParams()
-    params.set('limit', String(pageSize))
-    params.set('offset', String((page - 1) * pageSize))
-    params.set('include_keywords', 'true')
-    params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
-    params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
-    params.set('legacy_aliases', 'false')
-    const res = await bgRequest<any>({
-      path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
-      method: 'GET' as any
-    })
-    if (!isCurrentAuthority(requestOwner)) return []
-    const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : [])
-    const totalItems =
-      Number(
-        res?.pagination?.total ??
-          res?.total ??
-          res?.pagination?.total_items ??
-          items.length
-      ) || 0
-    setTotal(totalItems)
-    return sortNoteRows(items, sortOption).map(mapNoteListItem)
-  }, [authorityOwner, effectiveKeywordTokens, fetchFilteredNotesRaw, isCurrentAuthority, listMode, listViewMode, page, pageSize, query, selectedMoodboardId, setTotal, sortOption])
+    const result = await fetchListPage(page, pageSize)
+    if (!result) return []
+    setTotal(result.total)
+    return result.items.map(mapNoteListItem)
+  }, [authorityOwner, fetchListPage, isCurrentAuthority, listMode, listViewMode, page, pageSize, selectedMoodboardId, setTotal, sortOption])
 
   const listQueryKey = [
     'notes',
@@ -445,6 +473,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     selectedNotebookId ?? 'none',
     effectiveKeywordTokens.join('|'),
     tagMatch,
+    listMode === 'trash' ? trashQuery : '',
     ...(authorityScope === undefined
       ? []
       : ['authority', authorityScope, 'generation', authorityOwner.generation])
@@ -504,13 +533,48 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     () => rawNotes.map((note) => String(note.id)),
     [rawNotes]
   )
+  // ---- "Select all N matching" (NL-05) ----
+  const matchingFilterKey = JSON.stringify([
+    authorityOwner.scope ?? null, authorityOwner.generation, listMode, listViewMode,
+    query, effectiveKeywordTokens, tagMatch, selectedNotebookId ?? null, sortOption, trashQuery
+  ])
+  const fetchMatchingPage = React.useCallback(
+    async (fetchPage: number, fetchPageSize: number, signal: AbortSignal) => {
+      const result = await fetchListPage(fetchPage, fetchPageSize, signal)
+      return { items: (result?.items ?? []).map(mapNoteListItem), total: result?.total ?? 0 }
+    },
+    [fetchListPage]
+  )
+  const reportSelectAllMatchingError = React.useCallback(() => {
+    message.error(t('option:notesSearch.bulkSelectAllMatchingError', {
+      defaultValue: 'Could not select all matching notes. Try again.'
+    }))
+  }, [message, t])
+  const { matching, selectingAllMatching, selectAllMatching, clearMatchingSelection } = useNotesMatchingSelection({
+    filterKey: matchingFilterKey,
+    fetchPage: listMode === 'active' && listViewMode === 'moodboard' ? null : fetchMatchingPage,
+    onError: reportSelectAllMatchingError
+  })
+  // With every match selected, the selection is the gathered rows, not just this page's.
+  const effectiveBulkSelectedIds = React.useMemo(
+    () => (matching ? matching.notes.map((note) => String(note.id)) : bulkSelectedIds),
+    [bulkSelectedIds, matching]
+  )
   const bulkSelectedIdSet = React.useMemo(
-    () => new Set(bulkSelectedIds),
-    [bulkSelectedIds]
+    () => new Set(effectiveBulkSelectedIds),
+    [effectiveBulkSelectedIds]
   )
   const selectedBulkNotes = React.useMemo(
-    () => rawNotes.filter((note) => bulkSelectedIdSet.has(String(note.id))),
-    [bulkSelectedIdSet, rawNotes]
+    () => (matching ? matching.notes : rawNotes.filter((note) => bulkSelectedIdSet.has(String(note.id)))),
+    [bulkSelectedIdSet, matching, rawNotes]
+  )
+  /** Changing the selection by hand leaves "all matching" for a page selection. */
+  const setPageBulkSelectedIds = React.useCallback(
+    (action: React.SetStateAction<string[]>) => {
+      clearMatchingSelection()
+      setBulkSelectedIds(action)
+    },
+    [clearMatchingSelection, setBulkSelectedIds]
   )
 
   // ---- moodboard pagination ----
@@ -1049,17 +1113,35 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     setPage(1)
   }, [setKeywordTokens, setListViewMode, setSelectedNotebookId])
 
+  const setTrashQuery = React.useCallback((value: string) => {
+    setTrashQueryState(value.trim())
+    setPage(1)
+  }, [setTrashQueryState])
+
   const clearBulkSelection = React.useCallback(() => {
+    clearMatchingSelection()
     setBulkSelectedIds([])
     bulkSelectionAnchorRef.current.value = null
-  }, [setBulkSelectedIds])
+  }, [clearMatchingSelection, setBulkSelectedIds])
 
+  const selectAllOnPage = React.useCallback(
+    (checked: boolean) => {
+      clearMatchingSelection()
+      setBulkSelectedIds(checked ? orderedVisibleNoteIds.slice() : [])
+      bulkSelectionAnchorRef.current.value = null
+    },
+    [clearMatchingSelection, orderedVisibleNoteIds, setBulkSelectedIds]
+  )
+
+  // Notes and Trash both select rows (NL-05): Trash restores the selection.
   const handleToggleBulkSelection = React.useCallback(
     (id: string | number, checked: boolean, shiftKey: boolean) => {
-      if (listMode !== 'active') return
       const targetId = String(id)
+      // Every visible row is selected while all matching notes are.
+      const fromMatching = matching != null
+      if (fromMatching) clearMatchingSelection()
       setBulkSelectedIds((current) => {
-        const next = new Set(current)
+        const next = new Set(fromMatching ? orderedVisibleNoteIds : current)
         const anchorId = bulkSelectionAnchorRef.current.value
         const canApplyRange =
           shiftKey &&
@@ -1085,8 +1167,21 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         return orderedVisibleNoteIds.filter((visibleId) => next.has(visibleId))
       })
     },
-    [listMode, orderedVisibleNoteIds, setBulkSelectedIds]
+    [clearMatchingSelection, matching, orderedVisibleNoteIds, setBulkSelectedIds]
   )
+
+  const allOnPageSelected =
+    orderedVisibleNoteIds.length > 0 && orderedVisibleNoteIds.every((visibleId) => bulkSelectedIdSet.has(visibleId))
+  const bulkSelectionControls = React.useMemo<NotesBulkSelectionControls>(() => ({
+    pageCount: orderedVisibleNoteIds.length,
+    total,
+    allOnPageSelected,
+    matching: matching ? { count: matching.notes.length, total: matching.total } : null,
+    selectingAllMatching,
+    matchingCap: SELECT_ALL_MATCHING_CAP,
+    onSelectAllOnPage: selectAllOnPage,
+    onSelectAllMatching: () => { void selectAllMatching() }
+  }), [allOnPageSelected, matching, orderedVisibleNoteIds.length, selectAllMatching, selectAllOnPage, selectingAllMatching, total])
 
   // ---- search debounce ----
   React.useEffect(() => {
@@ -1108,8 +1203,12 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   }, [clearSearchQueryTimeout, query, queryInput])
 
   // ---- bulk selection sync with visible ids ----
+  // Switching between Notes and Trash starts a fresh selection.
+  const bulkSelectionListModeRef = React.useRef(listMode)
   React.useEffect(() => {
-    if (listMode !== 'active') {
+    if (bulkSelectionListModeRef.current !== listMode) {
+      bulkSelectionListModeRef.current = listMode
+      setTrashQueryState('')
       setBulkSelectedIds([])
       bulkSelectionAnchorRef.current.value = null
       return
@@ -1133,7 +1232,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     ) {
       bulkSelectionAnchorRef.current.value = null
     }
-  }, [listMode, orderedVisibleNoteIds, setBulkSelectedIds])
+  }, [listMode, orderedVisibleNoteIds, setBulkSelectedIds, setTrashQueryState])
 
   // ---- page size persistence ----
   React.useEffect(() => {
@@ -1260,7 +1359,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     listMode, setListMode,
     listViewMode, setListViewMode,
     total, setTotal,
-    bulkSelectedIds, setBulkSelectedIds,
+    bulkSelectedIds: effectiveBulkSelectedIds, setBulkSelectedIds: setPageBulkSelectedIds,
     moodboards, selectedMoodboardId, setSelectedMoodboardId,
     selectedMoodboard,
     isMoodboardsFetching,
@@ -1288,5 +1387,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     createNotebookFromCurrentKeywords, removeSelectedNotebook,
     handleClearFilters,
     clearBulkSelection, handleToggleBulkSelection,
+    bulkSelectionControls,
+    trashQuery, setTrashQuery,
   }
 }

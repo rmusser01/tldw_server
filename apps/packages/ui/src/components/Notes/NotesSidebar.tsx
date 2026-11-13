@@ -8,6 +8,9 @@ import {
   X as CloseIcon,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import NotesBulkActionsBar, { type NotesBulkRunControls } from './NotesBulkActionsBar'
+import NotesTrashSearch from './NotesTrashSearch'
+import type { NotesBulkSelectionControls } from './hooks/useNotesMatchingSelection'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import NotesCollectionControls from '@/components/Notes/NotesCollectionControls'
@@ -170,6 +173,17 @@ export interface NotesSidebarProps {
   exportSelectedBulk: () => void
   addTagsToSelectedBulk: () => Promise<void>
   deleteSelectedBulk: () => Promise<void>
+  /** Trash: restore the selected notes (NL-05). */
+  restoreSelectedBulk?: () => Promise<void>
+  /** Trash search (NL-05). */
+  trashQuery?: string
+  setTrashQuery?: (query: string) => void
+  /** Opens the chat a list row came from (NL-04). */
+  openLinkedChat?: (conversationId: string) => void
+  /** The running bulk action and its failures (NL-05). */
+  bulkRun?: NotesBulkRunControls
+  /** Select all on the page, or every matching note (NL-05). */
+  bulkSelection?: NotesBulkSelectionControls
   toggleNotePinned: (id: string | number) => Promise<void>
   restoreNote: (id: string | number, version?: number) => Promise<void>
   exportAll: () => Promise<void>
@@ -310,6 +324,12 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   exportSelectedBulk,
   addTagsToSelectedBulk,
   deleteSelectedBulk,
+  openLinkedChat,
+  restoreSelectedBulk,
+  trashQuery = '',
+  setTrashQuery,
+  bulkRun,
+  bulkSelection,
   toggleNotePinned,
   restoreNote,
   exportAll,
@@ -1018,14 +1038,17 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   )}
                 </>
               ) : (
-                <Typography.Text
-                  type="secondary"
-                  className="text-[11px] text-text-muted block"
-                >
-                  {t('option:notesSearch.trashHelpText', {
-                    defaultValue: 'Restore notes from trash to edit them again.'
-                  })}
-                </Typography.Text>
+                <>
+                  {setTrashQuery && <NotesTrashSearch value={trashQuery} onSearch={setTrashQuery} />}
+                  <Typography.Text
+                    type="secondary"
+                    className="text-[11px] text-text-muted block"
+                  >
+                    {t('option:notesSearch.trashHelpText', {
+                      defaultValue: 'Restore notes from trash to edit them again.'
+                    })}
+                  </Typography.Text>
+                </>
               )}
             </div>
             {controlsHaveMoreBelow && (
@@ -1354,7 +1377,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             ) : (
               <NotesListPanel
                 listMode={listMode}
-                searchQuery={query}
+                searchQuery={listMode === 'trash' ? trashQuery : query}
                 conversationLabelById={conversationLabelById}
                 bulkSelectedIds={bulkSelectedIds}
                 isOnline={isOnline}
@@ -1371,7 +1394,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 total={total}
                 page={page}
                 pageSize={pageSize}
-                hasActiveFilters={hasActiveFilters}
+                hasActiveFilters={listMode === 'trash' ? trashQuery.length > 0 : hasActiveFilters}
                 selectedId={selectedId}
                 pinnedNoteIds={pinnedNoteIds}
                 onSelectNote={(id) => {
@@ -1381,9 +1404,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   void (handleOpenNoteFromKeyboard ?? handleSelectNote)(id)
                 }}
                 onToggleBulkSelection={handleToggleBulkSelection}
+                onToggleSelectAllOnPage={bulkSelection?.onSelectAllOnPage}
                 onTogglePinned={(id) => {
                   void toggleNotePinned(id)
                 }}
+                onOpenLinkedChat={openLinkedChat}
                 onChangePage={(nextPage, nextPageSize) => {
                   const normalizedPageSize = Number(nextPageSize || pageSize)
                   const sizeChanged = normalizedPageSize !== pageSize
@@ -1391,7 +1416,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   setPage(sizeChanged ? 1 : nextPage)
                 }}
                 onRetry={retryList}
-                onClearFilters={handleClearFilters}
+                onClearFilters={listMode === 'trash' && setTrashQuery ? () => setTrashQuery('') : handleClearFilters}
                 onCreateNote={() => {
                   void handleNewNote()
                 }}
@@ -1441,74 +1466,22 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
           )}
 
           {/* Sticky bulk actions bar at bottom */}
-          {listMode === 'active' && bulkSelectedIds.length > 0 && (
-            <div
-              className="flex-shrink-0 border-t border-border bg-surface2 px-4 py-2"
-              role="status"
-              aria-live="polite"
-              data-testid="notes-bulk-actions-bar"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <Typography.Text
-                  className="text-xs font-medium text-text"
-                  data-testid="notes-bulk-selected-count"
-                >
-                  {t('option:notesSearch.bulkSelectedCount', {
-                    defaultValue: '{{count}} selected',
-                    count: bulkSelectedIds.length
-                  })}
-                </Typography.Text>
-                <Button
-                  size="small"
-                  type="link"
-                  className="!px-0 text-xs"
-                  onClick={clearBulkSelection}
-                  data-testid="notes-bulk-clear-selection"
-                >
-                  {t('option:notesSearch.bulkClearSelection', {
-                    defaultValue: 'Clear selection'
-                  })}
-                </Button>
-              </div>
-              <div className="mt-2 grid grid-cols-3 gap-2">
-                <Button
-                  size="small"
-                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
-                  onClick={exportSelectedBulk}
-                  data-testid="notes-bulk-export"
-                >
-                  {t('option:notesSearch.bulkExport', {
-                    defaultValue: 'Export selected'
-                  })}
-                </Button>
-                <Button
-                  size="small"
-                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
-                  onClick={() => {
-                    void addTagsToSelectedBulk()
-                  }}
-                  data-testid="notes-bulk-assign-keywords"
-                >
-                  {t('option:notesSearch.bulkAddTags', {
-                    defaultValue: 'Add tags'
-                  })}
-                </Button>
-                <Button
-                  size="small"
-                  className={isMobileViewport ? 'min-h-[44px]' : undefined}
-                  danger
-                  onClick={() => {
-                    void deleteSelectedBulk()
-                  }}
-                  data-testid="notes-bulk-delete"
-                >
-                  {t('option:notesSearch.bulkDelete', {
-                    defaultValue: 'Delete selected'
-                  })}
-                </Button>
-              </div>
-            </div>
-          )}
+          <NotesBulkActionsBar
+            listMode={listMode}
+            selectedCount={bulkSelectedIds.length}
+            isMobileViewport={isMobileViewport}
+            run={bulkRun}
+            selection={bulkSelection}
+            onClearSelection={clearBulkSelection}
+            onExport={exportSelectedBulk}
+            onAddTags={() => {
+              void addTagsToSelectedBulk()
+            }}
+            onDelete={() => {
+              void deleteSelectedBulk()
+            }}
+            onRestore={restoreSelectedBulk ? () => { void restoreSelectedBulk() } : undefined}
+          />
         </div>
       </aside>
   )

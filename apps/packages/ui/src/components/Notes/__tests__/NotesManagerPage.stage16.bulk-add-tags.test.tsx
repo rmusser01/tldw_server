@@ -948,13 +948,15 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       renderPage()
       await user.click(await screen.findByTestId("notes-mode-trash"))
       await user.click(await screen.findByTestId("mock-restore-n1"))
-      await screen.findByDisplayValue("Alpha")
+      // NL-05: Restore stays in Trash; its toast offers "Open note".
+      await waitFor(() =>
+        expect(mockMessageOpen).toHaveBeenCalledWith(expect.objectContaining({ key: "notes-restored-n1" }))
+      )
       const restored = requests("POST").find(request => String(request.path).startsWith("/api/v1/notes/n1/restore?"))
       expect(restored).toBeDefined()
       if (restored) expectOwned(restored)
       expect(restored?.path).toBe("/api/v1/notes/n1/restore?expected_version=3")
       expect(findServerNote("n1")).toMatchObject({ deleted: false, version: 4, keywords: ["alpha", "beta"] })
-      expect(mockMessageSuccess).toHaveBeenCalledWith("Note restored")
     })
 
     it("preserves a newer same-owner Beta draft after an already-applied direct Restore acknowledgement", async () => {
