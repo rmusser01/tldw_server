@@ -120,7 +120,8 @@ import {
   hasNotesGraphActiveNotes,
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
-import { collectConversationIdsToResolve, settleInBatches } from './notes-conversation-labels'
+import { collectConversationIdsToResolve } from './notes-conversation-labels'
+import { useNotesConversationLabels } from './hooks/useNotesConversationLabels'
 import { useNotesBulkRun } from './hooks/useNotesBulkRun'
 import { showNoteRestoredToast } from './notes-restore-toast'
 import { isEditableTarget } from "@/utils/editable-target"
@@ -136,21 +137,6 @@ import NotesTrashGuidance from "@/components/Notes/NotesTrashGuidance"
 import { useLatchedFlag } from "./hooks/useLatchedFlag"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
-
-const isMissingConversationLookupError = (error: unknown): boolean => {
-  if (!error) return false
-  const status =
-    typeof error === 'object' && 'status' in error ? Number((error as { status?: unknown }).status) : Number.NaN
-  if (status === 404) return true
-  const code =
-    typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code || '') : ''
-  if (code.toUpperCase() === 'NOT_FOUND') return true
-  const message = error instanceof Error ? error.message : String(error)
-  return /\b(not found|404)\b/i.test(message)
-}
-
-const CONVERSATION_LABEL_MAX_RETRIES = 3
-const CONVERSATION_LABEL_RETRY_DELAY_MS = 1500
 
 // Display-only failure bubbles are not unsaved conversation work.
 const hasUnsavedChatWork = (row: ChatMessage): boolean => {
@@ -273,14 +259,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const desktopSidebarCollapsedRef = React.useRef(false)
   const wasMobileViewportRef = React.useRef(isMobileViewport)
-  const [conversationLabelById, setConversationLabelById] = React.useState<Record<string, string>>({})
-  const conversationLabelByIdRef = React.useRef<Record<string, string>>({})
-  conversationLabelByIdRef.current = conversationLabelById
-  const pendingConversationLabelRequestsRef = React.useRef<Set<string>>(new Set())
-  const missingConversationLabelIdsRef = React.useRef<Set<string>>(new Set())
-  const conversationLabelRetryAttemptsRef = React.useRef<Record<string, number>>({})
-  const conversationLabelRetryTimeoutRef = React.useRef<number | null>(null)
-  const [conversationLabelRetryTick, setConversationLabelRetryTick] = React.useState(0)
   const searchInputRef = React.useRef<InputRef | null>(null)
 
   // ---- Notebook keyword tokens (needed before list hook) ----
@@ -960,118 +938,21 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   // ---- Remaining logic that stays in the component ----
 
-  // Conversation label resolution
+  // Conversation label resolution (titles belong to the current account)
+  const conversationIdsToResolve = React.useMemo(
+    () => collectConversationIdsToResolve(visibleNotes, ed.backlinkConversationId),
+    [ed.backlinkConversationId, visibleNotes]
+  )
+  const { conversationLabelById, rememberConversationLabel } = useNotesConversationLabels({
+    authorityScope: notesGraphAuthorityScope ?? null,
+    isOnline,
+    conversationIds: conversationIdsToResolve
+  })
   const backlinkConversationLabel = React.useMemo(() => {
     const id = normalizeConversationId(ed.backlinkConversationId)
     if (!id) return null
     return conversationLabelById[id] || null
   }, [ed.backlinkConversationId, conversationLabelById])
-
-  const conversationIdsToResolve = React.useMemo(
-    () => collectConversationIdsToResolve(visibleNotes, ed.backlinkConversationId),
-    [ed.backlinkConversationId, visibleNotes]
-  )
-
-  const resolveConversationLabels = React.useCallback(
-    async (conversationIds: string[]) => {
-      const pending = conversationIds.filter((conversationId) => {
-        if (!conversationId) return false
-        if (conversationLabelByIdRef.current[conversationId]) return false
-        if (pendingConversationLabelRequestsRef.current.has(conversationId)) return false
-        if (missingConversationLabelIdsRef.current.has(conversationId)) return false
-        return true
-      })
-      if (pending.length === 0) return
-      pending.forEach((conversationId) =>
-        pendingConversationLabelRequestsRef.current.add(conversationId)
-      )
-      try {
-        await tldwClient.initialize().catch(() => null)
-        const settled = await settleInBatches(pending, async (conversationId) => {
-          const chat = await tldwClient.getChat(conversationId)
-          return { conversationId, label: toConversationLabel(chat) }
-        })
-        setConversationLabelById((current) => {
-          let next: Record<string, string> | null = null
-          for (const result of settled) {
-            if (result.status !== 'fulfilled') continue
-            const { conversationId, label } = result.value
-            if (!label) continue
-            missingConversationLabelIdsRef.current.delete(conversationId)
-            if (current[conversationId]) continue
-            if (next == null) next = { ...current }
-            next[conversationId] = label
-          }
-          return next ?? current
-        })
-        const retryableFailures: string[] = []
-        settled.forEach((result, index) => {
-          const conversationId = pending[index]
-          if (!conversationId) return
-          if (result.status === 'fulfilled') {
-            delete conversationLabelRetryAttemptsRef.current[conversationId]
-            return
-          }
-          if (isMissingConversationLookupError(result.reason)) {
-            missingConversationLabelIdsRef.current.add(conversationId)
-            delete conversationLabelRetryAttemptsRef.current[conversationId]
-            return
-          }
-          const nextAttempt =
-            (conversationLabelRetryAttemptsRef.current[conversationId] ?? 0) + 1
-          conversationLabelRetryAttemptsRef.current[conversationId] = nextAttempt
-          if (nextAttempt <= CONVERSATION_LABEL_MAX_RETRIES) {
-            retryableFailures.push(conversationId)
-          }
-        })
-        if (retryableFailures.length > 0) {
-          if (conversationLabelRetryTimeoutRef.current != null) {
-            window.clearTimeout(conversationLabelRetryTimeoutRef.current)
-          }
-          conversationLabelRetryTimeoutRef.current = window.setTimeout(() => {
-            conversationLabelRetryTimeoutRef.current = null
-            setConversationLabelRetryTick((current) => current + 1)
-          }, CONVERSATION_LABEL_RETRY_DELAY_MS)
-        }
-      } finally {
-        pending.forEach((conversationId) =>
-          pendingConversationLabelRequestsRef.current.delete(conversationId)
-        )
-      }
-    },
-    []
-  )
-
-  React.useEffect(
-    () => () => {
-      if (conversationLabelRetryTimeoutRef.current != null) {
-        window.clearTimeout(conversationLabelRetryTimeoutRef.current)
-      }
-    },
-    []
-  )
-
-  React.useEffect(() => {
-    const activeConversationIds = new Set(conversationIdsToResolve)
-    for (const conversationId of Object.keys(conversationLabelRetryAttemptsRef.current)) {
-      if (!activeConversationIds.has(conversationId)) {
-        delete conversationLabelRetryAttemptsRef.current[conversationId]
-      }
-    }
-    if (
-      activeConversationIds.size === 0 &&
-      conversationLabelRetryTimeoutRef.current != null
-    ) {
-      window.clearTimeout(conversationLabelRetryTimeoutRef.current)
-      conversationLabelRetryTimeoutRef.current = null
-    }
-  }, [conversationIdsToResolve])
-
-  React.useEffect(() => {
-    if (!isOnline) return
-    if (conversationIdsToResolve.length === 0) return
-    void resolveConversationLabels(conversationIdsToResolve)
-  }, [conversationIdsToResolve, conversationLabelRetryTick, isOnline, resolveConversationLabels])
 
   // ---- Handlers remaining in component ----
 
@@ -2576,7 +2457,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       useStoreMessageOption.getState().setHistory(mappedMessages.map(row => ({ role: row.role, content: row.message })))
       useStoreMessageOption.getState().setMessages(mappedMessages)
       const resolvedLabel = toConversationLabel(chat)
-      if (resolvedLabel) setConversationLabelById(current => ({ ...current, [conversationId]: resolvedLabel }))
+      if (resolvedLabel) rememberConversationLabel(conversationId, resolvedLabel)
     } catch (error) {
       if (isCurrent()) message.error(error instanceof Error ? error.message : t("option:notesSearch.openConversationError", { defaultValue: "Failed to open linked conversation." }))
     } finally {

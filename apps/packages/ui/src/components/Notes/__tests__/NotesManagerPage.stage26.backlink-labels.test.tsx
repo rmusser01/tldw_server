@@ -338,7 +338,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       const labels = screen.getAllByText("Research session")
       expect(labels.length).toBeGreaterThan(1)
     })
-    expect(mockGetChat).toHaveBeenCalledWith("conv-1234")
+    expect(mockGetChat).toHaveBeenCalledWith("conv-1234", expect.objectContaining({ signal: expect.any(AbortSignal) }))
   })
 
   it("falls back to topic label when conversation title is empty", async () => {
@@ -362,7 +362,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(await screen.findByText("From chat")).toBeInTheDocument()
     expect(screen.queryByText("conv-unavailable")).not.toBeInTheDocument()
     await waitFor(() => {
-      expect(mockGetChat).toHaveBeenCalledWith("conv-unavailable")
+      expect(mockGetChat).toHaveBeenCalledWith("conv-unavailable", expect.objectContaining({ signal: expect.any(AbortSignal) }))
     })
   })
 
@@ -414,7 +414,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     renderPage()
     const label = await screen.findByText("Saved research chat")
     expect(screen.getByTestId("notes-from-chat-note-backlink-1")).toContainElement(label)
-    expect(mockGetChat).toHaveBeenCalledWith(uuidConversationId)
+    expect(mockGetChat).toHaveBeenCalledWith(uuidConversationId, expect.objectContaining({ signal: expect.any(AbortSignal) }))
     expect(screen.queryByText(uuidConversationId)).not.toBeInTheDocument()
   })
 
