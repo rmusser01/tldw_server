@@ -87,18 +87,47 @@ separate worktrees, red test first, then merged into the wave branch.
 
 ### Wave 6: medium items, no decisions
 
-- Notes: NL-04 (row density, no raw UUIDs), NL-05 (bulk actions and Trash at
-  scale), NL-07 (search relevance), NL-14 (Graph for newcomers).
-- Chat: CM-03 (b) side-panel Continue and actions on saved markers, CM-12
-  fork lineage, CM-N2 for older branched chats.
-- Navigation: CS-09 per-chat Export (from the server) and Move to folder on
-  the full page; XP-06 ⌘K finds and creates notes and chats (first slice).
-- Composer and layout: CO-01 phone navigation with CO-N1; CC-11 slice (a):
-  `/new`, `/prompt` and server commands.
-- Accessibility: AX-11 transcript live region, AX-12 suggestion comboboxes;
-  measure AX-04 and XS-15 live.
-- XP-03 provenance, XS-13 side-panel quick-save slice 1, XP-04 "Chat about
-  this note" (after #3226, see below).
+Started 2026-11-13 on `ux/burndown-wave6` from dev @ 4b6b9ec446 (#3461).
+
+**Lane 6A — Notes list, bulk and Trash**
+- NL-04: a plain-text one-line preview, a "From chat" link instead of the
+  conversation id and message id, batch-resolved chat titles, relative dates
+  and denser rows. Moving search above Views waits for decision 16 (NL-12).
+- NL-05: select all on the page and all matching, a running bulk state with
+  progress, failures with Retry, and in Trash checkboxes, search and
+  "Restore selected". Restore stays in Trash. Undo for bulk delete waits for
+  decision 8.
+
+**Lane 6B — Notes search, Graph and ⌘K**
+- NL-07: a backend snippet and server-side sort, "Best match" while a query is
+  active, and the snippet in the row.
+- NL-14: tag labels, a node legend, a "Graph settings" popover with plain
+  labels, and a hint when the focus note is a fallback. The cap and filters
+  wait for decision 15 (NL-11).
+- XP-06 slice 1: Chats and Notes groups in the global palette, and "New note".
+
+**Lane 6C — Chat**
+- CM-03 (b): Continue and saved-status actions in the side panel.
+- CM-12: a fork keeps its parent, with a title, lineage and a way back.
+- CM-N2: legacy branched chats default to the newest-leaf path, with a hint
+  that alternative replies exist.
+- The full-page pending Stop (a Wave 5 follow-up).
+- CS-09: per-chat Export (read from the server) and Move to folder on the
+  full page, plus a visible ⋯ on side-panel tabs.
+
+**Lane 6D — Composer and accessibility**
+- CO-01 with CO-N1: a slim top bar in phone focus mode (chat list, title, New
+  chat, Exit focus).
+- CC-11 slice (a): `/new`, `/prompt` and the server commands in the WebUI.
+- AX-11: a narrower transcript live region.
+- AX-12: the slash, mention and wikilink suggestions become comboboxes.
+
+**Moved out of Wave 6:**
+- XP-03, XS-13 slice 1 and XP-04 go to Wave 8. They edit the files #3226
+  rewrites (`NotesEditorHeader.tsx`, `NotesDockPanel.tsx`,
+  `NoteQuickSaveModal.tsx`, `notes-capture.ts`), and the re-triage puts them
+  after #3226.
+- Measuring AX-04 and XS-15 goes to Wave 7, with decisions 12 and 14.
 
 ### Wave 7: after owner decisions
 
@@ -234,7 +263,7 @@ merged on top.
 
 | Wave | Status |
 |---|---|
-| 5 | Integrated and reviewed; PR pending |
-| 6 | Not started |
+| 5 | Landed (#3461, 2026-11-13) |
+| 6 | In progress |
 | 7 | Waiting on owner decisions |
 | 8 | Blocked |
