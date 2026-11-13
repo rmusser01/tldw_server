@@ -14,28 +14,61 @@ import type { HistorySelectionController } from "@/hooks/chat/useHistorySelectio
 import type { UploadedFile } from "@/db/dexie/types"
 import type { ChatScope } from "@/types/chat-scope"
 
+const BRANCH_TITLE_DEFAULT = "{{title}} — branch at message {{number}}"
+const TITLE_BASE_LIMIT = 60
+const SAMPLE_TITLE = "\u0001"
+const SAMPLE_NUMBER = 987654321
+
+/**
+ * The localized " — branch at message N" ending this module adds, so a
+ * branch of a branch replaces it instead of piling up endings.
+ */
+const branchSuffixPattern = (): RegExp | null => {
+  const sample = i18n.t("playground:historySelection.branchTitle", {
+    defaultValue: BRANCH_TITLE_DEFAULT,
+    title: SAMPLE_TITLE,
+    number: SAMPLE_NUMBER
+  })
+  if (typeof sample !== "string") return null
+  const at = sample.indexOf(SAMPLE_TITLE)
+  const suffix = at >= 0 ? sample.slice(at + SAMPLE_TITLE.length) : ""
+  if (!suffix.trim() || !suffix.includes(String(SAMPLE_NUMBER))) return null
+  const escaped = suffix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(String(SAMPLE_NUMBER), "\\d+")
+  return new RegExp(`${escaped}$`)
+}
+
 /**
  * "<parent title> — branch at message N", or "Branch at message N" for an
- * untitled chat. `null` when the branch point is unknown, so the server keeps
- * its own default.
+ * untitled chat. N counts the chat's questions and replies up to the branch
+ * point. The parent title loses its own branch ending and is cut to 60
+ * characters, so titles don't grow with each branch. `null` when the branch
+ * point is unknown, so the server keeps its own default.
  */
 export const nativeBranchTitle = (
   parentTitle: string | null | undefined,
   messageCount: number
 ): string | null => {
   if (!Number.isSafeInteger(messageCount) || messageCount < 1) return null
-  const title = parentTitle?.trim()
-  return title
+  let base = parentTitle?.trim() ?? ""
+  const suffix = branchSuffixPattern()
+  while (suffix && suffix.test(base)) base = base.replace(suffix, "").trim()
+  base = base.slice(0, TITLE_BASE_LIMIT).trim()
+  const title = base
     ? i18n.t("playground:historySelection.branchTitle", {
-        defaultValue: "{{title}} — branch at message {{number}}",
-        title,
+        defaultValue: BRANCH_TITLE_DEFAULT,
+        title: base,
         number: messageCount
       })
     : i18n.t("playground:historySelection.branchTitleUntitled", {
         defaultValue: "Branch at message {{number}}",
         number: messageCount
       })
+  return typeof title === "string" && title.trim() ? title : null
 }
+
+/** The questions and replies a branch copies, which its title counts. */
+export const countBranchMessages = (rows: readonly { readonly role?: unknown }[]): number =>
+  rows.filter((row) => row.role === "user" || row.role === "assistant").length
 
 /** The draft fields an opened saved server chat resets, as New Branch sets them. */
 export type NativeChatOpenSetters = {

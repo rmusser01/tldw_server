@@ -5,7 +5,7 @@ import i18n from "i18next"
 import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
 
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
-import { announceNativeBranch, nativeBranchTitle, openNativeChat } from "./fork-lineage"
+import { announceNativeBranch, countBranchMessages, nativeBranchTitle, openNativeChat } from "./fork-lineage"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
 import type { UploadedFile } from "@/db/dexie/types"
 import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
@@ -768,8 +768,9 @@ export const createBranchMessage =
         : await prepareLocalFork(request, { validate_lease: current })
       if (!current()) throw new Error("stale_selection")
       // CM-12: the branch is named after its parent chat and the message it starts from.
-      const branchTitle = native && request.input.kind === "normal"
-        ? nativeBranchTitle(options.chatTitle, request.input.selection.messages?.length ?? 0)
+      const branchTitle = native
+        ? nativeBranchTitle(options.chatTitle,
+          countBranchMessages((prepared as Awaited<ReturnType<typeof prepareNativeFork>>).rows ?? []))
         : null
       // Dispatch has begun: a later view change only suppresses application of the actual owner result.
       const result = native

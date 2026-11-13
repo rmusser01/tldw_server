@@ -639,8 +639,9 @@ describe("native branch lineage (CM-12)", () => {
       setServerChatMetaLoaded: vi.fn()
     })
   }
+  const preparedRows = [{ role: "user" }, { role: "assistant" }, { role: "user" }]
   beforeEach(() => {
-    nativeForks.prepare.mockResolvedValue({ request: lineageRequest })
+    nativeForks.prepare.mockResolvedValue({ request: lineageRequest, rows: preparedRows })
     nativeForks.commit.mockImplementation(async (_prepared, candidate) => {
       await candidate("child")
       return { ...nativeFinderResult }
@@ -658,6 +659,42 @@ describe("native branch lineage (CM-12)", () => {
     await createBranchMessage(lineageOptions(null))(lineageRequest)
     expect(nativeForks.commit).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
       title: "Branch at message 3"
+    })
+  })
+
+  it("counts only the chat's questions and replies, not system rows", async () => {
+    const withSystem: any = {
+      ...lineageRequest,
+      input: {
+        ...lineageRequest.input,
+        selection: {
+          ...lineageRequest.input.selection,
+          messages: [{ id: "s0", revision: "1" }, ...lineageRequest.input.selection.messages]
+        }
+      }
+    }
+    nativeForks.prepare.mockResolvedValue({
+      request: withSystem,
+      rows: [{ role: "system" }, ...preparedRows]
+    })
+    await createBranchMessage(lineageOptions())(withSystem)
+    expect(nativeForks.commit).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
+      title: "Trip plan — branch at message 3"
+    })
+  })
+
+  it("replaces a branch's own suffix instead of adding another when a branch is branched", async () => {
+    await createBranchMessage(lineageOptions("Trip plan — branch at message 7"))(lineageRequest)
+    expect(nativeForks.commit).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
+      title: "Trip plan — branch at message 3"
+    })
+  })
+
+  it("shortens a long parent title to 60 characters", async () => {
+    const long = "A".repeat(55) + " and then some more words"
+    await createBranchMessage(lineageOptions(long))(lineageRequest)
+    expect(nativeForks.commit).toHaveBeenCalledWith(expect.anything(), expect.any(Function), {
+      title: `${"A".repeat(55)} and — branch at message 3`
     })
   })
 
