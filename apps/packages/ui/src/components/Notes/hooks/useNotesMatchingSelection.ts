@@ -59,8 +59,11 @@ export function useNotesMatchingSelection({ filterKey, fetchPage, onError }: Opt
   const controllerRef = React.useRef<AbortController | null>(null)
 
   React.useEffect(() => () => controllerRef.current?.abort(), [])
+  // A new list ends the selection for good: going back to the old filters
+  // (Notes -> Trash -> Notes, a tag off and on) must not bring it back.
   React.useEffect(() => {
     controllerRef.current?.abort()
+    setSelection(null)
   }, [filterKey])
 
   const matching = selection && selection.key === filterKey ? selection : null

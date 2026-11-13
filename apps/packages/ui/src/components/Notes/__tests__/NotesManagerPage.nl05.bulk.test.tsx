@@ -423,6 +423,23 @@ describe("NotesManagerPage NL-05 select all", () => {
     expect(screen.queryByTestId("notes-bulk-matching-status")).not.toBeInTheDocument()
   })
 
+  it("does not bring an all-matching selection back after Notes -> Trash -> Notes", async () => {
+    serveLibrary(makeLibrary(5))
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("5 selected"))
+
+    fireEvent.click(screen.getByTestId("notes-mode-trash"))
+    await waitFor(() => expect(screen.getByTestId("notes-mode-trash")).toHaveAttribute("aria-pressed", "true"))
+    fireEvent.click(screen.getByTestId("notes-mode-active"))
+    await screen.findByTestId("notes-select-checkbox-m3")
+
+    expect(screen.queryByTestId("notes-bulk-actions-bar")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-select-checkbox-m1")).not.toBeChecked()
+  })
+
   it("caps Select all matching at the first 1000 notes", async () => {
     serveLibrary(makeLibrary(1500))
     renderPage()
