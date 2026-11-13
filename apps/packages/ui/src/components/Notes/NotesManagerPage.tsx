@@ -617,6 +617,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     noteNeighborsRequested && noteNeighborsSuccess && !neighborsDenied ? requestedNoteNeighborsData : null
   const noteNeighborsUnavailable =
     neighborsDenied || Number((noteNeighborsFailure as { status?: number } | null)?.status) === 403
+  // Only the user asks again: forgetting the denial re-enables the query, which then fetches once.
+  const recheckNeighborsAccess = React.useCallback(() => {
+    if (neighborsDenied) setNeighborsDeniedScope(null)
+    else void refetchNoteNeighbors()
+  }, [neighborsDenied, refetchNoteNeighbors])
   const noteNeighborsState = noteNeighborsError ? 'error'
     : noteNeighborsLoading ? 'loading'
     : noteNeighborsSuccess && noteNeighborsData != null ? 'success'
@@ -1762,8 +1767,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         const label = toBulkNoteLabel(note)
         try {
           operation.requireCurrent()
-          // List rows can be stale and tag-only edits keep the note version, so
-          // merge with the server's current tags rather than the cached row.
+          // List rows can be stale (another tab may have changed the tags), so merge
+          // with the server's current tags and version rather than the cached row.
           const current = await fetchNote(noteId, ownedRequest)
           operation.requireCurrent()
           const version = toNoteVersion(current)
@@ -2982,6 +2987,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         onRetryNeighbors={noteNeighborsUnavailable ? undefined : () => {
           void refetchNoteNeighbors()
         }}
+        onRecheckNeighborsAccess={noteNeighborsUnavailable ? recheckNeighborsAccess : undefined}
         selectedNotePinned={ed.selectedNotePinned}
         editorMode={ed.editorMode}
         editorInputMode={ed.editorInputMode}

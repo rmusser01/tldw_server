@@ -144,12 +144,13 @@ from tldw_Server_API.app.api.v1.schemas.notes_studio import (
     NoteStudioStateResponse,
 )
 from tldw_Server_API.app.core.config import settings as core_settings
-from tldw_Server_API.app.core.DB_Management.chacha.note_attachment_store import (
-    NoteAttachment,
-)
 
 #
 # Local Imports
+from tldw_Server_API.app.core.DB_Management.backends.base import UniqueConstraintError
+from tldw_Server_API.app.core.DB_Management.chacha.note_attachment_store import (
+    NoteAttachment,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (  # Corrected import path if needed
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -1864,8 +1865,8 @@ def _get_or_create_keyword_row(db: CharactersRAGDB, keyword_text: Any) -> Option
         return kw_row
     try:
         kw_id = db.add_keyword(text)
-    except ConflictError:
-        # Keyword may have been created concurrently; refetch and return if present.
+    except (ConflictError, UniqueConstraintError):
+        # Created concurrently (PostgreSQL reports a unique violation): use that row.
         kw_row = db.get_keyword_by_text(text)
         if kw_row:
             return kw_row
@@ -1875,22 +1876,43 @@ def _get_or_create_keyword_row(db: CharactersRAGDB, keyword_text: Any) -> Option
     return db.get_keyword_by_id(kw_id)
 
 
-def _sync_note_keywords(db: CharactersRAGDB, note_id: str, keywords: list[str]) -> dict[str, Any]:
-    """Sync note keywords and return a summary of attachment failures.
-
-    The note save itself should succeed even if one or more keyword operations fail.
-    This summary allows clients to surface a partial-success warning.
-    """
+def _desired_note_keywords(keywords: list[str]) -> dict[str, str]:
+    """Map each requested tag's identity to its first display text."""
     desired: dict[str, str] = {}
     for kw in keywords:
         text = _normalize_keyword_text(kw)
-        if not text:
-            continue
-        key = normalize_keyword_identity(text)
-        if key in desired:
-            continue
-        desired[key] = text
+        if text:
+            desired.setdefault(normalize_keyword_identity(text), text)
+    return desired
 
+
+def _resolve_note_keyword_rows(
+    db: CharactersRAGDB, desired: dict[str, str]
+) -> dict[str, Optional[dict[str, Any]]]:
+    """Get or create the keyword row for each requested tag (None when that fails).
+
+    Creation is idempotent by identity, so it needs no lock. Run it outside any
+    transaction: on PostgreSQL a concurrent insert of the same tag fails with a unique
+    violation, which would abort the whole enclosing transaction.
+    """
+    resolved: dict[str, Optional[dict[str, Any]]] = {}
+    for key, text in desired.items():
+        try:
+            row = _get_or_create_keyword_row(db, text)
+        except _NOTES_NONCRITICAL_EXCEPTIONS as err:
+            logger.warning(f"Keyword lookup or creation failed for '{text}': {err}")
+            row = None
+        resolved[key] = row if row and row.get("id") is not None else None
+    return resolved
+
+
+def _relink_note_keywords(
+    db: CharactersRAGDB,
+    note_id: str,
+    desired: dict[str, str],
+    resolved: dict[str, Optional[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Link and unlink a note's keywords to match ``desired``, using resolved rows only."""
     try:
         existing_rows = db.get_keywords_for_note(note_id=note_id)
     except _NOTES_NONCRITICAL_EXCEPTIONS as err:
@@ -1904,12 +1926,11 @@ def _sync_note_keywords(db: CharactersRAGDB, note_id: str, keywords: list[str]) 
             continue
         existing_by_key[normalize_keyword_identity(text)] = row
 
-    desired_keys = set(desired.keys())
     failed_keywords: list[str] = []
     attached_count = 0
 
     for key, row in existing_by_key.items():
-        if key in desired_keys:
+        if key in desired:
             attached_count += 1
             continue
         kw_id = row.get("id") if isinstance(row, dict) else None
@@ -1923,13 +1944,13 @@ def _sync_note_keywords(db: CharactersRAGDB, note_id: str, keywords: list[str]) 
     for key, text in desired.items():
         if key in existing_by_key:
             continue
+        kw_row = resolved.get(key)
+        if kw_row is None:
+            failed_keywords.append(text)
+            continue
         try:
-            kw_row = _get_or_create_keyword_row(db, text)
-            if kw_row and kw_row.get("id") is not None:
-                db.link_note_to_keyword(note_id=note_id, keyword_id=int(kw_row["id"]))
-                attached_count += 1
-            else:
-                failed_keywords.append(text)
+            db.link_note_to_keyword(note_id=note_id, keyword_id=int(kw_row["id"]))
+            attached_count += 1
         except _NOTES_NONCRITICAL_EXCEPTIONS as err:
             failed_keywords.append(text)
             logger.warning(f"Keyword attach failed for '{text}' on note {note_id}: {err}")
@@ -1940,6 +1961,16 @@ def _sync_note_keywords(db: CharactersRAGDB, note_id: str, keywords: list[str]) 
         "requested_count": len(desired),
         "attached_count": attached_count,
     }
+
+
+def _sync_note_keywords(db: CharactersRAGDB, note_id: str, keywords: list[str]) -> dict[str, Any]:
+    """Sync note keywords and return a summary of attachment failures.
+
+    The note save itself should succeed even if one or more keyword operations fail.
+    This summary allows clients to surface a partial-success warning.
+    """
+    desired = _desired_note_keywords(keywords)
+    return _relink_note_keywords(db, note_id, desired, _resolve_note_keyword_rows(db, desired))
 
 
 def _note_organization_ids(db: CharactersRAGDB, note_id: str) -> tuple[set[Any], set[Any]]:
@@ -1962,19 +1993,21 @@ def _sync_note_organization(
     relink that changes the links also advances the note's version (#3157). Without
     that, two clients at the same version could both replace the tags. The relink and
     the version check share one transaction: a stale version rolls the relink back.
+    Keyword rows are resolved or created before it opens (see
+    ``_resolve_note_keyword_rows``), so it only links, unlinks and bumps.
     """
-
-    def relink() -> dict[str, Any] | None:
+    if bump_from_version is None:
         summary = _sync_note_keywords(db, note_id=note_id, keywords=keywords) if keywords is not None else None
         if folder_paths is not None:
             db.sync_note_folders(note_id, folder_paths)
         return summary
-
-    if bump_from_version is None:
-        return relink()
+    desired = _desired_note_keywords(keywords) if keywords is not None else None
+    resolved = _resolve_note_keyword_rows(db, desired) if desired is not None else {}
     with db.transaction():
         before = _note_organization_ids(db, note_id)
-        summary = relink()
+        summary = _relink_note_keywords(db, note_id, desired, resolved) if desired is not None else None
+        if folder_paths is not None:
+            db.sync_note_folders(note_id, folder_paths)
         if _note_organization_ids(db, note_id) != before:
             db.note_store.bump_note_version(note_id, bump_from_version)
     return summary
@@ -7099,7 +7132,11 @@ async def patch_note(
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     """PATCH variant that allows updates without an explicit expected-version header.
-    If header is not provided, it fetches current version and applies the update."""
+    If header is not provided, it fetches current version and applies the update.
+
+    A tags- or folders-only body that changes the note's tags or folders advances its
+    `version` and `last_modified`, like any other edit, so a stale expected-version gets 409.
+    """
     provenance = note_in.knowledge_provenance
     provenance_version = note_in.expected_provenance_version
     if provenance is not None and expected_version is None:
