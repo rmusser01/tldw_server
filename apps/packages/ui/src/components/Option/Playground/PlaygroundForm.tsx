@@ -2938,7 +2938,7 @@ export const PlaygroundForm = ({
     closeComposerPopoversExcept("model");
     setModelDropdownOpenWithFocusRestore(true);
   }, [closeComposerPopoversExcept, setModelDropdownOpenWithFocusRestore]);
-  useModelSelectorOpenRequests({ openModelApiSelector, returnFocusSelectorRef: modelSelectorReturnFocusSelectorRef });
+  useModelSelectorOpenRequests({ openModelApiSelector, returnFocusSelectorRef: modelSelectorReturnFocusSelectorRef, pickerOpen: modelDropdownOpen });
   const getModelRecommendationActionLabel = React.useCallback(
     (action: ModelRecommendationAction) => {
       if (action === "enable_json_mode") {
