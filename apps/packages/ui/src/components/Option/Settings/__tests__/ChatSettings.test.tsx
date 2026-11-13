@@ -420,6 +420,32 @@ describe("ChatSettings background image controls", () => {
   })
 })
 
+// CC-11 (#3112): '@' tab mentions read browser tabs, which only the extension
+// can do; in the web app the switch made '@' open an empty tab list.
+describe("ChatSettings tab mentions switch", () => {
+  const TAB_MENTIONS_LABEL = "generalSettings.settings.tabMentionsEnabled.label"
+
+  beforeEach(() => {
+    useChatSettingsMock.mockReturnValue(buildChatSettingsState())
+    useStorageMock.mockImplementation((_key: string, defaultValue: unknown) =>
+      [defaultValue, vi.fn(), { isLoading: false }] as const
+    )
+    useSettingMock.mockReturnValue([undefined, vi.fn(), { isLoading: false }])
+  })
+
+  it("offers tab mentions in the extension", () => {
+    runtime.extension = true
+    render(<ChatSettings />)
+    expect(screen.getByRole("switch", { name: TAB_MENTIONS_LABEL })).toBeInTheDocument()
+  })
+
+  it("leaves tab mentions out of the web app, which cannot read browser tabs", () => {
+    runtime.extension = false
+    render(<ChatSettings />)
+    expect(screen.queryByRole("switch", { name: TAB_MENTIONS_LABEL })).toBeNull()
+  })
+})
+
 describe("ChatSettings side panel pinned composer (XS-09)", () => {
   const SIDEPANEL_LABEL = "Keep the side panel chat input visible while scrolling"
   const setSidepanelSticky = vi.fn()

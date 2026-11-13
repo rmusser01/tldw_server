@@ -331,7 +331,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
 
     const listLabel = await screen.findByText("Research session")
     fireEvent.mouseEnter(listLabel)
-    expect(await screen.findByText("Conversation ID: conv-1234")).toBeInTheDocument()
+    expect(await screen.findByText(/^Conversation ID: conv-1234/)).toBeInTheDocument()
 
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
     await waitFor(() => {
@@ -353,12 +353,14 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(await screen.findByText("Topic label")).toBeInTheDocument()
   })
 
-  it("falls back to raw conversation ID when metadata lookup fails", async () => {
+  // XP-14: the raw id stays in the tooltip, never in the row.
+  it("shows 'Linked chat', not the raw conversation ID, when metadata lookup fails", async () => {
     configureCommonRequests("conv-unavailable")
     mockGetChat.mockRejectedValue(new Error("missing chat"))
 
     renderPage()
-    expect(await screen.findByText("conv-unavailable")).toBeInTheDocument()
+    expect(await screen.findByText("Linked chat")).toBeInTheDocument()
+    expect(screen.queryByText("conv-unavailable")).not.toBeInTheDocument()
     await waitFor(() => {
       expect(mockGetChat).toHaveBeenCalledWith("conv-unavailable")
     })
@@ -376,7 +378,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
 
     renderPage()
 
-    expect(await screen.findByText("conv-retry")).toBeInTheDocument()
+    expect(await screen.findByText("Linked chat")).toBeInTheDocument()
     expect(mockGetChat).toHaveBeenCalledTimes(1)
 
     await waitFor(
@@ -393,7 +395,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     mockGetChat.mockRejectedValue(new Error("Chat session conv-unavailable not found"))
 
     renderPage()
-    expect(await screen.findByText("conv-unavailable")).toBeInTheDocument()
+    expect(await screen.findByText("Linked chat")).toBeInTheDocument()
 
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
     await waitFor(() => {
@@ -411,7 +413,8 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     )
 
     renderPage()
-    expect(await screen.findByText(uuidConversationId)).toBeInTheDocument()
+    expect(await screen.findByText("Linked chat")).toBeInTheDocument()
+    expect(screen.queryByText(uuidConversationId)).not.toBeInTheDocument()
 
     await waitFor(() => {
       expect(mockGetChat).not.toHaveBeenCalled()

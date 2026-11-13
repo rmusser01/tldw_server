@@ -4,6 +4,7 @@ import type { CapturedPromptOwnerScope } from "@/services/prompt-local-owner"
 import { ensureLocalProfileId } from "./history-selection"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { isLocalHistoryOwnerKey } from "@/utils/history-selection"
+import { WORKSPACE_RAG_SOURCES_KEY, restoreWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import {
   type ChatHistory as ChatHistoryType,
   type Message as MessageType,
@@ -410,6 +411,10 @@ export const formatSelectedHistory = (capture: import("@/types/history-selection
       role: node.role, name: typeof metadata.sender_name === "string" ? metadata.sender_name : displayRoles.get(node.id) === "user" ? "You" : "Assistant",
       content: selected.message, images: [...selected.images], createdAt: 0,
       parent_message_id: node.parent_id, metadataExtra: { ...metadata },
+      // RAG sources saved with a reply are shown again after reload (CM-04). Rows carry
+      // display source objects, as saveMessage's `source` does, despite Message's type.
+      ...(displayRoles.get(node.id) === "assistant" && !local.sources?.length
+        ? { sources: restoreWorkspaceRagSources(metadata[WORKSPACE_RAG_SOURCES_KEY]) as unknown as Message["sources"] } : {}),
       // Canonical partial status must survive reload into either chat surface.
       generationInfo: serverOwned && displayRoles.get(node.id) === "assistant" &&
         (metadata.generation_status === "stopped" || metadata.generation_status === "interrupted")

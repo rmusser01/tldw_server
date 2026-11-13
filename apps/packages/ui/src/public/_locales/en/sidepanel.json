@@ -1930,6 +1930,7 @@
     "workspaceVoice": "Workspace mode names each conversation and can read responses aloud. Microphone input is available only for a single conversation.",
     "selected": "Selected",
     "useBuddy": "Use this Buddy",
+    "licenceInfo": "Artwork licence",
     "entry": "Buddy & Persona",
     "dictationFailed": "Dictation unavailable. Check audio settings or type your reply.",
     "changedTarget": "Attachment changed. Refresh before replying.",

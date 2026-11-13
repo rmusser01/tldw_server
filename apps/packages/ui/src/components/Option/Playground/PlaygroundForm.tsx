@@ -1,4 +1,5 @@
 import { useCasualComposerDisclosure } from "./hooks/useCasualComposerDisclosure";
+import { useModelSelectorOpenRequests } from "./hooks/useModelSelectorOpenRequests";
 import { useModelSettingsOverlayState } from "@/hooks/useModelSettingsOverlayState"
 import { shallow } from "zustand/shallow";
 import { SelectedModelSaveFeedback } from "@/components/Common/SelectedModelSaveFeedback";
@@ -271,13 +272,11 @@ import {
   OPEN_KNOWLEDGE_PANEL_EVENT,
   OPEN_MCP_SETTINGS_EVENT,
   OPEN_MCP_TOOLS_EVENT,
-  OPEN_MODEL_SELECTOR_EVENT,
   OPEN_MODEL_SETTINGS_EVENT,
   OPEN_TURN_TOOLS_EVENT,
   SET_TEMPORARY_CHAT_EVENT,
   TOGGLE_WEB_SEARCH_EVENT,
   type McpSettingsOpenDetail,
-  type ModelSelectorOpenDetail,
   type ModelSettingsOpenDetail,
 } from "./playground-cockpit-actions";
 import { deriveRolePlayState, type RolePlayIdentity } from "./role-play-state";
@@ -2939,21 +2938,7 @@ export const PlaygroundForm = ({
     closeComposerPopoversExcept("model");
     setModelDropdownOpenWithFocusRestore(true);
   }, [closeComposerPopoversExcept, setModelDropdownOpenWithFocusRestore]);
-  React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent<ModelSelectorOpenDetail>).detail;
-      focusFirstVisibleElement("[data-testid='model-selector']");
-      modelSelectorReturnFocusSelectorRef.current = normalizeFocusSelector(
-        detail?.returnFocusSelector,
-      );
-      openModelApiSelector();
-    };
-    window.addEventListener(OPEN_MODEL_SELECTOR_EVENT, handler);
-    return () => {
-      window.removeEventListener(OPEN_MODEL_SELECTOR_EVENT, handler);
-    };
-  }, [openModelApiSelector]);
+  useModelSelectorOpenRequests({ openModelApiSelector, returnFocusSelectorRef: modelSelectorReturnFocusSelectorRef, pickerOpen: modelDropdownOpen });
   const getModelRecommendationActionLabel = React.useCallback(
     (action: ModelRecommendationAction) => {
       if (action === "enable_json_mode") {
@@ -4302,7 +4287,6 @@ export const PlaygroundForm = ({
     handleImageUpload,
     imageBackendDefaultTrimmed,
     imageBackendLabel,
-    setOpenModelSettings,
     currentMessage: form.values.message,
   });
 

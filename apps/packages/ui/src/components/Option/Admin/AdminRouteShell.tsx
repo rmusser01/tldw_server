@@ -1,6 +1,7 @@
 import React from "react"
 import { Link } from "react-router-dom"
 import { AdminQueryProvider } from "./AdminQueryProvider"
+import { useHeldDocumentTitle } from "@/utils/document-title"
 import {
   ADMIN_MODULES,
   adminModuleForRoute,
@@ -23,16 +24,9 @@ export const AdminRouteShell: React.FC<{
   const current = adminModuleForRoute(path)
   const onOverview = isAdminRoute(path) && !current
 
-  React.useEffect(() => {
-    if (typeof document === "undefined") return
-    const previous = document.title
-    document.title = current
-      ? `${current.label} · Admin · tldw`
-      : "Admin · tldw"
-    return () => {
-      document.title = previous
-    }
-  }, [current])
+  useHeldDocumentTitle(
+    current ? `${current.label} · Admin · tldw` : "Admin · tldw"
+  )
 
   return (
     <div className="flex min-h-full flex-col">

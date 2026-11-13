@@ -13,7 +13,11 @@ export const useModelPickerOpenRequests = (
   pickerRef: React.RefObject<OpenablePicker | null>
 ) => {
   React.useEffect(() => {
-    const open = () => pickerRef.current?.openAndFocus()
+    const open = (event: Event) => {
+      if (!pickerRef.current) return
+      event.preventDefault()
+      pickerRef.current.openAndFocus()
+    }
     window.addEventListener(OPEN_MODEL_SELECTOR_EVENT, open)
     return () => window.removeEventListener(OPEN_MODEL_SELECTOR_EVENT, open)
   }, [pickerRef])

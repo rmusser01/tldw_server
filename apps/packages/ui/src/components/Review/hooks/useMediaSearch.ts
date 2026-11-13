@@ -27,6 +27,10 @@ import {
 import {
   resolveKindsForTab
 } from '@/components/Review/mediaKinds'
+import {
+  buildReviewNotesRequestPath,
+  readNotesTotal
+} from '@/components/Review/reviewNotesRequest'
 import type { MediaResultItem } from '@/components/Media/types'
 
 const MEDIA_KEYWORD_ENDPOINT_RETRY_COOLDOWN_MS = 30_000
@@ -571,98 +575,31 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
           return []
         }
 
-        if (hasTextQuery) {
-          const keywordFilterActive = keywordTokens.length > 0
-          let notesResp: any
-          let usedKeywordServerFilter = false
+        // One GET on the notes API's own contract: limit/offset paging, exact tag
+        // tokens and pagination.total (#3149).
+        const notesResp = await request<any>({
+          path: buildReviewNotesRequestPath({ query, keywordTokens, page, pageSize, sortBy }),
+          method: 'GET'
+        })
+        const items = Array.isArray(notesResp?.items) ? notesResp.items : []
+        const notesServerTotal = readNotesTotal(notesResp, items.length)
+        setNotesTotal(notesServerTotal)
+        actualNotesCount = notesServerTotal
 
-          try {
-            const body: any = { query }
-            if (keywordFilterActive) {
-              body.must_have = keywordTokens
-              usedKeywordServerFilter = true
-            }
-            notesResp = await request<any>({
-              path: `/api/v1/notes/search/?page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
-              method: 'POST' as any,
-              headers: { 'Content-Type': 'application/json' },
-              body
-            })
-          } catch {
-            signal.throwIfAborted()
-            usedKeywordServerFilter = false
-            notesResp = await request<any>({
-              path: `/api/v1/notes/search/?query=${encodeURIComponent(
-                query
-              )}&page=${page}&results_per_page=${pageSize}&include_keywords=true` as any,
-              method: 'GET' as any
-            })
-          }
-
-          const items = Array.isArray(notesResp) ? notesResp : (notesResp?.items || [])
-          const pagination = notesResp?.pagination
-
-          let filteredItems = items
-          if (keywordFilterActive && !usedKeywordServerFilter) {
-            filteredItems = items.filter((n: any) => {
-              const noteKws = extractNoteKeywords(n)
-              return keywordTokens.some((kw) =>
-                noteKws.some((nkw) => nkw.toLowerCase().includes(kw.toLowerCase()))
-              )
-            })
-          }
-
-          if (keywordFilterActive && !usedKeywordServerFilter) {
-            const notesClientTotal = filteredItems.length
-            setNotesTotal(notesClientTotal)
-            actualNotesCount = notesClientTotal
-          } else {
-            const notesServerTotal = Number(pagination?.total_items || items.length || 0)
-            setNotesTotal(notesServerTotal)
-            actualNotesCount = notesServerTotal
-          }
-
-          for (const n of filteredItems) {
-            const id = n?.id ?? n?.note_id ?? n?.pk ?? n?.uuid
-            results.push({
-              kind: 'note',
-              id,
-              title: n?.title || `Note ${id}`,
-              snippet: n?.content?.substring(0, 200) || '',
-              keywords: extractNoteKeywords(n),
-              meta: {
-                type: 'note',
-                source: n?.metadata?.conversation_id ? 'conversation' : null
-              },
-              raw: n
-            })
-          }
-        } else {
-          const notesResp = await request<any>({
-            path: `/api/v1/notes/?page=${page}&results_per_page=${pageSize}` as any,
-            method: 'GET' as any
+        for (const n of items) {
+          const id = n?.id ?? n?.note_id ?? n?.pk ?? n?.uuid
+          results.push({
+            kind: 'note',
+            id,
+            title: n?.title || `Note ${id}`,
+            snippet: n?.content?.substring(0, 200) || '',
+            keywords: extractNoteKeywords(n),
+            meta: {
+              type: 'note',
+              source: n?.metadata?.conversation_id ? 'conversation' : null
+            },
+            raw: n
           })
-          const items = Array.isArray(notesResp?.items) ? notesResp.items : []
-          const pagination = notesResp?.pagination
-          const notesServerTotal = Number(pagination?.total_items || items.length || 0)
-          setNotesTotal(notesServerTotal)
-          actualNotesCount = notesServerTotal
-
-          for (const n of items) {
-            const id = n?.id ?? n?.note_id ?? n?.pk ?? n?.uuid
-            results.push({
-              kind: 'note',
-              id,
-              title: n?.title || `Note ${id}`,
-              snippet: n?.content?.substring(0, 200) || '',
-              keywords: extractNoteKeywords(n),
-              meta: {
-                type: 'note',
-                source: n?.metadata?.conversation_id ? 'conversation' : null
-              },
-              raw: n
-            })
-          }
         }
       } catch (err) {
         if (signal.aborted) throw err

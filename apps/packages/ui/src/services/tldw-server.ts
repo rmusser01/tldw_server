@@ -331,10 +331,15 @@ export const getAllModels = async ({ returnEmpty = false }: { returnEmpty?: bool
 /**
  * Every chat model the server's catalog lists, including models whose provider
  * is not set up (they keep their catalog-only flags). Backs the model picker's
- * "All models" scope (CC-06); sending still uses fetchChatModels.
+ * "All models" scope (CC-06); sending still uses fetchChatModels. The read is
+ * strict: a failure throws, so the picker can say so, rather than coming back
+ * as an empty catalog (#3343). throwOnError implies requireFresh in
+ * TldwModels.getModels, so this skips the 5-minute model cache and fetches
+ * each time the scope loads (it joins a fresh read already in flight, such as
+ * the ready list's).
  */
 export const fetchChatModelCatalog = async () => {
-  const models = await tldwModels.getModels()
+  const models = await tldwModels.getModels(false, { throwOnError: true })
   return dedupeChatModelsByModel(
     models.filter((model) => model.type === "chat").map(mapTldwModelToUi)
   )

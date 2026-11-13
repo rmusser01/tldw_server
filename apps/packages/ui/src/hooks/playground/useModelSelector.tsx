@@ -25,6 +25,10 @@ import {
   type ModelUsageStats
 } from "./modelSelectorUtils"
 import { formatChatProviderName } from "@/utils/chat-model-label"
+import {
+  getChatModelsCacheGeneration,
+  subscribeChatModelsInvalidation
+} from "@/services/chat-models-invalidation"
 
 // Loaded on demand: the server service pulls in much of the app.
 const loadServerChatModelCatalog = async (): Promise<ModelSelectorDescriptor[]> =>
@@ -90,19 +94,40 @@ export function useModelSelector({
   const modelListScope: ModelListScope =
     storedModelListScope === "catalog" ? "catalog" : "configured"
   const [catalogModels, setCatalogModels] = React.useState<ModelSelectorDescriptor[]>([])
+  const [catalogLoadFailed, setCatalogLoadFailed] = React.useState(false)
+  const [catalogAttempt, setCatalogAttempt] = React.useState(0)
+  // An account or server change invalidates the chat models; the catalog of
+  // the old one must not linger in "All models" (#3343).
+  const chatModelsGeneration = React.useSyncExternalStore(
+    subscribeChatModelsInvalidation,
+    getChatModelsCacheGeneration,
+    getChatModelsCacheGeneration
+  )
+  React.useEffect(() => {
+    setCatalogModels((models) => (models.length > 0 ? [] : models))
+    setCatalogLoadFailed(false)
+  }, [chatModelsGeneration])
   React.useEffect(() => {
     if (modelListScope !== "catalog") return
     let current = true
     void Promise.resolve()
       .then(() => loadCatalogModels())
       .then((models) => {
-        if (current) setCatalogModels(Array.isArray(models) ? models : [])
+        if (!current) return
+        setCatalogModels(Array.isArray(models) ? models : [])
+        setCatalogLoadFailed(false)
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (current) setCatalogLoadFailed(true)
+      })
     return () => {
       current = false
     }
-  }, [loadCatalogModels, modelListScope])
+  }, [catalogAttempt, chatModelsGeneration, loadCatalogModels, modelListScope])
+  const retryCatalogModels = React.useCallback(() => {
+    setCatalogLoadFailed(false)
+    setCatalogAttempt((attempt) => attempt + 1)
+  }, [])
   const selectedSelection = React.useMemo(
     () => resolveModelSelectorSelection(composerModels, selectedModel, apiProvider, { scope: activeSettingsScope, providerOverride: scopedApiProvider }),
     [composerModels, selectedModel, apiProvider, activeSettingsScope, scopedApiProvider]
@@ -292,7 +317,7 @@ export function useModelSelector({
     selectedModel
   ])
 
-  const modelDropdownMenuItems = React.useMemo(() => {
+  const scopeMenuItems = React.useMemo(() => {
     const models = filteredModels || []
     const allModels = (composerModels as any[]) || []
 
@@ -742,6 +767,28 @@ export function useModelSelector({
     t,
     toggleFavoriteModel
   ])
+  // "All models" says when the catalog could not load, above what it has (#3343).
+  const modelDropdownMenuItems = React.useMemo(
+    () =>
+      modelListScope === "catalog" && catalogLoadFailed
+        ? [
+            {
+              key: "model-catalog-retry",
+              label: (
+                <span>
+                  {t("playground:composer.modelCatalogLoadFailed", "Couldn't load all models")}
+                  {" · "}
+                  {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+                </span>
+              ),
+              onClick: retryCatalogModels
+            },
+            { type: "divider" as const, key: "model-catalog-retry-divider" },
+            ...scopeMenuItems
+          ]
+        : scopeMenuItems,
+    [catalogLoadFailed, modelListScope, retryCatalogModels, scopeMenuItems, t]
+  )
 
   const isSmallModel =
     modelCapabilities.includes("fast") ||
