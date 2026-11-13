@@ -379,17 +379,23 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const fetchListPage = React.useCallback(async (
     fetchPage: number,
     fetchPageSize: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    /** Oldest first, so notes edited while every page is read keep their place (not for search). */
+    oldestFirst = false
   ): Promise<{ items: any[]; total: number } | null> => {
     const requestOwner = authorityOwner
     if (!isCurrentAuthority(requestOwner)) return null
+    const pageSort = oldestFirst
+      ? { sortBy: 'created_at', sortOrder: 'asc' }
+      : NOTE_SORT_API_PARAMS[sortOption]
+    const orderRows = (rows: any[]) => (oldestFirst ? rows : sortNoteRows(rows, sortOption))
     if (listMode === 'trash') {
       const params = new URLSearchParams()
       params.set('limit', String(fetchPageSize))
       params.set('offset', String((fetchPage - 1) * fetchPageSize))
       params.set('include_keywords', 'true')
-      params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
-      params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+      params.set('sort_by', pageSort.sortBy)
+      params.set('sort_order', pageSort.sortOrder)
       params.set('legacy_aliases', 'false')
       if (trashQuery) params.set('query', trashQuery)
       const res = await bgRequest<any>({
@@ -407,7 +413,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
             items.length ??
             0
         ) || 0
-      return { items: sortNoteRows(items, sortOption), total: totalItems }
+      return { items: orderRows(items), total: totalItems }
     }
     const q = query.trim()
     const toks = effectiveKeywordTokens.map((k) => k.toLowerCase())
@@ -420,8 +426,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     params.set('limit', String(fetchPageSize))
     params.set('offset', String((fetchPage - 1) * fetchPageSize))
     params.set('include_keywords', 'true')
-    params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
-    params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+    params.set('sort_by', pageSort.sortBy)
+    params.set('sort_order', pageSort.sortOrder)
     params.set('legacy_aliases', 'false')
     const res = await bgRequest<any>({
       path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
@@ -437,7 +443,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
           res?.pagination?.total_items ??
           items.length
       ) || 0
-    return { items: sortNoteRows(items, sortOption), total: totalItems }
+    return { items: orderRows(items), total: totalItems }
   }, [authorityOwner, effectiveKeywordTokens, fetchFilteredNotesRaw, isCurrentAuthority, listMode, query, sortOption, trashQuery])
 
   const fetchNotes = React.useCallback(async (): Promise<NoteListItem[]> => {
@@ -560,7 +566,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   ])
   const fetchMatchingPage = React.useCallback(
     async (fetchPage: number, fetchPageSize: number, signal: AbortSignal) => {
-      const result = await fetchListPage(fetchPage, fetchPageSize, signal)
+      const result = await fetchListPage(fetchPage, fetchPageSize, signal, true)
       return { items: (result?.items ?? []).map(mapNoteListItem), total: result?.total ?? 0 }
     },
     [fetchListPage]
@@ -1157,9 +1163,10 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const handleToggleBulkSelection = React.useCallback(
     (id: string | number, checked: boolean, shiftKey: boolean) => {
       const targetId = String(id)
-      // Every visible row is selected while all matching notes are.
+      // Every visible row is selected while all matching notes are. Any toggle
+      // also abandons a "Select all matching" still gathering.
       const fromMatching = matching != null
-      if (fromMatching) clearMatchingSelection()
+      clearMatchingSelection()
       setBulkSelectedIds((current) => {
         const next = new Set(fromMatching ? orderedVisibleNoteIds : current)
         const anchorId = bulkSelectionAnchorRef.current.value

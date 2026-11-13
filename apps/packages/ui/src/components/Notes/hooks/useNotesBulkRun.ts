@@ -38,6 +38,8 @@ export type NotesBulkRunHandle = {
 
 export function useNotesBulkRun(authorityScope?: string | null) {
   const activeRunRef = React.useRef<symbol | null>(null)
+  const scopeRef = React.useRef(authorityScope)
+  scopeRef.current = authorityScope
   const [progress, setProgress] = React.useState<NotesBulkProgress | null>(null)
   const [failures, setFailures] = React.useState<NotesBulkFailures | null>(null)
 
@@ -50,6 +52,7 @@ export function useNotesBulkRun(authorityScope?: string | null) {
     if (activeRunRef.current) return null
     const run = Symbol(action)
     activeRunRef.current = run
+    const scope = scopeRef.current
     let done = 0
     let total = 0
     const isActive = () => activeRunRef.current === run
@@ -70,7 +73,9 @@ export function useNotesBulkRun(authorityScope?: string | null) {
         if (!isActive()) return
         activeRunRef.current = null
         setProgress(null)
-        setFailures(failed.length > 0 ? { action, notes: failed.slice(), ...(tags ? { tags } : {}) } : null)
+        // A run that outlived its account reports nothing to the new one.
+        const sameAccount = scopeRef.current === scope
+        setFailures(sameAccount && failed.length > 0 ? { action, notes: failed.slice(), ...(tags ? { tags } : {}) } : null)
       }
     }
   }, [])

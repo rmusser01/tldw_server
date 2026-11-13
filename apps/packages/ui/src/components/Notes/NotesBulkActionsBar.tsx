@@ -57,6 +57,8 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
   const progress = run?.progress ?? null
   const failures = run?.failures && actionMode(run.failures.action) === listMode ? run.failures : null
   const running = progress != null
+  // Actions wait while "Select all matching" is still reading the matches.
+  const actionsLocked = running || Boolean(selection?.selectingAllMatching)
   const hasSelection = selectedCount > 0
   if (!hasSelection && !running && !failures) return null
 
@@ -128,16 +130,20 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
   }
 
   return (
+    // Only the status text is a live region: the count, progress and failures
+    // are announced, the buttons around them are not.
     <div
       className="flex-shrink-0 border-t border-border bg-surface2 px-4 py-2"
-      role="status"
-      aria-live="polite"
-      aria-busy={running || undefined}
       data-testid="notes-bulk-actions-bar"
     >
       {hasSelection && (
         <div className="flex items-center justify-between gap-2">
-          <Typography.Text className="text-xs font-medium text-text" data-testid="notes-bulk-selected-count">
+          <Typography.Text
+            className="text-xs font-medium text-text"
+            role="status"
+            aria-live="polite"
+            data-testid="notes-bulk-selected-count"
+          >
             {fill(
               t('option:notesSearch.bulkSelectedCount', {
                 defaultValue: '{{count}} selected',
@@ -160,7 +166,12 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
       )}
       {hasSelection && renderMatchingSelection()}
       {progress && progress.total > 0 && (
-        <div className="mt-1 flex items-center gap-2 text-xs text-text-muted" data-testid="notes-bulk-progress">
+        <div
+          className="mt-1 flex items-center gap-2 text-xs text-text-muted"
+          role="status"
+          aria-live="polite"
+          data-testid="notes-bulk-progress"
+        >
           <Spin size="small" />
           <span>{progressText(progress)}</span>
         </div>
@@ -171,7 +182,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
             size="small"
             type="primary"
             className={buttonClass}
-            disabled={running || !onRestore}
+            disabled={actionsLocked || !onRestore}
             onClick={onRestore}
             data-testid="notes-bulk-restore"
           >
@@ -184,7 +195,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
           <Button
             size="small"
             className={buttonClass}
-            disabled={running}
+            disabled={actionsLocked}
             onClick={onExport}
             data-testid="notes-bulk-export"
           >
@@ -193,7 +204,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
           <Button
             size="small"
             className={buttonClass}
-            disabled={running}
+            disabled={actionsLocked}
             onClick={onAddTags}
             data-testid="notes-bulk-assign-keywords"
           >
@@ -203,7 +214,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
             size="small"
             className={buttonClass}
             danger
-            disabled={running}
+            disabled={actionsLocked}
             onClick={onDelete}
             data-testid="notes-bulk-delete"
           >
@@ -216,7 +227,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
           className="mt-2 rounded border border-warn/30 bg-warn/10 px-2 py-1.5 text-xs text-text"
           data-testid="notes-bulk-failures"
         >
-          <span className="font-medium">
+          <span className="font-medium" role="status" aria-live="polite">
             {failureText(failures)}
           </span>
           <ul className="mt-0.5 flex flex-wrap gap-x-2 text-text-muted">

@@ -112,6 +112,7 @@ describe("note chat backlinks without raw ids (XP-14)", () => {
         onOpenSettings={vi.fn()}
         onOpenHealth={vi.fn()}
         onRestoreNote={vi.fn()}
+        onOpenLinkedChat={vi.fn()}
         onExportAllMd={vi.fn()}
         onExportAllCsv={vi.fn()}
         onExportAllJson={vi.fn()}

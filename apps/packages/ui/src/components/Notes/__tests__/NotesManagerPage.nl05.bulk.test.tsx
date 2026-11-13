@@ -271,6 +271,23 @@ describe("NotesManagerPage NL-05 bulk runs", () => {
     expect(callsTo("DELETE")).toHaveLength(2)
   })
 
+  it("keeps the bar's live region on its status text, not around its buttons", async () => {
+    const pending: Record<string, ReturnType<typeof deferred>> = { n1: deferred() }
+    serve((_request, path, method) => (method === "DELETE" ? pending[noteIdOf(path)].promise : undefined))
+    renderPage()
+    await selectRows("n1")
+    const bar = screen.getByTestId("notes-bulk-actions-bar")
+    expect(bar).not.toHaveAttribute("aria-live")
+    expect(screen.getByTestId("notes-bulk-selected-count").closest("[aria-live]")).not.toBeNull()
+
+    fireEvent.click(screen.getByTestId("notes-bulk-delete"))
+    const progress = await screen.findByTestId("notes-bulk-progress")
+    expect(progress).toHaveAttribute("role", "status")
+    expect(screen.getByTestId("notes-bulk-delete").closest("[aria-live]")).toBeNull()
+    pending.n1.resolve({})
+    await waitFor(() => expect(screen.queryByTestId("notes-bulk-progress")).not.toBeInTheDocument())
+  })
+
   it("lists the notes a bulk delete could not delete, and Retry deletes only those", async () => {
     let failBeta = true
     serve((_request, path, method) => {
@@ -423,6 +440,65 @@ describe("NotesManagerPage NL-05 select all", () => {
     expect(screen.queryByTestId("notes-bulk-matching-status")).not.toBeInTheDocument()
   })
 
+  it("does not bring an all-matching selection back after Notes -> Trash -> Notes", async () => {
+    serveLibrary(makeLibrary(5))
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("5 selected"))
+
+    fireEvent.click(screen.getByTestId("notes-mode-trash"))
+    await waitFor(() => expect(screen.getByTestId("notes-mode-trash")).toHaveAttribute("aria-pressed", "true"))
+    fireEvent.click(screen.getByTestId("notes-mode-active"))
+    await screen.findByTestId("notes-select-checkbox-m3")
+
+    expect(screen.queryByTestId("notes-bulk-actions-bar")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-select-checkbox-m1")).not.toBeChecked()
+  })
+
+  it("abandons a running Select all matching when a row is toggled, and locks the actions meanwhile", async () => {
+    const gather = deferred()
+    const library = makeLibrary(5)
+    serve((_request, path, method) => {
+      if (method === "GET" && path.startsWith("/api/v1/notes/?")) {
+        if (listParams(path).get("limit") === "100") return gather.promise
+        return { items: library.slice(0, 3), pagination: { total: library.length } }
+      }
+      return undefined
+    })
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(gatherRequests()).toHaveLength(1))
+    for (const testId of ["notes-bulk-export", "notes-bulk-assign-keywords", "notes-bulk-delete"]) {
+      expect(screen.getByTestId(testId)).toBeDisabled()
+    }
+
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-m1"))
+    gather.resolve({ items: library, pagination: { total: library.length } })
+
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("2 selected"))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("2 selected")
+    expect(screen.queryByTestId("notes-bulk-matching-status")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-bulk-delete")).not.toBeDisabled()
+  })
+
+  it("gathers the library oldest first, so notes edited meanwhile are not skipped", async () => {
+    serveLibrary(makeLibrary(5))
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("5 selected"))
+
+    const params = listParams(String((gatherRequests()[0][0] as Request).path))
+    expect(params.get("sort_by")).toBe("created_at")
+    expect(params.get("sort_order")).toBe("asc")
+  })
+
   it("caps Select all matching at the first 1000 notes", async () => {
     serveLibrary(makeLibrary(1500))
     renderPage()
@@ -453,8 +529,11 @@ const restoreCalls = () =>
     .filter((request) => String(request?.method || "").toUpperCase() === "POST" && String(request?.path || "").includes("/restore"))
     .map((request) => String(request.path))
 
-const serveTrash = (onRestore: (id: string) => unknown = (id) => ({ id, version: 9, deleted: false })) => {
-  let trash = TRASH_NOTES.slice()
+const serveTrash = (
+  onRestore: (id: string) => unknown = (id) => ({ id, version: 9, deleted: false }),
+  options: { trash?: typeof TRASH_NOTES; activeDetail?: (id: string) => unknown } = {}
+) => {
+  let trash = options.trash ?? TRASH_NOTES.slice()
   serve((_request, path, method) => {
     if (path.startsWith("/api/v1/notes/trash?")) {
       const text = (listParams(path).get("query") || "").toLowerCase()
@@ -468,7 +547,12 @@ const serveTrash = (onRestore: (id: string) => unknown = (id) => ({ id, version:
       return result
     }
     const detail = path.match(/^\/api\/v1\/notes\/(t\d)$/)
+    if (detail && method === "GET" && options.activeDetail) return options.activeDetail(detail[1])
     if (detail && method === "GET") {
+      // GET reads active notes only: a note still in Trash is not found.
+      if (trash.some((row) => row.id === detail[1])) {
+        throw Object.assign(new Error("Note not found"), { status: 404 })
+      }
       const note = TRASH_NOTES.find((row) => row.id === detail[1])
       return { ...note, version: 9, deleted: false, keywords: [] }
     }
@@ -510,6 +594,18 @@ describe("NotesManagerPage NL-05 Trash", () => {
 
     await waitFor(() => expect(screen.getByTestId("notes-mode-trash")).toHaveAttribute("aria-pressed", "false"))
     await waitFor(() => expect(callsTo("GET", "t1").length).toBeGreaterThan(0))
+  })
+
+  it("shows one restore toast at a time when notes are restored one by one", async () => {
+    serveTrash()
+    renderPage()
+    await openTrash()
+    fireEvent.click(screen.getByTestId("notes-restore-t1"))
+    await waitFor(() => expect(mockMessageOpen).toHaveBeenCalledTimes(1))
+    fireEvent.click(await screen.findByTestId("notes-restore-t2"))
+    await waitFor(() => expect(mockMessageOpen).toHaveBeenCalledTimes(2))
+    const keys = mockMessageOpen.mock.calls.map(([config]) => config.key)
+    expect(keys[0]).toBe(keys[1])
   })
 
   it("selects Trash notes with checkboxes and restores them together", async () => {
@@ -599,5 +695,128 @@ describe("NotesManagerPage NL-05 Trash", () => {
     fireEvent.click(within(empty).getByRole("button", { name: /Clear search/ }))
     expect(await screen.findByTestId("notes-trash-row-t1")).toBeInTheDocument()
     expect(screen.getByTestId("notes-trash-search")).toHaveValue("")
+  })
+
+  it("disables each row's Restore while a bulk restore runs", async () => {
+    const pending = deferred()
+    serveTrash((id) => (id === "t1" ? pending.promise : { id, version: 9, deleted: false }))
+    renderPage()
+    await openTrash()
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t1"))
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t2"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-restore"))
+
+    await waitFor(() => expect(screen.getByTestId("notes-restore-t3")).toBeDisabled())
+    pending.resolve({ id: "t1", version: 9, deleted: false })
+    await waitFor(() => expect(screen.queryByTestId("notes-bulk-progress")).not.toBeInTheDocument())
+    expect(screen.getByTestId("notes-restore-t3")).not.toBeDisabled()
+  })
+
+  it("counts a note that already left Trash as restored, not failed", async () => {
+    serveTrash(
+      (id) => {
+        if (id === "t2") throw Object.assign(new Error("version mismatch"), { status: 409 })
+        return { id, version: 9, deleted: false }
+      },
+      { activeDetail: (id) => ({ id, title: "Draft plan", version: 6, deleted: false, keywords: [] }) }
+    )
+    renderPage()
+    await openTrash()
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t1"))
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t2"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-restore"))
+
+    await waitFor(() => expect(mockMessageSuccess).toHaveBeenCalledWith("Restored 2 notes"))
+    expect(screen.queryByTestId("notes-bulk-failures")).not.toBeInTheDocument()
+    expect(mockMessageWarning).not.toHaveBeenCalled()
+  })
+
+  it("retries a failed restore with the version it already knew unless the failure was a conflict", async () => {
+    const trash = TRASH_NOTES.map((note) => ({ ...note }))
+    let failDraft = true
+    serveTrash(
+      (id) => {
+        if (id === "t2" && failDraft) {
+          failDraft = false
+          // The list now reports a newer version, but the failure was not a conflict.
+          trash[1].version = 6
+          throw new Error("server unavailable")
+        }
+        return { id, version: 9, deleted: false }
+      },
+      { trash, activeDetail: () => { throw Object.assign(new Error("Note not found"), { status: 404 }) } }
+    )
+    renderPage()
+    await openTrash()
+    // t1 succeeds, so Trash is read again and now lists t2 at version 6.
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t1"))
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t2"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-restore"))
+    const failures = await screen.findByTestId("notes-bulk-failures")
+    await waitFor(() => expect(screen.queryByTestId("notes-trash-row-t1")).not.toBeInTheDocument())
+    fireEvent.click(within(failures).getByTestId("notes-bulk-retry"))
+
+    await waitFor(() =>
+      expect(restoreCalls().filter((path) => path.includes("/t2/"))).toEqual([
+        "/api/v1/notes/t2/restore?expected_version=5",
+        "/api/v1/notes/t2/restore?expected_version=5"
+      ])
+    )
+  })
+})
+
+describe("NotesManagerPage NL-05 single actions during a bulk run", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConfirmDanger.mockResolvedValue(true)
+    mockGetSetting.mockResolvedValue(null)
+    mockSetSetting.mockResolvedValue(undefined)
+    mockClearSetting.mockResolvedValue(undefined)
+  })
+
+  it("refuses the editor's Delete while a bulk delete runs", async () => {
+    const pending = deferred()
+    serve((_request, path, method) => {
+      if (method === "DELETE") return pending.promise
+      if (path.startsWith("/api/v1/notes/n3/neighbors")) return { nodes: [], edges: [] }
+      return undefined
+    })
+    renderPage()
+    await selectRows("n1", "n2")
+    fireEvent.click(screen.getByTestId("notes-bulk-delete"))
+    await screen.findByTestId("notes-bulk-progress")
+
+    fireEvent.click(screen.getByTestId("notes-open-button-n3"))
+    await screen.findByDisplayValue("Gamma")
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText("Delete"))
+
+    await waitFor(() => expect(mockMessageInfo).toHaveBeenCalledWith("Wait for the bulk action to finish."))
+    expect(callsTo("DELETE", "n3")).toHaveLength(0)
+    expect(mockConfirmDanger).toHaveBeenCalledTimes(1)
+    pending.resolve({})
+  })
+
+  it("gathers Trash oldest first too", async () => {
+    serve((_request, path) => {
+      if (path.startsWith("/api/v1/notes/trash?")) {
+        const limit = Number(listParams(path).get("limit"))
+        const rows = limit >= 100 ? TRASH_NOTES : TRASH_NOTES.slice(0, 2)
+        return { items: rows, total: TRASH_NOTES.length }
+      }
+      return undefined
+    })
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-mode-trash"))
+    await screen.findByTestId("notes-trash-row-t2")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("3 selected"))
+
+    const gathered = mockBgRequest.mock.calls
+      .map(([request]: [Request]) => String(request?.path || ""))
+      .find((path) => path.startsWith("/api/v1/notes/trash?") && listParams(path).get("limit") === "100")
+    expect(listParams(String(gathered)).get("sort_by")).toBe("created_at")
+    expect(listParams(String(gathered)).get("sort_order")).toBe("asc")
   })
 })

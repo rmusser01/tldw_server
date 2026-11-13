@@ -132,6 +132,8 @@ type NotesListPanelProps = {
   onOpenSettings: () => void
   onOpenHealth: () => void
   onRestoreNote: (id: string | number, version?: number) => void
+  /** A bulk action is running: row Restore waits for it (NL-05). */
+  restoreDisabled?: boolean
   onExportAllMd: () => void
   onExportAllCsv: () => void
   onExportAllJson: () => void
@@ -185,6 +187,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onOpenSettings,
   onOpenHealth,
   onRestoreNote,
+  restoreDisabled = false,
   onExportAllMd,
   onExportAllCsv,
   onExportAllJson,
@@ -195,7 +198,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   exportProgress = null,
   onCancelExport
 }) => {
-  const { t } = useTranslation(['option', 'settings', 'common'])
+  const { t, i18n } = useTranslation(['option', 'settings', 'common'])
+  // Dates read in the app's language, not the browser's (NL-04).
+  const appLanguage = i18n?.language
   const isTrashView = listMode === 'trash'
   const hasNotes = Array.isArray(notes) && notes.length > 0
   // A refresh of the same list keeps its rows on screen so the scroll position
@@ -214,6 +219,14 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
     [pinnedNoteIds]
   )
   const searchTerms = React.useMemo(() => extractSearchTerms(searchQuery), [searchQuery])
+  // Previews depend only on the rows, not on focus, selection or pins.
+  const previewTextById = React.useMemo(() => {
+    const previews = new Map<string, string>()
+    for (const note of notes ?? []) {
+      if (note.content) previews.set(String(note.id), derivePreviewText(note.content, note.title))
+    }
+    return previews
+  }, [notes])
   const selectedOnPage = hasNotes ? notes.filter((note) => bulkSelectedIdSet.has(String(note.id))).length : 0
   const allOnPageSelected = hasNotes && selectedOnPage === notes.length
   const showSelectAllOnPage = Boolean(onToggleSelectAllOnPage) && hasNotes
@@ -300,14 +313,14 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
 
   // NL-04: "3h ago" in the row, the full date in its tooltip.
   const renderRowDate = (value: string, parsed: Date, testId: string, id?: string) => (
-    <Tooltip title={parsed.toLocaleString()}>
+    <Tooltip title={parsed.toLocaleString(appLanguage)}>
       <time
         id={id}
         dateTime={value}
         data-testid={testId}
         className="shrink-0 whitespace-nowrap text-[11px] text-text-muted"
       >
-        {formatRelativeTime(value, t, { compact: true })}
+        {formatRelativeTime(value, t, { compact: true, locale: appLanguage })}
       </time>
     </Tooltip>
   )
@@ -592,7 +605,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
             <p id={rowHintId} className="sr-only">
               {t('option:notesSearch.listRowKeyboardHint', {
                 defaultValue:
-                  'Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin.'
+                  'Press Enter to open. Use the arrow keys to move between notes, X to select, P to pin, and C to open the chat a note came from.'
               })}
             </p>
           )}
@@ -614,14 +627,19 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                   selectedId != null && String(selectedId) === itemIdText
                 const isPinned = pinnedNoteIdSet.has(itemIdText)
                 const rowDomId = `${listDomId}-row-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
-                const previewText = item.content ? derivePreviewText(item.content, item.title) : ''
+                const previewText = previewTextById.get(itemIdText) ?? ''
                 const hasRowKeywords = Array.isArray(item.keywords) && item.keywords.length > 0
                 const rowDate = parseRowDate(item.updated_at)
                 const rowDateTestId = `notes-row-date-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
+                const rowConversationId =
+                  onOpenLinkedChat && item.conversation_id != null && String(item.conversation_id) !== ''
+                    ? String(item.conversation_id)
+                    : null
                 const rowDescribedBy = [
                   previewText || item.snippet ? `${rowDomId}-preview` : null,
                   hasRowKeywords ? `${rowDomId}-tags` : null,
                   rowDate ? `${rowDomId}-date` : null,
+                  rowConversationId ? `${rowDomId}-chat` : null,
                   rowHintId
                 ]
                   .filter(Boolean)
@@ -723,6 +741,11 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         if ((e.key === 'p' || e.key === 'P') && onTogglePinned) {
                           e.preventDefault()
                           onTogglePinned(item.id)
+                          return
+                        }
+                        if ((e.key === 'c' || e.key === 'C') && rowConversationId && onOpenLinkedChat) {
+                          e.preventDefault()
+                          onOpenLinkedChat(rowConversationId)
                         }
                       }}
                       onKeyUp={(e) => {
@@ -832,14 +855,15 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         )}
                       </div>
                     </button>
-                    {item.conversation_id != null && String(item.conversation_id) !== '' && (() => {
+                    {rowConversationId && (() => {
                       // Outside the open-note button: a button may not hold another one.
-                      const conversationId = String(item.conversation_id)
+                      const conversationId = rowConversationId
                       const conversationLabel = conversationLabelById[conversationId]
                       return (
                         <button
                           type="button"
-                          className="mt-0.5 flex max-w-full items-center gap-1 text-left text-xs text-primary hover:underline"
+                          id={`${rowDomId}-chat`}
+                          className={`${ROW_CONTROL_TARGET_CLASS} mt-0.5 max-w-full gap-1 text-left text-xs text-primary hover:underline`}
                           title={t('option:notesSearch.fromChatTooltip', {
                             defaultValue: 'Open the chat this note was saved from'
                           })}
@@ -855,7 +879,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                             {t('option:notesSearch.fromChatLink', { defaultValue: 'From chat' })}
                             {conversationLabel ? (
                               <>
-                                {': '}
+                                {t('option:notesSearch.fromChatTitleSeparator', { defaultValue: ': ' })}
                                 <span className="font-medium">{conversationLabel}</span>
                               </>
                             ) : null}
@@ -909,6 +933,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       <Button
                         size="small"
                         type="primary"
+                        disabled={restoreDisabled}
                         onClick={() => onRestoreNote(item.id, item.version)}
                         data-testid={`notes-restore-${String(item.id)}`}
                       >

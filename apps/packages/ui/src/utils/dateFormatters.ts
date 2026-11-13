@@ -2,6 +2,8 @@ import type { TFunction } from "i18next"
 
 interface FormatRelativeTimeOptions {
   compact?: boolean
+  /** BCP 47 language for dates older than a week; the browser's when unset. */
+  locale?: string
 }
 
 export const formatRelativeTime = (
@@ -13,7 +15,7 @@ export const formatRelativeTime = (
   if (Number.isNaN(date.getTime())) {
     return t("relativeTime.unknown", "Unknown")
   }
-  const { compact = false } = options
+  const { compact = false, locale } = options
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / (1000 * 60))
@@ -48,7 +50,7 @@ export const formatRelativeTime = (
       })
     }
 
-    return date.toLocaleDateString()
+    return date.toLocaleDateString(locale)
   }
 
   if (diffMins < 60) {
@@ -75,5 +77,5 @@ export const formatRelativeTime = (
     })
   }
 
-  return date.toLocaleDateString()
+  return date.toLocaleDateString(locale)
 }

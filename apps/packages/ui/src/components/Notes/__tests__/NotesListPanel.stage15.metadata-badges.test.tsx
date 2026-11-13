@@ -71,6 +71,7 @@ describe("NotesListPanel stage 15 metadata badges", () => {
         onOpenSettings={vi.fn()}
         onOpenHealth={vi.fn()}
         onRestoreNote={vi.fn()}
+        onOpenLinkedChat={vi.fn()}
         onExportAllMd={vi.fn()}
         onExportAllCsv={vi.fn()}
         onExportAllJson={vi.fn()}

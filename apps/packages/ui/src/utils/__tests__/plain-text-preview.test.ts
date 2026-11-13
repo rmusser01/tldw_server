@@ -20,6 +20,13 @@ describe("markdownLineToPlainText", () => {
     ["- [ ] open task", "open task"],
     ["* bullet", "bullet"],
     ["12. numbered", "numbered"],
+    ["<div><p>Hello <b>world</b></p></div>", "Hello world"],
+    ["**bold _and italic_ and `code`**", "bold and italic and code"],
+    ["***both***", "both"],
+    ["[x](https://en.wikipedia.org/wiki/Foo_(bar)) after", "x after"],
+    ["\\*not italic\\* and 1\\_2", "*not italic* and 1_2"],
+    ["| a | b |", "a · b"],
+    ["> [!NOTE] Heads up", "Heads up"],
     ["snake_case_name stays", "snake_case_name stays"],
     ["2 * 3 * 4", "2 * 3 * 4"]
   ])("turns %j into %j", (line, expected) => {
@@ -48,7 +55,36 @@ describe("toPlainPreview", () => {
 
   it("collapses whitespace and truncates to one short line", () => {
     const preview = toPlainPreview(`Lots   of\tspace ${"word ".repeat(60)}`, { maxLength: 20 })
-    expect(preview).toBe("Lots of space word w...")
+    expect(preview).toBe("Lots of space word w…")
+  })
+
+  it("cuts by character, never through an emoji's surrogate pair", () => {
+    const preview = toPlainPreview("😀".repeat(200), { maxLength: 60 })
+    expect(Array.from(preview)).toHaveLength(61)
+    expect(preview.endsWith("😀…")).toBe(true)
+    expect(preview).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/)
+  })
+
+  it("skips YAML front matter", () => {
+    expect(toPlainPreview("---\ntitle: Hello\ntags: [a]\n---\nBody")).toBe("Body")
+  })
+
+  it("skips a callout marker line and a setext underline", () => {
+    expect(toPlainPreview("> [!NOTE]\n> text")).toBe("text")
+    expect(toPlainPreview("Title\n=====\nBody", { skipLine: "Title" })).toBe("Body")
+  })
+
+  it("reads a table's first row as its cells", () => {
+    expect(toPlainPreview("| a | b |\n|---|---|\n| 1 | 2 |")).toBe("a · b")
+  })
+
+  it("stays fast on a huge line with unclosed emphasis", () => {
+    const started = performance.now()
+    toPlainPreview("**a ".repeat(80000))
+    toPlainPreview("_a ".repeat(40000))
+    toPlainPreview("~~a ".repeat(40000))
+    toPlainPreview("x".repeat(5_000_000))
+    expect(performance.now() - started).toBeLessThan(500)
   })
 
   it("handles CRLF content", () => {

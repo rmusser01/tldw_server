@@ -42,4 +42,18 @@ describe("useNotesBulkRun (NL-05)", () => {
     rerender({ scope: "scope-b" })
     expect(result.current.failures).toBeNull()
   })
+
+  it("drops a run's failures when the account changed while it ran", () => {
+    const { result, rerender } = renderHook(({ scope }) => useNotesBulkRun(scope), {
+      initialProps: { scope: "scope-a" }
+    })
+    let run: ReturnType<typeof result.current.begin> = null
+    act(() => {
+      run = result.current.begin("delete")
+    })
+    rerender({ scope: "scope-b" })
+    act(() => run!.finish([{ id: "n1", title: "Alpha" }]))
+    expect(result.current.failures).toBeNull()
+    expect(result.current.isRunning).toBe(false)
+  })
 })

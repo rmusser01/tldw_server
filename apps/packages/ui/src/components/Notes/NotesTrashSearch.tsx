@@ -4,6 +4,9 @@ import { Search as SearchIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { NOTE_SEARCH_DEBOUNCE_MS } from './notes-manager-utils'
 
+/** GET /api/v1/notes/trash accepts a query of at most 200 characters. */
+const TRASH_SEARCH_MAX_LENGTH = 200
+
 type NotesTrashSearchProps = {
   /** The search the Trash list applies now. */
   value: string
@@ -21,9 +24,10 @@ export const NotesTrashSearch: React.FC<NotesTrashSearchProps> = ({ value, onSea
   const onSearchRef = React.useRef(onSearch)
   onSearchRef.current = onSearch
 
-  // A search cleared from elsewhere (an empty state's Clear) clears the box.
+  // A search changed elsewhere (an empty state's Clear) updates the box. Applying
+  // the box's own text must not: that would eat a space typed before a pause.
   React.useEffect(() => {
-    setInput(value)
+    setInput((current) => (current.trim() === value.trim() ? current : value))
   }, [value])
 
   React.useEffect(() => {
@@ -40,6 +44,7 @@ export const NotesTrashSearch: React.FC<NotesTrashSearchProps> = ({ value, onSea
       aria-label={t('option:notesSearch.trashSearchAria', { defaultValue: 'Search Trash' })}
       prefix={<SearchIcon className="h-4 w-4 text-text-subtle" aria-hidden="true" />}
       value={input}
+      maxLength={TRASH_SEARCH_MAX_LENGTH}
       data-testid="notes-trash-search"
       onChange={(event) => setInput(event.target.value)}
       onPressEnter={() => onSearch(input.trim())}
