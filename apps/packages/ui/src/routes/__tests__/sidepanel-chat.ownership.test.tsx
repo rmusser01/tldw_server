@@ -277,7 +277,8 @@ vi.mock("@/services/app", () => ({ copilotResumeLastChat: async () => false }))
 vi.mock("@/components/Sidepanel/Chat/body", () => ({
   SidePanelBody: () => {
     io.controller = useHistorySelectionContext()
-    return <div>
+    // Like the real body, the message rows are the side panel's one log (AX-11).
+    return <div role="log" aria-label="Chat messages">
       {useStoreMessageOption((state) => state.messages).map((item, index) => (
         <p key={index}>{item.message}</p>
       ))}
@@ -1457,6 +1458,11 @@ describe.each([
     await screen.findByText("alice first")
     const composer = await screen.findByRole("textbox", { name: "Composer draft" })
     expect(screen.getByTestId("chat-messages")).toContainElement(composer)
+    // AX-11: the scroller is not a log, so the composer scrolling in it is
+    // not announced as part of the conversation.
+    expect(screen.getByTestId("chat-messages")).not.toHaveAttribute("role")
+    expect(screen.getAllByRole("log")).toHaveLength(1)
+    expect(composer.closest('[role="log"]')).toBeNull()
   })
 
   it("hides 'Scroll to latest' while the chat is empty (XS-09)", async () => {

@@ -2,6 +2,14 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu"
 import { openModelSelector } from "@/utils/model-selector-events"
+import { dispatchOpenPromptSelect } from "@/utils/prompt-select-events"
+import {
+  buildServerSlashCommands,
+  mergeSlashCommands,
+  useServerSlashCommandPayload,
+  type SlashCommandMeta
+} from "@/hooks/chat/server-slash-commands"
+import { useConnectionStore } from "@/store/connection"
 
 /**
  * A parsed composer submission. Resolving one never runs a command: the
@@ -36,6 +44,8 @@ export type UseSlashCommandsParams = {
   imageBackendDefaultTrimmed: string
   imageBackendLabel: string
   currentMessage: string
+  /** `/new`: the header's New chat path (`startSavedChat`). */
+  onNewChat: () => void
 }
 
 export function useSlashCommands({
@@ -46,11 +56,14 @@ export function useSlashCommands({
   handleImageUpload,
   imageBackendDefaultTrimmed,
   imageBackendLabel,
-  currentMessage
+  currentMessage,
+  onNewChat
 }: UseSlashCommandsParams) {
   const { t } = useTranslation(["playground", "common"])
+  const serverOnline = useConnectionStore((state) => state.state.isConnected)
+  const serverPayload = useServerSlashCommandPayload(serverOnline)
 
-  const slashCommands = React.useMemo<SlashCommandItem[]>(
+  const localCommands = React.useMemo<SlashCommandItem[]>(
     () => [
       {
         id: "slash-search",
@@ -126,6 +139,36 @@ export function useSlashCommands({
         action: () => {
           openModelSelector()
         }
+      },
+      {
+        id: "slash-new",
+        command: "new",
+        label: t("playground:composer.slashNew", "New chat"),
+        description: t(
+          "playground:composer.slashNewDesc",
+          "Start a new saved chat"
+        ),
+        keywords: ["clear", "reset", "start"],
+        // The header's New chat path (CC-11). The chat changes under the
+        // draft, so nothing after the command is sent.
+        standalone: true,
+        action: onNewChat
+      },
+      {
+        id: "slash-prompt",
+        command: "prompt",
+        label: t("playground:composer.slashPrompt", "Use a prompt"),
+        description: t(
+          "playground:composer.slashPromptDesc",
+          "Pick a saved prompt for this chat"
+        ),
+        keywords: ["prompts", "template", "system"],
+        action: () => {
+          dispatchOpenPromptSelect({
+            source: "slash-command",
+            returnFocusSelector: "#textarea-message"
+          })
+        }
       }
     ],
     [
@@ -134,11 +177,32 @@ export function useSlashCommands({
       imageBackendDefaultTrimmed,
       imageBackendLabel,
       setChatMode,
+      onNewChat,
       setWebSearch,
       t,
       webSearch
     ]
   )
+
+  // Server commands (CC-11) reuse a local command's wording and action when
+  // the names match; the rest have no local action and are sent as typed.
+  const slashCommands = React.useMemo<SlashCommandItem[]>(() => {
+    const fallbackMeta: Record<string, SlashCommandMeta> = {}
+    const localActions: Record<string, (() => void) | undefined> = {}
+    for (const command of localCommands) {
+      fallbackMeta[command.command] = {
+        label: command.label,
+        description: command.description ?? "",
+        keywords: command.keywords ?? [],
+        insertText: command.insertText
+      }
+      localActions[command.command] = command.action
+    }
+    const serverCommands = serverOnline
+      ? buildServerSlashCommands(serverPayload, fallbackMeta, localActions)
+      : []
+    return mergeSlashCommands(serverCommands, localCommands)
+  }, [localCommands, serverOnline, serverPayload])
 
   const slashCommandLookup = React.useMemo(
     () => new Map(slashCommands.map((command) => [command.command, command])),
@@ -281,6 +345,12 @@ export function useSlashCommands({
       const parsed = parseSlashInput(currentMessage)
       if (command.insertText) {
         formSetFieldValue("message", command.insertText)
+        requestAnimationFrame(() => textareaRef.current?.focus())
+        return
+      }
+      if (!command.action) {
+        // A server command: leave it in the composer for its arguments.
+        formSetFieldValue("message", `/${command.command} `)
         requestAnimationFrame(() => textareaRef.current?.focus())
         return
       }

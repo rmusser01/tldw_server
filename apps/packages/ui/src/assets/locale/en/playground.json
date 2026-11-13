@@ -536,6 +536,10 @@
     "slashGenerateImageDesc": "Generate an image. Use /generate-image:<provider> <prompt>.",
     "slashGenerateImageDescDefault": "Generate an image (default: {{backend}}). Use /generate-image:<provider> to override.",
     "slashModelDesc": "Choose the model for this chat",
+    "slashNew": "New chat",
+    "slashNewDesc": "Start a new saved chat",
+    "slashPrompt": "Use a prompt",
+    "slashPromptDesc": "Pick a saved prompt for this chat",
     "captureTools": "Capture and assist tools",
     "actions": "Send options",
     "moreTools": "More tools",
@@ -1826,5 +1830,8 @@
     "viewToolbar": "Conversation view",
     "noArtifactsYet": "No artifacts yet",
     "artifactsShort": "Artifacts"
+  },
+  "focusBar": {
+    "openChatList": "Open chat list"
   }
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PageAssistContext } from "@/context"
@@ -344,5 +344,48 @@ describe("SidePanelBody row memoization (WP-02/WP-03/WP-09)", () => {
         .getAllByTestId("sidepanel-row")
         .filter((row) => row.getAttribute("data-is-streaming") === "true")
     ).toHaveLength(0)
+  })
+})
+
+// AX-11: one polite log that holds only the messages, busy while a reply
+// streams; the finished reply's completion is announced beside it.
+describe("SidePanelBody transcript log (AX-11)", () => {
+  const renderBody = (state: { messages: any[]; streaming: boolean }) => {
+    sidepanelMessageState.value = {
+      ...sidepanelMessageState.value,
+      isProcessing: false,
+      ...state
+    }
+    const context = {
+      controller: null,
+      setController: vi.fn(),
+      embeddingController: null,
+      setEmbeddingController: vi.fn()
+    }
+    render(
+      <PageAssistContext.Provider value={context as any}>
+        <SidePanelBody />
+      </PageAssistContext.Provider>
+    )
+  }
+
+  it("has one polite log of the messages, busy while a reply streams", () => {
+    renderBody({ messages: buildMessages(3), streaming: true })
+    const logs = screen.getAllByRole("log")
+    expect(logs).toHaveLength(1)
+    const [log] = logs
+    expect(log).toHaveAccessibleName("Chat messages")
+    expect(log).toHaveAttribute("aria-live", "polite")
+    expect(log).toHaveAttribute("aria-relevant", "additions")
+    expect(log).toHaveAttribute("aria-busy", "true")
+    expect(within(log).getAllByTestId("sidepanel-row")).toHaveLength(3)
+    expect(log).not.toContainElement(screen.getByTestId("chat-reply-announcer"))
+  })
+
+  it("is not busy once the reply settles, and keeps the empty state out of the log", () => {
+    renderBody({ messages: [], streaming: false })
+    const log = screen.getByRole("log", { name: "Chat messages" })
+    expect(log).not.toHaveAttribute("aria-busy")
+    expect(log).not.toContainElement(screen.getByTestId("empty-sidepanel"))
   })
 })

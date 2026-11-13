@@ -2108,6 +2108,18 @@
   "composer_slashModelDesc": {
     "message": "Choose the model for this chat"
   },
+  "composer_slashNew": {
+    "message": "New chat"
+  },
+  "composer_slashNewDesc": {
+    "message": "Start a new saved chat"
+  },
+  "composer_slashPrompt": {
+    "message": "Use a prompt"
+  },
+  "composer_slashPromptDesc": {
+    "message": "Pick a saved prompt for this chat"
+  },
   "imageBackend_menuLabel": {
     "message": "Default image provider"
   },
@@ -4946,5 +4958,8 @@
   },
   "historySelection_alternativeReplies": {
     "message": "This chat has alternative replies. Only the newest is shown; review the history to choose which ones the AI sees."
+  },
+  "focusBar_openChatList": {
+    "message": "Open chat list"
   }
 }

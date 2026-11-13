@@ -517,9 +517,23 @@ vi.mock("@plasmohq/storage/hook", () => ({
   },
 }));
 
+const mediaState = vi.hoisted(() => ({ mobile: false }));
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false,
-  useDesktop: () => true,
+  useMobile: () => mediaState.mobile,
+  useDesktop: () => !mediaState.mobile,
+}));
+
+// The phone focus bar's New chat and title read the app's shared chat state;
+// the bar's own wiring is what these tests check (CO-01).
+const focusBarState = vi.hoisted(() => ({
+  title: "",
+  startSavedChat: vi.fn(() => true),
+}));
+vi.mock("@/hooks/useActiveChatTitle", () => ({
+  useActiveChatTitle: () => ({ title: focusBarState.title }),
+}));
+vi.mock("@/hooks/chat/useStartSavedChat", () => ({
+  useStartSavedChat: () => focusBarState.startSavedChat,
 }));
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
@@ -586,6 +600,9 @@ describe("Playground cockpit controls", () => {
     storageState.values.set("playgroundChatContextRailVisible", true);
     storageState.values.set("playgroundChatRuntimeRailVisible", true);
     layoutShellOverrideState.overrides = [];
+    mediaState.mobile = false;
+    focusBarState.title = "";
+    focusBarState.startSavedChat.mockClear();
     modelSettingsState.value.systemPrompt = "";
     modelSettingsState.value.setSystemPrompt = vi.fn();
     modelSettingsState.value.temperature = 0.7;
@@ -1550,6 +1567,71 @@ describe("Playground cockpit controls", () => {
     expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
     expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled()
   })
+
+  // CO-01: phones open /chat in Focus, which hides the header and sidebar.
+  // A slim bar keeps the chat list, the title, New chat and Exit focus.
+  it("gives phone Focus a top bar with the chat list, title, New chat and Exit focus (CO-01)", async () => {
+    mediaState.mobile = true;
+    messageOptionState.value.temporaryChat = false;
+    focusBarState.title = "Trip plans";
+    const openChatList = vi.fn();
+    window.addEventListener("tldw:open-chat-sidebar", openChatList);
+    try {
+      renderPlayground();
+      // Focus stays the phone default.
+      expect(await screen.findByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+      const bar = screen.getByTestId("playground-focus-bar");
+      expect(within(bar).getByRole("heading", { name: "Trip plans" })).toBeInTheDocument();
+
+      fireEvent.click(within(bar).getByRole("button", { name: "New saved chat" }));
+      expect(focusBarState.startSavedChat).toHaveBeenCalledTimes(1);
+
+      // CO-N1: Exit focus sits in the bar, not floating over the messages.
+      const exitFocus = within(bar).getByRole("button", { name: "Exit focus" });
+      expect(exitFocus).toHaveAttribute("data-testid", "playground-chat-layout-mode-trigger");
+      expect(screen.getAllByTestId("playground-chat-layout-mode-trigger")).toHaveLength(1);
+      expect(exitFocus.className).not.toMatch(/\bfixed\b/);
+
+      fireEvent.click(within(bar).getByRole("button", { name: "Open chat list" }));
+      expect(openChatList).toHaveBeenCalledTimes(1);
+      await waitFor(() =>
+        expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "cockpit")
+      );
+    } finally {
+      window.removeEventListener("tldw:open-chat-sidebar", openChatList);
+    }
+  });
+
+  it.each([
+    [false, "New Chat"],
+    [true, "Temporary chat (on this device)"],
+  ])("names an untitled chat in the phone Focus bar (temporary: %s) (CO-01)", async (temporary, name) => {
+    mediaState.mobile = true;
+    messageOptionState.value.temporaryChat = temporary;
+    renderPlayground();
+    const bar = await screen.findByTestId("playground-focus-bar");
+    expect(within(bar).getByRole("heading", { name })).toBeInTheDocument();
+  });
+
+  // CO-N1: where the floating pill stays (wider screens), the transcript
+  // starts below it instead of under it.
+  it("keeps the Exit focus pill on wide screens and pads the transcript below it (CO-N1)", async () => {
+    storageState.values.set("playgroundChatLayoutMode", "focus");
+    renderPlayground();
+    expect(await screen.findByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+    expect(screen.queryByTestId("playground-focus-bar")).toBeNull();
+    expect(screen.getByTestId("playground-chat-layout-mode-trigger").className).toMatch(/\bfixed\b/);
+    const scroller = screen.getByTestId("playground-chat").closest(".overflow-y-auto") as HTMLElement;
+    expect(scroller.className).toMatch(/\bpt-14\b/);
+    expect(scroller.className).toMatch(/\bscroll-pt-14\b/);
+
+    fireEvent.click(screen.getByTestId("playground-chat-layout-mode-trigger"));
+    await waitFor(() =>
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "cockpit")
+    );
+    const cockpitScroller = screen.getByTestId("playground-chat").closest(".overflow-y-auto") as HTMLElement;
+    expect(cockpitScroller.className).not.toMatch(/\bpt-14\b/);
+  });
 
   it("does not render cockpit control rails in focus mode", async () => {
     storageState.values.set("playgroundChatLayoutMode", "focus");

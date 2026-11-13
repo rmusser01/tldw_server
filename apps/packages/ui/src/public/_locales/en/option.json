@@ -7106,6 +7106,15 @@
   "notesSearch_shortcutListReturnDescription": {
     "message": "Return to the notes list."
   },
+  "notesSearch_wikilinkSuggestionCount": {
+    "message": "{{count}} notes"
+  },
+  "notesSearch_wikilinkSuggestionCount_one": {
+    "message": "{{count}} note"
+  },
+  "notesSearch_wikilinkSuggestionCount_other": {
+    "message": "{{count}} notes"
+  },
   "header_browsePages": {
     "message": "Browse pages"
   },

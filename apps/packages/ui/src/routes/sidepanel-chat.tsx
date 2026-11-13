@@ -3125,10 +3125,6 @@ const SidepanelChatContent = ({
 
           <div
             ref={containerRef}
-            role="log"
-            aria-live="polite"
-            aria-relevant="additions"
-            aria-label={t("playground:aria.chatTranscript", "Chat messages")}
             data-testid="chat-messages"
             className={`custom-scrollbar relative z-10 flex min-w-0 flex-1 min-h-0 w-full flex-col items-center overflow-x-hidden overflow-y-auto ${messagePadding}`}
             style={

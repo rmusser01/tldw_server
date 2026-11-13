@@ -80,8 +80,8 @@ test.describe("RAG search in sidepanel", () => {
       }
       await insertLink.click()
 
-      // Message textarea should contain inserted text
-      const ta = sp.getByRole("textbox")
+      // Message textarea should contain inserted text (a combobox for its suggestions, AX-12)
+      const ta = sp.getByTestId("chat-input")
       await expect(ta).toContainText("Source:")
 
       // Ask directly
