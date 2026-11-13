@@ -1097,6 +1097,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         {selectedId != null && (
           <CollapsibleSection
             key={noteNeighborsRequestKey}
+            headingLevel={3}
             title={t('option:notesSearch.connectionsSectionTitle', {
               defaultValue: 'Connections'
             })}
@@ -1643,6 +1644,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           <div className="mt-3 rounded-lg border border-border bg-surface2 p-2">
             <CollapsibleSection
               key={`${selectedId ?? 'draft'}-${tocEntries.length > 6}`}
+              headingLevel={3}
               title={t('option:notesSearch.tocHeading', { defaultValue: 'Table of contents' })}
               badge={tocEntries.length}
               defaultOpen={tocEntries.length <= 6}

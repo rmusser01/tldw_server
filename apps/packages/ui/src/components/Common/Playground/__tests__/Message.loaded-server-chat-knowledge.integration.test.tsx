@@ -1001,12 +1001,18 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
         await waitFor(() => expect(actions[0]).toHaveFocus())
       })
 
-      it(`${surface} ${role} Tab reaches the next real overflow action before later composer controls`, async () => {
-        const { user, actions } = await openKeyboardMenu(renderChat, role)
+      it(`${surface} ${role} Tab ${role === "assistant" ? "closes the menu onto its trigger" : "reaches the next real overflow action"} before later composer controls`, async () => {
+        const { user, trigger, menu, actions } = await openKeyboardMenu(renderChat, role)
         // Qualify Tab independently of the first-focus assertion above.
         actions[0].focus()
         await user.tab()
-        expect(actions[1]).toHaveFocus()
+        if (role === "assistant") {
+          // The reply's overflow is a menu: Tab leaves it (AX-02).
+          await expectClosedMenu(menu)
+          expect(trigger).toHaveFocus()
+        } else {
+          expect(actions[1]).toHaveFocus()
+        }
         expect(screen.getByRole("textbox", { name: "Later composer input" })).not.toHaveFocus()
       })
 

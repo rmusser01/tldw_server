@@ -87,4 +87,14 @@ describe("SidepanelHeaderSimple page heading", () => {
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Companion")
   })
+
+  it("adds no h1 for a page that renders its own", () => {
+    render(
+      <MemoryRouter>
+        <SidepanelHeaderSimple activeTitle="Companion" heading={null} />
+      </MemoryRouter>
+    )
+
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+  })
 })

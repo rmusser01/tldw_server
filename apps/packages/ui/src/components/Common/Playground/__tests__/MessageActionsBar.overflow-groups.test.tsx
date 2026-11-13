@@ -111,7 +111,11 @@ describe("MessageActionsBar overflow menu", () => {
       />
     )
 
-    const actions = within(menu()).getAllByRole("menuitem")
+    // Steering toggles are menuitemcheckbox items (AX-02).
+    const actions = [
+      ...within(menu()).getAllByRole("menuitem"),
+      ...within(menu()).getAllByRole("menuitemcheckbox")
+    ]
     expect(actions.length).toBeGreaterThan(8)
     for (const action of actions) {
       expect(action.querySelector("svg"), action.textContent ?? "").not.toBeNull()
@@ -125,7 +129,7 @@ describe("MessageActionsBar overflow menu", () => {
       "Make this shorter",
       "Explain this"
     ]) {
-      expect(within(menu()).getByRole("menuitem", { name: label })).toBeInTheDocument()
+      expect(within(menu()).getByText(label).closest("[role^='menuitem']")).not.toBeNull()
     }
   })
 
@@ -141,7 +145,8 @@ describe("MessageActionsBar overflow menu", () => {
     )
 
     const readAloud = within(menu()).getByRole("menuitem", { name: "Read Aloud" })
-    expect(readAloud).toBeDisabled()
+    // Focusable, so the reason is read, but marked unavailable (AX-02).
+    expect(readAloud).toHaveAttribute("aria-disabled", "true")
     expect(readAloud).toHaveAccessibleDescription(reason)
     expect(within(menu()).getByText(reason)).toBeVisible()
   })
