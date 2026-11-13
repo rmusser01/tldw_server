@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import NotesListPanel from "../NotesListPanel"
 import type { ServerCapabilities } from "@/services/tldw/server-capabilities"
@@ -76,5 +76,36 @@ describe("NotesListPanel NL-04 rows", () => {
   it("previews plain text in Trash rows too", () => {
     renderList([baseNote({ content: "## _Removed_ idea", deleted: true })], { listMode: "trash" })
     expect(screen.getByText("Removed idea")).toBeInTheDocument()
+  })
+
+  it("replaces the conversation line with a 'From chat' link and no ids", () => {
+    const conversationId = "acd86f3a-492e-4a8b-90fb-ff282b9721fb"
+    const onOpenLinkedChat = vi.fn()
+    const onSelectNote = vi.fn()
+    const { container } = renderList(
+      [baseNote({ conversation_id: conversationId, message_id: "9f1c2d3e-0000-4b8b-90fb-0123456789ab" })],
+      { onOpenLinkedChat, onSelectNote }
+    )
+    const link = screen.getByTestId("notes-from-chat-n1")
+    expect(link).toHaveTextContent("From chat")
+    expect(container).not.toHaveTextContent(conversationId)
+    expect(container).not.toHaveTextContent("9f1c2d3e")
+    expect(container).not.toHaveTextContent("msg ")
+    expect(container).not.toHaveTextContent("Linked to conversation")
+    // The link is not nested inside the row's open-note button.
+    expect(screen.getByTestId("notes-open-button-n1")).not.toContainElement(link)
+
+    fireEvent.click(link)
+    expect(onOpenLinkedChat).toHaveBeenCalledWith(conversationId)
+    expect(onSelectNote).not.toHaveBeenCalled()
+  })
+
+  it("names the chat in the 'From chat' link once its title resolves", () => {
+    renderList([baseNote({ conversation_id: "conv-7" })], {
+      conversationLabelById: { "conv-7": "Research session" }
+    })
+    const link = screen.getByTestId("notes-from-chat-n1")
+    expect(link).toHaveTextContent("From chat: Research session")
+    expect(within(link).getByText("Research session")).toBeInTheDocument()
   })
 })

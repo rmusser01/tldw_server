@@ -119,6 +119,7 @@ import {
   hasNotesGraphActiveNotes,
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
+import { collectConversationIdsToResolve, settleInBatches } from './notes-conversation-labels'
 import { isEditableTarget } from "@/utils/editable-target"
 import { useConnectionsMemory } from './notes-connections'
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
@@ -143,12 +144,6 @@ const isMissingConversationLookupError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error)
   return /\b(not found|404)\b/i.test(message)
 }
-
-const UUID_LIKE_CONVERSATION_ID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-
-const shouldAutoResolveConversationLabel = (conversationId: string): boolean =>
-  !UUID_LIKE_CONVERSATION_ID.test(conversationId)
 
 const CONVERSATION_LABEL_MAX_RETRIES = 3
 const CONVERSATION_LABEL_RETRY_DELAY_MS = 1500
@@ -953,23 +948,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     return conversationLabelById[id] || null
   }, [ed.backlinkConversationId, conversationLabelById])
 
-  const conversationIdsToResolve = React.useMemo(() => {
-    const ids = new Set<string>()
-    const selectedConversationId = normalizeConversationId(ed.backlinkConversationId)
-    for (const note of visibleNotes) {
-      const normalized = normalizeConversationId(note?.conversation_id)
-      if (!normalized) continue
-      if (shouldAutoResolveConversationLabel(normalized)) {
-        ids.add(normalized)
-        continue
-      }
-      if (selectedConversationId && normalized === selectedConversationId) {
-        ids.add(normalized)
-      }
-    }
-    if (selectedConversationId) ids.add(selectedConversationId)
-    return Array.from(ids)
-  }, [ed.backlinkConversationId, visibleNotes])
+  const conversationIdsToResolve = React.useMemo(
+    () => collectConversationIdsToResolve(visibleNotes, ed.backlinkConversationId),
+    [ed.backlinkConversationId, visibleNotes]
+  )
 
   const resolveConversationLabels = React.useCallback(
     async (conversationIds: string[]) => {
@@ -986,13 +968,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       )
       try {
         await tldwClient.initialize().catch(() => null)
-        const settled = await Promise.allSettled(
-          pending.map(async (conversationId) => {
-            const chat = await tldwClient.getChat(conversationId)
-            const label = toConversationLabel(chat)
-            return { conversationId, label }
-          })
-        )
+        const settled = await settleInBatches(pending, async (conversationId) => {
+          const chat = await tldwClient.getChat(conversationId)
+          return { conversationId, label: toConversationLabel(chat) }
+        })
         setConversationLabelById((current) => {
           let next: Record<string, string> | null = null
           for (const result of settled) {
@@ -2405,8 +2384,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const linkedChatRequestRef = React.useRef<AbortController | null>(null)
   React.useEffect(() => () => { linkedChatRequestRef.current?.abort() }, [linkedChatSourceKey])
 
-  const openLinkedConversation = async () => {
-    const conversationId = ed.backlinkConversationId
+  // A list row's "From chat" link names its own chat (NL-04); the editor opens the open note's.
+  const openLinkedConversation = async (rowConversationId?: string) => {
+    const conversationId = rowConversationId ?? ed.backlinkConversationId
     if (!conversationId) {
       message.warning(t("option:notesSearch.noLinkedConversation", { defaultValue: "No linked conversation to open." }))
       return
@@ -2909,6 +2889,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         deleteSelectedBulk={deleteSelectedBulk}
         toggleNotePinned={ed.toggleNotePinned}
         restoreNote={restoreNote}
+        openLinkedChat={(conversationId) => { void openLinkedConversation(conversationId) }}
         exportAll={exp.exportAll}
         exportAllCSV={exp.exportAllCSV}
         exportAllJSON={exp.exportAllJSON}

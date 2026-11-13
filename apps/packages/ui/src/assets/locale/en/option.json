@@ -1363,6 +1363,8 @@
     "offlineSaveUnavailable": "Offline saving is unavailable until your account and local storage are confirmed. Your changes remain unsaved.",
     "linkedConversation": "Linked to conversation",
     "linkedChatUnresolved": "Linked chat",
+    "fromChatLink": "From chat",
+    "fromChatTooltip": "Open the chat this note was saved from",
     "linkedConversationIdLabel": "Conversation ID",
     "linkedMessageIdLabel": "Message ID",
     "openConversation": "Open conversation",

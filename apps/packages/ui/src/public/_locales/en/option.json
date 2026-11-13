@@ -1247,6 +1247,12 @@
   "notesSearch_linkedChatUnresolved": {
     "message": "Linked chat"
   },
+  "notesSearch_fromChatLink": {
+    "message": "From chat"
+  },
+  "notesSearch_fromChatTooltip": {
+    "message": "Open the chat this note was saved from"
+  },
   "notesSearch_linkedConversationIdLabel": {
     "message": "Conversation ID"
   },

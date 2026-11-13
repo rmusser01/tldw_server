@@ -170,6 +170,8 @@ export interface NotesSidebarProps {
   exportSelectedBulk: () => void
   addTagsToSelectedBulk: () => Promise<void>
   deleteSelectedBulk: () => Promise<void>
+  /** Opens the chat a list row came from (NL-04). */
+  openLinkedChat?: (conversationId: string) => void
   toggleNotePinned: (id: string | number) => Promise<void>
   restoreNote: (id: string | number, version?: number) => Promise<void>
   exportAll: () => Promise<void>
@@ -310,6 +312,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   exportSelectedBulk,
   addTagsToSelectedBulk,
   deleteSelectedBulk,
+  openLinkedChat,
   toggleNotePinned,
   restoreNote,
   exportAll,
@@ -1384,6 +1387,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 onTogglePinned={(id) => {
                   void toggleNotePinned(id)
                 }}
+                onOpenLinkedChat={openLinkedChat}
                 onChangePage={(nextPage, nextPageSize) => {
                   const normalizedPageSize = Number(nextPageSize || pageSize)
                   const sizeChanged = normalizedPageSize !== pageSize

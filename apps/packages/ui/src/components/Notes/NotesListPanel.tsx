@@ -2,12 +2,11 @@ import { stripKnowledgeNoteProvenance } from '@/utils/knowledge-note-provenance'
 import { toPlainPreview } from '@/utils/plain-text-preview'
 import React from 'react'
 import { Button, Dropdown, Pagination, Spin, Tooltip } from 'antd'
-import { Clock3 as ClockIcon, Link2 as LinkIcon, Star as StarIcon, Tag as TagIcon } from 'lucide-react'
+import { Clock3 as ClockIcon, Link2 as LinkIcon, MessageSquare as ChatIcon, Star as StarIcon, Tag as TagIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NoteListItem } from '@/components/Notes/types'
 import { moveNotesListRowFocus } from './notes-list-keyboard'
-import { formatBacklinkIdsTooltip } from './notes-backlink-labels'
 
 const LazyNotesListPanelEmptyStates = React.lazy(() => import('./NotesListPanelEmptyStates'))
 
@@ -112,6 +111,8 @@ type NotesListPanelProps = {
   onOpenNoteFromKeyboard?: (id: string | number) => void
   onToggleBulkSelection?: (id: string | number, checked: boolean, shiftKey: boolean) => void
   onTogglePinned?: (id: string | number) => void
+  /** A row's "From chat" link: opens the chat the note was saved from (NL-04). */
+  onOpenLinkedChat?: (conversationId: string) => void
   onChangePage: (page: number, pageSize: number) => void
   onCreateNote: () => void
   onResetEditor: () => void
@@ -163,6 +164,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onOpenNoteFromKeyboard,
   onToggleBulkSelection,
   onTogglePinned,
+  onOpenLinkedChat,
   onChangePage,
   onCreateNote,
   onResetEditor,
@@ -636,6 +638,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         aria-hidden="true"
                       />
                     </button>
+                    <div className="min-w-0 flex-1">
                     <button
                       type="button"
                       aria-label={t('option:notesSearch.openNoteAria', {
@@ -773,28 +776,6 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                             )}
                           </div>
                         )}
-                        {item.conversation_id &&
-                          (() => {
-                            const conversationId = String(item.conversation_id)
-                            const conversationLabel = conversationLabelById[conversationId]
-                            return (
-                              <div className="text-xs text-primary mt-1">
-                                {conversationLabel
-                                  ? `${t('option:notesSearch.linkedConversation', {
-                                      defaultValue: 'Linked to conversation'
-                                    })}: `
-                                  : null}
-                                <Tooltip
-                                  title={formatBacklinkIdsTooltip(t, conversationId, item.message_id ? String(item.message_id) : null)}
-                                >
-                                  <span className="font-medium">
-                                    {conversationLabel ||
-                                      t('option:notesSearch.linkedChatUnresolved', { defaultValue: 'Linked chat' })}
-                                  </span>
-                                </Tooltip>
-                              </div>
-                            )
-                          })()}
                         <div id={`${rowDomId}-date`} className="text-xs text-text-muted mt-1">
                           {item.updated_at
                             ? (() => {
@@ -805,6 +786,38 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         </div>
                       </div>
                     </button>
+                    {item.conversation_id != null && String(item.conversation_id) !== '' && (() => {
+                      // Outside the open-note button: a button may not hold another one.
+                      const conversationId = String(item.conversation_id)
+                      const conversationLabel = conversationLabelById[conversationId]
+                      return (
+                        <button
+                          type="button"
+                          className="mt-0.5 flex max-w-full items-center gap-1 text-left text-xs text-primary hover:underline"
+                          title={t('option:notesSearch.fromChatTooltip', {
+                            defaultValue: 'Open the chat this note was saved from'
+                          })}
+                          tabIndex={-1}
+                          data-testid={`notes-from-chat-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            onOpenLinkedChat?.(conversationId)
+                          }}
+                        >
+                          <ChatIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+                          <span className="truncate">
+                            {t('option:notesSearch.fromChatLink', { defaultValue: 'From chat' })}
+                            {conversationLabel ? (
+                              <>
+                                {': '}
+                                <span className="font-medium">{conversationLabel}</span>
+                              </>
+                            ) : null}
+                          </span>
+                        </button>
+                      )
+                    })()}
+                    </div>
                   </div>
                 )}
                 {isTrashView && (

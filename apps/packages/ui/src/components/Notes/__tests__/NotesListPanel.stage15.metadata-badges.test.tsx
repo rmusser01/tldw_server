@@ -80,7 +80,7 @@ describe("NotesListPanel stage 15 metadata badges", () => {
     const badgeRow = screen.getByTestId("notes-item-badges-n-recent")
     expect(badgeRow.querySelectorAll("svg").length).toBe(3)
     expect(screen.queryByTestId("notes-item-badges-n-plain")).not.toBeInTheDocument()
-    // XP-14: a chat whose title is not known yet reads "Linked chat".
-    expect(container).toHaveTextContent("Linked chat")
+    // XP-14, NL-04: a chat whose title is not known yet reads "From chat", without ids.
+    expect(container).toHaveTextContent("From chat")
   })
 })
