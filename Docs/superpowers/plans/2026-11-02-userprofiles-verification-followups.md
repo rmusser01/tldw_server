@@ -592,3 +592,44 @@ and no owned process. Controller records and independent bounded exact-head
 review precede any guarded lease push. Entirely fresh current-head required CI
 and authoritative latest-dev ancestry remain mandatory before merge; no old
 green result, publication approval or PR3404 waiver transfers to runtime WP5.
+
+## November 13 Dev4b6 Integration
+
+Published `b012da2993` was blocked: six required results succeeded, but
+`frontend-required` and E2E Critical stopped before browser tests because the
+locked Playwright rejected Chromium on Ubuntu 26.04. Authoritative dev
+`4b6b9ec446387b957d000d465c38fe682e6940e3` already pins both jobs to Ubuntu
+24.04. This PR adds no workflow, dependency, runtime, or gate change.
+
+The rebased source is `11c78f8fe0aacbf876881000c76fe5b132fb74c9`. Of the 24
+prior patches, 18 replayed equal, three reconciled changed context, and three
+were superseded by dev's equivalent VisualPack and VN fixture fixes. Dev's
+expanded backup fixture is preserved verbatim. Companion retains dev's new
+capability contract and the delayed-layout regression; Prompt Studio keeps
+the visible-output assertions and delayed-frame control. Standalone retains
+the approved same-key draft test blob. Root conftest preserves dev's thread
+setup, and the database test keeps dev's migration fixtures and the PR's
+owner assertions. Independent source review found zero Critical, Important,
+or Minor issues and verified preservation of 1,294 dev-only and 11 PR-only
+paths by object and mode.
+
+Local verification: 242 tests across seven changed UI files, 66 retained
+VisualPack tests, 481 backend and canonical-format tests, and four benchmark
+tests (two live PostgreSQL via official fixtures), all passed without skips.
+These are scoped results, not a full-suite or hosted CI claim. Touched Python
+compile, diff, and configured cached hooks pass. Bandit contexts are unchanged
+from the previous reviewed head: 608 assertion findings and four synthetic
+test-secret findings, zero scan errors. Quality enforcement found no new
+offenses; the shard guard found zero newly uncovered tests (910 shards).
+
+On the old head, the advisory WebScraping inventory failure used identical
+inputs to the old base. Dev already regenerated the artifact. The advisory
+AuthNZ shard hit the outer timeout waiting on the unchanged VN repository
+outcomes subprocess at 99%; the reason for the child stall is unconfirmed.
+Neither was treated as a PR source defect or waived. Logs:
+`/private/tmp/pr3404-b012-*.log` and `/private/tmp/pr3404-4b6-*.log`.
+
+ADR assessment: no new durable decision. The rebase preserves existing
+membership and task-format rules (ADR-085, ADR-059, ADR-084). Fresh required
+checks on the published head and current dev ancestry remain mandatory.
+TASK-15413 stays In Progress until verified merge.
