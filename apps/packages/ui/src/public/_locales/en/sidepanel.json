@@ -2118,5 +2118,14 @@
   },
   "chatWithPage_onDescription": {
     "message": "Your next messages are answered using the page open in this tab."
+  },
+  "contextMenu_export": {
+    "message": "Export"
+  },
+  "contextMenu_openMenu": {
+    "message": "Chat actions: {{title}}"
+  },
+  "contextMenu_exportUnsaved": {
+    "message": "This chat isn't saved yet, so there is nothing to export."
   }
 }

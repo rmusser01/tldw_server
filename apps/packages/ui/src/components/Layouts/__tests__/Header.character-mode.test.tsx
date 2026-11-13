@@ -21,6 +21,14 @@ const messageOptionState = {
 
 let selectedCharacter: { id: string; name: string } | null = null
 const forkParent = vi.hoisted(() => ({ value: null as { id: string; title: string } | null, requested: [] as unknown[] }))
+const chatFiles = vi.hoisted(() => ({ exportServerChat: vi.fn(), success: vi.fn(), error: vi.fn() }))
+vi.mock("@/services/chat-transcript-export", () => ({
+  exportServerChat: (...args: unknown[]) => chatFiles.exportServerChat(...args)
+}))
+vi.mock("@/components/Sidepanel/Chat/BulkFolderPickerModal", () => ({
+  default: ({ open, conversationIds }: { open: boolean; conversationIds: string[] }) =>
+    open ? <div data-testid="folder-picker" data-ids={conversationIds.join(",")} /> : null
+}))
 
 const mockT = (
   key: string,
@@ -57,6 +65,7 @@ vi.mock("antd", () => ({
   Input: ({ value, onChange, placeholder }: any) => (
     <input value={value} onChange={onChange} placeholder={placeholder} />
   ),
+  message: { success: chatFiles.success, error: chatFiles.error },
   InputNumber: ({ value, onChange }: any) => (
     <input
       type="number"
@@ -103,6 +112,8 @@ vi.mock("../ChatHeader", () => ({
   ChatHeader: ({
     parentChatTitle,
     onOpenParentChat,
+    onExportChat,
+    onMoveToFolder,
     onOpenCommandPalette,
     onStartSavedChat,
     onStartTemporaryChat,
@@ -117,8 +128,16 @@ vi.mock("../ChatHeader", () => ({
     activeCharacterName?: string | null
     parentChatTitle?: string | null
     onOpenParentChat?: () => void
+    onExportChat?: (format: "markdown" | "json") => void
+    onMoveToFolder?: () => void
   }) => (
     <div>
+      {onExportChat ? (
+        <button type="button" onClick={() => onExportChat("json")}>Export JSON</button>
+      ) : null}
+      {onMoveToFolder ? (
+        <button type="button" onClick={() => onMoveToFolder()}>Move to folder</button>
+      ) : null}
       {onOpenParentChat ? (
         <button type="button" onClick={() => onOpenParentChat()}>
           Back to {parentChatTitle}
@@ -189,6 +208,46 @@ describe("Header branch lineage (CM-12)", () => {
   it("offers no way back for a chat that isn't a branch", () => {
     render(<Header />)
     expect(screen.queryByRole("button", { name: /^Back to/ })).not.toBeInTheDocument()
+  })
+})
+
+describe("Header per-chat Export and Move to folder (CS-09)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    messageOptionState.serverChatId = "saved-chat"
+    messageOptionState.temporaryChat = false
+    forkParent.value = null
+    locationPathname = "/chat"
+  })
+
+  it("exports the open saved chat from the server", async () => {
+    chatFiles.exportServerChat.mockResolvedValue(undefined)
+    render(<Header />)
+    fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
+    await vi.waitFor(() =>
+      expect(chatFiles.exportServerChat).toHaveBeenCalledWith("saved-chat", "json", expect.any(Object))
+    )
+    await vi.waitFor(() => expect(chatFiles.success).toHaveBeenCalledWith("Chat exported."))
+  })
+
+  it("says when the export fails", async () => {
+    chatFiles.exportServerChat.mockRejectedValue(new Error("HTTP 503"))
+    render(<Header />)
+    fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
+    await vi.waitFor(() => expect(chatFiles.error).toHaveBeenCalledWith("Couldn't export this chat. Try again."))
+  })
+
+  it("moves the open saved chat to a folder", async () => {
+    render(<Header />)
+    fireEvent.click(screen.getByRole("button", { name: "Move to folder" }))
+    expect(await screen.findByTestId("folder-picker")).toHaveAttribute("data-ids", "saved-chat")
+  })
+
+  it("offers neither for a chat that isn't saved on the server", () => {
+    messageOptionState.serverChatId = null
+    render(<Header />)
+    expect(screen.queryByRole("button", { name: "Export JSON" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Move to folder" })).toBeNull()
   })
 })
 

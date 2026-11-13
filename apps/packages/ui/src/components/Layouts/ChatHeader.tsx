@@ -6,6 +6,10 @@ import {
   BellOff,
   CogIcon,
   CornerUpLeft,
+  Download,
+  FileJson,
+  FileText,
+  FolderInput,
   House,
   LoaderCircle,
   Menu,
@@ -84,6 +88,10 @@ type ChatHeaderProps = {
    */
   parentChatTitle?: string | null
   onOpenParentChat?: () => void
+  /** Export the open saved chat from the server (CS-09). */
+  onExportChat?: (format: "markdown" | "json") => void
+  /** Choose the folders the open saved chat belongs to (CS-09). */
+  onMoveToFolder?: () => void
 }
 
 const toText = (value: unknown): string =>
@@ -125,7 +133,9 @@ export function ChatHeader({
   onRetryNotifications,
   renderAccountMenu,
   parentChatTitle = null,
-  onOpenParentChat
+  onOpenParentChat,
+  onExportChat,
+  onMoveToFolder
 }: ChatHeaderProps) {
   const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false)
   const headerMenuTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -491,6 +501,39 @@ export function ChatHeader({
             disabled: shareButtonDisabled,
             className: "sm:!hidden",
             onClick: () => runMenuAction(onOpenShareModal)
+          }
+        ]
+      : []),
+    ...(onExportChat
+      ? [
+          {
+            key: "export",
+            label: toText(t("sidepanel:contextMenu.export", "Export")),
+            icon: <Download className="size-4" aria-hidden="true" />,
+            children: [
+              {
+                key: "export-markdown",
+                label: toText(t("common:chatSidebar.exportMarkdown", "Markdown")),
+                icon: <FileText className="size-4" aria-hidden="true" />,
+                onClick: () => runMenuAction(() => onExportChat("markdown"))
+              },
+              {
+                key: "export-json",
+                label: toText(t("common:chatSidebar.exportJson", "JSON")),
+                icon: <FileJson className="size-4" aria-hidden="true" />,
+                onClick: () => runMenuAction(() => onExportChat("json"))
+              }
+            ]
+          }
+        ]
+      : []),
+    ...(onMoveToFolder
+      ? [
+          {
+            key: "move-to-folder",
+            label: toText(t("common:chatSidebar.moveToFolder", "Move to folder…")),
+            icon: <FolderInput className="size-4" aria-hidden="true" />,
+            onClick: () => runMenuAction(onMoveToFolder)
           }
         ]
       : []),
