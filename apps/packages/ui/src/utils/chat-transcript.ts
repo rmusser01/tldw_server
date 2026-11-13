@@ -2,17 +2,31 @@
  * One transcript format for every per-chat export and copy (CS-09): the chat
  * page's row and header menus, the side panel's tab menu, and the chat's
  * copy-as-Markdown. File contents stay in English, as before.
+ *
+ * A transcript holds every saved message, alternative replies included, so the
+ * JSON export is lossless. The Markdown export is the readable newest path of
+ * the chat (CM-N2) and says when alternatives were left out.
  */
+import { newestLeafPath } from "@/utils/newest-leaf-path"
 
 export type TranscriptRole = "user" | "assistant" | "system"
 
 export type TranscriptMessage = {
+  /** With `parentId`, lets the Markdown export follow the chat's newest path. */
+  id?: string
+  parentId?: string | null
   role: TranscriptRole
+  /** The server's sender name, when it records one. */
+  sender?: string | null
   content: string
   /** Shown instead of "You", "Assistant" or "System", for example a model name. */
   speaker?: string | null
   timestamp?: string | null
+  version?: number
   model?: string | null
+  provider?: string | null
+  /** The message's stored metadata, as the server returns it. */
+  metadata?: Record<string, unknown>
   images?: readonly string[]
 }
 
@@ -43,13 +57,25 @@ export const formatTranscriptMessagesMarkdown = (messages: readonly TranscriptMe
     })
     .join("\n\n")
 
-/** A whole chat as Markdown: its title, date and model, then its messages. */
+/**
+ * The messages a reader follows: the newest path when every message carries
+ * its id (alternative replies left out), otherwise all of them in order.
+ */
+const readableMessages = (messages: readonly TranscriptMessage[]) =>
+  messages.length && messages.every((message) => message.id)
+    ? newestLeafPath(messages, (message) => ({ id: message.id!, parentId: message.parentId ?? null }))
+    : { path: [...messages], hasAlternatives: false }
+
+/** A whole chat as Markdown: its title, date and model, then its newest path. */
 export const formatTranscriptMarkdown = (transcript: ChatTranscript): string => {
+  const { path, hasAlternatives } = readableMessages(transcript.messages)
   const header = [`# ${transcript.title}`, ""]
+  if (hasAlternatives)
+    header.push("> Alternative replies are omitted here; the JSON export includes them.", "")
   if (transcript.createdAt) header.push(`**Date:** ${new Date(transcript.createdAt).toLocaleDateString()}`)
   if (transcript.model) header.push(`**Model:** ${transcript.model}`)
   header.push("", "---", "")
-  return `${header.join("\n")}\n${formatTranscriptMessagesMarkdown(transcript.messages)}\n`
+  return `${header.join("\n")}\n${formatTranscriptMessagesMarkdown(path)}\n`
 }
 
 export const formatTranscriptJson = (transcript: ChatTranscript): string =>

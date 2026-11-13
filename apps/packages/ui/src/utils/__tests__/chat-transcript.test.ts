@@ -47,3 +47,35 @@ describe("chat transcript formatting (CS-09)", () => {
     expect(transcriptFileName("", "json", 7)).toBe("chat_7.json")
   })
 })
+
+describe("lossless JSON and newest-path Markdown (CS-09 follow-up)", () => {
+  const branched = {
+    id: "chat-1",
+    title: "Trip plan",
+    messages: [
+      { id: "u1", parentId: null, role: "user" as const, content: "Where first?", timestamp: "2026-11-01T09:00:00Z" },
+      { id: "a1", parentId: "u1", role: "assistant" as const, content: "Porto.", timestamp: "2026-11-01T09:00:01Z", model: "model-a" },
+      { id: "a1b", parentId: "u1", role: "assistant" as const, content: "Lisbon.", timestamp: "2026-11-01T09:00:02Z", model: "model-b" }
+    ]
+  }
+
+  it("keeps every message, alternatives included, in the JSON export", () => {
+    expect(JSON.parse(formatTranscriptJson(branched)).messages).toEqual(branched.messages)
+  })
+
+  it("writes the newest path in Markdown and says the alternatives are in the JSON export", () => {
+    const markdown = formatTranscriptMarkdown(branched)
+    expect(markdown).toContain("Lisbon.")
+    expect(markdown).not.toContain("Porto.")
+    const lines = markdown.split("\n").filter((line) => line.trim())
+    expect(lines[0]).toBe("# Trip plan")
+    expect(lines[1]).toMatch(/alternative replies.*omitted.*JSON export includes them/i)
+  })
+
+  it("adds no note when the chat has no alternative replies", () => {
+    const linear = { ...branched, messages: branched.messages.slice(0, 2) }
+    const markdown = formatTranscriptMarkdown(linear)
+    expect(markdown).toContain("Porto.")
+    expect(markdown).not.toMatch(/alternative replies/i)
+  })
+})

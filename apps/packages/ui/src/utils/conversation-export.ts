@@ -34,14 +34,24 @@ async function getConversationData(
       .equals(historyId)
       .toArray()
 
-    const exportedMessages: ExportedMessage[] = messages.map((msg: Message) => ({
-      role: msg.role as "user" | "assistant" | "system",
-      content: msg.content,
-      timestamp: msg.createdAt
-        ? new Date(msg.createdAt).toISOString()
-        : undefined,
-      model: msg.name
-    }))
+    // Every saved message, alternatives included, in stable creation order;
+    // ids and parents let the Markdown export follow the newest path.
+    const exportedMessages: ExportedMessage[] = messages
+      .map((msg: Message, index) => ({ msg, index }))
+      .sort((left, right) =>
+        (left.msg.createdAt ?? 0) - (right.msg.createdAt ?? 0) || left.index - right.index)
+      .map(({ msg }) => {
+        const role = msg.role as "user" | "assistant" | "system"
+        const model = role === "assistant" ? msg.modelId || msg.modelName || msg.name : undefined
+        return {
+          id: msg.id,
+          parentId: msg.parent_message_id ?? null,
+          role,
+          content: msg.content,
+          timestamp: msg.createdAt ? new Date(msg.createdAt).toISOString() : undefined,
+          ...(model ? { model } : {})
+        }
+      })
 
     return {
       id: historyId,
