@@ -109,6 +109,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NoteListSortOrder,
     NoteProvenanceRestore,
     NoteResponse,
+    NoteSearchSortBy,
     NotesExportRequest,
     NotesExportResponse,
     NotesForKeywordResponse,
@@ -116,6 +117,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_schemas import (
     NotesImportRequest,
     NotesImportResponse,
     NotesListResponse,
+    NotesSearchResponse,
     NoteUpdate,
     TitleSuggestRequest,
     TitleSuggestResponse,
@@ -2615,6 +2617,19 @@ _LEGACY_ALIASES_DESCRIPTION = (
 )
 
 
+def _attach_search_snippets(db: CharactersRAGDB, query_term: str, notes_data: list[dict[str, Any]]) -> None:
+    """Attach each note's highlighted body excerpt for the query (NL-07); best effort."""
+    if not notes_data:
+        return
+    try:
+        snippets = db.note_store.note_search_snippets(query_term, [str(note.get("id")) for note in notes_data])
+    except _NOTES_NONCRITICAL_EXCEPTIONS as err:
+        logger.warning(f"Building notes search snippets failed: {err}")
+        return
+    for note in notes_data:
+        note["snippet"] = snippets.get(str(note.get("id")))
+
+
 def _notes_list_payload(
     notes_data: list[dict[str, Any]],
     *,
@@ -2927,14 +2942,14 @@ async def create_note_folder(
 
 @router.get(
     "/search",
-    response_model=NotesListResponse,
+    response_model=NotesSearchResponse,
     summary="Search notes for the current user",
     tags=["notes"],
     dependencies=[Depends(require_expected_user)],
 )
 @router.get(
     "/search/",
-    response_model=NotesListResponse,
+    response_model=NotesSearchResponse,
     summary="Search notes for the current user",
     tags=["notes"],
     dependencies=[Depends(require_expected_user)],
@@ -2969,18 +2984,28 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 "autocomplete across the whole library. Ignored when tokens are given."
             ),
         ),
-        sort_by: Optional[str] = Query(
-            None,
-            description="Accepted for client compatibility; search results are ordered by relevance and recency.",
-        ),
-        sort_order: Optional[str] = Query(
-            None,
-            description="Accepted for client compatibility; search results are ordered by relevance and recency.",
-        ),
+        sort_by: Annotated[
+            Optional[NoteSearchSortBy],
+            Query(
+                description=(
+                    "Order of the whole result before paging. Omitted or 'relevance': best match first for a "
+                    "query (most recently modified for tags alone). Title sorts ignore case. Ignored by "
+                    "title_only searches."
+                ),
+            ),
+        ] = None,
+        sort_order: Annotated[
+            NoteListSortOrder, Query(description="Sort direction for a sort_by other than relevance")
+        ] = "desc",
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.search")),
 ):
+    """Search the current user's notes by text, keyword tokens, or both.
+
+    Each item carries ``snippet``: a short excerpt of the body around the text
+    match, as runs of plain text with ``match`` marking the matched terms.
+    """
     try:
         try:
             allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.search")
@@ -3005,6 +3030,8 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 limit=limit,
                 offset=offset,
                 match=tokens_match,
+                sort_by=sort_by,
+                sort_order=sort_order,
             )
             try:
                 total = db.count_notes_matching_keywords(
@@ -3021,11 +3048,15 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
         else:
-            notes_data = db.search_notes(search_term=query_term, limit=limit, offset=offset)
+            notes_data = db.search_notes(
+                search_term=query_term, limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order
+            )
             try:
                 total = db.count_notes_matching(query_term)
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
+        if query_term and (token_list or not title_only):  # title_only matches titles alone
+            _attach_search_snippets(db, query_term, notes_data)
         _attach_folders_bulk(db, notes_data)
         # Attach keywords inline (optional)
         if include_keywords:
