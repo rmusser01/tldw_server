@@ -4,6 +4,7 @@
 #
 # Imports
 import hashlib
+import importlib.util
 import os
 import sqlite3
 import uuid
@@ -121,7 +122,17 @@ VALID_HTML_URL = "https://example.com/" # Use example.com for basic HTML
 INVALID_URL = "http://this.url.definitely.does.not.exist.invalid/resource.mp4"
 URL_404 = "https://example.com/status/404"
 
-PDF_ENGINES_TO_TEST = ["pymupdf4llm", "pymupdf", "docling"]
+# docling is a declared dependency but heavy; skip its cases where it is not installed.
+PDF_ENGINES_TO_TEST = [
+    "pymupdf4llm",
+    "pymupdf",
+    pytest.param(
+        "docling",
+        marks=pytest.mark.skipif(
+            importlib.util.find_spec("docling") is None, reason="docling not installed"
+        ),
+    ),
+]
 TEST_VIDEO_TRANSCRIPTION_MODEL = "small"
 TEST_VIDEO_START_TIME = "0"
 TEST_VIDEO_END_TIME = "00:00:20"
@@ -701,7 +712,14 @@ class TestProcessVideos:
 class TestProcessAudios:
     ENDPOINT = "/api/v1/media/process-audios"
 
-    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers, controlled_transcription):
+    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers, controlled_transcription, monkeypatch):
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files
+
+        def fake_download(*, url, dest, **kwargs):
+            assert url == VALID_AUDIO_URL
+            Path(dest).write_bytes(b"ID3" + b"\x00" * 512)
+
+        monkeypatch.setattr(Audio_Files, "http_download", fake_download)
 
         form_data = {
             "urls": [VALID_AUDIO_URL],
