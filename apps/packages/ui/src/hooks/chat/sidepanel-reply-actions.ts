@@ -12,7 +12,7 @@
 import React from "react"
 import { chatSubmitFailed, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
-import { createContinueSavedReply } from "@/hooks/chat/native-history-continue"
+import { createContinueSavedReply, savedReplyActionFeedback } from "@/hooks/chat/native-history-continue"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import {
@@ -43,13 +43,17 @@ export const useSidepanelReplyActions = ({
   historySelection,
   onSubmit,
   actionsMountedRef,
-  retrySource
+  retrySource,
+  t,
+  notification
 }: {
   historySelection: HistorySelectionController | null | undefined
   onSubmit: SidepanelReplySubmit
   actionsMountedRef: React.MutableRefObject<boolean>
   /** The composer settings a retry is reviewed against. */
   retrySource: { model: string; selectedSystemPrompt: string | null; systemPrompt?: string | null }
+  t: (key: string, fallback: string) => string
+  notification: { error: (options: { message: string; description?: string }) => void }
 }) => {
   const recoveryRetrySource = React.useRef(retrySource)
   recoveryRetrySource.current = retrySource
@@ -87,11 +91,21 @@ export const useSidepanelReplyActions = ({
    * so knowledge search and vision don't apply to it.
    */
   const continueLastMessage = async () => {
-    // `null` means "not a saved server chat"; a saved chat's own result, even
-    // an empty one, never falls through to a local continuation.
-    const saved = await continueSavedReply()
-    if (saved !== null) return saved
-    return onSubmit({ message: "", image: "", isContinue: true, requestOverrides: { chatMode: "normal" } })
+    try {
+      // `null` means "not a saved server chat"; a saved chat's own result, even
+      // an empty one, never falls through to a local continuation.
+      const saved = await continueSavedReply()
+      if (saved !== null) return saved
+      return await onSubmit({ message: "", image: "", isContinue: true, requestOverrides: { chatMode: "normal" } })
+    } catch (error) {
+      // A refusal before dispatch would otherwise be silent: say it in Continue wording.
+      const reason = error instanceof Error ? error.message : String(error)
+      notification.error({
+        message: t("error", "Error"),
+        description: savedReplyActionFeedback(error, t, undefined, true) ?? reason
+      })
+      return chatSubmitFailed(reason)
+    }
   }
 
   return {

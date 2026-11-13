@@ -4104,7 +4104,7 @@ export const useMessage = () => {
   });
 
   const { continueLastMessage, getRecoveryRetryContext, retryRecoveredHistoryTurn, getSavedQuestionReview, retrySavedQuestion } =
-    useSidepanelReplyActions({ historySelection, onSubmit, actionsMountedRef,
+    useSidepanelReplyActions({ historySelection, onSubmit, actionsMountedRef, t, notification,
       retrySource: { model: selectedModel || "", selectedSystemPrompt, systemPrompt: currentChatModelSettings.systemPrompt } });
 
   return {
