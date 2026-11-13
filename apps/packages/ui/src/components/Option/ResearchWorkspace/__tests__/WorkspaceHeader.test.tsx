@@ -2817,7 +2817,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(
       within(modal).getByText("Summarize workspace blockers")
     ).toBeInTheDocument()
-    expect(within(modal).getByText("sess-alpha")).toBeInTheDocument()
+    // WP-44: run details load lazily — expand the task row first.
+    fireEvent.click(within(modal).getByText("Summarize workspace blockers"))
+    expect(await within(modal).findByText("sess-alpha")).toBeInTheDocument()
     expect(within(modal).getByText("1 artifacts/files")).toBeInTheDocument()
     expect(within(modal).getByText("3 diagnostics/warnings")).toBeInTheDocument()
     expect(
@@ -2962,8 +2964,10 @@ describe("WorkspaceHeader workspace browser modal", () => {
       name: "ACP run history"
     })
     expect(await within(modal).findByText("Alpha agent work")).toBeInTheDocument()
+    // WP-44: run details load lazily — expand the task row first.
+    fireEvent.click(within(modal).getByText("Synthesize the workspace"))
     expect(
-      within(modal).getByLabelText(
+      await within(modal).findByLabelText(
         /Observable activity: 1 artifacts\/files, 3 diagnostics\/warnings, 2 audit\/approvals, 4 events\/tool activity/i
       )
     ).toBeInTheDocument()
@@ -3138,6 +3142,8 @@ describe("WorkspaceHeader workspace browser modal", () => {
     const modal = await screen.findByRole("dialog", {
       name: "ACP run history"
     })
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(await within(modal).findByText("Versioned synthesis"))
     const saveButton = await within(modal).findByRole("button", {
       name: "Save to Studio"
     })
@@ -3260,7 +3266,11 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
     expect(await within(modal).findByText("Alpha retained results")).toBeInTheDocument()
 
-    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(within(modal).getByText("Write retained summary"))
+    fireEvent.click(
+      await within(modal).findByRole("button", { name: "Save to Studio" })
+    )
 
     await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3287,6 +3297,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     acpPersistence.heldSave = () => new Promise<void>(resolve => { release = resolve })
     renderAcpHeader()
     const modal = await openAcpHistory()
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(within(modal).getByText("Owned task"))
+    await within(modal).findByRole("button", { name: "Save to Studio" })
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
     await waitFor(() => expect(release).toBeTypeOf("function"))
     expect(mockAddArtifact).not.toHaveBeenCalled()
@@ -3304,6 +3317,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     acpPersistence.failSave = true
     renderAcpHeader()
     const modal = await openAcpHistory()
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(within(modal).getByText("Owned task"))
+    await within(modal).findByRole("button", { name: "Save to Studio" })
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
     await within(modal).findByText("Save unavailable; retry saving.")
     expect(mockAddArtifact).not.toHaveBeenCalled()
@@ -3360,6 +3376,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     acpPersistence.heldSave = () => new Promise<void>(resolve => { release = resolve })
     const view = renderAcpHeader()
     const modal = await openAcpHistory()
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(within(modal).getByText("Owned task"))
+    await within(modal).findByRole("button", { name: "Save to Studio" })
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
     await waitFor(() => expect(release).toBeTypeOf("function"))
     mockStoreState.workspaceId = "workspace-beta"
@@ -3397,6 +3416,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
     renderAcpHeader()
     const modal = await openAcpHistory()
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(within(modal).getByText("Owned task"))
+    await within(modal).findByRole("button", { name: "Save to Studio" })
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
     await waitFor(() => expect(release).toBeTypeOf("function"))
     mockStoreState.workspaceId = "workspace-beta"
@@ -3420,6 +3442,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     })
     renderAcpHeader()
     const modal = await openAcpHistory()
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(within(modal).getByText("Owned task"))
+    await within(modal).findByRole("button", { name: "Save to Studio" })
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
     await within(modal).findByText("Another writer saved this version. Save again for the next version.")
     expect(mockAddArtifact).not.toHaveBeenCalled()
@@ -3436,11 +3461,17 @@ describe("WorkspaceHeader workspace browser modal", () => {
     acpPersistence.failSave = true
     renderAcpHeader()
     const modal = await openAcpHistory()
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(within(modal).getByText("Owned task"))
+    await within(modal).findByRole("button", { name: "Save to Studio" })
     fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
     await within(modal).findByText("Save unavailable; retry saving.")
     fireEvent.click(within(modal).getAllByRole("button", { name: "Close" }).at(-1)!)
     installAcpHistory("Newly revised visible result.")
     const reopened = await openAcpHistory()
+    // WP-44: run details load lazily — expand the task row before saving.
+    fireEvent.click(within(reopened).getByText("Owned task"))
+    await within(reopened).findByRole("button", { name: "Save to Studio" })
     fireEvent.click(within(reopened).getByRole("button", { name: "Save to Studio" }))
     await within(reopened).findByText("The run result changed. Save again to save the currently displayed result as a new version.")
     expect(acpPersistence.request.mock.calls.filter(([input]) => input.method === "POST")).toHaveLength(1)
@@ -3497,7 +3528,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
       fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
       fireEvent.click(await screen.findByText("ACP run history"))
       const modal = await screen.findByRole("dialog", { name: "ACP run history" })
-      await waitFor(() => expect(acpPersistence.request.mock.calls.some(([input]) => input.path.endsWith("/tasks/77"))).toBe(true))
+      // WP-44: task details load lazily, so "task history succeeded" means
+      // the task-list read finished while the sessions read still hangs.
+      await waitFor(() => expect(acpPersistence.request.mock.calls.some(([input]) => input.path.endsWith("/projects/66/tasks"))).toBe(true))
       expire()
       await within(modal).findByText("Loading history exceeded 15 seconds. Reopen history to retry.")
       expect(within(modal).queryByText("No ACP runs linked to this workspace yet")).not.toBeInTheDocument()
@@ -3812,6 +3845,14 @@ describe("WorkspaceHeader workspace browser modal", () => {
     const modal = await screen.findByRole("dialog", {
       name: "ACP run history"
     })
+    // WP-44: opening the modal lists the newest tasks first (capped at 12
+    // rows) without eagerly fetching any task-detail layer.
+    expect(await within(modal).findByText("Task 13")).toBeInTheDocument()
+    expect(within(modal).getByText("Task 2")).toBeInTheDocument()
+    expect(within(modal).queryByText("Task 1")).not.toBeInTheDocument()
+    expect(detailRequests).toEqual([])
+    // Run details load lazily when the newest task row is expanded.
+    fireEvent.click(within(modal).getByText("Task 13"))
     expect(await within(modal).findByText("Newest task run")).toBeInTheDocument()
     expect(detailRequests).toContain(
       "http://127.0.0.1:8000/api/v1/agent-orchestration/tasks/13"
@@ -3965,6 +4006,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
     const modal = await screen.findByRole("dialog", {
       name: "ACP run history"
     })
+    // WP-44: the missing-task detail error surfaces on the expanded row,
+    // not as an unsupported-orchestration modal error.
+    fireEvent.click(await within(modal).findByText("Deleted task"))
     expect(await within(modal).findByText("Task not found")).toBeInTheDocument()
     expect(
       within(modal).queryByText("Agent orchestration is not available on this server.")

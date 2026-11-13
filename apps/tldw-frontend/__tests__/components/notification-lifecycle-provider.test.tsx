@@ -29,7 +29,7 @@ vi.mock("@web/lib/api", () => ({
 vi.mock("@web/lib/authStorage", () => ({
   getApiBearer: () => null,
   getApiKey: () => mocks.apiKey,
-  getEffectiveStoredTldwConfig: () => mocks.config,
+  getEffectiveStoredTldwConfig: vi.fn(() => mocks.config),
   getSessionAccessToken: () => window.localStorage.getItem("access_token")
 }))
 
@@ -395,7 +395,7 @@ describe("NotificationLifecycleProvider", () => {
     view.unmount()
   })
 
-  it("owns one bootstrap, one stream, and one 30-second unread poll", async () => {
+  it("owns one bootstrap, one stream, and no unread poll while the stream is active (WP-41)", async () => {
     vi.useFakeTimers()
     let streamOptions: Record<string, unknown> | undefined
     mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
@@ -420,11 +420,23 @@ describe("NotificationLifecycleProvider", () => {
     expect(view.latest().unreadCount).toBe(5)
 
     await act(async () => {
+      await vi.advanceTimersByTimeAsync(120_000)
+    })
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+    expect(mocks.listNotifications).toHaveBeenCalledTimes(1)
+    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+
+    act(() =>
+      (streamOptions?.onError as ((error: unknown) => void) | undefined)?.(
+        Object.assign(new Error("offline"), { status: 503 })
+      )
+    )
+    expect(view.latest().state).toBe("degraded")
+
+    await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000)
     })
     expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
-    expect(mocks.listNotifications).toHaveBeenCalledTimes(1)
-    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
 
     view.unmount()
     vi.useRealTimers()
@@ -675,7 +687,7 @@ describe("NotificationLifecycleProvider", () => {
     expect(view.latest().state).toBe("active")
   })
 
-  it("recovers an open stream after a transient unread poll succeeds", async () => {
+  it("resumes the unread poll when the stream errors and stops it again on reopen (WP-41)", async () => {
     vi.useFakeTimers()
     let streamOptions: Record<string, unknown> | undefined
     mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
@@ -684,18 +696,64 @@ describe("NotificationLifecycleProvider", () => {
     })
     mocks.getUnreadCount
       .mockResolvedValueOnce({ unread_count: 5 })
-      .mockRejectedValueOnce(Object.assign(new Error("offline"), { status: 503 }))
-      .mockResolvedValueOnce({ unread_count: 8 })
+      .mockResolvedValue({ unread_count: 8 })
     const view = renderProvider()
     await act(async () => vi.advanceTimersByTimeAsync(0))
     act(() => (streamOptions?.onOpen as (() => void) | undefined)?.())
-
-    await act(async () => vi.advanceTimersByTimeAsync(30_000))
-    expect(view.latest().state).toBe("degraded")
+    expect(view.latest().state).toBe("active")
 
     await act(async () => vi.advanceTimersByTimeAsync(30_000))
     expect(view.latest().state).toBe("active")
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+
+    act(() =>
+      (streamOptions?.onError as ((error: unknown) => void) | undefined)?.(
+        Object.assign(new Error("offline"), { status: 503 })
+      )
+    )
+    expect(view.latest().state).toBe("degraded")
+
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
     expect(view.latest().unreadCount).toBe(8)
+
+    act(() => (streamOptions?.onOpen as (() => void) | undefined)?.())
+    expect(view.latest().state).toBe("active")
+
+    await act(async () => vi.advanceTimersByTimeAsync(60_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
+  it("reads the stored auth config once per auth change, not once per render (WP-41)", async () => {
+    vi.useFakeTimers()
+    mocks.config = { serverUrl: "https://api.example.test", authMode: "single-user", apiKey: "manual-key" }
+    let streamOptions: Record<string, unknown> | undefined
+    mocks.subscribeNotificationsStream.mockImplementation((options: Record<string, unknown>) => {
+      streamOptions = options
+      return vi.fn()
+    })
+    const { getEffectiveStoredTldwConfig } = await import("@web/lib/authStorage")
+    const view = renderProvider("notifications:server-a:user-a")
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    act(() => (streamOptions?.onOpen as (() => void) | undefined)?.())
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+
+    const readsAfterBootstrap = getEffectiveStoredTldwConfig.mock.calls.length
+    expect(readsAfterBootstrap).toBeGreaterThan(0)
+
+    view.rerenderScope("notifications:server-a:user-a")
+    view.rerenderScope("notifications:server-a:user-a")
+    view.rerenderScope("notifications:server-a:user-a")
+    expect(getEffectiveStoredTldwConfig.mock.calls.length).toBe(readsAfterBootstrap)
+
+    // A config change still refreshes the projection.
+    mocks.config = { serverUrl: "https://api.example.test", authMode: "single-user" }
+    mocks.apiKey = null
+    act(() => window.dispatchEvent(new Event("tldw:config-updated")))
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(view.latest().state).toBe("auth-required")
+    view.unmount()
     vi.useRealTimers()
   })
 

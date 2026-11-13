@@ -2862,6 +2862,17 @@ interface WorkspaceIdentityState {
   workspaceChatReferenceId: string
 }
 
+/**
+ * In-memory (never persisted) cache entry for already-ingested source text.
+ * Keyed by mediaId; `version` is the content identity the caller asked for
+ * (null when the caller has no version pin). See WP-45.
+ */
+export interface WorkspaceSourceContentCacheEntry {
+  version: number | null
+  text: string
+  title: string | null
+}
+
 interface SourcesState {
   sources: WorkspaceSource[]
   selectedSourceIds: string[]
@@ -2873,6 +2884,7 @@ interface SourcesState {
   sourceFocusTarget: { sourceId: string; token: number } | null
   sourcesLoading: boolean
   sourcesError: string | null
+  sourceContentCache: Map<number, WorkspaceSourceContentCacheEntry>
 }
 
 interface StudioState {
@@ -3085,6 +3097,17 @@ interface SourcesActions {
   getSelectedMediaIds: () => number[]
   getEffectiveSelectedSources: () => WorkspaceSource[]
   getEffectiveSelectedMediaIds: () => number[]
+  /** In-memory source-text reuse (WP-45); returns null on any mismatch. */
+  getSourceContentText: (
+    mediaId: number,
+    version?: number | null
+  ) => string | null
+  setSourceContentText: (
+    mediaId: number,
+    version: number | null,
+    text: string,
+    title?: string | null
+  ) => void
 }
 
 interface StudioActions {
@@ -3261,7 +3284,8 @@ export const initialSourcesState: SourcesState = {
   sourceSearchQuery: "",
   sourceFocusTarget: null,
   sourcesLoading: false,
-  sourcesError: null
+  sourcesError: null,
+  sourceContentCache: new Map()
 }
 
 export const initialStudioState: StudioState = {

@@ -918,6 +918,254 @@ perfect review record through batch-final.
 - eslint (corrected invocation, from `apps/`, workspace binary, over the 16
   touched TS files): **exit 0**.
 - Whitespace: `git diff --check b2b7d5d2b0..HEAD` → clean.
+
+## Batch W4 (TASK-13524) — 2026-11-07
+
+HTTP-architecture batch: extension quick-ingest round-trip batching
+(WP-36/37/38), polling → SSE/visibility gating (WP-39..42), media-search
+parallelism + mount fan-out deletion (WP-43), N+1 fan-out retirement
+(WP-44..48/51), auth/config read caching + event-driven token waits
+(WP-52/63), model-catalog refetch discipline (WP-49/54). Branch
+`codex/webui-perf-w4-http-arch`, range `b2b7d5d2b0..6c3c009b61`
+(8 commits: six stage commits + the S4-minors fix `4acdab88ff` + the
+micro-fix `6c3c009b61`; base = dev merge `b2b7d5d2b0` incl. W1+W2 — W3/W5
+were pending merge on disjoint files at branch time). Every number below is
+from an actual run at HEAD `6c3c009b61` on 2026-11-07 (same
+machine/environment as the frozen tables; all prior sections are untouched).
+W4 touched 49 TypeScript files — 38 under `apps/packages/ui` (12 of them
+new, all tests or the two small new modules) and 11 under
+`apps/tldw-frontend` — plus this batch's backlog task files.
+
+### Family re-runs at HEAD (W4 owns no bench; the four automated ones must be untouched and green)
+
+W4 landed no new benchmark: like W3 before it (and W5 on its branch), W4's
+wins are request-count/concurrency/no-network changes pinned by mechanism
+tests, not wall-clock deltas. The benches exist to prove W4 broke nothing
+measured. All four are green at HEAD with count metrics **bit-identical** to
+their owner batches' recorded shapes:
+
+- **Family A — streaming bench (W1's)**: 200 seedMessages / 500 chunks /
+  storeSubscriberNotifications **3** / messageUpdateNotifications **2** /
+  transcriptArrayMapClones **1** / finalAssistantChars 4890;
+  streamPhaseMs 2.79 (informational) — identical counts to W3's re-run
+  record; W4 touched no streaming/render code.
+- **Family B — canned 100-chunk sidepanel e2e (W0's table, re-run by W5)**:
+  100 served / 15 applied / **21** store notifications / **16** message
+  updates / **30** domMutations / **longTasks 0**; ttftMs 188.3,
+  streamPhaseMs 1157, domNodeCount 214 — count metrics identical to W5's
+  recorded HEAD shape on the same branch base (its section rides the W5
+  branch; domNodeCount is the historically jittery one: 196–241 across
+  W0/W5 runs); the five live-backend suites in the file skip without
+  `TLDW_E2E_*` env vars, as at W0/W5.
+- **Family C1 — workspace persist (W0's table, W2's re-run)**: 22
+  `JSON.stringify` calls / 1,915,228 B / 2 `setItem` calls / 121,600 B
+  across all 3 in-process runs; durations 8.92 / 8.96 / 10.06 ms
+  (informational) — bit-identical to the W2/W3 records, proving the S4-minors
+  store change (sourceContentCache → Map) leaves the persistence chain
+  untouched (`partialize` drops the cache; the byte counts cannot differ).
+- **Family C2 — history bench (W2's)**: 1 setItem attempted/landed, 0 quota
+  errors, 115,651 B, 50 final entries, 2,313 B/request, amplification 1.0×
+  across all 3 in-process runs — bit-identical to the W2/W3 records.
+- **Family D** (production build + bundle budget) was not re-run — neither
+  W3 nor W5 re-ran it, and no bundle-size-relevant decision is in this
+  batch.
+
+### M1/M2 disposition (W0 manual rows: quick-ingest request count; page-load + idle request counts) — DONE BY MECHANISM
+
+M1 and M2 are W4's rows per this document's footer ("M1/M2 → W4"). Neither
+wall-clock number was measured; both rows are closed by mechanism evidence,
+stated honestly, per the M3/W5 precedent:
+
+- The W0 protocol for these rows mandates **human DevTools observation**
+  ("Do not automate them with browser automation when filling") — M1 needs a
+  running backend plus the built extension's service-worker DevTools, M2 a
+  `build:prod` + `bun run start` webui against a live backend on
+  `127.0.0.1:8000`. No canned page-load request-count harness exists in-repo
+  (the closest, `e2e/chat-request-dedupe.spec.ts`, covers only four /chat GET
+  targets and needs the live backend), so a protocol-conforming number is not
+  producible in this environment; a human DevTools before/after remains
+  available and nothing in either row blocks W4's closure.
+- **M1 mechanism evidence (S1, `0da7b87b85`)**: the unit suite pins that N
+  same-config quick-ingest entries produce **one** `/media/ingest/jobs`
+  submission carrying all k URLs (10 items sharing one config → 1 submission
+  POST, far inside the "≤ 4 from 10" criterion — satisfied by construction),
+  that heterogeneous groups go through the bounded pool (4), that poll rounds
+  issue all in-flight job GETs simultaneously (deferred-promise pin), and that
+  terminal PATCHes/batch-cancel/DELETE fan out concurrently. Per-item progress
+  order and shape are pinned byte-for-byte. The wall-time half of M1's
+  criterion (≥ 60% drop) is not measurable without a live backend.
+- **M2 mechanism evidence (S2 `01b04eed9e` + S3 `ed54f5f647` + S5
+  `49d27077db`)**: S2 pins the four pollers — buddy host at 60 s while its
+  panel is closed and zero polls while `document.hidden` (BuddyInteraction's
+  4 s loop ratified into the shared schedule), research run-list refetch only
+  while a run is active with SSE terminal-event invalidation, notification
+  polling only while the stream/bootstrap is degraded, and the workspace's
+  two 5 s pollers consolidated into one visibility+processing-gated
+  scheduler; S3 deletes the mount-time type-discovery fan-out (2 searches run
+  as one `Promise.all` round; the 3 discovery page-fetches are gone — mount
+  requests drop 5 → 2); S5 removes the per-call auth/config storage reads
+  behind one cached snapshot. The removed behavior — the ~2–4-per-5 s idle
+  request families M2 was written to catch — is gone by construction and by
+  falsifier test, not by measured delta.
+
+### What W4 proved, and how (mechanism framing, W3 convention)
+
+No new benchmark exists for W4's paths, and none was needed: the wins are
+request-count, concurrency, and no-network changes pinned by mechanism
+tests. Per stage:
+
+- **S1 — ingest batching (`0da7b87b85`)**: same-config grouping pinned (one
+  submission POST with k URLs), bounded pool over heterogeneous groups,
+  all-at-once poll rounds (deferred-promise simultaneity), concurrent
+  terminal fan-out, and per-item progress events byte-identical in order and
+  shape. Overlap-heavy: batched per-batch status polling was already landed
+  via the #3210 follow-up — only real gaps were closed.
+- **S2 — polling gating (`01b04eed9e`)**: fake-timer pins per poller —
+  hidden document produces zero polls; buddy panel closed produces no 5 s
+  polls (60 s ramp); SSE terminal event triggers exactly one list
+  invalidation; the notification poll starts on stream error and stops on
+  reopen; the workspace scheduler emits nothing with no processing sources or
+  while hidden. BuddyInteraction's hidden 4 s loop was ratified (base
+  `forceRender`+`destroyOnHidden=false` kept it alive while hidden whenever
+  attached).
+- **S3 — search cost (`ed54f5f647`)**: mount fan-out deletion (the deleted
+  discovery effect fetched `/api/v1/media/` pages 1–3 at per_page=50 — its
+  removal is the first-ever real coverage of the pagination request path via
+  a real QueryClient + network-layer mock), media/notes dispatch together
+  (deferred-promise simultaneity), per-side error semantics preserved, abort
+  now transport-cancels the concurrent side.
+- **S4 — N+1 retirement (`b32ec08e54`)**: lazy row-expand fetch in the ACP
+  history modal (incl. a zero-detail-requests-on-open pin), the
+  source-content resolver fetching only cache misses (optional-capability
+  store read so partial mocks degrade instead of breaking), 60 s staleTime on
+  flashcard due-counts, retrySync rag-write deferral settled by `Promise.all`
+  (red-first), a request-shape pin on the already-server-side character list.
+  Six overlap verdicts incl. two ALREADY-DONE (WP-47 gating at base;
+  WP-51 via 2026-05-22 lineage). Finished from an interrupted predecessor's
+  uncommitted state (26 h old, ~12 dirty files).
+- **S5 — auth/config caching (`49d27077db`)**: all FE auth getters served
+  from one per-generation snapshot dropped by every invalidation signal
+  (six families verified wired at HEAD); the extension's config reads go
+  through one batched `getMany` with ≤ 1 rotation-dependent follow-up; the
+  token wait is subscription-driven with a deadline final check and a
+  byte-identical poll fallback; the JWT is decoded once per wait. The 401
+  logout decision reads uncached by design (the mid-burst-rotation race it
+  exists for is pinned by the untouched "does not clear a newer session"
+  test).
+- **S6 — model-catalog discipline (`11bfd19a9a`)**: two mounts within
+  staleTime → one fetch; unmount/revisit stays at zero requests via the
+  gcTime catch (the default 5-min gc would evict the unmounted catalog at
+  minute 5 and break the 0-requests criterion — pinned by a 6-min unmount
+  gap test); all four refresh affordances force fresh reads; the
+  invalidation chain (account watch, server-URL change, generation tokens)
+  verified in code.
+- **Fix commits**: `4acdab88ff` (true LRU: Map with delete+re-insert, evict
+  `keys().next().value`, disambiguating insert-40-first test; shared
+  `SOURCE_CONTENT_CACHE_MAX_ENTRIES`; [BE] note relocated 13515 → 15186) and
+  `6c3c009b61` (per-iteration `clearTimeout` before re-arm; strict
+  `!Array.isArray` getMany guard; `capabilitiesQuery.data ?? {}` so a
+  200-null body keeps the default endpoint).
+
+### Per-stage attribution (what this branch landed vs pre-landed work)
+
+| Stage | Commit | Verdict at overlap check → what this branch landed | Pre-landed at branch point / out of scope |
+|---|---|---|---|
+| S1 — quick-ingest batching (WP-36/37/38) | `0da7b87b85` | Same-config URL/file grouping into single `/media/ingest/jobs` submissions; bounded pool (4) for heterogeneous groups and conference planning; concurrent terminal PATCH/batch-cancel/DELETE; per-item progress preserved (order + shape pinned) | Batched per-batch status polling already landed via the #3210 follow-up; parts of the warm hygiene pre-landed by the interim TASK-13511 lineage |
+| S2 — polling → SSE/visibility gating (WP-39/40/41/42) | `01b04eed9e` | All four pollers gated (buddy 60 s closed-panel + zero hidden; research activity-gated + SSE terminal invalidation; notifications degraded-only; workspace scheduler on processing+visibility) | BuddyInteraction ratified as pre-existing hidden 4 s loop (join required); alarm non-forcing pre-landed by W2 Stage 3 |
+| S3 — media search correctness + cost (WP-43) | `ed54f5f647` | `Promise.all` dual-side search (media-before-notes order, per-side errors preserved); mount type-discovery fan-out deleted (mount requests 5 → 2); facets from first response; Set membership snapshot | The Set conversion shape landed on the W3 branch (not in this lineage) — applied here as a shape-identical port |
+| S4 — N+1 fan-outs (WP-44..48/51) | `b32ec08e54` | GAPs built: ACP lazy row-expand details; shared source-content resolver + in-memory LRU cache; flashcard due-counts staleTime; retrySync parallel rag-settle; six overlap verdicts incl. WP-47 ALREADY-DONE (pinned by test) and WP-51 ALREADY-DONE via lineage (request-shape pin added) | WP-47 WorldBooks stats gating present at plan-verified base; WP-51 `listCharactersPage` default-on rollout (2026-05-22, pre-plan); [BE] batch endpoints requested as notes |
+| S4-minors fix | `4acdab88ff` | True LRU (Map delete+re-insert; insert-40-first disambiguation test), single shared cache-cap constant exported from the slice, [BE] note relocated to the renumbered backend task | — |
+| S5 — auth/config read caching (WP-52/63) | `49d27077db` | Five verdicts, all GAP/PARTIAL→closed: per-generation StoredAuthSnapshot + six invalidation families; batched `getMany` + ≤ 1 follow-up; event-driven rotation wait; JWT decoded once per wait; 401-logout fresh-read resolution in CODE (pin untouched) | W5's deferred m2/WP-63 effective-config reads closed here |
+| S6 — model-catalog discipline (WP-49/54) | `11bfd19a9a` | WP-49 PARTIAL-by-lineage (react-query migration already in `839d7a04ee` via TASK-13511 — verified, not re-migrated); real gaps: staleTime 30 s → 15 min + gcTime 15 min (the catch), all four refresh affordances + invalidation signals pinned; WP-54 GAP→built (`['rag/capabilities']` + dependent `['vlm-backends', endpoint]`; `reload()` invalidates both) | forceRefresh removal already in lineage |
+| micro-fix | `6c3c009b61` | Timer hygiene (clearTimeout before re-arm), strict getMany guard (reject arrays), degenerate-capabilities fallback (`data ?? {}`) | — |
+
+Review record: all six stages Approved — **0 blockers/majors across the
+whole batch**. S1–S3 zero fix rounds; S4's 2 minors fixed in `4acdab88ff`;
+S5's one-line minor and S6's optional-hardening minor fixed in `6c3c009b61`.
+The user waived the AI-PR Change-summary gate for W4 (2026-11-06): merge
+proceeds on green CI without waiting for a summary; no AI-authored summary
+may be represented as human-written (W3/W5 gates unaffected).
+
+### Documented gaps / follow-ups
+
+- **[BE] requests live on TASK-15186, renumbered from the plan's
+  TASK-13515** — the plan (written 2026-10-06) predates the lineage
+  renumbering; the consolidated [BE] note (batch media-details, due-counts
+  aggregate, per-book worldbook stats, whole-tail rag payload) was relocated
+  verbatim to TASK-15186 in `4acdab88ff` (13511 → 15181 likewise).
+- **S4 reviewer NOTE-3 — version identity plumbed-unused**: the
+  source-content cache is keyed by (mediaId, version) but the resolver
+  always reads/writes with version `null`; callers hold no version identity
+  today, so the stricter key is future plumbing. Follow-up: thread the
+  version when callers gain one.
+- **S4 reviewer NOTE-4 — session-lifetime staleness**: the source-content
+  cache has no TTL; entries live until the 32-entry LRU evicts them, so
+  re-ingested content served within a session can be stale until eviction or
+  reload. Bounded (32 entries, in-memory only); acceptable for the reuse
+  case, recorded for visibility.
+- **S6 — PlaygroundChat `providersStatus` 60 s staleness left as-is** (out
+  of S6 scope; one-line whole-branch candidate for parity with the catalog's
+  15-min policy).
+- **Plan Deferred/parked items**: WP-53 (prompt bulk-actions) is already
+  client-parallel — the [BE] batch endpoint remains the follow-up; WP-55
+  (agent-loop sequential tool execution) parked pending its own design
+  discussion (behavior risk).
+- **Lint delta (found at batch-final)**: the branch leaves the
+  `eslint-suppressions.packages-ui.json` entry for
+  `Review/hooks/useMediaSearch.ts` stale (no-restricted-syntax count 15 → 11
+  after S3's deletions) — the canonical `bun run lint:ui` therefore exits 2
+  with "suppressions left that do not occur anymore" while reporting
+  **0 errors**; the fix is one `--prune-suppressions` run (config-file-only,
+  out of scope for this docs+backlog-only commit). Warning churn on touched
+  files: +22/−7, all `no-unused-vars`/`no-explicit-any` warnings, 0 errors;
+  base comparison in the batch-final report.
+- **Extension e2e `queued-requests` local environment failure (pre-verified
+  at base)**: 4/4 fail locally with the identical test names at the branch
+  base `b2b7d5d2b0` (queue panel not rendering from seeded store state —
+  first recorded at Stage 1); CI remains the adjudicator.
+  `workspace-parity` is green locally (1/1).
+- Stage-review deferred minors (open-quiet-panel buddy ramp 5 s → 60 s,
+  grouped-submit top-level catch, file-group positional misattribution →
+  [BE] `original_filename` echo, resume-path emission order,
+  `unmatchedError` message wording, buddy-poll first-read settle) are
+  itemized in the stage reports and the SDD ledger; none block closure.
+
+### Verification runs at final HEAD (2026-11-07, `6c3c009b61`)
+
+- Full `apps/tldw-frontend` suite (`bun run test:run`): **2,989 files,
+  34,153 passed | 42 failed | 21 skipped** (34,216 tests, 680.76 s). All 42
+  reds verified **pre-existing at the branch base** `b2b7d5d2b0` by direct
+  batch execution of the same 18 files there (identical test names and
+  signatures, zero HEAD-only failures; one base-side flake passed at HEAD) —
+  the W3 base-execution precedent. (A first full run executed concurrently
+  with the packages/ui suite showed 74 reds; the extra 32 were 5 s-timeout
+  flakes under dual-suite worker contention — spot-proven by TestRunHistory,
+  15/15 green in isolation at both HEAD and base.)
+- Full `apps/packages/ui` suite (`bun run test`): **2,781 files, 31,676
+  passed | 8 failed | 7 skipped** (31,691 tests, 2,481 s). The four red
+  files — `MessageActionsBar.real-popover` (×3),
+  `ServicePromptsSettings` (×2), `Studio.model-targets` (×2),
+  `chat-document-processing` (×1) — are W3's documented pre-existing dev
+  families (popover visibility / router-history / model-targets /
+  Blob-text); the same four files fail at this branch's base too
+  (6–8 reds across repeat runs — the two families' siblings are
+  timing-flaky at both commits), and none of the four is in W4's 49-file
+  touched set.
+- Extension e2e: `test:e2e:workspace-parity` **1/1 green** (1.4 m);
+  `test:e2e:queued-requests` 4/4 fail locally, **identically at the branch
+  base** (same four test names) — pre-existing environment failure, pending
+  CI adjudication (W3's base-execution precedent).
+- FE typecheck (CI-canonical): `cd apps/tldw-frontend && bun run typecheck`
+  → **exit 0**.
+- eslint (W5's corrected invocation — from `apps/`, workspace binary): the
+  11 touched FE files → **exit 0** (one pre-existing `getCookie` unused
+  warning, identical at base); the 38 touched UI files → **0 errors**,
+  257 warnings (227 identical at base on the modified set; +15 in new test
+  files; net +22/−7 branch-caused, all warnings); canonical `bun run lint:ui`
+  exits 2 solely on the stale suppression entry documented above (exit 0 at
+  base).
+- Whitespace: `git diff --check b2b7d5d2b0..HEAD` → clean (51 files,
+  +5399/−1050).
 - Bandit: N/A — TypeScript-only batch, no Python touched (per program
   precedent).
 

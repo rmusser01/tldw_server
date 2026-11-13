@@ -2330,6 +2330,11 @@ function OwnedKnowledgeQAProvider({
       })
 
       const syncedMessages: KnowledgeQAMessage[] = []
+      // WP-48: rag-context writes depend only on their own message id, never
+      // on parent chaining, so they are deferred off the sequential message
+      // chain and settle in parallel once the chain completes. A server-side
+      // whole-tail payload (note on TASK-13515) would replace both layers.
+      const pendingRagContextWrites: Promise<boolean>[] = []
       let parentMessageId: string | null = null
       for (const messageToSync of messagesToSync) {
         const persisted = await persistChatMessage(
@@ -2349,14 +2354,14 @@ function OwnedKnowledgeQAProvider({
             ? syncRagContextTrust(messageToSync.ragContext)
             : messageToSync.ragContext
         if (messageToSync.role === "assistant" && messageToSync.ragContext) {
-          const persistedContext = await persistRagContext(
+          const ragContextWrite = persistRagContext(
             persisted.id,
             syncedRagContext as RagContextData
           )
-          if (!persistedContext) {
-            dispatch({ type: "MARK_SYNC_FAILED" })
-            return false
-          }
+          // Guard the early-exit paths above against unhandled rejections;
+          // the awaited copy below preserves the failure semantics.
+          ragContextWrite.catch(() => false)
+          pendingRagContextWrites.push(ragContextWrite)
         }
 
         syncedMessages.push({
@@ -2366,6 +2371,12 @@ function OwnedKnowledgeQAProvider({
           timestamp: persisted.timestamp || messageToSync.timestamp,
           ragContext: syncedRagContext,
         })
+      }
+
+      const ragContextWriteResults = await Promise.all(pendingRagContextWrites)
+      if (ragContextWriteResults.some((persisted) => !persisted)) {
+        dispatch({ type: "MARK_SYNC_FAILED" })
+        return false
       }
 
       dispatch({ type: "SET_THREAD_ID", payload: targetThreadId })
