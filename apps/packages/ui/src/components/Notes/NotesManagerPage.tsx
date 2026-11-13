@@ -126,6 +126,7 @@ import { showNoteRestoredToast } from './notes-restore-toast'
 import { isEditableTarget } from "@/utils/editable-target"
 import { useConnectionsMemory } from './notes-connections'
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
+import { useRevealFirstSearchHit } from "@/components/Notes/hooks/useRevealFirstSearchHit"
 import { revealNotesListAndFocusSearch } from "@/components/Notes/hooks/useNotesOffCanvasList"
 import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
 import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
@@ -226,9 +227,13 @@ type NotesManagerPageProps = {
   LeaveGuard?: React.ComponentType<NotesLeaveGuardState>
   /** Told which note is open, so the route can keep its address in step (XP-05). */
   onNoteSelectionChange?: NotesSelectionListener
+  /** Set once per navigation that asks for a new note (/notes?new=1, ⌘K "New note", XP-06). */
+  newNoteRequestKey?: string | null
+  /** The new-note request was handled (or declined); the route drops it from the address. */
+  onNewNoteRequestHandled?: () => void
 }
 
-const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard, onNoteSelectionChange }) => {
+const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard, onNoteSelectionChange, newNoteRequestKey = null, onNewNoteRequestHandled }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
   const { t } = useTranslation(['option', 'common'])
@@ -379,8 +384,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     editorDisabled,
     onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
-  useNotesSelectionReport(onNoteSelectionChange, { selectedId: ed.selectedId, title: ed.title, authorityScope: notesGraphAuthorityScope, hasDraft: ed.isDirty })
   const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
+  // A draft in progress, even an empty one, is not replaced by the last opened note.
+  useNotesSelectionReport(onNoteSelectionChange, { selectedId: ed.selectedId, title: ed.title, authorityScope: notesGraphAuthorityScope, hasDraft: ed.isDirty || hasActiveDraft })
   const [preparingDraft, setPreparingDraft] = React.useState(false)
   const preparingDraftRef = React.useRef<ReturnType<typeof ed.captureNoteMutation> | null>(null)
   const retireDraftTransition = React.useCallback(() => {
@@ -494,6 +500,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   const filteredCount = visibleNotes.length
   const listKeyboard = useNotesKeyboardNavigation({ visibleNotes, selectedId: ed.selectedId, selectNote: ed.handleSelectNote, richEditorRef: ed.richEditorRef, contentTextareaRef: ed.contentTextareaRef, editorRegionId: NOTES_EDITOR_REGION_ID, listMode: list.listMode })
+  useRevealFirstSearchHit({ selectedId: ed.selectedId, content: ed.content, query: list.query, textareaRef: ed.contentTextareaRef, enabled: ed.editorInputMode !== 'wysiwyg' && ed.editorMode !== 'preview' })
   const graphInitialFocusNoteId = React.useMemo(
     () =>
       resolveNotesGraphFocusNoteId(
@@ -2698,7 +2705,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [sourceNoteId])
 
   React.useEffect(() => {
-    if (sourceNoteId != null || !isOnline || list.listMode !== 'active' || !pendingNoteId || !Array.isArray(list.data) || ed.selectedId != null) return
+    if (sourceNoteId != null || !isOnline || list.listMode !== 'active' || !pendingNoteId || !Array.isArray(list.data) || ed.selectedId != null || hasActiveDraft) return
     let cancelled = false
     ;(async () => {
       const opened = await ed.handleSelectNote(pendingNoteId)
@@ -2708,7 +2715,16 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       void clearSetting(LAST_NOTE_ID_SETTING)
     })()
     return () => { cancelled = true }
-  }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])
+  }, [list.data, ed, hasActiveDraft, isOnline, list.listMode, pendingNoteId, sourceNoteId])
+
+  // ⌘K "New note" (XP-06) opens /notes?new=1: start one draft per request once
+  // the Notes owner is known, then let the route drop the request.
+  const handledNewNoteRequestRef = React.useRef<string | null>(null)
+  React.useEffect(() => {
+    if (!newNoteRequestKey || !notesGraphAuthorityScope || handledNewNoteRequestRef.current === newNoteRequestKey) return
+    handledNewNoteRequestRef.current = newNoteRequestKey
+    void handleNewNote().finally(() => onNewNoteRequestHandled?.())
+  }, [handleNewNote, newNoteRequestKey, notesGraphAuthorityScope, onNewNoteRequestHandled])
 
   React.useEffect(() => {
     if (!isMobileViewport && !wasMobileViewportRef.current) {
@@ -2899,6 +2915,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         pageSize={list.pageSize}
         total={list.total}
         sortOption={list.sortOption}
+        sortBestMatchAvailable={list.bestMatchAvailable}
         selectedId={ed.selectedId}
         visibleNotes={visibleNotes}
         filteredCount={filteredCount}

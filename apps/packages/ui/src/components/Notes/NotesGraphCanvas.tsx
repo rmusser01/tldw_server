@@ -8,6 +8,7 @@ import dagre from "cytoscape-dagre"
 import React from "react"
 import { useTranslation } from "react-i18next"
 
+import NotesGraphLegend from "./NotesGraphLegend"
 import type { ProvisionalNotesGraphOverlay } from "./hooks/useNotesGraphSuggestions"
 import type { NotesGraphLayout } from "./hooks/useNotesGraphWorkspace"
 import {
@@ -218,10 +219,12 @@ const NotesGraphCanvas = React.forwardRef<
             style: { "background-color": tokens.primary }
           },
           {
+            // Tag names are short, so tags stay labelled (NL-14).
             selector: 'node[type="tag"]',
             style: {
               "background-color": tokens.accent,
-              shape: "round-rectangle"
+              shape: "round-rectangle",
+              label: "data(label)"
             }
           },
           {
@@ -332,6 +335,11 @@ const NotesGraphCanvas = React.forwardRef<
       if (cy) syncNodeState(cy)
     }, [focusNoteId, selectedNodeId, syncNodeState])
 
+    const nodeTypes = React.useMemo(
+      () => new Set<string>(graph.nodes.map((node) => node.type)),
+      [graph.nodes]
+    )
+
     return (
       <div className="relative h-full min-w-0">
         <div
@@ -343,39 +351,7 @@ const NotesGraphCanvas = React.forwardRef<
             defaultValue: "Notes graph canvas"
           })}
         />
-        <ul
-          data-testid="notes-graph-edge-legend"
-          aria-label={t("notesSearch.graphEdgeLegend", {
-            defaultValue: "Relationship legend"
-          })}
-          className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] flex-wrap gap-x-3 gap-y-1 border border-border bg-elevated px-2 py-1 text-xs text-text shadow-sm motion-reduce:transition-none">
-          <li className="flex items-center gap-1.5">
-            <span
-              className="w-5 border-t-2 border-text-muted"
-              aria-hidden="true"
-            />
-            {t("notesSearch.graphLegendAuthoritative", {
-              defaultValue: "Authoritative"
-            })}
-          </li>
-          <li className="flex items-center gap-1.5">
-            <span
-              data-testid="notes-graph-semantic-legend-swatch"
-              className="w-5 border-t-2 border-dotted border-primary"
-              aria-hidden="true"
-            />
-            {t("notesSearch.graphSimilarContent", {
-              defaultValue: "Similar content"
-            })}
-          </li>
-          <li className="flex items-center gap-1.5">
-            <span
-              className="w-5 border-t-2 border-dashed border-warn"
-              aria-hidden="true"
-            />
-            {t("notesSearch.graphSuggestions", { defaultValue: "Suggestions" })}
-          </li>
-        </ul>
+        <NotesGraphLegend nodeTypes={nodeTypes} />
       </div>
     )
   }

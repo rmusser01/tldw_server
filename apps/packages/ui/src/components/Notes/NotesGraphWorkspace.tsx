@@ -300,6 +300,28 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
       </p>
     ) : null
 
+  // With no note open, the focus is a fallback (the most recent or first
+  // visible note); say so rather than centring on it silently (NL-14).
+  const focusFallbackLabel =
+    workspace.scope === "focused" &&
+    !normalizeGraphNoteId(selectedNoteId) &&
+    workspace.focusNoteId
+      ? workspace.graph?.nodes.find(
+          (node) => node.id === `note:${workspace.focusNoteId}`
+        )?.label ?? null
+      : null
+  const focusFallbackHint = focusFallbackLabel ? (
+    <p
+      className="border-b border-border bg-surface px-3 py-2 text-xs text-text-muted"
+      data-testid="notes-graph-focus-fallback-hint">
+      {t("option:notesSearch.graphFocusFallbackHint", {
+        defaultValue:
+          "No note is open, so the graph is centred on “{{title}}”. Pick a note to focus the graph.",
+        title: focusFallbackLabel
+      })}
+    </p>
+  ) : null
+
   return (
     <section
       ref={rootRef}
@@ -391,6 +413,7 @@ const NotesGraphWorkspace: React.FC<NotesGraphWorkspaceProps> = ({
         />
       )}
       {disabledReason}
+      {focusFallbackHint}
       {workspace.isOffline && !workspace.isPermissionDenied ? (
         <p
           className="border-b border-border bg-surface px-3 py-2 text-xs text-text-muted"

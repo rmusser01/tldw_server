@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NoteListItem } from '@/components/Notes/types'
 import { moveNotesListRowFocus } from './notes-list-keyboard'
+import { NoteSearchSnippet } from './NoteSearchSnippet'
 
 const LazyNotesListPanelEmptyStates = React.lazy(() => import('./NotesListPanelEmptyStates'))
 
@@ -618,7 +619,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                 const rowDate = parseRowDate(item.updated_at)
                 const rowDateTestId = `notes-row-date-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
                 const rowDescribedBy = [
-                  previewText ? `${rowDomId}-preview` : null,
+                  previewText || item.snippet ? `${rowDomId}-preview` : null,
                   hasRowKeywords ? `${rowDomId}-tags` : null,
                   rowDate ? `${rowDomId}-date` : null,
                   rowHintId
@@ -795,7 +796,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                             </div>
                           )
                         })()}
-                        {previewText && (
+                        {item.snippet ? (
+                          <NoteSearchSnippet id={`${rowDomId}-preview`} segments={item.snippet} />
+                        ) : previewText && (
                           <div id={`${rowDomId}-preview`} className="text-xs text-text-muted truncate mt-0.5">
                             {renderHighlightedText(
                               previewText,

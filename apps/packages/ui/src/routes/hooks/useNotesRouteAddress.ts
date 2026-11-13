@@ -10,9 +10,15 @@ import { updatePageTitle } from "@/utils/update-page-title"
  */
 export const NOTE_ROUTE_PARAM = "note"
 export const LEGACY_NOTE_ROUTE_PARAM = "source_ref_id"
+/** `/notes?new=1` asks the Notes page for a new note, then leaves the address (XP-06). */
+export const NEW_NOTE_ROUTE_PARAM = "new"
+export const NEW_NOTE_PATH = `/notes?${NEW_NOTE_ROUTE_PARAM}=1`
 
 const toSearchParams = (search: string | null | undefined) =>
   new URLSearchParams((search ?? "").replace(/^\?/, ""))
+
+const asksForNewNote = (search: string | null | undefined): boolean =>
+  toSearchParams(search).get(NEW_NOTE_ROUTE_PARAM) === "1"
 
 export const readNoteRouteId = (search: string | null | undefined): string | null => {
   const params = toSearchParams(search)
@@ -42,6 +48,9 @@ export const buildNotePath = (noteId: string): string => `/notes${withNoteRouteI
  * - When the address changes (Back, Forward, a link) to a note other than
  *   the open one, `sourceNoteId` asks the page to open it.
  * - /notes without a note reopens the note opened last.
+ * - /notes?new=1 asks for a new note instead (`newNoteRequestKey`, once per
+ *   navigation); `onNewNoteRequestHandled` then drops the request from the
+ *   address without a history entry.
  */
 export const useNotesRouteAddress = () => {
   const location = useLocation()
@@ -100,7 +109,7 @@ export const useNotesRouteAddress = () => {
         if (address) go(null, true)
         return
       }
-      if (!address && report.lastOpenedNoteId && !restoredRef.current) {
+      if (!address && !asksForNewNote(current.search) && report.lastOpenedNoteId && !restoredRef.current) {
         restoredRef.current = true
         go(report.lastOpenedNoteId, true)
       }
@@ -108,5 +117,21 @@ export const useNotesRouteAddress = () => {
     [navigate]
   )
 
-  return { sourceNoteId, onNoteSelectionChange }
+  const onNewNoteRequestHandled = React.useCallback(() => {
+    // A new note replaces any restore of the note opened last.
+    restoredRef.current = true
+    const current = locationRef.current
+    if (!asksForNewNote(current.search)) return
+    const params = toSearchParams(current.search)
+    params.delete(NEW_NOTE_ROUTE_PARAM)
+    const search = params.toString()
+    navigate(
+      { pathname: current.pathname, search: search ? `?${search}` : "", hash: current.hash },
+      { replace: true }
+    )
+  }, [navigate])
+
+  const newNoteRequestKey = asksForNewNote(location.search) ? location.key : null
+
+  return { sourceNoteId, onNoteSelectionChange, newNoteRequestKey, onNewNoteRequestHandled }
 }
