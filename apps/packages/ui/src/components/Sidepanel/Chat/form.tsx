@@ -1906,7 +1906,7 @@ export const SidepanelForm = ({
   }, [filteredTabs, mentionQuery, staticMentionItems, tabMentionsEnabled])
 
   const showMentionMenu = Boolean(mentionPosition) && tabMentionsEnabled
-  // The textarea is a combobox over whichever menu shows (AX-12).
+  // The textarea points into whichever suggestion menu shows (AX-12).
   const slashCombobox = useComposerCombobox({ open: showSlashMenu, count: filteredSlashCommands.length, activeIndex: slashActiveIndex })
   const mentionCombobox = useComposerCombobox({ open: showMentionMenu, count: mentionItems.length, activeIndex: mentionActiveIndex })
 

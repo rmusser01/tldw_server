@@ -328,17 +328,20 @@ describe("NotesManagerPage stage 7 wikilinks", { timeout: 60_000 }, () => {
   })
 
   // AX-12: the suggestions are a listbox the note textarea controls, so a
-  // screen reader hears the highlighted note and how many there are.
-  it("exposes wikilink suggestions as a combobox listbox", async () => {
+  // screen reader hears the highlighted note and how many there are. The
+  // editor stays a textbox; it never reads as a combo box.
+  it("points the note editor into its wikilink suggestion listbox", async () => {
     renderPage()
     const textarea = getEditor()
-    expect(textarea).toHaveAttribute("role", "combobox")
-    expect(textarea).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("textbox", { name: "Note content" })).toBe(textarea)
+    expect(textarea).not.toHaveAttribute("aria-expanded")
+    expect(textarea).not.toHaveAttribute("aria-controls")
 
     fireEvent.change(textarea, { target: { value: "See [[Li" } })
     const suggestions = await screen.findByTestId("notes-wikilink-suggestions")
     expect(suggestions).toHaveAttribute("role", "listbox")
-    expect(getEditor()).toHaveAttribute("aria-expanded", "true")
+    expect(getEditor()).not.toHaveAttribute("role")
+    expect(getEditor()).toHaveAttribute("aria-autocomplete", "list")
     expect(getEditor()).toHaveAttribute("aria-controls", suggestions.id)
     const options = within(suggestions).getAllByRole("option")
     expect(options[0]).toHaveTextContent("Linked note")
@@ -346,7 +349,7 @@ describe("NotesManagerPage stage 7 wikilinks", { timeout: 60_000 }, () => {
     expect(getEditor()).toHaveAttribute("aria-activedescendant", options[0].id)
     expect(within(suggestions).queryAllByRole("button")).toEqual([])
     // This file's translator leaves "{{count}}" as written.
-    expect(screen.getByTestId("suggestion-count-status")).toHaveTextContent("{{count}} notes")
+    await waitFor(() => expect(screen.getByTestId("suggestion-count-status")).toHaveTextContent("{{count}} notes"))
   })
 
   it.each(['Enter', 'Tab'])('accepts a wikilink before list continuation with %s', async (key) => {

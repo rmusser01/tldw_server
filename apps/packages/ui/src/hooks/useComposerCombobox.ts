@@ -15,10 +15,13 @@ type ComposerComboboxOptions = {
 
 /**
  * A textarea with inline suggestions (slash commands, @mentions, [[wikilinks]])
- * as an ARIA 1.2 combobox (AX-12). Focus stays in the textarea; arrowing moves
- * `aria-activedescendant` through the listbox's options, so a screen reader
- * reads each one. Render the menu's listbox with `listboxId` and its options
- * with `comboboxOptionId(listboxId, index)`.
+ * that a screen reader can follow (AX-12). The textarea keeps its textbox
+ * role: a textarea may not be a combobox, and the Notes editor must not read
+ * as one. It points into the menu with attributes a textbox supports:
+ * aria-autocomplete, aria-controls while the menu shows, and
+ * aria-activedescendant on the highlighted option. Focus stays in the
+ * textarea. Render the menu's listbox with `listboxId` and its options with
+ * `comboboxOptionId(listboxId, index)`.
  */
 export const useComposerCombobox = ({
   open,
@@ -26,18 +29,16 @@ export const useComposerCombobox = ({
   activeIndex
 }: ComposerComboboxOptions) => {
   const listboxId = `composer-suggestions-${React.useId().replace(/[^A-Za-z0-9_-]/g, "")}`
-  const expanded = open && count > 0
+  const showing = open && count > 0
   const activeDescendant =
-    expanded && activeIndex >= 0 && activeIndex < count
+    showing && activeIndex >= 0 && activeIndex < count
       ? comboboxOptionId(listboxId, activeIndex)
       : undefined
   return {
     listboxId,
     inputProps: {
-      role: "combobox" as const,
       "aria-autocomplete": "list" as const,
-      "aria-expanded": expanded,
-      "aria-controls": expanded ? listboxId : undefined,
+      "aria-controls": showing ? listboxId : undefined,
       "aria-activedescendant": activeDescendant
     }
   }

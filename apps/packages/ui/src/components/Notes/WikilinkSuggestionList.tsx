@@ -15,7 +15,7 @@ type WikilinkSuggestionListProps = {
 
 /**
  * The [[wikilink]] suggestions under the note editor: a listbox the editor
- * textarea controls as a combobox (AX-12), with the number of matches read
+ * textarea points into (AX-12), with the number of matches read
  * when it opens. The keyboard stays in the textarea (useNotesWikilinks).
  */
 export const WikilinkSuggestionList = ({

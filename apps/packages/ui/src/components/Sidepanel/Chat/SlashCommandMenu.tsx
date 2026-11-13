@@ -15,7 +15,7 @@ type SlashCommandMenuProps = {
   onSelect: (command: SlashCommandItem) => void
   className?: string
   emptyLabel?: string
-  /** The listbox id the composer's combobox controls (`useComposerCombobox`). */
+  /** The listbox id the composer textarea points into (`useComposerCombobox`). */
   listboxId?: string
 }
 
