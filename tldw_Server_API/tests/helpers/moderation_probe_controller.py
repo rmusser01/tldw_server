@@ -38,13 +38,21 @@ class PosixTree:
         self.pgid = self.process.pid
 
     def cleanup(self, deadline: float) -> bool:
-        self.process.poll()
-        try:
-            os.killpg(self.pgid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        signalled = False
         while time.monotonic() < deadline:
             self.process.poll()
+            if not signalled:
+                try:
+                    os.killpg(self.pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except PermissionError as exc:
+                    if exc.errno != errno.EPERM:
+                        raise
+                    # A group in native exit can briefly deny signalling.
+                    # Retry within the deadline; only absence confirms cleanup.
+                else:
+                    signalled = True
             if self.process.returncode is not None and sys.platform.startswith("linux"):
                 try:
                     while os.waitpid(-self.pgid, os.WNOHANG)[0]:

@@ -274,19 +274,39 @@ def test_signal_zero_persistent_eperm_uses_budget_and_retains_tree(posix_cleanup
     assert tree.process is owner
 
 
-def test_sigkill_eperm_is_not_treated_as_liveness_uncertainty(posix_cleanup_boundary, monkeypatch):
+def test_sigkill_transient_eperm_retries_until_group_is_absent(posix_cleanup_boundary, monkeypatch):
+    from types import SimpleNamespace
+
+    controller, tree, clock = posix_cleanup_boundary
+
+    signals = []
+
+    def killpg(pgid, sig):
+        assert pgid == 12345
+        signals.append(sig)
+        if clock.now == 0 and sig == controller.signal.SIGKILL:
+            raise PermissionError(1, "transient denial")
+        if clock.now > 0 and sig == 0:
+            raise ProcessLookupError(3, "absent")
+
+    monkeypatch.setattr(controller, "os", SimpleNamespace(killpg=killpg))
+    assert tree.cleanup(2.0) is True
+    assert signals == [controller.signal.SIGKILL, 0, controller.signal.SIGKILL, 0]
+
+
+def test_sigkill_persistent_eperm_does_not_release_live_group(posix_cleanup_boundary, monkeypatch):
     from types import SimpleNamespace
 
     controller, tree, clock = posix_cleanup_boundary
 
     def killpg(pgid, sig):
-        assert (pgid, sig) == (12345, controller.signal.SIGKILL)
-        raise PermissionError(1, "kill denied")
+        assert pgid == 12345
+        if sig == controller.signal.SIGKILL:
+            raise PermissionError(1, "persistent denial")
 
     monkeypatch.setattr(controller, "os", SimpleNamespace(killpg=killpg))
-    with pytest.raises(PermissionError):
-        tree.cleanup(2.0)
-    assert clock.now == 0
+    assert tree.cleanup(0.1) is False
+    assert clock.now >= 0.1
 
 
 def test_signal_zero_other_permission_errors_are_not_retried(posix_cleanup_boundary, monkeypatch):
