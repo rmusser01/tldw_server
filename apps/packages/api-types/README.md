@@ -15,9 +15,29 @@ both frontend shells (`apps/tldw-frontend`, `apps/extension` via
 
 ## Regenerating
 
+Generate with **Python 3.12**, matching the existing `backend-required` CI
+contract. This is an artifact-generation requirement, not a server runtime
+restriction. Different Python versions can change union ordering and default
+HTTP response descriptions in the exported schema without an API change.
+
+From the repository root, the Make targets default to `OPENAPI_PYTHON=python3.12`
+and reject missing or non-3.12 interpreters before exporting. Override it with
+a Python 3.12 environment containing the server dependencies; these targets do
+not use `CI_LOCAL_PYTHON`:
+
 ```bash
-bun run generate          # in apps/packages/api-types (needs server-importable Python)
-# or from the web shell:  bun run generate:api-types   (in apps/tldw-frontend)
+make openapi-fingerprint OPENAPI_PYTHON=/path/to/py312-venv/bin/python
+make openapi-drift-check OPENAPI_PYTHON=/path/to/py312-venv/bin/python
+```
+
+For full frontend type generation, pass that same Python 3.12 interpreter via
+the generator's existing `PYTHON` setting:
+
+```bash
+# in apps/packages/api-types
+PYTHON=/path/to/py312-venv/bin/python bun run generate
+# or in apps/tldw-frontend
+PYTHON=/path/to/py312-venv/bin/python bun run generate:api-types
 ```
 
 Run whenever the backend API contract changes. The existing backend drift gate

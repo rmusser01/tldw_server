@@ -532,11 +532,18 @@ test-triage:         ## Ranked test-quality triage report (see Docs/Audit/2026-0
 minimal-env-smoke:   ## Boot the app in a scrubbed env and probe /health (#2590-class guard)
 	$(CI_LOCAL_PYTHON) Helper_Scripts/ci/minimal_env_smoke.py $(CI_ARGS)
 
+# Match the existing backend-required CI generator, not the server runtime.
+OPENAPI_PYTHON ?= python3.12
+OPENAPI_PYTHON_GUARD = "$(OPENAPI_PYTHON)" -c 'import sys; sys.exit(sys.version_info[:2] != (3, 12))' || { \
+	echo "OpenAPI artifacts require Python 3.12 with server dependencies (matching backend CI); set OPENAPI_PYTHON=/path/to/python3.12." >&2; exit 2; }
+
 openapi-fingerprint: ## Refresh the checked-in OpenAPI drift fingerprint
-	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --fingerprint apps/packages/api-types/openapi.fingerprint.json
+	@$(OPENAPI_PYTHON_GUARD)
+	"$(OPENAPI_PYTHON)" Helper_Scripts/export_openapi_schema.py --fingerprint apps/packages/api-types/openapi.fingerprint.json
 
 openapi-drift-check: ## Fail if the OpenAPI contract drifted from the checked-in fingerprint
-	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json --check-paths apps/packages/api-types/paths.d.ts
+	@$(OPENAPI_PYTHON_GUARD)
+	"$(OPENAPI_PYTHON)" Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json --check-paths apps/packages/api-types/paths.d.ts
 
 # -----------------------------------------------------------------------------
 # Chat Streaming Load Harness (Scenario A starter)

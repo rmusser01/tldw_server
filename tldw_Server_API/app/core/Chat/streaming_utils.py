@@ -11,20 +11,12 @@ import math
 import os
 import threading
 import time
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
 from loguru import logger
 
-from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
-from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import (
-    DaemonCapacityError,
-    await_bounded_daemon_with_timeout,
-    daemon_capacity_from_env,
-    start_bounded_stream_cleanup_daemon,
-    start_bounded_stream_daemon,
-)
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     SanitizedProviderStreamError,
@@ -37,10 +29,19 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     sanitize_usage,
 )
 from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
+from tldw_Server_API.app.core.LLM_Calls.bounded_daemon import (
+    DaemonCapacityError,
+    await_bounded_daemon_with_timeout,
+    daemon_capacity_from_env,
+    start_bounded_stream_cleanup_daemon,
+    start_bounded_stream_daemon,
+)
 from tldw_Server_API.app.core.LLM_Calls.provider_results import (  # noqa: F401 - re-exported
-    PROVIDER_STREAM_ERROR_MESSAGES,
     _ALWAYS_SSE_CONTROL_PREFIXES,
     _FRAMED_ONLY_SSE_CONTROL_PREFIXES,
+    PROVIDER_STREAM_ERROR_MESSAGES,
     _extract_text_from_upstream_sse,
     _normalize_unframed_provider_stream_error,
     normalize_provider_stream_error,
@@ -1018,6 +1019,32 @@ def start_detached_settlement(operation: Callable[[], Any]) -> asyncio.Future[An
     return task
 
 
+class _TextTransformStopped(Exception):
+    """Carry a synchronous clean-stop signal across a coroutine boundary."""
+
+
+async def _apply_text_transform(transform: Callable[[str], str | Awaitable[str]], text: str) -> str:
+    """Support synchronous transforms and callables returning actual awaitables."""
+    try:
+        result = transform(text)
+    except StopIteration:
+        raise _TextTransformStopped from None
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+
+
+async def _flush_text_transform(transform: object) -> str:
+    """Await a transform's optional flush with the same contract as a delta."""
+    flush = getattr(transform, "flush", None)
+    if not callable(flush):
+        return ""
+    result = flush()
+    if inspect.isawaitable(result):
+        result = await result
+    return result
+
+
 class StreamingResponseHandler:
     """
     Handles streaming responses with proper error handling, cleanup, and timeouts.
@@ -1033,7 +1060,7 @@ class StreamingResponseHandler:
         idle_timeout: int = STREAMING_IDLE_TIMEOUT,
         heartbeat_interval: int = HEARTBEAT_INTERVAL,
         max_response_size: int = MAX_RESPONSE_SIZE_BYTES,
-        text_transform: Optional[callable] = None,
+        text_transform: Callable[[str], str | Awaitable[str]] | None = None,
     ):
         """
         Initialize the streaming response handler.
@@ -1055,6 +1082,8 @@ class StreamingResponseHandler:
         self.full_response: list[str] = []
         self.response_size = 0
         self.error_occurred = False
+        self._moderation_failed = False
+        self._moderation_error_emitted = False
         # Optional transform to apply to textual deltas before emission (e.g., moderation redaction)
         self.text_transform = text_transform
         # Track whether a terminal [DONE] was already sent (directly or via transform-combined payload)
@@ -1235,11 +1264,33 @@ class StreamingResponseHandler:
         failed after the stream started. Not kept: local failures such as a
         moderation block, a transform failure or the response size limit.
         """
+        if self._moderation_failed:
+            return False
         if self.provider_interrupted:
             return True
         return self.is_cancelled and not self.error_occurred
 
-    def _absorb_transform_tail(self) -> bool:
+    def _stop_for_moderation_failure(self) -> None:
+        """Latch before any flush or settlement can observe a successful state."""
+        self._moderation_failed = True
+        self.error_occurred = True
+        self.provider_interrupted = False
+        self.text_transform = None
+
+    def _moderation_error_frame(self) -> str:
+        self._stop_for_moderation_failure()
+        self._moderation_error_emitted = True
+        payload = {
+            "error": {
+                "message": "Moderation is currently unavailable",
+                "type": "moderation_unavailable",
+                "code": "moderation_unavailable",
+            }
+        }
+        self._attach_stream_metadata(payload)
+        return _trusted_local_stream_frame(sse_data(payload))
+
+    async def _absorb_transform_tail(self) -> bool:
         """Fold text a transform still holds back into the partial reply.
 
         The moderation transform holds back the end of the reply so it can
@@ -1254,7 +1305,10 @@ class StreamingResponseHandler:
         if not callable(flush_fn):
             return True
         try:
-            tail = flush_fn()
+            tail = await _flush_text_transform(self.text_transform)
+        except ModerationExecutionError:
+            self._stop_for_moderation_failure()
+            return False
         except StopStreamWithError:
             return False
         except _STREAMING_NONCRITICAL_EXCEPTIONS as flush_err:
@@ -1276,15 +1330,15 @@ class StreamingResponseHandler:
         self.response_size += tail_size
         return True
 
-    def _start_partial_settlement(
+    async def _start_partial_settlement(
         self,
         partial_save_callback: Callable[..., Any],
     ) -> asyncio.Future[Any] | None:
         """Hand the reply produced so far to a write that cancellation cannot abort.
 
-        This never awaits, so a cancelled stream can call it before any cleanup
-        that its teardown deadline might cut short. It starts at most one write
-        per stream.
+        First await the transform tail. Only after that succeeds can a detached
+        write start; cancellation or a failed flush cannot publish an unchecked
+        tail. It starts at most one write per stream.
 
         Returns:
             The detached write, or None when there is nothing to keep, the
@@ -1295,7 +1349,7 @@ class StreamingResponseHandler:
         if not self._partial_settlement_eligible() or not self.has_accumulated_output():
             return None
         self._settlement_started = True
-        if not self._absorb_transform_tail():
+        if not await self._absorb_transform_tail():
             return None
         partial_text = "".join(self.full_response)
         if not partial_text.strip():
@@ -1306,6 +1360,9 @@ class StreamingResponseHandler:
         async def settle() -> Any:
             try:
                 result = await _invoke_partial_save(partial_save_callback, partial_text, generation)
+            except ModerationExecutionError:
+                self._stop_for_moderation_failure()
+                return None
             except Exception as partial_err:  # noqa: BLE001 - persistence must not break stream cleanup
                 logger.error(
                     "Failed to save partial streaming response for {} error_type={}",
@@ -1501,6 +1558,31 @@ class StreamingResponseHandler:
         sync_bridge_started = False
         sync_bridge_admitted = threading.Event()
         sync_bridge_cleanup_claimed = threading.Event()
+        upstream_closed = False
+
+        async def close_upstream() -> None:
+            nonlocal upstream_closed
+            if upstream_closed:
+                return
+            try:
+                cleanup_stream = bridged_stream if sync_bridge_started else stream
+                if hasattr(cleanup_stream, "aclose") and callable(cleanup_stream.aclose):
+                    await invoke_stream_close_bounded(cleanup_stream.aclose)
+                if (
+                    not hasattr(stream, "__aiter__")
+                    and not sync_bridge_admitted.is_set()
+                    and not sync_bridge_cleanup_claimed.is_set()
+                ):
+                    sync_bridge_cleanup_claimed.set()
+                    await _close_unstarted_sync_stream_bounded(stream)
+            except asyncio.TimeoutError:
+                logger.debug("Stream cleanup exceeded bounded timeout for {}", self.conversation_id)
+            except _STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_err:
+                logger.debug(
+                    "Stream cleanup warning for {} error_type={}", self.conversation_id, type(cleanup_err).__name__
+                )
+            upstream_closed = True
+
         try:
             # Send initial metadata
             start_payload = {
@@ -1597,7 +1679,7 @@ class StreamingResponseHandler:
                         type(callback_error).__name__,
                     )
 
-            def process_line(raw_line: str, *, sse_framed: bool) -> tuple[list[str], bool]:
+            async def process_line(raw_line: str, *, sse_framed: bool) -> tuple[list[str], bool]:
                 nonlocal first_output_pending
                 outputs: list[str] = []
                 stripped_leading = raw_line.lstrip("\ufeff\u200b\u200c\u200d\u2060")
@@ -1697,7 +1779,10 @@ class StreamingResponseHandler:
                                         first_output_pending = True
                                     try:
                                         if self.text_transform:
-                                            text_piece = self.text_transform(text_piece)
+                                            text_piece = await _apply_text_transform(self.text_transform, text_piece)
+                                    except ModerationExecutionError:
+                                        outputs.append(self._moderation_error_frame())
+                                        return outputs, True
                                     except StopStreamWithError as stopper:
                                         err_payload = {
                                             "error": {
@@ -1713,7 +1798,7 @@ class StreamingResponseHandler:
                                         )
                                         self.error_occurred = True
                                         return outputs, True
-                                    except StopIteration:
+                                    except _TextTransformStopped:
                                         return outputs, True
                                     except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
                                         logger.error(
@@ -1769,7 +1854,10 @@ class StreamingResponseHandler:
                     self.stream_usage.chars += len(text_piece)  # counted for the usage row, like a content delta
                 try:
                     if self.text_transform:
-                        text_piece = self.text_transform(text_piece)
+                        text_piece = await _apply_text_transform(self.text_transform, text_piece)
+                except ModerationExecutionError:
+                    outputs.append(self._moderation_error_frame())
+                    return outputs, True
                 except StopStreamWithError as stopper:
                     err_payload = {
                         "error": {
@@ -1785,7 +1873,7 @@ class StreamingResponseHandler:
                     )
                     self.error_occurred = True
                     return outputs, True
-                except StopIteration:
+                except _TextTransformStopped:
                     return outputs, True
                 except _STREAMING_NONCRITICAL_EXCEPTIONS as transform_err:
                     logger.error(
@@ -1880,7 +1968,7 @@ class StreamingResponseHandler:
                                     stop_stream = True
                                     break
                                 continue
-                            outputs, should_stop = process_line(logical_line, sse_framed=sse_framed)
+                            outputs, should_stop = await process_line(logical_line, sse_framed=sse_framed)
                             chunk_outputs.extend(outputs)
                             # Provider-use accounting belongs to the first
                             # validated semantic frame, not clean stream
@@ -1894,6 +1982,8 @@ class StreamingResponseHandler:
                                     continue
                                 stop_stream = True
                                 break
+                        if self._moderation_failed:
+                            await close_upstream()
                         for out in chunk_outputs:
                             yield out
                         if stop_stream:
@@ -1911,26 +2001,20 @@ class StreamingResponseHandler:
                         yield canonical_provider_error(e)
                         break
                 else:
-                    if (
-                        not self.error_occurred
-                        and (
-                            (
-                                self.openai_sse_seen
-                                and (
-                                    not self.semantic_output_seen
-                                    or not (
-                                        self.valid_finish_received
-                                        or self.upstream_done_received
-                                    )
-                                )
-                            )
-                            or (
-                                self.upstream_done_received
-                                and not self.semantic_output_seen
+                    if not self.error_occurred and (
+                        (
+                            self.openai_sse_seen
+                            and (
+                                not self.semantic_output_seen
+                                or not (self.valid_finish_received or self.upstream_done_received)
                             )
                         )
+                        or (self.upstream_done_received and not self.semantic_output_seen)
                     ):
                         yield canonical_provider_error("provider_unavailable")
+        except ModerationExecutionError:
+            await close_upstream()
+            yield self._moderation_error_frame()
         except asyncio.CancelledError:
             # Client disconnected
             logger.info(f"Client disconnected from stream for {self.conversation_id}")
@@ -1957,7 +2041,10 @@ class StreamingResponseHandler:
                 flush_fn = getattr(self.text_transform, "flush", None)
                 if callable(flush_fn):
                     try:
-                        flush_text = flush_fn()
+                        flush_text = await _flush_text_transform(self.text_transform)
+                    except ModerationExecutionError:
+                        self._stop_for_moderation_failure()
+                        return
                     except _STREAMING_NONCRITICAL_EXCEPTIONS as flush_err:
                         logger.debug(
                             "text_transform flush on error ignored error_type={}",
@@ -1988,38 +2075,15 @@ class StreamingResponseHandler:
             try:
                 # A cancelled stream (client disconnect or stop request) is torn
                 # down inside a cancelled task and under short deadlines, so any
-                # await below may be cut off. Hand its partial reply to a detached
-                # write first, without awaiting (D7 S3-1).
-                if self.is_cancelled and partial_save_callback is not None:
-                    self._start_partial_settlement(partial_save_callback)
-
-                # Async cleanup is safe on the loop. Raw synchronous streams are
-                # closed by the daemon bridge worker; never call close() here.
+                # await below may be cut off. Validate its transform tail before
+                # handing the partial reply to a detached write (D7 S3-1).
                 try:
-                    cleanup_stream = bridged_stream if sync_bridge_started else stream
-                    if hasattr(cleanup_stream, "aclose") and callable(cleanup_stream.aclose):
-                        await invoke_stream_close_bounded(  # type: ignore[attr-defined]
-                            cleanup_stream.aclose,
-                        )
-                    if (
-                        not hasattr(stream, "__aiter__")
-                        and not sync_bridge_admitted.is_set()
-                        and not sync_bridge_cleanup_claimed.is_set()
-                    ):
-                        sync_bridge_cleanup_claimed.set()
-                        await _close_unstarted_sync_stream_bounded(stream)
-                except asyncio.TimeoutError:
-                    logger.debug(
-                        "Stream cleanup exceeded bounded timeout for {}",
-                        self.conversation_id,
-                    )
-                except _STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_err:
-                    # Log cleanup errors for debugging, but don't propagate
-                    logger.debug(
-                        "Stream cleanup warning for {} error_type={}",
-                        self.conversation_id,
-                        type(cleanup_err).__name__,
-                    )
+                    if self.is_cancelled and partial_save_callback is not None:
+                        await self._start_partial_settlement(partial_save_callback)
+                finally:
+                    # Cancellation during an awaited tail cannot skip provider cleanup.
+                    # Raw synchronous streams remain owned by the daemon bridge.
+                    await close_upstream()
 
                 # If cancelled (e.g., client disconnect or generator close), do not yield or await further
                 if self.is_cancelled:
@@ -2038,12 +2102,40 @@ class StreamingResponseHandler:
                                 type(finalize_err).__name__,
                             )
 
-                # Flush any pending tail from text_transform (e.g., moderation holdback)
+                deferred_success_error = None
+                if not self.is_cancelled and not self.error_occurred and before_success_callback:
+                    try:
+                        maybe_before_success = before_success_callback()
+                        if inspect.isawaitable(maybe_before_success):
+                            await maybe_before_success
+                    except ModerationExecutionError:
+                        yield self._moderation_error_frame()
+                    except StopStreamWithError as stopper:
+                        err_payload = {
+                            "error": {"message": str(stopper) or "Stream blocked by policy", "type": stopper.error_type}
+                        }
+                        self._attach_stream_metadata(err_payload)
+                        deferred_success_error = _trusted_local_stream_frame(sse_data(err_payload))
+                    except _STREAMING_NONCRITICAL_EXCEPTIONS as before_success_err:
+                        logger.error(
+                            "Before-success callback error for {} error_type={}",
+                            self.conversation_id,
+                            type(before_success_err).__name__,
+                        )
+                        err_payload = provider_stream_error_payload("provider_unavailable")
+                        self._attach_stream_metadata(err_payload)
+                        deferred_success_error = sse_data(err_payload)
+
+                # Engine failure forbids flushing; preserve the existing safe-tail
+                # behavior for ordinary policy/audit callback errors.
                 if not self.is_cancelled and not self.error_occurred and self.text_transform:
                     flush_fn = getattr(self.text_transform, "flush", None)
                     if callable(flush_fn):
                         try:
-                            flush_text = flush_fn()
+                            flush_text = await _flush_text_transform(self.text_transform)
+                        except ModerationExecutionError:
+                            yield self._moderation_error_frame()
+                            flush_text = None
                         except _STREAMING_NONCRITICAL_EXCEPTIONS as flush_err:
                             logger.debug(
                                 "text_transform flush error ignored error_type={}",
@@ -2067,40 +2159,12 @@ class StreamingResponseHandler:
                                     yield sse_data(content_payload)
                                     self.update_activity()
 
+                if deferred_success_error is not None and not self.error_occurred:
+                    self.error_occurred = True
+                    yield deferred_success_error
+
                 # Save the full response/tool calls if callback provided (only when not cancelled)
                 has_output = self.has_accumulated_output()
-                if (
-                    not self.is_cancelled
-                    and not self.error_occurred
-                ):
-                    if before_success_callback and not self.is_cancelled:
-                        try:
-                            maybe_before_success = before_success_callback()
-                            if hasattr(maybe_before_success, "__await__"):
-                                await maybe_before_success
-                        except StopStreamWithError as stopper:
-                            err_payload = {
-                                "error": {
-                                    "message": str(stopper) or "Stream blocked by policy",
-                                    "type": stopper.error_type,
-                                }
-                            }
-                            self._attach_stream_metadata(err_payload)
-                            self.error_occurred = True
-                            yield _trusted_local_stream_frame(
-                                sse_data(err_payload)
-                            )
-                        except _STREAMING_NONCRITICAL_EXCEPTIONS as before_success_err:
-                            logger.error(
-                                "Before-success callback error for {} error_type={}",
-                                self.conversation_id,
-                                type(before_success_err).__name__,
-                            )
-                            self.error_occurred = True
-                            err_payload = provider_stream_error_payload("provider_unavailable")
-                            self._attach_stream_metadata(err_payload)
-                            yield sse_data(err_payload)
-
                 if (
                     not self.is_cancelled
                     and save_callback
@@ -2144,6 +2208,9 @@ class StreamingResponseHandler:
                             "yes" if aggregated_function_call else "no",
                             len(extra_events),
                         )
+                    except ModerationExecutionError:
+                        yield self._moderation_error_frame()
+                        extra_events = []
                     except Exception as e:
                         logger.error(
                             "Failed to save streaming response for {} error_type={}",
@@ -2180,12 +2247,15 @@ class StreamingResponseHandler:
                 # saved message ID with stream_end. The shield keeps a late
                 # disconnect from aborting the write.
                 if partial_save_callback is not None:
-                    settlement = self._start_partial_settlement(partial_save_callback)
+                    settlement = await self._start_partial_settlement(partial_save_callback)
                     if settlement is not None and not self.is_cancelled:
                         partial_result = await asyncio.shield(settlement)
                         partial_message_id, _partial_events = self._parse_save_callback_result(partial_result)
                         if partial_message_id:
                             self.saved_message_id = partial_message_id
+
+                if self._moderation_failed and not self._moderation_error_emitted and not self.is_cancelled:
+                    yield self._moderation_error_frame()
 
                 # Send completion marker(s) after save so metadata includes IDs.
                 if not self.is_cancelled and not self.error_occurred:
@@ -2249,7 +2319,7 @@ async def create_streaming_response_with_timeout(
     on_first_output: Optional[Callable[[], Any]] = None,
     idle_timeout: int = STREAMING_IDLE_TIMEOUT,
     heartbeat_interval: int = HEARTBEAT_INTERVAL,
-    text_transform: Optional[callable] = None,
+    text_transform: Callable[[str], str | Awaitable[str]] | None = None,
     system_message_id: Optional[str] = None,
     continuation_metadata: Optional[dict[str, Any]] = None,
     history_persistence_ack: bool = False,

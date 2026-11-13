@@ -5,6 +5,8 @@ import {
   formatReviewDate,
   getReviewItemSourceLabel,
   getReviewItemUserLabel,
+  isExecutionIncident,
+  reviewPhaseLabel,
   REVIEW_STATUS_LABELS,
   SEVERITY_LABELS
 } from "./review-utils"
@@ -26,14 +28,14 @@ export const ReviewQueueList: React.FC<ReviewQueueListProps> = ({
 }) => {
   const bulkSelectionEnabled = Boolean(onToggleSelected)
   const headerColumns = bulkSelectionEnabled
-    ? "lg:grid-cols-[36px_110px_90px_120px_80px_1fr_150px]"
-    : "lg:grid-cols-[110px_90px_120px_80px_1fr_150px]"
-  const rowColumns = bulkSelectionEnabled ? "lg:grid-cols-[36px_1fr]" : "lg:grid-cols-1"
+    ? "[@container(min-width:800px)]:grid-cols-[36px_90px_65px_110px_104px_minmax(120px,1fr)_130px]"
+    : "[@container(min-width:800px)]:grid-cols-[90px_65px_110px_104px_minmax(120px,1fr)_130px]"
+  const rowColumns = bulkSelectionEnabled ? "[@container(min-width:800px)]:grid-cols-[36px_minmax(0,1fr)]" : "grid-cols-1"
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-surface">
-      <div className={`hidden gap-3 border-b border-border bg-surface2 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-muted lg:grid ${headerColumns}`}>
-        {bulkSelectionEnabled && <div>Select</div>}
+    <div className="overflow-hidden rounded-lg border border-border bg-surface [container-type:inline-size]">
+      <div className={`hidden gap-3 border-b border-border bg-surface2 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-muted [@container(min-width:800px)]:grid ${headerColumns}`}>
+        {bulkSelectionEnabled && <div><span className="sr-only">Select</span></div>}
         <div>Status</div>
         <div>Severity</div>
         <div>Category</div>
@@ -49,7 +51,7 @@ export const ReviewQueueList: React.FC<ReviewQueueListProps> = ({
             <div
               key={item.id}
               role="listitem"
-              className={`grid gap-2 border-b border-border px-3 py-3 last:border-b-0 lg:items-center ${rowColumns} ${
+              className={`grid gap-3 border-b border-border px-3 py-3 last:border-b-0 [@container(min-width:800px)]:items-center ${rowColumns} ${
                 selected ? "bg-blue-50 text-blue-950 dark:bg-blue-950/30 dark:text-blue-100" : "bg-surface hover:bg-surface2"
               }`}
             >
@@ -67,20 +69,20 @@ export const ReviewQueueList: React.FC<ReviewQueueListProps> = ({
               <button
                 type="button"
                 onClick={() => onSelect(item.id)}
-                className="grid w-full gap-2 text-left text-sm lg:grid-cols-[110px_90px_120px_80px_1fr_150px] lg:items-center"
+                className="grid min-w-0 w-full gap-3 break-words text-left text-sm [@container(min-width:800px)]:grid-cols-[90px_65px_110px_104px_minmax(120px,1fr)_130px] [@container(min-width:800px)]:items-center"
                 aria-current={selected ? "true" : undefined}
               >
                 <div>
                   <div className="font-medium text-text">{REVIEW_STATUS_LABELS[item.status]}</div>
-                  <div className="mt-0.5 text-xs text-text-muted lg:hidden">{getReviewItemSourceLabel(item)}</div>
+                  <div className="mt-0.5 text-xs text-text-muted [@container(min-width:800px)]:hidden">{getReviewItemSourceLabel(item)}</div>
                 </div>
                 <div className="text-text-muted">{item.severity ? SEVERITY_LABELS[item.severity] : "Unknown"}</div>
-                <div className="text-text-muted">{item.category || "Uncategorized"}</div>
-                <div className="capitalize text-text-muted">{item.phase}</div>
+                <div className="min-w-0 text-text-muted">{isExecutionIncident(item) ? "Operational failure" : item.category || "Uncategorized"}</div>
+                <div className="text-text-muted">{reviewPhaseLabel(item.phase)}</div>
                 <div className="min-w-0">
                   <div className="truncate text-text">{item.excerpt}</div>
                   <div className="mt-0.5 truncate text-xs text-text-muted">
-                    {getReviewItemSourceLabel(item)} · {getReviewItemUserLabel(item)}
+                    {getReviewItemSourceLabel(item)}{!isExecutionIncident(item) ? ` · ${getReviewItemUserLabel(item)}` : ""}
                     {item.recommended_action ? ` · Recommended: ${item.recommended_action}` : ""}
                   </div>
                 </div>

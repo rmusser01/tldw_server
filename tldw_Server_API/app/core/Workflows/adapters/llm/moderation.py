@@ -10,8 +10,17 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
+from tldw_Server_API.app.core.Moderation.execution_models import (
+    ExecutionBounds,
+    FailureMetadata,
+    SubstitutionRuleSnapshot,
+    execution_scope,
+)
+from tldw_Server_API.app.core.Moderation.execution_protocol import snapshot_substitution_request
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.Workflows.adapters._common import resolve_context_user_id
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.llm._config import (
@@ -65,8 +74,44 @@ async def run_moderation_adapter(config: dict[str, Any], context: dict[str, Any]
     if not text.strip():
         return {"error": "missing_text"}
 
-    # Test mode simulation
-    if is_test_mode():
+    def execute():
+        with execution_scope():
+            return _execute_moderation(config, context, action, text, simulated=is_test_mode())
+
+    return await run_moderation_async(
+        execute,
+        metadata=FailureMetadata(
+            "evaluate" if action == "check" else "custom_substitute",
+            "input" if action == "check" else None,
+            len(text),
+        ),
+    )
+
+
+def _custom_substitute(text: str, patterns: list[str], replacement: str) -> tuple[str, int]:
+    """Run one sequential stdlib template batch, including simulation rules."""
+    from tldw_Server_API.app.core.Moderation.execution_runner import get_execution_runner
+
+    rules = [
+        SubstitutionRuleSnapshot(pattern.strip(), int(re.IGNORECASE), replacement)
+        for pattern in patterns
+        if isinstance(pattern, str) and pattern.strip()
+    ]
+    if not rules:
+        return text, 0
+    with execution_scope() as scope:
+        request = snapshot_substitution_request(text, rules, None, ExecutionBounds())
+        result = get_execution_runner().execute(request, scope).result
+    if result.skipped_rule_indices:
+        logger.warning("Invalid custom redaction pattern skipped count={}", len(result.skipped_rule_indices))
+    return result.text, result.count
+
+
+def _execute_moderation(
+    config: dict[str, Any], context: dict[str, Any], action: str, text: str, *, simulated: bool
+) -> dict[str, Any]:
+    """Trusted orchestration only; all content regex execution is child-owned."""
+    if simulated:
         if action == "check":
             # Simulate: flag if "blocked" appears in text
             is_blocked = "blocked" in text.lower() or "unsafe" in text.lower()
@@ -78,19 +123,12 @@ async def run_moderation_adapter(config: dict[str, Any], context: dict[str, Any]
             }
         if action == "redact":
             # Simulate: redact any occurrence of "secret" or "password"
-            redacted, base_count = re.subn(r"\b(secret|password|blocked|unsafe)\b", "[REDACTED]", text, flags=re.IGNORECASE)
+            redacted, base_count = _custom_substitute(text, [r"\b(secret|password|blocked|unsafe)\b"], "[REDACTED]")
             # Apply custom patterns if provided
             custom_patterns = config.get("patterns")
             custom_count = 0
             if custom_patterns and isinstance(custom_patterns, list):
-                for pattern_str in custom_patterns:
-                    if isinstance(pattern_str, str) and pattern_str.strip():
-                        try:
-                            pat = re.compile(pattern_str.strip(), flags=re.IGNORECASE)
-                            redacted, count = pat.subn("[REDACTED]", redacted)
-                            custom_count += count
-                        except re.error:
-                            pass  # Skip invalid patterns in TEST_MODE
+                redacted, custom_count = _custom_substitute(redacted, custom_patterns, "[REDACTED]")
             redaction_count = base_count + custom_count
             return {
                 "redacted_text": redacted,
@@ -142,14 +180,9 @@ async def run_moderation_adapter(config: dict[str, Any], context: dict[str, Any]
             custom_patterns = config.get("patterns")
             custom_count = 0
             if custom_patterns and isinstance(custom_patterns, list):
-                for pattern_str in custom_patterns:
-                    if isinstance(pattern_str, str) and pattern_str.strip():
-                        try:
-                            pat = re.compile(pattern_str.strip(), flags=re.IGNORECASE)
-                            redacted, count = pat.subn(policy.redact_replacement or "[REDACTED]", redacted)
-                            custom_count += count
-                        except re.error:
-                            logger.warning("Invalid custom redaction pattern skipped")
+                redacted, custom_count = _custom_substitute(
+                    redacted, custom_patterns, policy.redact_replacement or "[REDACTED]"
+                )
 
             redaction_count = int(base_count or 0) + custom_count
             return {
@@ -162,6 +195,8 @@ async def run_moderation_adapter(config: dict[str, Any], context: dict[str, Any]
 
         return {"error": f"unknown_action:{action}"}
 
+    except ModerationExecutionError:
+        raise
     except Exception:
         logger.exception("Moderation adapter error")
         return {"error": "moderation_error"}

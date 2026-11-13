@@ -9,6 +9,21 @@ import { getDesignSystemState } from "@/design-system"
 
 const BLOCKED_STATE_LABEL = getDesignSystemState("blocked").label
 
+export function reviewPhaseLabel(phase: ModerationReviewItem["phase"]): string {
+  return { input: "Input", output: "Output", unspecified: "Unspecified" }[phase]
+}
+
+export function isExecutionIncident(item: ModerationReviewItem): boolean {
+  return item.source_type === "moderation_engine" && item.category === "moderation_engine_failure"
+}
+
+export function executionIncidentMetadata(item: ModerationReviewItem): Record<string, string> {
+  const context = item.context || {}
+  return Object.fromEntries(["reason", "operation", "correlation_id"]
+    .filter((key) => typeof context[key] === "string")
+    .map((key) => [key, context[key] as string]))
+}
+
 export const REVIEW_STATUS_LABELS: Record<ModerationReviewStatus, string> = {
   needs_review: "Needs review",
   approved: "Approved",

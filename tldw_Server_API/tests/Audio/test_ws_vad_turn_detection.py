@@ -36,6 +36,72 @@ class _DummyWebSocket:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("site", ["result_callback", "full_callback", "send"])
+async def test_moderation_failure_stops_unified_callbacks_and_snapshots(monkeypatch, site):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+
+    instances = []
+
+    class Transcriber:
+        def __init__(self, config):
+            self.text = "private transcript"
+            self.cleaned = False
+            instances.append(self)
+
+        def initialize(self):
+            pass
+
+        async def process_audio_chunk(self, data):
+            return {
+                "type": "transcription",
+                "text": "safe prefix" if site == "full_callback" else self.text,
+                "is_final": True,
+                "segments": [{"text": "safe segment" if site == "full_callback" else "private segment"}],
+            }
+
+        def get_full_transcript(self):
+            return self.text
+
+        def reset(self):
+            self.text = ""
+
+        def cleanup(self):
+            self.cleaned = True
+
+    class Socket(_DummyWebSocket):
+        async def send_json(self, payload):
+            if site == "send" and payload.get("type") == "transcription":
+                raise ModerationExecutionError("worker_crashed")
+            await super().send_json(payload)
+
+    async def fail(*args):
+        raise ModerationExecutionError("worker_crashed")
+
+    monkeypatch.setattr(unified, "UnifiedStreamingTranscriber", Transcriber)
+    config = json.dumps({"type": "config", "model": "parakeet", "sample_rate": 16000})
+    frames = [
+        config,
+        json.dumps({"type": "audio", "data": base64.b64encode(b"1234").decode("ascii")}),
+        json.dumps({"type": "stop"}),
+    ]
+    ws = Socket(frames)
+    with pytest.raises(ModerationExecutionError, match="worker_crashed"):
+        await unified.handle_unified_websocket(
+            ws,
+            unified.UnifiedStreamingConfig(),
+            on_transcript_result=fail if site == "result_callback" else None,
+            on_full_transcript=fail if site == "full_callback" else None,
+        )
+    assert not any(frame.get("type") in {"done", "error"} for frame in ws.sent)
+    assert not any(frame.get("type") == "full_transcript" for frame in ws.sent)
+    assert "private transcript" not in json.dumps(ws.sent)
+    assert "private segment" not in json.dumps(ws.sent)
+    assert instances[0].text == ""
+    assert instances[0].cleaned
+
+
+@pytest.mark.asyncio
 async def test_vad_auto_commit_triggers_full_transcript(monkeypatch):
     """Auto-commit should emit a full_transcript frame when VAD signals EOS."""
     class _StubTranscriber:
@@ -354,8 +420,8 @@ def test_silero_turn_detector_fails_open_on_torchscript_error(monkeypatch):
 
     import types
 
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.VAD_Lib as vlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.VAD_Lib as vlib
 
     monkeypatch.setattr(vlib, "_lazy_import_silero_vad", lambda: ("model", [None, None, None, _RaisingVADIterator, None]))
     fake_torch = types.SimpleNamespace(jit=types.SimpleNamespace(Error=_FakeJitError), from_numpy=lambda arr: arr)
@@ -438,12 +504,11 @@ def test_silero_turn_detector_real_vad_end_to_end(monkeypatch, tmp_path):
 
 def test_silero_turn_detector_logs_fail_open(monkeypatch):
 
-
     """
     When Silero VAD cannot be initialized, we should log a warning and continue without auto-commit.
     """
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.VAD_Lib as vlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.VAD_Lib as vlib
 
     def _raise_import_error():
 
@@ -476,8 +541,8 @@ def test_silero_turn_detector_logs_fail_open(monkeypatch):
 
 
 def test_silero_turn_detector_surfaces_specific_loader_reason(monkeypatch):
-    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.VAD_Lib as vlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Streaming_Unified as unified
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.VAD_Lib as vlib
 
     monkeypatch.setattr(vlib, "_lazy_import_silero_vad", lambda: (None, None))
     monkeypatch.setattr(

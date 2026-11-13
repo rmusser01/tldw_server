@@ -55,6 +55,7 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTranscriptDone,
     RealtimePipelineTurnDone,
 )
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 
 
 class RealtimeSession:
@@ -83,6 +84,7 @@ class RealtimeSession:
         self._pending_audio_item_id: str | None = None
         self._previous_item_id: str | None = None
         self._last_user_transcript = ""
+        self._moderation_failed = False
         self._pending_events: list[RealtimeServerEvent] = [self.created_event()]
 
     def created_event(self, event_id: str | None = None) -> SessionCreatedEvent:
@@ -187,6 +189,18 @@ class RealtimeSession:
                 sample_rate_hz=self.config.input_sample_rate_hz,
                 language=_language_from_metadata(self.config.metadata),
             )
+        except ModerationExecutionError:
+            self._last_user_transcript = ""
+            self._moderation_failed = True
+            events.append(
+                RealtimeErrorEvent(
+                    code="moderation_unavailable",
+                    message="Moderation is currently unavailable",
+                    event_id=command.event_id,
+                    error_type="server_error",
+                )
+            )
+            return events
         except Exception:  # noqa: BLE001 - normalize provider failures without leaking private details
             events.append(
                 RealtimeErrorEvent(
@@ -198,6 +212,7 @@ class RealtimeSession:
             )
             return events
 
+        self._moderation_failed = False
         self.turn_index += 1
         self._last_user_transcript = transcript
         previous_item_id = self._previous_item_id
@@ -231,6 +246,14 @@ class RealtimeSession:
         return []
 
     async def create_response(self, command: CreateResponseCommand) -> AsyncIterator[RealtimeServerEvent]:
+        if self._moderation_failed:
+            yield RealtimeErrorEvent(
+                code="moderation_unavailable",
+                message="Moderation is currently unavailable",
+                event_id=command.event_id,
+                error_type="server_error",
+            )
+            return
         if self.active_response_id is not None:
             yield RealtimeErrorEvent(
                 code="invalid_request",
@@ -384,6 +407,29 @@ class RealtimeSession:
                         return
                 elif isinstance(pipeline_event, RealtimePipelineTurnDone):
                     final_status = pipeline_event.status
+        except ModerationExecutionError:
+            self._last_user_transcript = ""
+            self._moderation_failed = True
+            if not self._generation_is_current(generation_id, response_id):
+                return
+            yield RealtimeErrorEvent(
+                code="moderation_unavailable",
+                message="Moderation is currently unavailable",
+                event_id=command.event_id,
+                error_type="server_error",
+            )
+            if not self._generation_is_current(generation_id, response_id):
+                return
+            yield ResponseDoneEvent(
+                event_id=command.event_id,
+                response_id=response_id,
+                status="failed",
+                status_details={
+                    "error": {"code": "moderation_unavailable", "message": "Moderation is currently unavailable"}
+                },
+            )
+            self._clear_active_response(response_id)
+            return
         except Exception:  # noqa: BLE001 - injected pipelines may raise provider-specific errors
             if not self._generation_is_current(generation_id, response_id):
                 return

@@ -10,7 +10,6 @@ import pytest
 
 import tldw_Server_API.app.core.Moderation.moderation_service as moderation_service_module
 from tldw_Server_API.app.core.Moderation.moderation_service import (
-    ModerationEvaluationResult,
     ModerationPolicy,
     ModerationService,
     PatternRule,
@@ -230,148 +229,70 @@ def test_build_sanitized_snippet_delegates_exactly_once():
     service._evaluation_limits.assert_not_called()
 
 
-def test_redact_text_delegates_exactly_once_with_one_snapshot():
-    evaluator = Mock()
-    evaluator.redact_text.return_value = sentinel.redacted_text
+@pytest.mark.parametrize(
+    "method,operation,want",
+    [
+        ("redact_text", "redact", "[R]"),
+        ("redact_text_with_count", "redact_with_count", ("[R]", 1)),
+    ],
+)
+def test_redaction_delegates_exactly_once_with_one_snapshot(monkeypatch, method, operation, want):
+    from tldw_Server_API.app.core.Moderation import execution_runner
+
     service = _service()
-    service._policy_evaluator = evaluator
-    service._evaluation_limits = Mock(return_value=sentinel.redact_limits)
-
-    result = service.redact_text(
-        sentinel.redact_text_input,
-        sentinel.redact_policy,
-        sentinel.redact_phase,
-    )
-
-    assert result is sentinel.redacted_text
+    limits = service._evaluation_limits()
+    service._evaluation_limits = Mock(return_value=limits)
+    owner = execution_runner.get_execution_runner()
+    execute = Mock(wraps=owner.execute)
+    monkeypatch.setattr(owner, "execute", execute)
+    assert getattr(service, method)("secret", _policy(), "output") == want
     service._evaluation_limits.assert_called_once_with()
-    evaluator.redact_text.assert_called_once_with(
-        sentinel.redact_text_input,
-        sentinel.redact_policy,
-        sentinel.redact_phase,
-        sentinel.redact_limits,
-    )
+    request = execute.call_args.args[0]
+    assert request.operation == operation
+    assert request.limits == {
+        "max_scan_chars": 10,
+        "match_window_chars": 5,
+        "max_fallback_scan_chars": 100,
+        "max_replacements_per_pattern": 2,
+    }
+    assert execute.call_count == 1
 
 
-def test_redact_text_with_count_delegates_exactly_once_with_one_snapshot():
-    evaluator = Mock()
-    evaluator.redact_text_with_count.return_value = sentinel.redaction_with_count
+def test_decision_only_evaluation_delegates_exactly_once_with_one_snapshot(monkeypatch):
+    from tldw_Server_API.app.core.Moderation import execution_runner
+
     service = _service()
-    service._policy_evaluator = evaluator
-    service._evaluation_limits = Mock(return_value=sentinel.count_limits)
-
-    result = service.redact_text_with_count(
-        sentinel.count_text,
-        sentinel.count_policy,
-        sentinel.count_phase,
-    )
-
-    assert result is sentinel.redaction_with_count
-    service._evaluation_limits.assert_called_once_with()
-    evaluator.redact_text_with_count.assert_called_once_with(
-        sentinel.count_text,
-        sentinel.count_policy,
-        sentinel.count_phase,
-        sentinel.count_limits,
-    )
-
-
-def test_decision_only_evaluation_delegates_exactly_once_with_one_snapshot():
-    evaluator = Mock()
-    evaluator.evaluate_text.return_value = sentinel.decision_only_result
-    service = _service()
-    service._policy_evaluator = evaluator
-    service._evaluation_limits = Mock(return_value=sentinel.decision_limits)
-    service.redact_text = Mock(
-        side_effect=AssertionError("public redaction must not run"),
-    )
-
-    result = service._evaluate_text_core(
-        sentinel.decision_only_text,
-        sentinel.decision_only_policy,
-        sentinel.decision_only_phase,
-        include_redacted_text=False,
-    )
-
-    assert result is sentinel.decision_only_result
-    service._evaluation_limits.assert_called_once_with()
-    evaluator.evaluate_text.assert_called_once_with(
-        sentinel.decision_only_text,
-        sentinel.decision_only_policy,
-        sentinel.decision_only_phase,
-        sentinel.decision_limits,
-        include_redacted_text=False,
-    )
+    owner = execution_runner.get_execution_runner()
+    execute = Mock(wraps=owner.execute)
+    monkeypatch.setattr(owner, "execute", execute)
+    service.redact_text = Mock(side_effect=AssertionError("public redaction must not run"))
+    result = service._evaluate_text_core("secret", _policy(), "output", include_redacted_text=False)
+    assert result.action == "redact"
+    assert result.redacted_text is None
+    assert execute.call_count == 1
     service.redact_text.assert_not_called()
 
 
-def test_service_evaluation_and_redaction_use_separate_snapshots():
+def test_service_evaluation_and_redaction_use_separate_snapshots(monkeypatch):
+    from tldw_Server_API.app.core.Moderation import execution_runner
+
     first = EvaluationLimits(10, 5, 100, 2)
     second = EvaluationLimits(20, 6, 200, 3)
-    evaluator = Mock()
-    decision = ModerationEvaluationResult(
-        action="redact",
-        matched_pattern=sentinel.decision_pattern,
-        category=sentinel.decision_category,
-        match_span=sentinel.decision_span,
-        sample=sentinel.decision_sample,
-    )
-    decision_before = vars(decision).copy()
-    evaluator.evaluate_text.return_value = decision
-    evaluator.redact_text.return_value = sentinel.public_redacted_text
     service = _service()
-    service._policy_evaluator = evaluator
     service._evaluation_limits = Mock(side_effect=[first, second])
     service.redact_text = Mock(wraps=service.redact_text)
-
-    result = service.evaluate_text(
-        sentinel.decision_text,
-        sentinel.decision_policy,
-        sentinel.decision_phase,
-    )
-
+    owner = execution_runner.get_execution_runner()
+    execute = Mock(wraps=owner.execute)
+    monkeypatch.setattr(owner, "execute", execute)
+    policy = _policy()
+    result = service.evaluate_text("secret", policy, "output")
     assert service._evaluation_limits.call_args_list == [call(), call()]
-    evaluator.evaluate_text.assert_called_once_with(
-        sentinel.decision_text,
-        sentinel.decision_policy,
-        sentinel.decision_phase,
-        first,
-        include_redacted_text=False,
-    )
-    service.redact_text.assert_called_once_with(
-        sentinel.decision_text,
-        sentinel.decision_policy,
-        phase=sentinel.decision_phase,
-    )
-    evaluator.redact_text.assert_called_once_with(
-        sentinel.decision_text,
-        sentinel.decision_policy,
-        sentinel.decision_phase,
-        second,
-    )
-    assert evaluator.mock_calls == [
-        call.evaluate_text(
-            sentinel.decision_text,
-            sentinel.decision_policy,
-            sentinel.decision_phase,
-            first,
-            include_redacted_text=False,
-        ),
-        call.redact_text(
-            sentinel.decision_text,
-            sentinel.decision_policy,
-            sentinel.decision_phase,
-            second,
-        ),
-    ]
-    assert vars(decision) == decision_before
-    assert result is not decision
-    assert result.action is decision.action
-    assert result.redacted_text is sentinel.public_redacted_text
-    assert result.matched_pattern is decision.matched_pattern
-    assert result.category is decision.category
-    assert result.match_span is decision.match_span
-    assert result.sample is decision.sample
+    service.redact_text.assert_called_once_with("secret", policy, phase="output")
+    requests = [entry.args[0] for entry in execute.call_args_list]
+    assert [request.operation for request in requests] == ["evaluate", "redact"]
+    assert [request.limits["max_scan_chars"] for request in requests] == [10, 20]
+    assert execute.call_args_list[0].args[1] is execute.call_args_list[1].args[1]
+    assert result.redacted_text == "[R]"
 
 
 def test_check_and_decision_only_core_do_not_invoke_public_redaction():

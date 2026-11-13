@@ -7,7 +7,7 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
@@ -16,12 +16,13 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import outside_chacha_operation
 from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database, get_content_backend_instance
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.exceptions import AdapterError
 from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.Workflows.adapters import get_adapter
 from tldw_Server_API.app.core.Workflows.capabilities import get_step_capability
-from tldw_Server_API.app.core.Workflows.failures import build_failure_envelope, is_retriable_reason
+from tldw_Server_API.app.core.Workflows.failures import FailureEnvelope, build_failure_envelope, is_retriable_reason
 
 _WF_NONCRITICAL_EXCEPTIONS: tuple[type[Exception], ...] = (
     AttributeError,
@@ -92,6 +93,8 @@ def _reason_code_from_error(error: BaseException | str | None) -> str:
     """Normalize an error payload into a reason code token used for retry policy."""
     if error is None:
         return ""
+    if isinstance(error, ModerationExecutionError):
+        return "moderation_unavailable"
     text = str(error).strip().lower()
     if not text:
         return ""
@@ -109,6 +112,14 @@ def _is_retriable_error(reason_code: str | None) -> bool:
     attempt's ``retryable`` flag come from one reason set.
     """
     return is_retriable_reason(reason_code)
+
+
+def _step_failure_envelope(error: Exception, *, step_type: str) -> FailureEnvelope:
+    """Keep only typed moderation execution failures terminal and content-free."""
+    failure = build_failure_envelope(error, step_type=step_type)
+    if isinstance(error, ModerationExecutionError):
+        return replace(failure, reason_code_core="moderation_unavailable", reason_code_detail=error.reason, retryable=False, retry_recommendation="unsafe", error_summary="Moderation is currently unavailable")
+    return failure
 
 
 def _resolve_config_templates(cfg: Any, context: dict[str, Any]) -> Any:
@@ -854,7 +865,7 @@ class WorkflowEngine:
                                 record_span_exception(err)
 
                         if err is not None:
-                            failure = build_failure_envelope(err, step_type=step_type)
+                            failure = _step_failure_envelope(err, step_type=step_type)
                             self._complete_step_attempt_record(
                                 attempt_id=attempt_id,
                                 step_type=step_type,
@@ -863,7 +874,7 @@ class WorkflowEngine:
                             )
 
                         if attempt <= max_retries:
-                            if not _is_retriable_error(error_reason_code):
+                            if isinstance(err, ModerationExecutionError) or not _is_retriable_error(error_reason_code):
                                 self._append_event(
                                     run_id,
                                     "step_retry_suppressed",
@@ -894,7 +905,7 @@ class WorkflowEngine:
                         # Check on_failure routing
                         try:
                             failure_next = str(step.get("on_failure") or "").strip()
-                            if failure_next and failure_next in id_to_idx:
+                            if not isinstance(err, ModerationExecutionError) and failure_next and failure_next in id_to_idx:
                                 jump_to_id_on_failure = failure_next
                         except _WF_NONCRITICAL_EXCEPTIONS:
                             jump_to_id_on_failure = None
@@ -909,7 +920,7 @@ class WorkflowEngine:
                         if not self._update_run_status_guarded(
                             run_id,
                             status="failed",
-                            status_reason=str(err),
+                            status_reason="moderation_unavailable" if isinstance(err, ModerationExecutionError) else str(err),
                             ended_at=self._now_iso(),
                             error=str(err),
                             tokens_input=tokens_in,
@@ -921,8 +932,9 @@ class WorkflowEngine:
                         with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             increment_counter("workflows_runs_failed", labels={"tenant": self._tenant_for_run(run_id)})
                         # Completion webhook on failure
-                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
-                            await self._maybe_send_completion_webhook(definition, run_id, status="failed")
+                        if not isinstance(err, ModerationExecutionError):
+                            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
+                                await self._maybe_send_completion_webhook(definition, run_id, status="failed")
                         return
 
                     # Success path or waiting handled inside adapter helper
@@ -1416,7 +1428,7 @@ class WorkflowEngine:
                     err = AdapterError("step_raised_cancelled_error")  # the step raised it itself (TASK-13891)
                     error_reason_code = _reason_code_from_error(err)
                 if err is not None:
-                    failure = build_failure_envelope(err, step_type=stype)
+                    failure = _step_failure_envelope(err, step_type=stype)
                     self._complete_step_attempt_record(
                         attempt_id=attempt_id,
                         step_type=stype,
@@ -1424,7 +1436,7 @@ class WorkflowEngine:
                         failure=failure,
                     )
                 if attempt <= max_retries:
-                    if not _is_retriable_error(error_reason_code):
+                    if isinstance(err, ModerationExecutionError) or not _is_retriable_error(error_reason_code):
                         self._append_event(
                             run_id,
                             "step_retry_suppressed",
@@ -1448,7 +1460,7 @@ class WorkflowEngine:
                 with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     self.db.complete_step_run(step_run_id=step_run_id, status="failed", outputs=outputs, error=str(err))
                 failure_next = str(step.get("on_failure") or "").strip()
-                if failure_next and failure_next in id_to_idx:
+                if not isinstance(err, ModerationExecutionError) and failure_next and failure_next in id_to_idx:
                     last = {"__status__": "failed", "error": str(err)}
                     context.update({"last": last})
                     idx = id_to_idx[failure_next]
@@ -1457,7 +1469,7 @@ class WorkflowEngine:
                 if not self._update_run_status_guarded(
                     run_id,
                     status="failed",
-                    status_reason=str(err),
+                    status_reason="moderation_unavailable" if isinstance(err, ModerationExecutionError) else str(err),
                     ended_at=self._now_iso(),
                     error=str(err),
                     tokens_input=tokens_in,
@@ -1468,8 +1480,9 @@ class WorkflowEngine:
                     finalized = True
                     return
                 self._append_event(run_id, "run_failed", {"error": str(err)})
-                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
-                    await self._maybe_send_completion_webhook(definition, run_id, status="failed")
+                if not isinstance(err, ModerationExecutionError):
+                    with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
+                        await self._maybe_send_completion_webhook(definition, run_id, status="failed")
                 _finalize(False)
                 finalized = True
                 return

@@ -37,10 +37,10 @@ from fastapi import WebSocketDisconnect
 from loguru import logger
 
 from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_truthy
 
-from .Audio_Streaming_Parakeet import AudioBuffer, StreamingConfig
 from .audio_stream_protocol import (
     AUDIO_TRANSCRIBE_ENDPOINT,
     AudioProtocolConfig,
@@ -49,7 +49,7 @@ from .audio_stream_protocol import (
     decode_audio_frame,
     validate_audio_stream_config,
 )
-from .ws_control_protocol import WSControlProtocolConfig, WSControlSession
+from .Audio_Streaming_Parakeet import AudioBuffer, StreamingConfig
 
 # Import existing implementations
 from .Audio_Transcription_Nemo import (
@@ -58,6 +58,8 @@ from .Audio_Transcription_Nemo import (
     transcribe_with_canary,
     transcribe_with_parakeet,
 )
+from .ws_control_protocol import WSControlProtocolConfig, WSControlSession
+
 try:  # pragma: no cover - optional on non-macOS or minimal test envs
     from .Audio_Transcription_Parakeet_MLX import (
         create_parakeet_mlx_streaming_session,
@@ -3273,6 +3275,8 @@ async def handle_unified_websocket(
             if on_full_transcript is not None:
                 try:
                     await on_full_transcript(full_transcript, auto_commit)
+                except ModerationExecutionError:
+                    raise
                 except Exception as cb_exc:  # noqa: BLE001 - callback failures must not break streaming
                     logger.debug(f"on_full_transcript callback failed: {cb_exc}")
             await stream.send_json(payload)
@@ -3336,6 +3340,8 @@ async def handle_unified_websocket(
                     full_snapshot = ""
                 try:
                     await on_transcript_result(result, full_snapshot)
+                except ModerationExecutionError:
+                    raise
                 except Exception as cb_exc:  # noqa: BLE001 - callback failures must not break streaming
                     logger.debug(f"on_transcript_result callback failed: {cb_exc}")
 
@@ -3460,6 +3466,8 @@ async def handle_unified_websocket(
                 with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
                     await stream.error("quota_exceeded", "Streaming transcription quota exceeded", data={"quota": _quota})
                 return
+            except ModerationExecutionError:
+                raise
             except _AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS as e:
                 if isinstance(e, WebSocketDisconnect):
                     # Let disconnect bubble to the outer handler for graceful shutdown
@@ -3467,6 +3475,11 @@ async def handle_unified_websocket(
                 logger.error(f"Error processing message: {e}")
                 await stream.error("internal_error", "Streaming audio processing failed")
 
+    except ModerationExecutionError:
+        if transcriber:
+            with contextlib.suppress(_AUDIO_UNIFIED_NONCRITICAL_EXCEPTIONS):
+                transcriber.reset()
+        raise
     except asyncio.TimeoutError:
         await stream.error("idle_timeout", "Configuration timeout")
     except WebSocketDisconnect:

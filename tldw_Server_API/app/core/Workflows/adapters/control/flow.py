@@ -14,6 +14,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+
 from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string
 from tldw_Server_API.app.core.exceptions import AdapterError, LLMQuotaExceededError
 from tldw_Server_API.app.core.Metrics import start_async_span as _start_span
@@ -426,6 +428,8 @@ async def run_parallel_adapter(config: dict[str, Any], context: dict[str, Any]) 
                     results[idx] = result
                 else:
                     results[idx] = {"error": f"unknown_step_type: {step_type}"}
+            except ModerationExecutionError:
+                raise
             except _FLOW_NONCRITICAL_EXCEPTIONS:
                 results[idx] = {"error": "parallel_step_error"}
                 if fail_fast:
