@@ -885,10 +885,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
             assert "concurrency" not in data
         else:
             prefix = "${{ github.workflow }}" if name == "jobs-suite.yml" else name.removesuffix(".yml")
-            suffix = concurrency_suffix
-            if name == "backend-required.yml":
-                suffix = suffix.replace("github.event.workflow_run.pull_requests[0].number || ", "")
-            assert data["concurrency"]["group"] == f"{prefix}-{suffix}", name
+            assert data["concurrency"]["group"] == f"{prefix}-{concurrency_suffix}", name
             expected_cancel: object = True
             if name == "jobs-suite.yml":
                 expected_cancel = (
@@ -907,7 +904,7 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         assert "github.event.workflow_run.head_sha" not in text
 
     combined_text = "\n".join(text for _, text in workflows.values())
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 26
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
     assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
     assert combined_text.count("github.event.pull_request.head.sha") == 56
