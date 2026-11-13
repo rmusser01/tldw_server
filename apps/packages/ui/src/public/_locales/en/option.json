@@ -6039,16 +6039,25 @@
     "message": "Search loaded nodes"
   },
   "notesSearch_graphRadiusLabel": {
-    "message": "Radius"
+    "message": "Distance from focus"
   },
   "notesSearch_graphRadiusAria": {
-    "message": "Graph radius"
+    "message": "Distance from focus note"
+  },
+  "notesSearch_graphRadiusOption_one": {
+    "message": "1 link away"
+  },
+  "notesSearch_graphRadiusOption_two": {
+    "message": "2 links away"
+  },
+  "notesSearch_graphSettings": {
+    "message": "Graph settings"
   },
   "notesSearch_graphMaxNodesLabel": {
-    "message": "Max nodes"
+    "message": "Most items shown"
   },
   "notesSearch_graphMaxNodesAria": {
-    "message": "Maximum graph nodes"
+    "message": "Most items shown in the graph"
   },
   "notesSearch_graphLayoutLabel": {
     "message": "Layout"
@@ -6057,7 +6066,7 @@
     "message": "Graph layout"
   },
   "notesSearch_graphLayoutOption_dagre": {
-    "message": "Dagre"
+    "message": "Tree"
   },
   "notesSearch_graphLayoutOption_circle": {
     "message": "Circle"
@@ -6066,7 +6075,7 @@
     "message": "Grid"
   },
   "notesSearch_graphLayoutOption_concentric": {
-    "message": "Concentric"
+    "message": "Rings"
   },
   "notesSearch_graphScope": {
     "message": "Graph scope"
@@ -6921,7 +6930,13 @@
     "message": "Relationship line styles"
   },
   "notesSearch_graphLegendAuthoritative": {
-    "message": "Authoritative"
+    "message": "Saved links"
+  },
+  "notesSearch_graphNodeLegend": {
+    "message": "Node shapes"
+  },
+  "notesSearch_graphFocusFallbackHint": {
+    "message": "No note is open, so the graph is centred on “{{title}}”. Pick a note to focus the graph."
   },
   "notesSearch_graphPassageSimilarityShort": {
     "message": "passage similarity"
