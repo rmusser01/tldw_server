@@ -4,6 +4,11 @@ import type { CopyFeedbackStatus } from "./useCopyFeedback"
 
 type Props = {
   status: CopyFeedbackStatus
+  /**
+   * Changes on every copy (useCopyFeedback's `attempt`). The message is
+   * re-created for each attempt, so a repeated "Copied" is announced again.
+   */
+  attempt?: number
   /** Confirmation shown on screen after a copy; without it "Copied" is only announced. */
   copiedLabel?: string
   className?: string
@@ -26,6 +31,7 @@ export const useCopyFailedHint = () => {
  */
 export const CopyStatus: FC<Props> = ({
   status,
+  attempt = 0,
   copiedLabel,
   className = ""
 }) => {
@@ -34,14 +40,14 @@ export const CopyStatus: FC<Props> = ({
   return (
     <span role="status" className={`text-[11px] ${className}`}>
       {status === "copied" ? (
-        <span className={copiedLabel ? "text-success" : "sr-only"}>
+        <span key={attempt} className={copiedLabel ? "text-success" : "sr-only"}>
           {copiedLabel || t("codeCopied", "Copied")}
         </span>
       ) : status === "failed" ? (
-        <>
+        <span key={attempt}>
           <span className="text-danger">{t("copyFailed", "Couldn't copy")}</span>
           <span className="sr-only"> {hint}</span>
-        </>
+        </span>
       ) : null}
     </span>
   )

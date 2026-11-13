@@ -129,7 +129,7 @@ export function CompactMessage({
   onOpenDetails,
 }: CompactMessageProps) {
   const { t, i18n } = useTranslation(["common", "playground"])
-  const { status: copyStatus, copied, failed: copyFailed, run: runCopy } = useCopyFeedback(2000)
+  const { status: copyStatus, attempt: copyAttempt, copied, failed: copyFailed, run: runCopy } = useCopyFeedback(2000)
   const copyFailedHint = useCopyFailedHint()
   const [editMode, setEditMode] = useState(false)
   const [editedText, setEditedText] = useState(message)
@@ -636,7 +636,7 @@ export function CompactMessage({
                   {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
                 </button>
               </Tooltip>
-              <CopyStatus status={copyStatus} />
+              <CopyStatus status={copyStatus} attempt={copyAttempt} />
 
               {/* Edit (user messages only) */}
               {!isBot && onEditFormSubmit && (

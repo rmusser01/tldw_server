@@ -163,12 +163,12 @@ const countRowsRendered = () =>
   Array.from(rowRenderCounts.values()).filter((count) => count > 0).length
 
 describe("SidePanelBody pending reply (G19)", () => {
-  const renderWithRequest = (controller: AbortController) => {
+  const renderWithRequest = (controller: AbortController, lastMessage = "▋") => {
     sidepanelMessageState.value = {
       ...sidepanelMessageState.value,
       streaming: false,
       isProcessing: false,
-      messages: replaceLastMessage(buildMessages(4), "▋")
+      messages: replaceLastMessage(buildMessages(4), lastMessage)
     }
     const context = {
       controller,
@@ -188,6 +188,17 @@ describe("SidePanelBody pending reply (G19)", () => {
 
   it("marks only the last reply as pending while a request is in flight before streaming", () => {
     expect(renderWithRequest(new AbortController())).toEqual(["false", "false", "false", "true"])
+  })
+
+  it("does not mark the previous finished reply while the request is still being prepared", () => {
+    // The controller is set before the pipeline adds the "▋" placeholder, and a
+    // queued "Send after this reply" starts with the finished answer still last.
+    expect(renderWithRequest(new AbortController(), "final assistant reply")).toEqual([
+      "false",
+      "false",
+      "false",
+      "false"
+    ])
   })
 
   it("stops marking the reply as pending once the request is stopped", () => {
