@@ -1,5 +1,6 @@
 """Who an LLM call is for, and the state carried across threads (LLM usage accounting spec §1)."""
 
+import contextvars
 import threading
 
 import pytest
@@ -8,12 +9,14 @@ from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     LLMCallContext,
     accounted_call,
+    bind_provider_credentials,
     capture_llm_call_state,
     current_llm_call_context,
     current_llm_user_id,
     in_accounted_call,
     llm_call_context,
     run_with_llm_call_state,
+    scoped_provider_credentials,
     with_llm_call_context,
 )
 
@@ -76,3 +79,41 @@ def test_state_snapshot_carries_the_resolved_user_into_a_raw_thread() -> None:
     assert seen["bare"] == (None, False, False)
     assert seen["carried"] == (6, True, True)
     assert run_with_llm_call_state(None, lambda: "ran") == "ran"
+
+
+def test_a_bound_handle_serves_its_own_provider_and_crosses_threads_with_the_call_state() -> None:
+    """A handle bound for the rest of a task answers for its provider only, and a thread given the call state
+    sees it (TASK-15426)."""
+    from types import SimpleNamespace
+
+    handle = SimpleNamespace(provider="openai")
+    seen: list[object] = []
+
+    def _bound_in_a_task() -> None:
+        bind_provider_credentials(None)  # binds nothing
+        assert current_llm_call_context().provider_credentials is None
+        bind_provider_credentials(handle)
+        state = capture_llm_call_state()
+        carried = threading.Thread(
+            target=run_with_llm_call_state, args=(state, lambda: seen.append(scoped_provider_credentials("OpenAI")))
+        )
+        carried.start(), carried.join()
+        seen.append(scoped_provider_credentials("anthropic"))
+
+    contextvars.copy_context().run(_bound_in_a_task)
+    assert seen == [handle, None]
+    assert current_llm_call_context().provider_credentials is None
+
+
+def test_a_background_root_never_inherits_the_handle_of_the_request_that_started_it() -> None:
+    """``llm_call_root`` drops a bound handle as it drops the admission mark (TASK-15426)."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
+
+    def _root_started_from_a_bound_request() -> object:
+        bind_provider_credentials(SimpleNamespace(provider="openai"))
+        with llm_call_root(7):
+            return current_llm_call_context().provider_credentials
+
+    assert contextvars.copy_context().run(_root_started_from_a_bound_request) is None
