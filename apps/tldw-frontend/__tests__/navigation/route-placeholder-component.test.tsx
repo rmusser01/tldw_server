@@ -25,6 +25,19 @@ vi.mock('next/link', () => ({
 }));
 
 describe('RoutePlaceholder recovery', () => {
+  // G14 follow-up: on a route change the next page names the tab before this
+  // one unmounts; the placeholder must not bring its predecessor's title back.
+  it('leaves a title the next page set when it unmounts', () => {
+    document.title = 'Previous | tldw';
+    const view = render(
+      <RoutePlaceholder title="Connector Jobs" description="Planned." plannedPath="/connectors/jobs" />
+    );
+    expect(document.title).toBe('Connector Jobs · tldw');
+    document.title = 'Notes | tldw';
+    view.unmount();
+    expect(document.title).toBe('Notes | tldw');
+  });
+
   beforeEach(() => {
     mockBack.mockReset();
     mockRouter.asPath = '/connectors/jobs';

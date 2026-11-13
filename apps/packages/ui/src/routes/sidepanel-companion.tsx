@@ -85,7 +85,11 @@ const SidepanelCompanion = () => {
         className="min-h-screen bg-surface text-text"
         data-testid="sidepanel-companion-root"
       >
-        <SidepanelHeaderSimple activeTitle={t("option:header.companion", "Companion")} />
+        {/* Companion Home renders its own "Companion" h1. */}
+        <SidepanelHeaderSimple
+          activeTitle={t("option:header.companion", "Companion")}
+          heading={null}
+        />
         <div className="pt-11">
           {/* Chat stays one tap away above the dashboard (XS-17). */}
           <div className="px-3 pt-3">

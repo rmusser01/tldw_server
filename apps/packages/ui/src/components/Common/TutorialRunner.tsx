@@ -4,6 +4,7 @@
  */
 
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import Joyride, {
   CallBackProps,
   STATUS,
@@ -430,7 +431,7 @@ export const TutorialRunner: React.FC = () => {
               refreshedTarget.scrollIntoView({
                 block: "center",
                 inline: "nearest",
-                behavior: "smooth"
+                behavior: smoothScrollBehavior()
               })
               setTargetRefresh((value) => value + 1)
               return

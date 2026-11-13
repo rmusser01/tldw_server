@@ -294,8 +294,11 @@ export type HistoryBookmarkScope = { profile_id: string; client_session_id: stri
 export type HistoryTurnOutcome = "complete" | "interrupted" | "stopped";
 /** A retained turn is scoped data; its settlement payload has no runtime owner capability. */
 export type HistoryTurnRecovery = {
-  /** Explicit alternatives remain in review until the user opens their result. */
-  action?: 'edit_resend' | 'regenerate';
+  /**
+   * Explicit alternatives remain in review until the user opens their result.
+   * `continue` reuses the saved question like `regenerate` (CM-01).
+   */
+  action?: 'edit_resend' | 'regenerate' | 'continue';
   operation_id: string;
   origin_view: HistoryViewSelectionV1;
   selection_digest: string;

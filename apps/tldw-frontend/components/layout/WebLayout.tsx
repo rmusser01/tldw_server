@@ -62,6 +62,7 @@ import {
 } from '@web/components/notifications/NotificationLifecycleProvider';
 import { NotificationToastBridge } from '@web/components/notifications/NotificationToastBridge';
 import { CommandPaletteHost } from '@/components/Common/CommandPaletteHost';
+import { openModelSelector } from '@/utils/model-selector-events';
 import {
   useConnectionActions,
   useConnectionState,
@@ -411,7 +412,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
     onToggleRag: () => setChatMode(chatMode === 'rag' ? 'normal' : 'rag'),
     onToggleWebSearch: () => setWebSearch(!webSearch),
     onIngestPage: handleIngestPage,
-    onSwitchModel: hideHeader ? undefined : () => setOpenModelSettings(true),
+    // The composer's model picker when /chat is open, else chat settings (AX-01).
+    onSwitchModel: hideHeader ? undefined : () => openModelSelector() || setOpenModelSettings(true),
     onToggleSidebar: shellSidebarEnabled ? toggleSidebar : undefined,
   };
 

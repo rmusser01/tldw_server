@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 type UseValidationRowHighlightResult = {
   highlightedValidationEntryId: number | null
@@ -42,7 +43,7 @@ export function useValidationRowHighlight(entries: any[]): UseValidationRowHighl
         const rowElement = document.querySelector(`tr[data-row-key="${entryId}"]`)
         if (rowElement instanceof HTMLElement) {
           try {
-            rowElement.scrollIntoView({ behavior: "smooth", block: "center" })
+            rowElement.scrollIntoView({ behavior: smoothScrollBehavior(), block: "center" })
           } catch {
             rowElement.scrollIntoView()
           }

@@ -241,7 +241,7 @@ export async function forkAt(page: Page, id: string) {
   const card = page.locator(`[data-testid="chat-message"][data-message-id="${id}"]`)
   await card.hover()
   await card.getByRole('button', { name: 'More actions', exact: true }).click()
-  await page.getByRole('button', { name: /New Branch/i }).click()
+  await page.getByRole('menuitem', { name: /New Branch/i }).click()
 }
 
 export async function localForkAndSend(page: Page, server: Awaited<ReturnType<typeof startHistoryServer>>) {
@@ -778,7 +778,7 @@ export async function qualifyChildIsolation(page: Page, server: Awaited<ReturnTy
   const answerCard = page.locator(`[data-message-id="${answer.id}"]`)
   await answerCard.hover()
   await answerCard.getByRole('button', { name: 'More actions', exact: true }).click()
-  await page.getByRole('button', { name: 'Delete', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
   await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click()
   await expect.poll(async () => (await readStore(page, 'messages')).some(row => row.id === answer.id)).toBe(false)
   await page.reload()

@@ -104,6 +104,26 @@ def test_note_store_owns_delegated_methods_without_monolith_duplicates(db, monke
     assert captured["kwargs"] == {"title": "Delegated Note", "content": "delegated body"}
 
 
+def test_bump_note_version_advances_a_current_note_and_keeps_its_graph_state_current(db):
+    db.add_note(title="Tagged", content="Links [[Other]]", note_id="tagged")
+
+    assert db.note_store.bump_note_version("tagged", 1) == 2
+
+    row = db.get_note_by_id("tagged")
+    assert (row["version"], row["title"], row["content"]) == (2, "Tagged", "Links [[Other]]")
+    assert db.note_graph_projection_store.get_note_state("tagged").source_version == 2
+
+
+def test_bump_note_version_refuses_a_stale_version(db):
+    db.add_note(title="Tagged", content="Body", note_id="tagged")
+    db.note_store.bump_note_version("tagged", 1)
+
+    with pytest.raises(ConflictError):
+        db.note_store.bump_note_version("tagged", 1)
+
+    assert db.get_note_by_id("tagged")["version"] == 2
+
+
 def _tombstone_unsynced(db, note_id):
     return db.tombstone_unsynced_note_from_sync(
         note_id=note_id,

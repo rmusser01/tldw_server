@@ -63,6 +63,25 @@ describe("NotesListPanel NL-16 loading and error states", () => {
     expect(within(loading).getAllByTestId("notes-list-skeleton-row").length).toBeGreaterThanOrEqual(3)
   })
 
+  it("keeps the empty state while a loaded empty list refetches", async () => {
+    renderPanel({ isFetching: true, notes: [], listLoaded: true })
+
+    expect(await screen.findByText("No notes yet")).toBeInTheDocument()
+    expect(screen.queryByTestId("notes-list-loading")).toBeNull()
+  })
+
+  it("shows placeholder rows while the first page of an empty list loads", () => {
+    renderPanel({ isFetching: true, notes: [], listLoaded: false })
+
+    expect(screen.getByTestId("notes-list-loading")).toBeInTheDocument()
+  })
+
+  it("shows placeholder rows while another page or search replaces held-over rows", () => {
+    renderPanel({ isFetching: true, notes: [], listLoaded: true, isPlaceholderData: true })
+
+    expect(screen.getByTestId("notes-list-loading")).toBeInTheDocument()
+  })
+
   it("explains an unreachable server in plain words and keeps the request path in Details", async () => {
     renderPanel({
       hasError: true,

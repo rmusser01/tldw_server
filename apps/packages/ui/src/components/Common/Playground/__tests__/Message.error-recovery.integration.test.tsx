@@ -292,6 +292,19 @@ const baseProps: React.ComponentProps<typeof PlaygroundMessage> = {
   conversationInstanceId: "conversation-1"
 }
 
+describe("PlaygroundMessage pending reply (G19)", () => {
+  it("offers Stop on the reply placeholder before the request starts streaming", () => {
+    const onStopStreaming = vi.fn()
+    const view = render(
+      <PlaygroundMessage {...baseProps} message="▋" isPending onStopStreaming={onStopStreaming} />
+    )
+    fireEvent.click(screen.getByTestId("chat-message-stop-streaming"))
+    expect(onStopStreaming).toHaveBeenCalledOnce()
+    view.rerender(<PlaygroundMessage {...baseProps} message="▋" onStopStreaming={onStopStreaming} />)
+    expect(screen.queryByTestId("chat-message-stop-streaming")).toBeNull()
+  })
+})
+
 describe("PlaygroundMessage implicit feedback in temporary mode", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -561,6 +574,25 @@ describe("PlaygroundMessage error recovery integration", () => {
     const status = screen.getByRole("status", { name: "Output limit reached" })
     expect(within(status).getByRole("button", { name: "Retry same model" })).toBeDisabled()
     expect(within(status).getByRole("button", { name: "Continue from partial" })).toBeDisabled()
+  })
+
+  it.each([
+    ["an output-limited", { generationInfo: { finish_reason: "length" } }],
+    ["an interrupted", { generationInfo: { interrupted: true } }]
+  ])("CM-01 gives Continue on %s reply its own disabled reason, not Regenerate's", (_label, props) => {
+    const regenerateReason = "This saved reply can't be regenerated here."
+    const view = render(
+      <PlaygroundMessage {...baseProps} {...props} regenerateDisabledReason={regenerateReason} continueDisabledReason={null} />
+    )
+    expect(screen.getByRole("button", { name: "Retry same model" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Continue from partial" })).toBeEnabled()
+    const continueReason = "This saved reply can't be continued here."
+    view.rerender(
+      <PlaygroundMessage {...baseProps} {...props} regenerateDisabledReason={null} continueDisabledReason={continueReason} />
+    )
+    expect(screen.getByRole("button", { name: "Continue from partial" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Continue from partial" })).toHaveAttribute("title", continueReason)
+    expect(screen.getByRole("button", { name: "Retry same model" })).toBeEnabled()
   })
 
   it.each([

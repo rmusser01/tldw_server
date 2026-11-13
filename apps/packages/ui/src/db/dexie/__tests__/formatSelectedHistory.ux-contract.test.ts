@@ -202,3 +202,46 @@ describe("X01 named sender display after upgrade", () => {
     expect(formatSelectedHistory(capture).messages[1]).toMatchObject({ role: "user", isBot: false })
   })
 })
+
+describe("CM-04 recorded RAG sources after reload", () => {
+  const recordedSources = {
+    origin: "knowledge_qa",
+    sources: [
+      {
+        originalId: 42,
+        excerpt: "RAG retrieves passages before generating.",
+        mediaId: 42,
+        title: "RAG primer",
+        type: "text",
+        sourceType: "text"
+      }
+    ]
+  }
+  const withSources = (value: unknown, row = 1) => {
+    const capture = buildNativeServerCapture()
+    capture.selected_content[row].extra_metadata = { workspace_rag_sources_v1: value }
+    return formatSelectedHistory(capture).messages
+  }
+
+  it("shows the sources recorded with a saved reply again", () => {
+    const [, reply] = withSources(recordedSources)
+    expect(reply.sources).toEqual([
+      expect.objectContaining({
+        name: "RAG primer",
+        pageContent: "RAG retrieves passages before generating.",
+        metadata: expect.objectContaining({ media_id: 42 })
+      })
+    ])
+  })
+
+  it("ignores malformed recorded sources without losing the saved reply", () => {
+    const [, reply] = withSources({ ...recordedSources, sources: [{ ...recordedSources.sources[0], mediaId: "42junk" }] })
+    expect(reply.sources).toEqual([])
+    expect(reply.message).toBe("Retrieval-augmented generation.")
+  })
+
+  it("does not show sources on a user message", () => {
+    const [question] = withSources(recordedSources, 0)
+    expect(question.sources).toEqual([])
+  })
+})

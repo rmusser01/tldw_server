@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import React from "react"
 import { describe, expect, it } from "vitest"
-import { render, screen, within } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { fireEvent, render, screen, within } from "@testing-library/react"
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom"
 
 import { AdminRouteShell } from "../AdminRouteShell"
 import { ADMIN_MODULES, adminModuleForRoute, isAdminRoute } from "../admin-modules"
+import { useRouteDocumentTitle } from "@/routes/hooks/useRouteDocumentTitle"
+import { getRouteDocumentTitle } from "@/routes/route-document-title"
 
 describe("AdminRouteShell", () => {
   it("renders a nav landmark linking every admin module", () => {
@@ -85,5 +87,42 @@ describe("AdminRouteShell", () => {
       "Server Admin"
     )
     expect(adminModuleForRoute("/admin")).toBeUndefined()
+  })
+
+  // G14 follow-up: leaving an admin page must not bring its title back over
+  // the next route's title (XP-19).
+  it("leaves the next route's title alone when it unmounts", () => {
+    const RouteShell = () => {
+      useRouteDocumentTitle("tldw")
+      const navigate = useNavigate()
+      return (
+        <>
+        <button type="button" onClick={() => navigate("/notes")}>
+          Go to Notes
+        </button>
+        <Routes>
+          <Route
+            path="/admin/server"
+            element={
+              <AdminRouteShell path="/admin/server">
+                <div>content</div>
+              </AdminRouteShell>
+            }
+          />
+          <Route path="/notes" element={<div>notes</div>} />
+        </Routes>
+        </>
+      )
+    }
+    render(
+      <MemoryRouter initialEntries={["/admin/server"]}>
+        <RouteShell />
+      </MemoryRouter>
+    )
+    expect(document.title).toBe("Server Admin · Admin · tldw")
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to Notes" }))
+
+    expect(document.title).toBe(getRouteDocumentTitle("/notes"))
   })
 })

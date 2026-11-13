@@ -69,6 +69,13 @@ const useMessageOptionState = vi.hoisted(() => ({
   }
 }))
 
+// A saved role-play chat is a native saved history whose server chat has a character.
+const savedHistory = vi.hoisted(() => ({ current: null as unknown }))
+vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
+  ...(await original<typeof import("@/hooks/chat/useHistorySelection")>()),
+  useHistorySelectionContext: () => savedHistory.current
+}))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, defaultValue?: string) => defaultValue || key
@@ -152,6 +159,8 @@ const steering = () => {
 describe("PlaygroundChat role-play steering scope", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    savedHistory.current = null
+    useStoreMessageOption.setState({ serverChatId: null, serverChatCharacterId: null, serverChatAssistantKind: null })
     useStoreMessageOption.getState().clearMessageSteering()
     Object.assign(useMessageOptionState.value, {
       selectedAssistant: CHARACTER,
@@ -186,6 +195,27 @@ describe("PlaygroundChat role-play steering scope", () => {
     render(<PlaygroundChat />)
 
     expect(lastReply()).toHaveAttribute("data-steering-offered", "true")
+  })
+
+  it("CM-01 does not offer steering in a saved role-play chat, which refuses steered sends", () => {
+    Object.assign(useMessageOptionState.value, {
+      serverChatId: "chat-robot",
+      serverChatCharacterId: "5"
+    })
+    useStoreMessageOption.setState({
+      serverChatId: "chat-robot",
+      serverChatCharacterId: "5",
+      serverChatAssistantKind: "character",
+      temporaryChat: false
+    })
+    savedHistory.current = {
+      getCurrent: () => ({ status: "ready", owner: { kind: "native", conversation_id: "chat-robot" } }),
+      fence: () => () => true
+    }
+
+    render(<PlaygroundChat />)
+
+    expect(lastReply()).toHaveAttribute("data-steering-offered", "false")
   })
 
   it("drops steering armed in a character chat when a plain chat opens", () => {

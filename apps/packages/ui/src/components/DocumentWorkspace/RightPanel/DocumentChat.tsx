@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, Suspense, useEffect } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 import { Empty, Spin, Switch, Tooltip, Popconfirm } from "antd"
 import {
@@ -96,7 +97,7 @@ export const DocumentChat: React.FC = () => {
   // Scroll to bottom when new messages arrive
   React.useEffect(() => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+      messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
     }
   }, [messages.length])
 

@@ -4,10 +4,10 @@
  * local-only and temporary chats have no address of their own.
  *
  * Opening a chat from the sidebar, a note or the command palette navigates to
- * that address. Switching from one saved chat to another adds a history entry
- * so Back returns to the previous chat; filling in the address of a chat that
- * had none (a restored session, a new chat's first saved turn) replaces the
- * current entry instead.
+ * that address, and New chat navigates to the bare chat page. Leaving a saved
+ * chat this way adds a history entry so Back returns to it; filling in the
+ * address of a chat that had none (a restored session, a new chat's first
+ * saved turn) replaces the current entry instead.
  */
 import { normalizeCharacterChatSessionId } from "@/utils/character-chat-mode-intent"
 import {
@@ -29,6 +29,22 @@ export const readServerChatRouteId = (search: string | null | undefined): string
 export const isCharacterChatRouteSearch = (search: string | null | undefined): boolean =>
   toSearchParams(search).get("mode")?.trim().toLowerCase() === "character"
 
+/**
+ * A character chat route in the location's query, or in a hash route outside
+ * a hash router (`/options.html#/chat?mode=character&...`), which the
+ * Playground's character intent also reads.
+ */
+export const isCharacterChatRouteLocation = (
+  search: string | null | undefined,
+  hash: string | null | undefined
+): boolean => {
+  const hashQueryStart = (hash ?? "").indexOf("?")
+  return (
+    isCharacterChatRouteSearch(search) ||
+    (hashQueryStart >= 0 && isCharacterChatRouteSearch((hash ?? "").slice(hashQueryStart)))
+  )
+}
+
 /** The one-shot history handoff a link may carry; the Playground consumes it. */
 export const HISTORY_SELECTION_HANDOFF_PARAM = "historySelection"
 
@@ -46,6 +62,27 @@ const browserQueries = (href: string): URLSearchParams[] => {
   }
 }
 
+/** The history handoff the mounted chat page has finished with, loaded or not. */
+let settledHistoryHandoff: string | null = null
+
+/**
+ * The Playground has finished with the history handoff link in the browser
+ * address. A link it loaded is already gone from the address; one it could
+ * not load stays there, and the next address write drops it instead of
+ * waiting for it for as long as the page stays open (#3119).
+ */
+export const settleHistoryHandoff = (
+  browserHref: string | null | undefined = typeof window === "undefined"
+    ? null
+    : window.location.href
+) => {
+  settledHistoryHandoff = browserHref
+    ? browserQueries(browserHref)
+        .map((params) => params.get(HISTORY_SELECTION_HANDOFF_PARAM))
+        .find((value) => value !== null) ?? null
+    : null
+}
+
 /**
  * Where a router query that carries the history handoff stands against the
  * real browser address. The Playground removes the handoff with
@@ -55,7 +92,8 @@ const browserQueries = (href: string): URLSearchParams[] => {
  * - `"none"`: the router query carries no handoff.
  * - `"pending"`: the browser address still carries it, so the page has not
  *   consumed it yet and the address must be left alone.
- * - `"consumed"`: only the router's stale query carries it.
+ * - `"consumed"`: only the router's stale query carries it, or the page has
+ *   settled it (see `settleHistoryHandoff`).
  */
 export const historyHandoffState = (
   routerSearch: string | null | undefined,
@@ -63,7 +101,9 @@ export const historyHandoffState = (
     ? null
     : window.location.href
 ): "none" | "pending" | "consumed" => {
-  if (!toSearchParams(routerSearch).has(HISTORY_SELECTION_HANDOFF_PARAM)) return "none"
+  const handoff = toSearchParams(routerSearch).get(HISTORY_SELECTION_HANDOFF_PARAM)
+  if (handoff === null) return "none"
+  if (handoff === settledHistoryHandoff) return "consumed"
   if (!browserHref) return "pending"
   return browserQueries(browserHref).some((params) =>
     params.has(HISTORY_SELECTION_HANDOFF_PARAM)
@@ -86,8 +126,9 @@ const CONSUMED_ON_ARRIVAL_PARAMS = [
 
 /**
  * `search` without the one-shot parameters the real browser address no
- * longer carries, so writing the chat address from the router's stale query
- * never brings a consumed one back. Other parameters are always kept.
+ * longer carries, or (for the history handoff) that the page has settled, so
+ * writing the chat address from the router's stale query never brings a
+ * consumed one back. Other parameters are always kept.
  */
 export const withoutConsumedParams = (
   search: string | null | undefined,
@@ -96,12 +137,13 @@ export const withoutConsumedParams = (
     : window.location.href
 ): string => {
   const params = toSearchParams(search)
-  if (browserHref) {
-    const queries = browserQueries(browserHref)
-    for (const name of CONSUMED_ON_ARRIVAL_PARAMS) {
-      if (params.has(name) && !queries.some((query) => query.has(name))) {
-        params.delete(name)
-      }
+  const queries = browserHref ? browserQueries(browserHref) : null
+  for (const name of CONSUMED_ON_ARRIVAL_PARAMS) {
+    const value = params.get(name)
+    if (value === null) continue
+    const settled = name === HISTORY_SELECTION_HANDOFF_PARAM && value === settledHistoryHandoff
+    if (settled || (queries && !queries.some((query) => query.has(name)))) {
+      params.delete(name)
     }
   }
   const next = params.toString()
@@ -135,40 +177,72 @@ export const buildServerChatPath = (chatId: string, chatPath = "/chat"): string 
 type MountedChatRoute = { namesChat: boolean }
 
 let mountedChatRoute: MountedChatRoute | null = null
-let pendingRouteChatId: string | null = null
+/** The chat a planned navigation opens; `chatId: null` is New chat's bare chat page. */
+let pendingRoute: { chatId: string | null; plannedAt: number } | null = null
 
-/** The chat page reports the chat its current address names while it is mounted. */
+/**
+ * How long the address sync waits for a planned navigation. A same-page
+ * navigation lands well within this; one that never lands (cancelled by a
+ * leave-page prompt, say) must not hold the address for good (#3119).
+ */
+export const PLANNED_CHAT_NAVIGATION_TIMEOUT_MS = 3_000
+
+/**
+ * The chat page reports the chat its current address names while it is
+ * mounted, and null when it unmounts. A navigation it planned can no longer
+ * land on it then, so the plan is dropped.
+ */
 export const reportMountedChatRoute = (route: MountedChatRoute | null) => {
   mountedChatRoute = route
+  if (route === null) {
+    pendingRoute = null
+    settledHistoryHandoff = null
+  }
 }
 
 /**
- * Plan the navigation that opens `chatId` on the chat page. The chat page's
- * address sync leaves the URL alone until this navigation lands, so a slow
- * router (Next.js) does not record the chat twice.
+ * Plan the navigation that opens `chatId` on the chat page, or the bare chat
+ * page for New chat (`null`). The chat page's address sync leaves the URL
+ * alone until this navigation lands, so a slow router (Next.js) does not
+ * record the chat twice, and its in-place rewrite cannot cancel New chat's
+ * history entry. A later plan replaces this one.
  */
 export const planServerChatNavigation = (
-  chatId: string,
+  chatId: string | null,
   chatPath = "/chat"
 ): { to: string; replace: boolean } => {
-  pendingRouteChatId = chatId
+  pendingRoute = { chatId, plannedAt: Date.now() }
   return {
-    to: buildServerChatPath(chatId, chatPath),
+    to: chatId === null ? chatPath : buildServerChatPath(chatId, chatPath),
     // From a chat page with no chat in its address there is nothing to go Back to.
     replace: mountedChatRoute !== null && !mountedChatRoute.namesChat
   }
 }
 
-/** True while a navigation to `chatId` planned above has not landed yet. */
-export const isServerChatNavigationPending = (chatId: string | null): boolean =>
-  chatId !== null && pendingRouteChatId === chatId
+/** Milliseconds the address sync may still wait for the planned navigation, or 0. */
+export const serverChatNavigationWaitMs = (): number => {
+  if (pendingRoute === null) return 0
+  const left = pendingRoute.plannedAt + PLANNED_CHAT_NAVIGATION_TIMEOUT_MS - Date.now()
+  if (left > 0) return left
+  pendingRoute = null
+  return 0
+}
 
-export const settleServerChatNavigation = (routeChatId: string | null) => {
-  if (routeChatId !== null && pendingRouteChatId === routeChatId) pendingRouteChatId = null
+/** True while a navigation to `chatId` (null: the bare chat page) planned above has not landed yet. */
+export const isServerChatNavigationPending = (chatId: string | null): boolean =>
+  serverChatNavigationWaitMs() > 0 && pendingRoute?.chatId === chatId
+
+/**
+ * A new location arrived: the planned navigation landed, or something else
+ * replaced it and it will not. Either way the address sync stops waiting.
+ */
+export const settleServerChatNavigation = () => {
+  pendingRoute = null
 }
 
 /** Test seam: forget module state between tests. */
 export const resetServerChatRouteState = () => {
   mountedChatRoute = null
-  pendingRouteChatId = null
+  pendingRoute = null
+  settledHistoryHandoff = null
 }

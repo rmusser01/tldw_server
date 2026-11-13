@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   chatModelReadinessKey,
   getChatModelSendOutcome,
-  isChatModelUnreachableError,
   chatProviderFailureKind,
   isChatProviderFailureError,
   recordChatModelSendOutcome,
@@ -58,27 +57,18 @@ describe("chatModelReadinessKey", () => {
   })
 })
 
-describe("isChatModelUnreachableError", () => {
-  it.each([
-    ["a 502 response", { status: 502 }],
-    ["a 5xx wrapped as the cause", new Error("Stream completion failed", { cause: { status: 503 } })],
-    [
-      "a provider_unavailable error code",
-      { status: 400, details: { detail: { error_code: "provider_unavailable" } } }
-    ],
-    ["an in-stream provider error frame", { error: { code: "provider_unavailable", message: "down" } }],
-    ["an HTTP status in the message", new Error("Request failed: HTTP 504 Gateway Timeout")]
-  ])("is true for %s", (_label, error) => {
-    expect(isChatModelUnreachableError(error)).toBe(true)
+// #3343: the evidence belongs to one account on one server.
+describe("send outcomes across account changes", () => {
+  it("forgets every outcome when the account or server changes", () => {
+    recordChatModelSendOutcome("ollama", "llama3", "unreachable")
+    window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    expect(getChatModelSendOutcome("ollama", "llama3")).toBeNull()
   })
 
-  it.each([
-    ["a validation error", { status: 422 }],
-    ["an abort", new DOMException("The operation was aborted.", "AbortError")],
-    ["a policy refusal", { error: { code: "model_not_allowed" } }],
-    ["nothing", undefined]
-  ])("is false for %s", (_label, error) => {
-    expect(isChatModelUnreachableError(error)).toBe(false)
+  it("keeps outcomes through a settings change that keeps the account", () => {
+    recordChatModelSendOutcome("ollama", "llama3", "working")
+    window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } }))
+    expect(getChatModelSendOutcome("ollama", "llama3")).toBe("working")
   })
 })
 
