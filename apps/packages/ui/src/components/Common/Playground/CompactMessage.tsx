@@ -21,6 +21,8 @@ import { useTranslation } from "react-i18next"
 import { useTTS } from "@/hooks/useTTS"
 import { useUiModeStore } from "@/store/ui-mode"
 import { copyToClipboard } from "@/utils/clipboard"
+import { CopyStatus, useCopyFailedHint } from "@/components/Common/CopyStatus"
+import { useCopyFeedback } from "@/components/Common/useCopyFeedback"
 import { removeModelSuffix } from "@/db/dexie/models"
 import { parseReasoning } from "@/libs/reasoning"
 import { humanizeMilliseconds } from "@/utils/humanize-milliseconds"
@@ -127,16 +129,14 @@ export function CompactMessage({
   onOpenDetails,
 }: CompactMessageProps) {
   const { t, i18n } = useTranslation(["common", "playground"])
-  const [copied, setCopied] = useState(false)
+  const { status: copyStatus, copied, failed: copyFailed, run: runCopy } = useCopyFeedback(2000)
+  const copyFailedHint = useCopyFailedHint()
   const [editMode, setEditMode] = useState(false)
   const [editedText, setEditedText] = useState(message)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [showSources, setShowSources] = useState(false)
   const [isAvatarPreviewOpen, setIsAvatarPreviewOpen] = useState(false)
   const previousModelImageRef = useRef<string | undefined>(undefined)
-  const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  )
   const { cancel, isSpeaking, speak } = useTTS()
   const uiMode = useUiModeStore((state) => state.mode)
   const [userDisplayName] = useStorage("chatUserDisplayName", "")
@@ -271,15 +271,6 @@ export function CompactMessage({
     previousModelImageRef.current = resolvedModelImage
   }, [isAvatarPreviewOpen, resolvedModelImage, shouldPreviewAvatar])
 
-  useEffect(() => {
-    return () => {
-      if (copyResetTimeoutRef.current) {
-        clearTimeout(copyResetTimeoutRef.current)
-        copyResetTimeoutRef.current = null
-      }
-    }
-  }, [])
-
   // Parse reasoning blocks
   const parsedContent = useMemo(() => {
     if (!isBot) return [{ type: "text" as const, content: message }]
@@ -296,17 +287,10 @@ export function CompactMessage({
     })
   }, [timestamp, i18n.language])
 
-  const handleCopy = useCallback(async () => {
-    await copyToClipboard({ text: message, formatted: false })
-    setCopied(true)
-    if (copyResetTimeoutRef.current) {
-      clearTimeout(copyResetTimeoutRef.current)
-    }
-    copyResetTimeoutRef.current = setTimeout(() => {
-      setCopied(false)
-      copyResetTimeoutRef.current = null
-    }, 2000)
-  }, [message])
+  // A refused write is shown next to the button, never left uncaught (G17).
+  const handleCopy = useCallback(() => {
+    void runCopy(() => copyToClipboard({ text: message, formatted: false }))
+  }, [message, runCopy])
 
   const handleSpeak = useCallback(() => {
     if (isSpeaking) {
@@ -643,15 +627,16 @@ export function CompactMessage({
 
             <div className="ml-auto flex items-center gap-1">
               {/* Copy */}
-              <Tooltip title={copied ? t("common:copied", "Copied!") : t("common:copy", "Copy")}>
+              <Tooltip title={copied ? t("common:copied", "Copied!") : copyFailed ? copyFailedHint : t("common:copy", "Copy")}>
                 <button
                   onClick={handleCopy}
-                  aria-label={copied ? t("common:copied", "Copied!") : t("common:copy", "Copy")}
+                  aria-label={t("common:copy", "Copy")}
                   className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text"
                 >
                   {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
                 </button>
               </Tooltip>
+              <CopyStatus status={copyStatus} />
 
               {/* Edit (user messages only) */}
               {!isBot && onEditFormSubmit && (
