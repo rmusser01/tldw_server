@@ -2269,5 +2269,11 @@
   },
   "chatSidebar_exportFailed": {
     "message": "Couldn't export this chat. Try again."
+  },
+  "chatSidebar_exporting": {
+    "message": "Exporting chat…"
+  },
+  "chatSidebar_exportTooLarge": {
+    "message": "This chat is too large to export here. Use Chatbooks to export it."
   }
 }

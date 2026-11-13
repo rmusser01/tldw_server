@@ -47,6 +47,7 @@ import {
 } from "@/services/settings/ui-settings"
 import { ServerChatRow } from "./ServerChatRow"
 import { exportServerChat } from "@/services/chat-transcript-export"
+import { runChatExport } from "@/components/Common/chat-export-action"
 import type { TranscriptFormat } from "@/utils/chat-transcript"
 import { CHAT_RECENCY_GROUP_LABELS, groupChatsByRecency } from "./chat-history-groups"
 import { showMovedToTrashNotice } from "./server-chat-trash-notice"
@@ -1230,20 +1231,15 @@ export function ServerChatList({
     async (chat: ServerChatHistoryItem, format: TranscriptFormat) => {
       const action = captureAction([chat.id])
       if (!action) return
-      try {
-        await exportServerChat(chat.id, format, {
+      await runChatExport({
+        chatId: chat.id,
+        t,
+        isCurrent: action.isCurrent,
+        run: () => exportServerChat(chat.id, format, {
           title: chat.title,
           requestScope: action.requestScope
         })
-        if (action.isCurrent())
-          message.success(t("common:chatSidebar.exportSuccess", "Chat exported."))
-      } catch (error) {
-        console.warn("[chat-sidebar] Could not export the chat", error)
-        if (action.isCurrent())
-          message.error(
-            t("common:chatSidebar.exportFailed", "Couldn't export this chat. Try again.")
-          )
-      }
+      })
     },
     [captureAction, t]
   )

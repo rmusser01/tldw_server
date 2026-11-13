@@ -38,8 +38,20 @@ describe("chat transcript formatting (CS-09)", () => {
     expect(markdown).toBe("## You\n\nLook\n\n![Image](data:image/png;base64,AAA)\n\n## Assistant\n\nSeen")
   })
 
-  it("writes JSON with the conversation fields and its messages", () => {
-    expect(JSON.parse(formatTranscriptJson(transcript))).toEqual(transcript)
+  it("writes JSON with the export format, the conversation fields and its messages", () => {
+    expect(JSON.parse(formatTranscriptJson(transcript))).toEqual({ format: "tldw-chat-export", version: 1, ...transcript })
+  })
+
+  it("says in the JSON when images were left out", () => {
+    const json = JSON.parse(formatTranscriptJson({ ...transcript, imagesOmitted: true }))
+    expect(json.images_omitted).toBe(true)
+    expect(json).not.toHaveProperty("imagesOmitted")
+    expect(JSON.parse(formatTranscriptJson(transcript))).not.toHaveProperty("images_omitted")
+  })
+
+  it("names a message of another role after its role instead of 'undefined'", () => {
+    const markdown = formatTranscriptMessagesMarkdown([{ role: "tool", content: "42" }])
+    expect(markdown).toBe("## Tool\n\n42")
   })
 
   it("names the file after the chat, without characters a file name can't hold", () => {

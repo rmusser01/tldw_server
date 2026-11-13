@@ -1295,6 +1295,8 @@ export interface ServerChatMessage {
   version?: number
   metadata_extra?: Record<string, unknown>
   pinned?: boolean
+  /** Present (true) when the server says the message has an image attached. */
+  has_image?: boolean
 }
 
 export type ChatSettingsResponse = {

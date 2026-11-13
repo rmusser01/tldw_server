@@ -21,9 +21,10 @@ const messageOptionState = {
 
 let selectedCharacter: { id: string; name: string } | null = null
 const forkParent = vi.hoisted(() => ({ value: null as { id: string; title: string } | null, requested: [] as unknown[] }))
-const chatFiles = vi.hoisted(() => ({ exportServerChat: vi.fn(), success: vi.fn(), error: vi.fn() }))
+const chatFiles = vi.hoisted(() => ({ exportServerChat: vi.fn(), success: vi.fn(), error: vi.fn(), loading: vi.fn(), destroy: vi.fn() }))
 vi.mock("@/services/chat-transcript-export", () => ({
-  exportServerChat: (...args: unknown[]) => chatFiles.exportServerChat(...args)
+  exportServerChat: (...args: unknown[]) => chatFiles.exportServerChat(...args),
+  ChatExportTooLargeError: class ChatExportTooLargeError extends Error {}
 }))
 vi.mock("@/components/Sidepanel/Chat/FolderPickerModal", () => ({
   default: ({ open, conversationId, operation }: { open: boolean; conversationId: string; operation?: { requestScope: { userId: string }; isCurrent: () => boolean } }) =>
@@ -69,7 +70,7 @@ vi.mock("antd", () => ({
   Input: ({ value, onChange, placeholder }: any) => (
     <input value={value} onChange={onChange} placeholder={placeholder} />
   ),
-  message: { success: chatFiles.success, error: chatFiles.error },
+  message: { success: chatFiles.success, error: chatFiles.error, loading: chatFiles.loading, destroy: chatFiles.destroy },
   InputNumber: ({ value, onChange }: any) => (
     <input
       type="number"
@@ -231,14 +232,14 @@ describe("Header per-chat Export and Move to folder (CS-09)", () => {
     await vi.waitFor(() =>
       expect(chatFiles.exportServerChat).toHaveBeenCalledWith("saved-chat", "json", expect.any(Object))
     )
-    await vi.waitFor(() => expect(chatFiles.success).toHaveBeenCalledWith("Chat exported."))
+    await vi.waitFor(() => expect(chatFiles.success).toHaveBeenCalledWith(expect.objectContaining({ content: "Chat exported." })))
   })
 
   it("says when the export fails", async () => {
     chatFiles.exportServerChat.mockRejectedValue(new Error("HTTP 503"))
     render(<Header />)
     fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
-    await vi.waitFor(() => expect(chatFiles.error).toHaveBeenCalledWith("Couldn't export this chat. Try again."))
+    await vi.waitFor(() => expect(chatFiles.error).toHaveBeenCalledWith(expect.objectContaining({ content: "Couldn't export this chat. Try again." })))
   })
 
   it("edits the open saved chat's folders for the current account", async () => {

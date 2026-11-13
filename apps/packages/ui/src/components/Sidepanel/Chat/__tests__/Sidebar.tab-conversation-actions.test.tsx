@@ -29,7 +29,8 @@ const io = vi.hoisted(() => ({
   exportServerChat: vi.fn()
 }))
 vi.mock("@/services/chat-transcript-export", () => ({
-  exportServerChat: (...args: unknown[]) => io.exportServerChat(...args)
+  exportServerChat: (...args: unknown[]) => io.exportServerChat(...args),
+  ChatExportTooLargeError: class ChatExportTooLargeError extends Error {}
 }))
 
 vi.mock("react-i18next", () => ({
@@ -51,7 +52,8 @@ vi.mock("react-i18next", () => ({
 }))
 vi.mock("antd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("antd")>()
-  return { ...actual, message: { ...actual.message, error: io.messageError, success: io.messageSuccess, info: io.messageInfo, warning: io.messageWarning } }
+  return { ...actual, message: { ...actual.message, error: io.messageError, success: io.messageSuccess, info: io.messageInfo, warning: io.messageWarning,
+    loading: vi.fn(), destroy: vi.fn() } }
 })
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
@@ -730,7 +732,7 @@ describe("side-panel tab menu: visible button and server export (CS-09)", () => 
         requestScope: owner.snapshot.requestScope
       })
     )
-    await waitFor(() => expect(io.messageSuccess).toHaveBeenCalledWith("Exported successfully"))
+    await waitFor(() => expect(io.messageSuccess).toHaveBeenCalledWith(expect.objectContaining({ content: "Chat exported." })))
     expect(io.messageError).not.toHaveBeenCalled()
   })
 
@@ -740,7 +742,7 @@ describe("side-panel tab menu: visible button and server export (CS-09)", () => 
     fireEvent.contextMenu(screen.getByRole("button", { name: "Quarterly plan" }))
     fireEvent.mouseEnter(await screen.findByRole("menuitem", { name: /^Export/ }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "Export as JSON" }))
-    await waitFor(() => expect(io.messageError).toHaveBeenCalledWith("Export failed"))
+    await waitFor(() => expect(io.messageError).toHaveBeenCalledWith(expect.objectContaining({ content: "Couldn't export this chat. Try again." })))
     expect(io.exportServerChat).toHaveBeenCalledWith("chat-1", "json", expect.any(Object))
   })
 })

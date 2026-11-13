@@ -40,6 +40,7 @@ import { ConversationContextMenu } from "./ConversationContextMenu"
 import { FolderPickerModal } from "./FolderPickerModal"
 import { exportTabToJSON, exportTabToMarkdown } from "@/utils/conversation-export"
 import { exportServerChat } from "@/services/chat-transcript-export"
+import { runChatExport } from "@/components/Common/chat-export-action"
 import type { TranscriptFormat } from "@/utils/chat-transcript"
 import { ConversationMenuButton } from "./ConversationMenuButton"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
@@ -691,27 +692,18 @@ export const SidepanelChatSidebar = ({
         message.error(t("sidepanel:contextMenu.exportUnsaved", "This chat isn't saved yet, so there is nothing to export."))
         return
       }
-      let success = false
-      try {
-        if (tab.serverChatId) {
-          await exportServerChat(tab.serverChatId, format, {
-            title: tab.label,
-            requestScope: owner?.isCurrent() ? owner.snapshot.requestScope : undefined
-          })
-          success = true
-        } else {
-          success = format === "json"
-            ? await exportTabToJSON(tab.historyId)
-            : await exportTabToMarkdown(tab.historyId)
-        }
-      } catch (error) {
-        console.warn("[sidepanel] Could not export the chat", error)
-      }
-      if (success) {
-        message.success(t("sidepanel:contextMenu.exportSuccess", "Exported successfully"))
-      } else {
-        message.error(t("sidepanel:contextMenu.exportError", "Export failed"))
-      }
+      const serverChatId = tab.serverChatId
+      const historyId = tab.historyId
+      await runChatExport({
+        chatId: serverChatId || historyId!,
+        t,
+        run: () => serverChatId
+          ? exportServerChat(serverChatId, format, {
+              title: tab.label,
+              requestScope: owner?.isCurrent() ? owner.snapshot.requestScope : undefined
+            })
+          : format === "json" ? exportTabToJSON(historyId) : exportTabToMarkdown(historyId)
+      })
     },
     [owner, tabs, t]
   )

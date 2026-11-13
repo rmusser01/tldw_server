@@ -684,7 +684,9 @@
     "exportMarkdown": "Markdown",
     "exportJson": "JSON",
     "exportSuccess": "Chat exported.",
-    "exportFailed": "Couldn't export this chat. Try again."
+    "exportFailed": "Couldn't export this chat. Try again.",
+    "exporting": "Exporting chat…",
+    "exportTooLarge": "This chat is too large to export here. Use Chatbooks to export it."
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"

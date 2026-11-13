@@ -18,6 +18,17 @@ import {
   type TranscriptMessage
 } from "@/utils/chat-transcript"
 
+/**
+ * The chat has more messages than one export can read (the loader's
+ * 20,000-message page limit), so it can't be exported here.
+ */
+export class ChatExportTooLargeError extends Error {
+  constructor() {
+    super("chat_export_too_large")
+    this.name = "ChatExportTooLargeError"
+  }
+}
+
 export type ServerChatExportOptions = {
   /** The title the caller already shows, used when the chat's details can't be read. */
   title?: string | null
@@ -62,15 +73,24 @@ export const readServerChatTranscript = async (
           { ...options, signal: page.signal }
         ),
       { signal }
-    )
+    ).catch((error: unknown) => {
+      if (error instanceof Error && /pagination limit/i.test(error.message)) throw new ChatExportTooLargeError()
+      throw error
+    })
   ])
+  // Image data isn't read for an export; JSON says when the chat has some.
+  const imagesOmitted = listed.some((message) =>
+    message.has_image === true ||
+    (message.images?.length ?? 0) > 0 ||
+    message.metadata_extra?.content_placeholder_reason === "image_attachment")
   return {
     id: chatId,
     title: chat?.title?.trim() || title?.trim() || "Untitled chat",
     createdAt: chat?.created_at ?? null,
     updatedAt: chat?.updated_at ?? null,
     // fetchAllServerChatMessages returns them in stable creation order.
-    messages: listed.map(transcriptMessage)
+    messages: listed.map(transcriptMessage),
+    ...(imagesOmitted ? { imagesOmitted } : {})
   }
 }
 

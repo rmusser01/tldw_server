@@ -36,6 +36,7 @@ import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
 import { useForkParentChat } from "@/hooks/chat/useForkParentChat"
 import { buildServerChatPath } from "@/hooks/chat/server-chat-route"
 import { exportServerChat } from "@/services/chat-transcript-export"
+import { runChatExport } from "@/components/Common/chat-export-action"
 import { resolveServicePromptScope } from "@/services/service-prompts"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import type { FolderOperation } from "@/store/folder"
@@ -141,13 +142,11 @@ export const Header: React.FC<Props> = ({
   const exportOpenChat = React.useCallback(
     async (format: TranscriptFormat) => {
       if (!savedChatId) return
-      try {
-        await exportServerChat(savedChatId, format, { title: activeTitle })
-        message.success(t("common:chatSidebar.exportSuccess", "Chat exported."))
-      } catch (error) {
-        console.warn("[chat-header] Could not export the chat", error)
-        message.error(t("common:chatSidebar.exportFailed", "Couldn't export this chat. Try again."))
-      }
+      await runChatExport({
+        chatId: savedChatId,
+        t,
+        run: () => exportServerChat(savedChatId, format, { title: activeTitle })
+      })
     },
     [activeTitle, savedChatId, t]
   )

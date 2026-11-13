@@ -1419,7 +1419,9 @@ export const chatRagMethods = {
                 ? m.expected_version
                 : undefined,
           metadata_extra: metadataExtra,
-          pinned
+          pinned,
+          // Kept so an export can say it left a message's image out.
+          ...(m.has_image === true ? { has_image: true } : {})
         } as ServerChatMessage
       })
       if (useSharedCache) {
