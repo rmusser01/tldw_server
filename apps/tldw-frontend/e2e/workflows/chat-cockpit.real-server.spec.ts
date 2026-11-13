@@ -1848,7 +1848,11 @@ test.describe('/chat cockpit real-server parity', () => {
       timeout: 60_000,
     });
     await assertNoBlockingServerDialog(page);
-    await expect(page.getByRole('log', { name: /chat messages/i })).toBeVisible();
+    // The log is the message rows only (AX-11): on a fresh chat it is present
+    // but empty and has no height, so check it exists, and that the chat
+    // column around it shows.
+    await expect(page.getByRole('log', { name: /chat messages/i })).toBeAttached();
+    await expect(page.getByTestId('playground-chat-shell')).toBeVisible();
     await assertCoreComposerControls(page, { composerOnly: true });
     await assertNoHorizontalOverflow(page);
     await page.screenshot({

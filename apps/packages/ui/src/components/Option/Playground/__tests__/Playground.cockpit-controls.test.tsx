@@ -535,6 +535,15 @@ vi.mock("@/hooks/useActiveChatTitle", () => ({
 vi.mock("@/hooks/chat/useStartSavedChat", () => ({
   useStartSavedChat: () => focusBarState.startSavedChat,
 }));
+// The real chat list is the shell's; the focus bar only has to open it and
+// close it when a chat is picked.
+vi.mock("@/components/Common/ChatSidebar", () => ({
+  ChatSidebar: ({ onConversationSelected }: { onConversationSelected?: () => void }) => (
+    <div data-testid="focus-chat-list-stub">
+      <button type="button" onClick={() => onConversationSelected?.()}>Pick a chat</button>
+    </div>
+  ),
+}));
 
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
   useLoadLocalConversation: () => vi.fn(async () => {}),
@@ -1574,31 +1583,49 @@ describe("Playground cockpit controls", () => {
     mediaState.mobile = true;
     messageOptionState.value.temporaryChat = false;
     focusBarState.title = "Trip plans";
-    const openChatList = vi.fn();
-    window.addEventListener("tldw:open-chat-sidebar", openChatList);
+    renderPlayground();
+    // Focus stays the phone default.
+    expect(await screen.findByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+    const bar = screen.getByTestId("playground-focus-bar");
+    expect(within(bar).getByRole("heading", { name: "Trip plans" })).toBeInTheDocument();
+
+    fireEvent.click(within(bar).getByRole("button", { name: "New saved chat" }));
+    expect(focusBarState.startSavedChat).toHaveBeenCalledTimes(1);
+
+    // CO-N1: Exit focus sits in the bar, not floating over the messages.
+    const exitFocus = within(bar).getByRole("button", { name: "Exit focus" });
+    expect(exitFocus).toHaveAttribute("data-testid", "playground-chat-layout-mode-trigger");
+    expect(screen.getAllByTestId("playground-chat-layout-mode-trigger")).toHaveLength(1);
+    expect(exitFocus.className).not.toMatch(/\bfixed\b/);
+  });
+
+  // CO-01 review: ☰ opens the chat list over Focus without leaving it, so
+  // picking a chat (or closing the list) keeps the phone in Focus.
+  it("opens the chat list from the phone Focus bar without leaving Focus (CO-01)", async () => {
+    mediaState.mobile = true;
+    messageOptionState.value.temporaryChat = false;
+    const shellOpen = vi.fn();
+    window.addEventListener("tldw:open-chat-sidebar", shellOpen);
     try {
       renderPlayground();
-      // Focus stays the phone default.
-      expect(await screen.findByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
-      const bar = screen.getByTestId("playground-focus-bar");
-      expect(within(bar).getByRole("heading", { name: "Trip plans" })).toBeInTheDocument();
+      const bar = await screen.findByTestId("playground-focus-bar");
+      const menu = within(bar).getByRole("button", { name: "Open chat list" });
+      expect(menu).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(menu);
 
-      fireEvent.click(within(bar).getByRole("button", { name: "New saved chat" }));
-      expect(focusBarState.startSavedChat).toHaveBeenCalledTimes(1);
+      const list = await screen.findByTestId("focus-chat-list-stub");
+      expect(menu).toHaveAttribute("aria-expanded", "true");
+      expect(shellOpen).not.toHaveBeenCalled();
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+      expect(storageState.values.has("playgroundChatLayoutMode")).toBe(false);
 
-      // CO-N1: Exit focus sits in the bar, not floating over the messages.
-      const exitFocus = within(bar).getByRole("button", { name: "Exit focus" });
-      expect(exitFocus).toHaveAttribute("data-testid", "playground-chat-layout-mode-trigger");
-      expect(screen.getAllByTestId("playground-chat-layout-mode-trigger")).toHaveLength(1);
-      expect(exitFocus.className).not.toMatch(/\bfixed\b/);
-
-      fireEvent.click(within(bar).getByRole("button", { name: "Open chat list" }));
-      expect(openChatList).toHaveBeenCalledTimes(1);
-      await waitFor(() =>
-        expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "cockpit")
-      );
+      fireEvent.click(within(list).getByRole("button", { name: "Pick a chat" }));
+      await waitFor(() => expect(menu).toHaveAttribute("aria-expanded", "false"));
+      expect(screen.getByTestId("playground-cockpit-shell")).toHaveAttribute("data-mode", "focus");
+      expect(storageState.values.has("playgroundChatLayoutMode")).toBe(false);
+      expect(layoutShellOverrideState.overrides.at(-1)).toEqual({ hideHeader: true, hideSidebar: true });
     } finally {
-      window.removeEventListener("tldw:open-chat-sidebar", openChatList);
+      window.removeEventListener("tldw:open-chat-sidebar", shellOpen);
     }
   });
 

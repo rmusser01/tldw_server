@@ -383,6 +383,30 @@ describe("PlaygroundMessage error recovery integration", () => {
     expect(announcer.textContent).toBe("Response complete")
   })
 
+  // AX-11 review: the announcement is keyed on the turn and its variant, so a
+  // reconciled reply (same turn, new text) is not announced twice, while a
+  // regenerated variant is.
+  it("announces a turn once even when its text is reconciled, and again for a new variant (AX-11)", () => {
+    const Transcript = ({ streaming, message, variant }: { streaming: boolean; message: string; variant: number }) => (
+      <ChatReplyAnnouncerProvider>
+        <div role="log" aria-label="Chat messages">
+          <PlaygroundMessage {...baseProps} message={message} messageId="reply-1" activeVariantIndex={variant} isStreaming={streaming} />
+        </div>
+      </ChatReplyAnnouncerProvider>
+    )
+    const view = render(<Transcript streaming message="Draft" variant={0} />)
+    const announcer = screen.getByTestId("chat-reply-announcer")
+    view.rerender(<Transcript streaming={false} message="Draft" variant={0} />)
+    expect(announcer.textContent).toBe("Response complete")
+    view.rerender(<Transcript streaming={false} message="Draft, as saved" variant={0} />)
+    expect(announcer.textContent).toBe("Response complete")
+
+    view.rerender(<Transcript streaming message="" variant={1} />)
+    view.rerender(<Transcript streaming={false} message="Second take" variant={1} />)
+    expect(announcer.textContent).not.toBe("Response complete")
+    expect(announcer.textContent?.trim()).toBe("Response complete")
+  })
+
   it("clears a previous response announcement when a detached request begins", () => {
     const view = render(<PlaygroundMessage {...baseProps} isStreaming />)
     view.rerender(<PlaygroundMessage {...baseProps} />)

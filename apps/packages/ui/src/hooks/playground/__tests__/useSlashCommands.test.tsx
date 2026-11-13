@@ -18,8 +18,9 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 const connectedState = useConnectionStore.getState().state
 let queryClient: QueryClient
-const renderHook = <Result,>(hook: () => Result) =>
+const renderHook = <Result, Props>(hook: (props: Props) => Result, options: { initialProps?: Props } = {}) =>
   renderHookBase(hook, {
+    ...options,
     wrapper: ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     )
@@ -219,6 +220,41 @@ describe("playground useSlashCommands: /new, /prompt and server commands", () =>
     }
   })
 
+  it("clears the chat's saved draft before a standalone command runs, then places the text after it", () => {
+    const calls: string[] = []
+    const { result } = renderHook(() =>
+      useSlashCommands({
+        ...baseParams,
+        onNewChat: () => calls.push("new chat"),
+        clearSourceDraft: () => calls.push("clear source draft")
+      })
+    )
+    const intent = result.current.resolveSubmissionIntent("/new and then this")
+    result.current.runStandaloneCommand(intent.slashCommand!, intent.message, (value) =>
+      calls.push(`message:${value}`)
+    )
+    expect(calls).toEqual(["clear source draft", "message:", "new chat", "message:and then this"])
+  })
+
+  it("passes the text after /prompt to the picker as its search", () => {
+    const opened: CustomEvent[] = []
+    const listener = (event: Event) => opened.push(event as CustomEvent)
+    window.addEventListener(OPEN_PROMPT_SELECT_EVENT, listener)
+    try {
+      const clearSourceDraft = vi.fn()
+      const { result } = renderHook(() => useSlashCommands({ ...baseParams, clearSourceDraft }))
+      const intent = result.current.resolveSubmissionIntent("/prompt weekly review")
+      expect(intent.slashCommand).toMatchObject({ command: "prompt", standalone: true, consumesArgument: true })
+      const messages: string[] = []
+      result.current.runStandaloneCommand(intent.slashCommand!, intent.message, (value) => messages.push(value))
+      expect(clearSourceDraft).toHaveBeenCalledTimes(1)
+      expect(opened[0]?.detail).toMatchObject({ source: "slash-command", search: "weekly review" })
+      expect(messages).toEqual(["", ""])
+    } finally {
+      window.removeEventListener(OPEN_PROMPT_SELECT_EVENT, listener)
+    }
+  })
+
   it("lists the server's chat commands and sends them as typed", async () => {
     commandIo.listChatCommands.mockResolvedValue({
       commands: [
@@ -227,13 +263,17 @@ describe("playground useSlashCommands: /new, /prompt and server commands", () =>
       ]
     })
     const { result } = renderHook(() => useSlashCommands(baseParams))
+    // Server commands follow the local ones, so the highlighted row stays put.
     await waitFor(() =>
-      expect(result.current.filteredSlashCommands.map((item) => item.command)).toEqual(
-        expect.arrayContaining(["time", "weather", "search", "new", "prompt"])
-      )
+      expect(result.current.filteredSlashCommands.map((item) => item.command)).toEqual([
+        "search", "web", "vision", "generate-image", "model", "new", "prompt", "time", "weather"
+      ])
     )
     const time = result.current.filteredSlashCommands.find((item) => item.command === "time")!
     expect(time).toMatchObject({ source: "server", description: "Show the current time" })
+    expect(result.current.filteredSlashCommands.find((item) => item.command === "weather")).toMatchObject({
+      description: "Weather for a place · /weather <place>"
+    })
     expect(time.action).toBeUndefined()
     // No local action: the draft goes to the server, which runs the command.
     expect(result.current.resolveSubmissionIntent("/time UTC")).toMatchObject({
@@ -259,6 +299,31 @@ describe("playground useSlashCommands: /new, /prompt and server commands", () =>
     expect(result.current.filteredSlashCommands.map((item) => item.command)).toEqual([
       "search", "web", "vision", "generate-image", "model", "new", "prompt"
     ])
+  })
+
+  // Review: /chat makes no commands request on load; the first "/" asks once.
+  it("asks the server for its commands only once the slash menu first opens", async () => {
+    const { rerender } = renderHook(({ message }) => useSlashCommands({ ...baseParams, currentMessage: message }), {
+      initialProps: { message: "" }
+    })
+    await act(async () => {})
+    expect(commandIo.listChatCommands).not.toHaveBeenCalled()
+    rerender({ message: "/" })
+    await waitFor(() => expect(commandIo.listChatCommands).toHaveBeenCalledTimes(1))
+    rerender({ message: "" })
+    rerender({ message: "/t" })
+    await act(async () => {})
+    expect(commandIo.listChatCommands).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps a local command's behaviour when the server lists the same name", async () => {
+    commandIo.listChatCommands.mockResolvedValue({ commands: [{ name: "new", description: "Server new" }] })
+    const { result } = renderHook(() => useSlashCommands(baseParams))
+    await waitFor(() =>
+      expect(result.current.filteredSlashCommands.find((item) => item.command === "new")).toMatchObject({ source: "server" })
+    )
+    const intent = result.current.resolveSubmissionIntent("/new and more")
+    expect(intent.slashCommand).toMatchObject({ command: "new", standalone: true, description: "Server new" })
   })
 
   it("does not ask the server while disconnected", async () => {

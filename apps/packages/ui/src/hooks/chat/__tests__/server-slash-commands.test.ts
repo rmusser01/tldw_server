@@ -27,22 +27,56 @@ describe("server slash commands", () => {
         ],
         permissions: ["chat.basic"]
       },
-      {},
-      {}
+      []
     )
     expect(commands.map((command) => command.command)).toEqual(["time", "weather"])
     expect(commands[0]).toMatchObject({ source: "server", label: "time", description: "Time" })
   })
 
-  it("keeps a local command's action when the server lists the same name", () => {
+  it("keeps a local command's action and behaviour when the server lists the same name", () => {
     const search = vi.fn()
-    const [command] = buildServerSlashCommands(
-      { commands: [{ name: "search" }] },
-      { search: { label: "Search", description: "Local search", keywords: ["rag"] } },
-      { search }
+    const local = [
+      { id: "slash-search", command: "search", label: "Search", description: "Local search", keywords: ["rag"], action: search },
+      { id: "slash-new", command: "new", label: "New chat", action: vi.fn(), standalone: true }
+    ]
+    const [searchCommand, newCommand] = buildServerSlashCommands(
+      { commands: [{ name: "search" }, { name: "new", description: "Server new" }] },
+      local
     )
-    expect(command).toMatchObject({ label: "search", description: "Local search", keywords: ["rag"] })
-    expect(command.action).toBe(search)
+    expect(searchCommand).toMatchObject({ label: "search", description: "Local search", keywords: ["rag"], source: "server" })
+    expect(searchCommand.action).toBe(search)
+    expect(newCommand).toMatchObject({ standalone: true, description: "Server new", source: "server" })
+    expect(newCommand.action).toBe(local[1].action)
+  })
+
+  it("describes a server command with its usage, or builds one from its arguments", () => {
+    const [weather, forecast] = buildServerSlashCommands(
+      {
+        commands: [
+          { name: "weather", description: "Weather for a place", usage: "/weather <place>" },
+          { name: "forecast", description: "forecast", args: ["city", "days"] }
+        ]
+      } as never,
+      []
+    )
+    expect(weather.description).toBe("Weather for a place · /weather <place>")
+    expect(forecast.description).toBe("/forecast <city> <days>")
+  })
+
+  it("can list the local commands first, so server commands do not move the highlighted row", () => {
+    const local = [
+      { id: "slash-search", command: "search", label: "Local search" },
+      { id: "slash-new", command: "new", label: "New chat" }
+    ]
+    const server = [
+      { id: "s-search", command: "search", label: "Server search" },
+      { id: "s-time", command: "time", label: "time" }
+    ]
+    expect(mergeSlashCommands(server, local, { localFirst: true }).map((command) => command.label)).toEqual([
+      "Server search",
+      "New chat",
+      "time"
+    ])
   })
 
   it("lists server commands first and fills in local ones", () => {

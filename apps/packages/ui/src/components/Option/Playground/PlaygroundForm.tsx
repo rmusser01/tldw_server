@@ -4282,16 +4282,10 @@ export const PlaygroundForm = ({
     resolveSubmissionIntent,
     activeImageCommand,
     handleSlashCommandSelect: slashHandleSelect,
+    runStandaloneCommand,
   } = useSlashCommands({
-    chatMode,
-    setChatMode,
-    webSearch,
-    setWebSearch,
-    handleImageUpload,
-    imageBackendDefaultTrimmed,
-    imageBackendLabel,
-    currentMessage: form.values.message,
-    onNewChat: startNewChat,
+    chatMode, setChatMode, webSearch, setWebSearch, handleImageUpload, imageBackendDefaultTrimmed, imageBackendLabel,
+    currentMessage: form.values.message, onNewChat: startNewChat, clearSourceDraft: composerInput.clearDraft,
   });
 
   const handleSlashCommandSelect = React.useCallback(
@@ -4399,6 +4393,7 @@ export const PlaygroundForm = ({
     setLastSubmittedContext,
     estimateTokensForText: estimateTokensForText as any,
     resolveSubmissionIntent,
+    runStandaloneCommand,
     queueSubmission,
     getSubmitDisabledReason,
     validateSelectedChatModelsAvailability,

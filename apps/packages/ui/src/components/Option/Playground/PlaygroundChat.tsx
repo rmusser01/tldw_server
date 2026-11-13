@@ -1394,7 +1394,7 @@ export const PlaygroundChat = ({
             onFollowUp={onPrepareResearchFollowUp}
           />
         </React.Suspense>
-        <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} log={{ label: t("playground:aria.chatTranscript", "Chat messages"), busy: streaming }} renderBlock={(block, blockIndex) => {
+        <VirtualChatTimeline key={`${historySelection?.view?.owner_key ?? ""}:${historySelection?.view?.conversation_id ?? historyId ?? ""}`} blocks={blocks} getKey={blockKey} messageBlocks={messageBlocks} scrollParentRef={scrollParentRef} navigationRef={navigationRef} log={{ label: t("playground:aria.chatTranscript", "Chat messages"), busy: streaming || requestPending }} renderBlock={(block, blockIndex) => {
           if (block.kind === "single") {
             const message = messages[block.index]
             const previousUserMessage = previousUserMessageByIndex.get(block.index) ?? null

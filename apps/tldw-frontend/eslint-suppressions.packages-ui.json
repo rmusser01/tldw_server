@@ -845,11 +845,6 @@
       "count": 1
     }
   },
-  "packages/ui/src/hooks/playground/useSlashCommands.ts": {
-    "no-restricted-imports": {
-      "count": 1
-    }
-  },
   "packages/ui/src/hooks/useAudioStudioGeneration.tsx": {
     "no-restricted-imports": {
       "count": 2

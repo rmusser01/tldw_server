@@ -1,9 +1,17 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import { Drawer } from "antd"
 import { Menu, Minimize2, SquarePen } from "lucide-react"
 import { useActiveChatTitle } from "@/hooks/useActiveChatTitle"
 import { useStartSavedChat } from "@/hooks/chat/useStartSavedChat"
 import { useStoreMessageOption } from "@/store/option"
+
+// The shell's chat list, loaded the first time the bar opens it.
+const ChatList = React.lazy(() =>
+  import("@/components/Common/ChatSidebar").then((module) => ({
+    default: module.ChatSidebar
+  }))
+)
 
 const actionClass =
   "inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 rounded-md px-2 text-sm text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
@@ -17,15 +25,20 @@ type PlaygroundFocusBarProps = {
  * Phone Focus mode hides the app header and sidebar. This slim bar keeps the
  * way out: the chat list, the chat's title, New chat and Exit focus (CO-01).
  * It sits above the transcript, so Exit focus no longer covers messages (CO-N1).
+ * ☰ opens the chat list in a drawer over Focus; picking a chat or closing the
+ * list leaves the phone in Focus, and the saved layout is untouched.
  */
 export const PlaygroundFocusBar = ({
   exitFocusLabel,
   onExitFocus
 }: PlaygroundFocusBarProps) => {
-  const { t } = useTranslation(["playground", "option"])
+  const { t } = useTranslation(["playground", "option", "common"])
   const { title } = useActiveChatTitle()
   const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
   const startSavedChat = useStartSavedChat()
+  const [chatListOpen, setChatListOpen] = React.useState(false)
+  const [chatListResetKey, setChatListResetKey] = React.useState(0)
+  const closeChatList = React.useCallback(() => setChatListOpen(false), [])
   const chatListLabel = String(
     t("playground:focusBar.openChatList", "Open chat list")
   )
@@ -43,8 +56,13 @@ export const PlaygroundFocusBar = ({
     >
       <button
         type="button"
-        onClick={() => window.dispatchEvent(new Event("tldw:open-chat-sidebar"))}
+        onClick={() => {
+          setChatListResetKey((key) => key + 1)
+          setChatListOpen(true)
+        }}
         aria-label={chatListLabel}
+        aria-haspopup="dialog"
+        aria-expanded={chatListOpen}
         title={chatListLabel}
         className={actionClass}
       >
@@ -72,6 +90,26 @@ export const PlaygroundFocusBar = ({
         <Minimize2 className="size-3.5" aria-hidden="true" />
         <span>{exitFocusLabel}</span>
       </button>
+      <Drawer
+        title={t("common:chatSidebar.title", "Chats")}
+        placement="left"
+        closeIcon={null}
+        open={chatListOpen}
+        onClose={closeChatList}
+        styles={{ header: { display: "none" }, body: { padding: 0, overflow: "hidden" } }}
+      >
+        {chatListOpen || chatListResetKey > 0 ? (
+          <React.Suspense fallback={null}>
+            <ChatList
+              className="!h-full !w-full"
+              collapsed={false}
+              openResetKey={chatListResetKey}
+              onToggleCollapse={closeChatList}
+              onConversationSelected={closeChatList}
+            />
+          </React.Suspense>
+        ) : null}
+      </Drawer>
     </header>
   )
 }

@@ -3,16 +3,17 @@ import { renderHook } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { comboboxOptionId, useComposerCombobox } from "../useComposerCombobox"
 
-// AX-12: one combobox contract for the slash, mention and wikilink menus.
+// AX-12: one contract for the slash, mention and wikilink menus. The
+// textarea keeps its textbox role (a textarea may not be a combobox, and
+// the Notes editor must not read as one); it points into the listbox with
+// attributes a textbox supports.
 describe("useComposerCombobox", () => {
-  it("is a collapsed combobox while no suggestions show", () => {
+  it("keeps the textbox role and controls nothing while no suggestions show", () => {
     const { result } = renderHook(() =>
       useComposerCombobox({ open: false, count: 3, activeIndex: 0 })
     )
     expect(result.current.inputProps).toEqual({
-      role: "combobox",
       "aria-autocomplete": "list",
-      "aria-expanded": false,
       "aria-controls": undefined,
       "aria-activedescendant": undefined
     })
@@ -25,8 +26,8 @@ describe("useComposerCombobox", () => {
     )
     const { listboxId } = result.current
     expect(listboxId).toMatch(/^[A-Za-z][\w-]*$/)
-    expect(result.current.inputProps).toMatchObject({
-      "aria-expanded": true,
+    expect(result.current.inputProps).toEqual({
+      "aria-autocomplete": "list",
       "aria-controls": listboxId,
       "aria-activedescendant": comboboxOptionId(listboxId, 0)
     })
@@ -36,12 +37,11 @@ describe("useComposerCombobox", () => {
     )
   })
 
-  it("stays collapsed when an open menu has no suggestions", () => {
+  it("controls nothing when an open menu has no suggestions", () => {
     const { result } = renderHook(() =>
       useComposerCombobox({ open: true, count: 0, activeIndex: 0 })
     )
     expect(result.current.inputProps).toMatchObject({
-      "aria-expanded": false,
       "aria-controls": undefined,
       "aria-activedescendant": undefined
     })

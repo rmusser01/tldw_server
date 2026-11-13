@@ -551,7 +551,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   }
 
   const { t } = useTranslation(['option', 'common'])
-  // The note textarea is a combobox over its [[wikilink]] suggestions (AX-12).
+  // The note textarea points into its [[wikilink]] suggestions; it stays a textbox (AX-12).
   const wikilinkSuggestionsOpen = Boolean(activeWikilinkQuery) && wikilinkSuggestions.length > 0
   const wikilinkCombobox = useComposerCombobox({
     open: wikilinkSuggestionsOpen,
