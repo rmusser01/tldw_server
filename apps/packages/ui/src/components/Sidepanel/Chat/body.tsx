@@ -78,9 +78,15 @@ export const SidePanelBody = ({
   const { t } = useTranslation(["option"])
   // A request is in flight from the moment it has a controller, before the
   // server accepts it and streaming starts (G19); the reply bubble offers Stop
-  // until the request is stopped.
+  // until the request is stopped. Only the reply the request is filling counts:
+  // the last row once it is a bot row ending in the "▋" placeholder. While the
+  // request is prepared, the previous finished reply is still last.
   const { controller: requestController } = usePageAssist()
-  const requestPending = Boolean(requestController && !requestController.signal.aborted)
+  const lastMessage = messages[messages.length - 1]
+  const requestPending = Boolean(
+    requestController && !requestController.signal.aborted &&
+      lastMessage?.isBot && String(lastMessage.message ?? "").endsWith("▋")
+  )
   const regenerateDisabledReason = isProtectedTrackedPersonaUnavailable(
     Boolean(historySelection), effectiveAssistantState?.kind,
     effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
