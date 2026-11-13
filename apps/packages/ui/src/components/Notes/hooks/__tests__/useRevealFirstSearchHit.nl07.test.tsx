@@ -55,6 +55,19 @@ describe("useRevealFirstSearchHit (NL-07)", () => {
     expect(mocks.reveal).toHaveBeenCalledWith(textarea, BODY.indexOf("FAISS"))
   })
 
+  it("puts the caret at the hit without focusing the editor", () => {
+    const focus = vi.spyOn(textarea, "focus")
+    const { rerender } = renderReveal({ selectedId: null, content: "", query: "faiss", enabled: true })
+    textarea.value = BODY
+    rerender({ selectedId: "n1", content: BODY, query: "faiss", enabled: true })
+
+    // Tabbing into the editor starts at the hit, not back at the top.
+    expect(textarea.selectionStart).toBe(BODY.indexOf("FAISS"))
+    expect(textarea.selectionEnd).toBe(BODY.indexOf("FAISS"))
+    expect(focus).not.toHaveBeenCalled()
+    expect(document.activeElement).not.toBe(textarea)
+  })
+
   it("does nothing without a query, without a hit, or when disabled", () => {
     const { rerender } = renderReveal({ selectedId: null, content: "", query: "", enabled: true })
     rerender({ selectedId: "n1", content: BODY, query: "", enabled: true })

@@ -1606,7 +1606,7 @@
     "graphEdgeLegend": "Relationship line styles",
     "graphLegendAuthoritative": "Saved links",
     "graphNodeLegend": "Node shapes",
-    "graphFocusFallbackHint": "No note is open, so the graph is centred on “{{title}}”. Pick a note to focus the graph.",
+    "graphFocusFallbackHint": "No note is open, so the graph is centered on “{{title}}”. Pick a note to focus the graph.",
     "graphPassageSimilarityShort": "passage similarity",
     "graphSemanticNeighbors": "Neighbors",
     "graphSemanticThreshold": "Minimum passage similarity",
