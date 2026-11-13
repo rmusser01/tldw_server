@@ -2,6 +2,7 @@ import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { savedReplyActionAvailability, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
+import { isReplyRequestPending } from "@/hooks/chat/pending-reply"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
@@ -79,17 +80,9 @@ export const SidePanelBody = ({
     isEmbedding
   } = useMessage()
   const { t } = useTranslation(["option"])
-  // A request is in flight from the moment it has a controller, before the
-  // server accepts it and streaming starts (G19); the reply bubble offers Stop
-  // until the request is stopped. Only the reply the request is filling counts:
-  // the last row once it is a bot row ending in the "▋" placeholder. While the
-  // request is prepared, the previous finished reply is still last.
+  // G19: the reply bubble a request is filling offers Stop before streaming starts.
   const { controller: requestController } = usePageAssist()
-  const lastMessage = messages[messages.length - 1]
-  const requestPending = Boolean(
-    requestController && !requestController.signal.aborted &&
-      lastMessage?.isBot && String(lastMessage.message ?? "").endsWith("▋")
-  )
+  const requestPending = isReplyRequestPending(requestController, messages)
   const regenerateDisabledReason = isProtectedTrackedPersonaUnavailable(
     Boolean(historySelection), effectiveAssistantState?.kind,
     effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
