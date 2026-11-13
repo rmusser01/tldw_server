@@ -1,6 +1,7 @@
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { savedReplyActionAvailability, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
@@ -64,6 +65,7 @@ export const SidePanelBody = ({
     streaming,
     isProcessing,
     regenerateLastMessage,
+    continueLastMessage,
     effectiveAssistantState,
     editMessage,
     deleteMessage,
@@ -91,6 +93,11 @@ export const SidePanelBody = ({
     Boolean(historySelection), effectiveAssistantState?.kind,
     effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
   ) ? t("assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null
+  // CM-03: Continue and a saved reply's recorded-status actions follow the
+  // full page's rules: a saved server chat's reply continues through the
+  // server, and a reply the server refused to continue no longer offers it.
+  const savedReplyActions = savedReplyActionAvailability({ historySelection, messages, temporaryChat })
+  const savedStatusActions = savedReplyStatusOffersActions(historySelection, messages)
   const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const { ttsEnabled } = useWebUI()
   const [openReasoning] = useStorage("openReasoning", false)
@@ -166,6 +173,7 @@ export const SidePanelBody = ({
     createChatBranch,
     handleVariantSwipe,
     regenerateLastMessage,
+    continueLastMessage,
     stopStreaming: stopStreamingFromUi
   })
   latestRowHandlers.current = {
@@ -174,6 +182,7 @@ export const SidePanelBody = ({
     createChatBranch,
     handleVariantSwipe,
     regenerateLastMessage,
+    continueLastMessage,
     stopStreaming: stopStreamingFromUi
   }
   const handleRegenerateRow = React.useCallback(
@@ -181,6 +190,9 @@ export const SidePanelBody = ({
       latestRowHandlers.current.regenerateLastMessage(...args),
     []
   )
+  const handleContinueRow = React.useCallback(() => {
+    void latestRowHandlers.current.continueLastMessage()
+  }, [])
   const handleStopStreamingRow = React.useCallback(
     (...args: Parameters<typeof stopStreamingFromUi>) => {
       latestRowHandlers.current.stopStreaming(...args)
@@ -502,6 +514,9 @@ export const SidePanelBody = ({
                   totalMessages={messages.length}
                   onRegenerate={handleRegenerateRow}
                   regenerateDisabledReason={regenerateDisabledReason}
+                  onContinue={savedReplyActions.continue ? undefined : handleContinueRow}
+                  continueDisabledReason={regenerateDisabledReason}
+                  savedStatusActions={savedStatusActions && index === messages.length - 1}
                   message_type={resolveCharacterMessageType(message, index, Boolean(serverChatId && characterIdentityEnabled))}
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
