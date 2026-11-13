@@ -121,6 +121,7 @@ import {
 } from './notes-manager-utils'
 import { collectConversationIdsToResolve, settleInBatches } from './notes-conversation-labels'
 import { useNotesBulkRun } from './hooks/useNotesBulkRun'
+import { showNoteRestoredToast } from './notes-restore-toast'
 import { isEditableTarget } from "@/utils/editable-target"
 import { useConnectionsMemory } from './notes-connections'
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
@@ -186,6 +187,14 @@ const patchNoteTags = (noteId: string, expectedVersion: number, tags: string[], 
       'expected-version': String(expectedVersion)
     },
     body: { keywords: tags }
+  })
+
+/** Restore a trashed note, guarded by its deleted version. */
+const postNoteRestore = (noteId: string, expectedVersion: number, ownedRequest: NotesOwnedRequestOptions) =>
+  bgRequest<{ id?: string | number } | null>({
+    ...ownedRequest,
+    path: `${notePath(noteId)}/restore?expected_version=${encodeURIComponent(String(expectedVersion))}`,
+    method: 'POST'
   })
 
 const toBulkNoteLabel = (note: { id: string | number; title?: string }) =>
@@ -1536,24 +1545,19 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     const operation = beginNoteMutation()
     try {
       const ownedRequest = await operation.requestOptions()
-      const restored = await bgRequest<any>({
-        ...ownedRequest,
-        path: `/api/v1/notes/${encodeURIComponent(target)}/restore?expected_version=${encodeURIComponent(
-          String(expectedVersion)
-        )}` as any,
-        method: 'POST' as any
-      })
+      const restored = await postNoteRestore(target, expectedVersion, ownedRequest)
       operation.requireCurrent()
       dismissNoteDeletedToast(message, target)
-      message.success('Note restored')
-      list.setListMode('active')
-      list.setPage(1)
+      // Stay in Trash so several notes can be restored in a row (NL-05).
       await operation.refetch()
       operation.requireCurrent()
       const restoredId = String(restored?.id || target)
-      if (operation.isEditorCurrent()) {
-        await latestEditorRef.current.loadDetail(restoredId, ownedRequest, operation.editRevision)
-      }
+      showNoteRestoredToast(message, {
+        noteId: restoredId,
+        label: t('option:notesSearch.noteRestored', { defaultValue: 'Note restored' }),
+        openLabel: t('option:notesSearch.restoredOpenNote', { defaultValue: 'Open note' }),
+        onOpen: () => { void openRestoredNote(restoredId, operation) }
+      })
     } catch (error: any) {
       if (!operation.isCurrent()) return
       if (ed.isVersionConflictError(error)) {
@@ -1563,6 +1567,65 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
     } finally { operation.release() }
   }
+
+  /** "Open note" in the restore toast: leave Trash and open the restored note. */
+  const openRestoredNote = async (noteId: string, original: MutationOwner) => {
+    if (!original.isOwnerCurrent()) return
+    const editor = latestEditorRef.current
+    await editor.switchListMode('active')
+    if (!original.isOwnerCurrent()) return
+    await latestEditorRef.current.handleSelectNote(noteId)
+  }
+
+  const restoreSelectedBulk = React.useCallback(async (retryTargets?: NoteListItem[]) => {
+    const targets = (retryTargets ?? list.selectedBulkNotes).slice()
+    if (targets.length === 0) {
+      message.info('No selected notes to restore')
+      return
+    }
+    const run = bulkRun.begin('restore')
+    if (!run) return
+    const failedNotes: NoteListItem[] = []
+    const operation = beginNoteMutation()
+    try {
+      const ownedRequest = await operation.requestOptions()
+      const restoredIds = new Set<string>()
+      run.start(targets.length)
+      for (const note of targets) {
+        const noteId = String(note.id)
+        try {
+          operation.requireCurrent()
+          const version = typeof note.version === 'number' && Number.isFinite(note.version)
+            ? note.version
+            : await lookupDeletedNoteVersion(noteId, operation, ownedRequest)
+          if (version == null) { failedNotes.push(note); continue }
+          await postNoteRestore(noteId, version, ownedRequest)
+          operation.requireCurrent()
+          restoredIds.add(noteId)
+          dismissNoteDeletedToast(message, noteId)
+        } catch {
+          operation.requireCurrent()
+          failedNotes.push({ ...note, version: undefined })
+        } finally {
+          run.step()
+        }
+      }
+      if (restoredIds.size > 0) {
+        message.success(`Restored ${formatNoteCount(restoredIds.size)}`)
+        list.setBulkSelectedIds((current) => current.filter((id) => !restoredIds.has(id)))
+        await operation.refetch()
+        operation.requireCurrent()
+      }
+      if (failedNotes.length > 0) {
+        message.warning(`${failedNotes.length} selected note${failedNotes.length === 1 ? '' : 's'} failed to restore`)
+      }
+    } catch (error) {
+      if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
+    } finally {
+      operation.release()
+      run.finish(failedNotes)
+    }
+  }, [beginNoteMutation, bulkRun, list, lookupDeletedNoteVersion, message])
 
   // Bulk operations: one run at a time, with n/N progress and Retry for failures (NL-05).
   // Retry passes the failed notes back in and skips the confirm the user already gave.
@@ -1841,6 +1904,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (!failures || bulkRun.isRunning) return
     if (failures.action === 'delete') void deleteSelectedBulk(failures.notes)
     else if (failures.action === 'addTags') void addTagsToSelectedBulk({ notes: failures.notes, tags: failures.tags ?? [] })
+    else void restoreSelectedBulk(failures.notes)
   }
 
   // Editor input handlers
@@ -2921,6 +2985,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         deleteSelectedBulk={deleteSelectedBulk}
         toggleNotePinned={ed.toggleNotePinned}
         restoreNote={restoreNote}
+        restoreSelectedBulk={restoreSelectedBulk}
         openLinkedChat={(conversationId) => { void openLinkedConversation(conversationId) }}
         bulkSelection={list.bulkSelectionControls}
         bulkRun={{

@@ -164,7 +164,7 @@
       "count": 1
     },
     "no-restricted-syntax": {
-      "count": 21
+      "count": 19
     }
   },
   "packages/ui/src/components/Notes/hooks/useNotesEditorState.tsx": {

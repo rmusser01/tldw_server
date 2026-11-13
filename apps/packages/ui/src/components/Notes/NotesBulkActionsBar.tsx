@@ -22,6 +22,8 @@ type NotesBulkActionsBarProps = {
   onExport: () => void
   onAddTags: () => void
   onDelete: () => void
+  /** Trash: restore the selected notes (NL-05). */
+  onRestore?: () => void
 }
 
 const MAX_LISTED_FAILURES = 5
@@ -48,13 +50,14 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
   onClearSelection,
   onExport,
   onAddTags,
-  onDelete
+  onDelete,
+  onRestore
 }) => {
   const { t } = useTranslation(['option'])
   const progress = run?.progress ?? null
   const failures = run?.failures && actionMode(run.failures.action) === listMode ? run.failures : null
   const running = progress != null
-  const hasSelection = listMode === 'active' && selectedCount > 0
+  const hasSelection = selectedCount > 0
   if (!hasSelection && !running && !failures) return null
 
   const progressText = (value: NotesBulkProgress) => {
@@ -162,7 +165,21 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
           <span>{progressText(progress)}</span>
         </div>
       )}
-      {hasSelection && (
+      {hasSelection && listMode === 'trash' && (
+        <div className="mt-2">
+          <Button
+            size="small"
+            type="primary"
+            className={buttonClass}
+            disabled={running || !onRestore}
+            onClick={onRestore}
+            data-testid="notes-bulk-restore"
+          >
+            {t('option:notesSearch.bulkRestore', { defaultValue: 'Restore selected' })}
+          </Button>
+        </div>
+      )}
+      {hasSelection && listMode === 'active' && (
         <div className="mt-2 grid grid-cols-3 gap-2">
           <Button
             size="small"

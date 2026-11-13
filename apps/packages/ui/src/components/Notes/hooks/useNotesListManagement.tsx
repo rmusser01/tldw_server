@@ -1113,17 +1113,16 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
 
   const selectAllOnPage = React.useCallback(
     (checked: boolean) => {
-      if (listMode !== 'active') return
       clearMatchingSelection()
       setBulkSelectedIds(checked ? orderedVisibleNoteIds.slice() : [])
       bulkSelectionAnchorRef.current.value = null
     },
-    [clearMatchingSelection, listMode, orderedVisibleNoteIds, setBulkSelectedIds]
+    [clearMatchingSelection, orderedVisibleNoteIds, setBulkSelectedIds]
   )
 
+  // Notes and Trash both select rows (NL-05): Trash restores the selection.
   const handleToggleBulkSelection = React.useCallback(
     (id: string | number, checked: boolean, shiftKey: boolean) => {
-      if (listMode !== 'active') return
       const targetId = String(id)
       // Every visible row is selected while all matching notes are.
       const fromMatching = matching != null
@@ -1155,7 +1154,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         return orderedVisibleNoteIds.filter((visibleId) => next.has(visibleId))
       })
     },
-    [clearMatchingSelection, listMode, matching, orderedVisibleNoteIds, setBulkSelectedIds]
+    [clearMatchingSelection, matching, orderedVisibleNoteIds, setBulkSelectedIds]
   )
 
   const allOnPageSelected =
@@ -1191,8 +1190,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   }, [clearSearchQueryTimeout, query, queryInput])
 
   // ---- bulk selection sync with visible ids ----
+  // Switching between Notes and Trash starts a fresh selection.
+  const bulkSelectionListModeRef = React.useRef(listMode)
   React.useEffect(() => {
-    if (listMode !== 'active') {
+    if (bulkSelectionListModeRef.current !== listMode) {
+      bulkSelectionListModeRef.current = listMode
       setBulkSelectedIds([])
       bulkSelectionAnchorRef.current.value = null
       return

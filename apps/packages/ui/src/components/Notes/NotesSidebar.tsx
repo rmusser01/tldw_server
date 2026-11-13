@@ -172,6 +172,8 @@ export interface NotesSidebarProps {
   exportSelectedBulk: () => void
   addTagsToSelectedBulk: () => Promise<void>
   deleteSelectedBulk: () => Promise<void>
+  /** Trash: restore the selected notes (NL-05). */
+  restoreSelectedBulk?: () => Promise<void>
   /** Opens the chat a list row came from (NL-04). */
   openLinkedChat?: (conversationId: string) => void
   /** The running bulk action and its failures (NL-05). */
@@ -319,6 +321,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   addTagsToSelectedBulk,
   deleteSelectedBulk,
   openLinkedChat,
+  restoreSelectedBulk,
   bulkRun,
   bulkSelection,
   toggleNotePinned,
@@ -1468,6 +1471,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             onDelete={() => {
               void deleteSelectedBulk()
             }}
+            onRestore={restoreSelectedBulk ? () => { void restoreSelectedBulk() } : undefined}
           />
         </div>
       </aside>

@@ -1298,6 +1298,18 @@
   "notesSearch_bulkSelectAllMatchingError": {
     "message": "Could not select all matching notes. Try again."
   },
+  "notesSearch_bulkRestore": {
+    "message": "Restore selected"
+  },
+  "notesSearch_bulkSelectTrashAria": {
+    "message": "Select note {{title}} to restore"
+  },
+  "notesSearch_noteRestored": {
+    "message": "Note restored"
+  },
+  "notesSearch_restoredOpenNote": {
+    "message": "Open note"
+  },
   "notesSearch_linkedConversationIdLabel": {
     "message": "Conversation ID"
   },

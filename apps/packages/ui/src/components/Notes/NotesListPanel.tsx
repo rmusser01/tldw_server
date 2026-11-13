@@ -215,7 +215,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   const searchTerms = React.useMemo(() => extractSearchTerms(searchQuery), [searchQuery])
   const selectedOnPage = hasNotes ? notes.filter((note) => bulkSelectedIdSet.has(String(note.id))).length : 0
   const allOnPageSelected = hasNotes && selectedOnPage === notes.length
-  const showSelectAllOnPage = Boolean(onToggleSelectAllOnPage) && hasNotes && !isTrashView
+  const showSelectAllOnPage = Boolean(onToggleSelectAllOnPage) && hasNotes
   const listDomId = React.useId()
   const rowHintId = `${listDomId}-row-hint`
   // Roving tabindex (AX-03): the list is one Tab stop. It is the row the user
@@ -630,7 +630,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                     key={itemIdText}
                     className={`w-full py-2 text-left transition-colors ${
                       isTrashView
-                        ? 'px-4'
+                        ? isBulkSelected ? 'bg-surface2/70 px-4' : 'px-4'
                         : isSelectedNote
                           ? 'bg-surface2 border-l-4 border-l-primary px-3'
                           : isBulkSelected
@@ -864,7 +864,25 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                   </div>
                 )}
                 {isTrashView && (
-                  <div className="w-full">
+                  <div className="flex items-start gap-2">
+                  {/* Trash rows select for "Restore selected" (NL-05). */}
+                  <label className={`${ROW_CONTROL_TARGET_CLASS} cursor-pointer`}>
+                    <input
+                      type="checkbox"
+                      checked={isBulkSelected}
+                      aria-label={t('option:notesSearch.bulkSelectTrashAria', {
+                        defaultValue: 'Select note {{title}} to restore',
+                        title: noteTitle
+                      })}
+                      data-testid={`notes-select-checkbox-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
+                      onChange={() => {}}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onToggleBulkSelection?.(item.id, !isBulkSelected, event.shiftKey)
+                      }}
+                    />
+                  </label>
+                  <div className="min-w-0 flex-1">
                     <div className="text-sm font-medium text-text truncate">
                       {truncateText(
                         item.title || `Note ${item.id}`,
@@ -896,6 +914,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         })}
                       </Button>
                     </div>
+                  </div>
                   </div>
                 )}
                   </div>

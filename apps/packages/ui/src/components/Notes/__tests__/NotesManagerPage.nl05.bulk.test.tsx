@@ -439,3 +439,132 @@ describe("NotesManagerPage NL-05 select all", () => {
     expect(gatherRequests()).toHaveLength(10)
   })
 })
+
+const TRASH_NOTES = [
+  { id: "t1", title: "Old idea", content: "o", version: 3, deleted: true },
+  { id: "t2", title: "Draft plan", content: "d", version: 5, deleted: true },
+  { id: "t3", title: "Scratch", content: "s", version: 2, deleted: true }
+]
+
+const restoreCalls = () =>
+  mockBgRequest.mock.calls
+    .map(([request]: [Request]) => request)
+    .filter((request) => String(request?.method || "").toUpperCase() === "POST" && String(request?.path || "").includes("/restore"))
+    .map((request) => String(request.path))
+
+const serveTrash = (onRestore: (id: string) => unknown = (id) => ({ id, version: 9, deleted: false })) => {
+  let trash = TRASH_NOTES.slice()
+  serve((_request, path, method) => {
+    if (path.startsWith("/api/v1/notes/trash?")) return { items: trash, total: trash.length }
+    const restore = path.match(/^\/api\/v1\/notes\/(t\d)\/restore\?expected_version=(\d+)$/)
+    if (restore && method === "POST") {
+      const result = onRestore(restore[1])
+      trash = trash.filter((note) => note.id !== restore[1])
+      return result
+    }
+    const detail = path.match(/^\/api\/v1\/notes\/(t\d)$/)
+    if (detail && method === "GET") {
+      const note = TRASH_NOTES.find((row) => row.id === detail[1])
+      return { ...note, version: 9, deleted: false, keywords: [] }
+    }
+    return undefined
+  })
+}
+
+const openTrash = async () => {
+  fireEvent.click(await screen.findByTestId("notes-mode-trash"))
+  await screen.findByTestId("notes-trash-row-t1")
+}
+
+describe("NotesManagerPage NL-05 Trash", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConfirmDanger.mockResolvedValue(true)
+    mockGetSetting.mockResolvedValue(null)
+    mockSetSetting.mockResolvedValue(undefined)
+    mockClearSetting.mockResolvedValue(undefined)
+  })
+
+  it("stays in Trash after a restore and offers Open note in the toast", async () => {
+    serveTrash()
+    renderPage()
+    await openTrash()
+
+    fireEvent.click(screen.getByTestId("notes-restore-t1"))
+
+    await waitFor(() => expect(mockMessageOpen).toHaveBeenCalled())
+    expect(restoreCalls()).toEqual(["/api/v1/notes/t1/restore?expected_version=3"])
+    await waitFor(() => expect(screen.queryByTestId("notes-trash-row-t1")).not.toBeInTheDocument())
+    expect(screen.getByTestId("notes-mode-trash")).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByTestId("notes-trash-row-t2")).toBeInTheDocument()
+    expect(callsTo("GET", "t1")).toHaveLength(0)
+
+    const toast = render(<>{mockMessageOpen.mock.calls[0][0].content}</>)
+    expect(toast.container).toHaveTextContent("Note restored")
+    fireEvent.click(within(toast.container).getByTestId("notes-restored-open-note"))
+
+    await waitFor(() => expect(screen.getByTestId("notes-mode-trash")).toHaveAttribute("aria-pressed", "false"))
+    await waitFor(() => expect(callsTo("GET", "t1").length).toBeGreaterThan(0))
+  })
+
+  it("selects Trash notes with checkboxes and restores them together", async () => {
+    serveTrash()
+    renderPage()
+    await openTrash()
+
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t1"))
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t2"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("2 selected"))
+    expect(screen.queryByTestId("notes-bulk-delete")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("notes-bulk-export")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("notes-bulk-restore"))
+
+    await waitFor(() => expect(mockMessageSuccess).toHaveBeenCalledWith("Restored 2 notes"))
+    expect(restoreCalls()).toEqual([
+      "/api/v1/notes/t1/restore?expected_version=3",
+      "/api/v1/notes/t2/restore?expected_version=5"
+    ])
+    expect(screen.getByTestId("notes-mode-trash")).toHaveAttribute("aria-pressed", "true")
+    await waitFor(() => expect(screen.queryByTestId("notes-trash-row-t1")).not.toBeInTheDocument())
+    expect(screen.getByTestId("notes-trash-row-t3")).toBeInTheDocument()
+  })
+
+  it("selects every Trash note on the page from the header checkbox", async () => {
+    serveTrash()
+    renderPage()
+    await openTrash()
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("3 selected"))
+    expect(screen.getByTestId("notes-bulk-restore")).toBeInTheDocument()
+  })
+
+  it("lists notes that could not be restored and retries only those", async () => {
+    let failDraft = true
+    serveTrash((id) => {
+      if (id === "t2" && failDraft) {
+        failDraft = false
+        throw new Error("server unavailable")
+      }
+      return { id, version: 9, deleted: false }
+    })
+    renderPage()
+    await openTrash()
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t1"))
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t2"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-restore"))
+
+    const failures = await screen.findByTestId("notes-bulk-failures")
+    expect(failures).toHaveTextContent("Restore failed for 1:")
+    expect(within(failures).getByText("Draft plan")).toBeInTheDocument()
+
+    fireEvent.click(within(failures).getByTestId("notes-bulk-retry"))
+    await waitFor(() =>
+      expect(restoreCalls().filter((path) => path.includes("/t2/"))).toEqual([
+        "/api/v1/notes/t2/restore?expected_version=5",
+        "/api/v1/notes/t2/restore?expected_version=5"
+      ])
+    )
+    await waitFor(() => expect(screen.queryByTestId("notes-bulk-failures")).not.toBeInTheDocument())
+  })
+})

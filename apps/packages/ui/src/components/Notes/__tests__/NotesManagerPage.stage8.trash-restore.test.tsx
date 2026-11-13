@@ -175,7 +175,9 @@ describe("NotesManagerPage stage 8 trash/restore", () => {
     mockClearSetting.mockResolvedValue(undefined)
   })
 
-  it("restores a trashed note and opens it in active mode", async () => {
+  // NL-05: a restore stays in Trash so several notes can be restored in a row;
+  // the toast's "Open note" opens it (NotesManagerPage.nl05.bulk.test.tsx).
+  it("restores a trashed note and stays in Trash", async () => {
     let activeNotes = [{ id: "note-active", title: "Active note", content: "active", version: 1, deleted: false }]
     let trashNotes = [{ id: "note-trash", title: "Trash note", content: "trashed", version: 7, deleted: true }]
 
@@ -255,16 +257,16 @@ describe("NotesManagerPage stage 8 trash/restore", () => {
     })
 
     await waitFor(() => {
-      const detailCalled = mockBgRequest.mock.calls.some(([request]) => {
-        return (
-          String(request?.path || "") === "/api/v1/notes/note-trash" &&
-          String(request?.method || "GET").toUpperCase() === "GET"
-        )
-      })
-      expect(detailCalled).toBe(true)
+      expect(screen.queryByText("Trash note")).not.toBeInTheDocument()
     })
-
-    expect(await screen.findByTestId("notes-editor-revision-meta")).toHaveTextContent("Version 8")
+    expect(screen.getByTestId("notes-mode-trash")).toHaveAttribute("aria-pressed", "true")
+    const detailCalled = mockBgRequest.mock.calls.some(([request]) => {
+      return (
+        String(request?.path || "") === "/api/v1/notes/note-trash" &&
+        String(request?.method || "GET").toUpperCase() === "GET"
+      )
+    })
+    expect(detailCalled).toBe(false)
   })
 
   it("shows trash empty state", async () => {
