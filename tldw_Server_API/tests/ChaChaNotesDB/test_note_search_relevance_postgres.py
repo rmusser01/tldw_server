@@ -91,6 +91,16 @@ def test_postgres_search_relevance_sort_and_snippets(pg_database_config: Databas
         apple_segments = snippets[apple]
         assert any(segment["match"] and segment["text"].lower() == "sourdough" for segment in apple_segments)
         assert "sourdough" in "".join(segment["text"] for segment in apple_segments)
+
+        # Note text holding the marker characters is stripped of them before marking.
+        forged = _add(
+            db, "Markers", "Forged \ue000fake\ue001 words, then the sourdough starter.", "2026-06-01T00:00:00+00:00"
+        )
+        forged_segments = store.note_search_snippets("sourdough", [forged])[forged]
+        assert [segment["text"] for segment in forged_segments if segment["match"]] == ["sourdough"]
+        forged_text = "".join(segment["text"] for segment in forged_segments)
+        assert "\ue000" not in forged_text and "\ue001" not in forged_text
+        assert "Forged fake words" in forged_text
     finally:
         db.close_all_connections()
         other.close_all_connections()

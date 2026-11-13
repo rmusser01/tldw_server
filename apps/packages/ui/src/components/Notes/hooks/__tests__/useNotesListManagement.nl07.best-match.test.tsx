@@ -143,4 +143,38 @@ describe("useNotesListManagement Best match (NL-07)", () => {
     act(() => result.current.setQuery("loaf"))
     expect(result.current.sortOption).toBe("relevance")
   })
+
+  it("gathers every match without snippets; the list still asks for them", async () => {
+    const { result } = renderList()
+    act(() => result.current.setQuery("sourdough"))
+    await waitFor(() => expect(result.current.rawNotes).toHaveLength(3))
+    expect(lastSearchParams().has("include_snippets")).toBe(false)
+    const listRequests = searchPaths().length
+
+    await act(async () => {
+      result.current.bulkSelectionControls.onSelectAllMatching()
+    })
+
+    await waitFor(() => expect(result.current.bulkSelectionControls.matching).not.toBeNull())
+    const gathered = searchPaths()
+      .slice(listRequests)
+      .map((path) => new URLSearchParams(path.split("?")[1]))
+    expect(gathered.length).toBeGreaterThan(0)
+    expect(gathered.every((params) => params.get("include_snippets") === "false")).toBe(true)
+  })
+
+  it("starts a new 'all matching' selection when the search's sort changes", async () => {
+    const { result } = renderList()
+    act(() => result.current.setQuery("sourdough"))
+    await waitFor(() => expect(result.current.rawNotes).toHaveLength(3))
+    await act(async () => {
+      result.current.bulkSelectionControls.onSelectAllMatching()
+    })
+    await waitFor(() => expect(result.current.bulkSelectionControls.matching).not.toBeNull())
+
+    // Best match to Title is another order of another gather.
+    act(() => result.current.setSortOption("title_asc"))
+
+    expect(result.current.bulkSelectionControls.matching).toBeNull()
+  })
 })

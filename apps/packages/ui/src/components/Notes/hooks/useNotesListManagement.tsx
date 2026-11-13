@@ -16,6 +16,7 @@ import type {
   NotesListViewMode,
   MoodboardSummary,
   NotebookFilterOption,
+  NotesPageFetchOptions,
 } from '../notes-manager-types'
 import {
   extractBacklink,
@@ -303,7 +304,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     toks: string[],
     fetchPage: number,
     fetchPageSize: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: NotesPageFetchOptions
   ): Promise<{ items: any[]; total: number }> => {
     const requestOwner = authorityOwner
     if (!isCurrentAuthority(requestOwner)) {
@@ -334,6 +336,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     if (tokenCount > 1) params.set('tokens_match', tagMatch)
     // `items` is all the list reads; skip the duplicate arrays (NS-04).
     params.set('legacy_aliases', 'false')
+    // Gathering ids (select all, export) needs no match excerpts.
+    if (options?.includeSnippets === false) params.set('include_snippets', 'false')
 
     const abs = await bgRequest<any>({
       path: `/api/v1/notes/search/?${params.toString()}` as any,
@@ -379,7 +383,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const fetchListPage = React.useCallback(async (
     fetchPage: number,
     fetchPageSize: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: NotesPageFetchOptions
   ): Promise<{ items: any[]; total: number } | null> => {
     const requestOwner = authorityOwner
     if (!isCurrentAuthority(requestOwner)) return null
@@ -412,7 +417,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     const q = query.trim()
     const toks = effectiveKeywordTokens.map((k) => k.toLowerCase())
     if (q || toks.length > 0) {
-      return fetchFilteredNotesRaw(q, toks, fetchPage, fetchPageSize, signal)
+      return fetchFilteredNotesRaw(q, toks, fetchPage, fetchPageSize, signal, options)
     }
     // GET /api/v1/notes/ pages with limit/offset and sorts the whole library
     // server-side; it ignores page/results_per_page.
@@ -556,11 +561,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   // ---- "Select all N matching" (NL-05) ----
   const matchingFilterKey = JSON.stringify([
     authorityOwner.scope ?? null, authorityOwner.generation, listMode, listViewMode,
-    query, effectiveKeywordTokens, tagMatch, selectedNotebookId ?? null, sortOption, trashQuery
+    query, effectiveKeywordTokens, tagMatch, selectedNotebookId ?? null, effectiveSortOption, trashQuery
   ])
   const fetchMatchingPage = React.useCallback(
     async (fetchPage: number, fetchPageSize: number, signal: AbortSignal) => {
-      const result = await fetchListPage(fetchPage, fetchPageSize, signal)
+      const result = await fetchListPage(fetchPage, fetchPageSize, signal, { includeSnippets: false })
       return { items: (result?.items ?? []).map(mapNoteListItem), total: result?.total ?? 0 }
     },
     [fetchListPage]

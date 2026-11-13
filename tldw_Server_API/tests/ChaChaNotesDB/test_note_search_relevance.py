@@ -200,3 +200,63 @@ def test_snippet_segments_are_bounded() -> None:
     assert len(text) <= NOTE_SEARCH_SNIPPET_MAX_CHARS
     assert text.endswith("…")
     assert segments[0] == {"text": "hit", "match": True}
+
+
+def _recorded_order_clauses(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, search) -> list[str]:
+    """Run ``search`` and return the ORDER BY clause of each notes query it sent."""
+    sent: list[str] = []
+    original = db.execute_query
+
+    def record(query, *args, **kwargs):
+        flat = " ".join(str(query).split())
+        if "ORDER BY" in flat and "LIMIT" in flat:
+            sent.append(flat[flat.rindex("ORDER BY") : flat.rindex("LIMIT")].strip())
+        return original(query, *args, **kwargs)
+
+    monkeypatch.setattr(db, "execute_query", record)
+    search()
+    return sent
+
+
+@pytest.mark.parametrize(
+    "search",
+    [
+        lambda db: db.search_notes("sourdough", limit=2, offset=1),
+        lambda db: db.search_notes_with_keywords("sourdough", ["baking"], limit=2, offset=1),
+        lambda db: db.search_notes_with_keywords(None, ["baking"], limit=2, offset=1),
+    ],
+    ids=["text", "text-and-tags", "tags-only"],
+)
+def test_relevance_order_breaks_ties_by_id(
+    db: CharactersRAGDB, library: dict[str, str], monkeypatch: pytest.MonkeyPatch, search
+) -> None:
+    """Notes that tie on score and date must page in one stable order."""
+    clauses = _recorded_order_clauses(db, monkeypatch, lambda: search(db))
+    assert clauses
+    assert all(clause.endswith("id ASC") for clause in clauses), clauses
+
+
+def test_tied_notes_page_without_overlap(db: CharactersRAGDB) -> None:
+    ids = {
+        _add(db, "Same", "a sourdough note", modified="2026-01-01T00:00:00+00:00") for _ in range(4)
+    }
+    seen = [db.search_notes("sourdough", limit=1, offset=offset)[0]["id"] for offset in range(4)]
+    assert set(seen) == ids
+    assert seen == sorted(seen)
+
+
+def test_note_text_cannot_forge_a_highlight(db: CharactersRAGDB) -> None:
+    """Note text holding the private marker characters shows as text, never as a match."""
+    note_id = _add(
+        db,
+        "Markers",
+        "Forged fake words, then the sourdough starter.",
+        modified="2026-01-01T00:00:00+00:00",
+    )
+
+    segments = db.note_store.note_search_snippets("sourdough", [note_id])[note_id]
+
+    assert [segment["text"] for segment in segments if segment["match"]] == ["sourdough"]
+    text = "".join(segment["text"] for segment in segments)
+    assert "" not in text and "" not in text
+    assert "Forged fake words" in text

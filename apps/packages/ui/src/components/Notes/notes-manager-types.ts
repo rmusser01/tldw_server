@@ -44,3 +44,9 @@ export type {
   NotesTocEntry,
   NoteWithKeywords,
 } from './notes-manager-utils'
+
+/** Options for fetching one page of the notes list or of a search. */
+export type NotesPageFetchOptions = {
+  /** False to skip match excerpts: gathering ids for select-all or export needs none. */
+  includeSnippets?: boolean
+}

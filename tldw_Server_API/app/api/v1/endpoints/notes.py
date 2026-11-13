@@ -3012,6 +3012,15 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
         limit: int = Query(10, ge=1, le=100, description="Number of results to return"),
         offset: int = Query(0, ge=0, description="Result offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        include_snippets: Annotated[
+            bool,
+            Query(
+                description=(
+                    "If false, skip the match excerpts (`snippet` is null): for callers that need only ids "
+                    "and titles, such as selecting or exporting every match."
+                )
+            ),
+        ] = True,
         legacy_aliases: Annotated[
             bool, Query(description=_LEGACY_ALIASES_DESCRIPTION)
         ] = True,
@@ -3111,7 +3120,7 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 total = db.count_notes_matching(query_term)
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)
-        if query_term and (token_list or not title_only):  # title_only matches titles alone
+        if include_snippets and query_term and (token_list or not title_only):  # title_only matches titles alone
             _attach_search_snippets(db, query_term, notes_data)
         _attach_folders_bulk(db, notes_data)
         # Attach keywords inline (optional)

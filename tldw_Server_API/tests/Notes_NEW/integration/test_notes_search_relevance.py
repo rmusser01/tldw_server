@@ -201,3 +201,20 @@ def test_title_only_search_has_no_snippet(notes_client: TestClient) -> None:
     items = _search(notes_client, query="Apple", title_only="true")
     assert _titles(items) == ["Apple pie"]
     assert items[0]["snippet"] is None
+
+
+@pytest.mark.parametrize("tokens", [None, "baking"])
+def test_snippets_can_be_left_out(notes_client: TestClient, tokens: str | None) -> None:
+    """Callers that only need ids and titles (select all, export) skip the excerpt work."""
+    params = {"query": "sourdough", "include_snippets": "false"}
+    if tokens:
+        params["tokens"] = tokens
+    items = _search(notes_client, **params)
+    assert "Apple pie" in _titles(items)
+    assert all(item["snippet"] is None for item in items)
+
+
+def test_openapi_documents_include_snippets(notes_client: TestClient) -> None:
+    spec = notes_client.app.openapi()
+    parameters = {param["name"]: param for param in spec["paths"]["/api/v1/notes/search/"]["get"]["parameters"]}
+    assert parameters["include_snippets"]["schema"]["default"] is True

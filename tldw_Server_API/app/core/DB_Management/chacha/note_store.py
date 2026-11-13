@@ -51,16 +51,19 @@ _NOTE_LIST_SORT_DIRECTIONS = {"asc": "ASC", "desc": "DESC"}
 # A search with no sort (or "relevance") orders by bm25 / ts_rank.
 NOTE_SEARCH_RELEVANCE_SORT = "relevance"
 
-# Search snippets (NL-07): private-use markers wrap each matched term, so note
-# text can never forge a highlight boundary that a client would render as markup.
+# Search snippets (NL-07): private-use markers wrap each matched term. Note text
+# that holds the same characters is stripped of them before it is marked
+# (PostgreSQL) or after its excerpt is aligned with an unmarked copy (SQLite), so
+# note text never forges a highlight.
 _SNIPPET_OPEN = "\ue000"
 _SNIPPET_CLOSE = "\ue001"
+_SNIPPET_MARKERS = _SNIPPET_OPEN + _SNIPPET_CLOSE
 _SNIPPET_ELLIPSIS = "…"
 _SNIPPET_TOKENS = 24
 # The longest excerpt returned, in characters (ellipses included).
 NOTE_SEARCH_SNIPPET_MAX_CHARS = 240
 # ts_headline parses the whole document; read at most this much of a note body.
-_SNIPPET_SOURCE_MAX_CHARS = 100_000
+_SNIPPET_SOURCE_MAX_CHARS = 20_000
 # The search endpoint pages at most 100 notes.
 _SNIPPET_MAX_NOTES = 100
 _SNIPPET_MARKER_RE = re.compile(f"({_SNIPPET_OPEN}|{_SNIPPET_CLOSE})")
@@ -99,6 +102,30 @@ def note_search_snippet_segments(marked: str | None) -> list[dict[str, Any]] | N
     if not any(segment["match"] for segment in segments):
         return None
     return segments
+
+
+def _keep_inserted_snippet_markers(marked: str | None, plain: str | None) -> str | None:
+    """Return ``marked`` with the note's own marker characters removed (SQLite).
+
+    ``marked`` is the FTS excerpt ``plain`` with the highlight markers
+    inserted. Walking both, a character that ``plain`` also has at that point
+    is note text (kept, unless it is a marker character); any other character
+    is an inserted marker. Returns None when the two do not line up.
+    """
+    if marked is None or plain is None:
+        return None
+    kept: list[str] = []
+    position = 0
+    for char in marked:
+        if position < len(plain) and char == plain[position]:
+            position += 1
+            if char not in _SNIPPET_MARKERS:
+                kept.append(char)
+        elif char in _SNIPPET_MARKERS:
+            kept.append(char)
+        else:
+            return None
+    return "".join(kept) if position == len(plain) else None
 
 
 class NoteStore:
@@ -2974,10 +3001,10 @@ class NoteStore:
                 return []
             owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
             sort_select, order_clause = self._note_search_order(
-                sort_by, sort_order, "n", "ORDER BY rank DESC, n.last_modified DESC"
+                sort_by, sort_order, "n", "ORDER BY rank DESC, n.last_modified DESC, n.id ASC"
             )
             fallback_select, fallback_order = self._note_search_order(
-                sort_by, sort_order, "n", "ORDER BY n.last_modified DESC"
+                sort_by, sort_order, "n", "ORDER BY n.last_modified DESC, n.id ASC"
             )
             tsquery = (
                 " | ".join(f"'{term}'" for term in terms)
@@ -3030,7 +3057,7 @@ class NoteStore:
         safe_literal = search_term.replace('"', '""')
         safe_search_term = " OR ".join(f'"{term}"' for term in terms) if match_any else f'"{safe_literal}"'
         _, order_clause = self._note_search_order(
-            sort_by, sort_order, "main", "ORDER BY bm25_score, main.last_modified DESC"
+            sort_by, sort_order, "main", "ORDER BY bm25_score, main.last_modified DESC, main.id ASC"
         )
 
         query = """
@@ -3072,24 +3099,47 @@ class NoteStore:
                 f"StartSel={_SNIPPET_OPEN}, StopSel={_SNIPPET_CLOSE}, MaxWords={_SNIPPET_TOKENS}, "
                 f"MinWords={_SNIPPET_TOKENS // 2}, MaxFragments=1"
             )
+            # The note's own marker characters are removed before marking.
             query = (
-                "SELECT n.id AS id, ts_headline('english', LEFT(n.content, ?), to_tsquery('english', ?), ?) "  # nosec B608
+                "SELECT n.id AS id, ts_headline('english', translate(LEFT(n.content, ?), ?, ''), "  # nosec B608
+                "to_tsquery('english', ?), ?) "
                 f"AS marked FROM notes n WHERE n.deleted = FALSE{owner_clause} AND n.id IN ({placeholders})"
             )
-            params: tuple[Any, ...] = (_SNIPPET_SOURCE_MAX_CHARS, tsquery, options, *owner_params, *ids)
+            params: tuple[Any, ...] = (
+                _SNIPPET_SOURCE_MAX_CHARS,
+                _SNIPPET_MARKERS,
+                tsquery,
+                options,
+                *owner_params,
+                *ids,
+            )
         else:
             phrase = '"' + term.replace('"', '""') + '"'
-            # Column 1 is the body; the title already shows in the row.
+            # Column 1 is the body; the title already shows in the row. The
+            # unmarked copy tells inserted markers from the note's own.
             query = (
-                "SELECT main.id AS id, snippet(notes_fts, 1, ?, ?, ?, ?) AS marked "  # nosec B608
+                "SELECT main.id AS id, snippet(notes_fts, 1, ?, ?, ?, ?) AS marked, "  # nosec B608
+                "snippet(notes_fts, 1, '', '', ?, ?) AS plain "
                 "FROM notes_fts JOIN notes AS main ON notes_fts.rowid = main.rowid "
                 f"WHERE notes_fts MATCH ? AND main.deleted = 0 AND main.id IN ({placeholders})"
             )
-            params = (_SNIPPET_OPEN, _SNIPPET_CLOSE, _SNIPPET_ELLIPSIS, _SNIPPET_TOKENS, phrase, *ids)
+            params = (
+                _SNIPPET_OPEN,
+                _SNIPPET_CLOSE,
+                _SNIPPET_ELLIPSIS,
+                _SNIPPET_TOKENS,
+                _SNIPPET_ELLIPSIS,
+                _SNIPPET_TOKENS,
+                phrase,
+                *ids,
+            )
         rows = self._db.execute_query(query, params, read_only=True).fetchall()
         snippets: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
-            segments = note_search_snippet_segments(row["marked"])
+            marked = row["marked"]
+            if self._db.backend_type != BackendType.POSTGRESQL:
+                marked = _keep_inserted_snippet_markers(marked, row["plain"])
+            segments = note_search_snippet_segments(marked)
             if segments:
                 snippets[str(row["id"])] = segments
         return snippets
@@ -3252,11 +3302,18 @@ class NoteStore:
         keyword_table = self._db._map_table_for_backend("keywords")
         like_clause, like_params = self._keyword_token_filter(tokens, match, keyword_table)
         has_query = bool(search_term and str(search_term).strip())
+        # ``n.id`` breaks ties, so pages never overlap or skip notes.
         if self._db.backend_type == BackendType.POSTGRESQL:
-            relevance_clause = "ORDER BY rank DESC, n.last_modified DESC" if has_query else "ORDER BY n.last_modified DESC"
+            relevance_clause = (
+                "ORDER BY rank DESC, n.last_modified DESC, n.id ASC"
+                if has_query
+                else "ORDER BY n.last_modified DESC, n.id ASC"
+            )
         else:
             relevance_clause = (
-                "ORDER BY bm25(notes_fts), n.last_modified DESC" if has_query else "ORDER BY n.last_modified DESC"
+                "ORDER BY bm25(notes_fts), n.last_modified DESC, n.id ASC"
+                if has_query
+                else "ORDER BY n.last_modified DESC, n.id ASC"
             )
         sort_select, order_clause = self._note_search_order(sort_by, sort_order, "n", relevance_clause)
 
