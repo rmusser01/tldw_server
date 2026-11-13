@@ -1,4 +1,5 @@
 import { stripKnowledgeNoteProvenance } from '@/utils/knowledge-note-provenance'
+import { toPlainPreview } from '@/utils/plain-text-preview'
 import React from 'react'
 import { Button, Dropdown, Pagination, Spin, Tooltip } from 'antd'
 import { Clock3 as ClockIcon, Link2 as LinkIcon, Star as StarIcon, Tag as TagIcon } from 'lucide-react'
@@ -23,25 +24,12 @@ const truncateText = (value?: string | null, max?: number) => {
   return `${value.slice(0, max)}...`
 }
 
-const derivePreviewText = (content?: string | null, title?: string | null) => {
-  const source = stripKnowledgeNoteProvenance(String(content || ''))
-    .replace(/\r\n/g, '\n')
-    .trim()
-  if (!source) return ''
-  const normalizedTitle = String(title || '')
-    .trim()
-    .replace(/^#+\s*/, '')
-    .toLowerCase()
-  const lines = source
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-  const firstNonTitleLine = lines.find((line) => {
-    if (!normalizedTitle) return true
-    return line.replace(/^#+\s*/, '').toLowerCase() !== normalizedTitle
+/** The note's first line of plain text that is not its title (NL-04). */
+const derivePreviewText = (content?: string | null, title?: string | null) =>
+  toPlainPreview(stripKnowledgeNoteProvenance(String(content || '')), {
+    skipLine: title,
+    maxLength: MAX_PREVIEW_LENGTH
   })
-  return truncateText(firstNonTitleLine || lines[0] || source, MAX_PREVIEW_LENGTH)
-}
 
 const wasEditedRecently = (updatedAt?: string | null) => {
   if (!updatedAt) return false
@@ -753,7 +741,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                             </div>
                           )
                         })()}
-                        {item.content && (
+                        {previewText && (
                           <div id={`${rowDomId}-preview`} className="text-xs text-text-muted truncate mt-1">
                             {renderHighlightedText(
                               previewText,
@@ -827,9 +815,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         MAX_TITLE_LENGTH
                       )}
                     </div>
-                    {item.content && (
+                    {previewText && (
                       <div className="text-xs text-text-muted truncate mt-1">
-                        {derivePreviewText(item.content, item.title)}
+                        {previewText}
                       </div>
                     )}
                     <div className="mt-2 flex items-center justify-between gap-2">
