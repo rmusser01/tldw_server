@@ -1,4 +1,5 @@
 import { WORKSPACE_RAG_SOURCES_KEY, restoreWorkspaceRagSources } from "@/utils/workspace-rag-sources"
+import { serverChatActivePath } from "@/utils/newest-leaf-path"
 import { readSavedRoleplayPresentation } from "@/services/tldw/roleplay-resume"
 import { useHistorySelectionContext } from "./useHistorySelection"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -1156,8 +1157,9 @@ export const useServerChatLoader = ({
             if (!canCommitCurrentLoad()) return
           }
           const hasSelectedHistory = selectionRef.current?.getCurrent().capture?.status === "captured"
+          // CM-N2: without a selected history, show the newest path, not every alternative reply.
           const mappedMessages = mapServerChatMessagesToPlaygroundMessages({
-            serverMessages: list,
+            serverMessages: serverChatActivePath(list).messages,
             assistantName,
             characterId
           })

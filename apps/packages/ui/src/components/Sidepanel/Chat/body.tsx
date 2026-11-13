@@ -13,6 +13,7 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useStorage } from "@plasmohq/storage/hook"
 import { applyVariantToMessage } from "@/utils/message-variants"
+import { variantBranchCursor } from "@/utils/newest-leaf-path"
 import { generateID } from "@/db/dexie/helpers"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useStoreMessageOption } from "@/store/option"
@@ -135,7 +136,8 @@ export const SidePanelBody = ({
         const variants = message?.variants || []
         const currentIndex = message?.activeVariantIndex ?? variants.length - 1
         const candidate = variants[currentIndex + (direction === "prev" ? -1 : 1)]
-        if (candidate?.id) void historySelection.choose({ kind: "after_message", message_id: candidate.id })
+        // CM-N2: show the rest of that alternative's branch, not just the reply.
+        if (candidate?.id) void historySelection.choose(variantBranchCursor(historySelection, candidate.id))
         return
       }
       setMessages((prev) =>

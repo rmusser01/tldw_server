@@ -61,6 +61,7 @@ import {
 } from "@/hooks/useVisualIdentityResolver"
 import { VISUAL_IDENTITY_EXPRESSION_OPTIONS } from "@/utils/visual-identity-expressions"
 import { savedReplyActionAvailability, savedReplyRegenerateUnavailableReason, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
+import { variantBranchCursor } from "@/utils/newest-leaf-path"
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 
 type TimelineBlock =
@@ -1180,7 +1181,8 @@ export const PlaygroundChat = ({
         const variants = message?.variants || []
         const currentIndex = message?.activeVariantIndex ?? variants.length - 1
         const candidate = variants[currentIndex + (direction === "prev" ? -1 : 1)]
-        if (candidate?.id) void historySelection.choose({ kind: "after_message", message_id: candidate.id })
+        // CM-N2: show the rest of that alternative's branch, not just the reply.
+        if (candidate?.id) void historySelection.choose(variantBranchCursor(historySelection, candidate.id))
         return
       }
       setMessages((prev) =>

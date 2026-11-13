@@ -480,6 +480,23 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     expect(usePlaygroundSessionStore.getState()).toMatchObject({ serverChatId: "cedar", historyId: null, trackedCharacterId: "4", scopeKey: "scope-A" })
   })
 
+  it("opens a linked branched chat on its newest path, without its older alternative reply (CM-N2)", async () => {
+    configureCommonRequests("branched")
+    mockGetChat.mockResolvedValue({ id: "branched", title: "Branched chat", version: 1 })
+    mockListChatMessages.mockResolvedValue([
+      { id: "q", role: "user", content: "When?", created_at: "2026-02-18T10:00:00Z", version: 1, parent_message_id: null },
+      { id: "a-old", role: "assistant", content: "Noon", created_at: "2026-02-18T10:01:00Z", version: 1, parent_message_id: "q" },
+      { id: "a-new", role: "assistant", content: "08:30", created_at: "2026-02-18T10:02:00Z", version: 1, parent_message_id: "q" }
+    ])
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText(/open linked conversation/i))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=branched"))
+    expect(useStoreMessageOption.getState().messages.map((row) => row.serverMessageId)).toEqual(["q", "a-new"])
+    expect(useStoreMessageOption.getState().history.map((row) => row.content)).toEqual(["When?", "08:30"])
+  })
+
   it("keeps the linked Cedar reply through the real Playground mismatch and persisted-session initialization effects", async () => {
     configureCommonRequests("cedar")
     mockGetChat.mockResolvedValue({ id: "cedar", title: "Cedar chat", character_id: 4, source: "webui-character-chat", version: 3 })

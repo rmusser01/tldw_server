@@ -1509,7 +1509,8 @@
     "branchCreatedFrom": "This chat continues from \"{{title}}\". The original chat is unchanged.",
     "backToParent": "Back to parent",
     "backToParentFailed": "Couldn't open the original chat",
-    "backToParentFailedDetail": "Open it from the chat list instead."
+    "backToParentFailedDetail": "Open it from the chat list instead.",
+    "alternativeReplies": "This chat has alternative replies. Only the newest is shown; review the history to choose which ones the AI sees."
   },
   "standaloneHtml": {
     "recoveryUnavailable": "Recovery unavailable. Keep this tab open or download your draft.",

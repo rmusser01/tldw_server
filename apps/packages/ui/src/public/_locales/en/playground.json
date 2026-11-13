@@ -4943,5 +4943,8 @@
   },
   "historySelection_backToParentFailedDetail": {
     "message": "Open it from the chat list instead."
+  },
+  "historySelection_alternativeReplies": {
+    "message": "This chat has alternative replies. Only the newest is shown; review the history to choose which ones the AI sees."
   }
 }

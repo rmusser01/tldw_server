@@ -207,3 +207,46 @@ describe("SidePanelBody Continue and saved-status actions (CM-03)", () => {
     expect(last.savedStatusActions).toBe(true)
   })
 })
+
+describe("SidePanelBody alternative replies (CM-N2)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetSavedReplyRefusals()
+  })
+
+  it("opens the newest message on the chosen alternative's branch, not just the alternative", async () => {
+    const choose = vi.fn(async () => true)
+    const nodes = [
+      node("u1", "user", null),
+      node("a1", "assistant", "u1"),
+      node("u2", "user", "a1"),
+      node("a2", "assistant", "u2"),
+      node("a1b", "assistant", "u1")
+    ]
+    const branchView = { ...view, cursor: { kind: "after_message" as const, message_id: "a1b" } }
+    const state = {
+      status: "ready",
+      owner: { kind: "native" },
+      view: branchView,
+      capture: { status: "captured", snapshot: { nodes }, rows: [], selected_content: [], view: branchView }
+    }
+    selection.current = { ...state, getCurrent: () => state, fence: () => () => true, choose }
+    rowProps.clear()
+    sidepanelMessageState.value = {
+      ...sidepanelMessageState.value,
+      messages: [
+        { id: "u1", isBot: false, role: "user", name: "You", message: "Question", sources: [] },
+        {
+          id: "a1b", isBot: true, role: "assistant", name: "Assistant", message: "Newer answer", sources: [],
+          variants: [{ id: "a1", message: "Older answer" }, { id: "a1b", message: "Newer answer" }],
+          activeVariantIndex: 1
+        }
+      ]
+    }
+    render(<SidePanelBody />)
+    await act(async () => {
+      ;(rowProps.get("a1b")!.onSwipePrev as () => void)()
+    })
+    expect(choose).toHaveBeenCalledWith({ kind: "after_message", message_id: "a2" })
+  })
+})
