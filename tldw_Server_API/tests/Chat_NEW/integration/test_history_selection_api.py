@@ -700,7 +700,7 @@ def test_unsupported_saved_context_rejects_before_provider_or_admission(history_
         raise AssertionError("unsupported context must not reach provider or append")
 
     monkeypatch.setattr(db, "append_selected_history_inputs", forbidden)
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", forbidden)
     request = {
         "model": "gpt-4o-mini",
         "conversation_id": cid,
@@ -870,7 +870,7 @@ def test_native_endpoint_strips_provider_receipts_and_only_acks_owner_save(histo
             "tldw_message_id": "forged-result", "tldw_history_admission_v1": {"input_message_id": "forged-input"}}) + "\n\n"
         yield "data: [DONE]\n\n"
 
-    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     if save_fails:
         def fail_save(*_args, **_kwargs):
             raise RuntimeError("owner save failed")
@@ -1446,8 +1446,8 @@ def test_native_leaf_delete_refuses_enrolled_sync_before_product_or_sync_mutatio
     def no_sync_write(*_args, **_kwargs):
         raise AssertionError("Unsupported native Sync deletion cannot write")
 
-    monkeypatch.setattr(character_messages, "delete_unenrolled_server_origin_objects", no_sync_write)
-    monkeypatch.setattr(character_messages, "capture_server_origin_mutation", no_sync_write)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.delete_unenrolled_server_origin_objects", no_sync_write)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sync.v2.server_origin.capture_server_origin_mutation", no_sync_write)
     response = client.delete(
         f"/api/v1/messages/{leaf}", headers=headers, params={"expected_version": 1, **native_options}
     )
@@ -1655,14 +1655,14 @@ def test_b02_server_existing_input_completion_never_readmits_question(history_ap
     selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-existing-answer")["selection"]
     calls = []
     live_skills = AsyncMock(return_value="LIVE-SKILLS-MUST-NOT-ENTER-FROZEN-CONTEXT")
-    monkeypatch.setattr(chat, "build_system_message_with_skills_async", live_skills)
+    monkeypatch.setattr("tldw_Server_API.app.core.Skills.context_integration.build_system_message_with_skills_async", live_skills)
 
     def provider(**kwargs):
         calls.append(kwargs["messages_payload"])
         yield "data: " + json.dumps({"choices": [{"delta": {"content": "B02-ANSWER"}, "finish_reason": "stop"}]}) + "\n\n"
         yield "data: [DONE]\n\n"
 
-    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json={
         "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
         "messages": [], "tldw_history_server_existing_input_v1": selection,
@@ -1706,9 +1706,9 @@ def test_b02_existing_question_retry_keeps_input_policy(history_api, monkeypatch
         if messages:
             messages[0].content = "Redacted by current input policy"
 
-    monkeypatch.setattr(chat, "moderate_input_messages", input_policy)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.moderate_input_messages", input_policy)
     provider = Mock(side_effect=AssertionError("denied canonical input must not reach provider"))
-    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json={
         "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
         "messages": [], "tldw_history_server_existing_input_v1": selection,
@@ -1733,7 +1733,7 @@ def test_b02_existing_question_obeys_payload_text_limit(history_api, monkeypatch
     selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-input-size")["selection"]
     monkeypatch.setattr(chat, "MAX_TEXT_LENGTH", 4)
     provider = Mock(side_effect=AssertionError("oversized canonical input must not reach provider"))
-    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json={
         "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
         "messages": [], "tldw_history_server_existing_input_v1": selection,
@@ -1764,7 +1764,7 @@ def test_b02_existing_question_rejects_changed_authority(history_api, monkeypatc
         selection["owner_key"] = "different-owner"
     count = db.count_messages_for_conversation(cid)
     provider = Mock(side_effect=AssertionError("changed authority must not reach provider"))
-    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json={
         "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
         "messages": [], "tldw_history_server_existing_input_v1": selection,
@@ -1788,7 +1788,7 @@ def test_b02_existing_question_refuses_answer_saved_during_generation(history_ap
                         "content": "already answered", "parent_message_id": question})
         yield "data: " + json.dumps({"choices": [{"delta": {"content": "late answer"}, "finish_reason": "stop"}]}) + "\n\n"
         yield "data: [DONE]\n\n"
-    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json={
         "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
         "messages": [], "tldw_history_server_existing_input_v1": selection,
@@ -1881,7 +1881,7 @@ def test_b02_existing_question_uses_frozen_character_after_live_card_edit(histor
         calls.append(kwargs)
         yield "data: " + json.dumps({"choices": [{"delta": {"content": "answer"}, "finish_reason": "stop"}]}) + "\n\n"
         yield "data: [DONE]\n\n"
-    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     response = client.post("/api/v1/chat/completions", headers=headers, json={
         "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
         "messages": [], "tldw_history_server_existing_input_v1": selection})

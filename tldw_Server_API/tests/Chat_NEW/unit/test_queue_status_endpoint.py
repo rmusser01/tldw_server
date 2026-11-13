@@ -84,7 +84,7 @@ def test_queue_status_endpoint_enabled():
     app.dependency_overrides[get_auth_principal] = _principal_override
     try:
         with TestClient(app) as client:
-            with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=_QStub()):
+            with patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=_QStub()):
                 resp = client.get("/api/v1/chat/queue/status")
                 assert resp.status_code == 200
                 data = resp.json()
@@ -99,7 +99,7 @@ def test_queue_status_endpoint_disabled():
     app.dependency_overrides[get_auth_principal] = _principal_override
     try:
         with TestClient(app) as client:
-            with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=None):
+            with patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None):
                 resp = client.get("/api/v1/chat/queue/status")
                 assert resp.status_code == 200
                 data = resp.json()
@@ -135,7 +135,7 @@ def test_queue_activity_requires_auth_and_permissions():
     app.dependency_overrides[get_auth_principal] = _principal_override
     try:
         with TestClient(app) as client:
-            with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=_QStub()):
+            with patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=_QStub()):
                 resp = client.get("/api/v1/chat/queue/activity?limit=5")
                 assert resp.status_code == 200
                 data = resp.json()

@@ -67,8 +67,7 @@ def test_character_completion_retains_saved_image(monkeypatch: pytest.MonkeyPatc
         captured.extend(kwargs["messages_payload"])
         return {"choices": [{"message": {"content": "Image received"}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", capture_completion)
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", capture_completion)
     body = {"include_character_context": False}
     if endpoint == "complete-v2":
         body.update(provider="llama", model="vision-fixture", save_to_db=False)
@@ -112,8 +111,7 @@ def test_character_provider_receives_ordered_png_and_jpeg(monkeypatch: pytest.Mo
             )
         return {"choices": [{"message": {"content": "Seen"}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", provider)
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     response = test_client.post(
         f"/api/v1/chats/{chat_id}/complete-v2",
         headers=auth_headers,
@@ -156,7 +154,7 @@ def test_character_rejects_incomplete_images_before_provider(
         }
     )
     called = []
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: called.append(kwargs))
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: called.append(kwargs))
     if fault == "budget":
         monkeypatch.setitem(chat_message_images.settings, "MAX_MESSAGE_IMAGE_BYTES", 1)
     if fault == "unavailable":
@@ -215,8 +213,7 @@ def test_character_preserves_or_rejects_saved_image_details(
         captured.extend(kwargs["messages_payload"])
         return {"choices": [{"message": {"content": "Seen"}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", provider)
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     body = {"include_character_context": False}
     if endpoint == "complete-v2":
         body.update(provider="llama", model="vision-fixture", save_to_db=False)
@@ -257,7 +254,7 @@ def test_character_image_metadata_read_failure_prevents_dispatch(
 
     monkeypatch.setattr(character_db, "execute_query", fail_metadata)
     called = []
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: called.append(kwargs))
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: called.append(kwargs))
     response = test_client.post(f"/api/v1/chats/{chat_id}/complete-v2", headers=auth_headers,
                                json={"provider": "llama", "model": "vision-fixture", "save_to_db": False})
     assert response.status_code == 503, response.text
@@ -290,8 +287,7 @@ def test_character_image_only_text_preserves_retry_content(
         captured.extend(kwargs["messages_payload"])
         return {"choices": [{"message": {"content": "Seen"}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", provider)
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     body = {"include_character_context": False}
     if endpoint == "complete-v2":
         body.update(provider="llama", model="vision-fixture", save_to_db=False)
@@ -373,11 +369,10 @@ def test_character_image_reads_leave_event_loop_and_release_operation(
 
         monkeypatch.setattr(pool._pool, "_add_to_pool", publish)
     monkeypatch.setattr(character_chat_sessions, "_verify_chat_ownership", verify)
-    monkeypatch.setattr(character_chat_sessions, "read_messages_with_images", read)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: {
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chat_message_images.read_messages_with_images", read)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: {
         "choices": [{"message": {"content": "Seen"}}],
     })
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
     path = f"/api/v1/chats/{chat_id}/{endpoint}"
     body = {"include_character_context": False}
     if endpoint == "complete-v2":

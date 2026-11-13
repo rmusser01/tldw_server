@@ -77,14 +77,16 @@ def test_continue_saves_original_plus_continuation_as_sibling_reply(history_api,
 
     monkeypatch.setattr(streaming_utils, "CHAT_STREAM_INCLUDE_METADATA", False)
     client, db, cid, headers = history_api
-    provider = endpoint.perform_chat_api_call
+    from tldw_Server_API.app.core.Chat import chat_service as _chat_service
+
+    provider = _chat_service.perform_chat_api_call
     provider_inputs = []
 
     def observe(api_endpoint, messages_payload, **kwargs):
         provider_inputs.append(messages_payload)
         return provider(api_endpoint, messages_payload, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", observe)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", observe)
     original_admission = answered(client, cid, headers)
     before = db.get_messages_for_conversation(cid)
     response = continue_reply(client, cid, headers, select(client, cid, headers, after="a1"), stream=stream)
@@ -161,7 +163,7 @@ def test_invalid_continue_never_reaches_provider_or_message_writes(history_api, 
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid continuation must not reach provider")
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", forbidden)
     response = continue_reply(client, cid, headers, selection, stream=stream, target=target, **extra)
     assert response.status_code == 409, response.text
     if boundary in {"missing-authority", "branch-false", "without-selection"}:

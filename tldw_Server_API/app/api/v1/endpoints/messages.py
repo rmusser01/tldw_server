@@ -37,7 +37,6 @@ from tldw_Server_API.app.core.Chat.bounded_daemon import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError, ChatBadRequestError, ChatConfigurationError
 from tldw_Server_API.app.core.Chat.chat_service import (
-    perform_chat_api_call_async,
     resolve_provider_and_model,
 )
 from tldw_Server_API.app.core.Chat.streaming_utils import (
@@ -45,16 +44,13 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     invoke_stream_close_bounded,
     normalize_provider_stream_error,
 )
-from tldw_Server_API.app.core.config import loaded_config_data
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.exceptions import ChatModelNotAvailableError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.http_client import create_async_client as async_http_client_factory
-from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.gateway import _validate_provider_model_selection
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
@@ -70,6 +66,11 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
 )
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async
+import tldw_Server_API.app.core.Chat.chat_service as _chat_service
+import tldw_Server_API.app.core.LLM_Calls.adapter_utils as _adapter_utils
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.core.http_client as _http_client
 
 router = APIRouter()
 public_router = APIRouter()
@@ -927,7 +928,7 @@ def _native_count_payload_is_semantic(data: Any) -> bool:
 
 def _config_default_llm_provider() -> str | None:
     """Return the default LLM provider from loaded config sections."""
-    cfg = loaded_config_data
+    cfg = _config.loaded_config_data
     def _extract(section: str) -> str | None:
         """Extract default_api from a config section if present."""
         try:
@@ -960,7 +961,7 @@ def _get_default_provider() -> str:
 def _resolve_messages_base_url(provider: str, app_config: dict[str, Any] | None) -> str:
     """Resolve the base URL for a messages-native provider."""
     config_is_authoritative = app_config is not None
-    cfg = app_config if config_is_authoritative else loaded_config_data
+    cfg = app_config if config_is_authoritative else _config.loaded_config_data
     if provider == "anthropic":
         base = None
         try:
@@ -1088,12 +1089,12 @@ def _resolve_llamacpp_api_key(app_config: dict[str, Any] | None) -> str | None:
                 return key.strip()
         return None
 
-    return _from_cfg(app_config if app_config is not None else loaded_config_data)
+    return _from_cfg(app_config if app_config is not None else _config.loaded_config_data)
 
 
 def _resolve_native_timeout(provider: str, app_config: dict[str, Any] | None) -> float | None:
     """Resolve timeout values for native Messages providers."""
-    cfg = app_config if app_config is not None else loaded_config_data
+    cfg = app_config if app_config is not None else _config.loaded_config_data
     section = "anthropic_api" if provider == "anthropic" else "llama_api"
     default_timeout = 60.0 if provider == "anthropic" else 120.0
     try:
@@ -1238,7 +1239,7 @@ async def _native_post_json(
 ) -> Any:
     """Execute a native provider POST and map upstream failures consistently."""
     try:
-        async with async_http_client_factory(timeout=timeout) as client:
+        async with _http_client.create_async_client(timeout=timeout) as client:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             return resp.json()
@@ -1284,7 +1285,7 @@ async def _prepare_native_stream_iterator(
                     await client_cm.__aexit__(None, None, None)
 
     try:
-        client_cm = async_http_client_factory(timeout=timeout)
+        client_cm = _http_client.create_async_client(timeout=timeout)
         client = await client_cm.__aenter__()
         client_entered = True
         stream_cm = client.stream("POST", url, headers=headers, json=payload)
@@ -1949,7 +1950,7 @@ def _new_messages_credential_runtime(
     """Build one Messages runtime from trusted authenticated request state."""
     try:
         user_id, team_ids, org_ids, trusted_base_url_override = (
-            derive_trusted_credential_scope(request, current_user)
+            _byok_helpers.derive_trusted_credential_scope(request, current_user)
         )
     except ByokResolutionError as exc:
         raise_detached_error(_messages_credential_http_exception(exc))
@@ -2009,7 +2010,7 @@ async def _resolve_messages_credentials(
             )
         )
 
-    if provider_requires_api_key(provider) and not provider_auth_is_resolved(
+    if provider_requires_api_key(provider) and not _adapter_utils.provider_auth_is_resolved(
         provider,
         api_key=credentials.api_key,
         app_config=credentials.app_config,
@@ -2166,7 +2167,7 @@ async def _handle_messages(
         stream = bool(call_params.get("stream"))
         if stream:
             try:
-                stream_iter = await perform_chat_api_call_async(**call_params)
+                stream_iter = await _chat_service.perform_chat_api_call_async(**call_params)
             except (asyncio.CancelledError, LLMQuotaExceededError):
                 raise
             except Exception:  # noqa: BLE001 - arbitrary adapter failures are untrusted
@@ -2193,7 +2194,7 @@ async def _handle_messages(
                     )
 
             response = await await_owned_worker(
-                perform_chat_api_call_async(**call_params),
+                _chat_service.perform_chat_api_call_async(**call_params),
                 on_cancel_result=_mark_late_valid_response,
             )
             converted_payload = _convert_semantic_openai_messages_response(

@@ -34,7 +34,6 @@ from tldw_Server_API.app.core.Chatbooks.openwebui_hydration_jobs import (
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent, get_ps_logger
-from tldw_Server_API.app.core.Metrics.metrics_manager import increment_counter
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, rbac_rate_limit, User
 
 from ....core.Chatbooks.chatbook_models import ContentType, ExportJob, ExportStatus, ImportJob
@@ -76,6 +75,7 @@ from ..schemas.chatbook_schemas import (
     ChatbookVersion as SchemaChatbookVersion,
 )
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+import tldw_Server_API.app.core.Metrics.metrics_manager as _metrics_manager
 
 _CHATBOOKS_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -175,7 +175,7 @@ def _safe_import_chatbook_name(metadata: dict) -> str | None:
 def _safe_increment_metric(metric_name: str, labels: dict, error_context: str = "") -> None:
     """Safely increment a metric, logging failures without raising."""
     try:
-        increment_counter(metric_name, labels=labels)
+        _metrics_manager.increment_counter(metric_name, labels=labels)
     except _CHATBOOKS_NONCRITICAL_EXCEPTIONS:
         logger.debug("metrics increment failed")
 

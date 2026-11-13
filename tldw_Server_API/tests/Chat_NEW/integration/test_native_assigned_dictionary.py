@@ -35,7 +35,7 @@ from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session im
     single_user_cookie_client as single_user_cookie_client,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.real_chat_service]
 TEXT = "Echo UAT_IN_742; ORBIT-742."
 MODEL = "qwen2.5:0.5b"
 ENDPOINT = "http://127.0.0.1:11434"

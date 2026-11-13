@@ -47,26 +47,17 @@ from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     find_messages_in_conversation,
     map_sender_to_role,
-    post_message_to_conversation,
-    remove_message_from_conversation,
     replace_placeholders,
     retrieve_message_details,
-)
-from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
-    materialize_roleplay_behavior_settings,
 )
 
 # Rate limiting
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import get_character_rate_limiter
-from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
-    validate_chat_settings_storage,
-)
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     build_character_system_prompt,
 )
 from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
 from tldw_Server_API.app.core.config import settings
-from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -82,13 +73,17 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
     SyncServerOriginMaterializationError,
     SyncServerOriginMutationNotSupportedError,
     capture_applied_server_origin_write,
-    capture_server_origin_mutation,
-    delete_unenrolled_server_origin_objects,
     get_active_server_origin_sync_service_for_user,
     server_origin_object_id,
     server_origin_stable_key,
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
+import tldw_Server_API.app.api.v1.utils.chat_message_images as _chat_message_images
+import tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade as _Character_Chat_Lib_facade
+import tldw_Server_API.app.core.Character_Chat.character_conversation_factory as _character_conversation_factory
+import tldw_Server_API.app.core.Character_Chat.chat_settings_validation as _chat_settings_validation
+import tldw_Server_API.app.core.DB_Management.chacha.message_store as _message_store
+import tldw_Server_API.app.core.Sync.v2.server_origin as _server_origin
 
 _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -612,7 +607,7 @@ async def send_message(
             )
             timestamp = sync_service.clock() or datetime.now(timezone.utc).isoformat()
             try:
-                capture_server_origin_mutation(
+                _server_origin.capture_server_origin_mutation(
                     sync_service,
                     user_id=str(current_user.id),
                     domain="chat.message",
@@ -634,7 +629,7 @@ async def send_message(
                 raise _message_sync_http_error(sync_exc) from sync_exc
         else:
             # Add to database via Character_Chat guardrails
-            created_id = post_message_to_conversation(
+            created_id = _Character_Chat_Lib_facade.post_message_to_conversation(
                 db=db,
                 conversation_id=chat_id,
                 character_name=character_name,
@@ -744,8 +739,8 @@ async def get_chat_messages(
         expand_images = include_images is True or format_for_completions is True
         if expand_images:
             messages, attachment_urls = await run_in_threadpool(
-                read_messages_with_images, db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
-                image_byte_limit=MAX_CHAT_ATTACHMENT_READ_BYTES,
+                _chat_message_images.read_messages_with_images, db, chat_id, limit=limit, offset=offset, include_deleted=include_deleted,
+                image_byte_limit=_message_store.MAX_CHAT_ATTACHMENT_READ_BYTES,
                 for_completions=format_for_completions is True,
             )
         else:
@@ -1228,7 +1223,7 @@ async def edit_message(
                 chat_settings["pinnedMessageIds"] = pinned_ids
                 snapshot = resume_state.get("behavior_snapshot")
                 if isinstance(snapshot, Mapping) and snapshot.get("status") == "valid":
-                    materialized = materialize_roleplay_behavior_settings(
+                    materialized = _character_conversation_factory.materialize_roleplay_behavior_settings(
                         conn,
                         conversation=conversation,
                         resume_state=resume_state,
@@ -1245,7 +1240,7 @@ async def edit_message(
                                 "effective_completion"
                             ],
                         }
-                chat_settings = validate_chat_settings_storage(
+                chat_settings = _chat_settings_validation.validate_chat_settings_storage(
                     chat_settings,
                     reject_credentials=(
                         isinstance(resume_state.get("behavior_snapshot"), Mapping)
@@ -1375,11 +1370,11 @@ async def delete_message(
         def delete_directly() -> None:
             # Soft delete the message
             success = (
-                remove_message_from_conversation(
+                _Character_Chat_Lib_facade.remove_message_from_conversation(
                     db, message_id, expected_version, require_leaf=require_leaf, expected_revision=expected_revision
                 )
                 if require_leaf or expected_revision is not None
-                else remove_message_from_conversation(db, message_id, expected_version)
+                else _Character_Chat_Lib_facade.remove_message_from_conversation(db, message_id, expected_version)
             )
 
             if not success:
@@ -1409,7 +1404,7 @@ async def delete_message(
                 # and then published by id, so a device that kept a copy outside Sync
                 # deletes it too (Q8).
                 published = await run_in_threadpool(
-                    delete_unenrolled_server_origin_objects,
+                    _server_origin.delete_unenrolled_server_origin_objects,
                     sync_service,
                     user_id=str(current_user.id),
                     objects=[("chat.message", message_id)],
@@ -1426,7 +1421,7 @@ async def delete_message(
                     source="server_api",
                 )
                 if published:
-                    capture_server_origin_mutation(
+                    _server_origin.capture_server_origin_mutation(
                         sync_service,
                         user_id=str(current_user.id),
                         domain="chat.message",

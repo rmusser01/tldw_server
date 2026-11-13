@@ -135,7 +135,7 @@ async def test_image_listing_runs_off_event_loop_with_operation_context(
         observed.append((threading.get_ident(), current_connection_state(db)))
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(character_messages, "read_messages_with_images", read)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.utils.chat_message_images.read_messages_with_images", read)
     app = FastAPI()
     app.include_router(character_messages.router, prefix="/api/v1")
     app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=41)

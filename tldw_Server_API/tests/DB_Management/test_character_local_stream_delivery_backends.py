@@ -102,13 +102,13 @@ async def test_local_bytes_forward_before_completion_and_cleanup(stream_db, monk
 
     monkeypatch.setenv("STREAMS_UNIFIED", unified)
     monkeypatch.setenv("DISABLE_OFFLINE_SIM", "true")
-    monkeypatch.setattr(endpoint, "derive_trusted_credential_scope", lambda *_: (1, [], [], False))
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope", lambda *_: (1, [], [], False))
     monkeypatch.setattr(endpoint, "ProviderCredentialRuntime", Runtime)
     monkeypatch.setattr(
         endpoint, "get_character_rate_limiter", lambda: SimpleNamespace(check_chat_completion_rate=allowed)
     )
     monkeypatch.setattr(endpoint, "_should_enforce_char_chat_strict_model_selection", lambda: False)
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider_call)
     response = await endpoint.character_chat_completion(
         chat_id=chat,
         body=CharacterChatCompletionV2Request(provider="llama", model="delivery-model", stream=True, save_to_db=True),

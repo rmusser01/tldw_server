@@ -50,7 +50,7 @@ def test_chat_completions_marks_its_provider_call_as_self_recorded(
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         }
 
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _dispatch)
     monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
     response = _post(client, auth_token, stream=False)
@@ -70,7 +70,7 @@ def test_chat_completions_streaming_marks_its_provider_call_as_self_recorded(
         seen.append(current_llm_call_context().records_itself)
         return iter(['data: {"choices":[{"delta":{"content":"hi"}}]}\n\n', "data: [DONE]\n\n"])
 
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _dispatch)
     monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
     response = _post(client, auth_token, stream=True)

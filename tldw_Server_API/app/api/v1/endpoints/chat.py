@@ -62,14 +62,12 @@ from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import
     capture_provider_override_call_snapshot,
     get_llm_provider_override,
     get_llm_provider_overrides_snapshot,
-    get_override_default_model,
     get_override_model_priority,
     validate_provider_override,
 )
 from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
     get_max_base64_bytes,
-    validate_image_url,
 )
 from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
@@ -91,7 +89,6 @@ from starlette.responses import JSONResponse, StreamingResponse
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
     get_chacha_db_for_user,
-    get_chacha_db_for_user_id,
 )
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import try_get_job_manager
 from tldw_Server_API.app.api.v1.utils.notes_sync_errors import (
@@ -138,20 +135,13 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
 )
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     ChatSettingsSizeError,
-    validate_chat_settings_storage,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
 )
-from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings import (
-    score_exemplars_with_embeddings,
-)
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector import (
     PersonaExemplarSelectorConfig,
     select_character_exemplars,
-)
-from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry import (
-    compute_persona_exemplar_telemetry,
 )
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
@@ -175,18 +165,11 @@ from tldw_Server_API.app.core.Chat.chat_helpers import (
 )
 from tldw_Server_API.app.core.Chat.chat_metrics import get_chat_metrics
 from tldw_Server_API.app.core.Chat.chat_service import (
-    _nonstream_provider_result_is_usable,
-    apply_prompt_templating,
     build_call_params_from_request,
-    build_context_and_messages,
     estimate_tokens_from_json,
-    execute_non_stream_call,
     execute_streaming_call,
     inject_research_context_into_prompt,
-    is_model_known_for_provider,
-    moderate_input_messages,
     perform_chat_api_call,
-    perform_chat_api_call_async,
     queue_is_active,
     resolve_input_moderation_chat_type,
     resolve_moderation_chat_type,
@@ -214,9 +197,7 @@ from tldw_Server_API.app.core.Chat.prompt_template_manager import (  # noqa: F40
     apply_template_to_string,
     load_template,
 )
-from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-from tldw_Server_API.app.core.Chat.rate_limiter import get_rate_limiter
-from tldw_Server_API.app.core.Chat.request_queue import RequestPriority, get_request_queue
+from tldw_Server_API.app.core.Chat.request_queue import RequestPriority
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     PROVIDER_STREAM_ERROR_MESSAGES,
     StreamTaskCapacityError,
@@ -252,14 +233,11 @@ from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
     RoutingUsageContext,
-    build_provider_order_for_routing,
     extract_router_choice,  # noqa: F401 - legacy tests patch/use this endpoint symbol
     extract_router_usage,
     flatten_provider_listing_for_routing,
-    log_model_router_usage,
     resolve_routing_policy,
     route_model,
-    select_llm_router_choice,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
@@ -269,9 +247,6 @@ from tldw_Server_API.app.core.Moderation.review_service import (
     capture_moderation_review_item,
     is_moderation_review_capture_enabled,
 )
-from tldw_Server_API.app.core.Moderation.supervised_policy import (
-    bootstrap_guardian_moderation_runtime,
-)
 from tldw_Server_API.app.core.Notes.organization_capture import (
     active_coordinator,
     capture_note_upsert,
@@ -279,11 +254,6 @@ from tldw_Server_API.app.core.Notes.organization_capture import (
     stable_note_id,
 )
 from tldw_Server_API.app.core.Persona.conversation_admission import require_current_persona
-from tldw_Server_API.app.core.Skills.context_integration import (
-    add_skill_tool_to_tools_list_async,
-    build_system_message_with_skills_async,
-)
-from tldw_Server_API.app.core.Utils.chunked_image_processor import get_image_processor
 from tldw_Server_API.app.core.Workspaces.assistant_defaults import (
     project_assistant_startup,
     require_workspace_for_chat_creation,
@@ -308,7 +278,6 @@ from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
     enforce_llm_quota,
     enforce_llm_quota_if_the_router_was_refused,
-    users_own_key_serves,
 )
 from tldw_Server_API.app.api.v1.schemas.chat_commands_schemas import ChatCommandInfo, ChatCommandsListResponse
 from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
@@ -317,11 +286,9 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
     ValidationIssue,
 )
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
-from tldw_Server_API.app.core.AuthNZ.crypto_utils import derive_hmac_key
 from tldw_Server_API.app.core.Usage.llm_budget_guard import enforce_llm_budget
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_LOGS
-from tldw_Server_API.app.core.AuthNZ.rbac import user_has_permission
-from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, enforcement_enabled, get_billing_enforcer
+from tldw_Server_API.app.core.Billing.enforcement import LimitCategory, get_billing_enforcer
 from tldw_Server_API.app.core.Chat import command_router
 from tldw_Server_API.app.core.Chat.command_authorization import (
     authorize_command,
@@ -335,9 +302,6 @@ from tldw_Server_API.app.core.Chat_Macros.parser import enforce_background_execu
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.Chat_Macros.service import ChatMacroCatalogItem, ChatMacrosService
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
-from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
-from tldw_Server_API.app.core.Metrics.metrics_manager import get_metrics_registry
-from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 from tldw_Server_API.app.core.Persona.exemplar_prompt_assembly import (
     assemble_persona_exemplar_prompt,
@@ -365,9 +329,6 @@ from tldw_Server_API.app.core.Resource_Governance.deps import derive_entity_key
 from tldw_Server_API.app.core.Resource_Governance.governor import RGRequest
 from tldw_Server_API.app.core.testing import (
     env_flag_enabled as _shared_env_flag_enabled,
-)
-from tldw_Server_API.app.core.testing import (
-    is_test_mode as _shared_is_test_mode,
 )
 from tldw_Server_API.app.core.testing import (
     is_truthy as _shared_is_truthy,
@@ -421,9 +382,9 @@ async def _own_key_before_the_hosted_plan(current_user: Any, provider: str, bill
 
     Asked once per request: ``enforce_llm_quota`` reuses the answer (ADR-083).
     """
-    if not enforcement_enabled() or billing_org_id is None:
+    if not _enforcement.enforcement_enabled() or billing_org_id is None:
         return None
-    return await users_own_key_serves(getattr(current_user, "id", None), provider)
+    return await _usage_quota_deps.users_own_key_serves(getattr(current_user, "id", None), provider)
 
 
 def _request_has_endpoint_override(request_data: Any) -> bool:
@@ -493,7 +454,33 @@ def _mandatory_audit_unavailable_detail() -> dict[str, str]:
 # Load configuration values from config
 import contextlib
 
-from tldw_Server_API.app.core.config import load_and_log_configs, load_comprehensive_config
+from tldw_Server_API.app.core.config import load_comprehensive_config
+import tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps as _ChaCha_Notes_DB_Deps
+import tldw_Server_API.app.api.v1.API_Deps.billing_deps as _billing_deps
+import tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps as _usage_quota_deps
+import tldw_Server_API.app.core.AuthNZ.crypto_utils as _crypto_utils
+import tldw_Server_API.app.core.AuthNZ.rbac as _rbac
+import tldw_Server_API.app.core.Billing.enforcement as _enforcement
+import tldw_Server_API.app.core.Character_Chat.chat_settings_validation as _chat_settings_validation
+import tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings as _persona_exemplar_embeddings
+import tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry as _persona_exemplar_telemetry
+import tldw_Server_API.app.core.Chat.chat_metrics as _chat_metrics
+import tldw_Server_API.app.core.Chat.chat_service as _chat_service
+import tldw_Server_API.app.core.Chat.provider_manager as _provider_manager
+import tldw_Server_API.app.core.Chat.rate_limiter as _rate_limiter
+import tldw_Server_API.app.core.Chat.request_queue as _request_queue
+import tldw_Server_API.app.core.LLM_Calls.routing as _routing
+import tldw_Server_API.app.core.Metrics.metrics_logger as _metrics_logger
+import tldw_Server_API.app.core.Metrics.metrics_manager as _metrics_manager
+import tldw_Server_API.app.core.Moderation.moderation_service as _moderation_service
+import tldw_Server_API.app.core.Moderation.supervised_policy as _supervised_policy
+import tldw_Server_API.app.core.Persona.conversation_admission as _conversation_admission
+import tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides as _llm_provider_overrides
+import tldw_Server_API.app.core.Skills.context_integration as _context_integration
+import tldw_Server_API.app.core.Utils.chunked_image_processor as _chunked_image_processor
+import tldw_Server_API.app.core.Utils.image_validation as _image_validation
+import tldw_Server_API.app.core.config as __config
+import tldw_Server_API.app.core.testing as _testing
 
 _config = load_comprehensive_config()
 # ConfigParser uses sections, check if Chat-Module section exists
@@ -962,17 +949,17 @@ async def _build_context_and_messages_compat(
         "save_message_fn": save_message_fn,
     }
     try:
-        signature = inspect.signature(build_context_and_messages)
+        signature = inspect.signature(_chat_service.build_context_and_messages)
     except (TypeError, ValueError):
         signature = None
 
     if signature is None or "runtime_state" in signature.parameters:
-        return await build_context_and_messages(
+        return await _chat_service.build_context_and_messages(
             **call_kwargs,
             runtime_state=runtime_state,
         )
 
-    return await build_context_and_messages(**call_kwargs)
+    return await _chat_service.build_context_and_messages(**call_kwargs)
 
 
 def _request_uses_vision_input(messages: list[Any]) -> bool:
@@ -1666,7 +1653,7 @@ async def _select_auto_chat_llm_router_choice(
         # Router output is a constrained JSON control response, so retain its
         # legacy textual error-prefix rejection while normal Chat preserves
         # assistant-authored strings verbatim.
-        return _nonstream_provider_result_is_usable(response) and not (
+        return _chat_service._nonstream_provider_result_is_usable(response) and not (
             provider_result_contains_error(response, legacy_error_prefix=True)
         )
 
@@ -1697,8 +1684,8 @@ async def _select_auto_chat_llm_router_choice(
             terminal_credential_error = exc
             raise
 
-        metrics = get_chat_metrics()
-        provider_manager = get_provider_manager()
+        metrics = _chat_metrics.get_chat_metrics()
+        provider_manager = _provider_manager.get_provider_manager()
         router_started_at = time.time()
 
         async def _mark_late_router_choice(response: Any) -> None:
@@ -1708,7 +1695,7 @@ async def _select_auto_chat_llm_router_choice(
         try:
             with llm_call_context(records_itself=True):
                 response = await await_owned_worker(
-                    perform_chat_api_call_async(
+                    _chat_service.perform_chat_api_call_async(
                         api_endpoint=router_model.provider,
                         messages_payload=router_messages,
                         api_key=handle.api_key,
@@ -1787,7 +1774,7 @@ async def _select_auto_chat_llm_router_choice(
     async def _log_router_usage(router_model, usage, latency_ms):
         try:
             await await_owned_worker(
-                log_model_router_usage(
+                _routing.log_model_router_usage(
                     context=RoutingUsageContext(
                         surface="chat",
                         endpoint="POST:/api/v1/chat/completions",
@@ -1815,7 +1802,7 @@ async def _select_auto_chat_llm_router_choice(
             )
 
     try:
-        result = await select_llm_router_choice(
+        result = await _routing.select_llm_router_choice(
             router_request=router_request,
             policy=policy,
             candidates=candidates,
@@ -1910,7 +1897,7 @@ async def _resolve_auto_chat_routing_decision(
         candidates=candidates,
         sticky_store=sticky_store,
         llm_router_choice=llm_router_choice,
-        provider_order=build_provider_order_for_routing(
+        provider_order=_routing.build_provider_order_for_routing(
             provider_listing,
             objective=policy.objective,
             priority_resolver=partial(
@@ -2512,20 +2499,20 @@ def _record_persona_telemetry_hooks(
     except (TypeError, ValueError):
         lcs = 0.0
 
-    log_histogram("chat_persona_ioo_ratio", max(0.0, min(1.0, ioo)), labels=labels)
-    log_histogram("chat_persona_ior_ratio", max(0.0, min(1.0, ior)), labels=labels)
-    log_histogram("chat_persona_lcs_ratio", max(0.0, min(1.0, lcs)), labels=labels)
+    _metrics_logger.log_histogram("chat_persona_ioo_ratio", max(0.0, min(1.0, ioo)), labels=labels)
+    _metrics_logger.log_histogram("chat_persona_ior_ratio", max(0.0, min(1.0, ior)), labels=labels)
+    _metrics_logger.log_histogram("chat_persona_lcs_ratio", max(0.0, min(1.0, lcs)), labels=labels)
 
     safety_flags = telemetry.get("safety_flags")
     if isinstance(safety_flags, list):
         for flag in safety_flags:
-            log_counter(
+            _metrics_logger.log_counter(
                 "chat_persona_safety_flag_total",
                 labels={**labels, "flag": str(flag)},
             )
 
     if ioo >= _PERSONA_IOO_ALERT_THRESHOLD:
-        log_counter("chat_persona_ioo_threshold_exceeded_total", labels=labels)
+        _metrics_logger.log_counter("chat_persona_ioo_threshold_exceeded_total", labels=labels)
         if normalized_assistant_kind == "persona":
             logger.warning(
                 "Persona telemetry IOO threshold exceeded debug_id={} ioo={} user_id={} character_id={} assistant_kind={} assistant_id={}",
@@ -2546,9 +2533,9 @@ def _record_persona_telemetry_hooks(
             )
 
     if ior < _PERSONA_IOR_LOW_ALERT_THRESHOLD:
-        log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "low"})
+        _metrics_logger.log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "low"})
     elif ior > _PERSONA_IOR_HIGH_ALERT_THRESHOLD:
-        log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "high"})
+        _metrics_logger.log_counter("chat_persona_ior_out_of_band_total", labels={**labels, "band": "high"})
 
     window_key = _persona_ioo_window_key(
         user_id=user_id,
@@ -2563,7 +2550,7 @@ def _record_persona_telemetry_hooks(
             len(window) == window.maxlen
             and sum(window) >= _PERSONA_IOO_SUSTAIN_MIN_HITS
         ):
-            log_counter("chat_persona_ioo_sustained_alert_total", labels=labels)
+            _metrics_logger.log_counter("chat_persona_ioo_sustained_alert_total", labels=labels)
 
 
 async def _increment_active_request(user_id: str) -> int:
@@ -2796,7 +2783,7 @@ async def list_chat_commands(
             decision = authorize_command(
                 spec=spec,
                 context=auth_context,
-                permission_checker=user_has_permission,
+                permission_checker=_rbac.user_has_permission,
             )
             if decision.allowed:
                 items.append(_as_chat_command_from_spec(name, spec))
@@ -2848,7 +2835,7 @@ async def validate_chat_dictionary(
 @lru_cache(maxsize=1)
 def _config_default_llm_provider() -> str | None:
     """Compatibility wrapper for tests patching the endpoint config loader."""
-    return config_default_llm_provider(load_and_log_configs())
+    return config_default_llm_provider(__config.load_and_log_configs())
 
 
 def _any_cloud_provider_has_key() -> bool:
@@ -2881,7 +2868,7 @@ def _get_default_provider() -> str:
     """Compatibility wrapper for tests patching ordinary chat defaults."""
     return get_default_provider(
         config_resolver=_config_default_llm_provider,
-        test_mode_resolver=_shared_is_test_mode,
+        test_mode_resolver=_testing.is_test_mode,
     )
 
 
@@ -2889,7 +2876,7 @@ def _get_default_model_for_provider_name(target_provider: str) -> str | None:
     """Compatibility wrapper for ordinary chat's patchable override helpers."""
     return get_default_model_for_provider(
         target_provider,
-        override_default_resolver=get_override_default_model,
+        override_default_resolver=_llm_provider_overrides.get_override_default_model,
         override_resolver=get_llm_provider_override,
         config_loader=lambda: _config,
     )
@@ -2900,7 +2887,7 @@ def _should_enforce_strict_model_selection() -> bool:
     raw = os.getenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION")
     if raw is not None:
         return _shared_is_truthy(raw)
-    return not _shared_is_test_mode()
+    return not _testing.is_test_mode()
 
 
 def _validate_explicit_model_availability(
@@ -2916,13 +2903,13 @@ def _validate_explicit_model_availability(
 
     try:
         if credentials_resolved:
-            availability = is_model_known_for_provider(
+            availability = _chat_service.is_model_known_for_provider(
                 provider_name, model_name, api_key=api_key,
                 app_config=app_config, credentials_resolved=True,
                 endpoint_provenance=endpoint_provenance,
             )
         else:
-            availability = is_model_known_for_provider(provider_name, model_name)
+            availability = _chat_service.is_model_known_for_provider(provider_name, model_name)
     except (ChatAuthenticationError, ChatConfigurationError):
         # The model list could not be read. Dispatch repeats the authoritative check inside the credential
         # refresh-and-retry path, so a rejected OAuth token still refreshes (review I3).
@@ -3034,7 +3021,7 @@ async def _process_content_for_db_sync(
 
             if url_str.startswith("data:"):
                 # Use chunked image processor for large images
-                image_processor = get_image_processor()
+                image_processor = _chunked_image_processor.get_image_processor()
                 if image_processor and len(url_str) > 100000:  # Large image, use chunked processing
                     is_valid, decoded_bytes, mime_type, error_msg = await image_processor.process_image_url(
                         url_str, get_max_base64_bytes()
@@ -3052,7 +3039,7 @@ async def _process_content_for_db_sync(
                         text_parts_sync.append(f"<Image failed: {error_msg}>")
                 else:
                     # Small image or processor not available - use standard validation
-                    is_valid, mime_type, decoded_bytes = validate_image_url(url_str)
+                    is_valid, mime_type, decoded_bytes = _image_validation.validate_image_url(url_str)
                     if is_valid and decoded_bytes:
                         images_sync.append((decoded_bytes, mime_type))
                         if image_details is not None:
@@ -3191,7 +3178,7 @@ async def _save_message_turn_to_db(
 
     # Capture before run_in_executor: executor threads do not inherit ContextVars.
     publication = current_buddy_publication.get()
-    metrics = get_chat_metrics()
+    metrics = _chat_metrics.get_chat_metrics()
     current_loop = asyncio.get_running_loop()
     role = message_obj.get("role")
     if role not in ("user", "assistant", "tool", "system"):
@@ -3581,7 +3568,7 @@ async def create_chat_completion(
     # Database is provided via dependency; async wrapper not needed here
 
     # Initialize metrics collector
-    metrics = get_chat_metrics()
+    metrics = _chat_metrics.get_chat_metrics()
 
     # Budget enforcement is handled by the dependency and/or middleware.
     # Avoid duplicating authorization logic in the handler to prevent drift.
@@ -3663,7 +3650,7 @@ async def create_chat_completion(
                 if str(workspace.get("client_id") or "") != user_id:
                     raise HTTPException(status_code=404, detail="Workspace not found")
             await asyncio.to_thread(
-                require_current_persona, chat_db, owner_id=user_id, conversation=conversation,
+                _conversation_admission.require_current_persona, chat_db, owner_id=user_id, conversation=conversation,
             )
         if request_data.character_id:
             request_data.character_id = validate_character_id(request_data.character_id)
@@ -3680,7 +3667,7 @@ async def create_chat_completion(
             and current_user
             and getattr(current_user, "id", None) is not None
         ):
-            request_data.tools = await add_skill_tool_to_tools_list_async(
+            request_data.tools = await _context_integration.add_skill_tool_to_tools_list_async(
                 request_data.tools,
                 user_id=current_user.id,
                 base_path=user_base_dir,
@@ -3761,7 +3748,7 @@ async def create_chat_completion(
             selected_provider,
             selected_model,
             provider_debug,
-        ) = resolve_provider_and_model(
+        ) = _chat_service.resolve_provider_and_model(
             request_data=request_data,
             metrics_default_provider=get_default_provider(),
             normalize_default_provider=_get_default_provider(),
@@ -3817,7 +3804,7 @@ async def create_chat_completion(
         rg_finalized = False
 
         # Billing: initialized after request_json is available (see below)
-        _billing_enforcer: LimitEnforcer | None = None
+        _billing_enforcer: _billing_deps.LimitEnforcer | None = None
         _billing_enforcer_entered = False
         chat_macro_intent: dict[str, Any] | None = None
         native_stream_failure: HTTPException | None = None
@@ -3900,7 +3887,7 @@ async def create_chat_completion(
                                 'redacted': False,
                             }
                             try:
-                                moderation = get_moderation_service()
+                                moderation = _moderation_service.get_moderation_service()
                                 # Determine effective policy for this user/client
                                 req_user_id = None
                                 try:
@@ -4125,7 +4112,7 @@ async def create_chat_completion(
             # limits to validate 429 behavior. So we only bypass the limiter for mocks
             # when not running in TEST_MODE.
             try:
-                _is_test_mode = _shared_is_test_mode()
+                _is_test_mode = _testing.is_test_mode()
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                 _is_test_mode = False
 
@@ -4162,10 +4149,10 @@ async def create_chat_completion(
 
             rate_limiter = None
             if not rg_active:
-                rate_limiter = get_rate_limiter()
+                rate_limiter = _rate_limiter.get_rate_limiter()
                 if (
                     not _is_test_mode
-                    and (isinstance(chat_db, Mock) or isinstance(perform_chat_api_call, Mock))
+                    and (isinstance(chat_db, Mock) or isinstance(_chat_service.perform_chat_api_call, Mock))
                 ):
                     rate_limiter = None
                 # Ensure a limiter exists in TEST_MODE even if startup didn't init it
@@ -4415,7 +4402,7 @@ async def create_chat_completion(
             own_key = await _own_key_before_the_hosted_plan(current_user, selected_provider, billing_org_id)
             if own_key is False and not _billing_enforcer_entered:
                 try:
-                    _billing_enforcer = LimitEnforcer(
+                    _billing_enforcer = _billing_deps.LimitEnforcer(
                         billing_org_id,
                         LimitCategory.LLM_TOKENS_MONTH,
                         estimated_units=max(1, _estimated_request_tokens),
@@ -4444,7 +4431,7 @@ async def create_chat_completion(
                     if default_model_for_provider:
                         model = default_model_for_provider
                         request_data.model = default_model_for_provider
-                override_error = validate_provider_override(provider, model)
+                override_error = _llm_provider_overrides.validate_provider_override(provider, model)
             except ByokResolutionError as credential_error:
                 raise_detached_error(
                     _provider_credential_http_exception(credential_error)
@@ -4542,7 +4529,7 @@ async def create_chat_completion(
                     and getattr(current_user, "id", None) is not None
                     and (guardian_enabled or self_monitoring_enabled)
                 ):
-                    _guardian_runtime = bootstrap_guardian_moderation_runtime(
+                    _guardian_runtime = _supervised_policy.bootstrap_guardian_moderation_runtime(
                         user_id=current_user.id,
                         dependent_user_id=str(current_user.id),
                         chat_type=input_moderation_chat_type,
@@ -4562,14 +4549,14 @@ async def create_chat_completion(
 
             # Moderation: apply global/per-user policy to input messages (redact or block)
             try:
-                moderation = get_moderation_service()
+                moderation = _moderation_service.get_moderation_service()
                 try:
                     mon = get_topic_monitoring_service()
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     mon = None
                 original_saved_content = (validation_request_data.messages[0].content
                     if request_data.tldw_history_server_existing_input_v1 is not None else None)
-                await moderate_input_messages(
+                await _chat_service.moderate_input_messages(
                     request_data=validation_request_data,
                     request=request,
                     moderation_service=moderation,
@@ -4623,7 +4610,7 @@ async def create_chat_completion(
                 # auto-switching from 'local-llm' to 'openai' if an OpenAI key
                 # is present. This is primarily to satisfy integration tests that
                 # expect config-driven defaults.
-                _test_mode_flag = _shared_is_test_mode()
+                _test_mode_flag = _testing.is_test_mode()
                 _autoswitch_enabled = ALLOW_AUTOSWITCH_TO_OPENAI or _test_mode_flag
                 if (
                     _autoswitch_enabled
@@ -4871,7 +4858,7 @@ async def create_chat_completion(
                     output_moderation_chat_type = None
 
                 # --- Prompt Templating (system + content transforms) ---
-                final_system_message, templated_llm_payload = apply_prompt_templating(
+                final_system_message, templated_llm_payload = _chat_service.apply_prompt_templating(
                     request_data=request_data,
                     character_card=character_card_for_context or {},
                     llm_payload_messages=llm_payload_messages,
@@ -5021,7 +5008,7 @@ async def create_chat_completion(
                         if persona_strategy in {"hybrid", "embeddings"}:
 
                             def _embedding_callback(turn_text: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
-                                return score_exemplars_with_embeddings(
+                                return _persona_exemplar_embeddings.score_exemplars_with_embeddings(
                                     turn_text,
                                     candidates,
                                     user_id=user_id,
@@ -5075,7 +5062,7 @@ async def create_chat_completion(
                         persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
 
                 if native_history_selection is None and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
-                    final_system_message = await build_system_message_with_skills_async(
+                    final_system_message = await _context_integration.build_system_message_with_skills_async(
                         final_system_message,
                         current_user.id,
                         user_base_dir,
@@ -5119,7 +5106,7 @@ async def create_chat_completion(
                 )
 
                 # --- LLM Call ---
-                cleaned_args = build_call_params_from_request(
+                cleaned_args = _chat_service.build_call_params_from_request(
                     request_data=request_data,
                     target_api_provider=target_api_provider,
                     provider_api_key=provider_api_key,
@@ -5200,7 +5187,7 @@ async def create_chat_completion(
                             },
                         )
 
-                    refreshed_args = build_call_params_from_request(
+                    refreshed_args = _chat_service.build_call_params_from_request(
                         request_data=request_data,
                         target_api_provider=target_provider,
                         provider_api_key=provider_api_key_new,
@@ -5226,7 +5213,7 @@ async def create_chat_completion(
                     return refreshed_args, refreshed_model
 
                 # Use provider manager for health checks and failover
-                provider_manager = get_provider_manager()
+                provider_manager = _provider_manager.get_provider_manager()
                 selected_provider = provider
 
                 if provider_manager:
@@ -5270,7 +5257,7 @@ async def create_chat_completion(
                 if selected_provider != provider:
                     try:
                         refreshed_args, refreshed_model = await rebuild_call_params_for_provider(selected_provider)
-                        override_error = validate_provider_override(selected_provider, refreshed_model or model)
+                        override_error = _llm_provider_overrides.validate_provider_override(selected_provider, refreshed_model or model)
                         if override_error:
                             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=override_error)
                         cleaned_args = refreshed_args
@@ -5298,9 +5285,9 @@ async def create_chat_completion(
 
                 # Request Queue Integration (Admission control / backpressure)
                 # ------------------------------------------------------------------------
-                is_test_mode_flag = _shared_is_test_mode()
+                is_test_mode_flag = _testing.is_test_mode()
                 try:
-                    queue_candidate = get_request_queue()
+                    queue_candidate = _request_queue.get_request_queue()
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     queue_candidate = None
 
@@ -5411,7 +5398,7 @@ async def create_chat_completion(
                             or (target_api_provider in {"openai", "groq", "mistral"})
                         )
                     )
-                    and perform_chat_api_call is _ORIGINAL_PERFORM_CHAT_API_CALL
+                    and _chat_service.perform_chat_api_call is _ORIGINAL_PERFORM_CHAT_API_CALL
                 )
 
                 def _mock_chat_call(**kwargs):
@@ -5470,7 +5457,7 @@ async def create_chat_completion(
                 if use_mock_provider and provider in {"openai", "groq", "mistral"}:
                     llm_call_func = partial(_mock_chat_call, **cleaned_args)
                 else:
-                    llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                    llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
 
                 def _active_provider_uses_openai_oauth() -> bool:
                     active_handle = active_credential.get("handle")
@@ -5494,7 +5481,7 @@ async def create_chat_completion(
 
                 def _record_openai_oauth_retry(outcome: str) -> None:
                     try:
-                        log_counter(
+                        _metrics_logger.log_counter(
                             "byok_oauth_401_retry_total",
                             labels={
                                 "provider": "openai",
@@ -5556,7 +5543,7 @@ async def create_chat_completion(
                             try:
                                 # Checked at the call on its own handle. The usage row keeps the first handle's
                                 # source, which differs only if the user's OAuth key was deleted mid-request (TASK-13955).
-                                refreshed_response = perform_chat_api_call(**refreshed_args)
+                                refreshed_response = _chat_service.perform_chat_api_call(**refreshed_args)
                                 _record_openai_oauth_retry("success")
                                 return refreshed_response
                             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS as retry_exc:
@@ -5576,7 +5563,7 @@ async def create_chat_completion(
 
                 # Build moderation getter that overlays guardian policies on output
                 def _get_moderation_with_guardian():
-                    base = get_moderation_service()
+                    base = _moderation_service.get_moderation_service()
                     if not _supervised_engine or not _dep_user_id:
                         return base
                     try:
@@ -5594,7 +5581,7 @@ async def create_chat_completion(
                 async def _on_stream_full_reply_for_persona_telemetry(full_reply: str) -> None:
                     assistant_text = str(full_reply or "")
                     if should_record_persona_telemetry:
-                        persona_telemetry = compute_persona_exemplar_telemetry(
+                        persona_telemetry = _persona_exemplar_telemetry.compute_persona_exemplar_telemetry(
                             output_text=assistant_text,
                             selected_exemplars=persona_selected_exemplars,
                         )
@@ -5857,7 +5844,7 @@ async def create_chat_completion(
                                 raise _provider_credential_http_exception_for_code("missing_provider_credentials")
                             cleaned_args = refreshed_args
                             model = refreshed_model or model
-                            llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                            llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
                             continue
 
                         if replay_certified and stream_error_code == "provider_unavailable":
@@ -5896,7 +5883,7 @@ async def create_chat_completion(
                                 cleaned_args = refreshed_args
                                 model = refreshed_model or model
                                 selected_provider = fallback_provider
-                                llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                                llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
                                 continue
 
                         if oauth_retry_state["attempted"]:
@@ -5940,7 +5927,7 @@ async def create_chat_completion(
                 else:  # Non-streaming
 
                     async def _execute_non_stream_response():
-                        return await with_llm_call_context(execute_non_stream_call(
+                        return await with_llm_call_context(_chat_service.execute_non_stream_call(
                             current_loop=current_loop,
                             cleaned_args=cleaned_args,
                             selected_provider=selected_provider,
@@ -6007,7 +5994,7 @@ async def create_chat_completion(
                                 )
                             cleaned_args = refreshed_args
                             model = refreshed_model or model
-                            llm_call_func = partial(perform_chat_api_call, **cleaned_args)
+                            llm_call_func = partial(_chat_service.perform_chat_api_call, **cleaned_args)
                     persona_telemetry: dict[str, Any] | None = None
                     assistant_reply_text = (
                         _extract_assistant_text_from_completion_payload(encoded_payload)
@@ -6015,7 +6002,7 @@ async def create_chat_completion(
                         else ""
                     )
                     if isinstance(encoded_payload, dict) and should_record_persona_telemetry:
-                        persona_telemetry = compute_persona_exemplar_telemetry(
+                        persona_telemetry = _persona_exemplar_telemetry.compute_persona_exemplar_telemetry(
                             output_text=assistant_reply_text,
                             selected_exemplars=persona_selected_exemplars,
                         )
@@ -6051,7 +6038,7 @@ async def create_chat_completion(
                         and isinstance(encoded_payload, dict)
                     ):
                         if persona_telemetry is None:
-                            persona_telemetry = compute_persona_exemplar_telemetry(
+                            persona_telemetry = _persona_exemplar_telemetry.compute_persona_exemplar_telemetry(
                                 output_text="",
                                 selected_exemplars=persona_selected_exemplars,
                             )
@@ -6468,7 +6455,7 @@ async def create_chat_completion(
 async def get_chat_queue_status():
     """Expose raw chat request queue metrics for diagnostics."""
     try:
-        queue = get_request_queue()
+        queue = _request_queue.get_request_queue()
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         queue = None
     if queue is None:
@@ -6501,7 +6488,7 @@ async def get_chat_queue_activity(
     if limit < 1 or limit > 1000:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="limit must be between 1 and 1000")
     try:
-        queue = get_request_queue()
+        queue = _request_queue.get_request_queue()
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         queue = None
     if queue is None:
@@ -6873,7 +6860,7 @@ def _get_knowledge_qa_share_signing_key() -> bytes:
     if explicit:
         return explicit.encode("utf-8")
     try:
-        return derive_hmac_key()
+        return _crypto_utils.derive_hmac_key()
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         # Fall back only to a real deployment secret. This previously ended with
         # `or "knowledge_qa_share_link_default"` -- a constant published in this
@@ -7016,7 +7003,7 @@ def _persist_knowledge_qa_share_links(
             snapshot_valid = (
                 isinstance(snapshot, dict) and snapshot.get("status") == "valid"
             )
-            final_settings = validate_chat_settings_storage(
+            final_settings = _chat_settings_validation.validate_chat_settings_storage(
                 final_settings,
                 reject_credentials=snapshot_valid,
                 allow_internal=True,
@@ -7350,7 +7337,7 @@ async def list_chat_conversations(
             search_in=search_in,
         )
         duration_seconds = max(time.perf_counter() - started_at, 0.0)
-        registry = get_metrics_registry()
+        registry = _metrics_manager.get_metrics_registry()
         registry.increment("chat_conversation_search_requests_total", labels=labels)
         registry.observe("chat_conversation_search_duration_seconds", duration_seconds, labels=labels)
         return labels
@@ -8156,7 +8143,7 @@ async def resolve_conversation_share_token(
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid share link owner") from exc
 
-    db = await get_chacha_db_for_user_id(owner_user_id, str(owner_user_id))
+    db = await _ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id(owner_user_id, str(owner_user_id))
     conversation = db.get_conversation_by_id(conversation_id)
     if not conversation or conversation.get("deleted"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")

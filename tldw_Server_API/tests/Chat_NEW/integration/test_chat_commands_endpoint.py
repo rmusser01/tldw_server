@@ -67,7 +67,7 @@ def test_list_chat_commands_rbac_filtering(test_client, auth_headers, monkeypatc
     monkeypatch.delenv("CHAT_COMMANDS_REQUIRE_PERMISSIONS", raising=False)
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_mod
 
-    monkeypatch.setattr(chat_mod, "user_has_permission", lambda user_id, perm: False, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.rbac.user_has_permission", lambda user_id, perm: False, raising=True)
 
     app, override_key = _install_request_user_override(is_admin=False, permissions=[])
     try:
@@ -90,7 +90,7 @@ def test_list_chat_commands_rbac_allow_path(test_client, auth_headers, monkeypat
     monkeypatch.delenv("CHAT_COMMANDS_REQUIRE_PERMISSIONS", raising=False)
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_mod
 
-    monkeypatch.setattr(chat_mod, "user_has_permission", lambda user_id, perm: True, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.rbac.user_has_permission", lambda user_id, perm: True, raising=True)
 
     app, override_key = _install_request_user_override(is_admin=False, permissions=[])
     try:

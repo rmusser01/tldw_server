@@ -214,8 +214,7 @@ def test_native_llamacpp_empty_snapshot_does_not_fall_through_to_global_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        messages_endpoint,
-        "loaded_config_data",
+        "tldw_Server_API.app.core.config.loaded_config_data",
         {"llama_api": {"api_ip": "http://ambient.example:8080"}},
     )
 
@@ -230,8 +229,7 @@ def test_native_llamacpp_empty_snapshot_does_not_adopt_global_api_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        messages_endpoint,
-        "loaded_config_data",
+        "tldw_Server_API.app.core.config.loaded_config_data",
         {"llama_api": {"api_key": "ambient-key"}},
     )
 
@@ -244,8 +242,7 @@ def test_native_messages_empty_snapshot_does_not_adopt_global_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        messages_endpoint,
-        "loaded_config_data",
+        "tldw_Server_API.app.core.config.loaded_config_data",
         {"anthropic_api": {"api_timeout": 123}},
     )
 

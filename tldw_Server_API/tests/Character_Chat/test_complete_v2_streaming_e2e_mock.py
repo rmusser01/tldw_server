@@ -130,7 +130,7 @@ async def test_complete_v2_streaming_e2e_monkeypatched(
 
         return _generator()
 
-    monkeypatch.setattr(chat_sessions_mod, "perform_chat_api_call", _fake_perform_chat_api_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_perform_chat_api_call)
 
     # Isolate DB and ensure env changes don't leak to other tests
     tmpdir = tempfile.mkdtemp(prefix="chacha_stream_e2e_")
@@ -206,7 +206,7 @@ async def test_complete_v2_streaming_non_iterable_fallback(
             "choices": [{"message": {"role": "assistant", "content": "Fallback content"}}]
         }
 
-    monkeypatch.setattr(chat_sessions_mod, "perform_chat_api_call", _fake_perform_chat_api_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_perform_chat_api_call)
     try:
         from tldw_Server_API.app.main import app
 

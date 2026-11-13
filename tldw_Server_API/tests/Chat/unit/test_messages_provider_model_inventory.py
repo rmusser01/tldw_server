@@ -38,7 +38,7 @@ async def test_native_messages_validate_resolved_credential_inventory(
         calls.append((provider, key, kwargs["base_url"]))
         return SimpleNamespace(status=inventory_status, models=("current-model",))
 
-    monkeypatch.setattr(messages, "provider_auth_is_resolved", lambda *args, **kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.adapter_utils.provider_auth_is_resolved", lambda *args, **kwargs: True)
     monkeypatch.setattr(chat_service, "discover_provider_models", discover)
     monkeypatch.setattr(gateway, "discover_provider_models", discover)
     monkeypatch.setattr(
@@ -97,7 +97,7 @@ async def test_messages_inventory_failures_share_the_chat_public_codes(
     async def resolve(provider, *, model):
         return credentials
 
-    monkeypatch.setattr(messages, "provider_auth_is_resolved", lambda *args, **kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.adapter_utils.provider_auth_is_resolved", lambda *args, **kwargs: True)
     monkeypatch.setattr(
         chat_service, "discover_provider_models",
         lambda *args, **kwargs: SimpleNamespace(status=inventory_status, models=models),

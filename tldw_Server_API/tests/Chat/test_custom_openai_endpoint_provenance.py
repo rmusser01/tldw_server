@@ -215,7 +215,7 @@ def test_chat_endpoint_sets_post_parse_url_free_provenance(
         }
 
     monkeypatch.setattr(chat_endpoint, "ProviderCredentialRuntime", _Runtime)
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", _perform_chat_api_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _perform_chat_api_call)
     body = {
         "api_provider": "custom-openai-api",
         "model": "model",

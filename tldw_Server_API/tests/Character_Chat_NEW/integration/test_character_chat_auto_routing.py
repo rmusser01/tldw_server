@@ -70,11 +70,11 @@ def test_complete_v2_routes_auto_model_before_provider_call(test_client, auth_he
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.perform_chat_api_call",
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=_stub_chat_api_call,
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.parse_boolean",
+            "tldw_Server_API.app.core.Utils.common.parse_boolean",
             return_value=True,
         ),
     ):

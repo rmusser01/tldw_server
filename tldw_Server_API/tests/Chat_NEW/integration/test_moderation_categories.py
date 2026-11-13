@@ -118,7 +118,7 @@ def test_categories_allow_pii_redaction(credentialed_test_client_factory):
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         policy = _Policy(categories_enabled={'pii'})
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_Svc(policy)):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_Svc(policy)):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -129,7 +129,7 @@ def test_categories_allow_pii_redaction(credentialed_test_client_factory):
                     "stream": False
                 }
                 # Mock provider to echo back user content
-                with patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value={
+                with patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value={
                     "id": "chatcmpl-1",
                     "object": "chat.completion",
                     "created": 123,
@@ -161,7 +161,7 @@ def test_categories_disable_pii_redaction(credentialed_test_client_factory):
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         policy = _Policy(categories_enabled={'confidential'})  # no 'pii'
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_Svc(policy)):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_Svc(policy)):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -171,7 +171,7 @@ def test_categories_disable_pii_redaction(credentialed_test_client_factory):
                     "messages": [{"role": "user", "content": "the email is user@example.com"}],
                     "stream": False
                 }
-                with patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value={
+                with patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value={
                     "id": "chatcmpl-1",
                     "object": "chat.completion",
                     "created": 123,
@@ -237,13 +237,13 @@ def test_output_guardian_proxy_receives_character_chat_type_for_continued_charac
             )
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_Svc(policy)),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_Svc(policy)),
+            patch("tldw_Server_API.app.core.Moderation.supervised_policy.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
             patch("tldw_Server_API.app.core.Moderation.supervised_policy.GuardianModerationProxy", _SpyGuardianModerationProxy),
             patch("tldw_Server_API.app.core.feature_flags.is_guardian_enabled", return_value=True),
             patch("tldw_Server_API.app.core.feature_flags.is_self_monitoring_enabled", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value={
                     "id": "chatcmpl-guard-output-1",
                     "object": "chat.completion",
@@ -325,13 +325,13 @@ def test_output_guardian_proxy_receives_regular_chat_type_for_resumed_default_as
             )
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_Svc(policy)),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_Svc(policy)),
+            patch("tldw_Server_API.app.core.Moderation.supervised_policy.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
             patch("tldw_Server_API.app.core.Moderation.supervised_policy.GuardianModerationProxy", _SpyGuardianModerationProxy),
             patch("tldw_Server_API.app.core.feature_flags.is_guardian_enabled", return_value=True),
             patch("tldw_Server_API.app.core.feature_flags.is_self_monitoring_enabled", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value={
                     "id": "chatcmpl-guard-output-ordinary",
                     "object": "chat.completion",

@@ -288,7 +288,7 @@ class TestChatErrorHandling:
                 csrf_token = response.cookies.get("csrf_token", "")
 
                 with (
-                    patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_perform,
+                    patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_perform,
                     patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
                 ):
                     mock_perform.side_effect = Exception("LLM API Error")

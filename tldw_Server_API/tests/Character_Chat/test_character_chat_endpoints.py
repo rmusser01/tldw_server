@@ -488,8 +488,7 @@ async def test_send_message_returns_generic_500_for_db_error(monkeypatch):
                 raise CharactersRAGDBError("message send backend unavailable")
 
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "post_message_to_conversation",
+                "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation",
                 fake_post_message_to_conversation,
             )
 
@@ -538,8 +537,7 @@ async def test_send_message_maps_input_error_to_400(monkeypatch):
                 raise InputError("message payload is invalid")
 
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "post_message_to_conversation",
+                "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation",
                 fake_post_message_to_conversation,
             )
 
@@ -588,8 +586,7 @@ async def test_send_message_maps_oversize_input_error_to_413(monkeypatch):
                 raise InputError("Attachment exceeds maximum size")
 
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "post_message_to_conversation",
+                "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation",
                 fake_post_message_to_conversation,
             )
 
@@ -638,8 +635,7 @@ async def test_send_message_maps_conflict_error_to_409(monkeypatch):
                 raise ConflictError("message version conflict")
 
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "post_message_to_conversation",
+                "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation",
                 fake_post_message_to_conversation,
             )
 
@@ -826,8 +822,7 @@ async def test_delete_message_returns_generic_500_for_db_error(monkeypatch):
                 raise CharactersRAGDBError("message delete backend unavailable")
 
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "remove_message_from_conversation",
+                "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.remove_message_from_conversation",
                 fake_remove_message_from_conversation,
             )
 
@@ -884,8 +879,7 @@ async def test_delete_message_maps_conflict_error_to_409(monkeypatch):
                 raise ConflictError("message delete conflict")
 
             monkeypatch.setattr(
-                character_messages_endpoint,
-                "remove_message_from_conversation",
+                "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.remove_message_from_conversation",
                 fake_remove_message_from_conversation,
             )
 

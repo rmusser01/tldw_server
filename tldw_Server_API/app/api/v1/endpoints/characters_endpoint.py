@@ -184,22 +184,12 @@ from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     create_new_character_from_data,
     delete_character_from_db,
     get_character_details,
-    import_and_save_character_from_file,
     restore_character_from_db,
-    search_characters_by_query_text,
     update_existing_character_details,
 )
-from tldw_Server_API.app.core.Character_Chat.character_limits import get_character_limits
-from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import get_character_rate_limiter
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_RECURSIVE_DEPTH
 from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector import (
     PersonaExemplarSelectorConfig,
-    select_character_exemplars,
-)
-from tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings import (
-    score_exemplars_with_embeddings,
-    upsert_character_exemplar_embeddings,
-    delete_character_exemplar_embeddings,
 )
 from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookService
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
@@ -210,6 +200,11 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
     RestoreWindowExpiredError,
 )
+import tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade as _Character_Chat_Lib_facade
+import tldw_Server_API.app.core.Character_Chat.character_limits as _character_limits
+import tldw_Server_API.app.core.Character_Chat.character_rate_limiter as _character_rate_limiter
+import tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings as _persona_exemplar_embeddings
+import tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector as _persona_exemplar_selector
 
 _CHARACTERS_NONCRITICAL_EXCEPTIONS = (
     OSError,
@@ -569,7 +564,7 @@ def _sync_exemplar_embeddings_best_effort(
     if not user_id or not exemplars:
         return
     try:
-        upsert_character_exemplar_embeddings(
+        _persona_exemplar_embeddings.upsert_character_exemplar_embeddings(
             user_id=user_id,
             character_id=character_id,
             exemplars=exemplars,
@@ -602,7 +597,7 @@ def _delete_exemplar_embeddings_best_effort(
     if not user_id or not exemplar_ids:
         return
     try:
-        delete_character_exemplar_embeddings(
+        _persona_exemplar_embeddings.delete_character_exemplar_embeddings(
             user_id=user_id,
             character_id=character_id,
             exemplar_ids=exemplar_ids,
@@ -711,7 +706,7 @@ def _search_character_exemplars_hybrid_best_effort(
         return lexical_candidates[search_request.offset:search_request.offset + search_request.limit], total
 
     try:
-        embedding_scores = score_exemplars_with_embeddings(
+        embedding_scores = _persona_exemplar_embeddings.score_exemplars_with_embeddings(
             normalized_query,
             all_candidates,
             user_id=user_id,
@@ -791,7 +786,7 @@ async def import_character_endpoint(
     """
     try:
         try:
-            limits = get_character_limits()
+            limits = _character_limits.get_character_limits()
             max_import_size_mb = int(limits.max_import_size_mb)
             max_import_bytes = max_import_size_mb * 1024 * 1024
         except _CHARACTERS_NONCRITICAL_EXCEPTIONS:
@@ -832,7 +827,7 @@ async def import_character_endpoint(
             )
 
         # Check rate limits
-        rate_limiter = get_character_rate_limiter()
+        rate_limiter = _character_rate_limiter.get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "character_import")
         rate_limiter.check_import_size(len(file_content_bytes))
 
@@ -846,7 +841,7 @@ async def import_character_endpoint(
         # Use the detected type from validation
         file_type_validated = detected_type
 
-        success, message, char_id = import_and_save_character_from_file(
+        success, message, char_id = _Character_Chat_Lib_facade.import_and_save_character_from_file(
             db,
             file_content=file_content_bytes,
             file_type=file_type_validated,
@@ -1027,7 +1022,7 @@ async def get_rate_limit_status(
     current_user: User = Depends(get_request_user)
 ):
     """Get current rate limit usage statistics for the authenticated user."""
-    rate_limiter = get_character_rate_limiter()
+    rate_limiter = _character_rate_limiter.get_character_rate_limiter()
     stats = await rate_limiter.get_usage_stats(current_user.id)
     return stats
 
@@ -1041,7 +1036,7 @@ async def create_new_character_endpoint(
 ):
     try:
         # Check rate limits
-        rate_limiter = get_character_rate_limiter()
+        rate_limiter = _character_rate_limiter.get_character_rate_limiter()
         await rate_limiter.check_rate_limit(current_user.id, "character_create")
 
         # Check character count limit. The helper expects the current count
@@ -1466,7 +1461,7 @@ async def select_character_exemplars_debug_endpoint(
             embedding_user_id = _resolve_exemplar_embedding_user_id(db)
 
             def _embedding_callback(user_turn: str, candidates: list[dict[str, Any]]) -> dict[str, float]:
-                return score_exemplars_with_embeddings(
+                return _persona_exemplar_embeddings.score_exemplars_with_embeddings(
                     user_turn,
                     candidates,
                     user_id=embedding_user_id,
@@ -1476,7 +1471,7 @@ async def select_character_exemplars_debug_endpoint(
 
             embedding_callback = _embedding_callback
 
-        selected_result = select_character_exemplars(
+        selected_result = _persona_exemplar_selector.select_character_exemplars(
             db=db,
             character_id=character_id,
             user_turn=request.user_turn,
@@ -1975,7 +1970,7 @@ async def search_characters_endpoint(
     if not query.strip():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Search query cannot be empty.")
     try:
-        results_db = search_characters_by_query_text(db, query, limit=limit)
+        results_db = _Character_Chat_Lib_facade.search_characters_by_query_text(db, query, limit=limit)
         return [_convert_db_char_to_response_model(card, backend_type=db.backend_type) for card in results_db]
     except CharactersRAGDBError as e:
         logger.error(f"DB error searching characters for '{query}': {e}", exc_info=True)

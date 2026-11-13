@@ -90,12 +90,15 @@ def _override_character_chat_rate_limits_for_chat_new(monkeypatch):
 # =====================================================================
 
 @pytest.fixture(autouse=True)
-def _mock_perform_chat_api_call(monkeypatch):
+def _mock_perform_chat_api_call(monkeypatch, request):
     """
     Provide a deterministic fake LLM response so integration tests do not rely on
     external OpenAI connectivity. Tests that need custom behaviour can override
     this by patching `perform_chat_api_call` in the test body.
     """
+    if request.node.get_closest_marker("real_chat_service"):
+        # The fake sits on chat_service itself, so tests that drive the real adapter opt out.
+        return
     from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 
     def _stream_generator():
@@ -130,7 +133,7 @@ def _mock_perform_chat_api_call(monkeypatch):
             "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
         }
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", _fake_chat_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_chat_call)
 
 # =====================================================================
 # Test Markers
@@ -145,6 +148,7 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "slow: Tests that take > 1 second")
     config.addinivalue_line("markers", "requires_llm: Tests requiring LLM API")
     config.addinivalue_line("markers", "streaming: Tests for streaming responses")
+    config.addinivalue_line("markers", "real_chat_service: Skip the default chat_service.perform_chat_api_call fake")
 
 # =====================================================================
 # Rate Limiter Reset Between Tests

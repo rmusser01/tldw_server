@@ -182,8 +182,7 @@ def _install_simple_credential_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
             return None
 
     monkeypatch.setattr(
-        character_chat_sessions,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(
@@ -234,8 +233,7 @@ def _install_character_completion_runtime(
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     monkeypatch.setenv("STREAMS_UNIFIED", "0")
     monkeypatch.setattr(
-        character_chat_sessions,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [11], [22], True),
     )
     monkeypatch.setattr(
@@ -244,8 +242,7 @@ def _install_character_completion_runtime(
         RecordingCredentialRuntime,
     )
     monkeypatch.setattr(
-        character_chat_sessions,
-        "provider_requires_api_key",
+        "tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key",
         lambda _provider: False,
     )
     monkeypatch.setattr(
@@ -259,8 +256,7 @@ def _install_character_completion_runtime(
         lambda: False,
     )
     monkeypatch.setattr(
-        character_chat_sessions,
-        "perform_chat_api_call",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
         lambda **_kwargs: provider_response,
     )
 
@@ -369,8 +365,7 @@ async def test_complete_v2_cancelled_sync_factory_hands_off_completed_result_bef
         return result
 
     monkeypatch.setattr(
-        character_chat_sessions,
-        "perform_chat_api_call",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
         blocking_provider_call,
     )
 
@@ -451,8 +446,7 @@ async def test_complete_v2_sync_provider_factory_timeout_is_bounded_and_sanitize
         raise TimeoutError("private provider timeout sentinel")
 
     monkeypatch.setattr(
-        character_chat_sessions,
-        "await_bounded_daemon_with_timeout",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.await_bounded_daemon_with_timeout",
         timeout_boundary,
     )
 
@@ -528,8 +522,7 @@ async def test_complete_v2_sync_stream_uses_bounded_factory_iteration_and_cleanu
                 released_event.set()
 
     monkeypatch.setattr(
-        character_chat_sessions,
-        "await_bounded_daemon_with_timeout",
+        "tldw_Server_API.app.core.LLM_Calls.bounded_daemon.await_bounded_daemon_with_timeout",
         run_inline,
     )
 
@@ -539,8 +532,7 @@ async def test_complete_v2_sync_stream_uses_bounded_factory_iteration_and_cleanu
         close()
 
     monkeypatch.setattr(
-        character_chat_sessions,
-        "invoke_owned_stream_close",
+        "tldw_Server_API.app.core.Chat.streaming_utils.invoke_owned_stream_close",
         close_inline,
     )
 
@@ -595,8 +587,8 @@ async def test_character_provider_timeout_retains_capacity_until_worker_really_e
         release.wait(timeout=2)
         return {"choices": [{"message": {"role": "assistant", "content": "late"}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", blocking_provider)
-    monkeypatch.setattr(character_chat_sessions, "STREAM_DAEMON_POOL", pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", blocking_provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.STREAM_DAEMON_POOL", pool)
     monkeypatch.setattr(
         character_chat_sessions,
         "CHARACTER_PROVIDER_CALL_TIMEOUT_SECONDS",
@@ -689,8 +681,8 @@ async def test_timed_out_character_factory_closes_late_stream_result(
         release.wait(timeout=2)
         return LateStream()
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", blocking_provider)
-    monkeypatch.setattr(character_chat_sessions, "STREAM_DAEMON_POOL", pool)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", blocking_provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.STREAM_DAEMON_POOL", pool)
     monkeypatch.setattr(
         character_chat_sessions,
         "CHARACTER_PROVIDER_CALL_TIMEOUT_SECONDS",
@@ -1000,7 +992,7 @@ async def test_character_late_usage_requires_valid_nonempty_content(
         return result
 
     monkeypatch.setattr(character_chat_sessions, "ProviderCredentialRuntime", Runtime)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider_call)
     monkeypatch.setattr(
         character_chat_sessions,
         "CHARACTER_PROVIDER_CALL_TIMEOUT_SECONDS",
@@ -1078,7 +1070,7 @@ async def test_character_sync_boundary_never_queues_a_late_default_executor_star
     executor = ThreadPoolExecutor(max_workers=1)
     loop.set_default_executor(executor)
     default_future = loop.run_in_executor(None, occupy_default_executor)
-    monkeypatch.setattr(character_chat_sessions, "STREAM_DAEMON_POOL", BoundedDaemonPool(1))
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.STREAM_DAEMON_POOL", BoundedDaemonPool(1))
     operation = asyncio.create_task(
         character_chat_sessions._run_bounded_character_sync_call(
             provider_call,
@@ -1216,14 +1208,13 @@ async def test_complete_v2_bedrock_auth_contract_distinguishes_default_chain_fro
 
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     monkeypatch.setattr(
-        character_chat_sessions,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(character_chat_sessions, "ProviderCredentialRuntime", BedrockRuntime)
     monkeypatch.setattr(character_chat_sessions, "get_character_rate_limiter", lambda: _NoopCharacterRateLimiter())
     monkeypatch.setattr(character_chat_sessions, "_should_enforce_char_chat_strict_model_selection", lambda: False)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider_call)
 
     kwargs = {
         "chat_id": "chat-1",
@@ -1667,11 +1658,10 @@ async def test_complete_v2_stream_limit_failure_overrides_partial_success(
     )
     monkeypatch.setenv("STREAMS_UNIFIED", streams_unified)
     if limit_kind == "chunks":
-        monkeypatch.setattr(character_chat_sessions, "MAX_STREAMING_CHUNKS", 1)
+        monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.constants.MAX_STREAMING_CHUNKS", 1)
     else:
         monkeypatch.setattr(
-            character_chat_sessions,
-            "MAX_STREAMING_BYTES",
+            "tldw_Server_API.app.core.Character_Chat.constants.MAX_STREAMING_BYTES",
             len(character_chat_sessions.ensure_sse_line(content_frame).encode("utf-8"))
             + 1,
         )
@@ -2168,12 +2158,11 @@ async def test_complete_v2_maps_typed_credential_failures_to_bounded_errors(
 
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     monkeypatch.setattr(
-        character_chat_sessions,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(character_chat_sessions, "ProviderCredentialRuntime", FailingRuntime)
-    monkeypatch.setattr(character_chat_sessions, "provider_requires_api_key", lambda _provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: False)
     monkeypatch.setattr(character_chat_sessions, "get_character_rate_limiter", lambda: _NoopCharacterRateLimiter())
     monkeypatch.setattr(character_chat_sessions, "_should_enforce_char_chat_strict_model_selection", lambda: False)
 
@@ -2251,7 +2240,7 @@ async def test_complete_v2_dispatch_keeps_one_static_credential_snapshot(
         RecordingCredentialRuntime,
         raising=False,
     )
-    monkeypatch.setattr(character_chat_sessions, "provider_requires_api_key", lambda _provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: False)
     monkeypatch.setattr(
         character_chat_sessions,
         "get_character_rate_limiter",
@@ -2262,7 +2251,7 @@ async def test_complete_v2_dispatch_keeps_one_static_credential_snapshot(
         "_should_enforce_char_chat_strict_model_selection",
         lambda: False,
     )
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider_call)
 
     response = await character_chat_sessions.character_chat_completion(
         chat_id="chat-1",
@@ -2476,10 +2465,10 @@ async def test_complete_v2_maps_chat_api_server_error_to_sanitized_502(
 
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     _install_simple_credential_runtime(monkeypatch)
-    monkeypatch.setattr(character_chat_sessions, "provider_requires_api_key", lambda provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda provider: False)
     monkeypatch.setattr(character_chat_sessions, "get_character_rate_limiter", lambda: _NoopCharacterRateLimiter())
     monkeypatch.setattr(character_chat_sessions, "_should_enforce_char_chat_strict_model_selection", lambda: False)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_provider_call)
 
     with pytest.raises(HTTPException) as exc_info:
         await character_chat_sessions.character_chat_completion(
@@ -2532,10 +2521,10 @@ async def test_complete_v2_clamps_untrusted_provider_http_status(
 
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     _install_simple_credential_runtime(monkeypatch)
-    monkeypatch.setattr(character_chat_sessions, "provider_requires_api_key", lambda _provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda _provider: False)
     monkeypatch.setattr(character_chat_sessions, "get_character_rate_limiter", lambda: _NoopCharacterRateLimiter())
     monkeypatch.setattr(character_chat_sessions, "_should_enforce_char_chat_strict_model_selection", lambda: False)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_provider_call)
 
     with pytest.raises(HTTPException) as exc_info:
         await character_chat_sessions.character_chat_completion(
@@ -2573,10 +2562,10 @@ async def test_complete_v2_detaches_unexpected_provider_error_graph(
 
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     _install_simple_credential_runtime(monkeypatch)
-    monkeypatch.setattr(character_chat_sessions, "provider_requires_api_key", lambda provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda provider: False)
     monkeypatch.setattr(character_chat_sessions, "get_character_rate_limiter", lambda: _NoopCharacterRateLimiter())
     monkeypatch.setattr(character_chat_sessions, "_should_enforce_char_chat_strict_model_selection", lambda: False)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_provider_call)
 
     with pytest.raises(HTTPException) as exc_info:
         await character_chat_sessions.character_chat_completion(
@@ -2611,10 +2600,10 @@ async def test_complete_v2_forwards_inference_prefix_cache_intent(
 
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     _install_simple_credential_runtime(monkeypatch)
-    monkeypatch.setattr(character_chat_sessions, "provider_requires_api_key", lambda provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda provider: False)
     monkeypatch.setattr(character_chat_sessions, "get_character_rate_limiter", lambda: _NoopCharacterRateLimiter())
     monkeypatch.setattr(character_chat_sessions, "_should_enforce_char_chat_strict_model_selection", lambda: False)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_provider_call)
 
     response = await character_chat_sessions.character_chat_completion(
         chat_id="chat-1",
@@ -2653,16 +2642,15 @@ async def test_complete_v2_prompt_guardrail_errors_fail_closed_before_provider_d
 
     monkeypatch.setenv("ENABLE_LOCAL_LLM_PROVIDER", "true")
     _install_simple_credential_runtime(monkeypatch)
-    monkeypatch.setattr(character_chat_sessions, "provider_requires_api_key", lambda provider: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_metadata.provider_requires_api_key", lambda provider: False)
     monkeypatch.setattr(character_chat_sessions, "get_character_rate_limiter", lambda: _NoopCharacterRateLimiter())
     monkeypatch.setattr(character_chat_sessions, "_should_enforce_char_chat_strict_model_selection", lambda: False)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_provider_call)
     monkeypatch.setattr(
-        character_chat_sessions,
-        "load_prompt_cost_guardrail_config",
+        "tldw_Server_API.app.core.Chat.prompt_cost_guardrails.load_prompt_cost_guardrail_config",
         lambda: PromptCostGuardrailConfig(enabled=True),
     )
-    monkeypatch.setattr(character_chat_sessions, "evaluate_prompt_cost_guardrails", raise_guardrail_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.prompt_cost_guardrails.evaluate_prompt_cost_guardrails", raise_guardrail_error)
 
     with pytest.raises(HTTPException) as exc_info:
         await character_chat_sessions.character_chat_completion(
@@ -2779,7 +2767,7 @@ async def test_complete_v2_preserves_safe_provider_failure_classification(
         def fail_before_stream(**_kwargs: Any) -> None:
             """Raise the provider failure before an SSE response starts."""
             raise failure
-        monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", fail_before_stream)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fail_before_stream)
 
     call = character_chat_sessions.character_chat_completion(
         chat_id="chat-1",

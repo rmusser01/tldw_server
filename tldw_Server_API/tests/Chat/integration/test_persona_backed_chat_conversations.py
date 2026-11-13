@@ -87,7 +87,7 @@ def persona_chat_client(persona_chat_db):
             return_value={"openai_api": {"api_key": "sk-test-key"}},
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             return_value=mock_response,
         ) as perform_chat_api_call,
         patch(
@@ -234,7 +234,7 @@ def retry_identity_chat_client(request, tmp_path, monkeypatch):
                 return_value={"openai_api": {"api_key": "sk-test-key"}},
             ),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value=mock_response,
             ) as provider_call,
             patch(
@@ -349,7 +349,7 @@ def test_explicit_retry_persists_new_identical_question_after_pre_persistence_mo
     monkeypatch.setenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION", "1")
     invalid = {**original, "model": "missing-model-256", "metadata": {"tldw_client_message_id": "failed-new-turn"}}
     with patch(
-        "tldw_Server_API.app.api.v1.endpoints.chat.is_model_known_for_provider",
+        "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider",
         return_value=False,
     ) as model_known:
         rejected = client.post("/api/v1/chat/completions", json=invalid, headers=headers)
@@ -836,8 +836,8 @@ def test_persona_backed_chat_records_telemetry_with_persona_identity_labels(
     def _record_histogram(metric_name: str, value: float, labels: dict[str, str] | None = None):  # noqa: ARG001
         recorded_histograms.append((metric_name, dict(labels or {})))
 
-    monkeypatch.setattr(chat_endpoint_module, "compute_persona_exemplar_telemetry", _fake_telemetry)
-    monkeypatch.setattr(chat_endpoint_module, "log_histogram", _record_histogram)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry.compute_persona_exemplar_telemetry", _fake_telemetry)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_logger.log_histogram", _record_histogram)
 
     response = client.post(
         "/api/v1/chat/completions",

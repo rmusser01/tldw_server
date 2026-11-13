@@ -1448,9 +1448,8 @@ def test_unit_select_character_exemplars_debug_input_error(
             "get_character_card_by_id",
             return_value={"id": 7},
         ),
-        patch.object(
-            characters_api_module,
-            "select_character_exemplars",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector.select_character_exemplars",
             side_effect=InputError("invalid exemplar selection"),
         ),
     ):
@@ -1472,9 +1471,8 @@ def test_unit_select_character_exemplars_debug_db_error(
             "get_character_card_by_id",
             return_value={"id": 7},
         ),
-        patch.object(
-            characters_api_module,
-            "select_character_exemplars",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_selector.select_character_exemplars",
             side_effect=CharactersRAGDBError("exemplar debug backend unavailable"),
         ),
     ):
@@ -1524,19 +1522,16 @@ def test_unit_import_character_conflict_returns_existing_payload(
     }
 
     with (
-        patch.object(
-            characters_api_module,
-            "get_character_limits",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.character_limits.get_character_limits",
             return_value=SimpleNamespace(max_import_size_mb=10),
         ),
-        patch.object(
-            characters_api_module,
-            "get_character_rate_limiter",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.character_rate_limiter.get_character_rate_limiter",
             return_value=rate_limiter,
         ),
-        patch.object(
-            characters_api_module,
-            "import_and_save_character_from_file",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.import_and_save_character_from_file",
             side_effect=ConflictError("character already exists"),
         ),
         patch.object(
@@ -1561,19 +1556,16 @@ def test_unit_import_character_conflict_without_existing_payload_returns_409(
     rate_limiter = build_import_rate_limiter_stub()
 
     with (
-        patch.object(
-            characters_api_module,
-            "get_character_limits",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.character_limits.get_character_limits",
             return_value=SimpleNamespace(max_import_size_mb=10),
         ),
-        patch.object(
-            characters_api_module,
-            "get_character_rate_limiter",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.character_rate_limiter.get_character_rate_limiter",
             return_value=rate_limiter,
         ),
-        patch.object(
-            characters_api_module,
-            "import_and_save_character_from_file",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.import_and_save_character_from_file",
             side_effect=ConflictError("character already exists"),
         ),
         patch.object(
@@ -1597,19 +1589,16 @@ def test_unit_import_character_input_error_maps_to_400(
     rate_limiter = build_import_rate_limiter_stub()
 
     with (
-        patch.object(
-            characters_api_module,
-            "get_character_limits",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.character_limits.get_character_limits",
             return_value=SimpleNamespace(max_import_size_mb=10),
         ),
-        patch.object(
-            characters_api_module,
-            "get_character_rate_limiter",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.character_rate_limiter.get_character_rate_limiter",
             return_value=rate_limiter,
         ),
-        patch.object(
-            characters_api_module,
-            "import_and_save_character_from_file",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.import_and_save_character_from_file",
             side_effect=InputError("invalid character import payload"),
         ),
     ):
@@ -1628,19 +1617,16 @@ def test_unit_import_character_db_error_maps_to_400(
     rate_limiter = build_import_rate_limiter_stub()
 
     with (
-        patch.object(
-            characters_api_module,
-            "get_character_limits",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.character_limits.get_character_limits",
             return_value=SimpleNamespace(max_import_size_mb=10),
         ),
-        patch.object(
-            characters_api_module,
-            "get_character_rate_limiter",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.character_rate_limiter.get_character_rate_limiter",
             return_value=rate_limiter,
         ),
-        patch.object(
-            characters_api_module,
-            "import_and_save_character_from_file",
+        patch(
+            "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.import_and_save_character_from_file",
             side_effect=CharactersRAGDBError("character import backend unavailable"),
         ),
     ):
@@ -2662,7 +2648,7 @@ class TestCharacterAPIIntegration:
         def _raise_db_error(*args, **kwargs):
             raise CharactersRAGDBError("character search backend unavailable")
 
-        monkeypatch.setattr(characters_api_module, "search_characters_by_query_text", _raise_db_error)
+        monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.search_characters_by_query_text", _raise_db_error)
 
         response = client.get(f"{CHARACTERS_ENDPOINT_PREFIX}/search/?query=test")
 

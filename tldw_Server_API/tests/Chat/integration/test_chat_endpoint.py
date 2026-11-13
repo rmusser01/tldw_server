@@ -247,7 +247,7 @@ def mock_media_db():
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")
 @patch(
     "tldw_Server_API.app.core.Chat.chat_service.apply_template_to_string"
@@ -328,7 +328,7 @@ def test_create_chat_completion_no_template(
 @pytest.mark.unit
 @pytest.mark.skip(reason="Streaming tests hang with TestClient - needs investigation")
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")
 @patch("tldw_Server_API.app.core.Chat.chat_service.apply_template_to_string")
 def test_create_chat_completion_success_streaming(  # Added default_chat_request_data fixture
@@ -347,7 +347,7 @@ def test_create_chat_completion_success_streaming(  # Added default_chat_request
     )
 
     with patch(
-        "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call"
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call"
     ) as mock_chat_api_call_inner:  # Renamed for clarity
 
         def mock_stream_generator():  # This mock is for the return value of perform_chat_api_call
@@ -393,7 +393,7 @@ def test_create_chat_completion_success_streaming(  # Added default_chat_request
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")
 @patch("tldw_Server_API.app.core.Chat.chat_service.apply_template_to_string")
 def test_system_message_extraction(
@@ -436,7 +436,7 @@ def test_system_message_extraction(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")
 @patch("tldw_Server_API.app.core.Chat.chat_service.apply_template_to_string")
 def test_no_system_message_in_payload(
@@ -533,7 +533,7 @@ def test_api_key_used_from_config(
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_media_db
     app.dependency_overrides[get_chacha_db_for_user] = lambda: mock_chat_db
 
-    with patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_chat_api_call:
+    with patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_chat_api_call:
         mock_chat_api_call.return_value = {"id": "res_openai"}
 
         # Test 1: Default provider (should pick up "openai" key from patched dict)
@@ -688,7 +688,7 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
     with (
         bypass_api_limits(app),
         patch.object(config_llm_providers, "get_api_keys", lambda: {}),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_chat_api_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_chat_api_call,
     ):
         mock_chat_api_call.return_value = {
             "id": "res_custom_openai",
@@ -729,7 +729,7 @@ def test_keyless_provider_proceeds_without_key(  # Added default_chat_request_da
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")  # Corrected patch target
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")  # Corrected patch target
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")
 @patch("tldw_Server_API.app.core.Chat.chat_service.apply_template_to_string")
 @pytest.mark.parametrize(
@@ -874,7 +874,7 @@ def test_chat_api_call_exception_handling_unit(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")
 @patch("tldw_Server_API.app.core.Chat.chat_service.apply_template_to_string")
 def test_non_iterable_stream_generator_from_shim(
@@ -915,7 +915,7 @@ def test_non_iterable_stream_generator_from_shim(
 @pytest.mark.skip(reason="Async generator error handling causes timeout - needs refactoring")
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")  # Patches the alias used in chat.py
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")  # Patches the alias used in chat.py
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.apply_template_to_string")
 def test_error_within_stream_generator(
@@ -1038,7 +1038,7 @@ def test_error_within_stream_generator(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_create_chat_completion_with_optional_params(
     mock_load_template,
@@ -1108,7 +1108,7 @@ def test_create_chat_completion_with_optional_params(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_non_stream_structured_json_schema_success_returns_metadata(
     mock_load_template,
@@ -1160,7 +1160,7 @@ def test_non_stream_structured_json_schema_success_returns_metadata(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_non_stream_structured_json_schema_failure_returns_400(
     mock_load_template,
@@ -1209,7 +1209,7 @@ def test_non_stream_structured_json_schema_failure_returns_400(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_create_chat_completion_with_tools_unit(
     mock_load_template,
@@ -1286,7 +1286,7 @@ def test_create_chat_completion_with_tools_unit(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_save_to_db_not_passed_to_chat_api_call(
     mock_load_template,
@@ -1321,7 +1321,7 @@ def test_save_to_db_not_passed_to_chat_api_call(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")  # Mock this
 def test_create_chat_completion_character_not_found_uses_defaults(
     mock_load_template,
@@ -1390,7 +1390,7 @@ def test_create_chat_completion_character_not_found_uses_defaults(
 
 @pytest.mark.unit
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.core.Chat.chat_service.load_template")
 def test_create_chat_completion_template_file_not_found(
     mock_load_template,

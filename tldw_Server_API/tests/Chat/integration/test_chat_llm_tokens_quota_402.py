@@ -38,7 +38,7 @@ def test_chat_completions_402_on_monthly_llm_token_quota(
 
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", _tiny_llm_tokens_limit)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.llm_tokens_this_month", _month_already_spent)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _recording_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _recording_dispatch)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", _recording_dispatch)
     monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
@@ -93,7 +93,7 @@ def test_chat_completions_402_on_daily_llm_cost_quota(
 
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.user_quota", _daily_cost_limit)
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.quota_checks.llm_cost_today", _spent_fifty_cents)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _recording_dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _recording_dispatch)
     monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", _recording_dispatch)
     monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"local-llm": "dummy-key"}))
 
@@ -145,7 +145,7 @@ def test_chat_completions_admits_an_over_limit_user_whose_provider_runs_on_their
 
     refuse_llm_work(monkeypatch)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _dispatch)
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -178,7 +178,7 @@ def test_chat_completions_answers_402_when_the_call_itself_is_refused(
             category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
         )
 
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _refused_at_the_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _refused_at_the_call)
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -211,8 +211,8 @@ class _PlanSpent:
 
 def _on_a_spent_hosted_plan(client, monkeypatch) -> None:
     """Billing checks on for org 7, whose plan refuses every LLM request (the hosted product)."""
-    monkeypatch.setattr(chat_ep, "enforcement_enabled", lambda: True)
-    monkeypatch.setattr(chat_ep, "LimitEnforcer", _PlanSpent)
+    monkeypatch.setattr("tldw_Server_API.app.core.Billing.enforcement.enforcement_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.billing_deps.LimitEnforcer", _PlanSpent)
     monkeypatch.setitem(client.app.dependency_overrides, chat_ep.get_billing_org_id, lambda: 7)
 
 
@@ -240,8 +240,8 @@ def test_the_hosted_plan_does_not_check_a_request_on_the_users_own_key(
         }
 
     _on_a_spent_hosted_plan(client, monkeypatch)
-    monkeypatch.setattr(chat_ep, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps.users_own_key_serves", _own_key)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _dispatch)
 
     request_data = ChatCompletionRequest(
         model="local-llm",
@@ -293,9 +293,9 @@ def test_a_hosted_over_limit_request_on_the_users_own_key_looks_the_key_up_once(
 
     _on_a_spent_hosted_plan(client, monkeypatch)
     refuse_llm_work(monkeypatch)
-    monkeypatch.setattr(chat_ep, "users_own_key_serves", _own_key)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps.users_own_key_serves", _own_key)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
-    monkeypatch.setattr(chat_ep, "perform_chat_api_call", _dispatch)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _dispatch)
 
     request_data = ChatCompletionRequest(
         model="local-llm",

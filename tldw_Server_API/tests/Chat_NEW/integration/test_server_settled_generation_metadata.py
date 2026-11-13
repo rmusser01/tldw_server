@@ -96,7 +96,7 @@ def _install_provider(monkeypatch, make_stream: Callable[[], AsyncIterator[str]]
     def provider(*_args, **_kwargs):
         return make_stream()
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
 
 
 def _drop_client_after(app, marker: bytes, delivered: list[bytes], occurrences: int = 1):
@@ -649,14 +649,14 @@ def test_b02_admitted_preparation_failure_refunds_and_records_failure(governed_s
         reservations.extend(governor._handles.values())
         raise ChatConfigurationError("private-b02-configuration-marker", provider="openai")
 
-    monkeypatch.setattr(chat, "apply_prompt_templating", fail_preparation)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.apply_prompt_templating", fail_preparation)
     provider_calls = []
 
     def unexpected_provider(*args, **kwargs):
         provider_calls.append((args, kwargs))
         raise AssertionError("preparation failure must not call provider")
 
-    monkeypatch.setattr(chat, "perform_chat_api_call", unexpected_provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", unexpected_provider)
     selection = _selection(client, cid, headers, "b02-reserved-preparation")
     response = client.post(
         "/api/v1/chat/completions", headers=headers,

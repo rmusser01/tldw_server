@@ -33,7 +33,7 @@ async def _complete_v2_stream_lines(monkeypatch, bind_provider_call, streams_uni
         bind_provider_call(kwargs)
         return iter(provider_lines)
 
-    monkeypatch.setattr(chat_sessions_mod, "perform_chat_api_call", _fake_perform_chat_api_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_perform_chat_api_call)
 
     tmpdir = tempfile.mkdtemp(prefix="chacha_stream_done_")
     monkeypatch.setenv("USER_DB_BASE_DIR", tmpdir)

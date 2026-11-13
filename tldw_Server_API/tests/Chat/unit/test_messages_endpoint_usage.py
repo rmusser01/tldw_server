@@ -76,8 +76,7 @@ def _install_resolutions(
             return None
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, user: (int(user.id_int), [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
@@ -376,7 +375,7 @@ async def test_converted_stream_rejects_every_structural_provider_error_before_m
 
         return _stream()
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _stream_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _stream_adapter)
     response = await messages_endpoint._handle_messages(
         _message_request("openai/gpt-4o-mini", stream=True),
         current_user=SimpleNamespace(id_int=1),
@@ -448,7 +447,7 @@ async def test_converted_stream_preserves_domain_error_tool_arguments(
 
         return _stream()
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _stream_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _stream_adapter)
     response = await messages_endpoint._handle_messages(
         _message_request("openai/gpt-4o-mini", stream=True),
         current_user=SimpleNamespace(id_int=1),
@@ -510,7 +509,7 @@ async def test_concurrent_converted_stream_error_marks_only_valid_credentials(
         )
         return "".join([item async for item in response.body_iterator])
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _stream_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _stream_adapter)
     valid_task = asyncio.create_task(_request_and_consume(1))
     error_task = asyncio.create_task(_request_and_consume(2))
     try:
@@ -566,7 +565,7 @@ async def test_concurrent_converted_mixed_error_marks_only_valid_credentials(
             }
         return _mixed_converted_messages_response("later-choice", sentinel)
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     valid_task = asyncio.create_task(
         messages_endpoint._handle_messages(
             _message_request("openai/gpt-4o-mini"),
@@ -646,8 +645,7 @@ async def test_messages_uses_trusted_runtime_scope_and_closes_after_nonstream(
         }
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (7, [11], [22], True),
         raising=False,
     )
@@ -657,7 +655,7 @@ async def test_messages_uses_trusted_runtime_scope_and_closes_after_nonstream(
         _Runtime,
         raising=False,
     )
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
 
     response = await messages_endpoint._handle_messages(
         _message_request("openai/gpt-4o-mini"),
@@ -713,7 +711,7 @@ async def test_converted_messages_legacy_function_call_marks_scoped_credentials(
             "usage": {"prompt_tokens": 3, "completion_tokens": 2},
         }
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
 
     response = await messages_endpoint._handle_messages(
         _message_request("openai/legacy-model"),
@@ -770,7 +768,7 @@ async def test_converted_messages_malformed_legacy_function_call_fails_closed(
             ]
         }
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
 
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._handle_messages(
@@ -860,7 +858,7 @@ async def test_converted_nonstream_rejects_nonobject_tool_input_before_mark(
             arguments=arguments,
         )
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._handle_messages(
             _message_request("openai/model-a"),
@@ -911,7 +909,7 @@ async def test_converted_nonstream_accepts_object_tool_input_controls(
             arguments=arguments,
         )
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     response = await messages_endpoint._handle_messages(
         _message_request("openai/model-a"),
         current_user=SimpleNamespace(id_int=1),
@@ -960,7 +958,7 @@ async def test_converted_nonstream_rejects_invalid_usage_before_mark(
             "usage": usage,
         }
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._handle_messages(
             _message_request("openai/model-a"),
@@ -1005,7 +1003,7 @@ async def test_concurrent_converted_tool_schema_marks_only_valid_credentials(
             arguments=arguments,
         )
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     valid_task = asyncio.create_task(
         messages_endpoint._handle_messages(
             _message_request("openai/model-a"),
@@ -1167,12 +1165,11 @@ async def test_converted_messages_cancellation_marks_and_closes_after_adapter_ex
         }
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (7, [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
 
     task = asyncio.create_task(
         messages_endpoint._handle_messages(
@@ -1231,7 +1228,7 @@ async def test_concurrent_converted_messages_mark_only_the_credentials_used(
             "usage": {"prompt_tokens": 1, "completion_tokens": 1},
         }
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _call_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _call_adapter)
     request_data = _message_request("openai/gpt-4o-mini")
     first = asyncio.create_task(
         messages_endpoint._handle_messages(
@@ -1283,7 +1280,7 @@ async def test_converted_invalid_response_does_not_mark_credentials_used(
     async def _invalid_adapter(**_kwargs: Any) -> str:
         return "not a response object"
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _invalid_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _invalid_adapter)
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._handle_messages(
             _message_request("openai/gpt-4o-mini"),
@@ -1316,7 +1313,7 @@ async def test_stream_marks_use_on_first_valid_output_but_not_when_empty(
 
         return _stream()
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _stream_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _stream_adapter)
     output_response = await messages_endpoint._handle_messages(
         _message_request("openai/gpt-4o-mini", stream=True),
         current_user=SimpleNamespace(id_int=1),
@@ -1767,7 +1764,7 @@ async def test_error_only_converted_stream_is_terminal_without_marking_use(
 
         return _stream()
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _stream_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _stream_adapter)
     response = await messages_endpoint._handle_messages(
         _message_request("openai/gpt-4o-mini", stream=True),
         current_user=SimpleNamespace(id_int=1),
@@ -1825,14 +1822,12 @@ async def test_converted_stream_exception_is_sanitized_and_closes_before_runtime
         return _stream()
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
     monkeypatch.setattr(
-        messages_endpoint,
-        "perform_chat_api_call_async",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
         _stream_adapter,
     )
 
@@ -1903,12 +1898,11 @@ async def test_converted_stream_early_termination_closes_source_before_runtime(
         return raw_source
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _stream_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _stream_adapter)
     response = await messages_endpoint._handle_messages(
         _message_request("openai/gpt-4o-mini", stream=True),
         current_user=SimpleNamespace(id_int=1),
@@ -2058,14 +2052,12 @@ async def test_converted_message_stop_detaches_blocking_source_close_once(
         return source
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
     monkeypatch.setattr(
-        messages_endpoint,
-        "perform_chat_api_call_async",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
         _stream_adapter,
     )
 
@@ -2200,12 +2192,11 @@ async def test_concurrent_converted_stream_aclose_is_request_local_and_ordered(
         return source
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, user: (int(user.id_int), [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _stream_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _stream_adapter)
 
     async def _open(user_id: int):
         response = await messages_endpoint._handle_messages(
@@ -2285,12 +2276,11 @@ async def test_converted_factory_exception_is_detached_and_closes_runtime(
         raise RuntimeError(sentinel)
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
 
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._handle_messages(
@@ -2519,8 +2509,7 @@ async def test_native_stream_cancellation_closes_source_before_credential_runtim
         return _source()
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
@@ -2573,7 +2562,7 @@ async def test_error_only_converted_response_is_rejected_without_marking_use(
     async def _error_adapter(**_kwargs: Any) -> dict[str, Any]:
         return {"error": {"message": "upstream denied", "type": "provider_error"}}
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _error_adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _error_adapter)
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._handle_messages(
             _message_request("openai/gpt-4o-mini"),
@@ -2619,7 +2608,7 @@ async def test_bedrock_default_chain_auth_reaches_messages_adapter(
             "usage": {"prompt_tokens": 1, "completion_tokens": 1},
         }
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     response = await messages_endpoint._handle_messages(
         _message_request("bedrock/anthropic.claude-3-haiku"),
         current_user=SimpleNamespace(id_int=1),
@@ -2878,8 +2867,7 @@ async def test_concurrent_messages_retries_explicit_false_credential_mark(
         }
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, user: (int(user.id_int), [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
@@ -2890,8 +2878,7 @@ async def test_concurrent_messages_retries_explicit_false_credential_mark(
         _native_stream,
     )
     monkeypatch.setattr(
-        messages_endpoint,
-        "perform_chat_api_call_async",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
         _converted_adapter,
     )
 
@@ -3070,8 +3057,7 @@ async def test_stream_cancellation_drains_false_mark_retry_before_close(
         return _source()
 
     monkeypatch.setattr(
-        messages_endpoint,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _user: (1, [], [], False),
     )
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
@@ -3081,8 +3067,7 @@ async def test_stream_cancellation_drains_false_mark_retry_before_close(
         _native_stream,
     )
     monkeypatch.setattr(
-        messages_endpoint,
-        "perform_chat_api_call_async",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
         _converted_stream,
     )
 
@@ -4949,7 +4934,7 @@ async def test_converted_nonstream_rejects_invalid_finish_contract_before_mark(
     async def _adapter(**_kwargs: Any) -> dict[str, Any]:
         return _converted_nonstream_finish_contract_response(case, sentinel)
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._handle_messages(
             _message_request("openai/model-a"),
@@ -4989,7 +4974,7 @@ async def test_converted_nonstream_accepts_valid_finish_contract_controls(
     async def _adapter(**_kwargs: Any) -> dict[str, Any]:
         return _converted_nonstream_finish_contract_response(case, "unused")
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     response = await messages_endpoint._handle_messages(
         _message_request("openai/model-a"),
         current_user=SimpleNamespace(id_int=1),
@@ -5041,7 +5026,7 @@ async def test_concurrent_converted_nonstream_finish_contract_is_request_local(
             anthropic_beta=None,
         )
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter)
     tasks = [asyncio.create_task(_call(user_id)) for user_id in (1, 2)]
     try:
         await asyncio.wait_for(

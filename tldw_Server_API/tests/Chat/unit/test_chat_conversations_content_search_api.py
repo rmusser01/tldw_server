@@ -172,7 +172,7 @@ def test_unknown_search_in_is_a_client_error(ctx: SimpleNamespace, search_in: st
 def test_content_search_is_labelled_in_search_metrics(ctx: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     """Content searches are distinguishable from title searches when watching latency."""
     registry = _FakeMetricsRegistry()
-    monkeypatch.setattr(chat_router, "get_metrics_registry", lambda: registry, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: registry, raising=False)
     _add_chat(ctx.db, "weekly", "Weekly sync")
     _say(ctx.db, "weekly", "zebrafinch")
 

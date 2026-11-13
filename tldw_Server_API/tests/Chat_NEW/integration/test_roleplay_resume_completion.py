@@ -14,6 +14,9 @@ from tldw_Server_API.tests.LLM_Calls.test_provider_inventory_egress_scope import
 )
 
 
+pytestmark = pytest.mark.real_chat_service
+
+
 @pytest.fixture
 def resume_api(credentialed_test_client, populated_chacha_db, auth_headers):
     db = CharactersRAGDB(db_path=populated_chacha_db.db_path_str, client_id="1", owner_user_id="1")
@@ -190,7 +193,7 @@ def test_resume_completion_fence_rejects_before_live_sources_or_dispatch(resume_
         raise AssertionError("Protected Resume fell through to current sources/provider")
 
     monkeypatch.setattr(db, "get_character_card_by_id", forbidden)
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", forbidden)
     response = client.post(
         f"/api/v1/chats/{cid}/complete-v2",
         headers=headers,
@@ -227,7 +230,7 @@ def test_unchanged_protected_generation_dispatches_saved_prompt_and_persists_onc
         calls.append(kwargs)
         return {"choices": [{"message": {"role": "assistant", "content": content}}]}
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Loaded a changed source card")
@@ -269,7 +272,7 @@ def test_concurrent_writer_retains_generated_content_without_wrong_save(resume_a
         assert release.wait(8), "Test did not release owned provider"
         return {"choices": [{"message": {"content": content}}]}
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     with ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(client.post, f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
         try:
@@ -322,7 +325,7 @@ def test_invalid_provider_result_is_never_saved_as_roleplay_text(resume_api, mon
 
     client, db, cid, headers = resume_api
     body = generation_request(client, db, cid, headers)
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", lambda **kwargs: provider_result)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: provider_result)
     response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
     assert response.status_code == 502, response.text
     assert "private-provider-detail" not in response.text
@@ -364,10 +367,9 @@ def test_frozen_lore_obeys_current_segment_cost_policy(resume_api, monkeypatch, 
         calls.append(kwargs)
         return {"choices": [{"message": {"content": "Actual reply"}}]}
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     monkeypatch.setattr(
-        endpoint,
-        "load_prompt_cost_guardrail_config",
+        "tldw_Server_API.app.core.Chat.prompt_cost_guardrails.load_prompt_cost_guardrail_config",
         lambda: PromptCostGuardrailConfig(enabled=True, default_action=action, warn_world_book_tokens=1),
     )
     before = db.count_messages_for_conversation(cid)
@@ -833,7 +835,7 @@ def test_protected_resume_generation_enforces_llm_quota(resume_api, monkeypatch,
     before = db.get_roleplay_resume_state(cid)
     provider = Mock(return_value="Unexpected provider work")
     persist = Mock(wraps=db.commit_roleplay_resume_generation)
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     monkeypatch.setattr(db, "commit_roleplay_resume_generation", persist)
 
     async def limit(_uid: object, key: str) -> int | None:
@@ -878,7 +880,7 @@ def test_protected_resume_generation_admits_an_over_limit_user_on_their_own_key(
         admitted.append(current_llm_call_context().prechecked)
         return {"choices": [{"message": {"role": "assistant", "content": "Resumed on your key."}}]}
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider_call)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", own_key)
     refuse_llm_work(monkeypatch)
     response = client.post(f"/api/v1/chats/{cid}/complete-v2", headers=headers, json=body)
@@ -903,7 +905,7 @@ def test_completed_resume_replay_ignores_new_llm_quota(resume_api, monkeypatch, 
     client, db, cid, headers = resume_api
     body = generation_request(client, db, cid, headers)
     provider = Mock(return_value="Saved reply before quota exhaustion")
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider)
     limits = {}
     reads = []
 

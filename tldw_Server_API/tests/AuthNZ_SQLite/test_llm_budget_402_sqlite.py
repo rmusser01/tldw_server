@@ -28,7 +28,7 @@ def _override_chat_deps(app, monkeypatch, chacha_db_path: Path):
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", lambda **kwargs: _chat_stub_response())
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: _chat_stub_response())
     monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test"}))
 
     async def _override_chacha_db_for_user(current_user=None):

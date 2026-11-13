@@ -110,7 +110,7 @@ def test_queue_reject_returns_429(
         _app.dependency_overrides[get_chacha_db_for_user] = lambda: db
 
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue",
+            "tldw_Server_API.app.core.Chat.request_queue.get_request_queue",
             return_value=_QueueStubReject(),
         ):
             body = {
@@ -155,11 +155,11 @@ def test_queue_admit_allows_request(
 
         with (
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue",
+                "tldw_Server_API.app.core.Chat.request_queue.get_request_queue",
                 return_value=_QueueStubAdmit(),
             ),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value=mock_response,
             ),
         ):
@@ -207,7 +207,7 @@ def test_queue_enabled_skips_admission(
         with (
             patch("tldw_Server_API.app.api.v1.endpoints.chat.QUEUED_EXECUTION", True),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue",
+                "tldw_Server_API.app.core.Chat.request_queue.get_request_queue",
                 return_value=queue_stub,
             ),
             patch(
@@ -215,7 +215,7 @@ def test_queue_enabled_skips_admission(
                 return_value=queue_stub,
             ),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value=mock_response,
             ),
         ):

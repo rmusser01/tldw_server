@@ -242,7 +242,7 @@ async def test_native_messages_uses_same_authoritative_alias_membership(
         assert model == "claude-current-alias"
         return credentials
 
-    monkeypatch.setattr(messages, "provider_auth_is_resolved", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.adapter_utils.provider_auth_is_resolved", lambda *_args, **_kwargs: True)
     runtime: Any = SimpleNamespace(resolve=resolve)
     if expected_status is None:
         assert await messages._resolve_messages_credentials(

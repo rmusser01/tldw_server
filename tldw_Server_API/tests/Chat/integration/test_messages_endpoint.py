@@ -70,7 +70,7 @@ def test_messages_endpoint_non_streaming(client_user_only, monkeypatch):
     async def _fake_call(**kwargs):
         return _build_openai_response("hello")
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _fake_call)
 
     payload = {
         "model": "openai/gpt-4",
@@ -96,7 +96,7 @@ def test_messages_endpoint_streaming(client_user_only, monkeypatch):
             yield 'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\n'
         return _stream()
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _fake_call)
 
     payload = {
         "model": "openai/gpt-4",
@@ -133,7 +133,7 @@ def test_messages_refuses_an_over_quota_user_before_any_provider_call(client_use
         calls.append("native")
         return _build_native_response()
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter_call)
     monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_post)
     refuse_llm_work(monkeypatch)
     payload = {"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10, "stream": stream}
@@ -158,7 +158,7 @@ def test_messages_admits_an_over_quota_user_whose_provider_runs_on_their_own_key
     async def _own_key(_uid, provider):
         return provider == "openai"
 
-    monkeypatch.setattr(messages_endpoint, "perform_chat_api_call_async", _adapter_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _adapter_call)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
     refuse_llm_work(monkeypatch)
     payload = {"model": "openai/gpt-4", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10}
@@ -241,8 +241,7 @@ def test_messages_count_tokens_anthropic(client_user_only, monkeypatch):
     # count_tokens posts through async_http_client_factory; the sync
     # http_client_factory alias is not on this path.
     monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
+        "tldw_Server_API.app.core.http_client.create_async_client",
         lambda *a, **k: _AsyncFakeClient({"input_tokens": 3}),
     )
 

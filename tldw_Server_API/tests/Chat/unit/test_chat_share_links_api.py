@@ -123,7 +123,7 @@ def test_share_link_create_list_revoke_and_public_resolve(tmp_path, monkeypatch)
         assert int(user_id) == 1
         return db
 
-    monkeypatch.setattr(chat_router, "get_chacha_db_for_user_id", _fake_get_db_for_user_id)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id", _fake_get_db_for_user_id)
 
     create_response = client.post(
         f"/api/v1/chat/conversations/{conversation_id}/share-links",
@@ -433,8 +433,7 @@ def test_share_link_writer_uses_transactional_conversation_identity(monkeypatch)
         return settings
 
     monkeypatch.setattr(
-        chat_router,
-        "validate_chat_settings_storage",
+        "tldw_Server_API.app.core.Character_Chat.chat_settings_validation.validate_chat_settings_storage",
         _capture_validation,
     )
     db = _RacingDB()

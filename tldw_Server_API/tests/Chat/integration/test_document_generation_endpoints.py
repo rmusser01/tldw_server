@@ -99,8 +99,7 @@ def _install_direct_document_runtime(monkeypatch, lifecycle):
 
     monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", RecordingRuntime)
     monkeypatch.setattr(
-        chat_docs,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _principal: (1, [11], [22], True),
     )
 
@@ -212,7 +211,7 @@ async def test_document_factory_starts_without_default_executor_and_drains_cance
             return "generated"
 
     _install_direct_document_runtime(monkeypatch, lifecycle)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     loop.set_default_executor(saturated_executor)
     default_blocker = loop.run_in_executor(None, block_default_executor)
     try:
@@ -292,7 +291,7 @@ async def test_document_factory_capacity_rejection_is_bounded_and_pre_dispatch(
             return []
 
     _install_direct_document_runtime(monkeypatch, lifecycle)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     pool.start(occupy_pool, name="occupied-document-worker")
     try:
         await _wait_for_thread_event(occupied)
@@ -358,8 +357,7 @@ async def test_document_stream_missing_credentials_fails_closed_in_test_mode(
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", MissingCredentialRuntime)
     monkeypatch.setattr(
-        chat_docs,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _principal: (1, [], [], False),
     )
 
@@ -618,7 +616,7 @@ async def test_document_sync_stream_disconnect_retains_distinct_late_iterator_fo
 
     _install_direct_document_runtime(monkeypatch, lifecycle)
     monkeypatch.delenv("STREAMS_UNIFIED", raising=False)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
     response = await chat_docs.generate_document(
         request=GenerateDocumentRequest(
             **_make_payload(provider="ollama", model="model-a", api_key=None, stream=True)
@@ -710,7 +708,7 @@ async def test_document_sync_stream_uses_bounded_next_and_reserved_close_when_ex
 
     _install_direct_document_runtime(monkeypatch, lifecycle)
     monkeypatch.delenv("STREAMS_UNIFIED", raising=False)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", sync_pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", sync_pool, raising=False)
     monkeypatch.setattr(
         bounded_daemon_module,
         "STREAM_CLEANUP_DAEMON_POOL",
@@ -1045,7 +1043,7 @@ async def test_document_cancelled_next_classifies_late_result_semantically(
     success_state = {"successful": False}
     resource_holder = {}
     pool = BoundedDaemonPool(2)
-    monkeypatch.setattr(chat_docs, "SYNC_ADAPTER_CALL_POOL", pool, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.bounded_daemon.SYNC_ADAPTER_CALL_POOL", pool, raising=False)
 
     def late_value():
         if late_kind == "clean_exhaustion":
@@ -1166,8 +1164,7 @@ async def test_document_bedrock_auth_contract_distinguishes_default_chain_from_a
 
     monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", BedrockRuntime)
     monkeypatch.setattr(
-        chat_docs,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _principal: (1, [], [], False),
     )
 
@@ -1933,8 +1930,7 @@ def test_document_generate_keeps_static_snapshot_at_service_boundary(
     authenticated_client.app.dependency_overrides[get_document_generator_service] = lambda: SnapshotService
     monkeypatch.setattr(chat_docs, "ProviderCredentialRuntime", FakeRuntime)
     monkeypatch.setattr(
-        chat_docs,
-        "derive_trusted_credential_scope",
+        "tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope",
         lambda _request, _principal: (1, [2], [3], True),
     )
     monkeypatch.setattr(

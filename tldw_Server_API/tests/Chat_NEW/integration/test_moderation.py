@@ -304,7 +304,7 @@ def test_input_block_returns_400(monkeypatch, credentialed_test_client_factory):
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         policy = _StubPolicy(enabled=True, input_action='block', output_action='redact')
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(policy)):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -334,8 +334,8 @@ def test_input_block_fails_closed_when_mandatory_audit_fails(credentialed_test_c
         app.dependency_overrides[get_audit_service_for_user] = _failing_audit_service_override
         policy = _StubPolicy(enabled=True, input_action='block', output_action='redact')
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_provider:
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(policy)), \
+             patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_provider:
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -366,8 +366,8 @@ def test_input_block_fails_closed_when_audit_service_missing(credentialed_test_c
         app.dependency_overrides[get_audit_service_for_user] = _missing_audit_service_override
         policy = _StubPolicy(enabled=True, input_action='block', output_action='redact')
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_provider:
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(policy)), \
+             patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_provider:
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -408,8 +408,8 @@ def test_output_redaction_non_streaming(monkeypatch, credentialed_test_client_fa
             ]
         }
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=reply):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(policy)), \
+             patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=reply):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -477,10 +477,10 @@ def test_output_redaction_non_streaming_with_real_moderation_service(
     try:
         app.dependency_overrides[get_chacha_db_for_user] = lambda: db
         with patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service",
+            "tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service",
             return_value=service,
         ), patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             return_value=reply,
         ):
             with credentialed_test_client_factory(app) as client:
@@ -533,8 +533,8 @@ def test_output_redaction_non_streaming_fails_closed_when_mandatory_audit_fails(
             ]
         }
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=reply):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(policy)), \
+             patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=reply):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -576,8 +576,8 @@ def test_output_block_non_streaming_fails_closed_when_mandatory_audit_fails(
             ]
         }
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=reply):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(policy)), \
+             patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=reply):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -615,9 +615,9 @@ def test_streaming_redaction_applied(credentialed_test_client_factory):
             yield "data: [DONE]\n\n"
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service",
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service",
                   return_value=_StubModerationService(policy)),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+            patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                   return_value=upstream_stream()),
         ):
             with credentialed_test_client_factory(app) as client:
@@ -684,9 +684,9 @@ def test_streaming_cross_chunk_redaction_output(
             yield "data: [DONE]\n\n"
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service",
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service",
                   return_value=_EvalModerationService(policy)),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+            patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                   return_value=upstream_stream()),
         ):
             with credentialed_test_client_factory(app) as client:
@@ -749,8 +749,8 @@ def test_streaming_block_emits_sse_error_and_finishes(
             yield f"data: {json.dumps(chunk2)}\n\n"
             yield "data: [DONE]\n\n"
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(policy)), \
+             patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=upstream_stream()):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -795,8 +795,8 @@ def test_streaming_block_emits_audit_failure_when_mandatory_audit_fails(
             yield f"data: {json.dumps(chunk2)}\n\n"
             yield "data: [DONE]\n\n"
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(policy)), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(policy)), \
+             patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=upstream_stream()):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -839,9 +839,9 @@ def test_streaming_redaction_emits_audit_failure_and_fails_closed(
             yield "data: [DONE]\n\n"
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service",
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service",
                   return_value=_StubModerationService(policy)),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+            patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                   return_value=upstream_stream()),
         ):
             with credentialed_test_client_factory(app) as client:
@@ -903,8 +903,8 @@ def test_streaming_cross_chunk_redaction_persisted(
             yield f"data: {json.dumps(chunk2)}\n\n"
             yield "data: [DONE]\n\n"
 
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_EvalModerationService(policy)), \
-             patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=upstream_stream()):
+        with patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_EvalModerationService(policy)), \
+             patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=upstream_stream()):
             with credentialed_test_client_factory(app) as client:
                 resp = client.get("/api/v1/health")
                 client.csrf_token = resp.cookies.get("csrf_token", "")
@@ -964,12 +964,12 @@ def test_character_chat_input_guardian_overlay_uses_character_chat_type(credenti
             )
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(base_policy)),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(base_policy)),
+            patch("tldw_Server_API.app.core.Moderation.supervised_policy.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
             patch("tldw_Server_API.app.core.feature_flags.is_guardian_enabled", return_value=True),
             patch("tldw_Server_API.app.core.feature_flags.is_self_monitoring_enabled", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value={
                     "id": "chatcmpl-guard-input-1",
                     "object": "chat.completion",
@@ -1039,12 +1039,12 @@ def test_continued_character_conversation_input_guardian_overlay_uses_saved_conv
             )
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(base_policy)),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(base_policy)),
+            patch("tldw_Server_API.app.core.Moderation.supervised_policy.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
             patch("tldw_Server_API.app.core.feature_flags.is_guardian_enabled", return_value=True),
             patch("tldw_Server_API.app.core.feature_flags.is_self_monitoring_enabled", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value={
                     "id": "chatcmpl-guard-input-2",
                     "object": "chat.completion",
@@ -1115,12 +1115,12 @@ def test_continued_ordinary_conversation_input_guardian_overlay_stays_regular_fo
             )
 
         with (
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=_StubModerationService(base_policy)),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
+            patch("tldw_Server_API.app.core.Moderation.moderation_service.get_moderation_service", return_value=_StubModerationService(base_policy)),
+            patch("tldw_Server_API.app.core.Moderation.supervised_policy.bootstrap_guardian_moderation_runtime", side_effect=_fake_bootstrap_guardian_moderation_runtime, create=True),
             patch("tldw_Server_API.app.core.feature_flags.is_guardian_enabled", return_value=True),
             patch("tldw_Server_API.app.core.feature_flags.is_self_monitoring_enabled", return_value=False),
             patch(
-                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 return_value={
                     "id": "chatcmpl-guard-input-ordinary",
                     "object": "chat.completion",

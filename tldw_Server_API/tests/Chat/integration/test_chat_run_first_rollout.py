@@ -17,7 +17,7 @@ pytestmark = pytest.mark.integration
 
 
 @patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test_key"}))
-@patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call")
+@patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call")
 @patch("tldw_Server_API.app.api.v1.endpoints.chat.load_template")
 def test_chat_endpoint_records_run_first_rollout_labels(
     mock_load_template,
@@ -61,7 +61,7 @@ def test_chat_endpoint_records_run_first_rollout_labels(
     collector.track_run_first_fallback_after_run = MagicMock()
     collector.track_run_first_completion_proxy = MagicMock()
 
-    monkeypatch.setattr("tldw_Server_API.app.api.v1.endpoints.chat.get_chat_metrics", lambda: collector)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_metrics.get_chat_metrics", lambda: collector)
     monkeypatch.setattr(chat_service, "resolve_chat_run_first_rollout_mode", lambda raw_mode=None, default="off": "default_on")
     monkeypatch.setattr(
         chat_service,

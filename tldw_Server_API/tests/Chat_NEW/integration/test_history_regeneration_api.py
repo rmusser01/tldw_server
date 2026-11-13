@@ -71,14 +71,16 @@ def test_regeneration_reuses_original_input_and_preserves_selected_originals(
     client, db, cid, headers = history_api
     from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
 
-    provider = endpoint.perform_chat_api_call
+    from tldw_Server_API.app.core.Chat import chat_service as _chat_service
+
+    provider = _chat_service.perform_chat_api_call
     provider_inputs = []
 
     def observe(api_endpoint, messages_payload, **kwargs):
         provider_inputs.append(messages_payload)
         return provider(api_endpoint, messages_payload, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", observe)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", observe)
     original_admission = answered(client, cid, headers)
     if older_branch:
         later = send(client, cid, headers, select(client, cid, headers, after="a1"), "u2")
@@ -189,7 +191,7 @@ def test_invalid_regeneration_never_reaches_provider_or_message_writes(history_a
     def forbidden(*args, **kwargs):
         raise AssertionError("invalid regeneration must not reach provider")
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", forbidden)
     response = regenerate(client, cid, headers, selection, stream=stream, target=target, **extra)
     assert response.status_code == (412 if boundary == "scope-header" else 409), response.text
     if boundary in {"missing-authority", "branch-absent", "branch-false"}:
@@ -267,14 +269,16 @@ def test_server_admitted_ordered_images_are_reused_once_verbatim(history_api, mo
     admission = original.json()["tldw_history_admission_v1"]
     target = original.json()["tldw_message_id"]
     before = db.get_messages_for_conversation(cid, strict_images=True)
-    provider = endpoint.perform_chat_api_call
+    from tldw_Server_API.app.core.Chat import chat_service as _chat_service
+
+    provider = _chat_service.perform_chat_api_call
     provider_inputs = []
 
     def observe(api_endpoint, messages_payload, **kwargs):
         provider_inputs.append(messages_payload)
         return provider(api_endpoint, messages_payload, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", observe)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", observe)
     selection = select(client, cid, headers, after=target)
     response = regenerate(
         client, cid, headers, selection, stream=stream, target=target, messages=[{"role": "user", "content": content}]
@@ -310,14 +314,16 @@ def test_selected_ancestors_and_current_system_instructions_survive_regeneration
     reply(client, cid, headers, ancestor.json()["tldw_history_admission_v1"], "a0")
     original = send(client, cid, headers, select(client, cid, headers, after="a0"), "u1")
     reply(client, cid, headers, original.json()["tldw_history_admission_v1"], "a1")
-    provider = endpoint.perform_chat_api_call
+    from tldw_Server_API.app.core.Chat import chat_service as _chat_service
+
+    provider = _chat_service.perform_chat_api_call
     payloads = []
 
     def observe(api_endpoint, messages_payload, **kwargs):
         payloads.append((messages_payload, kwargs))
         return provider(api_endpoint, messages_payload, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", observe)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", observe)
     response = regenerate(
         client,
         cid,
@@ -357,14 +363,16 @@ def test_input_retirement_during_provider_call_refuses_late_reply_settlement(
     answered(client, cid, headers)
     selection = select(client, cid, headers, after="a1")
     entered, release = threading.Event(), threading.Event()
-    provider = endpoint.perform_chat_api_call
+    from tldw_Server_API.app.core.Chat import chat_service as _chat_service
+
+    provider = _chat_service.perform_chat_api_call
 
     def held(api_endpoint, messages_payload, **kwargs):
         entered.set()
         assert release.wait(15), "test must release the held provider"
         return provider(api_endpoint, messages_payload, **kwargs)
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", held)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", held)
     with ThreadPoolExecutor(max_workers=1) as pool:
         operation = pool.submit(regenerate, client, cid, headers, selection, stream=stream)
         try:

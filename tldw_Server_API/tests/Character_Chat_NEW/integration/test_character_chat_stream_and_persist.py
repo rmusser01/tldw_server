@@ -410,7 +410,7 @@ def test_complete_v2_sanitizes_emote_directives_for_non_streaming_response_and_s
             ]
         }
 
-    monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
     response = test_client.post(
         f"/api/v1/chats/{chat_id}/complete-v2",
@@ -489,7 +489,7 @@ def test_complete_v2_prompt_contract_mentions_available_emote_states(
         captured["messages"] = messages_payload
         return {"choices": [{"message": {"content": "ok"}}]}
 
-    monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
     response = test_client.post(
         f"/api/v1/chats/{chat_resp.json()['id']}/complete-v2",
@@ -871,7 +871,7 @@ def test_persist_streamed_message_maps_input_error_to_400(
         raise InputError("persist payload is invalid")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.post_message_to_conversation",
+        "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation",
         _raise_input_error,
     )
 
@@ -898,7 +898,7 @@ def test_persist_streamed_message_maps_oversize_input_error_to_413(
         raise InputError("Persist attachment exceeds maximum size")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.post_message_to_conversation",
+        "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation",
         _raise_input_error,
     )
 

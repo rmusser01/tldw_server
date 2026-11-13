@@ -125,7 +125,7 @@ def test_chat_endpoint_routes_auto_before_provider_normalization(
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
     ):
@@ -309,12 +309,12 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call_async",
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
             side_effect=fake_router_call,
             create=True,
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.log_model_router_usage",
+            "tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage",
             side_effect=fake_router_usage,
             create=True,
         ),
@@ -323,7 +323,7 @@ def test_chat_endpoint_auto_routing_runs_llm_router_logs_usage_and_wires_sticky_
             side_effect=fake_route_model,
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
     ):
@@ -435,7 +435,7 @@ def test_service_rechecks_persona_revoked_after_endpoint_admission(
             conn.execute("UPDATE persona_profiles SET is_active = ? WHERE id = ?", (False, "revoked-persona"))
         return profile
 
-    monkeypatch.setattr(chat_endpoint, "require_current_persona", admit_then_revoke)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.conversation_admission.require_current_persona", admit_then_revoke)
     with patch.object(persona_chat_db, "add_message", wraps=persona_chat_db.add_message) as message:
         response = client.post("/api/v1/chat/completions", headers=headers, json={
             "model": "gpt-4", "api_provider": "openai", "conversation_id": cid, "save_to_db": True,
@@ -502,7 +502,7 @@ def test_chat_endpoint_disables_provider_fallback_for_pinned_provider_auto_routi
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
     ):
@@ -577,11 +577,11 @@ def test_chat_endpoint_auto_routing_uses_post_validation_tool_capabilities(
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.add_skill_tool_to_tools_list_async",
+            "tldw_Server_API.app.core.Skills.context_integration.add_skill_tool_to_tools_list_async",
             side_effect=fake_add_skill_tools,
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call",
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
     ):
@@ -661,13 +661,13 @@ def test_a_refused_router_call_is_not_a_provider_failure_and_the_request_gets_th
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call_async",
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
             side_effect=refused_router_call,
             create=True,
         ),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch("tldw_Server_API.app.api.v1.endpoints.chat.route_model", side_effect=rules_route_model),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=must_not_dispatch),
+        patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", side_effect=must_not_dispatch),
     ):
         response = authenticated_client.post("/api/v1/chat/completions", headers=headers, json=request_data.model_dump())
 
@@ -719,7 +719,7 @@ def test_a_refused_router_call_that_leaves_no_route_still_gets_the_402(
             },
         ),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call_async",
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
             side_effect=refused_router_call,
             create=True,
         ),

@@ -80,7 +80,7 @@ def test_chat_completion_injects_persona_exemplar_guidance_and_debug_meta(
         observed["system_message"] = kwargs.get("system_message")
         return _fake_chat_response()
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -139,7 +139,7 @@ def test_chat_completion_persona_strategy_off_skips_exemplar_injection(
         observed["system_message"] = kwargs.get("system_message")
         return _fake_chat_response()
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -183,7 +183,7 @@ def test_chat_completion_uses_configured_persona_default_budget_when_override_mi
     def _fake_provider_call(**kwargs):  # noqa: ARG001
         return _fake_chat_response(content="Budget default response.")
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -229,7 +229,7 @@ def test_streaming_chat_persona_debug_exposes_debug_id_header(
 
         return _stream()
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_stream_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_stream_call)
 
     with test_client.stream(
         "POST",
@@ -295,8 +295,8 @@ def test_streaming_chat_computes_persona_telemetry_without_debug_meta(
             "safety_flags": [],
         }
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_stream_call)
-    monkeypatch.setattr(chat_endpoint_module, "compute_persona_exemplar_telemetry", _fake_telemetry)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_stream_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry.compute_persona_exemplar_telemetry", _fake_telemetry)
 
     with test_client.stream(
         "POST",
@@ -347,8 +347,8 @@ def test_chat_completion_computes_persona_telemetry_without_debug_meta(
             "safety_flags": [],
         }
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
-    monkeypatch.setattr(chat_endpoint_module, "compute_persona_exemplar_telemetry", _fake_telemetry)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry.compute_persona_exemplar_telemetry", _fake_telemetry)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -413,7 +413,7 @@ def test_chat_completion_excludes_safety_blocked_exemplar_for_violent_turn(
         observed["system_message"] = kwargs.get("system_message")
         return _fake_chat_response(content="I can't help with hurting people.")
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -458,7 +458,7 @@ def test_chat_completion_persona_telemetry_flags_overcopying(
     def _fake_provider_call(**kwargs):  # noqa: ARG001
         return _fake_chat_response(content=copied_response)
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -523,7 +523,7 @@ def test_chat_completion_excludes_prompt_injection_blocked_exemplar_for_jailbrea
         observed["system_message"] = kwargs.get("system_message")
         return _fake_chat_response(content="I can’t reveal hidden instructions.")
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -574,8 +574,8 @@ def test_chat_completion_embeddings_strategy_passes_user_and_character_to_embedd
         observed["character_id"] = str(kwargs.get("character_id"))
         return {}
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
-    monkeypatch.setattr(chat_endpoint_module, "score_exemplars_with_embeddings", _fake_embedding_scores)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings.score_exemplars_with_embeddings", _fake_embedding_scores)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -615,7 +615,7 @@ def test_chat_completion_accepts_persona_id_alias_before_removal_date_when_resol
         observed["system_message"] = kwargs.get("system_message")
         return _fake_chat_response(content="Alias path response.")
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -713,8 +713,8 @@ def test_chat_completion_persona_id_alias_before_removal_date_with_embeddings_st
         observed["character_id"] = str(kwargs.get("character_id"))
         return {}
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
-    monkeypatch.setattr(chat_endpoint_module, "score_exemplars_with_embeddings", _fake_embedding_scores)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_embeddings.score_exemplars_with_embeddings", _fake_embedding_scores)
 
     response = test_client.post(
         "/api/v1/chat/completions",
@@ -768,8 +768,8 @@ def test_chat_completion_auto_adjusts_persona_budget_after_sustained_ioo_alerts(
             "safety_flags": ["ioo_high"],
         }
 
-    monkeypatch.setattr(chat_endpoint_module, "perform_chat_api_call", _fake_provider_call)
-    monkeypatch.setattr(chat_endpoint_module, "compute_persona_exemplar_telemetry", _high_ioo_telemetry)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _fake_provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.modules.persona_exemplar_telemetry.compute_persona_exemplar_telemetry", _high_ioo_telemetry)
     monkeypatch.setattr(chat_endpoint_module, "_PERSONA_IOO_BUDGET_AUTO_ADJUST_ENABLED", True)
     monkeypatch.setattr(chat_endpoint_module, "_PERSONA_IOO_BUDGET_AUTO_REDUCTION_FACTOR", 0.50)
     monkeypatch.setattr(chat_endpoint_module, "_PERSONA_IOO_BUDGET_AUTO_MIN_TOKENS", 120)

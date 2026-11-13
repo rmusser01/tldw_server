@@ -174,7 +174,7 @@ def test_opt_in_read_never_returns_partial_attachments(persona_chat_client, pers
         return original(sql, *args, **kwargs)
     monkeypatch.setattr(persona_chat_db, "execute_query", query)
     if fault == "budget":
-        monkeypatch.setattr(character_messages, "MAX_CHAT_ATTACHMENT_READ_BYTES", 1, raising=False)
+        monkeypatch.setattr("tldw_Server_API.app.core.DB_Management.chacha.message_store.MAX_CHAT_ATTACHMENT_READ_BYTES", 1, raising=False)
     response = client.get(f"/api/v1/chats/{chat_id}/messages?include_images=true", headers=headers)
     assert response.status_code >= 400
     assert "messages" not in response.json()

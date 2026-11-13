@@ -22,7 +22,7 @@ def test_dual_emit_preserves_legacy_and_loop_events(
     monkeypatch.setenv("STREAMS_UNIFIED", "1")
 
     with patch(
-        "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
         return_value=_mock_provider_stream(),
     ):
         with credentialed_test_client.stream(
