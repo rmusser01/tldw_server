@@ -42,6 +42,7 @@ async def test_engine_failure_completed_before_cancel_unwinds_is_retrieved(monke
     lock = asyncio.Lock()
 
     async def request() -> None:
+        """Hold the engine lock while the controlled call is pending."""
         async with tts_utils.hold_tts_engine(lock) as run:
             await run(lambda: None)
 

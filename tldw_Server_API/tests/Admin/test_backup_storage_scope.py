@@ -40,12 +40,6 @@ def read_marker(path: Path) -> list[dict]:
 
 @pytest.fixture
 def storage_scope(tmp_path, monkeypatch):
-    from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps
-    from tldw_Server_API.app.core import config
-
-    # Full-suite collection can leave consumers holding an older settings object.
-    monkeypatch.setattr(Audit_DB_Deps, "settings", config.settings)
-    monkeypatch.setattr(data_ops, "app_settings", config.settings)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("DATABASE_URL", "sqlite:///" + str(tmp_path / "auth.db"))

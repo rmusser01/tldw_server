@@ -392,3 +392,20 @@ published branch head remains `2bd4eab7cf`. Do not inherit old-head hosted check
 as new-head success, enable auto-merge, waive the human Change summary, or start
 Skills execution features. Parent and qualification tasks remain in progress
 while these landing gates are open.
+
+## November 13 CI and Review Reconciliation (TASK-2294.3.2.11)
+
+1. **Diagnose (complete):** Run 42404336325 failed five shards in uv setup
+   (HTTP 504), one oversized Auth integration shard at its existing deadline,
+   and one Auth unit test because its timestamp contained the synthetic user
+   ID. The aggregate failure is a consequence, not another root cause.
+2. **Repair (in progress):** Rebase on dev 4b6b9ec446, retaining its pinned
+   wheel bootstrap and Auth shard split. Keep upstream MCP, VN, Admin and
+   Parakeet fixture coverage. Capture message-only output in the Auth unit
+   test while preserving redaction assertions. Record the PR-specific waiver
+   and add missing docstrings. No ADR required: no runtime policy changes.
+3. **Qualify (pending):** Repeat the timestamp-forced regression, affected
+   suites, lint, Bandit, task guards and independent review. Publish and read
+   current-head CI and CodeRabbit before enabling auto-merge. The requester
+   explicitly waived the Change summary on November 7 and selected CodeRabbit
+   plus independent review instead of Qodo on November 13.

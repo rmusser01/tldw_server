@@ -29,14 +29,14 @@ def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000, freq: float = 44
     """Generate a small mono 16-bit PCM WAV for testing."""
     n_samples = int(duration_sec * sr)
     buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
+    with wave.open(buf, 'wb') as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)
         wf.setframerate(sr)
         frames = bytearray()
         for i in range(n_samples):
             sample = int(32767 * 0.2 * math.sin(2 * math.pi * freq * (i / sr)))
-            frames += struct.pack("<h", sample)
+            frames += struct.pack('<h', sample)
         wf.writeframes(frames)
     return buf.getvalue()
 
@@ -56,6 +56,7 @@ def identity_audio_canonicalization(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_transcriptions_requires_auth_401(bypass_api_limits):
 
+
     ctx = bypass_api_limits(app)
     with ctx, TestClient(app) as client:
         wav_bytes = _make_wav_bytes()
@@ -71,9 +72,9 @@ def test_transcriptions_ok_with_override(
     identity_audio_canonicalization,
 ):
 
+
     ctx = bypass_api_limits(app)
     with ctx, TestClient(app) as client:
-
         async def _override_user():
             return User(id=1, username="tester", email="t@example.com", is_active=True)
 
@@ -114,7 +115,9 @@ def test_transcriptions_ok_with_override(
             return {
                 "text": "stubbed transcript",
                 "language": language or "en",
-                "segments": [{"start_seconds": 0.0, "end_seconds": 0.1, "Text": "stubbed transcript"}],
+                "segments": [
+                    {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "stubbed transcript"}
+                ],
                 "diarization": {"enabled": False, "speakers": None},
                 "usage": {"duration_ms": None, "tokens": None},
                 "metadata": {"provider": "faster-whisper", "model": model or "large-v3"},
@@ -145,6 +148,7 @@ def test_transcriptions_ok_with_override(
 
 def test_translations_requires_auth_401(bypass_api_limits):
 
+
     ctx = bypass_api_limits(app)
     with ctx, TestClient(app) as client:
         wav_bytes = _make_wav_bytes()
@@ -160,9 +164,9 @@ def test_translations_ok_with_override(
     identity_audio_canonicalization,
 ):
 
+
     ctx = bypass_api_limits(app)
     with ctx, TestClient(app) as client:
-
         async def _override_user():
             return User(id=1, username="tester", email="t@example.com", is_active=True)
 
@@ -203,7 +207,9 @@ def test_translations_ok_with_override(
             return {
                 "text": "translated transcript",
                 "language": language or "en",
-                "segments": [{"start_seconds": 0.0, "end_seconds": 0.1, "Text": "translated transcript"}],
+                "segments": [
+                    {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "translated transcript"}
+                ],
                 "diarization": {"enabled": False, "speakers": None},
                 "usage": {"duration_ms": None, "tokens": None},
                 "metadata": {"provider": "faster-whisper", "model": model or "large-v3"},
@@ -239,10 +245,11 @@ def test_transcriptions_parakeet_variant_routes_to_parakeet(
     identity_audio_canonicalization,
     cached_bound_method,
 ):
+
+
     """Model strings like 'parakeet-mlx' should route to the Parakeet provider, not Whisper."""
     ctx = bypass_api_limits(app)
     with ctx, TestClient(app) as client:
-
         async def _override_user():
             return User(id=1, username="tester", email="t@example.com", is_active=True)
 
@@ -285,7 +292,9 @@ def test_transcriptions_parakeet_variant_routes_to_parakeet(
             return {
                 "text": "parakeet transcript",
                 "language": language or "en",
-                "segments": [{"start_seconds": 0.0, "end_seconds": 0.1, "Text": "parakeet transcript"}],
+                "segments": [
+                    {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "parakeet transcript"}
+                ],
                 "diarization": {"enabled": False, "speakers": None},
                 "usage": {"duration_ms": None, "tokens": None},
                 "metadata": {"provider": "parakeet", "model": model or ""},
@@ -329,10 +338,11 @@ def test_transcriptions_default_model_uses_config(
     bypass_api_limits,
     identity_audio_canonicalization,
 ):
+
+
     """Omitting model should use config.txt defaults for the STT provider."""
     ctx = bypass_api_limits(app)
     with ctx, TestClient(app) as client:
-
         async def _override_user():
             return User(id=1, username="tester", email="t@example.com", is_active=True)
 
@@ -364,7 +374,9 @@ def test_transcriptions_default_model_uses_config(
             return {
                 "text": "config default transcript",
                 "language": language or "en",
-                "segments": [{"start_seconds": 0.0, "end_seconds": 0.1, "Text": "config default transcript"}],
+                "segments": [
+                    {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "config default transcript"}
+                ],
                 "diarization": {"enabled": False, "speakers": None},
                 "usage": {"duration_ms": None, "tokens": None},
                 "metadata": {"provider": "parakeet", "model": model or ""},
@@ -399,10 +411,11 @@ def test_transcriptions_qwen2audio_variant_routes_to_qwen2audio(
     bypass_api_limits,
     identity_audio_canonicalization,
 ):
+
+
     """Model strings like 'qwen2audio-test' should route to Qwen2Audio provider, not Whisper."""
     ctx = bypass_api_limits(app)
     with ctx, TestClient(app) as client:
-
         async def _override_user():
             return User(id=1, username="tester", email="t@example.com", is_active=True)
 
@@ -435,7 +448,9 @@ def test_transcriptions_qwen2audio_variant_routes_to_qwen2audio(
             return {
                 "text": "qwen2audio transcript",
                 "language": language or "en",
-                "segments": [{"start_seconds": 0.0, "end_seconds": 0.1, "Text": "qwen2audio transcript"}],
+                "segments": [
+                    {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "qwen2audio transcript"}
+                ],
                 "diarization": {"enabled": False, "speakers": None},
                 "usage": {"duration_ms": None, "tokens": None},
                 "metadata": {"provider": "qwen2audio", "model": model or ""},
@@ -465,6 +480,8 @@ def test_transcriptions_qwen2audio_variant_routes_to_qwen2audio(
 
 
 def test_transcriptions_whisper_model_not_cached_allows_first_use_load(monkeypatch, bypass_api_limits):
+
+
     """
     When the underlying faster-whisper model is not cached locally yet,
     /audio/transcriptions should still proceed through the adapter so the
@@ -472,7 +489,6 @@ def test_transcriptions_whisper_model_not_cached_allows_first_use_load(monkeypat
     """
     ctx = bypass_api_limits(app)
     with ctx, TestClient(app) as client:
-
         async def _override_user():
             return User(id=1, username="tester", email="t@example.com", is_active=True)
 
@@ -534,7 +550,9 @@ def test_transcriptions_whisper_model_not_cached_allows_first_use_load(monkeypat
             return {
                 "text": "first use integration transcript",
                 "language": language or "en",
-                "segments": [{"start_seconds": 0.0, "end_seconds": 0.1, "Text": "first use integration transcript"}],
+                "segments": [
+                    {"start_seconds": 0.0, "end_seconds": 0.1, "Text": "first use integration transcript"}
+                ],
                 "diarization": {"enabled": False, "speakers": None},
                 "usage": {"duration_ms": None, "tokens": None},
                 "metadata": {"provider": "faster-whisper", "model": model or "large-v3"},
