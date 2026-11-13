@@ -653,8 +653,10 @@ def test_log_file_lock_uses_runtime_timeout_from_env(
 
 
 @pytest.fixture
-def fallback_log_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[ModuleType, Path]:
-    """Load the real fallback lock without reloading a live writer's globals."""
+def fallback_log_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> tuple[ModuleType, Path]:
+    """Expose the real fallback lock without background file-log appends."""
     log_path = tmp_path / "fallback_system_logs.jsonl"
     # Lock tests use real files without unrelated queued log appends competing.
     monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "false")

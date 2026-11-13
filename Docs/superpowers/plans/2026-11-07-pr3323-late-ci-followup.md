@@ -2,7 +2,7 @@
 
 **Task:** TASK-15480 (original local evidence run ID: TASK-15466)
 **Follow-up PR:** https://github.com/rmusser01/tldw_server/pull/3438
-**Base:** `cb70f0c5d134ac585c70fc30b5a99bf0ced98562` (`dev`); initial publication base was `dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c`.
+**Base:** `4b6b9ec446387b957d000d465c38fe682e6940e3` (`dev`); initial publication base was `dfac3ca7f34a296a2dc3a3fbc340efdd1a0bae5c`.
 **Goal:** Validate all four late CI failures and publish only confirmed, unowned repairs.
 **ADR check:** No new ADR is required for restoring existing lock configuration and generated-artifact contracts. ADR-059 governs task editing; ADR-085 governs the separately owned AuthNZ fixture repair.
 
@@ -117,3 +117,18 @@ The merge-queue variable is unset. After the final publication and review/check 
 Fresh local verification after this rebase passes **277 tests, zero failures/errors/skips** (848 warnings): 22 Logging, ten inventory, 212 Docs and 33 test-quality/task ratchet cases. Ruff, scoped Black, compilation, whitespace, canonical task normalization and unique IDs pass. Bandit against the exact new dev base retains the same three inherited B105 synthetic-secret findings with no new findings or analysis errors (B101 excluded in both test scans). Backend/helper/config inputs are identical between the two dev bases; the earlier broad matrices remain historical source-identical evidence, not new-head hosted passes.
 
 The old published head's hosted core-server-smoke check completed successfully during this audit, confirming the previously disclosed local Hypothesis limitation is not a hosted failure on that head. No failing check or actionable review comment was reported before final publication. PR #3406 remains open at its independently validated source head. The rebased head still needs its own hosted protected gates before normal auto-merge can land it.
+
+### November 13 Rebase and CI Disposition
+
+Rebased the three published commits from `983fe26a126a35cbb602f70f50fd73d89a62dfcf` onto `4b6b9ec446387b957d000d465c38fe682e6940e3`. All three conflicts overlapped upstream repairs. Preserve the newer generated inventories from `3451c811d0`, the private fallback module fixture from `1dcba9972c`, and the queue-drain regression from `aa54f65509`. Retain this PR's distinct held-lock isolation regression. No new runtime or workflow behavior is introduced; no new ADR is needed.
+
+The old-head full-suite aggregate in run `42420375003` reflects these 14 shard failures:
+
+| Failure | Rebase disposition |
+| --- | --- |
+| Eleven RAG, paper-search and embeddings setup failures | All eleven check annotations report HTTP 504 before tests. `0de5c3ad22` on dev uses the pinned official PyPI wheel instead of the failing release-asset download. |
+| MCP in-app accounting | Dev has the standard-library spies in `c0d9a0a451`; all 63 accounting tests pass with plugin autoload disabled. |
+| Admin PostgreSQL restore interruption | The old run failed its offline admission check before restore. Dev's `aa54f65509` finishes connection reset before pool shutdown, preserving the offline guard. The Admin backup shard passed on #3461 head `7044613f96`, whose tree exactly matches the new dev base. |
+| AuthNZ integration timeout | The old stack was in the VN quota-lock subprocess, not the earlier missing membership context. The containing test file and the new isolated database teardown regression pass all seven cases on the rebase with real PostgreSQL and no skips. This does not establish the original timeout cause or certify the full shard. The earlier membership context fix is separately on dev in `756e8b0475`. |
+
+The focused rebase run passed 152 cases (23 Logging, ten inventory, 63 MCP accounting, and 56 CI guards). The final Logging, Docs, task and Python setup action checks passed 254 cases, no failures or skips. Scoped Ruff, Black, compilation and whitespace checks passed. Compared with dev, Bandit retained three inherited B105 test literals and reported no new findings or errors (B101 excluded on both sides). Auto-merge was temporarily disarmed before the rebase and is to be restored after the leased push. Keep the requester's summary waiver and all branch protections. Only the new head's checks qualify it for landing; no manual required workflow dispatch or broad-suite pass is claimed.
