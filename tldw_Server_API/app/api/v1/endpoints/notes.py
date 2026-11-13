@@ -1942,6 +1942,44 @@ def _sync_note_keywords(db: CharactersRAGDB, note_id: str, keywords: list[str]) 
     }
 
 
+def _note_organization_ids(db: CharactersRAGDB, note_id: str) -> tuple[set[Any], set[Any]]:
+    keyword_ids = {row.get("id") for row in db.get_keywords_for_note(note_id=note_id)}
+    folder_ids = {row.get("id") for row in db.get_note_folders_for_note(note_id)}
+    return keyword_ids, folder_ids
+
+
+def _sync_note_organization(
+    db: CharactersRAGDB,
+    *,
+    note_id: str,
+    keywords: list[str] | None,
+    folder_paths: list[str] | None,
+    bump_from_version: int | None,
+) -> dict[str, Any] | None:
+    """Relink a note's tags and folders, and return the keyword sync summary.
+
+    With ``bump_from_version`` set, nothing else saved the note in this request, so a
+    relink that changes the links also advances the note's version (#3157). Without
+    that, two clients at the same version could both replace the tags. The relink and
+    the version check share one transaction: a stale version rolls the relink back.
+    """
+
+    def relink() -> dict[str, Any] | None:
+        summary = _sync_note_keywords(db, note_id=note_id, keywords=keywords) if keywords is not None else None
+        if folder_paths is not None:
+            db.sync_note_folders(note_id, folder_paths)
+        return summary
+
+    if bump_from_version is None:
+        return relink()
+    with db.transaction():
+        before = _note_organization_ids(db, note_id)
+        summary = relink()
+        if _note_organization_ids(db, note_id) != before:
+            db.bump_note_version(note_id, bump_from_version)
+    return summary
+
+
 def _build_import_note_companion_event(
     *,
     db: CharactersRAGDB,
@@ -7293,11 +7331,15 @@ async def patch_note(
                         raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
-        if sync_service is None and compound_note is None and keywords_supplied:
-            keyword_sync_summary = _sync_note_keywords(db, note_id=note_id, keywords=kw_list or [])
-
-        if sync_service is None and compound_note is None and folders_supplied:
-            db.sync_note_folders(note_id, folder_paths or [])
+        if sync_service is None and compound_note is None and (keywords_supplied or folders_supplied):
+            keyword_sync_summary = _sync_note_organization(
+                db,
+                note_id=note_id,
+                keywords=(kw_list or []) if keywords_supplied else None,
+                folder_paths=(folder_paths or []) if folders_supplied else None,
+                # Nothing above saved a tags/folders-only body, so the relink advances the version.
+                bump_from_version=None if update_data else expected_version,
+            )
 
         updated_note_data = compound_note or db.get_note_by_id(note_id=note_id)
         if not updated_note_data:

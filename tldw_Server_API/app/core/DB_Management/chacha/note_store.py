@@ -40,6 +40,7 @@ from tldw_Server_API.app.core.Sync_Contracts.notes_moodboard_studio_contract imp
     parse_notes_studio_document_v1,
     studio_result_hash,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
@@ -2130,6 +2131,14 @@ class NoteStore:
             return []
 
         keyword_table = self._db._map_table_for_backend("keywords")
+        # Match by keyword identity, as the notes tag filter does: LOWER() misses
+        # non-ASCII case on SQLite and ß/SS on Postgres.
+        keyword_ids = self._active_keyword_ids_by_identity([normalized_tag], keyword_table).get(
+            normalize_keyword_identity(normalized_tag), []
+        )
+        if not keyword_ids:
+            return []
+        id_placeholders = ", ".join(["?"] * len(keyword_ids))
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id, "n")
         related_clause, related_params = self._db._selected_owner_filter(self._db.client_id, "k")
         if include_deleted:
@@ -2138,21 +2147,21 @@ class NoteStore:
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
                 f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
-                "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? "
+                f"WHERE nk.keyword_id IN ({id_placeholders}) AND k.deleted = ? "
                 f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
-            params: list[Any] = [normalized_tag, self._deleted_value(False), limit]
+            params: list[Any] = [*keyword_ids, self._deleted_value(False), limit]
         else:
             query = (
                 "SELECT DISTINCT n.id, n.last_modified "
                 "FROM notes n "
                 "JOIN note_keywords nk ON nk.note_id = n.id "
                 f"JOIN {keyword_table} k ON k.id = nk.keyword_id "  # nosec B608
-                "WHERE LOWER(k.keyword) = LOWER(?) AND k.deleted = ? AND n.deleted = ? "
+                f"WHERE nk.keyword_id IN ({id_placeholders}) AND k.deleted = ? AND n.deleted = ? "
                 f"{owner_clause}{related_clause} ORDER BY n.last_modified DESC, n.id ASC LIMIT ?"
             )
             params = [
-                normalized_tag,
+                *keyword_ids,
                 self._deleted_value(False),
                 self._deleted_value(False),
                 limit,
@@ -2476,6 +2485,66 @@ class NoteStore:
             logger.error(f"Database error updating note ID {note_id} (expected v{expected_version}): {e}",
                          exc_info=True)
             raise
+
+    def bump_note_version(
+        self,
+        note_id: str,
+        expected_version: int,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        semantic_dataset_id: str | None = None,
+    ) -> int:
+        """Advance a note's version for a change kept outside the note row, such as its tags or folders.
+
+        Optimistic locking compares this version, so a relink that left it alone let two
+        clients at the same version both succeed (#3157). Returns the new version and raises
+        ``ConflictError`` when the note is no longer at ``expected_version``.
+        """
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        next_version = expected_version + 1
+        query = (
+            "UPDATE notes SET last_modified = ?, version = ?, client_id = ? "
+            f"WHERE id = ? AND version = ? AND deleted = 0{owner_clause}"  # nosec B608 - fixed owner SQL fragment; values stay bound.
+        )
+        params = (
+            self._db._get_current_utc_timestamp_iso(),
+            next_version,
+            self._db.client_id,
+            note_id,
+            expected_version,
+        ) + owner_params
+
+        def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> int:
+            if transaction_conn.execute(query, params).rowcount == 0:
+                current_version = self._db._get_current_db_version(
+                    transaction_conn, "notes", "id", note_id, owner_client_id=self._db.client_id
+                )
+                raise ConflictError(  # noqa: TRY003
+                    f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                    entity="notes",
+                    entity_id=note_id,
+                )
+            note = transaction_conn.execute("SELECT title, content FROM notes WHERE id = ?", (note_id,)).fetchone()
+            # Graph and semantic state are only current while they match the note's version.
+            self._db.note_graph_projection_store.replace_projection(
+                note_id=note_id,
+                source_version=next_version,
+                projection=parse_wikilinks(str(note["content"] or ""), source_note_id=note_id),
+                conn=transaction_conn,
+            )
+            self._mark_note_semantic_dirty(
+                transaction_conn,
+                dataset_id=semantic_dataset_id,
+                note_id=note_id,
+                title=str(note["title"]),
+                content=str(note["content"]),
+                content_version=next_version,
+            )
+            return next_version
+
+        if conn is not None:
+            return _execute(conn)
+        with self._db.transaction() as transaction_conn:
+            return _execute(transaction_conn)
 
     # ------------------------------------------------------------------
     # Note deletion and restoration
@@ -2917,6 +2986,37 @@ class NoteStore:
         ).fetchone()
         return int(row["cnt"]) if row else 0
 
+    def _active_keyword_ids_by_identity(self, tokens: list[str], keyword_table: str) -> dict[str, list[int]]:
+        """Map each token's ``normalize_keyword_identity`` to every active keyword id with it.
+
+        SQL cannot compare the identity (NFC plus casefold): SQLite's LOWER() and NOCASE
+        fold ASCII only, so a stored "Éclair" never matched "éclair", and Postgres LOWER()
+        misses ß/SS. As Media does (TASK-13950.5), one lookup reads the case-insensitive
+        SQL matches, which hold every ASCII row (an ASCII row's casefold is its
+        lowercase), plus every row with a non-ASCII character, and Python compares the
+        identities. Legacy rows that share an identity all count.
+        """
+        wanted = {normalize_keyword_identity(token) for token in tokens}
+        postgres = self._db.backend_type == BackendType.POSTGRESQL
+        values = [*tokens, *(wanted - set(tokens))]
+        placeholders = ", ".join(["LOWER(?)" if postgres else "?"] * len(values))
+        # SQLite's keyword column is NOCASE, so its IN folds ASCII case too.
+        match = f"{'LOWER(keyword)' if postgres else 'keyword'} IN ({placeholders})"
+        # ponytail: reads every non-ASCII keyword row; add a stored identity column if
+        # non-ASCII vocabularies get large.
+        non_ascii = "keyword ~ '[^[:ascii:]]'" if postgres else "keyword GLOB '*[^ -~]*'"
+        owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
+        query = (
+            f"SELECT id, keyword FROM {keyword_table} "  # nosec B608 - fixed SQL fragments; values stay bound.
+            f"WHERE deleted = {'FALSE' if postgres else '0'} AND ({match} OR {non_ascii}){owner_clause}"
+        )
+        ids: dict[str, list[int]] = {}
+        for row in self._db.execute_query(query, (*values, *owner_params)).fetchall():
+            identity = normalize_keyword_identity(str(row["keyword"]))
+            if identity in wanted:
+                ids.setdefault(identity, []).append(int(row["id"]))
+        return ids
+
     def _keyword_token_filter(
         self,
         tokens: list[str],
@@ -2925,34 +3025,31 @@ class NoteStore:
     ) -> tuple[str, list[Any]]:
         """Build the keyword-token predicate for a notes search (NL-N1).
 
-        Tokens match keywords exactly, ignoring case. ``match="any"`` keeps a
-        note that has at least one of the tokens; ``match="all"`` keeps only a
-        note that has every token. The caller joins ``k`` (keywords) and ``n``
-        (notes); the "all" subquery applies the same owner and deleted filters
-        to its own keyword alias.
+        Tokens match keywords by ``normalize_keyword_identity``: exactly, ignoring
+        case on every backend. ``match="any"`` keeps a note that has at least one
+        of the tokens; ``match="all"`` keeps only a note that has every token. The
+        caller joins ``nk`` (note_keywords) and ``n`` (notes). The keyword ids come
+        from the owner's active keywords, so they carry the owner and deleted filters.
         """
         if match not in ("all", "any"):
             raise ValueError(f"Unsupported keyword match mode: {match!r}")
-        placeholders = ", ".join(["?"] * len(tokens))
-        clause = f"LOWER(k.keyword) IN ({placeholders})"
-        params: list[Any] = list(tokens)
-        if match == "all" and len(tokens) > 1:
-            if self._db.backend_type == BackendType.POSTGRESQL:
-                deleted_false = "FALSE"
-                k2_scope, k2_owner_params = self._db._selected_owner_filter(self._db.client_id, "k2")
-            else:
-                deleted_false = "0"
-                k2_scope, k2_owner_params = "", ()
-            clause += (
-                " AND n.id IN ("
-                "SELECT nk2.note_id FROM note_keywords nk2 "
-                f"JOIN {keyword_table} k2 ON k2.id = nk2.keyword_id "
-                f"WHERE k2.deleted = {deleted_false}{k2_scope} "
-                f"AND LOWER(k2.keyword) IN ({placeholders}) "
-                "GROUP BY nk2.note_id "
-                "HAVING COUNT(DISTINCT LOWER(k2.keyword)) = ?)"
-            )
-            params.extend([*k2_owner_params, *tokens, len(tokens)])
+        found = self._active_keyword_ids_by_identity(tokens, keyword_table)
+        groups = [found.get(normalize_keyword_identity(token), []) for token in tokens]
+        if match == "all" and not all(groups):
+            return "1 = 0", []
+        groups = [ids for ids in groups if ids]
+        if not groups:
+            return "1 = 0", []
+        all_ids = [keyword_id for ids in groups for keyword_id in ids]
+        clause = f"nk.keyword_id IN ({', '.join(['?'] * len(all_ids))})"
+        params: list[Any] = list(all_ids)
+        if match == "all" and len(groups) > 1:
+            for ids in groups:
+                clause += (
+                    " AND EXISTS (SELECT 1 FROM note_keywords nk2 WHERE nk2.note_id = n.id "
+                    f"AND nk2.keyword_id IN ({', '.join(['?'] * len(ids))}))"
+                )
+                params.extend(ids)
         return clause, params
 
     def search_notes_with_keywords(
@@ -2968,7 +3065,7 @@ class NoteStore:
         Tokens match keywords exactly (case-insensitive); ``match`` is "all"
         (every token, the default) or "any" (at least one).
         """
-        tokens = list(dict.fromkeys(t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()))
+        tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return []
@@ -3062,7 +3159,7 @@ class NoteStore:
 
         Uses the same exact, ``match``-mode token rules as ``search_notes_with_keywords``.
         """
-        tokens = list(dict.fromkeys(t.strip().lower() for t in keyword_tokens if isinstance(t, str) and t.strip()))
+        tokens = dedupe_keywords(t for t in keyword_tokens if isinstance(t, str))
         if not tokens:
             if not search_term or not str(search_term).strip():
                 return 0

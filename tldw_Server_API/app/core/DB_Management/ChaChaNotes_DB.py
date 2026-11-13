@@ -1147,6 +1147,14 @@ class CharactersRAGDB:
             semantic_dataset_id: str | None = None,
         ) -> bool | None: ...
 
+        def bump_note_version(
+            self,
+            note_id: str,
+            expected_version: int,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
+        ) -> int: ...
+
         def _ensure_conversation_settings_table(self, *, connection: Any | None = None) -> None: ...
 
         def _ensure_persona_live_voice_session_summaries_table(self, *, connection: Any | None = None) -> None: ...
@@ -47554,6 +47562,7 @@ for _note_store_method in (
     "count_notes_per_tag",
     "get_note_source_info",
     "update_note",
+    "bump_note_version",
     "soft_delete_note",
     "delete_note",
     "restore_note",

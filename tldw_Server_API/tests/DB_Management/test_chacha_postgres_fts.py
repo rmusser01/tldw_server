@@ -282,6 +282,8 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
 
     def execute(query, params):
         statements.append((query, params))
+        if query.startswith("SELECT id, keyword FROM keywords"):
+            return SimpleNamespace(fetchall=lambda: [{"id": 7, "keyword": "Tag"}])
         return SimpleNamespace(fetchall=lambda: [{"id": "owned-note"}], fetchone=lambda: {"cnt": 1})
 
     monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
@@ -307,11 +309,16 @@ def test_postgres_notes_search_uses_selected_owner_predicates(monkeypatch, mode)
     if mode.startswith("keyword"):
         assert "k.client_id = ?" in query
         assert "selected-k" in params
+        # Tags resolve to keyword ids through the same selected owner.
+        lookup, lookup_params = statements[0]
+        assert lookup.startswith("SELECT id, keyword FROM keywords") and "client_id = ?" in lookup
+        assert "selected-" in lookup_params and db.client_id not in lookup_params
+        assert 7 in params
 
 
 @pytest.mark.parametrize("counting", [False, True])
-def test_postgres_notes_all_tags_subquery_keeps_owner_and_deleted_filters(monkeypatch, counting):
-    """NL-N1: the 'all tags' subquery filters its own keyword alias by owner and deletion."""
+def test_postgres_notes_all_tags_filter_uses_owned_active_keyword_ids(monkeypatch, counting):
+    """NL-N1: with "all", a note needs every tag; tags resolve by identity to the owner's active keywords."""
     from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
 
     db = _make_postgres_db()
@@ -323,6 +330,9 @@ def test_postgres_notes_all_tags_subquery_keeps_owner_and_deleted_filters(monkey
 
     def execute(query, params):
         statements.append((query, params))
+        if query.startswith("SELECT id, keyword FROM keywords"):
+            rows = [{"id": 11, "keyword": "RAG"}, {"id": 12, "keyword": "Baking"}, {"id": 13, "keyword": "Straße"}]
+            return SimpleNamespace(fetchall=lambda: rows)
         return SimpleNamespace(fetchall=lambda: [], fetchone=lambda: {"cnt": 0})
 
     monkeypatch.setattr(db, "_selected_owner_filter", selected_owner)
@@ -332,15 +342,18 @@ def test_postgres_notes_all_tags_subquery_keeps_owner_and_deleted_filters(monkey
         store.count_notes_matching_keywords(None, ["Rag", "baking", "rag"], match="all")
     else:
         store.search_notes_with_keywords(None, ["Rag", "baking", "rag"], limit=3, offset=0, match="all")
+    lookup, lookup_params = statements[0]
+    assert "deleted = FALSE" in lookup and "client_id = ?" in lookup
+    assert "selected-" in lookup_params
     query, params = statements[-1]
-    assert "LOWER(k.keyword) IN (?, ?)" in query
-    assert "LIKE" not in query
-    assert "k2.deleted = FALSE AND k2.client_id = ?" in " ".join(query.split())
-    assert "HAVING COUNT(DISTINCT LOWER(k2.keyword)) = ?" in query
-    assert "selected-k2" in params
-    # Duplicate tokens collapse, so the note needs both distinct tags.
-    assert params.count("rag") == 2 and params.count("baking") == 2
-    assert 2 in params
+    flat = " ".join(query.split())
+    assert "LOWER(k.keyword)" not in query and "LIKE" not in query
+    assert "nk.keyword_id IN (?, ?)" in flat
+    assert flat.count("EXISTS (SELECT 1 FROM note_keywords nk2 WHERE nk2.note_id = n.id AND nk2.keyword_id IN (?))") == 2
+    assert "k.client_id = ?" in query and "selected-k" in params
+    # Duplicate tokens collapse, so the note needs both distinct tags; other keywords stay out.
+    assert params.count(11) == 2 and params.count(12) == 2
+    assert 13 not in params
 
 
 @pytest.mark.parametrize(

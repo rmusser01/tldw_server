@@ -559,11 +559,15 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const noteNeighborsOwner = JSON.stringify([notesGraphAuthorityScope, authoritySelectedId])
   const noteNeighborsOwnerRef = React.useRef(noteNeighborsOwner)
   noteNeighborsOwnerRef.current = noteNeighborsOwner
-  const [neighborsIntent, setNeighborsIntent] = React.useState({ owner: noteNeighborsOwner, requested: false, denied: false })
+  const [neighborsIntent, setNeighborsIntent] = React.useState({ owner: noteNeighborsOwner, requested: false })
   if (neighborsIntent.owner !== noteNeighborsOwner) {
-    setNeighborsIntent({ owner: noteNeighborsOwner, requested: false, denied: false })
+    setNeighborsIntent({ owner: noteNeighborsOwner, requested: false })
   }
   const noteNeighborsRequested = neighborsIntent.owner === noteNeighborsOwner && neighborsIntent.requested
+  // The route needs an account permission (notes graph read), so one 403 answers
+  // for every note of the account: remember it per scope, not per note.
+  const [neighborsDeniedScope, setNeighborsDeniedScope] = React.useState<string | null>(null)
+  const neighborsDenied = notesGraphAuthorityScope != null && neighborsDeniedScope === notesGraphAuthorityScope
   const connectionsMemory = useConnectionsMemory()
   const {
     data: requestedNoteNeighborsData,
@@ -582,33 +586,37 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     enabled:
       isOnline &&
       noteNeighborsRequested &&
-      !neighborsIntent.denied &&
+      !neighborsDenied &&
       notesGraphAuthorityScope != null &&
       authoritySelectedId != null,
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     refetchOnMount: false,
-    queryFn: async () => {
+    // Passing the signal lets React Query abort the request of a note the user left.
+    queryFn: async ({ signal }) => {
       const noteId = encodeURIComponent(String(authoritySelectedId))
+      const requestScope = notesGraphAuthorityScope
       try {
         const graph = await bgRequest<any>({
           path: `/api/v1/notes/${noteId}/neighbors?edge_types=manual,wikilink,backlink,source_membership&max_nodes=80&max_edges=200` as any,
-          method: 'GET' as any
+          method: 'GET' as any,
+          abortSignal: signal
         })
         return noteNeighborsOwnerRef.current === noteNeighborsOwner ? graph : null
       } catch (error) {
-        if (Number((error as { status?: number } | null)?.status) === 403) {
-          setNeighborsIntent((current) => current.owner === noteNeighborsOwner
-            ? { ...current, denied: true }
-            : current)
+        if (!signal.aborted && Number((error as { status?: number } | null)?.status) === 403) {
+          setNeighborsDeniedScope(requestScope)
         }
         throw error
       }
     }
   })
-  const noteNeighborsData = noteNeighborsRequested && noteNeighborsSuccess ? requestedNoteNeighborsData : null
-  const noteNeighborsUnavailable = Number((noteNeighborsFailure as { status?: number } | null)?.status) === 403
+  // A denied account shows no graph, not even one cached before the 403 arrived.
+  const noteNeighborsData =
+    noteNeighborsRequested && noteNeighborsSuccess && !neighborsDenied ? requestedNoteNeighborsData : null
+  const noteNeighborsUnavailable =
+    neighborsDenied || Number((noteNeighborsFailure as { status?: number } | null)?.status) === 403
   const noteNeighborsState = noteNeighborsError ? 'error'
     : noteNeighborsLoading ? 'loading'
     : noteNeighborsSuccess && noteNeighborsData != null ? 'success'
@@ -1682,7 +1690,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
             const current = await fetchNote(snapshot.noteId, ownedRequest)
             operation.requireCurrent()
             const currentEditor = latestEditorRef.current
-            // Content edits bump the version; tag-only edits do not, so compare tags too.
+            // Content and tag edits bump the version (#3157); the tag check also covers older servers.
             if (
               (currentEditor.isDirty && currentEditor.selectedId != null && String(currentEditor.selectedId) === snapshot.noteId) ||
               toNoteVersion(current) !== snapshot.appliedVersion ||
@@ -2844,6 +2852,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         query={list.query}
         isFetching={list.isFetching}
         isPlaceholderData={list.isPlaceholderData}
+        listLoaded={Array.isArray(list.data)}
         hasListError={list.isError}
         listErrorMessage={list.listErrorMessage}
         isStaleResults={list.isError && Array.isArray(list.data) && list.data.length > 0}
