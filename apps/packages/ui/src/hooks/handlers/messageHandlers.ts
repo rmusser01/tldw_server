@@ -814,7 +814,14 @@ export const createBranchMessage =
             // Only from the branch it announced: elsewhere the notice no longer applies.
             backToParent: () => {
               const live = controller.getCurrent()
-              if (live.owner?.kind !== "native" || live.owner.conversation_id !== result.child_id) return
+              if (live.owner?.kind !== "native" || live.owner.conversation_id !== result.child_id) {
+                options.notification.info({
+                  message: i18n.t("playground:historySelection.backToParentStale", "That branch is no longer open"),
+                  description: i18n.t("playground:historySelection.backToParentStaleDetail",
+                    "Open the original chat from the chat list.")
+                })
+                return
+              }
               void openNativeChat(controller, parent, captureChatDraftLoad("switch"), options).catch(() =>
                 options.notification.error({
                   message: i18n.t("playground:historySelection.backToParentFailed", "Couldn't open the original chat"),

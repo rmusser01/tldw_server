@@ -715,7 +715,10 @@ describe("side-panel tab menu: visible button and server export (CS-09)", () => 
 
   it("opens the same menu from a visible button on the tab", async () => {
     renderSidebar()
-    fireEvent.click(screen.getByRole("button", { name: "Chat actions: Quarterly plan" }))
+    const button = screen.getByRole("button", { name: "Chat actions: Quarterly plan" })
+    expect(button).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(button)
+    await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "true"))
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }))
     expect(await screen.findByRole("dialog", { name: "Rename conversation" })).toBeInTheDocument()
   })

@@ -634,7 +634,7 @@ describe("native branch lineage (CM-12)", () => {
       historyId: null,
       chatTitle,
       historySelection,
-      notification: { error: vi.fn(), warning: vi.fn(), success: vi.fn() },
+      notification: { error: vi.fn(), warning: vi.fn(), success: vi.fn(), info: vi.fn() },
       setServerChatId: vi.fn(),
       setServerChatMetaLoaded: vi.fn()
     })
@@ -715,5 +715,21 @@ describe("native branch lineage (CM-12)", () => {
       undefined,
       expect.any(Function)
     )
+  })
+
+  it("says the notice no longer applies once another chat is open, instead of doing nothing", async () => {
+    const { render, screen, fireEvent } = await import("@testing-library/react")
+    const options = lineageOptions()
+    await createBranchMessage(options)(lineageRequest)
+    const toast = options.notification.success.mock.calls[0][0]
+    // The user opens another chat before using the notice.
+    await options.historySelection.loadConversation({ serverChatId: "elsewhere" }, undefined, () => {})
+    const loads = options.historySelection.loadConversation.mock.calls.length
+    render(toast.actions)
+    fireEvent.click(screen.getByRole("button", { name: "Back to parent" }))
+    expect(options.notification.info).toHaveBeenCalledWith(expect.objectContaining({
+      message: "That branch is no longer open"
+    }))
+    expect(options.historySelection.loadConversation).toHaveBeenCalledTimes(loads)
   })
 })
