@@ -3194,6 +3194,7 @@ const PlaygroundMessageImpl = (props: Props) => {
               hideCopy={props.hideCopy}
               copyPressed={copyFeedback.copied}
               copyFailed={copyFeedback.failed}
+              copyAttempt={copyFeedback.attempt}
               onCopy={handleCopy}
               canReply={canReply}
               onReply={handleReply}

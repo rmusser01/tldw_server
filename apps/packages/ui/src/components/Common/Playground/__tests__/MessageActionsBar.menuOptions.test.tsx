@@ -78,6 +78,13 @@ describe("MessageActionsBar menu options", () => {
     expect(screen.getByRole("button", { name: "copyToClipboard" })).not.toContainElement(copied)
   })
 
+  it("announces a repeated copy again", () => {
+    const view = render(<MessageActionsBar {...baseProps()} copyPressed copyAttempt={1} />)
+    const first = screen.getByText("Copied")
+    view.rerender(<MessageActionsBar {...baseProps()} copyPressed copyAttempt={2} />)
+    expect(screen.getByText("Copied")).not.toBe(first)
+  })
+
   it("says when copying failed, with a hint, and keeps the Copy button usable", () => {
     render(<MessageActionsBar {...baseProps()} copyFailed />)
     expect(screen.getByText("Couldn't copy").closest('[role="status"]')).toHaveTextContent(/select the text/i)

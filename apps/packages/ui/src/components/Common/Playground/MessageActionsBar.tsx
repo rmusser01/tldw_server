@@ -140,6 +140,8 @@ type MessageActionsBarProps = {
   copyPressed: boolean
   /** The last copy failed; the bar says so and keeps the copy icon. */
   copyFailed?: boolean
+  /** Changes on every copy, so a repeated result is announced again. */
+  copyAttempt?: number
   onCopy: () => void | Promise<void>
   canReply: boolean
   onReply: () => void
@@ -207,6 +209,7 @@ export function MessageActionsBar({
   hideCopy,
   copyPressed,
   copyFailed = false,
+  copyAttempt,
   onCopy,
   canReply,
   onReply,
@@ -608,7 +611,7 @@ export function MessageActionsBar({
                 </IconButton>
               </Tooltip>
             )}
-            {!hideCopy && <CopyStatus status={copyFailed ? "failed" : copyPressed ? "copied" : "idle"} />}
+            {!hideCopy && <CopyStatus status={copyFailed ? "failed" : copyPressed ? "copied" : "idle"} attempt={copyAttempt} />}
             {!hideEditAndRegenerate && (
               <Tooltip title={t("edit")}>
                 <IconButton

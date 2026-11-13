@@ -25,7 +25,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
   showTooltip = true
 }) => {
   const { t } = useTranslation(["common"])
-  const { status, copied, failed, run } = useCopyFeedback(2000)
+  const { status, attempt, copied, failed, run } = useCopyFeedback(2000)
   const failedHint = useCopyFailedHint()
 
   // A refused write is shown next to the button, never left uncaught (G17).
@@ -66,7 +66,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
       ) : (
         button
       )}
-      <CopyStatus status={status} />
+      <CopyStatus status={status} attempt={attempt} />
     </span>
   )
 }

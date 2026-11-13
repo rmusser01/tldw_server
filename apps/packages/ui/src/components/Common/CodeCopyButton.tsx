@@ -25,7 +25,7 @@ export const CodeCopyButton: FC<Props> = ({
   copiedLabel,
   className = ""
 }) => {
-  const { status, copied, failed, copy } = useCopyFeedback()
+  const { status, attempt, copied, failed, copy } = useCopyFeedback()
   const failedHint = useCopyFailedHint()
 
   return (
@@ -45,7 +45,7 @@ export const CodeCopyButton: FC<Props> = ({
           )}
         </button>
       </Tooltip>
-      <CopyStatus status={status} copiedLabel={copiedLabel} />
+      <CopyStatus status={status} attempt={attempt} copiedLabel={copiedLabel} />
     </span>
   )
 }
