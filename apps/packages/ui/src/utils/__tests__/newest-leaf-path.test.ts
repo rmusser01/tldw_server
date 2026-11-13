@@ -26,9 +26,21 @@ describe("newestLeafPath (CM-N2)", () => {
     expect(ids(newestLeafPath(rows, link).path)).toEqual(["u1", "a1b"])
   })
 
-  it("treats a parent that is missing or listed later as unlinked", () => {
-    const rows = [row("u1"), row("a1", "deleted"), row("u2", "a9"), row("a9", "u2")]
-    expect(ids(newestLeafPath(rows, link).path)).toEqual(["u1", "a1", "u2", "a9"])
+  it("treats a parent that is missing as unlinked", () => {
+    const rows = [row("u1"), row("a1", "deleted"), row("u2"), row("a2", "u2")]
+    expect(ids(newestLeafPath(rows, link).path)).toEqual(["u1", "a1", "u2", "a2"])
+  })
+
+  it("still ends, keeping every row, when parents form a cycle", () => {
+    const rows = [row("u1"), row("a1", "u1"), row("u2", "a9"), row("a9", "u2")]
+    expect([...ids(newestLeafPath(rows, link).path)].sort()).toEqual(["a1", "a9", "u1", "u2"])
+  })
+
+  it("puts a reply listed before its question back after it (review case)", () => {
+    const rows = [row("u1"), row("a1", "u1"), row("a2", "u2"), row("u2", "a1")]
+    const { path, hasAlternatives } = newestLeafPath(rows, link)
+    expect(ids(path)).toEqual(["u1", "a1", "u2", "a2"])
+    expect(hasAlternatives).toBe(false)
   })
 
   it("returns nothing for an empty chat", () => {

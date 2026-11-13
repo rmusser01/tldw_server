@@ -79,3 +79,22 @@ describe("lossless JSON and newest-path Markdown (CS-09 follow-up)", () => {
     expect(markdown).not.toMatch(/alternative replies/i)
   })
 })
+
+describe("Markdown order when a reply is listed before its question (review follow-up)", () => {
+  it("keeps every turn of the newest path", () => {
+    const markdown = formatTranscriptMarkdown({
+      id: "chat-1",
+      title: "Order",
+      messages: [
+        { id: "u1", parentId: null, role: "user", content: "Q1" },
+        { id: "a1", parentId: "u1", role: "assistant", content: "A1" },
+        { id: "a2", parentId: "u2", role: "assistant", content: "A2" },
+        { id: "u2", parentId: "a1", role: "user", content: "Q2" }
+      ]
+    })
+    const order = ["Q1", "A1", "Q2", "A2"].map((text) => markdown.indexOf(text))
+    expect(order.every((at) => at >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    expect(markdown).not.toMatch(/alternative replies/i)
+  })
+})
