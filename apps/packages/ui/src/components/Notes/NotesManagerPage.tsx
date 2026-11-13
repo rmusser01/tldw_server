@@ -2922,6 +2922,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         toggleNotePinned={ed.toggleNotePinned}
         restoreNote={restoreNote}
         openLinkedChat={(conversationId) => { void openLinkedConversation(conversationId) }}
+        bulkSelection={list.bulkSelectionControls}
         bulkRun={{
           progress: bulkRun.progress,
           failures: bulkRun.failures,

@@ -338,3 +338,104 @@ describe("NotesManagerPage NL-05 bulk runs", () => {
     await waitFor(() => expect(screen.queryByTestId("notes-bulk-failures")).not.toBeInTheDocument())
   })
 })
+
+const listParams = (path: string) => new URLSearchParams(path.split("?")[1] ?? "")
+
+/** A library bigger than the visible page: the list shows 3 rows, gathers read pages of 100. */
+const serveLibrary = (library: Array<{ id: string; title: string; content: string; version: number }>) =>
+  serve((_request, path, method) => {
+    if (method === "GET" && path.startsWith("/api/v1/notes/?")) {
+      const params = listParams(path)
+      const limit = Number(params.get("limit"))
+      const offset = Number(params.get("offset"))
+      const rows = limit >= 100 ? library.slice(offset, offset + limit) : library.slice(0, 3)
+      return { items: rows, pagination: { total: library.length } }
+    }
+    if (method === "DELETE") return {}
+    return undefined
+  })
+
+const gatherRequests = () =>
+  mockBgRequest.mock.calls.filter(([request]: [Request]) => {
+    const path = String(request?.path || "")
+    return path.startsWith("/api/v1/notes/?") && listParams(path).get("limit") === "100"
+  })
+
+const makeLibrary = (size: number) =>
+  Array.from({ length: size }, (_, index) => ({ id: `m${index + 1}`, title: `Match ${index + 1}`, content: "x", version: 1 }))
+
+describe("NotesManagerPage NL-05 select all", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConfirmDanger.mockResolvedValue(true)
+    mockGetSetting.mockResolvedValue(null)
+    mockSetSetting.mockResolvedValue(undefined)
+    mockClearSetting.mockResolvedValue(undefined)
+  })
+
+  it("selects every row on the page from the header checkbox, and clears them again", async () => {
+    serve()
+    renderPage()
+    const selectAll = await screen.findByTestId("notes-select-all-page")
+    await screen.findByTestId("notes-select-checkbox-n3")
+
+    fireEvent.click(selectAll)
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("3 selected"))
+    for (const id of ["n1", "n2", "n3"]) expect(screen.getByTestId(`notes-select-checkbox-${id}`)).toBeChecked()
+    expect(selectAll).toBeChecked()
+
+    fireEvent.click(selectAll)
+    await waitFor(() => expect(screen.queryByTestId("notes-bulk-actions-bar")).not.toBeInTheDocument())
+  })
+
+  it("selects all matching notes beyond the page and runs the bulk action on every one", async () => {
+    serveLibrary(makeLibrary(5))
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+
+    const selectMatching = await screen.findByTestId("notes-bulk-select-all-matching")
+    expect(selectMatching).toHaveTextContent("Select all 5 matching")
+    fireEvent.click(selectMatching)
+
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("5 selected"))
+    expect(screen.getByTestId("notes-bulk-matching-status")).toHaveTextContent("All 5 matching notes are selected.")
+
+    fireEvent.click(screen.getByTestId("notes-bulk-delete"))
+    await waitFor(() => expect(callsTo("DELETE")).toHaveLength(5))
+    expect(mockConfirmDanger).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("Delete 5 selected notes") })
+    )
+  })
+
+  it("goes back to the page selection when a row is unchecked after Select all matching", async () => {
+    serveLibrary(makeLibrary(5))
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("5 selected"))
+
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-m1"))
+
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("2 selected"))
+    expect(screen.queryByTestId("notes-bulk-matching-status")).not.toBeInTheDocument()
+  })
+
+  it("caps Select all matching at the first 1000 notes", async () => {
+    serveLibrary(makeLibrary(1500))
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+
+    const selectMatching = await screen.findByTestId("notes-bulk-select-all-matching")
+    expect(selectMatching).toHaveTextContent("Select the first 1000 matching")
+    fireEvent.click(selectMatching)
+
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("1000 selected"))
+    expect(screen.getByTestId("notes-bulk-matching-status")).toHaveTextContent(
+      "The first 1000 of 1500 matching notes are selected."
+    )
+    expect(gatherRequests()).toHaveLength(10)
+  })
+})

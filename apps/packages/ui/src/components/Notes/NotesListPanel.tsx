@@ -118,6 +118,8 @@ type NotesListPanelProps = {
   /** Enter on a row: open the note and move focus into the editor (AX-03). */
   onOpenNoteFromKeyboard?: (id: string | number) => void
   onToggleBulkSelection?: (id: string | number, checked: boolean, shiftKey: boolean) => void
+  /** The header checkbox: select or clear every row on this page (NL-05). */
+  onToggleSelectAllOnPage?: (checked: boolean) => void
   onTogglePinned?: (id: string | number) => void
   /** A row's "From chat" link: opens the chat the note was saved from (NL-04). */
   onOpenLinkedChat?: (conversationId: string) => void
@@ -171,6 +173,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onSelectNote,
   onOpenNoteFromKeyboard,
   onToggleBulkSelection,
+  onToggleSelectAllOnPage,
   onTogglePinned,
   onOpenLinkedChat,
   onChangePage,
@@ -210,6 +213,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
     [pinnedNoteIds]
   )
   const searchTerms = React.useMemo(() => extractSearchTerms(searchQuery), [searchQuery])
+  const selectedOnPage = hasNotes ? notes.filter((note) => bulkSelectedIdSet.has(String(note.id))).length : 0
+  const allOnPageSelected = hasNotes && selectedOnPage === notes.length
+  const showSelectAllOnPage = Boolean(onToggleSelectAllOnPage) && hasNotes && !isTrashView
   const listDomId = React.useId()
   const rowHintId = `${listDomId}-row-hint`
   // Roving tabindex (AX-03): the list is one Tab stop. It is the row the user
@@ -310,11 +316,29 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
       {/* Export header */}
       <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-surface2">
         <div className="flex items-center justify-between">
-          <span className="text-xs uppercase tracking-[0.14em] text-text-muted">
-            {isTrashView
-              ? t('option:notesSearch.trashResultsLabel', { defaultValue: 'Trash' })
-              : t('option:notesSearch.resultsLabel', { defaultValue: 'Results' })}
-          </span>
+          <div className="flex items-center gap-2">
+            {showSelectAllOnPage && (
+              <label className={`${ROW_CONTROL_TARGET_CLASS} cursor-pointer`}>
+                <input
+                  type="checkbox"
+                  checked={allOnPageSelected}
+                  ref={(element) => {
+                    if (element) element.indeterminate = selectedOnPage > 0 && !allOnPageSelected
+                  }}
+                  aria-label={t('option:notesSearch.selectAllOnPageAria', {
+                    defaultValue: 'Select all notes on this page'
+                  })}
+                  data-testid="notes-select-all-page"
+                  onChange={(event) => onToggleSelectAllOnPage?.(event.target.checked)}
+                />
+              </label>
+            )}
+            <span className="text-xs uppercase tracking-[0.14em] text-text-muted">
+              {isTrashView
+                ? t('option:notesSearch.trashResultsLabel', { defaultValue: 'Trash' })
+                : t('option:notesSearch.resultsLabel', { defaultValue: 'Results' })}
+            </span>
+          </div>
           {/* Import, folder sync and export do not apply to Trash (NL-15). */}
           {!isTrashView && (
             <div className="flex items-center gap-1">

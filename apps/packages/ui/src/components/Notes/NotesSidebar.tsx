@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import NotesBulkActionsBar, { type NotesBulkRunControls } from './NotesBulkActionsBar'
+import type { NotesBulkSelectionControls } from './hooks/useNotesMatchingSelection'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import NotesCollectionControls from '@/components/Notes/NotesCollectionControls'
@@ -175,6 +176,8 @@ export interface NotesSidebarProps {
   openLinkedChat?: (conversationId: string) => void
   /** The running bulk action and its failures (NL-05). */
   bulkRun?: NotesBulkRunControls
+  /** Select all on the page, or every matching note (NL-05). */
+  bulkSelection?: NotesBulkSelectionControls
   toggleNotePinned: (id: string | number) => Promise<void>
   restoreNote: (id: string | number, version?: number) => Promise<void>
   exportAll: () => Promise<void>
@@ -317,6 +320,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   deleteSelectedBulk,
   openLinkedChat,
   bulkRun,
+  bulkSelection,
   toggleNotePinned,
   restoreNote,
   exportAll,
@@ -1388,6 +1392,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   void (handleOpenNoteFromKeyboard ?? handleSelectNote)(id)
                 }}
                 onToggleBulkSelection={handleToggleBulkSelection}
+                onToggleSelectAllOnPage={bulkSelection?.onSelectAllOnPage}
                 onTogglePinned={(id) => {
                   void toggleNotePinned(id)
                 }}
@@ -1454,6 +1459,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             selectedCount={bulkSelectedIds.length}
             isMobileViewport={isMobileViewport}
             run={bulkRun}
+            selection={bulkSelection}
             onClearSelection={clearBulkSelection}
             onExport={exportSelectedBulk}
             onAddTags={() => {

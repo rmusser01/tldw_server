@@ -2,6 +2,7 @@ import React from 'react'
 import { Button, Spin, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { NotesBulkAction, NotesBulkFailures, NotesBulkProgress } from './hooks/useNotesBulkRun'
+import type { NotesBulkSelectionControls } from './hooks/useNotesMatchingSelection'
 
 /** What the bar needs from the page's bulk run (NL-05). */
 export type NotesBulkRunControls = {
@@ -16,6 +17,7 @@ type NotesBulkActionsBarProps = {
   selectedCount: number
   isMobileViewport: boolean
   run?: NotesBulkRunControls
+  selection?: NotesBulkSelectionControls
   onClearSelection: () => void
   onExport: () => void
   onAddTags: () => void
@@ -42,6 +44,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
   selectedCount,
   isMobileViewport,
   run,
+  selection,
   onClearSelection,
   onExport,
   onAddTags,
@@ -73,6 +76,53 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
     return fill(text, values)
   }
   const buttonClass = isMobileViewport ? 'min-h-[44px]' : undefined
+  const renderMatchingSelection = () => {
+    if (!selection) return null
+    const { matching } = selection
+    if (matching) {
+      const values = { count: matching.count, total: matching.total }
+      const text =
+        matching.total > matching.count
+          ? t('option:notesSearch.bulkFirstMatchingSelected', {
+              defaultValue: 'The first {{count}} of {{total}} matching notes are selected.',
+              ...values
+            })
+          : t('option:notesSearch.bulkAllMatchingSelected', {
+              defaultValue: 'All {{count}} matching notes are selected.',
+              ...values
+            })
+      return (
+        <div className="mt-1 text-xs text-text-muted" data-testid="notes-bulk-matching-status">
+          {fill(text, values)}
+        </div>
+      )
+    }
+    if (!selection.allOnPageSelected || selection.total <= selection.pageCount) return null
+    const count = Math.min(selection.total, selection.matchingCap)
+    const label =
+      selection.total > selection.matchingCap
+        ? t('option:notesSearch.bulkSelectFirstMatching', {
+            defaultValue: 'Select the first {{count}} matching',
+            count
+          })
+        : t('option:notesSearch.bulkSelectAllMatching', {
+            defaultValue: 'Select all {{count}} matching',
+            count
+          })
+    return (
+      <Button
+        size="small"
+        type="link"
+        className="!px-0 text-xs"
+        loading={selection.selectingAllMatching}
+        disabled={running}
+        onClick={selection.onSelectAllMatching}
+        data-testid="notes-bulk-select-all-matching"
+      >
+        {fill(label, { count })}
+      </Button>
+    )
+  }
 
   return (
     <div
@@ -105,6 +155,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
           </Button>
         </div>
       )}
+      {hasSelection && renderMatchingSelection()}
       {progress && progress.total > 0 && (
         <div className="mt-1 flex items-center gap-2 text-xs text-text-muted" data-testid="notes-bulk-progress">
           <Spin size="small" />
