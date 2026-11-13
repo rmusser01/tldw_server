@@ -528,3 +528,109 @@ def test_response_quality_saved_ui_min_score_is_a_global_threshold(tmp_path, sco
     assert runner._evaluate_passed({"accuracy": score, "overall_quality": score}, score, {  # nosec B101 - Existing UI threshold is a global minimum.
         "thresholds": {"min_score": minimum},
     }) is passed
+
+
+_SAMPLE = {
+    "input": {"source_text": "s", "summary": "s", "query": "q", "contexts": ["c"], "response": "r",
+              "prompt": "p", "question": "q", "claim": "c", "evidence": "e"},
+    "expected": "A",
+}
+_SPEC = {"allowed_labels": ["A", "B"]}
+
+
+async def _own_key_run(monkeypatch, tmp_path):
+    """A runner and a run config carrying the user's own-key handle for OpenAI (TASK-15426)."""
+    from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import users_own_key_credentials
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    users_own_key(monkeypatch, "openai")
+    handle = await users_own_key_credentials(1, "openai")
+    runner = EvaluationRunner(db_path=str(tmp_path / "evals.db"))
+    return runner, handle, {"config": {"api_name": "openai"}, "provider_credentials": handle}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["summarization", "rag", "response_quality"])
+async def test_every_judge_evaluator_of_a_run_gets_the_users_handle(monkeypatch, tmp_path, eval_type):
+    """A run started with the user's own-key handle passes it to G-Eval and to the RAG and quality judges."""
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    runner, handle, config = await _own_key_run(monkeypatch, tmp_path)
+    seen: list = []
+
+    class _Evaluator:
+        def __init__(self, **kwargs):
+            if "provider_credentials" in kwargs:
+                seen.append(kwargs["provider_credentials"])
+
+        async def evaluate(self, **kwargs):
+            if "provider_credentials" in kwargs:
+                seen.append(kwargs["provider_credentials"])
+            return {"metrics": {}}
+
+    monkeypatch.setattr(eval_runner, "run_geval", lambda **kwargs: seen.append(kwargs["provider_credentials"]) or {})
+    monkeypatch.setattr(eval_runner, "RAGEvaluator", _Evaluator)
+    monkeypatch.setattr(eval_runner, "ResponseQualityEvaluator", _Evaluator)
+    fn = {"summarization": runner._eval_summarization, "rag": runner._eval_rag,
+          "response_quality": runner._eval_response_quality}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, config, "sample_000001")
+
+    assert "error" not in result, result
+    assert seen and all(item is handle for item in seen), seen
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("eval_type", ["label_choice", "nli_factcheck"])
+async def test_a_runs_direct_judge_calls_carry_the_users_key(monkeypatch, tmp_path, eval_type):
+    """Label choice and NLI call the adapter directly: the request carries the user's key, recorded as theirs."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+        PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    )
+    from tldw_Server_API.app.core.Usage.llm_call_context import call_credential_source
+
+    runner, handle, config = await _own_key_run(monkeypatch, tmp_path)
+    requests: list[dict] = []
+
+    def _chat(request, timeout=None):
+        requests.append(request)
+        return {"choices": [{"message": {"content": "A"}}]}
+
+    monkeypatch.setattr(eval_runner, "get_adapter_or_raise", lambda _provider: SimpleNamespace(chat=_chat))
+    fn = {"label_choice": runner._eval_label_choice, "nli_factcheck": runner._eval_nli_factcheck}[eval_type]
+
+    result = await fn(_SAMPLE, _SPEC, config, "sample_000001")
+
+    assert "error" not in result, result
+    assert [(r["api_key"], call_credential_source(r), r.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)) for r in requests] == [
+        ("sk-users-own-key", "user", handle)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_direct_judge_call_refuses_a_handle_for_another_provider(monkeypatch, tmp_path):
+    """A handle issued for another provider fails the call before any adapter, so it never runs on a key (TASK-15426)."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.Evaluations import eval_runner
+
+    _runner, handle, _config = await _own_key_run(monkeypatch, tmp_path)
+    adapters: list[str] = []
+
+    def _adapter(provider):
+        adapters.append(provider)
+        return SimpleNamespace(chat=lambda _request, timeout=None: {"choices": [{"message": {"content": "A"}}]})
+
+    monkeypatch.setattr(eval_runner, "get_adapter_or_raise", _adapter)
+
+    with pytest.raises(ChatConfigurationError) as refused:
+        eval_runner._call_adapter_text(
+            api_endpoint="anthropic", messages_payload=[{"role": "user", "content": "A or B?"}], model="claude-test",
+            provider_credentials=handle,
+        )
+    assert (refused.value.provider, refused.value.message) == ("anthropic", "Provider credential context is invalid.")
+    assert adapters == []
