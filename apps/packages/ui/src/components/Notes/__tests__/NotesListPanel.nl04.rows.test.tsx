@@ -108,4 +108,27 @@ describe("NotesListPanel NL-04 rows", () => {
     expect(link).toHaveTextContent("From chat: Research session")
     expect(within(link).getByText("Research session")).toBeInTheDocument()
   })
+
+  it("shows a relative date on the title line, with the full date in a tooltip", async () => {
+    const updatedAt = new Date(Date.now() - 3 * 60 * 60 * 1000)
+    const fullDate = updatedAt.toLocaleString()
+    renderList([baseNote({ updated_at: updatedAt.toISOString() })])
+
+    const date = screen.getByTestId("notes-row-date-n1")
+    expect(date).toHaveTextContent("3h ago")
+    expect(document.body.textContent).not.toContain(fullDate)
+    expect(date).toHaveAttribute("dateTime", updatedAt.toISOString())
+    // Denser rows: the date shares the title's line instead of taking its own.
+    expect(date.parentElement).toContainElement(screen.getByText("Daily log"))
+
+    fireEvent.mouseEnter(date)
+    expect(await screen.findByText(fullDate)).toBeInTheDocument()
+  })
+
+  it("shows when a Trash note was deleted as a relative date", () => {
+    const deletedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+    renderList([baseNote({ updated_at: deletedAt.toISOString(), deleted: true })], { listMode: "trash" })
+    expect(screen.getByTestId("notes-row-date-n1")).toHaveTextContent("2d ago")
+    expect(document.body.textContent).not.toContain(deletedAt.toLocaleString())
+  })
 })

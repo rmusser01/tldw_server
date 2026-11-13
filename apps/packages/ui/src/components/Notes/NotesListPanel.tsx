@@ -1,5 +1,6 @@
 import { stripKnowledgeNoteProvenance } from '@/utils/knowledge-note-provenance'
 import { toPlainPreview } from '@/utils/plain-text-preview'
+import { formatRelativeTime } from '@/utils/dateFormatters'
 import React from 'react'
 import { Button, Dropdown, Pagination, Spin, Tooltip } from 'antd'
 import { Clock3 as ClockIcon, Link2 as LinkIcon, MessageSquare as ChatIcon, Star as StarIcon, Tag as TagIcon } from 'lucide-react'
@@ -29,6 +30,13 @@ const derivePreviewText = (content?: string | null, title?: string | null) =>
     skipLine: title,
     maxLength: MAX_PREVIEW_LENGTH
   })
+
+/** A row's date, or null when the server sent none or an unreadable one. */
+const parseRowDate = (value?: string | null): Date | null => {
+  if (!value) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
 
 const wasEditedRecently = (updatedAt?: string | null) => {
   if (!updatedAt) return false
@@ -183,7 +191,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   exportProgress = null,
   onCancelExport
 }) => {
-  const { t } = useTranslation(['option', 'settings'])
+  const { t } = useTranslation(['option', 'settings', 'common'])
   const isTrashView = listMode === 'trash'
   const hasNotes = Array.isArray(notes) && notes.length > 0
   // A refresh of the same list keeps its rows on screen so the scroll position
@@ -281,6 +289,20 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         onRetry={onRetry}
       />
     </React.Suspense>
+  )
+
+  // NL-04: "3h ago" in the row, the full date in its tooltip.
+  const renderRowDate = (value: string, parsed: Date, testId: string, id?: string) => (
+    <Tooltip title={parsed.toLocaleString()}>
+      <time
+        id={id}
+        dateTime={value}
+        data-testid={testId}
+        className="shrink-0 whitespace-nowrap text-[11px] text-text-muted"
+      >
+        {formatRelativeTime(value, t, { compact: true })}
+      </time>
+    </Tooltip>
   )
 
   return (
@@ -569,10 +591,12 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                 const rowDomId = `${listDomId}-row-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
                 const previewText = item.content ? derivePreviewText(item.content, item.title) : ''
                 const hasRowKeywords = Array.isArray(item.keywords) && item.keywords.length > 0
+                const rowDate = parseRowDate(item.updated_at)
+                const rowDateTestId = `notes-row-date-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
                 const rowDescribedBy = [
                   previewText ? `${rowDomId}-preview` : null,
                   hasRowKeywords ? `${rowDomId}-tags` : null,
-                  item.updated_at ? `${rowDomId}-date` : null,
+                  rowDate ? `${rowDomId}-date` : null,
                   rowHintId
                 ]
                   .filter(Boolean)
@@ -580,7 +604,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                 return (
                   <div
                     key={itemIdText}
-                    className={`w-full py-3 text-left transition-colors ${
+                    className={`w-full py-2 text-left transition-colors ${
                       isTrashView
                         ? 'px-4'
                         : isSelectedNote
@@ -694,13 +718,13 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                           const hasBacklink = Boolean(item.conversation_id)
                           const editedRecently = wasEditedRecently(item.updated_at)
                           return (
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="text-sm font-medium text-text truncate">
+                            <div className="flex items-center gap-2">
+                              <div className="min-w-0 flex-1 text-sm font-medium text-text truncate">
                                 {renderHighlightedText(titleText, searchTerms)}
                               </div>
                               {(isPinned || hasKeywords || hasBacklink || editedRecently) && (
                                 <div
-                                  className="mt-0.5 flex items-center gap-1 text-text-muted"
+                                  className="flex shrink-0 items-center gap-1 text-text-muted"
                                   data-testid={`notes-item-badges-${String(item.id)}`}
                                 >
                                   {isPinned && (
@@ -741,11 +765,14 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                                   )}
                                 </div>
                               )}
+                              {rowDate && item.updated_at
+                                ? renderRowDate(item.updated_at, rowDate, rowDateTestId, `${rowDomId}-date`)
+                                : null}
                             </div>
                           )
                         })()}
                         {previewText && (
-                          <div id={`${rowDomId}-preview`} className="text-xs text-text-muted truncate mt-1">
+                          <div id={`${rowDomId}-preview`} className="text-xs text-text-muted truncate mt-0.5">
                             {renderHighlightedText(
                               previewText,
                               searchTerms
@@ -753,11 +780,11 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                           </div>
                         )}
                         {Array.isArray(item.keywords) && item.keywords.length > 0 && (
-                          <div id={`${rowDomId}-tags`} className="mt-2 flex flex-wrap gap-1">
+                          <div id={`${rowDomId}-tags`} className="mt-1 flex flex-wrap gap-1">
                             {item.keywords.slice(0, 5).map((keyword, idx) => (
                               <span
                                 key={`${keyword}-${idx}`}
-                                className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-surface2 text-text"
+                                className="inline-flex items-center rounded bg-surface2 px-1.5 text-[11px] leading-5 text-text"
                               >
                                 {keyword}
                               </span>
@@ -769,21 +796,13 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                                   count: item.keywords.length - 5
                                 })}
                               >
-                                <span className="inline-flex items-center px-2 py-0.5 text-xs text-text-muted">
+                                <span className="inline-flex items-center px-1.5 text-[11px] leading-5 text-text-muted">
                                   +{item.keywords.length - 5}
                                 </span>
                               </Tooltip>
                             )}
                           </div>
                         )}
-                        <div id={`${rowDomId}-date`} className="text-xs text-text-muted mt-1">
-                          {item.updated_at
-                            ? (() => {
-                                const d = new Date(item.updated_at)
-                                return isNaN(d.getTime()) ? '' : d.toLocaleString()
-                              })()
-                            : ''}
-                        </div>
                       </div>
                     </button>
                     {item.conversation_id != null && String(item.conversation_id) !== '' && (() => {
@@ -829,23 +848,18 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       )}
                     </div>
                     {previewText && (
-                      <div className="text-xs text-text-muted truncate mt-1">
+                      <div className="text-xs text-text-muted truncate mt-0.5">
                         {previewText}
                       </div>
                     )}
-                    <div className="mt-2 flex items-center justify-between gap-2">
-                      <div className="text-xs text-text-muted">
+                    <div className="mt-1 flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1 text-xs text-text-muted">
                         {t('option:notesSearch.trashedAtLabel', {
                           defaultValue: 'Deleted'
                         })}
-                        {item.updated_at
-                          ? (() => {
-                              const d = new Date(item.updated_at)
-                              return isNaN(d.getTime())
-                                ? ''
-                                : ` · ${d.toLocaleString()}`
-                            })()
-                          : ''}
+                        {rowDate && item.updated_at
+                          ? renderRowDate(item.updated_at, rowDate, rowDateTestId)
+                          : null}
                       </div>
                       <Button
                         size="small"
