@@ -4733,6 +4733,9 @@
   "composer_modelScopeAll": {
     "message": "All models"
   },
+  "composer_modelCatalogLoadFailed": {
+    "message": "Couldn't load all models"
+  },
   "composer_modelNotSetUp": {
     "message": "Not set up"
   },

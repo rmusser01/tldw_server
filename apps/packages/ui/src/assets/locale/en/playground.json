@@ -771,6 +771,7 @@
     "modelScopeLabel": "Models to show",
     "modelScopeReady": "Ready to use",
     "modelScopeAll": "All models",
+    "modelCatalogLoadFailed": "Couldn't load all models",
     "modelNotSetUp": "Not set up",
     "modelNotSetUpTitle": "This model's provider is not set up on your server yet.",
     "modelReadiness": {
