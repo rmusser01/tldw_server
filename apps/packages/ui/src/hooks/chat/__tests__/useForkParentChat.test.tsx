@@ -5,10 +5,12 @@ const client = vi.hoisted(() => ({ getChat: vi.fn() }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: client }))
 
 import { useForkParentChat } from "../useForkParentChat"
+import { getQueryClient } from "@/services/query-client"
 
 describe("useForkParentChat (CM-12)", () => {
   beforeEach(() => {
     client.getChat.mockReset()
+    getQueryClient().clear()
   })
 
   it("finds the chat a branch was forked from", async () => {
@@ -59,5 +61,35 @@ describe("useForkParentChat (CM-12)", () => {
     const { result } = renderHook(() => useForkParentChat("branch"))
     await waitFor(() => expect(client.getChat).toHaveBeenCalledTimes(2))
     expect(result.current).toBeNull()
+  })
+})
+
+describe("useForkParentChat reads (review follow-up)", () => {
+  beforeEach(() => {
+    client.getChat.mockReset()
+    getQueryClient().clear()
+  })
+
+  it("reads a branch and its parent's title once, however often the chat is reopened", async () => {
+    client.getChat.mockImplementation(async (id: string) =>
+      id === "branch" ? { id: "branch", parent_conversation_id: "trip" } : { id: "trip", title: "Trip plan" })
+    const first = renderHook(() => useForkParentChat("branch"))
+    await waitFor(() => expect(first.result.current).toEqual({ id: "trip", title: "Trip plan" }))
+    first.unmount()
+    const second = renderHook(() => useForkParentChat("branch"))
+    await waitFor(() => expect(second.result.current).toEqual({ id: "trip", title: "Trip plan" }))
+    expect(client.getChat).toHaveBeenCalledTimes(2)
+  })
+
+  it("takes the parent from the chat list the sidebar already read, fetching only the parent's title", async () => {
+    getQueryClient().setQueryData(["serverChatHistory", { page: 1 }], {
+      items: [{ id: "branch", title: "Trip plan — branch at message 3", parent_conversation_id: "trip" }],
+      total: 1
+    })
+    client.getChat.mockResolvedValue({ id: "trip", title: "Trip plan" })
+    const { result } = renderHook(() => useForkParentChat("branch"))
+    await waitFor(() => expect(result.current).toEqual({ id: "trip", title: "Trip plan" }))
+    expect(client.getChat).toHaveBeenCalledOnce()
+    expect(client.getChat).toHaveBeenCalledWith("trip", expect.anything())
   })
 })
