@@ -17,21 +17,22 @@ export type CommandPaletteContentProvider = {
   search: (query: string, signal: AbortSignal) => Promise<CommandItem[]>
 }
 
-type ContentResults = { query: string; items: CommandItem[] }
+type ContentResults = { query: string; items: CommandItem[]; failed: boolean }
 
-const EMPTY: ContentResults = { query: "", items: [] }
+const NO_ITEMS: CommandItem[] = []
+const EMPTY: ContentResults = { query: "", items: NO_ITEMS, failed: false }
 
 /**
  * Search the content providers for `query`: 200 ms after the last keystroke,
  * one AbortController per query, at most five results per provider, in
- * provider order. A failing provider contributes nothing. `pending` is true
- * from the keystroke until the results for that query arrive.
+ * provider order. A failing provider contributes nothing and sets `failed`.
+ * `pending` is true from the keystroke until the results for that query arrive.
  */
 export const useCommandPaletteContentResults = (
   query: string,
   providers: CommandPaletteContentProvider[] | undefined,
   enabled: boolean
-): { items: CommandItem[]; pending: boolean } => {
+): { items: CommandItem[]; pending: boolean; failed: boolean } => {
   const trimmed = query.trim()
   const active = enabled && trimmed.length > 0 && (providers?.length ?? 0) > 0
   const [results, setResults] = useState<ContentResults>(EMPTY)
@@ -40,15 +41,19 @@ export const useCommandPaletteContentResults = (
     if (!active || !providers) return
     const controller = new AbortController()
     const timer = window.setTimeout(() => {
+      let failed = false
       void Promise.all(
         providers.map((provider) =>
           provider
             .search(trimmed, controller.signal)
             .then((items) => items.slice(0, COMMAND_PALETTE_CONTENT_LIMIT))
-            .catch(() => [] as CommandItem[])
+            .catch(() => {
+              failed = true
+              return [] as CommandItem[]
+            })
         )
       ).then((groups) => {
-        if (!controller.signal.aborted) setResults({ query: trimmed, items: groups.flat() })
+        if (!controller.signal.aborted) setResults({ query: trimmed, items: groups.flat(), failed })
       })
     }, COMMAND_PALETTE_CONTENT_DEBOUNCE_MS)
     return () => {
@@ -59,5 +64,9 @@ export const useCommandPaletteContentResults = (
 
   // Results belong to one query; while another is typed they are not shown.
   const current = active && results.query === trimmed
-  return { items: current ? results.items : [], pending: active && !current }
+  return {
+    items: current ? results.items : NO_ITEMS,
+    pending: active && !current,
+    failed: current && results.failed
+  }
 }

@@ -540,6 +540,7 @@
     "categoryChats": "Chats",
     "categoryNotes": "Notes",
     "searchingContent": "Searching chats and notes…",
+    "contentSearchFailed": "Chats and notes could not be searched.",
     "newNote": "New note",
     "untitledChat": "Untitled chat",
     "untitledNote": "Untitled note",
