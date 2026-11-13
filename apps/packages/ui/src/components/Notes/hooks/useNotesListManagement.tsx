@@ -11,6 +11,7 @@ import {
 } from '@/services/settings/ui-settings'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type {
+  NotesBrowseSortOption,
   NotesSortOption,
   NotesListViewMode,
   MoodboardSummary,
@@ -33,6 +34,7 @@ import {
   NOTE_SEARCH_DEBOUNCE_MS,
   promptModal,
 } from '../notes-manager-utils'
+import { normalizeNoteSearchSnippet } from '../NoteSearchSnippet'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 import { isSameNotesListRowsKind } from '../notes-list-cache'
 
@@ -128,9 +130,24 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   const [searchTipsQuery, setSearchTipsQuery] = React.useState('')
   const [page, setPage] = React.useState(1)
   const [pageSize, setPageSize] = React.useState(20)
-  const [sortOption, setSortOption] = React.useState<NotesSortOption>('modified_desc')
+  const [sortOption, setBrowseSortOption] = React.useState<NotesBrowseSortOption>('modified_desc')
+  // A text search starts on Best match (NL-07); a sort picked during it lasts until it ends.
+  const [searchSortOption, setSearchSortOption] = React.useState<NotesSortOption>('relevance')
   const [listMode, setListMode] = React.useState<'active' | 'trash'>('active')
   const [listViewMode, setListViewMode] = React.useState<NotesListViewMode>('list')
+  const bestMatchAvailable =
+    listMode === 'active' && listViewMode !== 'moodboard' && query.trim().length > 0
+  const effectiveSortOption: NotesSortOption = bestMatchAvailable ? searchSortOption : sortOption
+  const setSortOption = React.useCallback(
+    (option: NotesSortOption) => {
+      if (bestMatchAvailable) setSearchSortOption(option)
+      else if (option !== 'relevance') setBrowseSortOption(option)
+    },
+    [bestMatchAvailable]
+  )
+  React.useEffect(() => {
+    if (!bestMatchAvailable) setSearchSortOption('relevance')
+  }, [bestMatchAvailable])
   const listQueryViewMode = listViewMode === 'graph' ? 'list' : listViewMode
   // Render-state transitions stay local to React until this tree commits.
   const [storedAuthorityOwner, setStoredAuthorityOwner] =
@@ -257,13 +274,15 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       return { items: [], total: 0 }
     }
 
+    // Text searches sort by best match unless another sort is picked; tags alone use the list's sort.
+    const fetchSort: NotesSortOption = qstr ? searchSortOption : sortOption
     const params = new URLSearchParams()
     if (qstr) params.set('query', qstr)
     params.set('limit', String(fetchPageSize))
     params.set('offset', String((fetchPage - 1) * fetchPageSize))
     params.set('include_keywords', 'true')
-    params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
-    params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+    params.set('sort_by', NOTE_SORT_API_PARAMS[fetchSort].sortBy)
+    params.set('sort_order', NOTE_SORT_API_PARAMS[fetchSort].sortOrder)
     let tokenCount = 0
     toks.forEach((tok) => {
       const v = tok.trim()
@@ -309,8 +328,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       totalVal = Number(totalCandidate) || 0
     }
 
-    return { items: sortNoteRows(items, sortOption), total: totalVal }
-  }, [authorityOwner, isCurrentAuthority, sortOption, tagMatch])
+    return { items: sortNoteRows(items, fetchSort), total: totalVal }
+  }, [authorityOwner, isCurrentAuthority, searchSortOption, sortOption, tagMatch])
 
   const fetchNotes = React.useCallback(async (): Promise<NoteListItem[]> => {
     const requestOwner = authorityOwner
@@ -338,7 +357,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
           n?.membership_source === 'both'
             ? n.membership_source
             : undefined,
-        version: toNoteVersion(n) ?? undefined
+        version: toNoteVersion(n) ?? undefined,
+        snippet: normalizeNoteSearchSnippet(n?.snippet)
       }
     }
 
@@ -441,7 +461,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     query,
     page,
     pageSize,
-    sortOption,
+    effectiveSortOption,
     selectedNotebookId ?? 'none',
     effectiveKeywordTokens.join('|'),
     tagMatch,
@@ -1256,7 +1276,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     searchTipsQuery, setSearchTipsQuery,
     page, setPage,
     pageSize, setPageSize,
-    sortOption, setSortOption,
+    // The sort the list shows: Best match ('relevance') is offered only while bestMatchAvailable.
+    sortOption: effectiveSortOption, setSortOption, bestMatchAvailable,
     listMode, setListMode,
     listViewMode, setListViewMode,
     total, setTotal,

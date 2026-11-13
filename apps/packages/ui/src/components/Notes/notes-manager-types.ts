@@ -15,6 +15,7 @@ export type {
   NotesEditorMode,
   NotesInputMode,
   NotesSortOption,
+  NotesBrowseSortOption,
   KeywordPickerSortMode,
   KeywordFrequencyTone,
   KeywordManagementItem,

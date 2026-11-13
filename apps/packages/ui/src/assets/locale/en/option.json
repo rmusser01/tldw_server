@@ -1720,6 +1720,7 @@
     "tagMatchLabel": "Show notes with",
     "tagMatchAll": "All these tags",
     "tagMatchAny": "Any of these tags",
+    "sortRelevance": "Best match",
     "resultsRegionLabel": "Notes results",
     "shortcutGroupList": "Notes list",
     "shortcutListMoveDescription": "Move between notes in the list.",

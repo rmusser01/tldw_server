@@ -7013,6 +7013,9 @@
   "notesSearch_tagMatchAny": {
     "message": "Any of these tags"
   },
+  "notesSearch_sortRelevance": {
+    "message": "Best match"
+  },
   "notesSearch_resultsRegionLabel": {
     "message": "Notes results"
   },

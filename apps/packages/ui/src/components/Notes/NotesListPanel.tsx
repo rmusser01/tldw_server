@@ -7,6 +7,7 @@ import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NoteListItem } from '@/components/Notes/types'
 import { moveNotesListRowFocus } from './notes-list-keyboard'
 import { formatBacklinkIdsTooltip } from './notes-backlink-labels'
+import { NoteSearchSnippet } from './NoteSearchSnippet'
 
 const LazyNotesListPanelEmptyStates = React.lazy(() => import('./NotesListPanelEmptyStates'))
 
@@ -580,7 +581,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                 const previewText = item.content ? derivePreviewText(item.content, item.title) : ''
                 const hasRowKeywords = Array.isArray(item.keywords) && item.keywords.length > 0
                 const rowDescribedBy = [
-                  previewText ? `${rowDomId}-preview` : null,
+                  previewText || item.snippet ? `${rowDomId}-preview` : null,
                   hasRowKeywords ? `${rowDomId}-tags` : null,
                   item.updated_at ? `${rowDomId}-date` : null,
                   rowHintId
@@ -753,7 +754,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                             </div>
                           )
                         })()}
-                        {item.content && (
+                        {item.snippet ? (
+                          <NoteSearchSnippet id={`${rowDomId}-preview`} segments={item.snippet} />
+                        ) : item.content && (
                           <div id={`${rowDomId}-preview`} className="text-xs text-text-muted truncate mt-1">
                             {renderHighlightedText(
                               previewText,

@@ -524,7 +524,10 @@ export type NotesInputMode = 'markdown' | 'wysiwyg'
  * uncontrolled, so the toggle is back. Set to false to hide WYSIWYG again.
  */
 export const NOTES_WYSIWYG_INPUT_ENABLED = true
-export type NotesSortOption = 'modified_desc' | 'created_desc' | 'title_asc' | 'title_desc'
+/** Sorts for the plain list and Trash. */
+export type NotesBrowseSortOption = 'modified_desc' | 'created_desc' | 'title_asc' | 'title_desc'
+/** `relevance` ("Best match") applies only while a text search is active (NL-07). */
+export type NotesSortOption = NotesBrowseSortOption | 'relevance'
 export type KeywordPickerSortMode = 'frequency_desc' | 'alpha_asc' | 'alpha_desc'
 export type KeywordFrequencyTone = 'none' | 'low' | 'medium' | 'high'
 export type KeywordManagementItem = {
@@ -2079,8 +2082,9 @@ export const estimateDetectedNotesFromImportContent = (format: ImportFormat, con
 
 export const NOTE_SORT_API_PARAMS: Record<
   NotesSortOption,
-  { sortBy: 'last_modified' | 'created_at' | 'title'; sortOrder: 'asc' | 'desc' }
+  { sortBy: 'relevance' | 'last_modified' | 'created_at' | 'title'; sortOrder: 'asc' | 'desc' }
 > = {
+  relevance: { sortBy: 'relevance', sortOrder: 'desc' },
   modified_desc: { sortBy: 'last_modified', sortOrder: 'desc' },
   created_desc: { sortBy: 'created_at', sortOrder: 'desc' },
   title_asc: { sortBy: 'title', sortOrder: 'asc' },
@@ -2174,6 +2178,8 @@ export const toSortableTitle = (candidate: unknown): string =>
     .toLowerCase()
 
 export const sortNoteRows = (items: any[], sortOption: NotesSortOption): any[] => {
+  // Best match keeps the server's relevance order; there is nothing to sort by here.
+  if (sortOption === 'relevance') return items
   const next = [...items]
   next.sort((a, b) => {
     if (sortOption === 'title_asc' || sortOption === 'title_desc') {

@@ -122,6 +122,7 @@ import {
 import { isEditableTarget } from "@/utils/editable-target"
 import { useConnectionsMemory } from './notes-connections'
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
+import { useRevealFirstSearchHit } from "@/components/Notes/hooks/useRevealFirstSearchHit"
 import { revealNotesListAndFocusSearch } from "@/components/Notes/hooks/useNotesOffCanvasList"
 import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
 import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
@@ -487,6 +488,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   const filteredCount = visibleNotes.length
   const listKeyboard = useNotesKeyboardNavigation({ visibleNotes, selectedId: ed.selectedId, selectNote: ed.handleSelectNote, richEditorRef: ed.richEditorRef, contentTextareaRef: ed.contentTextareaRef, editorRegionId: NOTES_EDITOR_REGION_ID, listMode: list.listMode })
+  useRevealFirstSearchHit({ selectedId: ed.selectedId, content: ed.content, query: list.query, textareaRef: ed.contentTextareaRef, enabled: ed.editorInputMode !== 'wysiwyg' && ed.editorMode !== 'preview' })
   const graphInitialFocusNoteId = React.useMemo(
     () =>
       resolveNotesGraphFocusNoteId(
@@ -2821,6 +2823,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         pageSize={list.pageSize}
         total={list.total}
         sortOption={list.sortOption}
+        sortBestMatchAvailable={list.bestMatchAvailable}
         selectedId={ed.selectedId}
         visibleNotes={visibleNotes}
         filteredCount={filteredCount}

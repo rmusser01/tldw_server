@@ -25,6 +25,7 @@ import type {
   ExportProgressState,
 } from './notes-manager-types'
 import { NOTES_LIST_REGION_ID } from './notes-manager-utils'
+import { buildNotesSortOptions } from './notes-sort-options'
 import { useHasContentBelow } from './hooks/useHasContentBelow'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NotesRecentOpenedEntry } from '@/services/settings/ui-settings'
@@ -57,6 +58,8 @@ export interface NotesSidebarProps {
   pageSize: number
   total: number
   sortOption: NotesSortOption
+  /** A text search is active, so the sort menu offers Best match (NL-07). */
+  sortBestMatchAvailable?: boolean
   selectedId: string | number | null
 
   // Data
@@ -205,6 +208,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   pageSize,
   total,
   sortOption,
+  sortBestMatchAvailable,
   selectedId,
 
   // Data
@@ -777,32 +781,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       aria-label={t('option:notesSearch.sortAriaLabel', {
                         defaultValue: 'Sort notes'
                       })}
-                      options={[
-                        {
-                          value: 'modified_desc',
-                          label: t('option:notesSearch.sortModifiedDesc', {
-                            defaultValue: 'Date modified (newest first)'
-                          })
-                        },
-                        {
-                          value: 'created_desc',
-                          label: t('option:notesSearch.sortCreatedDesc', {
-                            defaultValue: 'Date created (newest first)'
-                          })
-                        },
-                        {
-                          value: 'title_asc',
-                          label: t('option:notesSearch.sortTitleAsc', {
-                            defaultValue: 'Title (A-Z)'
-                          })
-                        },
-                        {
-                          value: 'title_desc',
-                          label: t('option:notesSearch.sortTitleDesc', {
-                            defaultValue: 'Title (Z-A)'
-                          })
-                        }
-                      ]}
+                      options={buildNotesSortOptions(t, {
+                        bestMatchAvailable: Boolean(sortBestMatchAvailable)
+                      })}
                     />
                   </div>
 
