@@ -7,6 +7,10 @@ showed the first line of body-only hits. Without a sort (or with
 ``created_at`` and ``title`` order the whole result in SQL. Each item carries
 ``snippet``: a short excerpt of the body around the match, split into segments
 whose ``match`` flag marks a matched term, or null when only the title matched.
+
+Clients that still send other ``sort_by``/``sort_order`` values keep working:
+known values match ignoring case, an unknown ``sort_by`` falls back to
+relevance and an unknown ``sort_order`` to the default (desc), never a 422.
 """
 
 from collections.abc import Generator, Iterator
@@ -16,6 +20,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -126,9 +131,59 @@ def test_tag_search_honours_sort(notes_client: TestClient) -> None:
     assert _titles(items) == ["Sourdough country loaf", "bread log", "Apple pie"]
 
 
-def test_unknown_sort_is_rejected(notes_client: TestClient) -> None:
-    response = notes_client.get("/api/v1/notes/search/", params={"query": "sourdough", "sort_by": "bogus"})
-    assert response.status_code == 422
+@pytest.mark.parametrize("sort_order", [None, "asc", "sideways"])
+def test_unknown_sort_by_falls_back_to_relevance(notes_client: TestClient, sort_order: str | None) -> None:
+    """The endpoint once accepted and ignored any sort; old clients must not get a 422."""
+    relevance = _titles(_search(notes_client, query="sourdough"))
+    params = {"query": "sourdough", "sort_by": "updated_at"}
+    if sort_order is not None:
+        params["sort_order"] = sort_order
+    assert _titles(_search(notes_client, **params)) == relevance
+
+
+def test_unknown_sort_by_falls_back_to_relevance_for_tag_searches(notes_client: TestClient) -> None:
+    relevance = _titles(_search(notes_client, query="sourdough", tokens="baking"))
+    assert _titles(_search(notes_client, query="sourdough", tokens="baking", sort_by="bogus")) == relevance
+
+
+@pytest.mark.parametrize(
+    ("sort_by", "sort_order", "expected"),
+    [
+        ("last_modified", "DESC", ["Sourdough shopping", "Apple pie", "bread log", "Sourdough country loaf"]),
+        ("Title", "Asc", ["Apple pie", "bread log", "Sourdough country loaf", "Sourdough shopping"]),
+        # An unknown direction uses the default, desc.
+        ("LAST_MODIFIED", "sideways", ["Sourdough shopping", "Apple pie", "bread log", "Sourdough country loaf"]),
+    ],
+)
+def test_known_sorts_match_ignoring_case(
+    notes_client: TestClient, sort_by: str, sort_order: str, expected: list[str]
+) -> None:
+    assert _titles(_search(notes_client, query="sourdough", sort_by=sort_by, sort_order=sort_order)) == expected
+
+
+def test_unknown_sort_is_logged_at_debug_not_warning(notes_client: TestClient) -> None:
+    records: list[tuple[str, str]] = []
+    sink_id = logger.add(lambda message: records.append((message.record["level"].name, message.record["message"])))
+    try:
+        _search(notes_client, query="sourdough", sort_by="updated_at", sort_order="sideways")
+    finally:
+        logger.remove(sink_id)
+    mentions = [(level, text) for level, text in records if "updated_at" in text or "sideways" in text]
+    assert mentions, records
+    assert {level for level, _ in mentions} == {"DEBUG"}
+
+
+def test_openapi_documents_the_sort_values_without_rejecting_others(notes_client: TestClient) -> None:
+    spec = notes_client.app.openapi()
+    parameters = {param["name"]: param for param in spec["paths"]["/api/v1/notes/search/"]["get"]["parameters"]}
+    for name, values in (
+        ("sort_by", ("relevance", "last_modified", "created_at", "title")),
+        ("sort_order", ("asc", "desc")),
+    ):
+        param = parameters[name]
+        schema_text = repr(param["schema"])
+        assert "enum" not in schema_text, param
+        assert all(value in param["description"] for value in values), param
 
 
 def test_items_carry_a_highlighted_snippet_for_body_matches(notes_client: TestClient) -> None:

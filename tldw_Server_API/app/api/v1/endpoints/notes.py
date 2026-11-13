@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, NoReturn, Optional, TypeVar
+from typing import Annotated, Any, Callable, Literal, NoReturn, Optional, TypeVar, cast, get_args
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -2940,6 +2940,41 @@ async def create_note_folder(
         handle_db_errors(e, "note folder")
 
 
+# Search sorts (NL-07). Other values fall back to relevance and desc instead of
+# a 422: the endpoint once accepted and ignored any sort, and older clients
+# still send their own values.
+_NOTE_SEARCH_SORTS: frozenset[str] = frozenset(get_args(NoteSearchSortBy))
+_NOTE_SEARCH_SORT_ORDERS: frozenset[str] = frozenset(get_args(NoteListSortOrder))
+_NOTE_SEARCH_DEFAULT_SORT_ORDER: NoteListSortOrder = "desc"
+
+
+def _normalize_note_search_sort(
+    sort_by: Optional[str], sort_order: Optional[str]
+) -> tuple[Optional[NoteListSortBy], NoteListSortOrder]:
+    """Return the ``(sort_by, sort_order)`` a note search applies.
+
+    Known values match ignoring case. ``None`` for ``sort_by`` means relevance:
+    omitted, ``relevance`` or an unknown value. An unknown ``sort_order`` uses
+    desc. Unknown values are logged at debug level only, since a client that
+    sends one sends it on every request.
+    """
+    column = (sort_by or "").strip().lower()
+    direction = (sort_order or "").strip().lower()
+    if column and column not in _NOTE_SEARCH_SORTS:
+        logger.debug("Notes search: unknown sort_by {!r}, ordering by relevance", str(sort_by)[:64])
+    if direction and direction not in _NOTE_SEARCH_SORT_ORDERS:
+        logger.debug("Notes search: unknown sort_order {!r}, using desc", str(sort_order)[:64])
+    applied_sort_by = (
+        cast(NoteListSortBy, column) if column in _NOTE_SEARCH_SORTS and column != "relevance" else None
+    )
+    applied_sort_order = (
+        cast(NoteListSortOrder, direction)
+        if direction in _NOTE_SEARCH_SORT_ORDERS
+        else _NOTE_SEARCH_DEFAULT_SORT_ORDER
+    )
+    return applied_sort_by, applied_sort_order
+
+
 @router.get(
     "/search",
     response_model=NotesSearchResponse,
@@ -2985,18 +3020,25 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
             ),
         ),
         sort_by: Annotated[
-            Optional[NoteSearchSortBy],
+            Optional[str],
             Query(
                 description=(
-                    "Order of the whole result before paging. Omitted or 'relevance': best match first for a "
+                    "Order of the whole result before paging: 'relevance', 'last_modified', 'created_at' or "
+                    "'title', ignoring case. Omitted, 'relevance' or any other value: best match first for a "
                     "query (most recently modified for tags alone). Title sorts ignore case. Ignored by "
                     "title_only searches."
                 ),
             ),
         ] = None,
         sort_order: Annotated[
-            NoteListSortOrder, Query(description="Sort direction for a sort_by other than relevance")
-        ] = "desc",
+            Optional[str],
+            Query(
+                description=(
+                    "Sort direction for a sort_by other than relevance: 'asc' or 'desc', ignoring case. "
+                    "Omitted or any other value: 'desc'."
+                ),
+            ),
+        ] = None,
         rate_limiter: RateLimiter = Depends(get_rate_limiter_dep),
         current_user: User = Depends(get_request_user),
         _: None = Depends(rbac_rate_limit("notes.search")),
@@ -3020,6 +3062,7 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
         if not query_term and not token_list:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="query or tokens is required")
+        search_sort_by, search_sort_order = _normalize_note_search_sort(sort_by, sort_order)
         logger.debug(
             f"User (DB client_id: {db.client_id}) searching notes: query='{query_term}', limit={limit}, offset={offset}, tokens={token_list}")
         total = None
@@ -3030,8 +3073,8 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 limit=limit,
                 offset=offset,
                 match=tokens_match,
-                sort_by=sort_by,
-                sort_order=sort_order,
+                sort_by=search_sort_by,
+                sort_order=search_sort_order,
             )
             try:
                 total = db.count_notes_matching_keywords(
@@ -3049,7 +3092,7 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 total = offset + len(notes_data)
         else:
             notes_data = db.search_notes(
-                search_term=query_term, limit=limit, offset=offset, sort_by=sort_by, sort_order=sort_order
+                search_term=query_term, limit=limit, offset=offset, sort_by=search_sort_by, sort_order=search_sort_order
             )
             try:
                 total = db.count_notes_matching(query_term)
