@@ -2,6 +2,7 @@
 import React from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { MemoryRouter, useNavigate } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText";
 import {
@@ -181,6 +182,7 @@ describe("Playground send owns only its captured composer draft", () => {
           imageBackendLabel: "none",
           setOpenModelSettings: vi.fn(),
           currentMessage: composer.form.values.message,
+          onNewChat: vi.fn(),
         });
         const submit = usePlaygroundSubmit({
           form,
@@ -259,9 +261,12 @@ describe("Playground send owns only its captured composer draft", () => {
       {
         initialProps: initial,
         wrapper: ({ children }) => (
-          <MemoryRouter initialEntries={[initial.route ?? "/chat"]}>
-            <HistorySelectionProvider>{children}</HistorySelectionProvider>
-          </MemoryRouter>
+          // The slash commands read the server's command list (CC-11).
+          <QueryClientProvider client={new QueryClient()}>
+            <MemoryRouter initialEntries={[initial.route ?? "/chat"]}>
+              <HistorySelectionProvider>{children}</HistorySelectionProvider>
+            </MemoryRouter>
+          </QueryClientProvider>
         ),
       },
     );

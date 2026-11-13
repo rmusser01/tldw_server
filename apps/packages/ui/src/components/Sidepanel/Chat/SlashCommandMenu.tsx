@@ -1,15 +1,8 @@
 import React from "react"
 import { cn } from "@/libs/utils"
+import type { SlashCommandItem } from "@/types/slash-command"
 
-export type SlashCommandItem = {
-  id: string
-  command: string
-  label: string
-  description?: string
-  keywords?: string[]
-  action?: () => void
-  insertText?: string
-}
+export type { SlashCommandItem }
 
 type SlashCommandMenuProps = {
   open: boolean

@@ -12,6 +12,7 @@ import {
   renderPlayground,
   resetPlaygroundHarness,
   screen,
+  sendFromComposer,
   waitFor,
   waitForChatIdle
 } from "./harness/playground-harness"
@@ -129,5 +130,93 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
 
     await waitFor(() => expect(modelSearch()).toHaveFocus(), HARNESS_WAIT)
     expect(modelSettingsDialog()).toBeNull()
+  })
+
+  // CC-11 (slice a): /new, /prompt and the server's chat commands.
+  it("starts a fresh saved chat with '/new', like the header's New chat", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+    await sendFromComposer(view, "First topic question")
+    const previousHistoryId = useStoreMessageOption.getState().historyId
+
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "/new")
+    await view.user.keyboard("{Enter}")
+
+    await waitFor(
+      () => expect(screen.queryByText("First topic question")).not.toBeInTheDocument(),
+      HARNESS_WAIT
+    )
+    expect(view.composer).toHaveValue("")
+    expect(useStoreMessageOption.getState()).toMatchObject({ temporaryChat: false, messages: [] })
+    await sendFromComposer(view, "Unrelated question")
+    expect(useStoreMessageOption.getState().historyId).not.toBe(previousHistoryId)
+    expect(completionMessages(server.completionRequests().at(-1)!)).toEqual([
+      { role: "user", content: "Unrelated question" }
+    ])
+  })
+
+  it("sends nothing when '/new' is submitted with text after it", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+    await sendFromComposer(view, "First topic question")
+
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "/new and then this")
+    await view.user.keyboard("{Enter}")
+
+    await waitFor(
+      () => expect(screen.queryByText("First topic question")).not.toBeInTheDocument(),
+      HARNESS_WAIT
+    )
+    await waitForChatIdle()
+    expect(server.completionRequests()).toHaveLength(1)
+    expect(useStoreMessageOption.getState().messages).toEqual([])
+  })
+
+  it("opens the prompt picker with '/prompt'", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "/prompt")
+    await view.user.keyboard("{Enter}")
+
+    expect(await screen.findByPlaceholderText("Search prompts...", {}, HARNESS_WAIT)).toBeInTheDocument()
+    expect(view.composer).toHaveValue("")
+    expect(server.completionRequests()).toHaveLength(0)
+  })
+
+  it("lists the server's chat commands and sends a picked one as typed", async () => {
+    const server = createFakeTldwServer({
+      chatCommands: [{ name: "time", description: "Show the current time" }]
+    })
+    const view = await renderPlayground({ server })
+
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "/ti")
+    expect(await screen.findByText("Show the current time", {}, HARNESS_WAIT)).toBeInTheDocument()
+    await view.user.keyboard("{Enter}")
+    await waitFor(() => expect(view.composer).toHaveValue("/time "), HARNESS_WAIT)
+
+    await view.user.type(view.composer, "UTC")
+    await view.user.keyboard("{Enter}")
+    await waitForChatIdle()
+    const completions = server.completionRequests()
+    expect(completions).toHaveLength(1)
+    expect(completionMessages(completions[0]).at(-1)).toEqual({ role: "user", content: "/time UTC" })
+  })
+
+  it("keeps the local commands when the server lists none", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+
+    await view.user.click(view.composer)
+    await view.user.type(view.composer, "/")
+    await waitFor(() => expect(server.find("GET", "/api/v1/chat/commands")).toHaveLength(1), HARNESS_WAIT)
+    expect(screen.getByText("/new")).toBeInTheDocument()
+    expect(screen.getByText("/prompt")).toBeInTheDocument()
+    expect(screen.queryByText("/time")).toBeNull()
+    expect(server.unhandled).toEqual([])
   })
 })

@@ -81,6 +81,7 @@ import {
 } from "@/hooks/playground";
 // TldwButton moved to extracted sub-components
 import { useAntdNotification } from "@/hooks/useAntdNotification";
+import { startSavedChat } from "@/hooks/chat/start-saved-chat";
 import { useAudioSourceCatalog } from "@/hooks/useAudioSourceCatalog";
 import { usePlaygroundSessionStore } from "@/store/playground-session";
 import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope";
@@ -4271,6 +4272,8 @@ export const PlaygroundForm = ({
     closeComposerPopoversExcept("model");
     setOpenModelSettings(true);
   }, [closeComposerPopoversExcept, setOpenModelSettings]);
+  // `/new` takes the header's New chat path (CC-11).
+  const startNewChat = React.useCallback(() => void startSavedChat({ clearChat, setTemporaryChat, setSelectedCharacter }), [clearChat, setSelectedCharacter, setTemporaryChat]);
   const {
     showSlashMenu,
     slashActiveIndex,
@@ -4288,6 +4291,7 @@ export const PlaygroundForm = ({
     imageBackendDefaultTrimmed,
     imageBackendLabel,
     currentMessage: form.values.message,
+    onNewChat: startNewChat,
   });
 
   const handleSlashCommandSelect = React.useCallback(

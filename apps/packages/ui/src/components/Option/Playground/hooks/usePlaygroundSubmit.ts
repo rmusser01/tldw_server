@@ -389,6 +389,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       }
       // Resolving is pure (it also runs per keystroke); a command runs only on submit.
       executeSlashCommand(intent)
+      // `/new` moves to another chat: nothing is sent from the one it left.
+      if (intent.slashCommand?.standalone) return
       if (intent.invalidImageCommand) {
         notificationApi.error({
           message: t("error", { defaultValue: "Error" }),
