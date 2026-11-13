@@ -135,8 +135,11 @@ describe("TutorialPrompt behavior", () => {
     }
   )
 
-  it.each(["New", "H1"])(
-    "a prompt's original Start refuses replacement %s",
+  // Review of #3119: the prompt is about the page, so a chat change on the
+  // same page (switching chats, New chat, a restored session) must not leave
+  // it on screen with a Start that silently does nothing.
+  it.each(["chat switch", "New", "H1"])(
+    "a visible prompt's Start still starts the tour after a %s on the same page",
     (boundary) => {
       let epoch = 1
       const selection = {
@@ -148,20 +151,26 @@ describe("TutorialPrompt behavior", () => {
       render(
         <MemoryRouter initialEntries={["/chat"]}>
           <HistorySelectionContext.Provider value={selection}>
+            <NavigatorBridge />
             <TutorialPrompt />
           </HistorySelectionContext.Provider>
         </MemoryRouter>
       )
       act(() => vi.advanceTimersByTime(2000))
       const original = infoMock.mock.calls[0][0].btn
-      if (boundary === "New")
+      if (boundary === "chat switch")
+        act(() => {
+          capturedNavigate?.("/chat?chat=chat-x")
+          useStoreMessageOption.getState().setServerChatId("chat-x")
+        })
+      else if (boundary === "New")
         act(() => useStoreMessageOption.getState().startNewChatDraft())
       else epoch++
       render(original)
       fireEvent.click(screen.getByRole("button", { name: "Start tour" }))
-      expect(startTutorialMock).not.toHaveBeenCalled()
-      expect(destroyMock).not.toHaveBeenCalled()
-      expect(markPromptSeenMock).not.toHaveBeenCalled()
+      expect(startTutorialMock).toHaveBeenCalledOnce()
+      expect(destroyMock).toHaveBeenCalledWith("tutorial-prompt-global")
+      expect(markPromptSeenMock).toHaveBeenCalledWith("/chat")
     }
   )
 

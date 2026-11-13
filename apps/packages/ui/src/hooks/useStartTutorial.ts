@@ -11,8 +11,10 @@ import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 type StartTutorialOptions = {
   /**
    * What makes a launcher stale. "address" (the default): any change of the
-   * address since it rendered. "page": only a change of page, so a same-page
-   * address change (opening a note writes /notes?note=<id>) keeps it.
+   * address, or of the chat draft and history selection it rendered with.
+   * "page": only a change of page (or account), for a tour about the page:
+   * a same-page address change (opening a note writes /notes?note=<id>) or a
+   * chat change (switch, New chat, a restored session) keeps it.
    */
   fence?: "address" | "page"
 }
@@ -61,14 +63,15 @@ export const useStartTutorial = ({ fence = "address" }: StartTutorialOptions = {
   }, [])
   return useCallback(
     (tutorialId: string, target?: HTMLElement | null) => {
-      const sourceIsCurrent = () =>
-        (fence === "page"
-          ? pathname === currentPathname.current
-          : route === currentRoute.current) &&
+      const chatSourceIsCurrent = () =>
         source.isCurrent() &&
         (!owner ||
           owner.kind === "unavailable" ||
-          owner.validate_lease?.() !== false) &&
+          owner.validate_lease?.() !== false)
+      const sourceIsCurrent = () =>
+        (fence === "page"
+          ? pathname === currentPathname.current
+          : route === currentRoute.current && chatSourceIsCurrent()) &&
         (!account?.requestScope || account.isCurrent())
       if (!mounted.current || !sourceIsCurrent()) return false
       // The run belongs to the address it starts on (the launcher's own,
