@@ -174,11 +174,63 @@ Other work:
 - Land with the strict-dev loop: merge dev when it moves, re-run a flaky
   E2E Critical at most twice.
 
+## Wave 5 log
+
+Four lanes were built in worktrees and merged into `ux/burndown-2026-11` with
+no conflicts. Each lane was reviewed separately, and the review fixes were
+merged on top.
+
+- **Integration fixes:** the CI contracts step caught two ratchets.
+  - `build_context_and_messages` grew past its 821-line ceiling. The
+    `history_selection` imports moved to module level and the Continue strip
+    moved into `_history_for_request`, so the function is back at 821.
+  - `bump_note_version` grew the CharactersRAGDB surface. Callers now use
+    `db.note_store.bump_note_version`. The private-member ceiling went from 551
+    to 553, with the reason recorded in the baseline.
+- **Lane choices accepted during integration:**
+  - Continue whitespace: a continuation that starts with whitespace replaces
+    the saved trailing whitespace; otherwise the saved spacing is kept.
+  - Role-play steering is offered only where the server accepts it, which
+    means before a character chat is saved and in temporary chats.
+  - The fallback chat title uses server local time with its zone.
+  - `continue` recovery records are forward-only: an older bundle refuses that
+    conversation's recovery list until the record is opened or dismissed.
+  - Tag and folder edits advance the note version. With semantic indexing on,
+    that also re-embeds the note.
+- **Pre-existing failures seen locally, unchanged by this wave:**
+  - `chat-document-processing.test.ts` "reconstructs upload files" (a jsdom
+    Blob).
+  - `test_chat_service_streaming_tool_autoexec.py::test_a_stream_dropped_before_any_output_is_refunded_and_writes_no_row`
+    (times out on the base too).
+  - `test_merge_queue_gate_workflows.py` needs a `python` on PATH.
+
+### Follow-ups from Wave 5
+
+- **Chat:**
+  - The full-page Playground has no Stop on the pending reply bubble
+    (Wave 6, with CM-03 (b)).
+  - Note backlinks have no "resolving" state; this waits on #3226.
+  - Chatbooks import detects conflicts by title, so server-titled chats and
+    voice fallback titles can collide.
+- **Notes:**
+  - Advance a note's semantic record without re-embedding when only its
+    version moved.
+  - `update_note` metadata-only bumps don't mark the note semantic-dirty.
+  - The keyword link/unlink endpoints don't bump the version.
+- **Contrast:**
+  - Light status text on `/15` and `/20` tints is still below 4.5:1, and the
+    derivation margin is thin (about 4.55). Derive to about 4.6, or move those
+    classes to `/10`.
+  - The light-mode `text-primary` shade is now darker than the primary fills;
+    it needs a visual sign-off.
+- **Shortcuts:** the side panel's Ctrl+E ("chat with current page") and the
+  full page's Mod+E (Switch model) share a help label.
+
 ## Status
 
 | Wave | Status |
 |---|---|
-| 5 | In progress |
+| 5 | Integrated and reviewed; PR pending |
 | 6 | Not started |
 | 7 | Waiting on owner decisions |
 | 8 | Blocked |
