@@ -2977,8 +2977,6 @@ def _format_selected_history_messages(
     replace_user_placeholders: bool = True,
 ) -> list[dict[str, Any]]:
     """Format only detached owner-selected rows; never reload current sources."""
-    from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
-
     output: list[dict[str, Any]] = []
     source_nodes = {row["id"]: row for row in snapshot.nodes}
     for item in content:
