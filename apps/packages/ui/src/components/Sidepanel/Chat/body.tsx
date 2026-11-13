@@ -4,6 +4,7 @@ import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
+import { ChatReplyAnnouncerProvider } from "~/components/Common/Playground/ChatReplyAnnouncer"
 import { useMessage } from "~/hooks/useMessage"
 import { usePageAssist } from "@/context"
 import { EmptySidePanel } from "../Chat/empty"
@@ -478,14 +479,13 @@ export const SidePanelBody = ({
   }, [selectedCharacter?.id, serverChatCharacterId, serverChatId])
 
   return (
-    <>
+    <ChatReplyAnnouncerProvider>
       <div
-        role="log"
-        aria-live="polite"
         className={`relative flex w-full flex-col items-center ${topPaddingClass} pb-4`}
       >
         {messages.length === 0 && !(selectedCharacter && getAssistantSelectionMode(characterToAssistantSelection(selectedCharacter)) === "tracked" && !historyId && !serverChatId) && <EmptySidePanel inputRef={inputRef} />}
-        <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+        {/* The side panel's one log: only the message rows, quiet; a finished reply is read by the announcer (AX-11). */}
+        <div role="log" aria-label={t("playground:aria.chatTranscript", "Chat messages")} aria-live="off" aria-busy={streaming || undefined} style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
           {rowVirtualizer.getVirtualItems().map((vr) => {
             const index = vr.index
             const message = messages[index]
@@ -550,7 +550,6 @@ export const SidePanelBody = ({
           })}
         </div>
       </div>
-
-    </>
+    </ChatReplyAnnouncerProvider>
   )
 }

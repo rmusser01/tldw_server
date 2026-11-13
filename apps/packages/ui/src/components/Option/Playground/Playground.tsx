@@ -18,6 +18,7 @@ import { PlaygroundChat } from "./PlaygroundChat";
 import { MessageViewSelect } from "@/components/Common/Playground/MessageViewSelect";
 import type { ChatTimelineNavigation } from "./VirtualChatTimeline";
 import { PlaygroundFocusBar } from "./PlaygroundFocusBar";
+import { ChatReplyAnnouncerProvider } from "@/components/Common/Playground/ChatReplyAnnouncer";
 import {
   PlaygroundCockpitShell,
   type PlaygroundCockpitMode,
@@ -4102,46 +4103,45 @@ const PlaygroundContent = () => {
               ) : null}
             </div>
             )}
-            <div
-              ref={containerRef}
-              data-testid={
-                stickyChatInput ? "playground-chat-transcript" : undefined
-              }
-              role="log"
-              aria-live="polite"
-              aria-relevant="additions"
-              aria-label={t("playground:aria.chatTranscript", "Chat messages")}
-              className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 ${
-                exitFocusPillVisible ? "pt-14 scroll-pt-14" : ""
-              }`}
-            >
-              <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
-                <ChatErrorBoundary>
-                  <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={!compareActive && serverChatCharacterId ? getSavedQuestionReview : undefined} onRetrySavedQuestion={!compareActive && serverChatCharacterId ? retrySavedQuestion : undefined} onBind={() => void historySelection.bindUnavailableConversation()} />
-                  <PlaygroundChat
-                    messageView={messageView}
-                    scrollParentRef={containerRef}
-                    navigationRef={chatTimelineRef}
-                    showStarterDeck={showStarterDeck}
-                    searchQuery={threadSearchHighlightQuery(threadSearchOpen, threadSearchQuery)}
-                    matchedMessageIndices={threadSearchMatchSet}
-                    activeSearchMessageIndex={threadSearchActiveMessageIndex}
-                    onAttachResearchContext={handleAttachResearchContext}
-                    onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
-                    returnedResearchRunId={pendingReturnedResearchRunId}
-                    onDismissReturnedResearchRun={() => {
-                      if (!pendingReturnedResearchRunId) {
-                        return;
-                      }
-                      setDismissedReturnedResearchRunId(
-                        pendingReturnedResearchRunId,
-                      );
-                      setPendingReturnedResearchRunId(null);
-                    }}
-                  />
-                </ChatErrorBoundary>
+            {/* The message log is inside PlaygroundChat (AX-11); finished replies are read from the announcer. */}
+            <ChatReplyAnnouncerProvider>
+              <div
+                ref={containerRef}
+                data-testid={
+                  stickyChatInput ? "playground-chat-transcript" : undefined
+                }
+                className={`custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4 ${
+                  exitFocusPillVisible ? "pt-14 scroll-pt-14" : ""
+                }`}
+              >
+                <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
+                  <ChatErrorBoundary>
+                    <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={!compareActive && serverChatCharacterId ? getSavedQuestionReview : undefined} onRetrySavedQuestion={!compareActive && serverChatCharacterId ? retrySavedQuestion : undefined} onBind={() => void historySelection.bindUnavailableConversation()} />
+                    <PlaygroundChat
+                      messageView={messageView}
+                      scrollParentRef={containerRef}
+                      navigationRef={chatTimelineRef}
+                      showStarterDeck={showStarterDeck}
+                      searchQuery={threadSearchHighlightQuery(threadSearchOpen, threadSearchQuery)}
+                      matchedMessageIndices={threadSearchMatchSet}
+                      activeSearchMessageIndex={threadSearchActiveMessageIndex}
+                      onAttachResearchContext={handleAttachResearchContext}
+                      onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
+                      returnedResearchRunId={pendingReturnedResearchRunId}
+                      onDismissReturnedResearchRun={() => {
+                        if (!pendingReturnedResearchRunId) {
+                          return;
+                        }
+                        setDismissedReturnedResearchRunId(
+                          pendingReturnedResearchRunId,
+                        );
+                        setPendingReturnedResearchRunId(null);
+                      }}
+                    />
+                  </ChatErrorBoundary>
+                </div>
               </div>
-            </div>
+            </ChatReplyAnnouncerProvider>
             <div
               ref={composerDockRef}
               data-testid={

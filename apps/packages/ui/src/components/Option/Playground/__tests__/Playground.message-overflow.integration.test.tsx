@@ -25,6 +25,9 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 import { DEFAULT_MESSAGE_STEERING_PROMPTS } from "@/utils/message-steering"
 
+// The reply in the transcript, not its copy in the announcer beside it (AX-11).
+const IN_TRANSCRIPT = '[role="log"] *'
+
 describe("Playground reply overflow menu", { timeout: 60_000 }, () => {
   beforeEach(async () => {
     await resetPlaygroundHarness()
@@ -37,7 +40,7 @@ describe("Playground reply overflow menu", { timeout: 60_000 }, () => {
 
     await sendFromComposer(view, "Plain question")
 
-    await screen.findByText("Plain answer", {}, HARNESS_WAIT)
+    await screen.findByText("Plain answer", { selector: IN_TRANSCRIPT }, HARNESS_WAIT)
     const card = screen
       .getAllByTestId("chat-message")
       .find((row) => row.getAttribute("data-role") === "assistant")!
@@ -54,7 +57,7 @@ describe("Playground reply overflow menu", { timeout: 60_000 }, () => {
     server.setDefaultReply("Plain answer")
     const view = await renderPlayground({ server })
     await sendFromComposer(view, "Plain question")
-    await screen.findByText("Plain answer", {}, HARNESS_WAIT)
+    await screen.findByText("Plain answer", { selector: IN_TRANSCRIPT }, HARNESS_WAIT)
 
     // The state a character chat leaves behind when the user armed "Force
     // narrate" or "Impersonate user" and then switched here without sending:

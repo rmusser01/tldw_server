@@ -12,7 +12,8 @@ export function VirtualChatTimeline<T>({
   messageBlocks,
   scrollParentRef,
   navigationRef,
-  renderBlock
+  renderBlock,
+  log
 }: {
   blocks: T[]
   getKey: (index: number) => string
@@ -20,6 +21,12 @@ export function VirtualChatTimeline<T>({
   scrollParentRef?: React.RefObject<HTMLDivElement>
   navigationRef?: React.MutableRefObject<ChatTimelineNavigation | null>
   renderBlock: (block: T, index: number) => React.ReactNode
+  /**
+   * Make the rows the transcript's log (AX-11): only messages, quiet (a
+   * finished reply is read by the transcript's announcer), busy while a
+   * reply streams.
+   */
+  log?: { label: string; busy: boolean }
 }) {
   const container = React.useRef<HTMLDivElement>(null)
   const pending = React.useRef<{
@@ -124,6 +131,14 @@ export function VirtualChatTimeline<T>({
       ref={container}
       className="relative w-full"
       style={enabled ? { height: virtualizer.getTotalSize() } : undefined}
+      {...(log
+        ? {
+            role: "log",
+            "aria-label": log.label,
+            "aria-live": "off" as const,
+            "aria-busy": log.busy || undefined
+          }
+        : {})}
     >
       {(enabled
         ? rows.map((row) => ({ index: row.index, row }))
