@@ -1,6 +1,7 @@
 import type { ChatMessageView } from "@/services/settings/ui-settings"
 import React from "react"
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
+import { moveMenuFocus } from "@/utils/menu-keyboard"
 import type { TFunction } from "i18next"
 import { Popover, Tooltip } from "antd"
 import {
@@ -75,6 +76,7 @@ const OverflowMenuItem: React.FC<{
     <>
       <button
         type="button"
+        role="menuitem"
         onClick={onClick}
         disabled={disabled}
         aria-disabled={disabled}
@@ -94,6 +96,8 @@ const OverflowMenuItem: React.FC<{
       {reason ? (
         <p
           id={reasonId}
+          // Read as the item's description, not as a child of the menu.
+          role="none"
           className="-mt-1 max-w-[240px] px-3 pb-2 pl-9 text-[11px] leading-snug text-text-muted"
         >
           {reason}
@@ -268,7 +272,7 @@ export function MessageActionsBar({
   React.useEffect(() => {
     const menu = actionMenuRef.current
     if (!overflowOpen || !menu) return
-    scheduleFocusFirstVisibleElement("button:not(:disabled)", menu, () =>
+    scheduleFocusFirstVisibleElement("[role='menuitem']:not(:disabled)", menu, () =>
       actionMenuOpenRef.current && actionMenuRef.current === menu && menu.isConnected)
   }, [overflowOpen])
   const showLeftFeedback = !editMode && showFeedbackControls
@@ -647,6 +651,8 @@ export function MessageActionsBar({
               <Popover
                 content={<GenerationInfo generationInfo={generationInfo} />}
                 title={t("generationInfo")}
+                // Keyboard and touch users can open it too (AX-02).
+                trigger={["hover", "focus", "click"]}
               >
                 <IconButton
                   ariaLabel={t("generationInfo") as string}
@@ -674,9 +680,16 @@ export function MessageActionsBar({
               <div
                 id={actionMenuId}
                 ref={actionMenuRef}
+                role="menu"
+                aria-label={t("common:moreActions", "More actions") as string}
                 className="flex min-w-[180px] flex-col py-1"
                 onClick={() => changeActionMenu(false)}
                 onKeyDown={event => {
+                  // Arrow, Home and End move between actions (AX-02).
+                  if (moveMenuFocus(event.currentTarget, event.key)) {
+                    event.preventDefault()
+                    return
+                  }
                   if (event.key !== "Escape") return
                   event.preventDefault()
                   event.stopPropagation()
@@ -689,6 +702,7 @@ export function MessageActionsBar({
             <IconButton
               ref={actionTriggerRef}
               ariaLabel={t("common:moreActions", "More actions") as string}
+              hasPopup="menu"
               ariaExpanded={overflowOpen}
               ariaControls={overflowOpen ? actionMenuId : undefined}
               className={actionButtonClass}

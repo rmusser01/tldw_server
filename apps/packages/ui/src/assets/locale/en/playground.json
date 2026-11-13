@@ -533,6 +533,7 @@
     "slashGenerateImage": "Generate image",
     "slashGenerateImageDesc": "Generate an image. Use /generate-image:<provider> <prompt>.",
     "slashGenerateImageDescDefault": "Generate an image (default: {{backend}}). Use /generate-image:<provider> to override.",
+    "slashModelDesc": "Choose the model for this chat",
     "captureTools": "Capture and assist tools",
     "actions": "Send options",
     "moreTools": "More tools",

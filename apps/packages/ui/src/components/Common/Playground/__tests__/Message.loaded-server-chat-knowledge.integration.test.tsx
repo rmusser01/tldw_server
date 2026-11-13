@@ -395,8 +395,8 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
     const assistant = messageCard("assistant")
 
     openMoreActions(assistant)
-    expect(within(assistant).getByRole("button", { name: "Save to Flashcards" })).toBeInTheDocument()
-    fireEvent.click(within(assistant).getByRole("button", { name: "Save to Notes" }))
+    expect(within(assistant).getByRole("menuitem", { name: "Save to Flashcards" })).toBeInTheDocument()
+    fireEvent.click(within(assistant).getByRole("menuitem", { name: "Save to Notes" }))
 
     // conversation_id + message_id are what the note's back-link points at.
     await waitFor(() =>
@@ -428,7 +428,7 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
 
     if (pinsMessages) {
       openMoreActions(user)
-      fireEvent.click(within(user).getByRole("button", { name: "Pin" }))
+      fireEvent.click(within(user).getByRole("menuitem", { name: "Pin" }))
       expect(chatState.toggleMessagePinned).toHaveBeenCalledWith(0)
     }
     expect(user).toHaveAttribute("data-server-message-id", USER_ID)
@@ -673,7 +673,7 @@ describe.each(surfaces)(
         const view = renderChat()
         openMoreActions(messageCard("assistant"))
         fireEvent.click(
-          within(messageCard("assistant")).getByRole("button", {
+          within(messageCard("assistant")).getByRole("menuitem", {
             name: "Delete"
           })
         )
@@ -688,7 +688,7 @@ describe.each(surfaces)(
         messageApiMock.success.mockClear()
         openMoreActions(messageCard("assistant"))
         fireEvent.click(
-          within(messageCard("assistant")).getByRole("button", {
+          within(messageCard("assistant")).getByRole("menuitem", {
             name: "Delete"
           })
         )
@@ -894,7 +894,8 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
     await user.keyboard("{Enter}")
     const menu = await activeMenu()
     expect(menu.closest("#tldw-portal-root")).not.toBeNull()
-    const actions = within(menu).getAllByRole("button")
+    // The reply's overflow is a menu (AX-02); the user bubble's is a toolbar.
+    const actions = within(menu).getAllByRole(role === "assistant" ? "menuitem" : "button")
       .filter(button => !(button as HTMLButtonElement).disabled)
     expect(actions.length).toBeGreaterThanOrEqual(2)
     return { user, trigger, menu, actions }
@@ -968,7 +969,7 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
       const card = messageCard("assistant")
       expect(within(card).getAllByRole("button", { name: "More actions", hidden: true })).toHaveLength(1)
       fireEvent.click(within(card).getByRole("button", { name: "More actions" }))
-      expect(within(await activeMenu()).getByRole("button", { name: "Save to Notes" })).toBeVisible()
+      expect(within(await activeMenu()).getByRole("menuitem", { name: "Save to Notes" })).toBeVisible()
     })
 
     it(`${surface} keeps older assistant overflow reachable while primary actions remain hover-revealed`, async () => {
@@ -978,7 +979,7 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
       const older = messageCard("assistant")
       expect(within(older).queryByRole("button", { name: "copyToClipboard" })).toBeNull()
       fireEvent.click(within(older).getByRole("button", { name: "More actions" }))
-      expect(within(await activeMenu()).getByRole("button", { name: "Save to Notes" })).toBeVisible()
+      expect(within(await activeMenu()).getByRole("menuitem", { name: "Save to Notes" })).toBeVisible()
     })
 
     it(`${surface} opens an older user bubble's real actions with the keyboard`, async () => {
@@ -1022,7 +1023,7 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
         const { user, trigger, menu } = await openKeyboardMenu(renderChat, role)
         const copy = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue(undefined)
         try {
-          const action = within(menu).getByRole("button", {
+          const action = within(menu).getByRole(role === "assistant" ? "menuitem" : "button", {
             name: role === "assistant" ? "Save to Notes" : "copyToClipboard"
           })
           action.focus()
@@ -1076,7 +1077,7 @@ describe("TASK-13279 Casual last-reply action reachability", { timeout: 20_000 }
     it.each(["Save to Notes", "Save to Flashcards", "Delete"])(`${surface} gives real secondary action %s a 44px menu row`, async name => {
       renderChat()
       fireEvent.click(within(messageCard("assistant")).getByRole("button", { name: "More actions" }))
-      const button = within(await activeMenu()).getByRole("button", { name })
+      const button = within(await activeMenu()).getByRole("menuitem", { name })
       expect(button).toBeVisible()
       for (const client of ["tldw-frontend", "extension"]) {
         for (const viewport of [320, 1280]) {

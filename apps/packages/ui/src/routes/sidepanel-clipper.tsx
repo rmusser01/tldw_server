@@ -49,6 +49,7 @@ const SidepanelClipper = () => {
       >
         <SidepanelHeaderSimple
           activeTitle={t("sidepanel:clipper.routeLabel", "Clipper")}
+          heading={t("sidepanel:clipper.routeLabel", "Clipper")}
         />
         <div className="space-y-4 px-3 pb-4 pt-14">
           {!isOnline ? (

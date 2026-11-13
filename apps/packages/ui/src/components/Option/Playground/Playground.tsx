@@ -4143,15 +4143,6 @@ const PlaygroundContent = () => {
                   : ""
               }`}
             >
-              {!isMobileViewport && !focusModeActive ? (
-                <div
-                  className={`mx-auto w-full ${chatContentWidthClassName} px-4 pt-2 text-[11px] text-text-muted`}
-                >
-                  <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
-                    {t("playground:regions.composer", "Composer")}
-                  </span>
-                </div>
-              ) : null}
               {!isAutoScrollToBottom && messages.length > 0 && (
                 <ScrollToLatestButton
                   onClick={() => autoScrollToBottom()}

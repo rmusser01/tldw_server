@@ -1004,6 +1004,9 @@
   "chatSidebar_title": {
     "message": "Chats"
   },
+  "chatSidebar_historyLandmark": {
+    "message": "Chat history"
+  },
   "chatSidebar_newChat": {
     "message": "New Chat"
   },
@@ -2055,6 +2058,9 @@
   },
   "shortcuts_searchThread": {
     "message": "Search this conversation"
+  },
+  "shortcuts_switchModel": {
+    "message": "Switch model"
   },
   "shortcuts_toggleArtifacts": {
     "message": "Toggle artifacts panel (when available)"

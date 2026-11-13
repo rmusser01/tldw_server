@@ -182,7 +182,7 @@ describe("MessageActionsBar menu options", () => {
     expect(nextButton.className).toContain("min-w-[44px]")
     expect(overflowTrigger.className).toContain("min-h-[44px]")
     expect(overflowTrigger.className).toContain("min-w-[44px]")
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }))
     expect(onDelete).toHaveBeenCalledTimes(1)
   })
 })
