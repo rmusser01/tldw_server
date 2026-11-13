@@ -923,7 +923,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
             ))}
           </div>
         </>
-      ) : hasActiveFilters && !isTrashView ? (
+      ) : hasActiveFilters ? (
         renderEmptyStateSurface('no-results')
       ) : (
         renderEmptyStateSurface('empty')

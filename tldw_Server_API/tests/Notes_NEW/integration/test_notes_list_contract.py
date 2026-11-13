@@ -295,6 +295,43 @@ def test_trash_pages_and_sorts_like_the_active_list(
     assert active["pagination"]["total"] == _LIBRARY_SIZE - 25
 
 
+def test_trash_query_filters_by_title_or_content_and_counts_only_matches(
+    notes_client: TestClient,
+    notes_db: CharactersRAGDB,
+) -> None:
+    """Trash search (NL-05): ?query= keeps trashed notes whose title or content holds the text."""
+    trashed: dict[str, str] = {}
+    for title, content in [
+        ("Budget 2026", "numbers"),
+        ("Groceries", "milk and BUDGET notes"),
+        ("Travel", "plans"),
+        ("100% done", "literal percent"),
+    ]:
+        note_id = notes_db.add_note(title=title, content=content)
+        note = notes_db.get_note_by_id(note_id)
+        notes_db.soft_delete_note(note_id, expected_version=note["version"])
+        trashed[title] = note_id
+    active_id = notes_db.add_note(title="Budget active", content="not in trash")
+
+    matches = _get_page(notes_client, "/api/v1/notes/trash", query="budget", sort_by="title", sort_order="asc")
+    first_only = _get_page(notes_client, "/api/v1/notes/trash", query="budget", limit=1, offset=0)
+    literal = _get_page(notes_client, "/api/v1/notes/trash", query="0%")
+    blank = _get_page(notes_client, "/api/v1/notes/trash", query="   ")
+
+    assert _ids(matches) == [trashed["Budget 2026"], trashed["Groceries"]]
+    assert matches["pagination"]["total"] == 2
+    assert active_id not in _ids(matches)
+    assert len(first_only["items"]) == 1
+    assert first_only["pagination"]["total"] == 2
+    assert _ids(literal) == [trashed["100% done"]]
+    assert blank["pagination"]["total"] == 4
+
+
+def test_trash_query_rejects_overlong_text(notes_client: TestClient) -> None:
+    response = notes_client.get("/api/v1/notes/trash", params={"query": "x" * 201})
+    assert response.status_code == 422
+
+
 @pytest.mark.parametrize(
     ("sort_by", "sort_order"),
     [("content", "desc"), ("title; DROP TABLE notes", "asc"), ("title", "sideways")],

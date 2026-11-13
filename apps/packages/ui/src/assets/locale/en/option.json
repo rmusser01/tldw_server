@@ -1384,6 +1384,8 @@
     "bulkSelectTrashAria": "Select note {{title}} to restore",
     "noteRestored": "Note restored",
     "restoredOpenNote": "Open note",
+    "trashSearchPlaceholder": "Search Trash",
+    "trashSearchAria": "Search Trash",
     "linkedConversationIdLabel": "Conversation ID",
     "linkedMessageIdLabel": "Message ID",
     "openConversation": "Open conversation",

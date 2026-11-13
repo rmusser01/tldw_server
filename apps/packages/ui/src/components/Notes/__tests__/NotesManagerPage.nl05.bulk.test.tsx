@@ -80,7 +80,8 @@ vi.mock("react-i18next", () => ({
         typeof defaultValueOrOptions === "string" ? defaultValueOrOptions : defaultValueOrOptions?.defaultValue
       if (!template) return key
       if (typeof defaultValueOrOptions !== "object") return template
-      return template.replace(/\{\{(\w+)\}\}/g, (_, name: string) => String(defaultValueOrOptions[name] ?? ""))
+      // Like i18next, a placeholder without a value stays as written.
+      return template.replace(/\{\{(\w+)\}\}/g, (match, name: string) => String(defaultValueOrOptions[name] ?? match))
     }
   })
 }))
@@ -455,7 +456,11 @@ const restoreCalls = () =>
 const serveTrash = (onRestore: (id: string) => unknown = (id) => ({ id, version: 9, deleted: false })) => {
   let trash = TRASH_NOTES.slice()
   serve((_request, path, method) => {
-    if (path.startsWith("/api/v1/notes/trash?")) return { items: trash, total: trash.length }
+    if (path.startsWith("/api/v1/notes/trash?")) {
+      const text = (listParams(path).get("query") || "").toLowerCase()
+      const rows = text ? trash.filter((note) => `${note.title} ${note.content}`.toLowerCase().includes(text)) : trash
+      return { items: rows, total: rows.length }
+    }
     const restore = path.match(/^\/api\/v1\/notes\/(t\d)\/restore\?expected_version=(\d+)$/)
     if (restore && method === "POST") {
       const result = onRestore(restore[1])
@@ -566,5 +571,33 @@ describe("NotesManagerPage NL-05 Trash", () => {
       ])
     )
     await waitFor(() => expect(screen.queryByTestId("notes-bulk-failures")).not.toBeInTheDocument())
+  })
+
+  it("searches Trash on the server, and shows a no-results state with Clear", async () => {
+    serveTrash()
+    renderPage()
+    await openTrash()
+
+    const search = screen.getByTestId("notes-trash-search")
+    fireEvent.change(search, { target: { value: "draft" } })
+    fireEvent.keyDown(search, { key: "Enter", code: "Enter", keyCode: 13 })
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("notes-trash-row-t1")).not.toBeInTheDocument()
+      expect(screen.getByTestId("notes-trash-row-t2")).toBeInTheDocument()
+    })
+    const searched = mockBgRequest.mock.calls
+      .map(([request]: [Request]) => String(request?.path || ""))
+      .filter((path) => path.startsWith("/api/v1/notes/trash?") && listParams(path).get("query") === "draft")
+    expect(searched.length).toBeGreaterThan(0)
+
+    fireEvent.change(search, { target: { value: "zzz" } })
+    fireEvent.keyDown(search, { key: "Enter", code: "Enter", keyCode: 13 })
+    const empty = await screen.findByTestId("notes-list-no-results-state")
+    expect(empty).toHaveTextContent('No notes match "zzz".')
+
+    fireEvent.click(within(empty).getByRole("button", { name: /Clear search/ }))
+    expect(await screen.findByTestId("notes-trash-row-t1")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-trash-search")).toHaveValue("")
   })
 })

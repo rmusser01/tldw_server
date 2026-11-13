@@ -1310,6 +1310,12 @@
   "notesSearch_restoredOpenNote": {
     "message": "Open note"
   },
+  "notesSearch_trashSearchPlaceholder": {
+    "message": "Search Trash"
+  },
+  "notesSearch_trashSearchAria": {
+    "message": "Search Trash"
+  },
   "notesSearch_linkedConversationIdLabel": {
     "message": "Conversation ID"
   },

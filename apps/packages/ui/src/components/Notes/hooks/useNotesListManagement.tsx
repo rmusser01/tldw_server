@@ -190,6 +190,12 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     isCurrentAuthority,
     0
   )
+  /** Trash search (NL-05): a title or content substring, matched on the server. */
+  const [trashQuery, setTrashQueryState] = useAuthorityOwnedState(
+    authorityOwner,
+    isCurrentAuthority,
+    ''
+  )
   const [bulkSelectedIds, setBulkSelectedIds] = useAuthorityOwnedState(
     authorityOwner,
     isCurrentAuthority,
@@ -365,6 +371,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
       params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
       params.set('legacy_aliases', 'false')
+      if (trashQuery) params.set('query', trashQuery)
       const res = await bgRequest<any>({
         path: `/api/v1/notes/trash?${params.toString()}` as any,
         method: 'GET' as any,
@@ -411,7 +418,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
           items.length
       ) || 0
     return { items: sortNoteRows(items, sortOption), total: totalItems }
-  }, [authorityOwner, effectiveKeywordTokens, fetchFilteredNotesRaw, isCurrentAuthority, listMode, query, sortOption])
+  }, [authorityOwner, effectiveKeywordTokens, fetchFilteredNotesRaw, isCurrentAuthority, listMode, query, sortOption, trashQuery])
 
   const fetchNotes = React.useCallback(async (): Promise<NoteListItem[]> => {
     const requestOwner = authorityOwner
@@ -466,6 +473,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     selectedNotebookId ?? 'none',
     effectiveKeywordTokens.join('|'),
     tagMatch,
+    listMode === 'trash' ? trashQuery : '',
     ...(authorityScope === undefined
       ? []
       : ['authority', authorityScope, 'generation', authorityOwner.generation])
@@ -528,7 +536,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   // ---- "Select all N matching" (NL-05) ----
   const matchingFilterKey = JSON.stringify([
     authorityOwner.scope ?? null, authorityOwner.generation, listMode, listViewMode,
-    query, effectiveKeywordTokens, tagMatch, selectedNotebookId ?? null, sortOption
+    query, effectiveKeywordTokens, tagMatch, selectedNotebookId ?? null, sortOption, trashQuery
   ])
   const fetchMatchingPage = React.useCallback(
     async (fetchPage: number, fetchPageSize: number, signal: AbortSignal) => {
@@ -1105,6 +1113,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     setPage(1)
   }, [setKeywordTokens, setListViewMode, setSelectedNotebookId])
 
+  const setTrashQuery = React.useCallback((value: string) => {
+    setTrashQueryState(value.trim())
+    setPage(1)
+  }, [setTrashQueryState])
+
   const clearBulkSelection = React.useCallback(() => {
     clearMatchingSelection()
     setBulkSelectedIds([])
@@ -1195,6 +1208,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   React.useEffect(() => {
     if (bulkSelectionListModeRef.current !== listMode) {
       bulkSelectionListModeRef.current = listMode
+      setTrashQueryState('')
       setBulkSelectedIds([])
       bulkSelectionAnchorRef.current.value = null
       return
@@ -1218,7 +1232,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     ) {
       bulkSelectionAnchorRef.current.value = null
     }
-  }, [listMode, orderedVisibleNoteIds, setBulkSelectedIds])
+  }, [listMode, orderedVisibleNoteIds, setBulkSelectedIds, setTrashQueryState])
 
   // ---- page size persistence ----
   React.useEffect(() => {
@@ -1374,5 +1388,6 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     handleClearFilters,
     clearBulkSelection, handleToggleBulkSelection,
     bulkSelectionControls,
+    trashQuery, setTrashQuery,
   }
 }

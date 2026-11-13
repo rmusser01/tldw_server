@@ -2986,6 +2986,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         toggleNotePinned={ed.toggleNotePinned}
         restoreNote={restoreNote}
         restoreSelectedBulk={restoreSelectedBulk}
+        trashQuery={list.trashQuery}
+        setTrashQuery={list.setTrashQuery}
         openLinkedChat={(conversationId) => { void openLinkedConversation(conversationId) }}
         bulkSelection={list.bulkSelectionControls}
         bulkRun={{

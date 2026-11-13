@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import NotesBulkActionsBar, { type NotesBulkRunControls } from './NotesBulkActionsBar'
+import NotesTrashSearch from './NotesTrashSearch'
 import type { NotesBulkSelectionControls } from './hooks/useNotesMatchingSelection'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
@@ -174,6 +175,9 @@ export interface NotesSidebarProps {
   deleteSelectedBulk: () => Promise<void>
   /** Trash: restore the selected notes (NL-05). */
   restoreSelectedBulk?: () => Promise<void>
+  /** Trash search (NL-05). */
+  trashQuery?: string
+  setTrashQuery?: (query: string) => void
   /** Opens the chat a list row came from (NL-04). */
   openLinkedChat?: (conversationId: string) => void
   /** The running bulk action and its failures (NL-05). */
@@ -322,6 +326,8 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   deleteSelectedBulk,
   openLinkedChat,
   restoreSelectedBulk,
+  trashQuery = '',
+  setTrashQuery,
   bulkRun,
   bulkSelection,
   toggleNotePinned,
@@ -1032,14 +1038,17 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   )}
                 </>
               ) : (
-                <Typography.Text
-                  type="secondary"
-                  className="text-[11px] text-text-muted block"
-                >
-                  {t('option:notesSearch.trashHelpText', {
-                    defaultValue: 'Restore notes from trash to edit them again.'
-                  })}
-                </Typography.Text>
+                <>
+                  {setTrashQuery && <NotesTrashSearch value={trashQuery} onSearch={setTrashQuery} />}
+                  <Typography.Text
+                    type="secondary"
+                    className="text-[11px] text-text-muted block"
+                  >
+                    {t('option:notesSearch.trashHelpText', {
+                      defaultValue: 'Restore notes from trash to edit them again.'
+                    })}
+                  </Typography.Text>
+                </>
               )}
             </div>
             {controlsHaveMoreBelow && (
@@ -1368,7 +1377,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             ) : (
               <NotesListPanel
                 listMode={listMode}
-                searchQuery={query}
+                searchQuery={listMode === 'trash' ? trashQuery : query}
                 conversationLabelById={conversationLabelById}
                 bulkSelectedIds={bulkSelectedIds}
                 isOnline={isOnline}
@@ -1385,7 +1394,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 total={total}
                 page={page}
                 pageSize={pageSize}
-                hasActiveFilters={hasActiveFilters}
+                hasActiveFilters={listMode === 'trash' ? trashQuery.length > 0 : hasActiveFilters}
                 selectedId={selectedId}
                 pinnedNoteIds={pinnedNoteIds}
                 onSelectNote={(id) => {
@@ -1407,7 +1416,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   setPage(sizeChanged ? 1 : nextPage)
                 }}
                 onRetry={retryList}
-                onClearFilters={handleClearFilters}
+                onClearFilters={listMode === 'trash' && setTrashQuery ? () => setTrashQuery('') : handleClearFilters}
                 onCreateNote={() => {
                   void handleNewNote()
                 }}

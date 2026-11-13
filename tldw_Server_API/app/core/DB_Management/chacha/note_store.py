@@ -1942,6 +1942,19 @@ class NoteStore:
             primary = f"{column} {direction}"
         return f"ORDER BY {primary}, id ASC"
 
+    def _text_match_filter(self, text_query: str | None) -> tuple[str, list[Any]]:
+        """A case-insensitive title-or-content substring filter, or nothing for blank text.
+
+        LIKE wildcards in the text match literally.
+        """
+        term = str(text_query or "").strip()
+        if not term:
+            return "", []
+        # SQLite LIKE ignores ASCII case; PostgreSQL needs ILIKE.
+        operator = "ILIKE" if self._db.backend_type == BackendType.POSTGRESQL else "LIKE"
+        pattern = f"%{self._escape_like(term)}%"
+        return f" AND (title {operator} ? ESCAPE '\\' OR content {operator} ? ESCAPE '\\')", [pattern, pattern]
+
     def list_notes(
         self,
         limit: int = 100,
@@ -1950,6 +1963,7 @@ class NoteStore:
         only_deleted: bool = False,
         sort_by: str = "last_modified",
         sort_order: str = "desc",
+        text_query: str | None = None,
     ) -> list[dict[str, Any]]:
         """List notes, most recently modified first by default.
 
@@ -1960,6 +1974,8 @@ class NoteStore:
         ``sort_by`` is one of ``last_modified``, ``created_at`` or ``title``
         (case-insensitive) and ``sort_order`` is ``asc`` or ``desc``. The whole
         result set is ordered before ``limit``/``offset`` apply.
+
+        ``text_query`` keeps notes whose title or content contains it, ignoring case.
 
         Raises:
             InputError: If ``sort_by`` or ``sort_order`` is not supported.
@@ -1973,6 +1989,9 @@ class NoteStore:
         elif not include_deleted:
             where_clause += " AND deleted = ?"
             params.append(False if self._db.backend_type == BackendType.POSTGRESQL else 0)
+        text_clause, text_params = self._text_match_filter(text_query)
+        where_clause += text_clause
+        params.extend(text_params)
 
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         where_clause += owner_clause
@@ -2050,14 +2069,19 @@ class NoteStore:
         offset: int = 0,
         sort_by: str = "last_modified",
         sort_order: str = "desc",
+        text_query: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List only soft-deleted notes (trash), ordered like ``list_notes``."""
+        """List only soft-deleted notes (trash), ordered like ``list_notes``.
+
+        ``text_query`` keeps notes whose title or content contains it, ignoring case.
+        """
         return self.list_notes(
             limit=limit,
             offset=offset,
             only_deleted=True,
             sort_by=sort_by,
             sort_order=sort_order,
+            text_query=text_query,
         )
 
     def get_notes_batch(self, note_ids: list[str], include_deleted: bool = True) -> list[dict[str, Any]]:
@@ -2251,8 +2275,10 @@ class NoteStore:
     # Note counting
     # ------------------------------------------------------------------
 
-    def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int:
-        """Count notes by deletion scope.
+    def count_notes(
+        self, include_deleted: bool = False, only_deleted: bool = False, text_query: str | None = None
+    ) -> int:
+        """Count notes by deletion scope, optionally only those matching ``text_query``.
 
         Defaults to active-note count only.
         """
@@ -2264,6 +2290,9 @@ class NoteStore:
         elif not include_deleted:
             where_clause += " AND deleted = ?"
             params.append(False if self._db.backend_type == BackendType.POSTGRESQL else 0)
+        text_clause, text_params = self._text_match_filter(text_query)
+        where_clause += text_clause
+        params.extend(text_params)
 
         owner_clause, owner_params = self._db._selected_owner_filter(self._db.client_id)
         where_clause += owner_clause
@@ -2277,9 +2306,9 @@ class NoteStore:
             logger.error(f"Error counting notes: {exc}")
             raise
 
-    def count_deleted_notes(self) -> int:
-        """Return count of soft-deleted notes."""
-        return self.count_notes(only_deleted=True)
+    def count_deleted_notes(self, text_query: str | None = None) -> int:
+        """Return count of soft-deleted notes, optionally only those matching ``text_query``."""
+        return self.count_notes(only_deleted=True, text_query=text_query)
 
     def count_user_notes(self, include_deleted: bool = True) -> int:
         """Count total notes for seedless query gate."""
