@@ -1916,23 +1916,37 @@ def _over_quota_run(c, monkeypatch) -> tuple[int, list[list[dict]]]:
     return int(r.json()["id"]), summarized
 
 
-def test_output_summaries_refuse_an_over_quota_user_before_any_summary(client_with_user, monkeypatch):
-    """An over-quota user asking for summaries gets the 402 before any summary call (TASK-13864), whatever keys
-    they stored: summaries run on the server's key (TASK-13956)."""
-    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, own_keys_for_every_provider
+@pytest.mark.parametrize("own_key", [True, False], ids=["own-key", "server-key"])
+def test_output_summaries_name_their_provider_to_the_llm_quota(client_with_user, monkeypatch, own_key):
+    """The summaries' boundary names the request's provider (TASK-15426): an over-limit user with their own key for
+    it is served, with the handle passed to the summaries; any other is refused before any summary or output."""
+    from tldw_Server_API.app.api.v1.endpoints import watchlists as watchlists_endpoint
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, users_own_key
 
     c = client_with_user
-    run_id, summarized = _over_quota_run(c, monkeypatch)
-    asked = own_keys_for_every_provider(monkeypatch)
+    run_id, _ = _over_quota_run(c, monkeypatch)
+    asked = users_own_key(monkeypatch, "openai" if own_key else "anthropic")
+    seen: list[tuple] = []
+
+    async def _summarize(items, **kwargs):
+        seen.append((getattr(kwargs.get("provider_credentials"), "api_key", None), current_llm_call_context().prechecked))
+        return items
+
+    monkeypatch.setattr(watchlists_endpoint, "summarize_items_for_output", _summarize)
 
     r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "summarize": True, "llm_provider": "openai"})
 
-    assert_llm_quota_402(r)
-    assert summarized == []
-    assert asked == []
-    r = c.get("/api/v1/watchlists/outputs", params={"run_id": run_id})
-    assert r.status_code == 200, r.text
-    assert r.json()["total"] == 0
+    assert asked == ["openai"]
+    if own_key:
+        assert r.status_code == 200, r.text
+        assert seen == [("sk-users-own-key", False)]
+    else:
+        assert_llm_quota_402(r)
+        assert seen == []
+        r = c.get("/api/v1/watchlists/outputs", params={"run_id": run_id})
+        assert r.status_code == 200, r.text
+        assert r.json()["total"] == 0
 
 
 def test_output_without_summaries_is_not_refused_for_an_over_quota_user(client_with_user, monkeypatch):
