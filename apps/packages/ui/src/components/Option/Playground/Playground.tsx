@@ -4103,7 +4103,7 @@ const PlaygroundContent = () => {
               ) : null}
             </div>
             )}
-            {/* The message log is inside PlaygroundChat (AX-11); finished replies are read from the announcer. */}
+            {/* The message log is inside PlaygroundChat (AX-11); the announcer says when a reply finished. */}
             <ChatReplyAnnouncerProvider>
               <div
                 ref={containerRef}

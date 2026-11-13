@@ -484,8 +484,8 @@ export const SidePanelBody = ({
         className={`relative flex w-full flex-col items-center ${topPaddingClass} pb-4`}
       >
         {messages.length === 0 && !(selectedCharacter && getAssistantSelectionMode(characterToAssistantSelection(selectedCharacter)) === "tracked" && !historyId && !serverChatId) && <EmptySidePanel inputRef={inputRef} />}
-        {/* The side panel's one log: only the message rows, quiet; a finished reply is read by the announcer (AX-11). */}
-        <div role="log" aria-label={t("playground:aria.chatTranscript", "Chat messages")} aria-live="off" aria-busy={streaming || undefined} style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
+        {/* The side panel's one log: only the message rows, busy while a reply streams (AX-11). */}
+        <div role="log" aria-label={t("playground:aria.chatTranscript", "Chat messages")} aria-live="polite" aria-relevant="additions" aria-busy={streaming || undefined} style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
           {rowVirtualizer.getVirtualItems().map((vr) => {
             const index = vr.index
             const message = messages[index]

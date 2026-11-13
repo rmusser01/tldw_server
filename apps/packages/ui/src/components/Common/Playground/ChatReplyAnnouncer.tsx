@@ -1,10 +1,9 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import { markdownToText } from "@/utils/markdown-to-text"
 
 type ChatReplyAnnouncer = {
-  /** Read a finished reply once. `key` names the reply, so a repeat call is ignored. */
-  announce: (key: string, reply: string) => void
+  /** Say a reply finished. `key` names the reply, so a repeat call is ignored. */
+  announceComplete: (key: string) => void
 }
 
 const NO_BREAK_SPACE = String.fromCharCode(0xa0)
@@ -20,10 +19,11 @@ export const useChatReplyAnnouncer = () =>
   React.useContext(ChatReplyAnnouncerContext)
 
 /**
- * The chat transcript's only announcement (AX-11). The message log is quiet
- * (aria-live="off"), so streaming, the re-render after it and each message's
- * chrome (names, times, toolbars) are not read out. When a reply finishes,
- * its text is read once from this polite region, which sits outside the log.
+ * The transcript's completion announcement (AX-11). The message log is a
+ * polite log, busy while a reply streams, so a screen reader reads the new
+ * reply once streaming settles. This region, outside the log, then says
+ * "Response complete" once. It never repeats the reply's text, so the text
+ * is on the page once.
  */
 export const ChatReplyAnnouncerProvider = ({
   children
@@ -40,26 +40,23 @@ export const ChatReplyAnnouncerProvider = ({
     },
     []
   )
-  const announce = React.useCallback(
-    (key: string, reply: string) => {
+  const announceComplete = React.useCallback(
+    (key: string) => {
       if (lastKeyRef.current === key) return
       lastKeyRef.current = key
-      const text =
-        markdownToText(reply).trim() ||
-        String(
-          t("playground:message.responseComplete", {
-            defaultValue: "Response complete"
-          })
-        )
-      // A new reply with the same words still changes the region, so it is read.
+      const text = String(
+        t("playground:message.responseComplete", {
+          defaultValue: "Response complete"
+        })
+      )
+      // A second reply finishing before the first clears still changes the region.
       setAnnouncement((previous) => (previous === text ? `${text}${NO_BREAK_SPACE}` : text))
-      // Once read, the copy leaves the page, so the reply's text is on it once.
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
       clearTimerRef.current = setTimeout(() => setAnnouncement(""), ANNOUNCEMENT_CLEAR_MS)
     },
     [t]
   )
-  const value = React.useMemo(() => ({ announce }), [announce])
+  const value = React.useMemo(() => ({ announceComplete }), [announceComplete])
   return (
     <ChatReplyAnnouncerContext.Provider value={value}>
       {children}

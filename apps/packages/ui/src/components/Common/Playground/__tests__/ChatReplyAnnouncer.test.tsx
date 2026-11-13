@@ -28,9 +28,10 @@ afterEach(() => {
   announce = null
 })
 
-// AX-11: the transcript's one announcement, outside the log.
+// AX-11: the transcript's one completion announcement, outside the log. The
+// log itself reads the reply; this only says it finished.
 describe("ChatReplyAnnouncerProvider", () => {
-  it("reads a reply's plain text once per key, then clears it", () => {
+  it("says a reply finished once per reply, then clears", () => {
     vi.useFakeTimers()
     render(
       <ChatReplyAnnouncerProvider>
@@ -39,22 +40,26 @@ describe("ChatReplyAnnouncerProvider", () => {
     )
     const region = screen.getByTestId("chat-reply-announcer")
     expect(region).toHaveAttribute("aria-live", "polite")
-    act(() => announce!.announce("reply-1", "## Plan\n\n**Bold** step"))
-    expect(region).toHaveTextContent(/^Plan\s+Bold step$/)
+    act(() => announce!.announceComplete("reply-1"))
+    expect(region.textContent).toBe("Response complete")
     act(() => vi.advanceTimersByTime(ANNOUNCEMENT_CLEAR_MS))
     expect(region).toBeEmptyDOMElement()
-    act(() => announce!.announce("reply-1", "## Plan\n\n**Bold** step"))
+    act(() => announce!.announceComplete("reply-1"))
     expect(region).toBeEmptyDOMElement()
   })
 
-  it("says the reply finished when it has no readable text", () => {
+  it("changes its text for a second reply finishing before the first clears", () => {
     render(
       <ChatReplyAnnouncerProvider>
         <Capture />
       </ChatReplyAnnouncerProvider>
     )
-    act(() => announce!.announce("reply-2", "```\ncode only\n```"))
-    expect(screen.getByTestId("chat-reply-announcer").textContent).toBe("Response complete")
+    const region = screen.getByTestId("chat-reply-announcer")
+    act(() => announce!.announceComplete("reply-1"))
+    const first = region.textContent
+    act(() => announce!.announceComplete("reply-2"))
+    expect(region.textContent?.trim()).toBe("Response complete")
+    expect(region.textContent).not.toBe(first)
   })
 
   it("is absent outside a transcript", () => {

@@ -357,10 +357,10 @@ describe("PlaygroundMessage error recovery integration", () => {
     expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
   })
 
-  // AX-11: the transcript log is quiet; a finished reply is read once from
-  // the transcript's announcer, outside the log, not by a live region inside
-  // the message.
-  it("reads a finished reply once through the transcript announcer, outside the log (AX-11)", () => {
+  // AX-11: the transcript log reads the reply; its completion is announced
+  // once from the transcript's announcer, outside the log, not by a live
+  // region inside the message.
+  it("announces a finished reply once through the transcript announcer, outside the log (AX-11)", () => {
     const Transcript = ({ streaming }: { streaming: boolean }) => (
       <ChatReplyAnnouncerProvider>
         <div role="log" aria-label="Chat messages">
@@ -375,11 +375,12 @@ describe("PlaygroundMessage error recovery integration", () => {
     view.rerender(<Transcript streaming={false} />)
     const log = screen.getByRole("log", { name: "Chat messages" })
     expect(log).not.toContainElement(announcer)
-    expect(announcer).toHaveTextContent("Done here")
-    expect(screen.queryByText("Response complete")).not.toBeInTheDocument()
+    expect(announcer.textContent).toBe("Response complete")
+    // The reply's text is on the page once: in the log, not copied into the announcer.
+    expect(announcer).not.toHaveTextContent("Done")
     expect(log.querySelectorAll("[aria-live]")).toHaveLength(0)
     view.rerender(<Transcript streaming={false} />)
-    expect(announcer.textContent).toBe("Done here")
+    expect(announcer.textContent).toBe("Response complete")
   })
 
   it("clears a previous response announcement when a detached request begins", () => {

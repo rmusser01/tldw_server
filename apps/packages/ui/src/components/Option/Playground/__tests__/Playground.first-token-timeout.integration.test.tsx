@@ -80,8 +80,7 @@ describe("Playground first-token wait (#3107)", { timeout: 60_000 }, () => {
     await sendAndWaitOnFakeClock(view, "Slow question", 61_000)
 
     expect(transcript()).toEqual(["user: Slow question", "assistant: Slow model reply"])
-    // The reply in the transcript, not its copy in the announcer beside it (AX-11).
-    await waitFor(() => expect(screen.getByText("Slow model reply", { selector: '[role="log"] *' })).toBeInTheDocument(), {
+    await waitFor(() => expect(screen.getByText("Slow model reply")).toBeInTheDocument(), {
       timeout: 5_000
     })
   })

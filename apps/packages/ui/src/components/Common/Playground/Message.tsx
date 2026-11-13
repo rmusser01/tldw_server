@@ -718,8 +718,8 @@ const PlaygroundMessageImpl = (props: Props) => {
     !interruptedGeneration &&
     !errorPayload
   // A reply that finished cleanly is announced once. In a transcript with an
-  // announcer (/chat, side panel), it is read from outside the log; elsewhere
-  // the message keeps its own "Response complete" (AX-11).
+  // announcer (/chat, side panel), "Response complete" comes from outside the
+  // log; elsewhere the message keeps its own (AX-11).
   const replyAnnouncer = useChatReplyAnnouncer()
   const responseCompleted =
     streamingComplete &&
@@ -731,8 +731,8 @@ const PlaygroundMessageImpl = (props: Props) => {
     !responseProcessing
   const completedReplyKey = props.messageId ?? `${props.currentMessageIndex}`
   useEffect(() => {
-    // Keyed by row and text: a regenerated reply is read again, a re-render is not.
-    if (responseCompleted) replyAnnouncer?.announce(`${completedReplyKey}\n${props.message}`, props.message)
+    // Keyed by row and text: a regenerated reply is announced again, a re-render is not.
+    if (responseCompleted) replyAnnouncer?.announceComplete(`${completedReplyKey}\n${props.message}`)
   }, [completedReplyKey, props.message, replyAnnouncer, responseCompleted])
   const hasVisibleAssistantResponseContent = hasVisibleAssistantResponse({
     message: props.message,

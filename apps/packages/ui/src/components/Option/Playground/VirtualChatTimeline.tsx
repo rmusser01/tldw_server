@@ -22,9 +22,9 @@ export function VirtualChatTimeline<T>({
   navigationRef?: React.MutableRefObject<ChatTimelineNavigation | null>
   renderBlock: (block: T, index: number) => React.ReactNode
   /**
-   * Make the rows the transcript's log (AX-11): only messages, quiet (a
-   * finished reply is read by the transcript's announcer), busy while a
-   * reply streams.
+   * Make the rows the transcript's log (AX-11): only messages, a polite log
+   * of additions, busy while a reply streams so the reply is read once it
+   * settles.
    */
   log?: { label: string; busy: boolean }
 }) {
@@ -135,7 +135,8 @@ export function VirtualChatTimeline<T>({
         ? {
             role: "log",
             "aria-label": log.label,
-            "aria-live": "off" as const,
+            "aria-live": "polite" as const,
+            "aria-relevant": "additions" as const,
             "aria-busy": log.busy || undefined
           }
         : {})}
