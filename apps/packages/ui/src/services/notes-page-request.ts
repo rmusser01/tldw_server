@@ -52,11 +52,28 @@ export const buildNotesPageRequestPath = ({
   return `${searching ? NOTES_SEARCH_PATH : NOTES_LIST_PATH}?${params.toString()}`
 }
 
-/** The notes API's total: `pagination.total`, then the top-level `total`. */
-export const readNotesTotal = (response: unknown, fallback: number): number => {
-  const record = (response ?? {}) as { total?: unknown; pagination?: { total?: unknown } }
-  const raw = record.pagination?.total ?? record.total
-  // A null total means the server could not count; the page's rows are the best guess.
-  const total = raw == null ? Number.NaN : Number(raw)
-  return Number.isFinite(total) && total >= 0 ? total : fallback
+type NotesPageResponse = {
+  total?: unknown
+  offset?: unknown
+  pagination?: { total?: unknown; offset?: unknown; has_more?: unknown }
+}
+
+const nonNegative = (value: unknown): number | null => {
+  const number = value == null ? Number.NaN : Number(value)
+  return Number.isFinite(number) && number >= 0 ? number : null
+}
+
+/**
+ * The notes API's total: `pagination.total`, then the top-level `total`.
+ *
+ * A null total means the server could not count. The rows seen so far
+ * (`offset` + this page's `rowCount`) are then a lower bound, plus one when
+ * `has_more` says a row follows, so the next page stays reachable.
+ */
+export const readNotesTotal = (response: unknown, rowCount: number): number => {
+  const record = (response ?? {}) as NotesPageResponse
+  const total = nonNegative(record.pagination?.total ?? record.total)
+  if (total != null) return total
+  const offset = nonNegative(record.pagination?.offset ?? record.offset) ?? 0
+  return offset + rowCount + (record.pagination?.has_more === true ? 1 : 0)
 }

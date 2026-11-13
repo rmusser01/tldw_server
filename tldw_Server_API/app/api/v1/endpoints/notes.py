@@ -7132,7 +7132,11 @@ async def patch_note(
         _: None = Depends(rbac_rate_limit("notes.update")),
 ):
     """PATCH variant that allows updates without an explicit expected-version header.
-    If header is not provided, it fetches current version and applies the update."""
+    If header is not provided, it fetches current version and applies the update.
+
+    A tags- or folders-only body that changes the note's tags or folders advances its
+    `version` and `last_modified`, like any other edit, so a stale expected-version gets 409.
+    """
     provenance = note_in.knowledge_provenance
     provenance_version = note_in.expected_provenance_version
     if provenance is not None and expected_version is None:
