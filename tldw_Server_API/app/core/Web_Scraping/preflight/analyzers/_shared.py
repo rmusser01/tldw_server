@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import Awaitable
 from typing import Any
 
-from ..context import PreflightDeadlineExceeded
+from ..context import ParentStop, PreflightDeadlineExceeded
 from ..probes import ProbeError
 
 
@@ -15,7 +15,7 @@ async def _safe_analyzer_call(
 ) -> dict[str, Any]:
     try:
         return await call
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except PreflightDeadlineExceeded:
         raise

@@ -16,16 +16,20 @@ from typing import Any, Optional
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ScrapeMethod
+from tldw_Server_API.app.core.config import load_and_log_configs
 from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import (
-    scrape_from_sitemap,
-)
+from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlOutcome, CrawlReport, successful_article
+from tldw_Server_API.app.core.Web_Scraping.contracts.requests import CrawlRequest
+from tldw_Server_API.app.core.Web_Scraping.jobs.projections import public_crawl_outcome
 from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
+from tldw_Server_API.app.core.Web_Scraping.orchestration.crawl import execute_crawl
 
 # Import the enhanced service
 from tldw_Server_API.app.services.enhanced_web_scraping_service import (
+    _check_service_active,
     get_web_scraping_service,
+    raise_for_empty_failed_crawl,
 )
 
 #
@@ -78,11 +82,7 @@ def _sanitize_analysis_result(
     if not detail:
         return False
     normalized = detail.lower()
-    status = (
-        "skipped"
-        if "provider is required" in normalized or "no api specified" in normalized
-        else "failed"
-    )
+    status = "skipped" if "provider is required" in normalized or "no api specified" in normalized else "failed"
     _mark_analysis_state(article, field_name, status, detail)
     return True
 
@@ -96,8 +96,6 @@ def _normalize_strategy_value(crawl_strategy: Optional[str]) -> Optional[str]:
     if value in {"best-first", "bestfirst"}:
         return "best_first"
     return value
-
-
 
 
 async def process_web_scraping_task(
@@ -176,12 +174,12 @@ async def process_web_scraping_task(
         except (TypeError, ValueError):
             raise HTTPException(
                 status_code=400,
-                detail=(f"score_threshold must be a float between 0.0 and 1.0; " f"got {score_threshold!r}."),
+                detail=(f"score_threshold must be a float between 0.0 and 1.0; got {score_threshold!r}."),
             ) from None
         if not 0.0 <= normalized_score_threshold <= 1.0:
             raise HTTPException(
                 status_code=400,
-                detail=("score_threshold must be between 0.0 and 1.0 inclusive; " f"got {normalized_score_threshold}."),
+                detail=(f"score_threshold must be between 0.0 and 1.0 inclusive; got {normalized_score_threshold}."),
             )
 
     if normalized_crawl_strategy is not None:
@@ -232,35 +230,74 @@ async def process_web_scraping_task(
     )
 
 
+class _IngestArticles(list[dict[str, Any]]):
+    """Keep the existing list API while retaining empty-crawl terminal facts."""
+
+    def __init__(self, articles: list[dict[str, Any]], outcome: CrawlOutcome | None, service_status: str | None):
+        super().__init__(articles)
+        self.crawl_outcome = public_crawl_outcome(outcome) if outcome is not None else None
+        self.service_status = service_status
+
+
+async def _ingest_sitemap_report(url: str, allow_llm_extraction: bool) -> CrawlReport:
+    """Consume the existing collector before compatibility list reduction."""
+    options = {"allow_llm_extraction": allow_llm_extraction}
+    report = await execute_crawl(
+        CrawlRequest(url),
+        profile="legacy_sitemap",
+        options=options,
+        supplied=frozenset(options),
+        config=(load_and_log_configs() or {}).get("web_scraper", {}),
+        credentials={},
+    )
+    raise_for_empty_failed_crawl(report)
+    _check_service_active()
+    return report
+
+
 def _ingest_crawl_articles(service_result: Any) -> list[dict[str, Any]]:
     """Recover articles and release temporary payloads not exposed by ingestion.
 
     Missing enhanced payloads raise ResourceNotFoundError with their result ID.
     Malformed stored envelopes still release their storage before propagating.
     """
-    if isinstance(service_result, dict) and service_result.get("ephemeral_id"):
-        result_id = service_result["ephemeral_id"]
-        try:
+    outcome = service_result.get("crawl_outcome") if isinstance(service_result, dict) else None
+    service_status = service_result.get("service_status") if isinstance(service_result, dict) else None
+    ephemeral_id = service_result.get("ephemeral_id") if isinstance(service_result, dict) else None
+    result_id = ephemeral_id or (
+        service_result.get("media_id")
+        if isinstance(service_result, dict) and service_result.get("status") == "ephemeral-ok"
+        else None
+    )
+    known_outcome = None
+    try:
+        known_outcome = CrawlOutcome(**outcome) if outcome is not None else None
+        if ephemeral_id:
             stored = ephemeral_storage.get_data(result_id)
             if stored is None:
                 raise ResourceNotFoundError("Web crawl results", result_id, "expired before ingestion")
             service_result = stored["result"]
-        finally:
+        if isinstance(service_result, dict):
+            outcome = service_result.get("crawl_outcome", outcome)
+            service_status = service_result.get("service_status", service_status)
+            service_result = service_result.get("articles") or service_result.get("results") or []
+        articles = service_result if isinstance(service_result, list) else []
+        terminal = CrawlOutcome(**outcome) if outcome is not None else None
+        known_outcome = known_outcome or terminal
+        if terminal is not None:
+            raise_for_empty_failed_crawl(CrawlReport(tuple(articles), terminal))
+        _check_service_active()
+        for article in articles:
+            if isinstance(article, dict) and "summary" in article and "analysis" not in article:
+                article["analysis"] = article.get("summary")
+        return _IngestArticles(articles, terminal, service_status)
+    except Exception as error:  # noqa: BLE001 - preserve known receipt facts through normalization failures
+        if known_outcome is not None:
+            error.crawl_outcome = public_crawl_outcome(known_outcome)
+        raise
+    finally:
+        if result_id:
             ephemeral_storage.remove_data(result_id)
-    elif (
-        isinstance(service_result, dict)
-        and service_result.get("status") == "ephemeral-ok"
-        and service_result.get("media_id")
-    ):
-        # Legacy crawls also store a copy, but already return the articles inline.
-        ephemeral_storage.remove_data(service_result["media_id"])
-    if isinstance(service_result, dict):
-        service_result = service_result.get("articles") or service_result.get("results") or []
-    articles = service_result if isinstance(service_result, list) else []
-    for article in articles:
-        if isinstance(article, dict) and "summary" in article and "analysis" not in article:
-            article["analysis"] = article.get("summary")
-    return articles
 
 
 async def ingest_web_content_orchestrate(
@@ -331,10 +368,13 @@ async def ingest_web_content_orchestrate(
         Shared summarization helper for sitemap/individual scraping.
         Mirrors the previous ingest_web_content summarization behavior.
         """
+        _check_service_active()
         if not getattr(request, "perform_analysis", False):
             article["analysis"] = None
             return article
 
+        if not successful_article(article):
+            return _mark_analysis_state(article, "analysis", "skipped", "No content to analyze.")
         content = article.get("content", "")
         if not content:
             return _mark_analysis_state(article, "analysis", "skipped", "No content to analyze.")
@@ -493,18 +533,12 @@ async def ingest_web_content_orchestrate(
 
         sitemap_url = urls[0]
 
-        def scrape_in_thread() -> list[dict[str, Any]]:
-            return scrape_from_sitemap(
-                sitemap_url,
-                allow_llm_extraction=bool(request.perform_analysis),
-            )
-
-        loop = asyncio.get_running_loop()
-        results = await loop.run_in_executor(None, scrape_in_thread)
+        report = await _ingest_sitemap_report(sitemap_url, bool(request.perform_analysis))
+        results = list(report.articles)
 
         if not results:
             logging.warning("No articles returned from sitemap scraping.")
-            return []
+            return _IngestArticles([], report.outcome, "completed")
 
         summarized: list[dict[str, Any]] = []
         for r in results:
@@ -514,7 +548,7 @@ async def ingest_web_content_orchestrate(
             summarized_article = await maybe_summarize_one(r)
             summarized.append(summarized_article)
 
-        return summarized
+        return _IngestArticles(summarized, report.outcome, "completed")
 
     # URL LEVEL: route to enhanced service (friendly ingest)
     if scrape_method == ScrapeMethod.URL_LEVEL:

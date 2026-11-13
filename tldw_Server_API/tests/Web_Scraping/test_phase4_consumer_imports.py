@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -60,16 +61,14 @@ CONSUMER_IMPORTS = {
     },
     "tldw_Server_API/app/services/web_scraping_service.py": {
         ORCHESTRATION_MODULE: {"scrape_article"},
-        LEGACY_MODULE: {"scrape_from_sitemap"},
+        f"{ORCHESTRATION_MODULE}.crawl": {"execute_crawl"},
+        LEGACY_MODULE: set(),
     },
 }
 
 REQUIRED_LEGACY_IMPORTS = {
     "tldw_Server_API/app/core/Watchlists/fetchers.py": {"is_content_page"},
     "tldw_Server_API/app/services/enhanced_web_scraping_service.py": {"is_content_page"},
-    "tldw_Server_API/app/services/web_scraping_service.py": {
-        "scrape_from_sitemap",
-    },
 }
 
 
@@ -101,7 +100,7 @@ def _legacy_module_imports(path: Path) -> set[str]:
     "source",
     [
         f"import {LEGACY_MODULE} as legacy\n",
-        ("from tldw_Server_API.app.core.Web_Scraping " "import Article_Extractor_Lib as legacy\n"),
+        ("from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as legacy\n"),
     ],
 )
 def test_legacy_module_alias_imports_are_detected(tmp_path: Path, source: str) -> None:
@@ -123,3 +122,73 @@ def test_phase4_consumers_import_only_canonical_article_owners() -> None:
                 assert actual_names <= expected_names, relative_path
             else:
                 assert expected_names <= actual_names, relative_path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial", [False, True])
+@pytest.mark.parametrize("reason", ["budget_exhausted", "deadline_exhausted", "queue_stopping"])
+async def test_watchlist_sitemap_preserves_parent_stop_and_partial_report(monkeypatch, tmp_path, partial, reason):
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Watchlists import fetchers
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
+    from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlInterrupted, CrawlReport
+
+    url = "https://example.com/sitemap.xml"
+    articles = [{"url": "https://example.com/article", "content": "Retained facts", "custom_extra": {"rank": 7}}]
+    report = CrawlReport.interrupted(articles if partial else [], reason)
+    calls, transports, scrapers = [], [], []
+    original = enhanced.EnhancedWebScraper
+
+    def scraper():
+        value = original({})
+        scrapers.append(value)
+        return value
+
+    async def execute(request, **kwargs):
+        calls.append((request.base_url, kwargs["profile"]))
+        return report
+
+    async def unexpected_transport(**kwargs):
+        transports.append(kwargs)
+        raise AssertionError("stopped crawl must not refetch or fall back")
+
+    monkeypatch.setenv("TEST_MODE", "false")
+    monkeypatch.setenv("TLDW_TEST_MODE", "false")
+    monkeypatch.setattr(enhanced, "EnhancedWebScraper", scraper)
+    monkeypatch.setattr(enhanced, "execute_crawl", execute)
+    monkeypatch.setattr(enhanced, "get_database_dir", lambda: str(tmp_path))
+    monkeypatch.setattr(http_client, "afetch", unexpected_transport)
+    try:
+        with pytest.raises(CrawlInterrupted) as raised:
+            await fetchers.fetch_site_top_links(url, top_n=3, method="sitemap")
+        assert raised.value.report is report
+        assert list(raised.value.report.articles) == (articles if partial else [])
+        assert calls == [(url, "enhanced_sitemap")] and transports == []
+    finally:
+        for value in scrapers:
+            await value.stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [RuntimeError("ordinary failure"), asyncio.CancelledError()])
+async def test_watchlist_sitemap_keeps_ordinary_fallback_but_not_cancellation(monkeypatch, tmp_path, failure):
+    from tldw_Server_API.app.core.Watchlists import fetchers
+    from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as enhanced
+
+    url = "https://example.com/sitemap.xml"
+    calls = []
+
+    async def sitemap(self, *args, **kwargs):
+        calls.append(args[0])
+        raise failure
+
+    monkeypatch.setenv("TEST_MODE", "false")
+    monkeypatch.setenv("TLDW_TEST_MODE", "false")
+    monkeypatch.setattr(enhanced.EnhancedWebScraper, "scrape_sitemap", sitemap)
+    monkeypatch.setattr(enhanced, "get_database_dir", lambda: str(tmp_path))
+    if isinstance(failure, asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):
+            await fetchers.fetch_site_top_links(url, method="sitemap")
+    else:
+        assert await fetchers.fetch_site_top_links(url, method="sitemap") == [url]
+    assert calls == [url]

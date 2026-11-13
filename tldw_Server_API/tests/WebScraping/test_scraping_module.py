@@ -247,10 +247,11 @@ async def test_extract_links_text_vs_html(monkeypatch):
 @pytest.mark.asyncio
 async def test_sitemap_scrape_blocks_on_async_policy_before_fetch(monkeypatch):
     from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as ews
+    from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlInterrupted
     from tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping import EnhancedWebScraper
 
     scraper = EnhancedWebScraper(config={"web_scraper_respect_robots": True})
-    calls = {"async": 0, "sync": 0}
+    calls = {"async": 0, "sync": 0, "fetch": 0}
 
     async def fake_policy(url, *, respect_robots, user_agent, source, stage, config, robots_filter=None):
         calls["async"] += 1
@@ -278,23 +279,23 @@ async def test_sitemap_scrape_blocks_on_async_policy_before_fetch(monkeypatch):
             source="enhanced_sitemap",
         )
 
-    class DummyResp:
-        text = "<urlset></urlset>"
+    def forbidden_fetch(*args, **kwargs):
+        calls["fetch"] += 1
+        raise AssertionError("policy denial must stop before the canonical fetch")
 
-        async def aclose(self):
-            return None
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import crawl
 
-    async def fake_afetch(*args, **kwargs):
-        return DummyResp()
-
-    monkeypatch.setattr(ews, "decide_web_outbound_policy", fake_policy, raising=False)
+    monkeypatch.setattr(crawl, "decide_web_outbound_policy", fake_policy)
     monkeypatch.setattr(ews, "decide_web_outbound_policy_sync", fake_sync_policy, raising=False)
-    monkeypatch.setattr(ews, "afetch", fake_afetch, raising=False)
+    monkeypatch.setattr(crawl.DefaultFetchClient, "fetch", forbidden_fetch)
 
-    results = await scraper.scrape_sitemap("https://example.com/sitemap.xml")
+    with pytest.raises(CrawlInterrupted) as caught:
+        await scraper.scrape_sitemap("https://example.com/sitemap.xml")
 
-    assert results == []
-    assert calls == {"async": 1, "sync": 0}
+    assert caught.value.report.outcome.state == "failed"
+    assert caught.value.report.outcome.stop_reason == "policy_denied"
+    assert caught.value.report.outcome.has_partial_results is False
+    assert calls == {"async": 1, "sync": 0, "fetch": 0}
 
 
 def test_provider_missing_keys_google(monkeypatch):

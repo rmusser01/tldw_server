@@ -6,8 +6,51 @@ from collections.abc import Mapping
 from typing import Any
 
 from .errors import RuntimeFailure
+from .execution import CrawlInterrupted, CrawlReport
 from .requests import SearchRequest
 from .results import ExtractionResult, PreflightResult, SearchResult, SearchResultsPayload
+
+
+def to_legacy_crawl(report: CrawlReport, *, profile: str) -> list[dict[str, Any]]:
+    """Convert only terminal reports with an unambiguous compatibility shape."""
+    outcome = report.outcome
+    if outcome.state == "cancelled":
+        import asyncio
+
+        error = asyncio.CancelledError()
+        error.report = report
+        raise error
+    if outcome.state == "completed":
+        values = _to_plain(report.articles)
+        if profile == "enhanced_batch":
+            for item in values:
+                if item.get("policy_reason") and item.get("extraction_successful") is False:
+                    for key in ("title", "author", "date", "content"):
+                        if isinstance(item.get(key), str) and item[key] in {"N/A", ""}:
+                            item.pop(key, None)
+        return values
+    if (
+        profile == "legacy_recursive"
+        and outcome.stop_reason == "transport_unavailable"
+        and any(item.get("error") == "browser_transport_unavailable" for item in report.articles)
+    ):
+        values = _to_plain(report.articles)
+        for item in values:
+            if item.get("error") == "browser_transport_unavailable":
+                for key in ("title", "author", "date", "content"):
+                    if isinstance(item.get(key), str) and item[key] in {"N/A", ""}:
+                        item.pop(key, None)
+        return values
+    if profile.startswith("legacy_") and outcome.stop_reason == "policy_denied" and not outcome.has_partial_results:
+        # Existing collectors return an empty list on pre-admission denial.
+        return []
+    if (
+        profile in {"legacy_sitemap", "legacy_url_level"}
+        and not outcome.has_partial_results
+        and (outcome.stop_reason == "execution_failed")
+    ):
+        return []
+    raise CrawlInterrupted(report)
 
 
 _ARTICLE_RESERVED_KEYS = {

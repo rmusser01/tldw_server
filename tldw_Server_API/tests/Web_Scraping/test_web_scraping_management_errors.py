@@ -4,6 +4,13 @@ import pytest
 from fastapi import HTTPException
 
 import tldw_Server_API.app.api.v1.endpoints.web_scraping as web_scraping_endpoints
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
+
+
+@pytest.fixture
+def platform_admin_user() -> User:
+    """Represent the verified request principal for direct handler calls."""
+    return User(id=1, username="platform-admin", roles=["admin"], is_verified=True)
 
 
 class _LoggerStub:
@@ -134,6 +141,7 @@ async def test_cancel_scraping_job_preserves_http_exception(monkeypatch):
 @pytest.mark.asyncio
 async def test_web_scraping_management_handlers_sanitize_non_http_exceptions(
     monkeypatch,
+    platform_admin_user,
     handler_factory,
     expected_detail,
     expected_log,
@@ -152,7 +160,7 @@ async def test_web_scraping_management_handlers_sanitize_non_http_exceptions(
     )
 
     with pytest.raises(HTTPException) as excinfo:
-        await handler_factory(object())
+        await handler_factory(platform_admin_user)
 
     assert excinfo.value.status_code == 500
     assert excinfo.value.detail == expected_detail

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -205,12 +206,14 @@ class RobotsFilter:
         backend: str = "httpx",
         timeout: float = 5.0,
         credential_free: bool = False,
+        fetch_robots: Callable[[str], Awaitable[Any]] | None = None,
     ) -> None:
         self.user_agent = user_agent
         self.ttl_seconds = int(ttl_seconds)
         self.backend = backend
         self.timeout = float(timeout)
         self.credential_free = credential_free
+        self._fetch_robots = fetch_robots
         # host -> (RobotFileParser|None, fetched_at_epoch_seconds)
         self._cache: dict[str, tuple[RobotFileParser | None, float]] = {}
         # Lock to avoid stampede on first fetch per host
@@ -259,7 +262,9 @@ class RobotsFilter:
                     return _RobotsFetchResult(parser=None, status="unreachable")
 
                 # Use thread offload to keep interface consistent with other code paths
-                if self.credential_free:
+                if self._fetch_robots is not None:
+                    resp = await self._fetch_robots(robots_url)
+                elif self.credential_free:
                     from tldw_Server_API.app.core.Web_Scraping.ua_profiles import build_browser_headers
 
                     resp = await asyncio.to_thread(

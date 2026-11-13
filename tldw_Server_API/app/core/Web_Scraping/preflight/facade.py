@@ -11,6 +11,8 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Web_Scraping.runtime.controls import ParentStop
+
 from ..contracts import (
     PreflightAdvice,
     PreflightResult,
@@ -18,6 +20,7 @@ from ..contracts import (
     WebScrapingStatus,
 )
 from ..contracts.conversion import preflight_result_to_public_dict
+from ..runtime.controls import ParentControls, observe_physical
 from ..runtime.policy import OutboundPolicyChecker, ProbeEgressGuard
 from ..runtime.requests import RuntimeRequestContext
 from .context import (
@@ -94,6 +97,7 @@ def build_execution_context(
     limits: PreflightLimits | None = None,
     identity_selector: Callable[[], Mapping[str, str]] | None = None,
     injected_adapters: PreflightAdapterOverrides | None = None,
+    parent: ParentControls | None = None,
 ) -> PreflightExecutionContext:
     """Build one governed dependency graph for a preflight execution."""
     overrides = injected_adapters or PreflightAdapterOverrides()
@@ -112,6 +116,7 @@ def build_execution_context(
         deadline=deadline,
         clock=selected_clock,
         sleep=selected_sleep,
+        parent=parent,
     )
 
     http = overrides.http
@@ -178,7 +183,7 @@ async def run_legacy_analyzer(
             policy_checker=policy_checker,
         )
         allowed = bool(target.decision.allowed)
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except Exception:  # noqa: BLE001 - policy failures must be sanitized
         return dict(_POLICY_ERROR)
@@ -195,7 +200,7 @@ async def run_legacy_analyzer(
     finally:
         try:
             await context.close()
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             raise
         except Exception:  # noqa: BLE001 - preserve the analyzer outcome
             logger.warning("Legacy analyzer context cleanup failed.")
@@ -247,7 +252,7 @@ def _failed_preflight(
 def _consume_runner_task(task: asyncio.Task[Any]) -> None:
     try:
         task.exception()
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         pass
 
 
@@ -282,7 +287,8 @@ async def _run_before_deadline(
 ) -> Mapping[str, Any]:
     from .runner import gather_analysis_with_context
 
-    remaining_s = context.controls.remaining_seconds()
+    parent = getattr(context.controls, "parent", None)
+    remaining_s = context.controls.cap_timeout(None) if parent is not None else context.controls.remaining_seconds()
     if remaining_s is not None and remaining_s <= 0:
         raise PreflightDeadlineExceeded
 
@@ -290,6 +296,18 @@ async def _run_before_deadline(
         gather_analysis_with_context(target, options, context),
         name="preflight-runner",
     )
+    if parent is not None:
+        observe_physical(runner_task)
+        try:
+            done, _ = await asyncio.wait({runner_task}, timeout=remaining_s)
+            if runner_task in done:
+                return runner_task.result()
+            context.controls.cap_timeout(None)
+            raise PreflightDeadlineExceeded
+        finally:
+            if not runner_task.done():
+                runner_task.cancel()
+            runner_task.add_done_callback(_consume_runner_task)
     if remaining_s is None:
         runner_waiter = asyncio.create_task(
             asyncio.wait({runner_task}),
@@ -297,10 +315,10 @@ async def _run_before_deadline(
         )
         try:
             await asyncio.shield(runner_waiter)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             try:
                 await _retire_runner_task(runner_task)
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, ParentStop):
                 # Retirement may surface the child cancellation; the outer one wins.
                 pass
             await runner_waiter
@@ -317,7 +335,7 @@ async def _run_before_deadline(
                 {runner_task, deadline_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             await _retire_runner_task(runner_task)
             raise
 
@@ -354,7 +372,7 @@ async def run_preflight(
             analysis=analysis,
             advice=_derive_advice(analysis),
         )
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, ParentStop):
         raise
     except PreflightDeadlineExceeded:
         return _failed_preflight(
@@ -369,7 +387,7 @@ async def run_preflight(
     finally:
         try:
             await context.close()
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, ParentStop):
             raise
         except Exception:  # noqa: BLE001 - cleanup cannot replace an outcome
             logger.warning("Preflight context cleanup failed.")

@@ -8,11 +8,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Security.url_validation import assert_url_safe
-from tldw_Server_API.app.services.enhanced_web_scraping_service import get_web_scraping_service
+from tldw_Server_API.app.core.Web_Scraping.jobs.projections import public_progress
+from tldw_Server_API.app.services.enhanced_web_scraping_service import get_web_scraping_service, is_platform_admin
 
 router = APIRouter(
     prefix="/web-scraping",
@@ -107,6 +108,8 @@ async def initialize_scraping_service(
 
     This starts the worker pool and prepares the service for scraping.
     """
+    if not is_platform_admin(current_user):
+        raise HTTPException(status_code=403, detail="Platform administrator required")
     try:
         service = get_web_scraping_service()
         await service.initialize()
@@ -129,6 +132,8 @@ async def shutdown_scraping_service(
 
     This stops all workers and cleans up resources.
     """
+    if not is_platform_admin(current_user):
+        raise HTTPException(status_code=403, detail="Platform administrator required")
     try:
         service = get_web_scraping_service()
         await service.shutdown()
@@ -168,11 +173,7 @@ async def get_scraping_progress(
         if not progress:
             raise HTTPException(status_code=404, detail="Task not found or no progress available")
 
-        return {
-            "task_id": task_id,
-            "progress": progress,
-            "status": "in_progress"
-        }
+        return {"task_id": task_id, "progress": public_progress(progress), "status": "in_progress"}
     except HTTPException:
         raise
     except _WEB_SCRAPING_ENDPOINT_EXCEPTIONS as e:

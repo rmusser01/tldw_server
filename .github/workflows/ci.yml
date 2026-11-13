@@ -1843,6 +1843,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -1969,7 +1972,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'auth-integration-s-z' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -1982,6 +1985,10 @@ jobs:
             pyproject.toml
             uv.lock
           extras: dev,multiplayer
+
+      - name: Install Chromium for native scraping tests
+        if: matrix.shard.name == 'integrations'
+        run: python -m playwright install --with-deps chromium
 
       - name: Verify core e2e fixtures are discoverable
         if: matrix.shard.name == 'core-server-smoke'
@@ -3600,6 +3607,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -3718,7 +3728,7 @@ jobs:
       - name: Install FFmpeg and PortAudio (Linux)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'auth-integration-s-z' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -3731,6 +3741,10 @@ jobs:
             pyproject.toml
             uv.lock
           extras: dev,multiplayer
+
+      - name: Install Chromium for native scraping tests
+        if: matrix.shard.name == 'integrations'
+        run: python -m playwright install --with-deps chromium
 
       - name: Verify core e2e fixtures are discoverable
         if: matrix.shard.name == 'core-server-smoke'
@@ -5157,6 +5171,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -5249,7 +5266,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'auth-integration-s-z' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -5262,6 +5279,10 @@ jobs:
             pyproject.toml
             uv.lock
           extras: dev
+
+      - name: Install Chromium for native scraping tests
+        if: matrix.shard.name == 'integrations'
+        run: python -m playwright install chromium
 
       - name: Ensure pytest-asyncio installed (OS matrix)
         shell: bash
@@ -6624,6 +6645,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -6716,7 +6740,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'auth-integration-s-z' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -6729,6 +6753,10 @@ jobs:
             pyproject.toml
             uv.lock
           extras: dev
+
+      - name: Install Chromium for native scraping tests
+        if: matrix.shard.name == 'integrations'
+        run: python -m playwright install chromium
 
       - name: Ensure pytest-asyncio installed (OS matrix)
         shell: bash
@@ -8082,6 +8110,9 @@ jobs:
               tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
+              tldw_Server_API/tests/Services/test_phase5_crawl_outcomes.py
+              tldw_Server_API/tests/Services/test_phase5_webscraping_authorization.py
+              tldw_Server_API/tests/Services/test_pr3436_observation_snapshot.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
               tldw_Server_API/tests/Services/test_service_*.py
               tldw_Server_API/tests/Services/test_storage_*.py
@@ -8174,7 +8205,7 @@ jobs:
       - name: Install FFmpeg (multi-OS)
         uses: ./.github/actions/setup-ffmpeg
         with:
-          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
+          install-ffmpeg: ${{ startsWith(matrix.shard.name, 'media-') || matrix.shard.name == 'ai-embeddings-media-validation' || matrix.shard.name == 'rag-new-unit-media-ingest' || matrix.shard.name == 'product-claims-service' || matrix.shard.name == 'auth-integration-s-z' || (matrix.shard.name == 'platform-services-core' || matrix.shard.name == 'platform-services-main-routing' || matrix.shard.name == 'platform-services-main-pollers') }}
           install-portaudio: 'true'
 
       - name: Setup Python and deps (with uv)
@@ -8187,6 +8218,10 @@ jobs:
             pyproject.toml
             uv.lock
           extras: dev
+
+      - name: Install Chromium for native scraping tests
+        if: matrix.shard.name == 'integrations'
+        run: python -m playwright install chromium
 
       - name: Ensure pytest-asyncio installed (OS matrix)
         shell: bash

@@ -449,6 +449,12 @@ class _FakeCDPSession:
             return self.runtime.cdp_responses[method]
         if method == "Network.enable":
             return {}
+        if method in {"Fetch.enable", "Fetch.continueRequest", "Fetch.failRequest", "Target.setDiscoverTargets"}:
+            return {}
+        if method == "Target.getTargets":
+            return {"targetInfos": []}
+        if method == "Target.getTargetInfo":
+            return {"targetInfo": {"browserContextId": "owned-context", "targetId": "main-target"}}
         if method == "Page.getFrameTree":
             return {"frameTree": {"frame": {"id": "main-frame"}}}
         if method == "Page.createIsolatedWorld":
@@ -487,7 +493,7 @@ class _FakePage(_CleanupControlled):
     def __init__(self, runtime: _FakeBrowserRuntime) -> None:
         self.runtime = runtime
 
-    async def goto(self, url: str, **kwargs: object) -> None:
+    async def goto(self, url: str, **kwargs: object) -> Any:
         self.runtime.events.append(f"goto:{url}")
         self.runtime.events.append(f"goto-options:{sorted(kwargs)}")
         self.runtime.raise_at("goto")
@@ -498,6 +504,16 @@ class _FakePage(_CleanupControlled):
                 route = value if isinstance(value, _FakeHttpRoute) else _FakeHttpRoute(str(value))
                 self.runtime.http_routes.append(route)
                 context.dispatch_http(route)
+                native = getattr(self.runtime, "browser_session", None)
+                if native is not None:
+                    native.emit(
+                        "Fetch.requestPaused",
+                        {
+                            "requestId": str(len(self.runtime.http_routes)),
+                            "request": {"url": route.request.url, "headers": {}},
+                            "resourceType": "Document",
+                        },
+                    )
             else:
                 route = value if isinstance(value, _FakeWebSocketRoute) else _FakeWebSocketRoute(str(value))
                 self.runtime.websocket_routes.append(route)
@@ -506,6 +522,8 @@ class _FakePage(_CleanupControlled):
             assert self.runtime.cdp_sessions
             self.runtime.cdp_sessions[-1].emit(event, payload)
         await asyncio.sleep(0)
+
+        return SimpleNamespace(status=200)
 
     async def content(self) -> str:
         self.runtime.events.append("content")
@@ -659,6 +677,22 @@ class _FakeBrowser(_CleanupControlled):
 
     def __init__(self, runtime: _FakeBrowserRuntime) -> None:
         self.runtime = runtime
+        self.connected = True
+        self.handlers = {}
+
+    async def new_browser_cdp_session(self):
+        session = _FakeCDPSession(self.runtime)
+        self.runtime.browser_session = session
+        return session
+
+    def on(self, event, callback):
+        self.handlers[event] = callback
+
+    def remove_listener(self, event, callback):
+        self.handlers.pop(event, None)
+
+    def is_connected(self):
+        return self.connected
 
     async def new_context(self, **kwargs: object) -> _FakeContext:
         self.runtime.events.append("new_context")
@@ -670,6 +704,9 @@ class _FakeBrowser(_CleanupControlled):
 
     async def close(self) -> None:
         await self.runtime.cleanup("close:browser")
+        self.connected = False
+        if callback := self.handlers.get("disconnected"):
+            callback()
 
 
 class _FakeChromium:

@@ -381,10 +381,14 @@ def test_phase4b_moved_consumers_import_canonical_content_and_extraction_facades
         node
         for node in execute_job.body
         if isinstance(node, ast.If)
-        and isinstance(node.test, ast.Attribute)
-        and isinstance(node.test.value, ast.Name)
-        and node.test.value.id == "self"
-        and node.test.attr == "parent_scraper"
+        and isinstance(node.test, ast.Compare)
+        and isinstance(node.test.left, ast.Attribute)
+        and isinstance(node.test.left.value, ast.Name)
+        and node.test.left.value.id == "self"
+        and node.test.left.attr == "parent_scraper"
+        and isinstance(node.test.ops[0], ast.IsNot)
+        and isinstance(node.test.comparators[0], ast.Constant)
+        and node.test.comparators[0].value is None
     )
     fallback_imports = [node for node in parent_scraper_branch.orelse if isinstance(node, ast.ImportFrom)]
     assert len(fallback_imports) == 1
@@ -497,9 +501,7 @@ def test_phase4b_crawl_bound_article_helper_forwards_guarded_html_to_canonical_e
 ) -> None:
     from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib as article
 
-    acquire = AsyncMock(
-        return_value="<html><head><title>Browser title</title></head><article>Body</article></html>"
-    )
+    acquire = AsyncMock(return_value="<html><head><title>Browser title</title></head><article>Body</article></html>")
 
     class GuardedBrowser:
         """Provide deterministic rendered HTML without a native browser."""
@@ -520,9 +522,7 @@ def test_phase4b_crawl_bound_article_helper_forwards_guarded_html_to_canonical_e
     monkeypatch.setattr(article, "convert_html_to_markdown", lambda content: f"markdown:{content}")
     monkeypatch.setattr(article, "GuardedArticleBrowser", GuardedBrowser)
 
-    result = asyncio.run(
-        article.scrape_article_async(None, "https://example.com/article", allow_llm_extraction=False)
-    )
+    result = asyncio.run(article.scrape_article_async(None, "https://example.com/article", allow_llm_extraction=False))
 
     assert calls == [
         (

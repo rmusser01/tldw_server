@@ -34,28 +34,16 @@ HTML = "<html><head><title>Article</title></head><body>demo@example.com</body></
 
 
 @pytest.mark.unit
-async def test_legacy_recursive_scrape_denies_transport_before_playwright_start(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
-) -> None:
-    """Legacy recursive crawling must fail closed before starting Playwright."""
+async def test_legacy_recursive_scrape_denies_transport_before_playwright_start(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article, crawl
+
     denied = decide_browser_transport(
-        configured_mode="disabled",
-        auth_mode="single_user",
-        outbound_policy_mode="compat",
+        configured_mode="disabled", auth_mode="single_user", outbound_policy_mode="compat"
     )
     guarded_browser = Mock(side_effect=AssertionError("browser must not be built"))
-    monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: denied, raising=False)
-    monkeypatch.setattr(legacy, "GuardedArticleBrowser", guarded_browser)
-
-    results = await legacy.recursive_scrape(
-        URL,
-        max_pages=1,
-        max_depth=0,
-        delay=0,
-        resume_file=str(tmp_path / "progress.json"),
-    )
-
+    monkeypatch.setattr(crawl, "default_browser_transport_decision", lambda: denied)
+    monkeypatch.setattr(article, "GuardedArticleBrowser", guarded_browser)
+    results = await legacy.recursive_scrape(URL, 1, 0, delay=0, resume_file=str(tmp_path / "progress.json"))
     assert results == [
         {
             "url": URL,
@@ -92,41 +80,32 @@ async def test_legacy_article_scrape_denies_transport_before_page_creation(
 
 
 @pytest.mark.unit
-async def test_legacy_recursive_scrape_stops_when_transport_is_denied_mid_run(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
-) -> None:
-    """Do not discover links after an inner article dispatch loses admission."""
-    allowed = decide_browser_transport(
-        configured_mode="auto",
-        auth_mode="single_user",
-        outbound_policy_mode="compat",
-    )
-    denied = decide_browser_transport(
-        configured_mode="auto",
-        auth_mode="multi_user",
-        outbound_policy_mode="strict",
-    )
+async def test_legacy_recursive_scrape_stops_when_transport_is_denied_mid_run(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Web_Scraping.orchestration import article, crawl
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser import GuardedArticleBrowser
+    from tldw_Server_API.app.core.Web_Scraping.policy import DefaultProbeEgressGuard
+    from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
+    from tldw_Server_API.tests.Web_Scraping.test_phase4_article_orchestration import _harness
+
+    allowed = decide_browser_transport(configured_mode="auto", auth_mode="single_user", outbound_policy_mode="compat")
+    denied = decide_browser_transport(configured_mode="auto", auth_mode="multi_user", outbound_policy_mode="strict")
     decision_provider = Mock(side_effect=[allowed, denied])
-    acquire = AsyncMock(side_effect=AssertionError("browser must not acquire"))
-
-    class GuardedBrowser:
-        """Expose an acquisition double without launching Playwright."""
-
-        def __init__(self, **_kwargs: object) -> None:
-            self.acquire = acquire
-
-    monkeypatch.setattr(legacy, "default_browser_transport_decision", decision_provider)
-    monkeypatch.setattr(legacy, "GuardedArticleBrowser", GuardedBrowser)
-
-    results = await legacy.recursive_scrape(
-        URL,
-        max_pages=1,
-        max_depth=1,
-        delay=0,
-        resume_file=str(tmp_path / "progress.json"),
+    launcher = SimpleNamespace(start=AsyncMock(side_effect=AssertionError("browser must not start")))
+    browser = GuardedArticleBrowser(
+        egress_guard=DefaultProbeEgressGuard(),
+        context=RuntimeRequestContext(),
+        launcher=launcher,
+        transport_decision=decision_provider,
     )
-
+    fixture = _harness()
+    monkeypatch.setattr(crawl, "default_browser_transport_decision", decision_provider)
+    monkeypatch.setattr(crawl, "decide_web_outbound_policy", AsyncMock(return_value=SimpleNamespace(allowed=True)))
+    monkeypatch.setattr(
+        article,
+        "_build_default_dependencies",
+        lambda *_args: dataclasses.replace(fixture.dependencies, browser=browser),
+    )
+    results = await legacy.recursive_scrape(URL, 1, 1, delay=0, resume_file=str(tmp_path / "progress.json"))
     assert results == [
         {
             "url": URL,
@@ -135,7 +114,7 @@ async def test_legacy_recursive_scrape_stops_when_transport_is_denied_mid_run(
             "capability": denied.to_capability_metadata(),
         }
     ]
-    acquire.assert_not_awaited()
+    launcher.start.assert_not_awaited()
     assert decision_provider.call_count == 2
 
 
@@ -188,56 +167,16 @@ async def test_legacy_article_scrape_uses_guarded_browser_instead_of_caller_cont
 
 
 @pytest.mark.unit
-async def test_legacy_recursive_scrape_discovers_links_from_guarded_html(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
-) -> None:
-    """Reuse guarded rendered HTML for crawl discovery without a second raw page."""
-    allowed = decide_browser_transport(
-        configured_mode="url_guarded",
-        auth_mode="single_user",
-        outbound_policy_mode="compat",
+async def test_legacy_recursive_scrape_discovers_links_from_guarded_html(monkeypatch, tmp_path):
+    from tldw_Server_API.tests.Web_Scraping.phase5_fakes import Phase5Harness
+
+    child_url = URL + "/next"
+    fixture = Phase5Harness(
+        profile="legacy_recursive", outcomes=[{"url": URL, "links": [child_url]}, {"url": child_url}]
     )
-    child_url = "https://example.com/article/next"
-    acquired: list[str] = []
-
-    class GuardedBrowser:
-        """Return a two-page same-origin crawl graph."""
-
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-        async def acquire(self, url: str, _profile: object) -> str:
-            """Record one guarded acquisition and return its rendered page."""
-            acquired.append(url)
-            if url == URL:
-                return '<html><body><a href="/article/next">Next</a></body></html>'
-            assert url == child_url
-            return "<html><body>Done</body></html>"
-
-    monkeypatch.setattr(legacy, "default_browser_transport_decision", lambda: allowed)
-    monkeypatch.setattr(legacy, "GuardedArticleBrowser", GuardedBrowser)
-    monkeypatch.setattr(
-        legacy,
-        "extract_article_with_pipeline",
-        lambda _html, url, **_kwargs: {
-            "url": url,
-            "title": "Article",
-            "content": "body",
-            "extraction_successful": True,
-        },
-    )
-    monkeypatch.setattr(legacy, "convert_html_to_markdown", lambda value: value)
-
-    results = await legacy.recursive_scrape(
-        URL,
-        max_pages=2,
-        max_depth=1,
-        delay=0,
-        resume_file=str(tmp_path / "progress.json"),
-    )
-
-    assert acquired == [URL, child_url]
+    with fixture.boundaries():
+        results = await legacy.recursive_scrape(URL, 2, 1, delay=0, resume_file=str(tmp_path / "progress.json"))
+    assert [call["url"] for call in fixture.transport_calls] == [URL, child_url]
     assert [result["url"] for result in results] == [URL, child_url]
     assert all("_discovered_links" not in result for result in results)
 
@@ -688,11 +627,13 @@ def test_pipeline_llm_uses_injected_provider_and_observes_cancellation_before_fa
     )
     nested_defaults = dataclasses.replace(
         defaults,
-        perform_chat_api_call=lambda **_kwargs: events.append("nested-provider")
-        or {
-            "choices": [{"message": {"content": '{"content": "nested"}'}}],
-            "usage": {},
-        },
+        perform_chat_api_call=lambda **_kwargs: (
+            events.append("nested-provider")
+            or {
+                "choices": [{"message": {"content": '{"content": "nested"}'}}],
+                "usage": {},
+            }
+        ),
         increment_counter=lambda *_args, **_kwargs: None,
         observe_histogram=lambda *_args, **_kwargs: None,
         log_counter=lambda *_args, **_kwargs: None,
