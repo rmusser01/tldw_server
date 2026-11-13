@@ -1976,7 +1976,7 @@ def _sync_note_organization(
         before = _note_organization_ids(db, note_id)
         summary = relink()
         if _note_organization_ids(db, note_id) != before:
-            db.bump_note_version(note_id, bump_from_version)
+            db.note_store.bump_note_version(note_id, bump_from_version)
     return summary
 
 

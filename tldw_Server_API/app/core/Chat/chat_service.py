@@ -77,6 +77,13 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     GENERATION_STATUS_LENGTH,
     build_generation_metadata,
 )
+from tldw_Server_API.app.core.Chat.history_selection import (
+    REPLY_ACTION_REFUSED_QUESTION,
+    REPLY_ACTION_REFUSED_REQUEST,
+    HistorySelectionError,
+    HistorySelectionSnapshotV1,
+    reply_action_refusal,
+)
 from tldw_Server_API.app.core.Chat.message_utils import should_persist_message_role
 from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     OutputModerationRuntime,
@@ -2943,6 +2950,24 @@ async def _resolve_saved_regeneration(
     return user, legacy_reply
 
 
+def _history_for_request(
+    snapshot: Any,
+    content: Any,
+    character_card: dict[str, Any],
+    continue_prefix: str | None,
+) -> list[dict[str, Any]]:
+    """Format the selected rows for this request.
+
+    On Continue the reply being continued is the final context message, and some
+    providers (for example Anthropic) refuse a final message that ends in whitespace,
+    so it goes out without its trailing whitespace.
+    """
+    formatted = _format_selected_history_messages(snapshot, content, character_card)
+    if continue_prefix is not None:
+        formatted[-1]["content"] = formatted[-1]["content"].rstrip()
+    return formatted
+
+
 def _format_selected_history_messages(
     snapshot: Any,
     content: Any,
@@ -3059,13 +3084,6 @@ async def build_context_and_messages(
             project_history_context,
             selected_unanswered_text_question,
         )
-        from tldw_Server_API.app.core.Chat.history_selection import (
-            REPLY_ACTION_REFUSED_QUESTION,
-            REPLY_ACTION_REFUSED_REQUEST,
-            HistorySelectionError,
-            HistorySelectionSnapshotV1,
-            reply_action_refusal,
-        )
 
         if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
             raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_context_prompt_template"})
@@ -3143,7 +3161,6 @@ async def build_context_and_messages(
                         )
                     except HistorySelectionError as exc:
                         if exc.code == "unsupported_history_regeneration":
-                            # Keep the reason: a question that can't be reused refuses both actions.
                             raise HistorySelectionError(unsupported_code, details=exc.details) from exc
                         raise
                     original = next(item for item in content if item["id"] == accepted["input_message_id"])
@@ -3696,11 +3713,7 @@ async def build_context_and_messages(
     if versioned:
         if regenerate_reply_id is not None or continue_reply_id is not None:
             overlap_cut = len(request_messages)
-        formatted_history = _format_selected_history_messages(history_snapshot, selected_content, character_card)
-        if continue_prefix is not None:
-            # The continued reply is the final context message. Some providers
-            # (for example Anthropic) refuse one that ends in whitespace.
-            formatted_history[-1]["content"] = formatted_history[-1]["content"].rstrip()
+        formatted_history = _history_for_request(history_snapshot, selected_content, character_card, continue_prefix)
         if server_existing_input is not None:
             existing_dictionary_content = assistant_context.pop("history_dictionary_user_content", [])
             if existing_dictionary_content:

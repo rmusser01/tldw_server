@@ -2515,9 +2515,8 @@ class NoteStore:
 
         def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> int:
             if transaction_conn.execute(query, params).rowcount == 0:
-                current_version = self._db._get_current_db_version(
-                    transaction_conn, "notes", "id", note_id, owner_client_id=self._db.client_id
-                )
+                current = self.get_note_by_id(note_id, include_deleted=True)
+                current_version = current.get("version") if current else None
                 raise ConflictError(  # noqa: TRY003
                     f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
                     entity="notes",
