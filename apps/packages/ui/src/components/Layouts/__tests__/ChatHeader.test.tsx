@@ -504,7 +504,7 @@ describe("ChatHeader branch lineage (CM-12)", () => {
 describe("ChatHeader per-chat actions (CS-09)", () => {
   it("exports the open chat as Markdown or JSON from More", async () => {
     const onExportChat = vi.fn()
-    render(<ChatHeader {...createProps({ onExportChat, onMoveToFolder: vi.fn() })} />)
+    render(<ChatHeader {...createProps({ onExportChat, onEditFolders: vi.fn() })} />)
     fireEvent.click(screen.getByRole("button", { name: "More actions" }))
     fireEvent.mouseEnter(await screen.findByRole("menuitem", { name: /^Export/ }))
     fireEvent.click(await screen.findByRole("menuitem", { name: "Markdown" }))
@@ -515,12 +515,12 @@ describe("ChatHeader per-chat actions (CS-09)", () => {
     expect(onExportChat).toHaveBeenLastCalledWith("json")
   })
 
-  it("moves the open chat to a folder from More", async () => {
-    const onMoveToFolder = vi.fn()
-    render(<ChatHeader {...createProps({ onExportChat: vi.fn(), onMoveToFolder })} />)
+  it("edits the open chat's folders from More", async () => {
+    const onEditFolders = vi.fn()
+    render(<ChatHeader {...createProps({ onExportChat: vi.fn(), onEditFolders })} />)
     fireEvent.click(screen.getByRole("button", { name: "More actions" }))
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Move to folder…" }))
-    expect(onMoveToFolder).toHaveBeenCalledOnce()
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Add to folder…" }))
+    expect(onEditFolders).toHaveBeenCalledOnce()
   })
 
   it("offers neither for a chat that isn't saved on the server", async () => {
@@ -528,6 +528,6 @@ describe("ChatHeader per-chat actions (CS-09)", () => {
     fireEvent.click(screen.getByRole("button", { name: "More actions" }))
     await screen.findByRole("menuitem", { name: "Open settings" })
     expect(screen.queryByRole("menuitem", { name: /^Export/ })).toBeNull()
-    expect(screen.queryByRole("menuitem", { name: "Move to folder…" })).toBeNull()
+    expect(screen.queryByRole("menuitem", { name: "Add to folder…" })).toBeNull()
   })
 })

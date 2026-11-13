@@ -866,7 +866,8 @@
     "detach": "Detach Buddy"
   },
   "folderPicker": {
-    "createError": "Unable to create the folder. Try again."
+    "createError": "Unable to create the folder. Try again.",
+    "saveError": "Some folder changes couldn't be saved. Try again."
   },
   "greetingPicker": {
     "opening": "{{name}} opening",

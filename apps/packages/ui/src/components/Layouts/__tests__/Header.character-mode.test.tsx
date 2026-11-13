@@ -25,9 +25,13 @@ const chatFiles = vi.hoisted(() => ({ exportServerChat: vi.fn(), success: vi.fn(
 vi.mock("@/services/chat-transcript-export", () => ({
   exportServerChat: (...args: unknown[]) => chatFiles.exportServerChat(...args)
 }))
-vi.mock("@/components/Sidepanel/Chat/BulkFolderPickerModal", () => ({
-  default: ({ open, conversationIds }: { open: boolean; conversationIds: string[] }) =>
-    open ? <div data-testid="folder-picker" data-ids={conversationIds.join(",")} /> : null
+vi.mock("@/components/Sidepanel/Chat/FolderPickerModal", () => ({
+  default: ({ open, conversationId, operation }: { open: boolean; conversationId: string; operation?: { requestScope: { userId: string }; isCurrent: () => boolean } }) =>
+    open ? <div data-testid="folder-picker" data-chat={conversationId} data-user={operation?.requestScope.userId}
+      data-current={String(operation?.isCurrent())} /> : null
+}))
+vi.mock("@/services/service-prompts", () => ({
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "https://chat.test", authMode: "multi-user" }, userId: "U1" })
 }))
 
 const mockT = (
@@ -113,7 +117,7 @@ vi.mock("../ChatHeader", () => ({
     parentChatTitle,
     onOpenParentChat,
     onExportChat,
-    onMoveToFolder,
+    onEditFolders,
     onOpenCommandPalette,
     onStartSavedChat,
     onStartTemporaryChat,
@@ -129,14 +133,14 @@ vi.mock("../ChatHeader", () => ({
     parentChatTitle?: string | null
     onOpenParentChat?: () => void
     onExportChat?: (format: "markdown" | "json") => void
-    onMoveToFolder?: () => void
+    onEditFolders?: () => void
   }) => (
     <div>
       {onExportChat ? (
         <button type="button" onClick={() => onExportChat("json")}>Export JSON</button>
       ) : null}
-      {onMoveToFolder ? (
-        <button type="button" onClick={() => onMoveToFolder()}>Move to folder</button>
+      {onEditFolders ? (
+        <button type="button" onClick={() => onEditFolders()}>Add to folder</button>
       ) : null}
       {onOpenParentChat ? (
         <button type="button" onClick={() => onOpenParentChat()}>
@@ -237,17 +241,20 @@ describe("Header per-chat Export and Move to folder (CS-09)", () => {
     await vi.waitFor(() => expect(chatFiles.error).toHaveBeenCalledWith("Couldn't export this chat. Try again."))
   })
 
-  it("moves the open saved chat to a folder", async () => {
+  it("edits the open saved chat's folders for the current account", async () => {
     render(<Header />)
-    fireEvent.click(screen.getByRole("button", { name: "Move to folder" }))
-    expect(await screen.findByTestId("folder-picker")).toHaveAttribute("data-ids", "saved-chat")
+    fireEvent.click(screen.getByRole("button", { name: "Add to folder" }))
+    const picker = await screen.findByTestId("folder-picker")
+    expect(picker).toHaveAttribute("data-chat", "saved-chat")
+    expect(picker).toHaveAttribute("data-user", "U1")
+    expect(picker).toHaveAttribute("data-current", "true")
   })
 
   it("offers neither for a chat that isn't saved on the server", () => {
     messageOptionState.serverChatId = null
     render(<Header />)
     expect(screen.queryByRole("button", { name: "Export JSON" })).toBeNull()
-    expect(screen.queryByRole("button", { name: "Move to folder" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Add to folder" })).toBeNull()
   })
 })
 

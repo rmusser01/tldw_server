@@ -2255,8 +2255,8 @@
   "chatSidebar_chatSettings": {
     "message": "Chat settings"
   },
-  "chatSidebar_moveToFolder": {
-    "message": "Move to folder…"
+  "chatSidebar_addToFolder": {
+    "message": "Add to folder…"
   },
   "chatSidebar_exportMarkdown": {
     "message": "Markdown"

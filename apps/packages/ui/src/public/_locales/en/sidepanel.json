@@ -2148,5 +2148,8 @@
   },
   "composer_mentionCount_other": {
     "message": "{{count}} matches"
+  },
+  "folderPicker_saveError": {
+    "message": "Some folder changes couldn't be saved. Try again."
   }
 }

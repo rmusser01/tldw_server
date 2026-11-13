@@ -91,7 +91,7 @@ type ChatHeaderProps = {
   /** Export the open saved chat from the server (CS-09). */
   onExportChat?: (format: "markdown" | "json") => void
   /** Choose the folders the open saved chat belongs to (CS-09). */
-  onMoveToFolder?: () => void
+  onEditFolders?: () => void
 }
 
 const toText = (value: unknown): string =>
@@ -135,7 +135,7 @@ export function ChatHeader({
   parentChatTitle = null,
   onOpenParentChat,
   onExportChat,
-  onMoveToFolder
+  onEditFolders
 }: ChatHeaderProps) {
   const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false)
   const headerMenuTriggerRef = React.useRef<HTMLButtonElement>(null)
@@ -527,13 +527,13 @@ export function ChatHeader({
           }
         ]
       : []),
-    ...(onMoveToFolder
+    ...(onEditFolders
       ? [
           {
-            key: "move-to-folder",
-            label: toText(t("common:chatSidebar.moveToFolder", "Move to folder…")),
+            key: "add-to-folder",
+            label: toText(t("common:chatSidebar.addToFolder", "Add to folder…")),
             icon: <FolderInput className="size-4" aria-hidden="true" />,
-            onClick: () => runMenuAction(onMoveToFolder)
+            onClick: () => runMenuAction(onEditFolders)
           }
         ]
       : []),

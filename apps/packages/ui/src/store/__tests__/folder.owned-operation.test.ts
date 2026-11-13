@@ -40,6 +40,21 @@ describe("history folder operations retain captured ownership", () => {
     vi.mocked(api.unlinkKeywordFromFolder).mockResolvedValue(ok(undefined) as never)
     vi.mocked(api.deleteKeyword).mockResolvedValue(ok(undefined) as never)
   })
+  it("removes a chat from a folder with the captured account, and not after the view retires (CS-09)", async () => {
+    vi.mocked(api.fetchConversationKeywordLinks).mockResolvedValue(ok([{ conversation_id: "chat-1", keyword_id: 9 }]) as never)
+    vi.mocked(api.unlinkKeywordFromConversation).mockResolvedValue(ok(undefined) as never)
+    const op = operation(); await refreshOwned(op)
+    expect(await useFolderStore.getState().removeConversationFromFolder("chat-1", 1, op)).toBe(true)
+    expect(api.unlinkKeywordFromConversation).toHaveBeenCalledWith("chat-1", 9, expect.objectContaining({ requestScope: op.requestScope }))
+    expect(useFolderStore.getState().conversationKeywordLinks).toEqual([])
+    expect(db.conversationKeywordLinks.where).not.toHaveBeenCalled()
+
+    vi.mocked(api.unlinkKeywordFromConversation).mockClear()
+    useFolderStore.setState({ conversationKeywordLinks: [{ conversation_id: "chat-1", keyword_id: 9 }] })
+    op.isCurrent.mockReturnValue(false)
+    expect(await useFolderStore.getState().removeConversationFromFolder("chat-1", 1, op)).toBe(false)
+    expect(api.unlinkKeywordFromConversation).not.toHaveBeenCalled()
+  })
   it("reads with the captured account, without turning unqualified cache into authority", async () => {
     const op = operation(); await refreshOwned(op)
     expect(api.fetchFolders).toHaveBeenCalledWith(expect.objectContaining({ requestScope: op.requestScope }))

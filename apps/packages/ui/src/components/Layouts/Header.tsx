@@ -36,12 +36,15 @@ import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
 import { useForkParentChat } from "@/hooks/chat/useForkParentChat"
 import { buildServerChatPath } from "@/hooks/chat/server-chat-route"
 import { exportServerChat } from "@/services/chat-transcript-export"
+import { resolveServicePromptScope } from "@/services/service-prompts"
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
+import type { FolderOperation } from "@/store/folder"
 import type { TranscriptFormat } from "@/utils/chat-transcript"
-
-const BulkFolderPickerModal = React.lazy(
-  () => import("@/components/Sidepanel/Chat/BulkFolderPickerModal")
-)
 import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
+
+const FolderPickerModal = React.lazy(
+  () => import("@/components/Sidepanel/Chat/FolderPickerModal")
+)
 
 type Props = {
   onToggleSidebar?: () => void
@@ -120,7 +123,21 @@ export const Header: React.FC<Props> = ({
   const forkParent = useForkParentChat(isChatRoute && !temporaryChat ? serverChatId : null)
   // CS-09: the open saved chat can be exported (read from the server) and filed.
   const savedChatId = isChatRoute && !temporaryChat ? serverChatId : null
-  const [folderPickerChatId, setFolderPickerChatId] = React.useState<string | null>(null)
+  const [folderPicker, setFolderPicker] = React.useState<{ chatId: string; operation: FolderOperation } | null>(null)
+  // The picker reads and edits folders for the account and chat it opened on.
+  const openFolderPicker = React.useCallback(async () => {
+    if (!savedChatId) return
+    const source = captureChatDraftSource()
+    try {
+      const requestScope = await resolveServicePromptScope()
+      if (source.isCurrent())
+        setFolderPicker({ chatId: savedChatId, operation: { requestScope, isCurrent: source.isCurrent } })
+    } catch (error) {
+      console.warn("[chat-header] Could not open the folder picker", error)
+      if (source.isCurrent())
+        message.error(t("sidepanel:multiSelect.organizationLoadError", "Unable to load folders and tags for this account."))
+    }
+  }, [savedChatId, t])
   const exportOpenChat = React.useCallback(
     async (format: TranscriptFormat) => {
       if (!savedChatId) return
@@ -437,7 +454,7 @@ export const Header: React.FC<Props> = ({
         parentChatTitle={forkParent?.title ?? null}
         onOpenParentChat={forkParent ? () => navigate(buildServerChatPath(forkParent.id)) : undefined}
         onExportChat={savedChatId ? (format) => void exportOpenChat(format) : undefined}
-        onMoveToFolder={savedChatId ? () => setFolderPickerChatId(savedChatId) : undefined}
+        onEditFolders={savedChatId ? () => void openFolderPicker() : undefined}
         shortcutsExpanded={headerShortcutsExpanded}
         onToggleShortcuts={toggleHeaderShortcuts}
         commandKeyLabel={cmdKey}
@@ -479,12 +496,13 @@ export const Header: React.FC<Props> = ({
           onClose={() => setTtsClipsOpen(false)}
         />
       ) : null}
-      {folderPickerChatId ? (
+      {folderPicker?.operation.isCurrent() ? (
         <React.Suspense fallback={null}>
-          <BulkFolderPickerModal
+          <FolderPickerModal
             open
-            conversationIds={[folderPickerChatId]}
-            onClose={() => setFolderPickerChatId(null)}
+            conversationId={folderPicker.chatId}
+            operation={folderPicker.operation}
+            onClose={() => setFolderPicker(null)}
           />
         </React.Suspense>
       ) : null}
