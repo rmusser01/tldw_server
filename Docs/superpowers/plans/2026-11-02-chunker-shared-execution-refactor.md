@@ -567,6 +567,31 @@ these local checks and review; do not transfer old-head green statuses to the
 resulting commit. ADR required: no new decision for these lifetime/test/artifact
 corrections; accepted ADR-096 and task-editor ADR-059 remain governing.
 
+## AuthNZ Shard Timeout Follow-Up (2026-11-13)
+
+The two Linux 3.12 runs on PR #3405 collected 540 cases and exited with
+status 124 at the unchanged 55-minute outer limit. They reached different
+cases within the VN module (63 and 69 cases completed there, respectively).
+That progress and the previously passing isolated case point to cumulative
+workload, not a confirmed deadlock in any one test.
+
+Adapt the four AuthNZ partitions from dev commit `9038a9d0d1`. All four
+passed in approximately 17 to 38 minutes on upstream PR #3394, run
+`42686182988`. This branch has no `test_postgres*.py` files in this directory,
+so omit that empty glob and use an existing profile PostgreSQL case for
+the separation contract. No production or AuthNZ test code changes.
+
+The new contract fails on the original single shard and passes after the
+split. All 55 original files are assigned exactly once in each of the six
+matrices, including the inherited release matrix. Required gates, database
+configuration, test filters, and timeout values are unchanged. No new ADR
+is required; this applies the existing CI partition pattern.
+
+Fresh hosted verification on PR #3405 remains separate from the upstream
+pass. GitHub reports conflicts with current dev; this draft update does
+not rebase or resolve unrelated conflicts. On the prior head, frontend and
+critical E2E failed at Playwright installation, separately from AuthNZ.
+
 ## Final Verification Commands
 
 After runtime activation, run these from the isolated root; log complete output
