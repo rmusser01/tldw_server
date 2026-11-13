@@ -671,7 +671,68 @@ def media_analysis_requested(form_data: Any) -> bool:
     return bool(getattr(form_data, "perform_analysis", False) and api_name and str(api_name).lower() != "none")
 
 
+def media_analysis_provider(form_data: Any) -> str | None:
+    """The provider of every LLM call a media request with analysis makes, or None when it turns on another
+    LLM stage the boundary cannot name (TASK-15426).
+
+    The other stages: claims extraction (requested or the server's default), contextual chunking, LLM chunk
+    boundaries or propositions, a chunking template, and the confabulation check.
+    """
+    from tldw_Server_API.app.core.Claims_Extraction.claims_utils import claims_extraction_enabled
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+
+    # ponytail: a denylist; a stage it misses is checked at its own call, so it is refused there, never counted.
+    other_stage = bool(
+        claims_extraction_enabled(form_data)
+        or any(
+            getattr(form_data, name, None)
+            for name in (
+                "enable_contextual_chunking",
+                "contextual_llm_model",
+                "context_window_size",
+                "auto_chunking_use_llm",
+                "auto_apply_template",
+                "chunking_template_name",
+                "perform_confabulation_check_of_analysis",
+            )
+        )
+        or str(getattr(form_data, "proposition_engine", None) or "").strip().lower() in {"llm", "auto"}
+    )
+    return None if other_stage else canonical_provider_name(str(form_data.api_name))
+
+
+async def media_analysis_credentials(user_id: Any, form_data: Any) -> Any:
+    """The handle for the user's own key for the analysis provider, ``api_name`` (``users_own_key_credentials``), or None.
+
+    Resolved whatever other LLM stage the request turns on, so the analysis runs on the user's key whenever they
+    stored one; ``media_analysis_provider`` still names no provider to the quota for such a request (TASK-15426).
+    """
+    from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import users_own_key_credentials
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+
+    return await users_own_key_credentials(user_id, canonical_provider_name(str(form_data.api_name)))
+
+
+async def admit_media_analysis(user_id: Any, form_data: Any) -> None:
+    """The LLM quota for a media request's analysis, which then runs on the user's own key when they stored one.
+
+    The analysis provider's handle (``media_analysis_credentials``) is bound to the call context for the rest
+    of the request, so every ``analyze`` call for that provider runs on it, under a limit whatever else the
+    request turns on. An over-limit user is let through, unmarked, only when the handle was issued and the
+    request turns on no other LLM stage: such a request names no provider, so it is refused (TASK-15426).
+    """
+    from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+    from tldw_Server_API.app.core.Usage.llm_call_context import bind_provider_credentials
+
+    handle = await media_analysis_credentials(user_id, form_data)
+    await enforce_llm_quota(user_id, provider=media_analysis_provider(form_data), own_key=handle is not None)
+    bind_provider_credentials(handle)
+
+
 __all__ = [
+    "admit_media_analysis",
+    "media_analysis_credentials",
+    "media_analysis_provider",
     "media_analysis_requested",
     "get_process_documents_form",
     "get_process_videos_form",
