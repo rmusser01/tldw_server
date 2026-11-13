@@ -148,13 +148,8 @@ export const useSlashCommands = ({
   )
 
   const serverCommands = React.useMemo<SlashCommandItem[]>(
-    () =>
-      buildServerSlashCommands(
-        serverPayload,
-        fallbackMeta,
-        localActions as Record<string, (() => void) | undefined>
-      ),
-    [fallbackMeta, localActions, serverPayload]
+    () => buildServerSlashCommands(serverPayload, fallbackCommands),
+    [fallbackCommands, serverPayload]
   )
 
   const slashCommands = React.useMemo(

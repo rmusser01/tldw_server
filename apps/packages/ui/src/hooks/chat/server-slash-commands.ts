@@ -24,6 +24,9 @@ type ServerSlashCommand = {
   permission?: string
   allowed?: boolean
   enabled?: boolean
+  /** How to call it, e.g. "/weather <place>". */
+  usage?: string
+  args?: string[]
 }
 
 export type ServerCommandsResponse = {
@@ -75,7 +78,7 @@ const isServerSlashCommand = (value: unknown): value is ServerSlashCommand => {
   if (id != null && typeof id !== "string" && typeof id !== "number") {
     return false
   }
-  const stringFields = ["command", "name", "label", "description"] as const
+  const stringFields = ["command", "name", "label", "description", "usage"] as const
   for (const field of stringFields) {
     const fieldValue = value[field]
     if (fieldValue != null && typeof fieldValue !== "string") {
@@ -181,21 +184,41 @@ export const useServerSlashCommandPayload = (enabled: boolean) => {
   return data ?? null
 }
 
+/** The server's description, with how to call the command when it says. */
+const describeServerCommand = (
+  command: ServerSlashCommand,
+  name: string,
+  localDescription?: string
+) => {
+  const args = normalizeStringArray(command.args)
+  const usage =
+    command.usage?.trim() ||
+    (args.length > 0 ? `/${name} ${args.map((arg) => `<${arg}>`).join(" ")}` : "")
+  // The server falls back to the bare name when a command has no description.
+  const rawName = (command.command || command.name || "").replace(/^\/+/, "").trim()
+  const description =
+    command.description && command.description.trim() !== rawName
+      ? command.description.trim()
+      : localDescription
+  return [description, usage].filter(Boolean).join(" · ") || undefined
+}
+
 /**
  * The commands the server offers this user. A command the composer also
- * defines keeps its local action, and its local description and keywords
- * unless the server sends its own.
+ * defines keeps the local command's action and behaviour (standalone,
+ * insert text), and its description and keywords unless the server sends
+ * its own.
  */
 export const buildServerSlashCommands = (
   payload: ServerCommandsResponse | null,
-  fallbackMeta: Record<string, SlashCommandMeta | undefined>,
-  localActions: Record<string, (() => void) | undefined>
+  localCommands: SlashCommandItem[]
 ): SlashCommandItem[] => {
   if (!payload) return []
   const commands = extractServerCommands(payload)
   if (commands.length === 0) return []
   const allowedCommands = extractAllowedCommands(payload)
   const userPermissions = extractPermissions(payload)
+  const localByName = new Map(localCommands.map((command) => [command.command, command]))
 
   return commands
     .map((command, index) => {
@@ -223,27 +246,42 @@ export const buildServerSlashCommands = (
           return null
         }
       }
-      const fallback = fallbackMeta[commandName]
+      const local = localByName.get(commandName)
+      const keywords = normalizeStringArray(command.keywords)
       return {
+        ...local,
         id: String(command.id ?? `server-${commandName}-${index}`),
         command: commandName,
-        label: command.label || command.name || fallback?.label || commandName,
-        description: command.description || fallback?.description || undefined,
-        keywords: normalizeStringArray(command.keywords || fallback?.keywords),
-        insertText: fallback?.insertText,
-        action: localActions[commandName],
+        label: command.label || command.name || local?.label || commandName,
+        description: describeServerCommand(command, commandName, local?.description),
+        keywords: keywords.length > 0 ? keywords : local?.keywords ?? [],
         source: "server"
       } satisfies SlashCommandItem
     })
     .filter(Boolean) as SlashCommandItem[]
 }
 
-/** Server commands first; local commands fill in the names the server lacks. */
+/**
+ * One list of server and local commands; a server command replaces the local
+ * one of the same name. By default server commands come first (the side
+ * panel). With `localFirst`, the local commands keep their places and the
+ * server's own commands follow, so a list that arrives later does not move
+ * the highlighted row (the web composer).
+ */
 export const mergeSlashCommands = (
   serverCommands: SlashCommandItem[],
-  localCommands: SlashCommandItem[]
+  localCommands: SlashCommandItem[],
+  { localFirst = false }: { localFirst?: boolean } = {}
 ): SlashCommandItem[] => {
   if (serverCommands.length === 0) return localCommands
+  if (localFirst) {
+    const serverByName = new Map(serverCommands.map((command) => [command.command, command]))
+    const localNames = new Set(localCommands.map((command) => command.command))
+    return [
+      ...localCommands.map((command) => serverByName.get(command.command) ?? command),
+      ...serverCommands.filter((command) => !localNames.has(command.command))
+    ]
+  }
   const merged = new Map<string, SlashCommandItem>()
   serverCommands.forEach((command) => merged.set(command.command, command))
   localCommands.forEach((command) => {

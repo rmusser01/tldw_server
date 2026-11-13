@@ -1,13 +1,12 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
-import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu"
+import type { SlashCommandItem } from "@/types/slash-command"
 import { openModelSelector } from "@/utils/model-selector-events"
 import { dispatchOpenPromptSelect } from "@/utils/prompt-select-events"
 import {
   buildServerSlashCommands,
   mergeSlashCommands,
-  useServerSlashCommandPayload,
-  type SlashCommandMeta
+  useServerSlashCommandPayload
 } from "@/hooks/chat/server-slash-commands"
 import { useConnectionStore } from "@/store/connection"
 
@@ -64,7 +63,12 @@ export function useSlashCommands({
 }: UseSlashCommandsParams) {
   const { t } = useTranslation(["playground", "common"])
   const serverOnline = useConnectionStore((state) => state.state.isConnected)
-  const serverPayload = useServerSlashCommandPayload(serverOnline)
+  // Ask the server for its commands only once the user first opens the
+  // slash menu, so loading /chat makes no extra request (CC-11).
+  const slashMenuOpen = /^\s*\/[\w-]*$/.test(currentMessage)
+  const [slashMenuOpened, setSlashMenuOpened] = React.useState(false)
+  if (slashMenuOpen && !slashMenuOpened) setSlashMenuOpened(true)
+  const serverPayload = useServerSlashCommandPayload(serverOnline && slashMenuOpened)
 
   const localCommands = React.useMemo<SlashCommandItem[]>(
     () => [
@@ -191,24 +195,15 @@ export function useSlashCommands({
     ]
   )
 
-  // Server commands (CC-11) reuse a local command's wording and action when
-  // the names match; the rest have no local action and are sent as typed.
+  // Server commands (CC-11) keep a local command's behaviour when the names
+  // match; the rest have no local action and are sent as typed. They follow
+  // the local commands, so a list that arrives later does not move the
+  // highlighted row.
   const slashCommands = React.useMemo<SlashCommandItem[]>(() => {
-    const fallbackMeta: Record<string, SlashCommandMeta> = {}
-    const localActions: Record<string, (() => void) | undefined> = {}
-    for (const command of localCommands) {
-      fallbackMeta[command.command] = {
-        label: command.label,
-        description: command.description ?? "",
-        keywords: command.keywords ?? [],
-        insertText: command.insertText
-      }
-      localActions[command.command] = command.action
-    }
     const serverCommands = serverOnline
-      ? buildServerSlashCommands(serverPayload, fallbackMeta, localActions)
+      ? buildServerSlashCommands(serverPayload, localCommands)
       : []
-    return mergeSlashCommands(serverCommands, localCommands)
+    return mergeSlashCommands(serverCommands, localCommands, { localFirst: true })
   }, [localCommands, serverOnline, serverPayload])
 
   const slashCommandLookup = React.useMemo(

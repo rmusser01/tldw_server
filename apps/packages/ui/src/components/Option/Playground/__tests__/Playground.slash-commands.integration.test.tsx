@@ -253,9 +253,11 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     expect(completionMessages(completions[0]).at(-1)).toEqual({ role: "user", content: "/time UTC" })
   })
 
-  it("keeps the local commands when the server lists none", async () => {
+  it("keeps the local commands when the server lists none, and asks only once '/' is typed", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
+    // Loading /chat does not ask for the server's commands.
+    expect(server.find("GET", "/api/v1/chat/commands")).toHaveLength(0)
 
     await view.user.click(view.composer)
     await view.user.type(view.composer, "/")
