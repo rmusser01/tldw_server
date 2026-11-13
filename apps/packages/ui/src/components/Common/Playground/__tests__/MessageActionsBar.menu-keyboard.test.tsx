@@ -149,4 +149,31 @@ describe("generation info", () => {
     expect(screen.getByRole("button", { name: "generationInfo" })).toHaveFocus()
     expect(await screen.findByText("eval_count", { exact: false })).toBeVisible()
   })
+
+  // A click must not close what hovering or the click's own focus opened.
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 300))
+
+  it("stays open when a mouse user hovers and then clicks Info", async () => {
+    const user = userEvent.setup()
+    mount({ generationInfo: { eval_count: 42 } })
+    const info = screen.getByRole("button", { name: "generationInfo" })
+    await user.hover(info)
+    const metrics = await screen.findByText("eval_count", { exact: false })
+    await waitFor(() => expect(metrics).toBeVisible())
+    await user.click(info)
+    await settle()
+    expect(metrics).toBeVisible()
+  })
+
+  it("stays open when Info has focus and is then clicked", async () => {
+    const user = userEvent.setup()
+    mount({ generationInfo: { eval_count: 42 } })
+    const info = screen.getByRole("button", { name: "generationInfo" })
+    info.focus()
+    const metrics = await screen.findByText("eval_count", { exact: false })
+    await waitFor(() => expect(metrics).toBeVisible())
+    await user.click(info)
+    await settle()
+    expect(metrics).toBeVisible()
+  })
 })

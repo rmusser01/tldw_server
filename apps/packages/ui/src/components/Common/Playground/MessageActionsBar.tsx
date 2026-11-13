@@ -645,8 +645,9 @@ export function MessageActionsBar({
               <Popover
                 content={<GenerationInfo generationInfo={generationInfo} />}
                 title={t("generationInfo")}
-                // Keyboard and touch users can open it too (AX-02).
-                trigger={["hover", "focus", "click"]}
+                // Keyboard users open it too (AX-02). Not "click": a click
+                // would close what the hover or the click's own focus opened.
+                trigger={["hover", "focus"]}
               >
                 <IconButton
                   ariaLabel={t("generationInfo") as string}
