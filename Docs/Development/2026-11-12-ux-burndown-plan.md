@@ -202,7 +202,11 @@ merged on top.
     Blob).
   - `test_chat_service_streaming_tool_autoexec.py::test_a_stream_dropped_before_any_output_is_refunded_and_writes_no_row`
     (times out on the base too).
-  - `test_merge_queue_gate_workflows.py` needs a `python` on PATH.
+  - `test_merge_queue_gate_workflows.py` needs a `python` on PATH with
+    `defusedxml`.
+  - `TutorialRunner.real-joyride.test.tsx` can log an unhandled "window is not
+    defined" under heavy load. The cause is react-joyride's own scroll, which
+    updates the popper 10 ms after its animation ends.
 
 ### Follow-ups from Wave 5
 
