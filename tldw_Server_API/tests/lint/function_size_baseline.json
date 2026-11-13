@@ -184,7 +184,7 @@
   "tldw_Server_API.app.core.Workflows.adapters.integration.messaging:run_kanban_adapter": {"lines": 483, "params": 2, "reason": null},
   "tldw_Server_API.app.core.Workflows.adapters.integration.webhook:run_webhook_adapter": {"lines": 484, "params": 2, "reason": null},
   "tldw_Server_API.app.core.Workflows.adapters.media.ingest:run_media_ingest_adapter": {"lines": 441, "params": 2, "reason": null},
-  "tldw_Server_API.app.core.Workflows.engine:WorkflowEngine._continue_run_impl": {"lines": 427, "params": 6, "reason": "TASK-15477 / PR3437: typed moderation execution failures are terminal and sanitized on resume, without retry, on_failure routing or affected failure webhook. Exact security integration size."},
+  "tldw_Server_API.app.core.Workflows.engine:WorkflowEngine._continue_run_impl": {"lines": 413, "params": 6, "reason": "TASK-15477 / PR3437: typed moderation execution failures are terminal and sanitized on resume, without retry, on_failure routing or affected failure webhook. Exact security integration size."},
   "tldw_Server_API.app.core.Workflows.engine:WorkflowEngine._start_run_impl": {"lines": 529, "params": 4, "reason": "TASK-15477 / PR3437: typed moderation execution failures are terminal and sanitized on start, without retry, on_failure routing or affected failure webhook. Exact security integration size."},
   "tldw_Server_API.app.core.config:load_and_log_configs": {"lines": 1993, "params": 1, "reason": null},
   "tldw_Server_API.app.core.config:load_settings": {"lines": 1416, "params": 0, "reason": null},

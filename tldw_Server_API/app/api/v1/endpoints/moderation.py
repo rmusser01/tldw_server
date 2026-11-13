@@ -568,7 +568,7 @@ async def test_moderation(
     """Evaluate sample text against the effective moderation policy for a user."""
     with execution_scope():
         try:
-            return await _test_moderation_scoped(payload)
+            return await _test_moderation_scoped(payload, request, principal)
         except ModerationExecutionError:
             raise HTTPException(
                 status_code=503,
@@ -576,7 +576,9 @@ async def test_moderation(
             ) from None
 
 
-async def _test_moderation_scoped(payload: ModerationTestRequest) -> ModerationTestResponse:
+async def _test_moderation_scoped(
+    payload: ModerationTestRequest, request: Request, principal: CurrentPrincipal
+) -> ModerationTestResponse:
     base_service = get_moderation_service()
     service = base_service
     user_id = _normalize_optional_identifier(payload.user_id)

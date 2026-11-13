@@ -2,18 +2,27 @@ from __future__ import annotations
 
 import re
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
-from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps, auth_deps
 from tldw_Server_API.app.api.v1.endpoints import moderation as moderation_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Moderation.moderation_service import ModerationPolicy, ModerationService, PatternRule
 from tldw_Server_API.app.core.Moderation import supervised_policy as supervised_policy_mod
+
+
+@pytest.fixture(autouse=True)
+def _isolate_sample_audit(monkeypatch):
+    audit = SimpleNamespace(log_event=AsyncMock(return_value=1), flush_event=AsyncMock())
+    monkeypatch.setattr(
+        Audit_DB_Deps, "get_or_create_audit_service_for_user_id_optional", AsyncMock(return_value=audit)
+    )
 
 
 def _make_principal() -> AuthPrincipal:
