@@ -1484,6 +1484,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const deleteNote = async (id?: string | number | null) => {
     const target = id ?? ed.selectedId
     if (target == null) { message.warning('No note selected'); return }
+    if (bulkRun.isRunning) { notifyBulkRunBusy(); return }
     const targetId = String(target)
     const operation = beginNoteMutation()
     try {
@@ -1539,6 +1540,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }
 
   const restoreNote = async (id: string | number, version?: number) => {
+    if (bulkRun.isRunning) { notifyBulkRunBusy(); return }
     const target = String(id)
     let expectedVersion: number | null =
       typeof version === 'number' && Number.isFinite(version) ? version : null
@@ -1576,6 +1578,21 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     } finally { operation.release() }
   }
 
+  /** A single delete or restore waits for a running bulk action (NL-05). */
+  const notifyBulkRunBusy = () => {
+    message.info(t('option:notesSearch.bulkRunBusy', { defaultValue: 'Wait for the bulk action to finish.' }))
+  }
+
+  /** True when a note reads back as active: it already left Trash. */
+  const isNoteActive = async (noteId: string, ownedRequest: NotesOwnedRequestOptions) => {
+    try {
+      const detail = await fetchNote(noteId, ownedRequest)
+      return Boolean(detail) && (detail as { deleted?: unknown }).deleted !== true
+    } catch {
+      return false
+    }
+  }
+
   /** "Open note" in the restore toast: leave Trash and open the restored note. */
   const openRestoredNote = async (noteId: string, original: MutationOwner) => {
     if (!original.isOwnerCurrent()) return
@@ -1611,9 +1628,17 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           operation.requireCurrent()
           restoredIds.add(noteId)
           dismissNoteDeletedToast(message, noteId)
-        } catch {
+        } catch (error) {
           operation.requireCurrent()
-          failedNotes.push({ ...note, version: undefined })
+          // Restored elsewhere (a single Restore, another tab): that is what the user wanted.
+          if (await isNoteActive(noteId, ownedRequest)) {
+            operation.requireCurrent()
+            restoredIds.add(noteId)
+            continue
+          }
+          operation.requireCurrent()
+          // Retry keeps the version it had, unless that version was the problem.
+          failedNotes.push(ed.isVersionConflictError(error) ? { ...note, version: undefined } : note)
         } finally {
           run.step()
         }
@@ -1633,7 +1658,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       operation.release()
       run.finish(failedNotes)
     }
-  }, [beginNoteMutation, bulkRun, list, lookupDeletedNoteVersion, message])
+  }, [beginNoteMutation, bulkRun, ed, list, lookupDeletedNoteVersion, message])
 
   // Bulk operations: one run at a time, with n/N progress and Retry for failures (NL-05).
   // Retry passes the failed notes back in and skips the confirm the user already gave.

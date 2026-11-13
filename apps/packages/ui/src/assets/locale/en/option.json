@@ -1386,6 +1386,7 @@
     "restoredOpenNote": "Open note",
     "trashSearchPlaceholder": "Search Trash",
     "trashSearchAria": "Search Trash",
+    "bulkRunBusy": "Wait for the bulk action to finish.",
     "linkedConversationIdLabel": "Conversation ID",
     "linkedMessageIdLabel": "Message ID",
     "openConversation": "Open conversation",

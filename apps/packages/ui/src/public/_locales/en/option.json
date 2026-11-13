@@ -1316,6 +1316,9 @@
   "notesSearch_trashSearchAria": {
     "message": "Search Trash"
   },
+  "notesSearch_bulkRunBusy": {
+    "message": "Wait for the bulk action to finish."
+  },
   "notesSearch_linkedConversationIdLabel": {
     "message": "Conversation ID"
   },

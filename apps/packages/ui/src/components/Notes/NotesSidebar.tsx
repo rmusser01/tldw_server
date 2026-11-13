@@ -1410,6 +1410,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 }}
                 onOpenSettings={onOpenSettings}
                 onOpenHealth={onOpenHealth}
+                restoreDisabled={bulkRun?.progress != null}
                 onRestoreNote={(id, version) => {
                   void restoreNote(id, version)
                 }}

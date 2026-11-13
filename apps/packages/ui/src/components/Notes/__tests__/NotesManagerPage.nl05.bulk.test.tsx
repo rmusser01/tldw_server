@@ -470,8 +470,11 @@ const restoreCalls = () =>
     .filter((request) => String(request?.method || "").toUpperCase() === "POST" && String(request?.path || "").includes("/restore"))
     .map((request) => String(request.path))
 
-const serveTrash = (onRestore: (id: string) => unknown = (id) => ({ id, version: 9, deleted: false })) => {
-  let trash = TRASH_NOTES.slice()
+const serveTrash = (
+  onRestore: (id: string) => unknown = (id) => ({ id, version: 9, deleted: false }),
+  options: { trash?: typeof TRASH_NOTES; activeDetail?: (id: string) => unknown } = {}
+) => {
+  let trash = options.trash ?? TRASH_NOTES.slice()
   serve((_request, path, method) => {
     if (path.startsWith("/api/v1/notes/trash?")) {
       const text = (listParams(path).get("query") || "").toLowerCase()
@@ -485,7 +488,12 @@ const serveTrash = (onRestore: (id: string) => unknown = (id) => ({ id, version:
       return result
     }
     const detail = path.match(/^\/api\/v1\/notes\/(t\d)$/)
+    if (detail && method === "GET" && options.activeDetail) return options.activeDetail(detail[1])
     if (detail && method === "GET") {
+      // GET reads active notes only: a note still in Trash is not found.
+      if (trash.some((row) => row.id === detail[1])) {
+        throw Object.assign(new Error("Note not found"), { status: 404 })
+      }
       const note = TRASH_NOTES.find((row) => row.id === detail[1])
       return { ...note, version: 9, deleted: false, keywords: [] }
     }
@@ -616,5 +624,105 @@ describe("NotesManagerPage NL-05 Trash", () => {
     fireEvent.click(within(empty).getByRole("button", { name: /Clear search/ }))
     expect(await screen.findByTestId("notes-trash-row-t1")).toBeInTheDocument()
     expect(screen.getByTestId("notes-trash-search")).toHaveValue("")
+  })
+
+  it("disables each row's Restore while a bulk restore runs", async () => {
+    const pending = deferred()
+    serveTrash((id) => (id === "t1" ? pending.promise : { id, version: 9, deleted: false }))
+    renderPage()
+    await openTrash()
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t1"))
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t2"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-restore"))
+
+    await waitFor(() => expect(screen.getByTestId("notes-restore-t3")).toBeDisabled())
+    pending.resolve({ id: "t1", version: 9, deleted: false })
+    await waitFor(() => expect(screen.queryByTestId("notes-bulk-progress")).not.toBeInTheDocument())
+    expect(screen.getByTestId("notes-restore-t3")).not.toBeDisabled()
+  })
+
+  it("counts a note that already left Trash as restored, not failed", async () => {
+    serveTrash(
+      (id) => {
+        if (id === "t2") throw Object.assign(new Error("version mismatch"), { status: 409 })
+        return { id, version: 9, deleted: false }
+      },
+      { activeDetail: (id) => ({ id, title: "Draft plan", version: 6, deleted: false, keywords: [] }) }
+    )
+    renderPage()
+    await openTrash()
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t1"))
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t2"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-restore"))
+
+    await waitFor(() => expect(mockMessageSuccess).toHaveBeenCalledWith("Restored 2 notes"))
+    expect(screen.queryByTestId("notes-bulk-failures")).not.toBeInTheDocument()
+    expect(mockMessageWarning).not.toHaveBeenCalled()
+  })
+
+  it("retries a failed restore with the version it already knew unless the failure was a conflict", async () => {
+    const trash = TRASH_NOTES.map((note) => ({ ...note }))
+    let failDraft = true
+    serveTrash(
+      (id) => {
+        if (id === "t2" && failDraft) {
+          failDraft = false
+          // The list now reports a newer version, but the failure was not a conflict.
+          trash[1].version = 6
+          throw new Error("server unavailable")
+        }
+        return { id, version: 9, deleted: false }
+      },
+      { trash, activeDetail: () => { throw Object.assign(new Error("Note not found"), { status: 404 }) } }
+    )
+    renderPage()
+    await openTrash()
+    // t1 succeeds, so Trash is read again and now lists t2 at version 6.
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t1"))
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-t2"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-restore"))
+    const failures = await screen.findByTestId("notes-bulk-failures")
+    await waitFor(() => expect(screen.queryByTestId("notes-trash-row-t1")).not.toBeInTheDocument())
+    fireEvent.click(within(failures).getByTestId("notes-bulk-retry"))
+
+    await waitFor(() =>
+      expect(restoreCalls().filter((path) => path.includes("/t2/"))).toEqual([
+        "/api/v1/notes/t2/restore?expected_version=5",
+        "/api/v1/notes/t2/restore?expected_version=5"
+      ])
+    )
+  })
+})
+
+describe("NotesManagerPage NL-05 single actions during a bulk run", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockConfirmDanger.mockResolvedValue(true)
+    mockGetSetting.mockResolvedValue(null)
+    mockSetSetting.mockResolvedValue(undefined)
+    mockClearSetting.mockResolvedValue(undefined)
+  })
+
+  it("refuses the editor's Delete while a bulk delete runs", async () => {
+    const pending = deferred()
+    serve((_request, path, method) => {
+      if (method === "DELETE") return pending.promise
+      if (path.startsWith("/api/v1/notes/n3/neighbors")) return { nodes: [], edges: [] }
+      return undefined
+    })
+    renderPage()
+    await selectRows("n1", "n2")
+    fireEvent.click(screen.getByTestId("notes-bulk-delete"))
+    await screen.findByTestId("notes-bulk-progress")
+
+    fireEvent.click(screen.getByTestId("notes-open-button-n3"))
+    await screen.findByDisplayValue("Gamma")
+    fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
+    fireEvent.click(await screen.findByText("Delete"))
+
+    await waitFor(() => expect(mockMessageInfo).toHaveBeenCalledWith("Wait for the bulk action to finish."))
+    expect(callsTo("DELETE", "n3")).toHaveLength(0)
+    expect(mockConfirmDanger).toHaveBeenCalledTimes(1)
+    pending.resolve({})
   })
 })

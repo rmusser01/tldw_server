@@ -132,6 +132,8 @@ type NotesListPanelProps = {
   onOpenSettings: () => void
   onOpenHealth: () => void
   onRestoreNote: (id: string | number, version?: number) => void
+  /** A bulk action is running: row Restore waits for it (NL-05). */
+  restoreDisabled?: boolean
   onExportAllMd: () => void
   onExportAllCsv: () => void
   onExportAllJson: () => void
@@ -185,6 +187,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   onOpenSettings,
   onOpenHealth,
   onRestoreNote,
+  restoreDisabled = false,
   onExportAllMd,
   onExportAllCsv,
   onExportAllJson,
@@ -909,6 +912,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       <Button
                         size="small"
                         type="primary"
+                        disabled={restoreDisabled}
                         onClick={() => onRestoreNote(item.id, item.version)}
                         data-testid={`notes-restore-${String(item.id)}`}
                       >
