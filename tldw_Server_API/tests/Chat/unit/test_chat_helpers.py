@@ -466,6 +466,14 @@ class TestNewConversationTitle:
         assert title == "word word word word word word…"
         assert splits == [6]
 
+    def test_does_not_cut_a_combining_mark_from_its_letter(self):
+        title = format_new_conversation_title("Bot", "a" * 58 + "e\u0301" + "z" * 10)
+        assert title == "a" * 58 + "…"
+
+    def test_does_not_cut_inside_an_emoji_sequence(self):
+        title = format_new_conversation_title("Bot", "a" * 57 + "\U0001F469\u200d\U0001F4BB" + "zzz")
+        assert title == "a" * 57 + "…"
+
     def test_falls_back_to_the_assistant_and_a_readable_time_with_its_zone(self):
         moment = datetime.datetime(
             2026, 10, 3, 3, 38, 23, tzinfo=datetime.timezone(datetime.timedelta(hours=2), "CEST")
