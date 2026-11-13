@@ -327,7 +327,8 @@ def format_new_conversation_title(
     pass for the reader's own, for example "Helpful AI Assistant · Nov 12,
     16:41 PST", instead of a machine timestamp such as "(20261112_164105)".
     """
-    words = (first_user_message or "").split()
+    # Split off only the words the title needs; a first message can be megabytes.
+    words = (first_user_message or "").split(maxsplit=_NEW_CONVERSATION_TITLE_WORDS)
     if words:
         title = " ".join(words[:_NEW_CONVERSATION_TITLE_WORDS])
         if len(words) > _NEW_CONVERSATION_TITLE_WORDS:

@@ -453,6 +453,19 @@ class TestNewConversationTitle:
         assert len(title) <= 60
         assert title.endswith("…")
 
+    def test_reads_only_the_first_words_of_a_long_message(self):
+        """A multi-megabyte first message is not split into all of its words."""
+        splits: list[int] = []
+
+        class SpyText(str):
+            def split(self, sep=None, maxsplit=-1):
+                splits.append(maxsplit)
+                return super().split(sep, maxsplit)
+
+        title = format_new_conversation_title("Bot", SpyText("word " * 200_000))
+        assert title == "word word word word word word…"
+        assert splits == [6]
+
     def test_falls_back_to_the_assistant_and_a_readable_time_with_its_zone(self):
         moment = datetime.datetime(
             2026, 10, 3, 3, 38, 23, tzinfo=datetime.timezone(datetime.timedelta(hours=2), "CEST")
