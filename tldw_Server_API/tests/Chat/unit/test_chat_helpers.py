@@ -447,6 +447,12 @@ class TestNewConversationTitle:
         assert len(title) <= 60
         assert title.endswith("…")
 
+    def test_keeps_the_cap_after_adding_the_ellipsis(self):
+        six_words = " ".join(["abcdefghi"] * 5 + ["abcdefghij"])  # exactly 60 characters
+        title = format_new_conversation_title("Bot", f"{six_words} and more")
+        assert len(title) <= 60
+        assert title.endswith("…")
+
     def test_falls_back_to_the_assistant_and_a_readable_time_with_its_zone(self):
         moment = datetime.datetime(
             2026, 10, 3, 3, 38, 23, tzinfo=datetime.timezone(datetime.timedelta(hours=2), "CEST")

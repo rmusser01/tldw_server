@@ -330,9 +330,12 @@ def format_new_conversation_title(
     words = (first_user_message or "").split()
     if words:
         title = " ".join(words[:_NEW_CONVERSATION_TITLE_WORDS])
+        if len(words) > _NEW_CONVERSATION_TITLE_WORDS:
+            title += "…"
+        # The cap applies to the finished title, ellipsis included.
         if len(title) > _NEW_CONVERSATION_TITLE_MAX_CHARS:
             return title[: _NEW_CONVERSATION_TITLE_MAX_CHARS - 1].rstrip() + "…"
-        return title + "…" if len(words) > _NEW_CONVERSATION_TITLE_WORDS else title
+        return title
     moment = now or _local_now()
     month = _MONTH_ABBREVIATIONS[moment.month - 1]
     zone = moment.tzname() or moment.strftime("%z")
