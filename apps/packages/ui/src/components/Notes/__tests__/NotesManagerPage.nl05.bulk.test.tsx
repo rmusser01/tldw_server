@@ -271,6 +271,23 @@ describe("NotesManagerPage NL-05 bulk runs", () => {
     expect(callsTo("DELETE")).toHaveLength(2)
   })
 
+  it("keeps the bar's live region on its status text, not around its buttons", async () => {
+    const pending: Record<string, ReturnType<typeof deferred>> = { n1: deferred() }
+    serve((_request, path, method) => (method === "DELETE" ? pending[noteIdOf(path)].promise : undefined))
+    renderPage()
+    await selectRows("n1")
+    const bar = screen.getByTestId("notes-bulk-actions-bar")
+    expect(bar).not.toHaveAttribute("aria-live")
+    expect(screen.getByTestId("notes-bulk-selected-count").closest("[aria-live]")).not.toBeNull()
+
+    fireEvent.click(screen.getByTestId("notes-bulk-delete"))
+    const progress = await screen.findByTestId("notes-bulk-progress")
+    expect(progress).toHaveAttribute("role", "status")
+    expect(screen.getByTestId("notes-bulk-delete").closest("[aria-live]")).toBeNull()
+    pending.n1.resolve({})
+    await waitFor(() => expect(screen.queryByTestId("notes-bulk-progress")).not.toBeInTheDocument())
+  })
+
   it("lists the notes a bulk delete could not delete, and Retry deletes only those", async () => {
     let failBeta = true
     serve((_request, path, method) => {
@@ -577,6 +594,18 @@ describe("NotesManagerPage NL-05 Trash", () => {
 
     await waitFor(() => expect(screen.getByTestId("notes-mode-trash")).toHaveAttribute("aria-pressed", "false"))
     await waitFor(() => expect(callsTo("GET", "t1").length).toBeGreaterThan(0))
+  })
+
+  it("shows one restore toast at a time when notes are restored one by one", async () => {
+    serveTrash()
+    renderPage()
+    await openTrash()
+    fireEvent.click(screen.getByTestId("notes-restore-t1"))
+    await waitFor(() => expect(mockMessageOpen).toHaveBeenCalledTimes(1))
+    fireEvent.click(await screen.findByTestId("notes-restore-t2"))
+    await waitFor(() => expect(mockMessageOpen).toHaveBeenCalledTimes(2))
+    const keys = mockMessageOpen.mock.calls.map(([config]) => config.key)
+    expect(keys[0]).toBe(keys[1])
   })
 
   it("selects Trash notes with checkboxes and restores them together", async () => {

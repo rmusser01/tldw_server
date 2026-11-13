@@ -7,6 +7,8 @@ type ToastApi = {
   destroy?: (key?: string) => unknown
 }
 
+const NOTE_RESTORED_TOAST_KEY = 'notes-restored'
+
 type NoteRestoredToastOptions = {
   noteId: string
   label: string
@@ -24,7 +26,8 @@ export const showNoteRestoredToast = (message: ToastApi, { noteId, label, openLa
     message.success(label)
     return
   }
-  const key = `notes-restored-${noteId}`
+  // One key: restoring several notes in a row keeps one toast, for the latest note.
+  const key = NOTE_RESTORED_TOAST_KEY
   message.open({
     key,
     type: 'success',

@@ -1319,6 +1319,24 @@
   "notesSearch_bulkRunBusy": {
     "message": "Wait for the bulk action to finish."
   },
+  "notesSearch_fromChatTitleSeparator": {
+    "message": ": "
+  },
+  "notesSearch_bulkRestoreSuccess_one": {
+    "message": "Restored {{count}} note"
+  },
+  "notesSearch_bulkRestoreSuccess_other": {
+    "message": "Restored {{count}} notes"
+  },
+  "notesSearch_bulkRestoreFailed_one": {
+    "message": "{{count}} selected note could not be restored"
+  },
+  "notesSearch_bulkRestoreFailed_other": {
+    "message": "{{count}} selected notes could not be restored"
+  },
+  "notesSearch_shortcutListOpenChatDescription": {
+    "message": "Open the chat the focused note came from."
+  },
   "notesSearch_linkedConversationIdLabel": {
     "message": "Conversation ID"
   },
@@ -6564,7 +6582,7 @@
     "message": "Close notes list"
   },
   "notesSearch_listRowKeyboardHint": {
-    "message": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin."
+    "message": "Press Enter to open. Use the arrow keys to move between notes, X to select, P to pin, and C to open the chat a note came from."
   },
   "notesSearch_tagFilterNoMatch": {
     "message": "No tag named \"{{query}}\""

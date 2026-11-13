@@ -130,16 +130,20 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
   }
 
   return (
+    // Only the status text is a live region: the count, progress and failures
+    // are announced, the buttons around them are not.
     <div
       className="flex-shrink-0 border-t border-border bg-surface2 px-4 py-2"
-      role="status"
-      aria-live="polite"
-      aria-busy={running || undefined}
       data-testid="notes-bulk-actions-bar"
     >
       {hasSelection && (
         <div className="flex items-center justify-between gap-2">
-          <Typography.Text className="text-xs font-medium text-text" data-testid="notes-bulk-selected-count">
+          <Typography.Text
+            className="text-xs font-medium text-text"
+            role="status"
+            aria-live="polite"
+            data-testid="notes-bulk-selected-count"
+          >
             {fill(
               t('option:notesSearch.bulkSelectedCount', {
                 defaultValue: '{{count}} selected',
@@ -162,7 +166,12 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
       )}
       {hasSelection && renderMatchingSelection()}
       {progress && progress.total > 0 && (
-        <div className="mt-1 flex items-center gap-2 text-xs text-text-muted" data-testid="notes-bulk-progress">
+        <div
+          className="mt-1 flex items-center gap-2 text-xs text-text-muted"
+          role="status"
+          aria-live="polite"
+          data-testid="notes-bulk-progress"
+        >
           <Spin size="small" />
           <span>{progressText(progress)}</span>
         </div>
@@ -218,7 +227,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
           className="mt-2 rounded border border-warn/30 bg-warn/10 px-2 py-1.5 text-xs text-text"
           data-testid="notes-bulk-failures"
         >
-          <span className="font-medium">
+          <span className="font-medium" role="status" aria-live="polite">
             {failureText(failures)}
           </span>
           <ul className="mt-0.5 flex flex-wrap gap-x-2 text-text-muted">

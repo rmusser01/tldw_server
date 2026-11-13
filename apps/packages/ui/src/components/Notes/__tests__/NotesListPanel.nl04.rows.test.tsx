@@ -7,8 +7,11 @@ import type { NoteListItem } from "../types"
 
 // NL-04 (#3101): list rows read as plain text and stay dense.
 
+const APP_LANGUAGE = "de-DE"
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
+    i18n: { language: "de-DE" },
     t: (key: string, defaultValueOrOptions?: string | { defaultValue?: string; [key: string]: unknown }) => {
       const template =
         typeof defaultValueOrOptions === "string" ? defaultValueOrOptions : defaultValueOrOptions?.defaultValue
@@ -102,6 +105,7 @@ describe("NotesListPanel NL-04 rows", () => {
 
   it("names the chat in the 'From chat' link once its title resolves", () => {
     renderList([baseNote({ conversation_id: "conv-7" })], {
+      onOpenLinkedChat: vi.fn(),
       conversationLabelById: { "conv-7": "Research session" }
     })
     const link = screen.getByTestId("notes-from-chat-n1")
@@ -111,7 +115,7 @@ describe("NotesListPanel NL-04 rows", () => {
 
   it("shows a relative date on the title line, with the full date in a tooltip", async () => {
     const updatedAt = new Date(Date.now() - 3 * 60 * 60 * 1000)
-    const fullDate = updatedAt.toLocaleString()
+    const fullDate = updatedAt.toLocaleString(APP_LANGUAGE)
     renderList([baseNote({ updated_at: updatedAt.toISOString() })])
 
     const date = screen.getByTestId("notes-row-date-n1")
@@ -129,6 +133,49 @@ describe("NotesListPanel NL-04 rows", () => {
     const deletedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
     renderList([baseNote({ updated_at: deletedAt.toISOString(), deleted: true })], { listMode: "trash" })
     expect(screen.getByTestId("notes-row-date-n1")).toHaveTextContent("2d ago")
-    expect(document.body.textContent).not.toContain(deletedAt.toLocaleString())
+    expect(document.body.textContent).not.toContain(deletedAt.toLocaleString(APP_LANGUAGE))
+  })
+
+  it("falls back to a date in the app's language after a week", () => {
+    const updatedAt = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    renderList([baseNote({ updated_at: updatedAt.toISOString() })])
+    expect(screen.getByTestId("notes-row-date-n1")).toHaveTextContent(updatedAt.toLocaleDateString(APP_LANGUAGE))
+  })
+
+  it("gives the 'From chat' link the row controls' touch target", () => {
+    renderList([baseNote({ conversation_id: "conv-7" })], { onOpenLinkedChat: vi.fn() })
+    expect(screen.getByTestId("notes-from-chat-n1")).toHaveClass(
+      "min-h-6",
+      "[@media(pointer:coarse)]:min-h-11"
+    )
+  })
+
+  it("describes the row with its 'From chat' link", () => {
+    renderList([baseNote({ conversation_id: "conv-7" })], {
+      onOpenLinkedChat: vi.fn(),
+      conversationLabelById: { "conv-7": "Research session" }
+    })
+    const link = screen.getByTestId("notes-from-chat-n1")
+    const describedBy = screen.getByTestId("notes-open-button-n1").getAttribute("aria-describedby") ?? ""
+    expect(link.id).not.toBe("")
+    expect(describedBy.split(" ")).toContain(link.id)
+  })
+
+  it("opens a row's chat with C, and documents it in the row hint", () => {
+    const onOpenLinkedChat = vi.fn()
+    renderList(
+      [baseNote({ conversation_id: "conv-7" }), baseNote({ id: "n2", title: "Plain note" })],
+      { onOpenLinkedChat }
+    )
+    fireEvent.keyDown(screen.getByTestId("notes-open-button-n2"), { key: "c" })
+    expect(onOpenLinkedChat).not.toHaveBeenCalled()
+    fireEvent.keyDown(screen.getByTestId("notes-open-button-n1"), { key: "c" })
+    expect(onOpenLinkedChat).toHaveBeenCalledWith("conv-7")
+    expect(document.body.textContent).toContain("C to open the chat a note came from")
+  })
+
+  it("shows no 'From chat' link when the list cannot open chats", () => {
+    renderList([baseNote({ conversation_id: "conv-7" })])
+    expect(screen.queryByTestId("notes-from-chat-n1")).not.toBeInTheDocument()
   })
 })

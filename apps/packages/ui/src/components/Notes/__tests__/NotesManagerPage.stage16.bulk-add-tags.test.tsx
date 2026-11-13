@@ -950,7 +950,7 @@ describe("NotesManagerPage stage 16 bulk add tags (NL-03)", { timeout: 30_000 },
       await user.click(await screen.findByTestId("mock-restore-n1"))
       // NL-05: Restore stays in Trash; its toast offers "Open note".
       await waitFor(() =>
-        expect(mockMessageOpen).toHaveBeenCalledWith(expect.objectContaining({ key: "notes-restored-n1" }))
+        expect(mockMessageOpen).toHaveBeenCalledWith(expect.objectContaining({ key: "notes-restored" }))
       )
       const restored = requests("POST").find(request => String(request.path).startsWith("/api/v1/notes/n1/restore?"))
       expect(restored).toBeDefined()

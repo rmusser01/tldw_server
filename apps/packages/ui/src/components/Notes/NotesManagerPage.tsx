@@ -1525,13 +1525,21 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         }
       }
       if (restoredIds.size > 0) {
-        message.success(`Restored ${formatNoteCount(restoredIds.size)}`)
+        const count = restoredIds.size
+        message.success(t('option:notesSearch.bulkRestoreSuccess', {
+          count,
+          defaultValue: count === 1 ? 'Restored {{count}} note' : 'Restored {{count}} notes'
+        }).replace('{{count}}', String(count)))
         list.setBulkSelectedIds((current) => current.filter((id) => !restoredIds.has(id)))
         await operation.refetch()
         operation.requireCurrent()
       }
       if (failedNotes.length > 0) {
-        message.warning(`${failedNotes.length} selected note${failedNotes.length === 1 ? '' : 's'} failed to restore`)
+        const count = failedNotes.length
+        message.warning(t('option:notesSearch.bulkRestoreFailed', {
+          count,
+          defaultValue: count === 1 ? '{{count}} selected note could not be restored' : '{{count}} selected notes could not be restored'
+        }).replace('{{count}}', String(count)))
       }
     } catch (error) {
       if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
@@ -1539,7 +1547,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       operation.release()
       run.finish(failedNotes)
     }
-  }, [beginNoteMutation, bulkRun, ed, list, lookupDeletedNoteVersion, message])
+  }, [beginNoteMutation, bulkRun, ed, list, lookupDeletedNoteVersion, message, t])
 
   // Bulk operations: one run at a time, with n/N progress and Retry for failures (NL-05).
   // Retry passes the failed notes back in and skips the confirm the user already gave.
