@@ -199,7 +199,8 @@ async def test_watchlist_consumer_propagates_real_enhanced_denial_without_fallba
     harness = make_harness(profile="enhanced_sitemap", outcomes=[{"url": BASE}])
     harness.denied_urls.add(harness.sitemap_url)
     with harness.boundaries():
-        monkeypatch.setattr(fetchers, "_in_test_mode", lambda: False)
+        monkeypatch.setenv("TEST_MODE", "false")
+        monkeypatch.setenv("TLDW_TEST_MODE", "false")
         monkeypatch.setattr(enhanced, "EnhancedWebScraper", lambda: harness.scraper)
         try:
             with pytest.raises(CrawlInterrupted) as caught:

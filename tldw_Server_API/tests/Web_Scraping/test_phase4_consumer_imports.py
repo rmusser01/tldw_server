@@ -152,7 +152,8 @@ async def test_watchlist_sitemap_preserves_parent_stop_and_partial_report(monkey
         transports.append(kwargs)
         raise AssertionError("stopped crawl must not refetch or fall back")
 
-    monkeypatch.setattr(fetchers, "_in_test_mode", lambda: False)
+    monkeypatch.setenv("TEST_MODE", "false")
+    monkeypatch.setenv("TLDW_TEST_MODE", "false")
     monkeypatch.setattr(enhanced, "EnhancedWebScraper", scraper)
     monkeypatch.setattr(enhanced, "execute_crawl", execute)
     monkeypatch.setattr(enhanced, "get_database_dir", lambda: str(tmp_path))
@@ -181,7 +182,8 @@ async def test_watchlist_sitemap_keeps_ordinary_fallback_but_not_cancellation(mo
         calls.append(args[0])
         raise failure
 
-    monkeypatch.setattr(fetchers, "_in_test_mode", lambda: False)
+    monkeypatch.setenv("TEST_MODE", "false")
+    monkeypatch.setenv("TLDW_TEST_MODE", "false")
     monkeypatch.setattr(enhanced.EnhancedWebScraper, "scrape_sitemap", sitemap)
     monkeypatch.setattr(enhanced, "get_database_dir", lambda: str(tmp_path))
     if isinstance(failure, asyncio.CancelledError):
