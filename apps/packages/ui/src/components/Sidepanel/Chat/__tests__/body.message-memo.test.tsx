@@ -382,6 +382,23 @@ describe("SidePanelBody transcript log (AX-11)", () => {
     expect(log).not.toContainElement(screen.getByTestId("chat-reply-announcer"))
   })
 
+  it("is busy while a request waits for its first token (AX-11)", () => {
+    sidepanelMessageState.value = {
+      ...sidepanelMessageState.value,
+      streaming: false,
+      isProcessing: false,
+      messages: replaceLastMessage(buildMessages(4), "▋")
+    }
+    render(
+      <PageAssistContext.Provider
+        value={{ controller: new AbortController(), setController: vi.fn(), embeddingController: null, setEmbeddingController: vi.fn() } as any}
+      >
+        <SidePanelBody />
+      </PageAssistContext.Provider>
+    )
+    expect(screen.getByRole("log", { name: "Chat messages" })).toHaveAttribute("aria-busy", "true")
+  })
+
   it("is not busy once the reply settles, and keeps the empty state out of the log", () => {
     renderBody({ messages: [], streaming: false })
     const log = screen.getByRole("log", { name: "Chat messages" })

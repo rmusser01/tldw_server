@@ -40,6 +40,25 @@ describe("Playground transcript log (AX-11)", { timeout: 60_000 }, () => {
     expect(log).toBeEmptyDOMElement()
   })
 
+  it("is busy while a sent message waits for its first token", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+    const gate = deferred()
+    server.planCompletion({ reply: "Late reply", gate: gate.promise })
+
+    try {
+      await view.user.click(view.composer)
+      await view.user.type(view.composer, "Hello there")
+      await view.user.keyboard("{Enter}")
+      await waitFor(() => expect(within(transcriptLog()).getAllByTestId("chat-message")).toHaveLength(2), HARNESS_WAIT)
+      expect(transcriptLog()).toHaveAttribute("aria-busy", "true")
+    } finally {
+      gate.resolve()
+    }
+    await waitForChatIdle()
+    await waitFor(() => expect(transcriptLog()).not.toHaveAttribute("aria-busy"), HARNESS_WAIT)
+  })
+
   it("is busy while a reply streams and says once, outside the log, that it finished", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })

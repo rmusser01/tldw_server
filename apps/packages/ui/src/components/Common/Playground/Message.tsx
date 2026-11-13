@@ -729,11 +729,12 @@ const PlaygroundMessageImpl = (props: Props) => {
     !errorPayload &&
     !responseStreaming &&
     !responseProcessing
-  const completedReplyKey = props.messageId ?? `${props.currentMessageIndex}`
+  // Keyed by turn and variant: a regenerated variant is announced again; a
+  // reconciled or re-rendered reply is not.
+  const completedReplyKey = `${props.messageId ?? props.currentMessageIndex}:${props.activeVariantIndex ?? 0}`
   useEffect(() => {
-    // Keyed by row and text: a regenerated reply is announced again, a re-render is not.
-    if (responseCompleted) replyAnnouncer?.announceComplete(`${completedReplyKey}\n${props.message}`)
-  }, [completedReplyKey, props.message, replyAnnouncer, responseCompleted])
+    if (responseCompleted) replyAnnouncer?.announceComplete(completedReplyKey)
+  }, [completedReplyKey, replyAnnouncer, responseCompleted])
   const hasVisibleAssistantResponseContent = hasVisibleAssistantResponse({
     message: props.message,
     message_type: props.message_type,
