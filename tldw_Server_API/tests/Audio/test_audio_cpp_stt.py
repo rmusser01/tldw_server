@@ -2247,6 +2247,62 @@ async def test_audio_cpp_http_response_close_survives_repeated_caller_cancellati
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["response-close", "wav-open"])
+async def test_audio_cpp_owned_cleanup_late_failure_is_not_logged_after_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    """Drain either owned operation without logging its late failure."""
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled: list[dict[str, object]] = []
+    started = asyncio.Event()
+    release = threading.Event()
+
+    def fail_after_release(*_args: Any, **_kwargs: Any) -> BinaryIO:
+        """Fail only once the test allows the blocked operation to finish."""
+        loop.call_soon_threadsafe(started.set)
+        if not release.wait(timeout=2):
+            raise AssertionError("test did not release owned operation")
+        raise RuntimeError("raw-owned-audio-error")
+
+    class FailingResponse:
+        """Response whose close fails after the caller is cancelled."""
+
+        async def aclose(self) -> None:
+            """Run the gated failure on a worker thread."""
+            await asyncio.to_thread(fail_after_release)
+
+    if operation == "response-close":
+        pending = audio_cpp._close_audio_cpp_response_before_cancellation(FailingResponse())
+    else:
+        monkeypatch.setattr(audio_cpp, "open_audio_cpp_wav", fail_after_release)
+        pending = audio_cpp._open_audio_cpp_wav_async("private.wav", base_dir=tmp_path)
+    task = asyncio.create_task(pending)
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        for message in ("first-cancel", "second-cancel"):
+            task.cancel(message)
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError, match="first-cancel"):
+            await asyncio.wait_for(task, timeout=2)
+        for _ in range(3):
+            await asyncio.sleep(0)
+        assert unhandled == []
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        loop.set_exception_handler(previous_handler)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "response_type",
     [_SelfCancellingCloseAudioCppResponse, _FailingCloseAudioCppResponse],
