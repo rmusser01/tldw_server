@@ -253,4 +253,29 @@ describe("NotesManagerPage Connections requests", { timeout: 60_000 }, () => {
     expect(screen.getByTestId("notes-section-connections-toggle")).toHaveAttribute("aria-expanded", "true")
     expect(neighborRequests.map((request) => request.noteId)).toEqual(["note-a"])
   })
+
+  it("lets the user check again after a 403, and forgets the denial once access works", async () => {
+    let denied = true
+    answerNeighbors = async ({ noteId }) => {
+      if (denied) {
+        throw Object.assign(new Error(`Forbidden (GET /api/v1/notes/${noteId}/neighbors)`), { status: 403 })
+      }
+      return { nodes: [{ id: noteId, type: "note", label: noteId }], edges: [] }
+    }
+    renderPage()
+    await openNote("note-a", "Note A")
+    fireEvent.click(screen.getByTestId("notes-section-connections-toggle"))
+    expect(await screen.findByText("Note connections are unavailable for this account.")).toBeInTheDocument()
+
+    // An administrator grants notes graph access.
+    denied = false
+    fireEvent.click(screen.getByTestId("notes-connections-recheck"))
+
+    expect(await screen.findByTestId("notes-related-empty")).toBeInTheDocument()
+    expect(screen.queryByText("Note connections are unavailable for this account.")).toBeNull()
+    await openNote("note-b", "Note B")
+    await waitFor(() => {
+      expect(neighborRequests.map((request) => request.noteId)).toEqual(["note-a", "note-a", "note-b"])
+    })
+  })
 })

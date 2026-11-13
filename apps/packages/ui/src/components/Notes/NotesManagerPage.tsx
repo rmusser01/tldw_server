@@ -617,6 +617,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     noteNeighborsRequested && noteNeighborsSuccess && !neighborsDenied ? requestedNoteNeighborsData : null
   const noteNeighborsUnavailable =
     neighborsDenied || Number((noteNeighborsFailure as { status?: number } | null)?.status) === 403
+  // Only the user asks again: forgetting the denial re-enables the query, which then fetches once.
+  const recheckNeighborsAccess = React.useCallback(() => {
+    if (neighborsDenied) setNeighborsDeniedScope(null)
+    else void refetchNoteNeighbors()
+  }, [neighborsDenied, refetchNoteNeighbors])
   const noteNeighborsState = noteNeighborsError ? 'error'
     : noteNeighborsLoading ? 'loading'
     : noteNeighborsSuccess && noteNeighborsData != null ? 'success'
@@ -2982,6 +2987,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         onRetryNeighbors={noteNeighborsUnavailable ? undefined : () => {
           void refetchNoteNeighbors()
         }}
+        onRecheckNeighborsAccess={noteNeighborsUnavailable ? recheckNeighborsAccess : undefined}
         selectedNotePinned={ed.selectedNotePinned}
         editorMode={ed.editorMode}
         editorInputMode={ed.editorInputMode}

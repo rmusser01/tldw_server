@@ -149,6 +149,8 @@ export interface NotesEditorPaneProps {
   /** Page-owned open/closed choice for Connections (NE-10). */
   connectionsMemory?: ConnectionsMemory
   onRetryNeighbors?: () => void
+  /** Ask again after a 403, for example once an administrator grants access. */
+  onRecheckNeighborsAccess?: () => void
 
   // Pinning
   selectedNotePinned: boolean
@@ -369,6 +371,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   onRequestNeighbors,
   connectionsMemory,
   onRetryNeighbors,
+  onRecheckNeighborsAccess,
   selectedNotePinned,
   editorMode,
   editorInputMode,
@@ -1119,11 +1122,16 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             testId="notes-section-connections"
           >
           {noteNeighborsUnavailable ? (
-            <Typography.Text type="secondary" role="status">
-              {t('option:notesSearch.connectionsUnavailable', {
-                defaultValue: 'Note connections are unavailable for this account.'
-              })}
-            </Typography.Text>
+            <div>
+              <Typography.Text type="secondary" role="status">
+                {t('option:notesSearch.connectionsUnavailable', {
+                  defaultValue: 'Note connections are unavailable for this account.'
+                })}
+              </Typography.Text>
+              {onRecheckNeighborsAccess && <Button size="small" type="link" onClick={onRecheckNeighborsAccess} data-testid="notes-connections-recheck">
+                {t('option:notesSearch.relatedNotesRetry', { defaultValue: 'Retry' })}
+              </Button>}
+            </div>
           ) : noteNeighborsLoading ? (
             <Typography.Text type="secondary" role="status">
               {t('option:notesSearch.connectionsLoading', {
