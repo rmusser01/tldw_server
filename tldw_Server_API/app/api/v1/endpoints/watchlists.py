@@ -56,7 +56,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota_on_own_key
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
@@ -7115,8 +7115,8 @@ async def create_output(
                 status_code=400,
                 detail="llm_provider_required: set llm_provider in request or job output_prefs.llm.provider",
             )
-        # Usage quotas (LLM usage accounting spec §4a), before any summary call and before the output is written.
-        await enforce_llm_quota(current_user.id)
+        # Usage quotas (§4a) before any summary call or output; the summaries run on the user's own key, if any.
+        own_key = await enforce_llm_quota_on_own_key(current_user.id, llm_provider, model=payload.llm_model)
         items_for_summary = [
             {
                 "id": getattr(it, "id", None),
@@ -7128,8 +7128,7 @@ async def create_output(
         ]
         try:
             items_for_summary = await summarize_items_for_output(
-                items_for_summary,
-                api_name=llm_provider,
+                items_for_summary, api_name=llm_provider, provider_credentials=own_key,
                 model_override=payload.llm_model,
                 custom_prompt=payload.summarize_prompt,
             )
