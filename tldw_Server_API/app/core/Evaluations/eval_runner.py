@@ -13,6 +13,7 @@ import asyncio
 import os
 import statistics
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime
@@ -58,6 +59,7 @@ from tldw_Server_API.app.core.Evaluations.run_state import (
 )
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.Evaluations.webhook_security import webhook_validator
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import SummaryProviderError
 from tldw_Server_API.app.core.RAG.rag_custom_metrics import get_custom_metrics
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
@@ -143,6 +145,25 @@ def _call_adapter_text(
 
 
 
+_LLM_RUN_TYPES = frozenset({"model_graded", "label_choice", "nli_factcheck"})
+
+
+def run_llm_provider(
+    evaluation: Optional[Mapping[str, Any]], run_config: Optional[Mapping[str, Any]]
+) -> tuple[Optional[str], Optional[str]]:
+    """The provider and model every LLM call of an evaluation run uses, as the runner resolves them (TASK-15426).
+
+    ``(None, None)`` when the run cannot be placed on one key: no evaluation, a type that makes no LLM
+    call, a raw ``api_key`` in the spec or the run config (it counts), or a ``rag_pipeline`` run, whose
+    pipeline stages pick their own providers.
+    """
+    spec = (evaluation or {}).get("eval_spec") or {}
+    if (evaluation or {}).get("eval_type") not in _LLM_RUN_TYPES or spec.get("sub_type") == "rag_pipeline":
+        return None, None
+    api_name, model, api_key = EvaluationRunner._resolve_eval_provider_model_api_key(spec, {"config": run_config})
+    return (None, None) if api_key else (canonical_provider_name(api_name), model)
+
+
 class EvaluationRunner:
     """Manages asynchronous evaluation execution"""
 
@@ -166,8 +187,8 @@ class EvaluationRunner:
         self.semaphore = asyncio.Semaphore(max_concurrent_evals)
         self.eval_timeout = eval_timeout
 
+    @staticmethod
     def _resolve_eval_provider_model_api_key(
-        self,
         eval_spec: dict[str, Any],
         eval_config: dict[str, Any],
     ) -> tuple[str, Optional[str], Optional[str]]:
