@@ -57,6 +57,8 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
   const progress = run?.progress ?? null
   const failures = run?.failures && actionMode(run.failures.action) === listMode ? run.failures : null
   const running = progress != null
+  // Actions wait while "Select all matching" is still reading the matches.
+  const actionsLocked = running || Boolean(selection?.selectingAllMatching)
   const hasSelection = selectedCount > 0
   if (!hasSelection && !running && !failures) return null
 
@@ -171,7 +173,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
             size="small"
             type="primary"
             className={buttonClass}
-            disabled={running || !onRestore}
+            disabled={actionsLocked || !onRestore}
             onClick={onRestore}
             data-testid="notes-bulk-restore"
           >
@@ -184,7 +186,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
           <Button
             size="small"
             className={buttonClass}
-            disabled={running}
+            disabled={actionsLocked}
             onClick={onExport}
             data-testid="notes-bulk-export"
           >
@@ -193,7 +195,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
           <Button
             size="small"
             className={buttonClass}
-            disabled={running}
+            disabled={actionsLocked}
             onClick={onAddTags}
             data-testid="notes-bulk-assign-keywords"
           >
@@ -203,7 +205,7 @@ export const NotesBulkActionsBar: React.FC<NotesBulkActionsBarProps> = ({
             size="small"
             className={buttonClass}
             danger
-            disabled={running}
+            disabled={actionsLocked}
             onClick={onDelete}
             data-testid="notes-bulk-delete"
           >

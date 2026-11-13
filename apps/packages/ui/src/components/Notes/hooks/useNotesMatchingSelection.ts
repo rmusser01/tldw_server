@@ -110,6 +110,8 @@ export function useNotesMatchingSelection({ filterKey, fetchPage, onError }: Opt
 
   const clearMatchingSelection = React.useCallback(() => {
     controllerRef.current?.abort()
+    controllerRef.current = null
+    setSelecting(false)
     setSelection(null)
   }, [])
 

@@ -440,6 +440,48 @@ describe("NotesManagerPage NL-05 select all", () => {
     expect(screen.getByTestId("notes-select-checkbox-m1")).not.toBeChecked()
   })
 
+  it("abandons a running Select all matching when a row is toggled, and locks the actions meanwhile", async () => {
+    const gather = deferred()
+    const library = makeLibrary(5)
+    serve((_request, path, method) => {
+      if (method === "GET" && path.startsWith("/api/v1/notes/?")) {
+        if (listParams(path).get("limit") === "100") return gather.promise
+        return { items: library.slice(0, 3), pagination: { total: library.length } }
+      }
+      return undefined
+    })
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(gatherRequests()).toHaveLength(1))
+    for (const testId of ["notes-bulk-export", "notes-bulk-assign-keywords", "notes-bulk-delete"]) {
+      expect(screen.getByTestId(testId)).toBeDisabled()
+    }
+
+    fireEvent.click(screen.getByTestId("notes-select-checkbox-m1"))
+    gather.resolve({ items: library, pagination: { total: library.length } })
+
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("2 selected"))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("2 selected")
+    expect(screen.queryByTestId("notes-bulk-matching-status")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-bulk-delete")).not.toBeDisabled()
+  })
+
+  it("gathers the library oldest first, so notes edited meanwhile are not skipped", async () => {
+    serveLibrary(makeLibrary(5))
+    renderPage()
+    await screen.findByTestId("notes-select-checkbox-m3")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("5 selected"))
+
+    const params = listParams(String((gatherRequests()[0][0] as Request).path))
+    expect(params.get("sort_by")).toBe("created_at")
+    expect(params.get("sort_order")).toBe("asc")
+  })
+
   it("caps Select all matching at the first 1000 notes", async () => {
     serveLibrary(makeLibrary(1500))
     renderPage()
@@ -724,5 +766,28 @@ describe("NotesManagerPage NL-05 single actions during a bulk run", () => {
     expect(callsTo("DELETE", "n3")).toHaveLength(0)
     expect(mockConfirmDanger).toHaveBeenCalledTimes(1)
     pending.resolve({})
+  })
+
+  it("gathers Trash oldest first too", async () => {
+    serve((_request, path) => {
+      if (path.startsWith("/api/v1/notes/trash?")) {
+        const limit = Number(listParams(path).get("limit"))
+        const rows = limit >= 100 ? TRASH_NOTES : TRASH_NOTES.slice(0, 2)
+        return { items: rows, total: TRASH_NOTES.length }
+      }
+      return undefined
+    })
+    renderPage()
+    fireEvent.click(await screen.findByTestId("notes-mode-trash"))
+    await screen.findByTestId("notes-trash-row-t2")
+    fireEvent.click(screen.getByTestId("notes-select-all-page"))
+    fireEvent.click(await screen.findByTestId("notes-bulk-select-all-matching"))
+    await waitFor(() => expect(screen.getByTestId("notes-bulk-selected-count")).toHaveTextContent("3 selected"))
+
+    const gathered = mockBgRequest.mock.calls
+      .map(([request]: [Request]) => String(request?.path || ""))
+      .find((path) => path.startsWith("/api/v1/notes/trash?") && listParams(path).get("limit") === "100")
+    expect(listParams(String(gathered)).get("sort_by")).toBe("created_at")
+    expect(listParams(String(gathered)).get("sort_order")).toBe("asc")
   })
 })
