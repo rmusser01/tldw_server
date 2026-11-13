@@ -169,8 +169,9 @@ def test_unknown_sort_is_logged_at_debug_not_warning(notes_client: TestClient) -
     finally:
         logger.remove(sink_id)
     mentions = [(level, text) for level, text in records if "updated_at" in text or "sideways" in text]
-    assert mentions, records
-    assert {level for level, _ in mentions} == {"DEBUG"}
+    assert ("DEBUG" in {level for level, _ in mentions}), records
+    # Request logging can echo the query string at INFO; only WARNING and above would be noise.
+    assert not [m for m in mentions if m[0] in {"WARNING", "ERROR", "CRITICAL"}], mentions
 
 
 def test_openapi_documents_the_sort_values_without_rejecting_others(notes_client: TestClient) -> None:
