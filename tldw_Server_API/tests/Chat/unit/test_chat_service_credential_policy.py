@@ -13,9 +13,8 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
-from tldw_Server_API.app.core.LLM_Calls import adapter_utils, chat_calls
+from tldw_Server_API.app.core.LLM_Calls import adapter_utils, chat_calls, gateway
 from tldw_Server_API.app.core.LLM_Calls.providers import moonshot_adapter
 
 
@@ -87,7 +86,7 @@ def test_explicit_credentials_bypass_resolvers_and_copy_config(monkeypatch):
     monkeypatch.setattr(adapter_utils, "resolve_provider_api_key_from_config", fail)
     supplied_config = {"openai_api": {"organization": "tenant-org"}}
 
-    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+    provider, request, _internal = gateway._build_adapter_request_from_chat_args(
         _args(
             **_resolved_fields(
                 "openai",
@@ -112,7 +111,7 @@ def test_explicit_missing_hosted_key_fails_safely(monkeypatch):
     )
 
     with pytest.raises(ChatConfigurationError) as exc_info:
-        chat_service._build_adapter_request_from_chat_args(
+        gateway._build_adapter_request_from_chat_args(
             _args(
                 **_resolved_fields("openai", api_key="  ", app_config={})
             )
@@ -124,7 +123,7 @@ def test_explicit_missing_hosted_key_fails_safely(monkeypatch):
 
 
 def test_explicit_local_provider_remains_keyless():
-    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+    provider, request, _internal = gateway._build_adapter_request_from_chat_args(
         _args(
             api_provider="ollama",
             model="llama3",
@@ -151,7 +150,7 @@ def test_legacy_request_without_marker_still_resolves_key(monkeypatch):
 
     monkeypatch.setattr(adapter_utils, "resolve_provider_api_key_from_config", resolve)
 
-    _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(_args(app_config={}))
+    _provider, request, _internal = gateway._build_adapter_request_from_chat_args(_args(app_config={}))
 
     assert request["api_key"] == "server-key"
     assert calls == [("openai", {})]
@@ -190,7 +189,7 @@ def test_explicit_absent_config_cannot_trigger_adapter_config_reload(monkeypatch
         "load_and_log_configs",
         lambda: (_ for _ in ()).throw(AssertionError("adapter must not reload server config")),
     )
-    _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+    _provider, request, _internal = gateway._build_adapter_request_from_chat_args(
         _args(
             api_provider="moonshot",
             **_resolved_fields(
@@ -220,7 +219,7 @@ def test_legacy_empty_config_still_allows_adapter_config_reload(monkeypatch):
         "load_and_log_configs",
         lambda: {"moonshot_api": {"api_base_url": "https://legacy.example/v1"}},
     )
-    _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+    _provider, request, _internal = gateway._build_adapter_request_from_chat_args(
         _args(api_provider="moonshot", api_key="legacy-key")
     )
 
@@ -239,7 +238,7 @@ def test_legacy_empty_config_still_allows_adapter_config_reload(monkeypatch):
     ],
 )
 def test_explicit_absent_config_is_plain_provider_scoped_mapping(provider, section, api_key):
-    _provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+    _provider, request, _internal = gateway._build_adapter_request_from_chat_args(
         _args(
             api_provider=provider,
             **_resolved_fields(
@@ -256,7 +255,7 @@ def test_explicit_absent_config_is_plain_provider_scoped_mapping(provider, secti
 
 
 def test_bedrock_runtime_default_chain_satisfies_shared_auth_contract():
-    provider, request, _internal = chat_service._build_adapter_request_from_chat_args(
+    provider, request, _internal = gateway._build_adapter_request_from_chat_args(
         _args(
             api_provider="bedrock",
             model="meta.llama3-8b-instruct",
@@ -283,7 +282,7 @@ def test_bedrock_runtime_absent_auth_fails_before_server_key_resolution(monkeypa
     )
 
     with pytest.raises(ChatConfigurationError, match="API key is required"):
-        chat_service._build_adapter_request_from_chat_args(
+        gateway._build_adapter_request_from_chat_args(
             _args(
                 api_provider="bedrock",
                 model="meta.llama3-8b-instruct",
@@ -300,7 +299,7 @@ def test_explicit_missing_model_does_not_use_default_model_environment(monkeypat
     monkeypatch.setenv("DEFAULT_MODEL_MOONSHOT", "server-env-model")
 
     with pytest.raises(ChatConfigurationError, match="Model is required"):
-        chat_service._build_adapter_request_from_chat_args(
+        gateway._build_adapter_request_from_chat_args(
             {
                 "api_provider": "moonshot",
                 "messages": [{"role": "user", "content": "hello"}],

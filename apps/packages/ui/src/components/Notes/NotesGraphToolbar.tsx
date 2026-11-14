@@ -7,6 +7,7 @@ import {
   Network,
   Plus,
   RefreshCw,
+  RotateCcw,
   SlidersHorizontal,
   ZoomIn,
   ZoomOut
@@ -35,6 +36,12 @@ type NotesGraphToolbarProps = {
   }
   visibleEdgeTypes: ReadonlySet<NotesGraphEdgeType>
   showProvisional: boolean
+  semanticAvailable: boolean
+  semanticEnabled: boolean
+  semanticFocusRequired: boolean
+  semanticTopK: number
+  semanticMaxTopK: number
+  semanticThreshold: number
   canExpand: boolean
   isRefreshing: boolean
   onSearchChange: (value: string) => void
@@ -47,6 +54,10 @@ type NotesGraphToolbarProps = {
   onShowAllNotes: () => void
   onToggleEdgeType: (edgeType: NotesGraphEdgeType) => void
   onToggleProvisional: () => void
+  onSemanticEnabledChange: (enabled: boolean) => void
+  onSemanticTopKChange: (value: number) => void
+  onSemanticThresholdChange: (value: number) => void
+  onSemanticReset: () => void
   onFocusCurrent: () => void
   onExpand: () => void
   onRefresh: () => void
@@ -104,6 +115,12 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
   allNotes,
   visibleEdgeTypes,
   showProvisional,
+  semanticAvailable,
+  semanticEnabled,
+  semanticFocusRequired,
+  semanticTopK,
+  semanticMaxTopK,
+  semanticThreshold,
   canExpand,
   isRefreshing,
   onSearchChange,
@@ -116,6 +133,10 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
   onShowAllNotes,
   onToggleEdgeType,
   onToggleProvisional,
+  onSemanticEnabledChange,
+  onSemanticTopKChange,
+  onSemanticThresholdChange,
+  onSemanticReset,
   onFocusCurrent,
   onExpand,
   onRefresh,
@@ -285,6 +306,90 @@ const NotesGraphToolbar: React.FC<NotesGraphToolbarProps> = ({
             })}
           </button>
         </div>
+
+        {semanticAvailable || semanticEnabled ? (
+          <fieldset className="flex min-h-11 min-w-0 flex-wrap items-end gap-2 border border-border bg-surface px-2 py-1">
+            <legend className="sr-only">
+              {t("option:notesSearch.graphSimilarContent", {
+                defaultValue: "Similar content"
+              })}
+            </legend>
+            <label className="flex h-9 items-center gap-2 whitespace-nowrap text-sm text-text">
+              <input
+                type="checkbox"
+                checked={semanticEnabled}
+                onChange={() => onSemanticEnabledChange(!semanticEnabled)}
+              />
+              {t("option:notesSearch.graphSimilarContent", {
+                defaultValue: "Similar content"
+              })}
+            </label>
+            {semanticEnabled ? (
+              <>
+                <label className="flex flex-col gap-0.5 text-xs text-text-muted">
+                  {t("option:notesSearch.graphSemanticNeighbors", {
+                    defaultValue: "Neighbors"
+                  })}
+                  <input
+                    type="number"
+                    className="h-8 w-[72px] border border-border bg-bg px-2 text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    aria-label={t("option:notesSearch.graphSemanticNeighbors", {
+                      defaultValue: "Neighbors"
+                    })}
+                    min={1}
+                    max={semanticMaxTopK}
+                    value={semanticTopK}
+                    onChange={(event) =>
+                      onSemanticTopKChange(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="flex min-w-[168px] flex-1 flex-col gap-0.5 text-xs text-text-muted">
+                  <span className="flex items-center justify-between gap-2">
+                    {t("option:notesSearch.graphSemanticThreshold", {
+                      defaultValue: "Minimum passage similarity"
+                    })}
+                    <output className="font-mono text-text">
+                      {semanticThreshold.toFixed(2)}
+                    </output>
+                  </span>
+                  <input
+                    type="range"
+                    className="h-8 w-full min-w-[144px] accent-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    aria-label={t("option:notesSearch.graphSemanticThreshold", {
+                      defaultValue: "Minimum passage similarity"
+                    })}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={semanticThreshold}
+                    onChange={(event) =>
+                      onSemanticThresholdChange(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <IconButton
+                  ariaLabel={t("option:notesSearch.graphSemanticReset", {
+                    defaultValue: "Reset Similar content controls"
+                  })}
+                  className={iconButtonClassName}
+                  onClick={onSemanticReset}>
+                  <RotateCcw size={iconSize} aria-hidden="true" />
+                </IconButton>
+              </>
+            ) : null}
+          </fieldset>
+        ) : null}
+
+        {semanticFocusRequired ? (
+          <p
+            className="min-h-9 min-w-0 flex-1 break-words px-2 py-2 text-xs text-warn"
+            role="status">
+            {t("option:notesSearch.graphSemanticFocusRequired", {
+              defaultValue: "Focus a Note to load similar content."
+            })}
+          </p>
+        ) : null}
 
         <IconButton
           ariaLabel={t("option:notesSearch.graphFocusCurrent", {

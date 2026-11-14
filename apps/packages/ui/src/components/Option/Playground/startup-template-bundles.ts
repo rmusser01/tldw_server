@@ -58,6 +58,8 @@ export type RolePlaySetupPreviewDescription = {
 }
 
 export type StartupTemplateBundle = {
+  /** Opaque account identity; credentials are never stored in a bundle. */
+  ownerId?: string
   id: string
   name: string
   createdAt: number
@@ -76,6 +78,7 @@ export type StartupTemplateBundle = {
 }
 
 export type StartupTemplateCreateInput = {
+  ownerId?: string | null
   name: string
   source?: StartupTemplateBundleSource
   selectedModel: string | null
@@ -223,11 +226,13 @@ const normalizeRolePlayBehavior = (
   ) {
     return null
   }
-  const systemPrompt = normalizeString(record.systemPrompt).trim()
+  if (typeof record.systemPrompt !== "string") return null
+  const systemPrompt = record.systemPrompt.trim()
   const templateId = normalizeNullableString(record.templateId)
   const templateTitle = normalizeNullableString(record.templateTitle)
   if (record.source === "template" && !templateId && !templateTitle) return null
-  if (record.source !== "template" && !systemPrompt && !templateTitle) return null
+  if (record.source !== "template" && !systemPrompt && !templateTitle)
+    return null
 
   return {
     source: record.source,
@@ -272,6 +277,12 @@ const normalizeRolePlayGeneration = (
   if (!value || typeof value !== "object") return null
   const record = value as Record<string, unknown>
   if (!isPresetKey(record.presetKey)) return null
+  if (
+    !record.settings ||
+    typeof record.settings !== "object" ||
+    Array.isArray(record.settings)
+  )
+    return null
   return {
     presetKey: record.presetKey,
     settings: normalizeRolePlaySettings(record.settings)
@@ -281,21 +292,21 @@ const normalizeRolePlayGeneration = (
 const normalizeRolePlayContext = (
   value: unknown
 ): StartupTemplateRolePlayContext | null => {
-  if (!value || typeof value !== "object") return null
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const record = value as Record<string, unknown>
   const rawCount = record.ragPinnedCount
-  const ids = Array.isArray(record.ragPinnedResultIds)
-    ? record.ragPinnedResultIds
-        .map((id) => (typeof id === "string" ? id.trim() : ""))
-        .filter(Boolean)
-    : []
-  const count =
-    typeof rawCount === "number" && Number.isFinite(rawCount) && rawCount > 0
-      ? Math.floor(rawCount)
-      : ids.length
-  if (count <= 0 && ids.length === 0) return null
+  const rawIds = record.ragPinnedResultIds
+  if (
+    typeof rawCount !== "number" ||
+    !Number.isFinite(rawCount) ||
+    rawCount < 0 ||
+    !Array.isArray(rawIds) ||
+    rawIds.some((id) => typeof id !== "string" || !id.trim())
+  )
+    return null
+  const ids = rawIds.map((id) => id.trim())
   return {
-    ragPinnedCount: Math.max(count, ids.length),
+    ragPinnedCount: Math.max(Math.floor(rawCount), ids.length),
     ragPinnedResultIds: ids
   }
 }
@@ -313,7 +324,15 @@ const normalizeRolePlayMetadata = (
   const generation = normalizeRolePlayGeneration(record.generation)
   const context = normalizeRolePlayContext(record.context)
 
-  if (!identity && !behavior && !scene && !generation && !context) return null
+  // Missing or malformed components are not explicit user clears.
+  const components = { identity, behavior, scene, generation, context }
+  if (
+    Object.entries(components).some(
+      ([key, normalized]) => record[key] !== null && !normalized
+    )
+  ) {
+    return null
+  }
 
   return {
     source: "role-play-setup",
@@ -377,6 +396,7 @@ export const createStartupTemplateBundle = (
   const character = normalizeCharacter(input.character)
   const rolePlay = normalizeRolePlayMetadata(input.rolePlay)
   return {
+    ...(input.ownerId ? { ownerId: input.ownerId } : {}),
     id: options?.id ?? createTemplateId(),
     name: sanitizeStartupTemplateName(input.name),
     createdAt: now,
@@ -409,6 +429,7 @@ export const normalizeStartupTemplateBundle = (
   const record = value as Record<string, unknown>
   const id = normalizeNullableString(record.id)
   if (!id) return null
+  if (record.ownerId != null && !normalizeNullableString(record.ownerId)) return null
 
   const createdAt =
     typeof record.createdAt === "number" && Number.isFinite(record.createdAt)
@@ -422,6 +443,7 @@ export const normalizeStartupTemplateBundle = (
   const rolePlay = normalizeRolePlayMetadata(record.rolePlay)
 
   return {
+    ...(normalizeNullableString(record.ownerId) ? { ownerId: normalizeNullableString(record.ownerId)! } : {}),
     id,
     name: sanitizeStartupTemplateName(normalizeString(record.name)),
     createdAt,
@@ -480,6 +502,17 @@ export const removeStartupTemplateBundle = (
   id: string
 ): StartupTemplateBundle[] => existing.filter((entry) => entry.id !== id)
 
+/** Unowned linked copies are ambiguous; retain them in storage without adoption. */
+export const isStartupTemplateOwnedBy = (
+  template: StartupTemplateBundle,
+  ownerId: string | null,
+): boolean => {
+  if (template.ownerId != null) return template.ownerId === ownerId
+  return template.selectedSystemPromptId == null &&
+    template.promptStudioPromptId == null &&
+    template.promptSource !== "prompt-library" && template.promptSource !== "prompt-studio"
+}
+
 export const isRolePlayRelevantBundle = (
   template: StartupTemplateBundle
 ): boolean => {
@@ -501,14 +534,17 @@ const formatRolePlayIdentity = (template: StartupTemplateBundle): string => {
     const label = identity.kind === "persona" ? "Persona" : "Character"
     return `${label}: ${identity.name || identity.id}`
   }
-  if (template.character?.name) return `Character: ${template.character.name}`
+  if (!template.rolePlay && template.character?.name)
+    return `Character: ${template.character.name}`
   return "None"
 }
 
 const formatRolePlayBehavior = (template: StartupTemplateBundle): string => {
   const behavior = template.rolePlay?.behavior
   if (!behavior) {
-    return template.systemPrompt.trim().length > 0 ? "Custom behavior" : "No behavior"
+    return !template.rolePlay && template.systemPrompt.trim().length > 0
+      ? "Custom behavior"
+      : "No behavior"
   }
   if (behavior.templateTitle) {
     return behavior.modified
@@ -557,13 +593,26 @@ export const resolveStartupTemplatePrompt = (
   template: StartupTemplateBundle,
   prompts: Prompt[]
 ): StartupTemplatePromptResolution => {
+  // Roleplay stores an exact behavior snapshot; legacy links cannot replace or revive it.
+  if (template.rolePlay) {
+    return {
+      prompt: null,
+      source: template.rolePlay.behavior ? "system-template" : "none",
+      promptTitle: template.rolePlay.behavior?.templateTitle ?? null,
+      promptStudioPromptId: null
+    }
+  }
   const byId = template.selectedSystemPromptId
-    ? prompts.find((prompt) => prompt.id === template.selectedSystemPromptId) || null
+    ? prompts.find((prompt) => prompt.id === template.selectedSystemPromptId) ||
+      null
     : null
   if (byId) {
     return {
       prompt: byId,
-      source: inferStartupTemplatePromptSource(byId, byId.content.trim().length > 0),
+      source: inferStartupTemplatePromptSource(
+        byId,
+        byId.content.trim().length > 0
+      ),
       promptTitle: byId.title || template.promptTitle,
       promptStudioPromptId:
         byId.studioPromptId ?? byId.serverId ?? template.promptStudioPromptId
@@ -574,19 +623,19 @@ export const resolveStartupTemplatePrompt = (
   const byStudioId =
     studioPromptId == null
       ? null
-      :
-          prompts.find(
-            (prompt) =>
-              prompt.studioPromptId === studioPromptId ||
-              prompt.serverId === studioPromptId
-          ) || null
+      : prompts.find(
+          (prompt) =>
+            prompt.studioPromptId === studioPromptId ||
+            prompt.serverId === studioPromptId
+        ) || null
 
   if (byStudioId) {
     return {
       prompt: byStudioId,
       source: "prompt-studio",
       promptTitle: byStudioId.title || template.promptTitle,
-      promptStudioPromptId: byStudioId.studioPromptId ?? byStudioId.serverId ?? studioPromptId
+      promptStudioPromptId:
+        byStudioId.studioPromptId ?? byStudioId.serverId ?? studioPromptId
     }
   }
 
@@ -614,7 +663,10 @@ export const describeStartupTemplatePrompt = (
       ? `Prompt library: ${resolution.promptTitle}`
       : "Prompt library"
   }
-  if (template.systemPrompt.trim().length > 0) {
+  const content = template.rolePlay
+    ? template.rolePlay.behavior?.systemPrompt ?? ""
+    : template.systemPrompt
+  if (content.trim().length > 0) {
     return "Custom system prompt"
   }
   return "No prompt"

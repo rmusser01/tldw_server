@@ -331,6 +331,7 @@ class PersonalContextRelay:
         """Renew ownership and verify the row remains current, within any deadline."""
 
         def deadline_open() -> bool:
+            """Return whether this attempt may continue; no budget means no deadline."""
             return budget is None or budget.deadline_open()
 
         if not self.publications.renew_lease(lease) or not deadline_open():

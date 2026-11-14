@@ -3,7 +3,9 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async () => ({
+  ...await vi.importActual<typeof import("@tanstack/react-query")>("@tanstack/react-query"),
+  useQueryClient: () => ({ invalidateQueries: vi.fn().mockResolvedValue(undefined) }),
   useQuery: () => ({ data: null, isFetching: false, error: null, refetch: vi.fn() })
 }))
 
@@ -33,6 +35,15 @@ vi.mock("@/services/moderation", () => ({
 }))
 
 import { ModerationPlaygroundShell } from "../ModerationPlaygroundShell"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+const readyConfig = { serverUrl: "http://rules-unit.test", authMode: "single-user" as const, apiKey: "unit-key" }
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: readyConfig, loading: false, authorityLoading: false })
+}))
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ready: true, ownerId: "recipe-owner:sha256:" + "a".repeat(64), unavailable: false, boundaryKey: deriveConnectionAuthorityId(readyConfig), retry: () => {} })
+}))
+
 
 const renderShell = () =>
   render(

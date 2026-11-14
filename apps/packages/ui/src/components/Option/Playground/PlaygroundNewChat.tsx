@@ -1,15 +1,13 @@
 import { PencilIcon } from "lucide-react"
-import { useMessage } from "../../../hooks/useMessage"
+import { useClearChat } from "@/hooks/chat/useClearChat"
 import { useTranslation } from 'react-i18next';
 
 export const PlaygroundNewChat = () => {
-  const { setHistory, setMessages, setHistoryId } = useMessage()
+  const clearChat = useClearChat()
   const { t } = useTranslation('optionChat')
 
   const handleClick = () => {
-    setHistoryId(null)
-    setMessages([])
-    setHistory([])
+    clearChat()
   }
 
   return (

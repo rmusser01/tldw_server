@@ -13,7 +13,7 @@ from tldw_Server_API.app.core.AuthNZ.migrations import (
     migration_074_create_federated_managed_grants_table,
 )
 from tldw_Server_API.app.core.AuthNZ.monitoring import AuthNZMonitor
-from tldw_Server_API.app.core.AuthNZ.scheduler import AuthNZScheduler
+from tldw_Server_API.app.services.authnz_scheduler import AuthNZScheduler
 from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
@@ -123,7 +123,7 @@ async def test_scheduler_monitor_queries_sqlite(monkeypatch):
     scheduler = AuthNZScheduler()
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.AuthNZ.scheduler.get_security_alert_dispatcher",
+        "tldw_Server_API.app.services.authnz_scheduler.get_security_alert_dispatcher",
         lambda: _NoopDispatcher(),
     )
 

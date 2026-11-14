@@ -139,12 +139,12 @@
 - `tldw_Server_API/tests/Security/test_http_hop_streaming.py` - prove status-only closes without body iteration/buffering.
 - `tldw_Server_API/tests/Services/test_startup_optional_workers.py` - mode-gated runtime registration and shutdown.
 - `apps/tldw-frontend/lib/api/openapi.fingerprint.json` - record the reviewed canonical PR 2 API delta.
-- `backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md` - execution notes, evidence, blockers, and PR state.
+- `backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md` - execution notes, evidence, blockers, and PR state.
 
 ### Task 0: Merged Dependency Gate, Baseline, And Task Activation
 
 **Files:**
-- Modify: `backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
+- Modify: `backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
 
 **Interfaces:**
 - Consumes: merged PR #2806, current `origin/dev`, approved design, and this plan.
@@ -211,7 +211,7 @@ Expected: record exact pass/fail/skip counts in `TASK-13111`. PostgreSQL skips a
 - [ ] **Step 5: Commit only the activated task metadata if it changed**
 
 ```bash
-git add "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+git add "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "chore(backlog): start admin webhook delivery task"
 ```
@@ -311,7 +311,7 @@ git add \
   tldw_Server_API/tests/Admin_Webhooks/test_domain_config_catalog.py \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_migration_postgres.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): define delivery recovery schema"
 ```
@@ -423,7 +423,7 @@ git add \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): persist delivery state and attempts"
 ```
@@ -611,7 +611,7 @@ git add \
   tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_sqlite.py \
   tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_postgres.py \
   tldw_Server_API/tests/Jobs/test_jobs_manager_admission_facade.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(jobs): support prepared worker dispositions"
 ```
@@ -677,7 +677,7 @@ git add \
   tldw_Server_API/app/core/Jobs/worker_sdk.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py \
   tldw_Server_API/tests/Jobs/test_worker_sdk.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(jobs): add prepared worker execution path"
 ```
@@ -766,7 +766,7 @@ git add \
   tldw_Server_API/tests/Security/test_http_hop_transport.py \
   tldw_Server_API/tests/Security/test_http_hop_streaming.py \
   tldw_Server_API/tests/Admin_Webhooks/test_executor.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): execute status-only signed attempts"
 ```
@@ -845,7 +845,7 @@ git add \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_domain.py \
   tldw_Server_API/tests/Admin_Webhooks/test_control_plane.py \
   tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): capture synthetic events and retire stale work"
 ```
@@ -984,7 +984,7 @@ git add \
   tldw_Server_API/app/core/Admin_Webhooks/reconciler.py \
   tldw_Server_API/tests/Admin_Webhooks/test_enqueue_reconciler.py \
   tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): reconcile delivery enqueue"
 ```
@@ -1146,7 +1146,7 @@ git add \
   tldw_Server_API/app/core/Admin_Webhooks/reconciler.py \
   tldw_Server_API/tests/Admin_Webhooks/test_worker.py \
   tldw_Server_API/tests/Admin_Webhooks/test_recovery_backend_matrix.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): recover prepared delivery outcomes"
 ```
@@ -1277,7 +1277,7 @@ git add \
   tldw_Server_API/tests/Admin_Webhooks/test_event_expansion.py \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_sqlite.py \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): persist synchronous test attempts"
 ```
@@ -1566,7 +1566,7 @@ git add \
   tldw_Server_API/tests/Admin_Webhooks/test_delivery_repository_postgres.py \
   tldw_Server_API/tests/Admin_Webhooks/test_openapi.py \
   apps/tldw-frontend/lib/api/openapi.fingerprint.json \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): expose delivery operations and history"
 ```
@@ -1801,7 +1801,7 @@ git add \
   tldw_Server_API/tests/Admin_Webhooks/test_api.py \
   tldw_Server_API/tests/Services/test_startup_optional_workers.py \
   Docs/Admin_Webhooks_Delivery_Runbook.md \
-  "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+  "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "feat(admin-webhooks): operate delivery runtime safely"
 ```
@@ -2059,7 +2059,7 @@ classification.
 
 **Files:**
 - Create: `Docs/Evidence/Admin_Webhooks_PR2_Verification.md`
-- Modify: `backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
+- Modify: `backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
 
 **Interfaces:**
 - Consumes: all PR 2 implementation, test output, OpenAPI delta, and approved design gates.
@@ -2348,7 +2348,7 @@ backlog task edit 13111 --append-notes "PR 2 verification complete: exact counts
     Docs/Evidence/Admin_Webhooks_PR2_Verification.md \
     Docs/superpowers/plans/2026-08-23-canonical-admin-webhook-delivery-substrate.md \
     apps/tldw-frontend/lib/api/openapi.fingerprint.json \
-    "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md" &&
+    "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md" &&
   git diff --cached --check &&
   git commit -m "docs(admin-webhooks): record delivery substrate verification"
 ```
@@ -2360,7 +2360,7 @@ mutation or commit command.
 ### Task 13: Request Review And Open PR 2 Without Merging It
 
 **Files:**
-- Modify: `backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
+- Modify: `backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md`
 - Review: every file changed from `origin/dev`.
 
 **Interfaces:**
@@ -2413,7 +2413,7 @@ backlog task edit 13111 \
   --ref "https://github.com/rmusser01/tldw_server/pull/2828" \
   --ref "$PR_URL" \
   --append-notes "PR 2 opened against dev after full verification and code review. Keep In Progress until review feedback is resolved and the user confirms merge."
-git add "backlog/tasks/task-13111 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
+git add "backlog/tasks/task-15132 - Implement-canonical-admin-webhook-delivery-substrate-and-recovery.md"
 git diff --cached --check
 git commit -m "chore(backlog): link admin webhook delivery PR"
 git push

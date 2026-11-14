@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.schemas.moderation_schemas import ModerationUserOverride
 from tldw_Server_API.app.core.Moderation import moderation_service as moderation_service_module
-from tldw_Server_API.app.core.Moderation.moderation_service import ModerationService
+from tldw_Server_API.app.core.Moderation.moderation_service import ModerationPolicy, ModerationService
 
 
 @pytest.mark.unit
@@ -287,7 +287,8 @@ def test_load_user_overrides_missing_file_sanitizes_info_path(tmp_path):
 
 
 @pytest.mark.unit
-def test_compile_user_rule_sanitizes_rule_id_warning_logs():
+def test_effective_policy_compilation_sanitizes_rule_warning_logs() -> None:
+    """Drop invalid raw overrides while keeping rule IDs and paths out of logs."""
     svc = ModerationService()
     rules = [
         {
@@ -313,15 +314,18 @@ def test_compile_user_rule_sanitizes_rule_id_warning_logs():
         },
     ]
 
+    svc._global_policy = ModerationPolicy(enabled=True, per_user_overrides=True, block_patterns=[])
+    svc._user_overrides = {"test-user": {"rules": rules}}
+
     messages: list[str] = []
     sink_id = moderation_service_module.logger.add(lambda message: messages.append(str(message)), level="WARNING")
     try:
-        compiled = [svc._compile_user_rule(rule) for rule in rules]
+        policy = svc.get_effective_policy("test-user")
     finally:
         moderation_service_module.logger.remove(sink_id)
 
     joined = "\n".join(messages)
-    assert compiled == [None, None, None]
+    assert policy.block_patterns == []
     assert "Skipped per-user rule with invalid is_regex" in joined
     assert "Skipped dangerous per-user regex rule" in joined
     assert "Skipped invalid per-user regex rule" in joined

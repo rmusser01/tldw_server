@@ -51,7 +51,7 @@ Related: TASK-13360, where editable installs resolve to the main checkout. Both 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-28. AC3: resolved by premise, not churn. ci.yml and 7 other workflows list uv.lock under cache-dependency-path, but .github/actions/setup-python-deps' resolve-cache-paths step drops any path that does not exist and falls back to pyproject.toml, so the absent lock is tolerated by design. Removing it from 8 workflows, several pinned by the license-first contract tests, would be churn with no behaviour change. AC4 (attribution correction): #2997's commit message said FastAPI changed include_router; it did not. The route-introspection difference came from this shared venv running fastapi 0.141.1 / starlette 1.6.0 against the declared fastapi>=0.136.3,<0.137.0; CI installs within the pin. AC1 stays open as an owner decision: either bring the shared venv inside the pin (uv pip install 'fastapi>=0.136.3,<0.137.0', but the venv is shared by every worktree and concurrent session) or raise the pin deliberately (Dependabot #2772 proposes <0.142.0), which then triggers AC2's getattr(route, path) audit.
 
 2026-09-29, owner decision: "bump fastapi to latest stable". AC1: pin raised deliberately to fastapi>=0.141.1,<0.142.0 (tests/Security/test_dependency_security_floor.py updated). FastAPI 0.141.1 requires starlette>=0.46 and pydantic>=2.9; the existing starlette>=1.0.1 and pydantic>=2.13.5,<2.14 pins already satisfy it. Verified locally: _IncludedRouter arrived in 0.137.0, iter_route_contexts in 0.138.0.
@@ -96,7 +96,7 @@ CORRECTION 2026-09-29 (CI on #3053): two earlier claims here were wrong.
 (1) 'Helper_Scripts/ci/route_auth_ratchet.py (already handles _IncludedRouter)': it handled one level only. effective_candidates() returns nested _IncludedRouter branches alongside route contexts, and its _route_facts gave those no path, so it skipped them. Every route two or more includes deep was invisible to the auth ratchet. That hid the two baselined audio routes (they read as stale), and it would equally have hidden a new unauthenticated nested route.
 (2) The 'known local-only failure' of route_auth_ratchet reporting GET /api/v1/audio/stream/status and /transcriptions/health stale was this same blind spot, not an environment where the audio router does not mount.
 Fix: iter_routes now walks iter_served_routes and yields API routes only. A new test puts an authenticated route two includes deep; it fails on the old walk. The ratchet passes locally (rc 0, baseline unchanged, so no hidden unauthenticated routes surfaced), and tests/lint/test_route_auth_ratchet.py has 11 passing.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

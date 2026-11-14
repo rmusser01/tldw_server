@@ -38,6 +38,7 @@ vi.mock("@/utils/is-private-mode", () => ({
 
 vi.mock("@/db/dexie/helpers", () => ({
   getAllPrompts: mocks.getAllPrompts,
+  getSharedLocalPrompts: async () => (await mocks.getAllPrompts()).filter((prompt: any) => prompt.ownerId == null && !prompt.serverId && !prompt.studioProjectId && !prompt.studioPromptId && !prompt.serverLibraryId && !prompt.serverLibraryUuid),
   markPromptSyncError: mocks.markPromptSyncError,
   permanentlyDeletePrompt: mocks.permanentlyDeletePrompt,
   restorePromptSnapshot: mocks.restorePromptSnapshot,
@@ -138,7 +139,7 @@ describe("PromptRecipeBuilder", () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
-    queryClient.setQueryData(["getAllPromptsForSelect"], records);
+    queryClient.setQueryData(["getAllPromptsForSelect", "shared-local-legacy"], records);
     queryClient.setQueryData(
       ["recipePersistenceUncertainty", ownerA, ["system-id"], null],
       { "system-id": "clear" },

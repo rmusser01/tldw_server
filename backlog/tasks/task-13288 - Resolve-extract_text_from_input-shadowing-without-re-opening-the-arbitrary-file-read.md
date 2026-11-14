@@ -56,13 +56,13 @@ Source: comprehensive core-module review prompt smoke run, findings LLM_Calls-1 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fix commit aec7b5a6cf. New test file tldw_Server_API/tests/LLM_Calls/test_summarization_input_extraction.py (11 tests). RED on ea1cbc6941: 8 failed / 3 passed (single-definition check, text+content dict keys via analyze(), scalar/non-object JSON '123','true','null','"quoted"','[1, 2]'). The two security tests passed on old code only because of the shadowing. GREEN: 11 passed. Mutation check: re-adding an os.path.isfile/open branch to the surviving extractor makes test_filesystem_path_is_not_read and test_extractor_never_opens_files fail (2 failed / 9 passed), so the security property is now pinned by tests, not definition order.
 
 TASK-2425 cross-reference: its 'file read not active through analyze()' conclusion was correct but rested on the second definition shadowing the first. Superseded: the file-reading definition is deleted, the surviving extractor documents that strings are never treated as paths, and analyze()'s docstring no longer advertises 'file path to JSON'. extract_metadata_and_content and format_input_with_metadata had zero references in app/ or tests/ and are deleted (the former also opened caller paths). Unused 'import os' removed.
 
 Suite comparison (LLM_Calls, Translation, Evaluations/unit/test_rag_evaluator.py, Chat/unit/test_authoritative_adapter_translation.py): before 17 failed / 650 passed, after 9 failed / 658 passed; the 9 remaining failures are identical before and after (pre-existing strict_filter/top_k tests), the other 8 before-failures are the new red tests. Bandit -ll on Summarization_General_Lib.py: no findings. Ruff clean on touched files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

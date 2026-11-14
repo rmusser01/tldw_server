@@ -5,13 +5,29 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
+    OrganizationCreateRequest,
     OrganizationSTTSettingsUpdate,
     OrganizationWatchlistsSettingsUpdate,
+    OrgMemberAddRequest,
+    OrgMemberRoleUpdateRequest,
+    TeamMemberAddRequest,
+    TeamMemberRoleUpdateRequest,
+)
+from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseLockError,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    MembershipAuthorizationError,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.services import admin_orgs_service
+from tldw_Server_API.app.services import admin_e2e_support_service, admin_orgs_service
 
 
 class _CursorStub:
@@ -101,6 +117,263 @@ def _admin_principal() -> AuthPrincipal:
         org_ids=[],
         team_ids=[],
     )
+
+
+@pytest.mark.asyncio
+async def test_admin_e2e_org_seed_atomically_assigns_requested_owner() -> None:
+    captured: dict[str, Any] = {}
+
+    class _Repo:
+        async def list_organizations(self, **_kwargs):
+            return [], 0
+
+        async def create_organization_with_owner_membership(self, **kwargs):
+            captured.update(kwargs)
+            return {"id": 55, "owner_user_id": kwargs["owner_user_id"]}
+
+    organization = await admin_e2e_support_service._ensure_org(
+        orgs_repo=_Repo(),  # type: ignore[arg-type]
+        owner_user_id=23,
+    )
+
+    assert organization["owner_user_id"] == 23
+    assert captured["owner_user_id"] == 23
+    assert captured["context"] is admin_e2e_support_service._E2E_MEMBERSHIP_CONTEXT
+
+
+@pytest.mark.asyncio
+async def test_create_org_with_owner_uses_atomic_owner_membership_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _atomic_create(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "id": 55,
+            "name": "Atomic Org",
+            "slug": "atomic-org",
+            "owner_user_id": 9,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    monkeypatch.setattr(
+        admin_orgs_service,
+        "core_create_organization_with_owner_membership",
+        _atomic_create,
+        raising=False,
+    )
+
+    response = await admin_orgs_service.create_org(
+        OrganizationCreateRequest(
+            name="Atomic Org",
+            slug="atomic-org",
+            owner_user_id=9,
+        ),
+        _admin_principal(),
+    )
+
+    assert response.owner_user_id == 9
+    assert captured["owner_user_id"] == 9
+    assert captured["context"].actor_user_id == 1
+    assert (
+        captured["context"].required_authority
+        is admin_orgs_service.MembershipAuthority.PLATFORM_ADMIN
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_org_without_owner_uses_actor_authorized_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    async def _authorized_create(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "id": 55,
+            "name": "Ownerless Org",
+            "slug": "ownerless-org",
+            "owner_user_id": None,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    async def _unexpected_unchecked_create(**_kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("admin creation must reauthorize the persisted actor")
+
+    monkeypatch.setattr(
+        admin_orgs_service,
+        "core_create_organization_as_actor",
+        _authorized_create,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        admin_orgs_service,
+        "core_create_organization",
+        _unexpected_unchecked_create,
+        raising=False,
+    )
+
+    response = await admin_orgs_service.create_org(
+        OrganizationCreateRequest(
+            name="Ownerless Org",
+            slug="ownerless-org",
+        ),
+        _admin_principal(),
+    )
+
+    assert response.owner_user_id is None
+    assert captured["context"].actor_user_id == 1
+    assert (
+        captured["context"].required_authority
+        is admin_orgs_service.MembershipAuthority.PLATFORM_ADMIN
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_org_with_owner_rejects_admin_without_persisted_actor_id() -> None:
+    principal = AuthPrincipal(
+        kind="service",
+        user_id=None,
+        roles=["admin"],
+        is_admin=True,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await admin_orgs_service.create_org(
+            OrganizationCreateRequest(
+                name="Atomic Org",
+                slug="atomic-org",
+                owner_user_id=9,
+            ),
+            principal,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Not authorized to manage memberships"
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_status", "expected_detail"),
+    [
+        (MembershipAuthorizationError(), 403, "Not authorized to manage memberships"),
+        (MembershipScopeNotFound(), 404, "Membership scope or target not found"),
+        (MembershipTargetNotFound(), 404, "Membership scope or target not found"),
+        (MembershipPreflightChanged(), 409, "Membership write conflicted; retry the request"),
+    ],
+)
+def test_membership_control_error_http_mapping(
+    error: Exception,
+    expected_status: int,
+    expected_detail: str,
+) -> None:
+    mapped = admin_orgs_service._membership_control_http_error(error)
+
+    assert mapped.status_code == expected_status
+    assert mapped.detail == expected_detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_status", "expected_detail", "expected_headers"),
+    [
+        (MembershipPreflightChanged(), 409, "Membership write conflicted; retry the request", None),
+        (
+            ConnectionPoolExhaustedError(),
+            503,
+            "Authentication database is busy. Please retry shortly.",
+            {"Retry-After": "7"},
+        ),
+        (DatabaseLockError(), 503, "Authentication database is busy. Please retry shortly.", {"Retry-After": "7"}),
+        (
+            TimeoutError("private timeout"),
+            503,
+            "Authentication database is busy. Please retry shortly.",
+            {"Retry-After": "7"},
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("service_name", "core_name"),
+    [
+        ("add_team_member", "core_add_team_member"),
+        ("remove_team_member", "core_remove_team_member"),
+        ("update_team_member_role", "core_update_team_member_role"),
+        ("add_org_member", "core_add_org_member"),
+        ("remove_org_member", "core_remove_org_member"),
+        ("update_org_member_role", "core_update_org_member_role"),
+    ],
+)
+async def test_admin_membership_writes_map_preflight_races_to_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    service_name: str,
+    core_name: str,
+    failure: Exception,
+    expected_status: int,
+    expected_detail: str,
+    expected_headers: dict[str, str] | None,
+) -> None:
+    monkeypatch.setenv("AUTHNZ_SQLITE_LOCK_RETRY_AFTER_SECONDS", "7")
+
+    async def _allow_team(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return {"org_id": 5}
+
+    async def _allow_org(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    async def _preflight_changed(*_args: Any, **_kwargs: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(
+        admin_orgs_service.admin_scope_service,
+        "get_scoped_team",
+        _allow_team,
+    )
+    monkeypatch.setattr(
+        admin_orgs_service.admin_scope_service,
+        "enforce_admin_org_access",
+        _allow_org,
+    )
+    monkeypatch.setattr(admin_orgs_service, core_name, _preflight_changed)
+
+    service = getattr(admin_orgs_service, service_name)
+    request = object()
+    principal = _admin_principal()
+    if service_name == "add_team_member":
+        call = service(11, TeamMemberAddRequest(user_id=7), request, principal)
+    elif service_name == "remove_team_member":
+        call = service(11, 7, request, principal)
+    elif service_name == "update_team_member_role":
+        call = service(
+            11,
+            7,
+            TeamMemberRoleUpdateRequest(role="lead"),
+            request,
+            principal,
+        )
+    elif service_name == "add_org_member":
+        call = service(5, OrgMemberAddRequest(user_id=7), request, principal)
+    elif service_name == "remove_org_member":
+        call = service(5, 7, request, principal)
+    else:
+        call = service(
+            5,
+            7,
+            OrgMemberRoleUpdateRequest(role="admin"),
+            request,
+            principal,
+        )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await call
+
+    assert exc_info.value.status_code == expected_status
+    assert exc_info.value.detail == expected_detail
+    assert exc_info.value.headers == expected_headers
 
 
 @pytest.mark.asyncio
@@ -215,7 +488,7 @@ async def test_get_org_watchlists_settings_postgres_path_uses_fetchrow_and_pg_pl
     assert response.org_id == 88
     assert response.require_include_default is True
     assert db.fetchrow_calls and "$1" in db.fetchrow_calls[0][0]
-    assert not db.execute_calls
+    assert not db.execute_calls  # nosec B101 -- request-time readiness must not issue DDL.
 
 
 @pytest.mark.asyncio
@@ -327,16 +600,22 @@ async def test_get_org_stt_settings_falls_back_to_stt_defaults_when_org_row_miss
 
 
 @pytest.mark.asyncio
-async def test_org_stt_settings_repo_ensure_tables_uses_pg_connection_execute() -> None:
+async def test_org_stt_settings_repo_ensure_tables_validates_pg_connection_without_ddl(monkeypatch) -> None:
     from tldw_Server_API.app.core.AuthNZ.repos.org_stt_settings_repo import AuthnzOrgSttSettingsRepo
 
     db = _PostgresTxConnWithSqliteTrap(metadata_json=None)
 
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.AuthNZ import postgres_runtime_schema
+
+    validator = AsyncMock()
+    monkeypatch.setattr(postgres_runtime_schema, "validate_postgres_org_stt_runtime", validator)
     repo = AuthnzOrgSttSettingsRepo(db)
     await repo.ensure_tables()
 
-    assert db.execute_calls
-    assert any("create table if not exists org_stt_settings" in q.lower() for q, _ in db.execute_calls)
+    validator.assert_awaited_once_with(db)
+    assert not db.execute_calls
 
 
 @pytest.mark.asyncio

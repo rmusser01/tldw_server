@@ -35,11 +35,11 @@ Create a follow-up implementation plan for the next llama.cpp managed runtime sl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started from merged Stage 1 plan and the managed runtime roadmap. This task is plan-only; implementation will be a follow-up code task.
 
 Verification: git diff --check passed with no output. ASCII scan over the plan and task files found no non-ASCII characters. Bandit skipped because this task only changes planning/task markdown and no Python code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

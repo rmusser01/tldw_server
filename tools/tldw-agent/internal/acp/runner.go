@@ -49,6 +49,41 @@ type Session struct {
 	gitTools     *tools.GitTools
 	terminal     *TerminalManager
 	runErr       <-chan error
+	promptMu     sync.Mutex
+	activePrompt *sessionPromptOperation
+	closed       bool
+}
+
+type sessionPromptOperation struct {
+	ctx               context.Context
+	cancel            context.CancelFunc
+	done              chan struct{}
+	nativeRelayClosed bool
+}
+
+func (s *Session) currentPrompt() *sessionPromptOperation {
+	s.promptMu.Lock()
+	defer s.promptMu.Unlock()
+	return s.activePrompt
+}
+
+func (s *Session) cancelPrompt() {
+	s.promptMu.Lock()
+	defer s.promptMu.Unlock()
+	if s.activePrompt != nil {
+		s.activePrompt.cancel()
+	}
+}
+
+// Linearize the last authority check with the synchronous local effect. Never
+// hold this lock during a permission or downstream RPC wait.
+func (s *Session) runDirectTool(operation *sessionPromptOperation, id json.RawMessage, action func() (*RPCResponse, error)) (*RPCResponse, error) {
+	s.promptMu.Lock()
+	defer s.promptMu.Unlock()
+	if s.closed || s.activePrompt != operation || (operation != nil && operation.ctx.Err() != nil) {
+		return NewErrorResponse(id, ErrInvalidReq, "tool operation no longer active"), nil
+	}
+	return action()
 }
 
 func NewRunner(cfg *config.Config) *Runner {
@@ -80,7 +115,9 @@ func (r *Runner) Run(stdin io.Reader, stdout io.Writer) error {
 }
 
 func (r *Runner) handleUpstreamNotification(msg *RPCMessage) {
-	// No upstream notifications are required for MVP.
+	if msg.Method == "session/cancel" {
+		_, _ = r.handleSessionCancel(msg)
+	}
 }
 
 func (r *Runner) handleUpstreamRequest(msg *RPCMessage) (*RPCResponse, error) {
@@ -337,21 +374,55 @@ func (r *Runner) handleSessionPrompt(msg *RPCMessage) (*RPCResponse, error) {
 		return NewErrorResponse(msg.ID, ErrInvalidParams, "unknown session"), nil
 	}
 
-	resp, err := session.downstream.CallRaw(context.Background(), "session/prompt", msg.Params)
-	if err != nil {
-		return NewErrorResponse(msg.ID, ErrInternal, fmt.Sprintf("downstream session/prompt failed: %v", err)), nil
+	if r.upstream == nil {
+		return NewErrorResponse(msg.ID, ErrInternal, "upstream unavailable"), nil
 	}
-	if resp.Error != nil {
-		return &RPCResponse{JSONRPC: JSONRPCVersion, ID: msg.ID, Error: resp.Error}, nil
+	session.promptMu.Lock()
+	if session.closed || session.activePrompt != nil {
+		session.promptMu.Unlock()
+		return NewErrorResponse(msg.ID, ErrInvalidReq, "session prompt already active"), nil
 	}
-
-	return NewResultResponse(msg.ID, json.RawMessage(resp.Result)), nil
+	ctx, cancel := context.WithCancel(context.Background())
+	operation := &sessionPromptOperation{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	session.activePrompt = operation
+	session.promptMu.Unlock()
+	go func() {
+		defer func() {
+			operation.cancel()
+			session.promptMu.Lock()
+			if session.activePrompt == operation {
+				session.activePrompt = nil
+			}
+			close(operation.done)
+			session.promptMu.Unlock()
+		}()
+		// Stop cancels permission waits, while the real downstream response/EOF
+		// determines settlement and therefore successor admission.
+		resp, err := session.downstream.callRaw(context.Background(), "session/prompt", msg.Params, func() {
+			session.promptMu.Lock()
+			if session.activePrompt == operation {
+				operation.nativeRelayClosed = true
+			}
+			session.promptMu.Unlock()
+		})
+		var response *RPCResponse
+		if err != nil || resp == nil {
+			response = NewErrorResponse(msg.ID, ErrInternal, fmt.Sprintf("downstream session/prompt failed: %v", err))
+		} else if resp.Error != nil {
+			response = &RPCResponse{JSONRPC: JSONRPCVersion, ID: msg.ID, Error: resp.Error}
+		} else {
+			response = NewResultResponse(msg.ID, json.RawMessage(resp.Result))
+		}
+		_ = r.upstream.SendResponse(response)
+	}()
+	return nil, nil
 }
 
 func (r *Runner) handleSessionCancel(msg *RPCMessage) (*RPCResponse, error) {
 	var params sessionPromptParams
 	if err := json.Unmarshal(msg.Params, &params); err == nil {
 		if session := r.getSession(params.SessionID); session != nil {
+			session.cancelPrompt()
 			_ = session.downstream.NotifyRaw("session/cancel", msg.Params)
 		}
 	}
@@ -370,6 +441,7 @@ func (r *Runner) handleSessionClose(msg *RPCMessage) (*RPCResponse, error) {
 
 	session := r.getSession(params.SessionID)
 	if session != nil {
+		session.cancelPrompt()
 		if capabilityEnabled(session.capabilities, "sessionCapabilities", "close") {
 			resp, err := session.downstream.CallRaw(context.Background(), "session/close", msg.Params)
 			if err != nil {
@@ -925,7 +997,18 @@ func (r *Runner) cleanupSession(sessionID string) {
 	if session == nil {
 		return
 	}
+	session.promptMu.Lock()
+	session.closed = true
+	operation := session.activePrompt
+	if operation != nil {
+		operation.cancel()
+	}
+	session.promptMu.Unlock()
 	r.terminateProcess(session.process)
+	session.downstream.markClosed(ErrConnectionClosed)
+	if operation != nil {
+		<-operation.done
+	}
 }
 
 func (r *Runner) terminateProcess(cmd *exec.Cmd) {
@@ -951,6 +1034,50 @@ func (r *Runner) shutdown() {
 func (r *Runner) handleDownstreamNotification(session *Session, msg *RPCMessage) {
 	if r.upstream == nil {
 		return
+	}
+	if msg.Method == "session/update" {
+		var params map[string]json.RawMessage
+		var sessionID string
+		if session == nil || json.Unmarshal(msg.Params, &params) != nil || json.Unmarshal(params["sessionId"], &sessionID) != nil || sessionID == "" || r.getSession(sessionID) != session {
+			return
+		}
+		var update map[string]json.RawMessage
+		_ = json.Unmarshal(params["update"], &update)
+		rawKind := update["sessionUpdate"]
+		var kind interface{}
+		useFallback := len(rawKind) == 0
+		if json.Unmarshal(rawKind, &kind) == nil {
+			// Match the server's exact nested-kind or outer-type classifier.
+			switch value := kind.(type) {
+			case nil:
+				useFallback = true
+			case string:
+				useFallback = value == ""
+			case bool:
+				useFallback = !value
+			case float64:
+				useFallback = value == 0
+			case []interface{}:
+				useFallback = len(value) == 0
+			case map[string]interface{}:
+				useFallback = len(value) == 0
+			}
+		}
+		if useFallback {
+			_ = json.Unmarshal(params["type"], &kind)
+		}
+		kindText, _ := kind.(string)
+		if kindText == "agent_message_chunk" {
+			session.promptMu.Lock()
+			operation := session.activePrompt
+			// Preserve raw no-prompt notifications; the server owns admission.
+			// A known prompt must stop relay at its actual downstream reply.
+			allowed := !session.closed && (operation == nil || (!operation.nativeRelayClosed && operation.ctx.Err() == nil))
+			session.promptMu.Unlock()
+			if !allowed {
+				return
+			}
+		}
 	}
 	_ = r.upstream.SendMessage(msg)
 }
@@ -998,7 +1125,17 @@ func (r *Runner) handlePermissionRequest(session *Session, msg *RPCMessage) (*RP
 		return NewResultResponse(msg.ID, fallback), nil
 	}
 
-	resp, err := r.upstream.CallRaw(context.Background(), "session/request_permission", msg.Params)
+	var params map[string]json.RawMessage
+	var sessionID string
+	if session == nil || json.Unmarshal(msg.Params, &params) != nil || json.Unmarshal(params["sessionId"], &sessionID) != nil || sessionID == "" || r.getSession(sessionID) != session {
+		return NewErrorResponse(msg.ID, ErrInvalidParams, "invalid session/request_permission sessionId"), nil
+	}
+
+	ctx := context.Background()
+	if operation := session.currentPrompt(); operation != nil {
+		ctx = operation.ctx
+	}
+	resp, err := r.upstream.CallRaw(ctx, "session/request_permission", msg.Params)
 	if err != nil || resp == nil {
 		fallback := map[string]interface{}{
 			"outcome": map[string]interface{}{"outcome": "cancelled"},
@@ -1012,6 +1149,36 @@ func (r *Runner) handlePermissionRequest(session *Session, msg *RPCMessage) (*RP
 	}
 
 	return NewResultResponse(msg.ID, json.RawMessage(resp.Result)), nil
+}
+
+func (r *Runner) approveDirectTool(session *Session, msg *RPCMessage, input map[string]interface{}) bool {
+	if session.id == "" {
+		return false
+	}
+	params, err := json.Marshal(map[string]interface{}{
+		"sessionId": session.id,
+		"tool":      map[string]interface{}{"name": msg.Method, "input": input},
+	})
+	if err != nil {
+		return false
+	}
+	response, err := r.handlePermissionRequest(session, &RPCMessage{ID: msg.ID, Method: "session/request_permission", Params: params})
+	if err != nil || response == nil || response.Error != nil {
+		return false
+	}
+	raw, err := json.Marshal(response.Result)
+	if err != nil {
+		return false
+	}
+	var result struct {
+		Outcome struct {
+			Outcome string `json:"outcome"`
+		} `json:"outcome"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return false
+	}
+	return result.Outcome.Outcome == "approved"
 }
 
 func (r *Runner) handleFSRead(session *Session, msg *RPCMessage) (*RPCResponse, error) {
@@ -1073,12 +1240,20 @@ func (r *Runner) handleFSWrite(session *Session, msg *RPCMessage) (*RPCResponse,
 	}
 
 	args := map[string]interface{}{"path": params.Path, "content": params.Content}
-	res, err := session.fsTools.Write(args)
-	if err != nil || !res.OK {
+	if _, err := session.workspace.ResolvePath(params.Path); err != nil {
 		return NewErrorResponse(msg.ID, ErrInternal, "failed to write file"), nil
 	}
-
-	return NewResultResponse(msg.ID, nil), nil
+	operation := session.currentPrompt()
+	if r.cfg.Security.RequireApprovalForWrites && !r.approveDirectTool(session, msg, args) {
+		return NewErrorResponse(msg.ID, ErrInvalidReq, "file write permission not approved"), nil
+	}
+	return session.runDirectTool(operation, msg.ID, func() (*RPCResponse, error) {
+		res, err := session.fsTools.Write(args)
+		if err != nil || !res.OK {
+			return NewErrorResponse(msg.ID, ErrInternal, "failed to write file"), nil
+		}
+		return NewResultResponse(msg.ID, nil), nil
+	})
 }
 
 func (r *Runner) handleSearchGrep(session *Session, msg *RPCMessage) (*RPCResponse, error) {
@@ -1216,12 +1391,18 @@ func (r *Runner) handleTerminalCreate(session *Session, msg *RPCMessage) (*RPCRe
 		return NewErrorResponse(msg.ID, ErrInvalidParams, "sessionId mismatch"), nil
 	}
 
-	termID, err := session.terminal.Create(params.Command, params.Args, params.Cwd, params.OutputByteLimit)
-	if err != nil {
-		return NewErrorResponse(msg.ID, ErrInternal, err.Error()), nil
+	input := map[string]interface{}{"command": params.Command, "args": params.Args, "cwd": params.Cwd, "outputByteLimit": params.OutputByteLimit}
+	operation := session.currentPrompt()
+	if r.cfg.Security.RequireApprovalForExec && !r.approveDirectTool(session, msg, input) {
+		return NewErrorResponse(msg.ID, ErrInvalidReq, "terminal permission not approved"), nil
 	}
-
-	return NewResultResponse(msg.ID, map[string]string{"terminalId": termID}), nil
+	return session.runDirectTool(operation, msg.ID, func() (*RPCResponse, error) {
+		termID, err := session.terminal.Create(params.Command, params.Args, params.Cwd, params.OutputByteLimit)
+		if err != nil {
+			return NewErrorResponse(msg.ID, ErrInternal, err.Error()), nil
+		}
+		return NewResultResponse(msg.ID, map[string]string{"terminalId": termID}), nil
+	})
 }
 
 func (r *Runner) handleTerminalOutput(session *Session, msg *RPCMessage) (*RPCResponse, error) {

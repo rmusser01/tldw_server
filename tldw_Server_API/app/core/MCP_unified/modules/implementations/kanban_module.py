@@ -17,6 +17,7 @@ from ....DB_Management.Kanban_DB import (
     KanbanDBError,
     NotFoundError,
 )
+from ....Kanban.vector_search import create_kanban_vector_search
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
 
@@ -1009,7 +1010,9 @@ class KanbanModule(BaseModule):
         user_id = getattr(context, "user_id", None)
         if user_id is None:
             raise ValueError("Missing user_id for Kanban access")
-        return KanbanDB(db_path=kanban_path, user_id=str(user_id))
+        return KanbanDB(
+            db_path=kanban_path, user_id=str(user_id), vector_search_factory=create_kanban_vector_search
+        )
 
     async def _list_boards(self, args: dict[str, Any], context: Any | None) -> dict[str, Any]:
         include_archived = bool(args.get("include_archived", False))

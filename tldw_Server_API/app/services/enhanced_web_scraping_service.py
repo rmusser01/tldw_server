@@ -20,6 +20,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.config import load_and_log_configs
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
@@ -33,7 +34,6 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.testing import is_truthy
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
 from tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib import is_content_page
 from tldw_Server_API.app.core.Web_Scraping.content import ContentMetadataHandler
 
@@ -733,7 +733,8 @@ class WebScrapingService:
                 system_prompt or load_prompt("webscraping", "article_summary_system")
                 or "You are a professional summarizer."
             )
-            summary = analyze(
+            summary = await asyncio.to_thread(
+                analyze,
                 input_data=content,
                 custom_prompt_arg=custom_prompt,
                 api_name=api_name or "openai",
@@ -797,7 +798,7 @@ class WebScrapingService:
         effective_user_id = user_id if user_id is not None else 1
         db_path = get_user_media_db_path(effective_user_id)
         with managed_media_database(
-            client_id=f"webscraping_service_{effective_user_id}",
+            client_id=str(effective_user_id),
             db_path=db_path,
             initialize=False,
         ) as db:
@@ -1018,6 +1019,7 @@ class WebScrapingService:
                         author=article.get("author", None),
                         ingestion_date=None,  # Will use current time
                         overwrite=False,
+                        owner_user_id=effective_user_id,
                         chunks=chunks_for_sql,
                     )
                     _dt = max(0.0, time.perf_counter() - _t0)

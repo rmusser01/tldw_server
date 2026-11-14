@@ -15,8 +15,15 @@ import pytest
 @pytest.mark.unit
 def test_guardrail_tables_used_only_in_core_authnz_modules():
     project_root = Path(__file__).resolve().parents[3]
-    authnz_core = project_root / "app" / "core" / "AuthNZ"
-    assert authnz_core.exists(), f"Expected AuthNZ core path not found: {authnz_core}"
+    roots = [project_root / "app" / "core" / name for name in ("AuthNZ", "Provider_Credentials")]
+    for root in roots:
+        assert root.exists(), f"Expected core path not found: {root}"
+    files = [path for root in roots for path in root.rglob("*.py")]
+    files += [project_root / "app" / "core" / "Usage" / f"llm_budget_{name}.py" for name in ("guard", "middleware")]
+    files.append(project_root / "app" / "services" / "authnz_scheduler.py")
+    assert project_root / "app" / "core" / "Provider_Credentials" / "byok_runtime.py" in files
+    assert project_root / "app" / "core" / "Usage" / "llm_budget_guard.py" in files
+    assert project_root / "app" / "services" / "authnz_scheduler.py" in files
 
     allowed_files = {
         "app/core/AuthNZ/rate_limiter.py",
@@ -38,7 +45,7 @@ def test_guardrail_tables_used_only_in_core_authnz_modules():
 
     offending: list[str] = []
 
-    for path in authnz_core.rglob("*.py"):
+    for path in files:
         rel = path.relative_to(project_root).as_posix()
         if rel in allowed_files:
             continue

@@ -39,7 +39,7 @@ Implement the approved ACP downstream entrypoint strategy design for the first p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation plan saved at Docs/superpowers/plans/2026-05-12-acp-entrypoint-strategy-implementation-plan.md.
 
 Plan review completed after two fix rounds. Added explicit no-inference guardrail tests, legacy DB migration/default coverage, dynamic API parity tests, and initialize-gated session/new plus session/prompt manifest sequencing. Final reviewer status: approved.
@@ -67,7 +67,7 @@ Task 3 custom-template blocker follow-up red evidence: requested pytest failed 2
 Task 4 execution plan recorded before edits: add failing ACP endpoint tests for agents, setup-guide, health, dynamic register forwarding, and runner/static entrypoint normalization; run focused pytest for red evidence; implement only schema and endpoint classifier wiring needed to pass; re-run focused pytest, git diff --check, scoped Bandit, and commit the Task 4 slice.
 
 Task 4 red evidence: focused ACP endpoint pytest failed 5 tests for missing entrypoint metadata in health, setup-guide, /agents registry, runner normalization, and static fallback. Task 4 green evidence: focused ACP endpoint pytest reports 41 passed and 5 warnings. git diff --check is clean. Scoped Bandit on agent_client_protocol endpoint and schema reports 0 findings. Implementation exposes classifier-backed entrypoint readiness metadata across health, setup-guide, registry/static/runner agent listing, and preserves dynamic registration forwarding.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -95,6 +95,7 @@ vi.mock("@/services/tldw/runtime-auth-override", () => ({
   invalidateCookieSessionConfig: vi.fn()
 }))
 
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { TldwApiClientBase } from "@/services/tldw/TldwApiClient"
 
 const sessionConfig = {
@@ -246,4 +247,45 @@ describe("TldwApiClient session credential cleanup", () => {
       apiKeyServerOrigin: sessionConfig.apiKeyServerOrigin
     })
   })
+
+  it("settles a stale guarded Save without recursively acquiring its held credential lock", async () => {
+    await storages.local.set("tldwConfig", sessionConfig)
+    await storages.session.set(MANUAL_SESSION_KEY, { ...sessionConfig, apiKey: "existing-session-secret" })
+    const writer = new TldwApiClientBase()
+    await writer.initialize()
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    let queued!: () => void
+    const waiting = new Promise<void>(resolve => { queued = resolve })
+    let tail = Promise.resolve()
+    let requests = 0
+    vi.stubGlobal("navigator", Object.create(window.navigator, { locks: { value: {
+      request: (_name: string, work: () => unknown) => {
+        requests += 1
+        if (requests === 2) queued()
+        const next = tail.then(work)
+        tail = next.then(() => undefined, () => undefined)
+        return next
+      }
+    } } }))
+    const blocker = navigator.locks.request("tldw:manual-session-credential", async () => { await held })
+    let current = true
+    const save = writer.saveManualSingleUserCredential({ serverUrl: sessionConfig.serverUrl, apiKey: "obsolete-save-key", persistence: "session",
+      assertCurrent: () => { if (!current) throw createServicePromptScopeChangedError() } })
+    const settled = save.then(() => ({ status: 200 }), error => error)
+    await waiting
+    current = false
+    await storages.session.remove(MANUAL_SESSION_KEY)
+    ;(writer as unknown as { config: unknown }).config = null
+    release()
+    await blocker
+    let timer!: ReturnType<typeof setTimeout>
+    const result = await Promise.race([settled, new Promise(resolve => { timer = setTimeout(() => resolve({ hung: true }), 250) })])
+    clearTimeout(timer)
+    expect(result).toMatchObject({ status: 412 })
+    expect(requests).toBe(2)
+    await expect(writer.saveManualSingleUserCredential({ serverUrl: sessionConfig.serverUrl, apiKey: "next-current-key", persistence: "session" })).resolves.toBe("session")
+    expect((await writer.getConfig())?.apiKey).toBe("next-current-key")
+  })
+
 })

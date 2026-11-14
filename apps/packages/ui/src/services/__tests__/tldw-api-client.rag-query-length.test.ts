@@ -255,8 +255,7 @@ describe("TldwApiClient RAG query length guard", () => {
   })
 
   it.each([
-    ["mixin", () => new TldwApiClient()],
-    ["base", () => new TldwApiClientBase()],
+    ["client", () => new TldwApiClient()],
   ])("allows a ragSimple GET path exactly at the documented limit for %s", async (_name, makeClient) => {
     mocks.bgRequest.mockResolvedValue({ answer: null })
     const fixedPathLength = "/api/v1/rag/simple?query=".length + "&top_k=5".length
@@ -272,8 +271,7 @@ describe("TldwApiClient RAG query length guard", () => {
   })
 
   it.each([
-    ["mixin", () => new TldwApiClient()],
-    ["base", () => new TldwApiClientBase()],
+    ["client", () => new TldwApiClient()],
   ])("rejects an over-limit ragSimple GET path before transport for %s", async (_name, makeClient) => {
     const fixedPathLength = "/api/v1/rag/simple?query=".length + "&top_k=5".length
     const overLimitQuery = "a".repeat(
@@ -340,14 +338,14 @@ describe("TldwApiClient RAG query length guard", () => {
     })
   })
 
-  it("sanitizes direct TldwApiClientBase ragSearch requests", async () => {
+  it("sanitizes direct ragSearch requests", async () => {
     mocks.tldwRequest.mockResolvedValue({
       ok: true,
       status: 200,
       data: { results: [], answer: null },
     })
 
-    const client = new TldwApiClientBase()
+    const client = new TldwApiClient()
     await client.ragSearch("base search boundary", credentialShapedOptions)
 
     const body = mocks.tldwRequest.mock.calls[0][0]?.body as Record<
@@ -357,14 +355,14 @@ describe("TldwApiClient RAG query length guard", () => {
     expectServerOwnedProviderBody(body)
   })
 
-  it("positive-allowlists Pydantic chat_history fields at the Base boundary", async () => {
+  it("positive-allowlists Pydantic chat_history fields at the client boundary", async () => {
     mocks.tldwRequest.mockResolvedValue({
       ok: true,
       status: 200,
       data: { results: [], answer: null },
     })
 
-    await new TldwApiClientBase().ragSearch(
+    await new TldwApiClient().ragSearch(
       "base history boundary",
       credentialShapedOptions
     )
@@ -379,7 +377,7 @@ describe("TldwApiClient RAG query length guard", () => {
       yield JSON.stringify({ type: "delta", text: "ok" })
     })
 
-    const client = new TldwApiClientBase()
+    const client = new TldwApiClient()
     const iterator = client.ragSearchStream(
       "base stream boundary",
       credentialShapedOptions
@@ -390,10 +388,10 @@ describe("TldwApiClient RAG query length guard", () => {
     expectServerOwnedProviderBody(payload.body as Record<string, unknown>)
   })
 
-  it("sanitizes direct TldwApiClientBase ragSimple requests", async () => {
+  it("sanitizes direct ragSimple requests", async () => {
     mocks.bgRequest.mockResolvedValue({ answer: null })
 
-    const client = new TldwApiClientBase()
+    const client = new TldwApiClient()
     await client.ragSimple("base simple boundary", {
       top_k: 2,
       sources: ["characters"],
@@ -456,7 +454,7 @@ describe("TldwApiClient RAG query length guard", () => {
     })
   })
 
-  it("sanitizes direct Base ragSearch failures without replaying HTTP 500", async () => {
+  it("sanitizes direct ragSearch failures without replaying HTTP 500", async () => {
     mocks.tldwRequest.mockResolvedValue({
       ok: false,
       status: 500,
@@ -465,7 +463,7 @@ describe("TldwApiClient RAG query length guard", () => {
     })
 
     await expect(
-      new TldwApiClientBase().ragSearch("base failure", {
+      new TldwApiClient().ragSearch("base failure", {
         enable_reranking: true,
       })
     ).rejects.toMatchObject({

@@ -41,13 +41,13 @@ Continue issue #1116 Phase 2.2 after PR #1324. Convert the next small minimal-te
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1324 merge was verified on origin/dev as 8b87d7b2a in the git log. Worktree: local feature worktree for phase2-2-minimal-study-router-conditionals-am. Branch: codex/phase2-2-minimal-study-router-conditionals-am. Baseline focused Kanban minimal tests passed with 3 passed before edits.
 
 RED verification: focused study tests failed before production changes because flashcards, quizzes, and study_suggestions were imported during spec construction and no named lazy study specs existed for registration-time skip/propagation assertions.
 
 GREEN verification: converted flashcards, quizzes, and study_suggestions to ImportedRouterSpec-backed lazy specs with skip_exceptions=(ImportError, AttributeError). Focused study tests passed with 3 passed; full test_router_groups_contract.py passed with 91 passed; test_main_router_contract.py passed with 6 passed; Bandit on minimal.py reported 0 results and 0 errors; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

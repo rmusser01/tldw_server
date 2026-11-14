@@ -1,4 +1,5 @@
 import type {
+  NotesGraphEdge,
   NotesGraphEdgeType,
   NotesGraphResponse,
   NotesGraphSuggestion
@@ -7,6 +8,10 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 
 import type { ProvisionalNotesGraphOverlay } from "./hooks/useNotesGraphSuggestions"
+import {
+  getNotesGraphEdgeLabel,
+  groupNotesGraphEdgesByPair
+} from "./notes-manager-utils"
 
 const PAGE_SIZE = 100
 const GROUP_ORDER = ["outgoing", "incoming", "connected", "suggested"] as const
@@ -19,7 +24,8 @@ const EDGE_ORDER: Record<
   backlink: 2,
   tag_membership: 3,
   source_membership: 4,
-  provisional_suggestion: 5
+  semantic: 5,
+  provisional_suggestion: 6
 }
 
 type RelationshipGroupId = (typeof GROUP_ORDER)[number]
@@ -28,6 +34,9 @@ export type NotesGraphRelationshipRow = {
   id: string
   group: RelationshipGroupId
   edgeType: NotesGraphEdgeType | "provisional_suggestion"
+  edgeIds: string[]
+  edgeTypes: NotesGraphEdgeType[]
+  edges: NotesGraphEdge[]
   counterpart: { id: string; label: string }
   suggestion: NotesGraphSuggestion | null
 }
@@ -62,20 +71,34 @@ export const buildNotesGraphRelationshipGroups = ({
     grouped.set(group, [...(grouped.get(group) ?? []), row])
   }
 
-  graph.edges.forEach((edge) => {
-    if (visibleEdgeTypes && !visibleEdgeTypes.has(edge.type)) return
-    if (edge.source !== selectedNodeId && edge.target !== selectedNodeId) return
+  const visibleEdges = graph.edges.filter(
+    (edge) =>
+      (!visibleEdgeTypes || visibleEdgeTypes.has(edge.type)) &&
+      (edge.source === selectedNodeId || edge.target === selectedNodeId)
+  )
+  groupNotesGraphEdgesByPair(visibleEdges).forEach((edgeGroup) => {
+    const representative =
+      edgeGroup.edges.find((edge) => edge.type === "manual") ??
+      edgeGroup.edges.find(
+        (edge) => edge.type === "wikilink" || edge.type === "backlink"
+      ) ??
+      edgeGroup.edges[0]
     const counterpartId =
-      edge.source === selectedNodeId ? edge.target : edge.source
-    const group = !edge.directed
+      representative.source === selectedNodeId
+        ? representative.target
+        : representative.source
+    const group = !representative.directed
       ? "connected"
-      : edge.source === selectedNodeId
+      : representative.source === selectedNodeId
         ? "outgoing"
         : "incoming"
     add(group, {
-      id: edge.id,
+      id: edgeGroup.id,
       group,
-      edgeType: edge.type,
+      edgeType: representative.type,
+      edgeIds: edgeGroup.edges.map((edge) => edge.id),
+      edgeTypes: edgeGroup.edges.map((edge) => edge.type),
+      edges: edgeGroup.edges,
       counterpart: {
         id: counterpartId,
         label: nodes.get(counterpartId)?.label ?? counterpartId
@@ -101,6 +124,9 @@ export const buildNotesGraphRelationshipGroups = ({
       id: overlay.edge.id,
       group: "suggested",
       edgeType: "provisional_suggestion",
+      edgeIds: [],
+      edgeTypes: [],
+      edges: [],
       counterpart: {
         id: counterpartId,
         label:
@@ -127,6 +153,162 @@ export const buildNotesGraphRelationshipGroups = ({
     const rows = grouped.get(id)
     return rows?.length ? [{ id, rows: [...rows].sort(compare) }] : []
   })
+}
+
+export type NotesGraphManualLinkHandler = (
+  edge: NotesGraphEdge,
+  origin: HTMLElement | null
+) => Promise<boolean>
+
+type SemanticRelationshipDetailsProps = {
+  edge: NotesGraphEdge
+  manualLinkAuthorized: boolean
+  isOnline: boolean
+  hasManualRelationship: boolean
+  manualLinkPending?: boolean
+  onCreateManualLink?: NotesGraphManualLinkHandler
+  showHeading?: boolean
+}
+
+export const NotesSemanticRelationshipDetails: React.FC<
+  SemanticRelationshipDetailsProps
+> = ({
+  edge,
+  manualLinkAuthorized,
+  isOnline,
+  hasManualRelationship,
+  manualLinkPending = false,
+  onCreateManualLink,
+  showHeading = true
+}) => {
+  const { t } = useTranslation("option")
+  const evidence = edge.evidence
+  const similarity = evidence?.similarity ?? edge.weight
+
+  return (
+    <section
+      className={
+        showHeading
+          ? "mt-2 min-w-0 border-t border-border pt-2 text-xs text-text"
+          : "min-w-0 pb-3 text-xs text-text"
+      }
+      aria-label={t("notesSearch.graphSimilarContent")}>
+      {showHeading ? (
+        <h3 className="font-semibold">
+          {t("notesSearch.graphSimilarContent")}
+        </h3>
+      ) : null}
+      {similarity !== null ? (
+        <p className="mt-1 break-words">
+          {t("notesSearch.graphPassageSimilarity", {
+            value: String(similarity)
+          })}
+        </p>
+      ) : null}
+      {evidence ? (
+        <>
+          <p className="mt-1 font-medium text-text-muted">
+            {t(`notesSearch.graphSimilarityBand.${evidence.qualitative_band}`)}
+          </p>
+          <dl className="mt-2 grid min-w-0 grid-cols-[auto,minmax(0,1fr)] gap-x-2 gap-y-1 text-text-muted">
+            <dt>{t("notesSearch.graphSemanticProvider")}</dt>
+            <dd className="break-words text-text">
+              {t("notesSearch.graphSemanticProviderModel", {
+                provider: evidence.provider_label,
+                model: evidence.model_label
+              })}
+            </dd>
+            <dt>{t("notesSearch.graphSemanticFreshness")}</dt>
+            <dd className="break-words text-text">
+              {t("notesSearch.graphSemanticVersions", {
+                source: evidence.source_content_version,
+                target: evidence.target_content_version
+              })}
+            </dd>
+            <dt>{t("notesSearch.graphSemanticGenerationLabel")}</dt>
+            <dd className="break-all text-text">
+              {t("notesSearch.graphSemanticGeneration", {
+                generation: evidence.generation_id
+              })}
+            </dd>
+            <dt>{t("notesSearch.graphSemanticIndexVersion")}</dt>
+            <dd className="break-words text-text">
+              {t("notesSearch.graphSemanticIndexVersionValue", {
+                index: evidence.semantic_index_revision,
+                configuration: evidence.configuration_revision
+              })}
+            </dd>
+            <dt>{t("notesSearch.graphSemanticModelRevision")}</dt>
+            <dd className="break-words text-text">
+              {evidence.model_revision ??
+                t("notesSearch.graphSemanticVersionUnavailable")}
+            </dd>
+            <dt>{t("notesSearch.graphSemanticNormalizationVersion")}</dt>
+            <dd className="break-words text-text">
+              {evidence.normalization_version}
+            </dd>
+            <dt>{t("notesSearch.graphSemanticChunkerVersion")}</dt>
+            <dd className="break-words text-text">
+              {evidence.chunker_version}
+            </dd>
+          </dl>
+          {evidence.excerpt_pairs.slice(0, 3).map((pair, index) => (
+            <div
+              key={`${edge.id}:evidence:${index}`}
+              className="mt-3 grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2">
+              <blockquote className="min-w-0 border-l-2 border-border pl-2">
+                <span className="block font-semibold text-text-muted">
+                  {t("notesSearch.graphSourceEvidence")}
+                </span>
+                <span className="mt-1 block break-words">
+                  {pair.source.text}
+                </span>
+              </blockquote>
+              <blockquote className="min-w-0 border-l-2 border-border pl-2">
+                <span className="block font-semibold text-text-muted">
+                  {t("notesSearch.graphTargetEvidence")}
+                </span>
+                <span className="mt-1 block break-words">
+                  {pair.target.text}
+                </span>
+              </blockquote>
+            </div>
+          ))}
+        </>
+      ) : edge.evidence_omitted ? (
+        <p className="mt-2 break-words text-text-muted">
+          {t("notesSearch.graphEvidenceOmitted")}
+        </p>
+      ) : null}
+      {manualLinkAuthorized &&
+      (evidence || edge.evidence_omitted === "response_byte_cap") &&
+      !hasManualRelationship &&
+      onCreateManualLink ? (
+        <button
+          type="button"
+          className="mt-3 min-h-11 border border-border bg-primary px-3 text-sm text-primary-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-50"
+          disabled={!isOnline || manualLinkPending}
+          onClick={(event) => {
+            const origin = event.currentTarget
+            void onCreateManualLink(edge, origin).then((succeeded) => {
+              requestAnimationFrame(() => {
+                const row = origin.closest<HTMLElement>(
+                  "[data-notes-graph-relationship-group]"
+                )
+                const nextFocus = succeeded
+                  ? row?.querySelector<HTMLButtonElement>(
+                      '[data-testid="notes-graph-relationship-row"]'
+                    ) ?? document.getElementById("notes-graph-details-tab")
+                  : origin
+                nextFocus?.focus()
+              })
+            })
+          }}>
+          {t("notesSearch.graphCreateManualLink")}
+        </button>
+      ) : null}
+    </section>
+  )
 }
 
 type ReviewRowProps = {
@@ -241,11 +423,16 @@ export type NotesGraphSuggestionDecisionHandler = (
 
 type NotesGraphRelationshipsViewProps = BuildGroupsInput & {
   suggestionsAuthorized: boolean
+  manualLinkAuthorized?: boolean
   isOnline: boolean
   canAccept?: boolean
   canReject?: boolean
   onSelectNode: (nodeId: string) => void
+  onSelectEdge?: (edgeId: string) => void
+  onCreateManualLink?: NotesGraphManualLinkHandler
   onDecideSuggestion?: NotesGraphSuggestionDecisionHandler
+  manualLinkPendingEdgeIds?: ReadonlySet<string>
+  queryIdentity?: string
 }
 
 const NotesGraphRelationshipsView: React.FC<
@@ -257,11 +444,16 @@ const NotesGraphRelationshipsView: React.FC<
   suggestions,
   visibleEdgeTypes,
   suggestionsAuthorized,
+  manualLinkAuthorized = false,
   isOnline,
   canAccept = false,
   canReject = false,
   onSelectNode,
-  onDecideSuggestion
+  onSelectEdge,
+  onCreateManualLink,
+  onDecideSuggestion,
+  manualLinkPendingEdgeIds,
+  queryIdentity
 }) => {
   const { t } = useTranslation("option")
   const groups = React.useMemo(
@@ -305,6 +497,13 @@ const NotesGraphRelationshipsView: React.FC<
   const rootRef = React.useRef<HTMLElement | null>(null)
   const firstRowRef = React.useRef<HTMLDivElement | null>(null)
   const previousPageRef = React.useRef(safePage)
+  const edgeFilterIdentity = React.useMemo(
+    () =>
+      Array.from(visibleEdgeTypes ?? [])
+        .sort()
+        .join(","),
+    [visibleEdgeTypes]
+  )
 
   const decide = async (
     action: "accept" | "reject",
@@ -321,7 +520,7 @@ const NotesGraphRelationshipsView: React.FC<
     )
     const nextSuggestionId =
       currentIndex >= 0
-        ? (reviewRows[currentIndex + 1]?.dataset.suggestionReviewRow ?? null)
+        ? reviewRows[currentIndex + 1]?.dataset.suggestionReviewRow ?? null
         : null
     let succeeded = false
     try {
@@ -345,7 +544,10 @@ const NotesGraphRelationshipsView: React.FC<
     })
   }
 
-  React.useEffect(() => setPage(0), [selectedNodeId])
+  React.useEffect(
+    () => setPage(0),
+    [edgeFilterIdentity, queryIdentity, selectedNodeId]
+  )
   React.useEffect(() => {
     const changed = previousPageRef.current !== safePage
     previousPageRef.current = safePage
@@ -429,6 +631,7 @@ const NotesGraphRelationshipsView: React.FC<
                       <div
                         ref={firstOnPage ? firstRowRef : undefined}
                         key={row.id}
+                        data-notes-graph-relationship-group={row.id}
                         role="listitem"
                         aria-posinset={setMetadata.position}
                         aria-setsize={setMetadata.setSize}
@@ -436,10 +639,88 @@ const NotesGraphRelationshipsView: React.FC<
                         <button
                           type="button"
                           data-testid="notes-graph-relationship-row"
+                          aria-describedby={`${row.id}-types`}
                           className="min-h-11 w-full break-words text-left text-sm text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                           onClick={() => onSelectNode(row.counterpart.id)}>
                           {row.counterpart.label}
                         </button>
+                        <p id={`${row.id}-types`} className="sr-only">
+                          {row.edgeTypes
+                            .map((edgeType) =>
+                              t(`notesSearch.graphEdgeType.${edgeType}`, {
+                                defaultValue: getNotesGraphEdgeLabel(edgeType)
+                              })
+                            )
+                            .join(", ")}
+                        </p>
+                        <div className="flex min-w-0 flex-wrap gap-1 pb-2">
+                          {row.edges.map((edge) => (
+                            <button
+                              key={edge.id}
+                              type="button"
+                              className="min-h-9 border border-border bg-surface px-2 text-xs text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                              onClick={() => onSelectEdge?.(edge.id)}>
+                              {t(`notesSearch.graphEdgeType.${edge.type}`, {
+                                defaultValue: getNotesGraphEdgeLabel(edge.type)
+                              })}
+                            </button>
+                          ))}
+                        </div>
+                        {row.edges
+                          .filter((edge) => edge.type === "semantic")
+                          .map((edge) => {
+                            const evidence = edge.evidence
+                            const similarity =
+                              evidence?.similarity ?? edge.weight
+                            return (
+                              <details
+                                key={edge.id}
+                                className="border-t border-border text-xs text-text">
+                                <summary
+                                  data-testid="notes-graph-semantic-evidence-toggle"
+                                  className="min-h-11 cursor-pointer py-2 pl-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+                                  <span
+                                    data-testid="notes-graph-semantic-treatment-label"
+                                    className="font-semibold">
+                                    {t("notesSearch.graphSimilarContent")}
+                                  </span>
+                                  <span className="ml-2 text-text-muted">
+                                    {evidence
+                                      ? t(
+                                          `notesSearch.graphSimilarityBand.${evidence.qualitative_band}`
+                                        )
+                                      : null}
+                                    {evidence && similarity !== null
+                                      ? " / "
+                                      : null}
+                                    {similarity !== null
+                                      ? t(
+                                          "notesSearch.graphPassageSimilarity",
+                                          {
+                                            value: String(similarity)
+                                          }
+                                        )
+                                      : null}
+                                  </span>
+                                </summary>
+                                <div className="pl-5">
+                                  <NotesSemanticRelationshipDetails
+                                    edge={edge}
+                                    manualLinkAuthorized={manualLinkAuthorized}
+                                    isOnline={isOnline}
+                                    hasManualRelationship={row.edgeTypes.includes(
+                                      "manual"
+                                    )}
+                                    manualLinkPending={manualLinkPendingEdgeIds?.has(
+                                      edge.id
+                                    )}
+                                    onCreateManualLink={onCreateManualLink}
+                                    showHeading={false}
+                                  />
+                                </div>
+                              </details>
+                            )
+                          })}
                       </div>
                     )
                   })}
@@ -453,6 +734,13 @@ const NotesGraphRelationshipsView: React.FC<
           {t("notesSearch.graphNoRelationships")}
         </p>
       )}
+      {graph.semantic_status?.truncated_by.length ? (
+        <p
+          className="border-t border-border p-3 text-xs text-warn"
+          role="status">
+          {t("notesSearch.graphSemanticTruncated")}
+        </p>
+      ) : null}
       {pageCount > 1 ? (
         <nav
           className="flex items-center justify-between border-t border-border px-3 py-2"

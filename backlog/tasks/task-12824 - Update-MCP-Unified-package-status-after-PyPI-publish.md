@@ -30,9 +30,9 @@ Reflect the successful first PyPI publish of mcp-unified 0.1.1 by updating packa
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PR review follow-up: Qodo found the repo-wide MCP docs contract still enforced old not-published wording; Gemini found the CLI subprocess test overwrote PYTHONPATH. Verified both comments against current code and reopening the task for the minimal PR follow-up commit.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

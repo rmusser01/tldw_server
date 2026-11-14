@@ -96,12 +96,12 @@ curl -H "Authorization: Bearer sk-..." https://api.example.com/api/v1/evaluation
 - **Burst Protection**: 10 requests/second max
 
 ### User-Based Limits (Multi-User Mode)
-| Tier       | Requests/Min | Tokens/Min | Batch Size | Cost/Month |
-|------------|-------------|------------|------------|------------|
-| Free       | 10          | 10,000     | 10         | $0         |
-| Basic      | 30          | 50,000     | 50         | $10        |
-| Premium    | 100         | 200,000    | 200        | $50        |
-| Enterprise | Unlimited   | Unlimited  | 1000       | Custom     |
+| Tier       | Requests/Min | Tokens/Min | Batch Size |
+|------------|-------------|------------|------------|
+| Free       | 10          | 10,000     | 10         |
+| Basic      | 30          | 50,000     | 50         |
+| Premium    | 100         | 200,000    | 200        |
+| Enterprise | Unlimited   | Unlimited  | 1000       |
 
 ### Rate Limit Response Headers
 Unified evaluation endpoints include standard response headers that surface current limits and remaining allowances:
@@ -112,8 +112,6 @@ Unified evaluation endpoints include standard response headers that surface curr
 - X-RateLimit-Daily-Limit
 - X-RateLimit-Daily-Remaining
 - X-RateLimit-Tokens-Remaining
-- X-RateLimit-Daily-Cost-Remaining
-- X-RateLimit-Monthly-Cost-Remaining
 
 In addition, draft standard headers are provided for compatibility with proxies and SDKs:
 
@@ -121,7 +119,7 @@ In addition, draft standard headers are provided for compatibility with proxies 
 - RateLimit-Remaining
 - RateLimit-Reset (seconds until the current minute window resets)
 
-Note: Remaining values are based on the latest limiter decision; actual token/cost usage may adjust after the request completes when providers return precise usage metadata.
+Note: Remaining values are based on the latest limiter decision; actual token usage may adjust after the request completes when providers return precise usage metadata.
 
 ## Core API Endpoints
 
@@ -683,8 +681,6 @@ Responses from evaluation endpoints also include standard `X-RateLimit-*` header
 - `X-RateLimit-Daily-Limit`
 - `X-RateLimit-Daily-Remaining`
 - `X-RateLimit-Tokens-Remaining`
-- `X-RateLimit-Daily-Cost-Remaining`
-- `X-RateLimit-Monthly-Cost-Remaining`
 
 ### Idempotency
 
@@ -856,7 +852,7 @@ curl "$BASE/embeddings/abtest/abtest_123/events" -H "X-API-KEY: $API_KEY"
 1. **Monitor token usage** via metrics endpoint
 2. **Use smaller models** for initial testing
 3. **Implement sampling** for large datasets
-4. **Set spending limits** via configuration
+4. **Set spending limits** with `limits.llm_cost_per_day_usd` and `limits.llm_cost_per_month_usd` (see `Docs/Operations/Usage_Quotas.md`)
 
 ### Security
 1. **Rotate API keys** regularly

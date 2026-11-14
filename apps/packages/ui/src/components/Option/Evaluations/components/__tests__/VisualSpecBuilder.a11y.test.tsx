@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { VisualSpecBuilder } from "../VisualSpecBuilder"
+import { EVAL_SPEC_SCHEMAS } from "../../utils/evalSpecSchemas"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue || key }),
@@ -55,4 +56,15 @@ describe("Evaluation visual spec accessible controls", () => {
     fireEvent.keyDown(number, { key: "ArrowUp", keyCode: 38 })
     expect(savedSpec().thresholds.min_score).toBe(0.6)
   })
+})
+
+it("offers the implemented response-quality metrics in both quality presets", () => {
+  const supported = ["relevance", "completeness", "clarity", "accuracy"]
+  render(<Builder type="response_quality" initial={{ metrics: ["accuracy"] }} />)
+  expect(screen.getAllByRole("checkbox")).toHaveLength(4)
+  for (const name of supported) {
+    expect(screen.getByRole("checkbox", { name })).toBeInTheDocument()
+  }
+  expect(EVAL_SPEC_SCHEMAS.response_quality.defaultSpec.metrics).toEqual(supported)
+  expect(EVAL_SPEC_SCHEMAS.model_graded.defaultSpec.metrics).toEqual(supported)
 })

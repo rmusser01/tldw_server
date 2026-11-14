@@ -31,13 +31,13 @@ Continue the frontend design-system product-state cleanup by replacing Inspector
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red: InspectorRail test mocked the design-system ready label as 'Ready via registry' and failed while the component still rendered literal Ready.
 
 Green verification: InspectorRail focused Vitest passed (4 tests); product-state guard unit test passed (52 tests); verify:design-system-state exited 0 with blocked=0 stale=0 baselineErrors=0; git diff --check exited 0. Broad bunx tsc still exits 2 with 239 baseline errors, and touched-scope filtering found no InspectorRail/baseline/touched-path matches.
 
 Bandit skipped: touched implementation is TypeScript/TSX/JSON/Backlog only, with no Python runtime code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,0 +1,242 @@
+{
+  "final-batch-result": {
+    "attempts": [
+      {
+        "name": "Aster-batch-success.txt",
+        "temporaryFailure": false
+      },
+      {
+        "name": "Aster-batch-retry.txt",
+        "temporaryFailure": true
+      },
+      {
+        "name": "Aster-batch-retry.txt",
+        "temporaryFailure": false
+      }
+    ],
+    "retainedCanonicalSuccessIds": [
+      4,
+      5
+    ],
+    "exactAskIds": [
+      4,
+      5
+    ]
+  },
+  "final-review-ask-result": {
+    "selectedIDs": [
+      212,
+      211
+    ],
+    "urlExact": true,
+    "requestExact": true
+  },
+  "final-power-result": {
+    "olderBeyondFirst200": true,
+    "selectedIDs": [
+      1,
+      6
+    ],
+    "presets": [
+      "Fast",
+      "Balanced",
+      "Deep",
+      "Fast"
+    ],
+    "provider": "openai",
+    "model": "local-uat-chat",
+    "actualExcerpt": true
+  },
+  "final-notes-result": {
+    "canonicalNoteId": "34a246ba-b6c3-40f3-8fa6-81920c0b2ed7",
+    "recipeNoAutoRun": true,
+    "exactOpen": true,
+    "revisedTitle": "Aster sourced brief \u2014 revised title",
+    "origin": "knowledge_qa",
+    "trustAndExcerptRetained": true,
+    "markdownAndWysiwygEditsRetained": true,
+    "markerHiddenFromEditing": true,
+    "canonicalBacklinkRetained": true
+  },
+  "final-note-open-revised": {
+    "canonicalNoteId": "34a246ba-b6c3-40f3-8fa6-81920c0b2ed7",
+    "title": "Aster sourced brief \u2014 revised title",
+    "origin": "knowledge_qa",
+    "trustQualified": true,
+    "excerptRetained": true
+  },
+  "final-recovery-result": {
+    "genuineNoResults": true,
+    "changeSourcesOpensDialog": true,
+    "depthIncreasedScopeRetained": true,
+    "controlledHTTP503RerunWithExistingAsk": true
+  },
+  "final-review-research-result": {
+    "selectedIDs": [
+      213,
+      212
+    ],
+    "activeSetExact": true,
+    "truthfulReviewedSourcesDraft": true,
+    "storedWebCanonicalId": 213,
+    "storedWebAttachedDirectly": true,
+    "snapshotUploads": 0,
+    "canonicalNoteId": "4ab2d743-c26c-4a70-8121-e7c872499930"
+  },
+  "final-research-result": {
+    "partialFailureRetry": true,
+    "uploads": [
+      {
+        "snapshot": true,
+        "hasOriginalNote": true,
+        "hasCheckpoint": true
+      },
+      {
+        "snapshot": true,
+        "hasOriginalNote": true,
+        "hasCheckpoint": true
+      }
+    ],
+    "noteId": "4ab2d743-c26c-4a70-8121-e7c872499930",
+    "snapshotID": 212,
+    "currentNoteRetained": true,
+    "sourceOriginalReferenceRetained": true,
+    "trustRetained": true,
+    "selectionRetained": true,
+    "noDuplicateSnapshot": true,
+    "snapshotRetrievable": true
+  },
+  "final-controlled-web-research-result": {
+    "controlledRagResponseBoundary": true,
+    "externalProviderExercised": false,
+    "sourceUrl": "http://127.0.0.1:18924/article",
+    "noteId": "4ab2d743-c26c-4a70-8121-e7c872499930",
+    "snapshotMediaId": 214,
+    "urlAndExcerptRetained": true,
+    "canonicalReopen": true,
+    "noDuplicateUpload": true
+  },
+  "final-native-result": {
+    "canonicalNoteId": "7b978cf8-d027-40c2-ae5b-839e0606d721",
+    "nativeStorage": {
+      "local": true,
+      "sync": true
+    },
+    "unmodifiedBuild": true,
+    "contentScriptExtraction": true,
+    "fullOptionsContinuation": true,
+    "retrievedExcerptMatchesCanonicalNote": true,
+    "trustDisplayConsistent": true
+  },
+  "keyboard-and-compact-layout": {
+    "previewForwardAndReverseTabs": 48,
+    "previewFocusContained": true,
+    "evidenceForwardAndReverseTabs": 48,
+    "evidenceFocusContained": true,
+    "layouts": [
+      {
+        "viewport": {
+          "width": 390,
+          "height": 844
+        },
+        "scrollWidth": 390,
+        "controls": [
+          {
+            "name": "Submit follow-up question",
+            "box": {
+              "x": 338,
+              "y": 743,
+              "width": 32,
+              "height": 32,
+              "top": 743,
+              "right": 370,
+              "bottom": 775,
+              "left": 338
+            }
+          },
+          {
+            "name": "Open evidence panel",
+            "box": {
+              "x": 12,
+              "y": 792,
+              "width": 87.625,
+              "height": 40,
+              "top": 792,
+              "right": 99.625,
+              "bottom": 832,
+              "left": 12
+            }
+          },
+          {
+            "name": "Start new topic",
+            "box": {
+              "x": 107.625,
+              "y": 792,
+              "width": 108.59375,
+              "height": 40,
+              "top": 792,
+              "right": 216.21875,
+              "bottom": 832,
+              "left": 107.625
+            }
+          }
+        ]
+      },
+      {
+        "viewport": {
+          "width": 390,
+          "height": 500
+        },
+        "scrollWidth": 390,
+        "controls": [
+          {
+            "name": "Submit follow-up question",
+            "box": {
+              "x": 338,
+              "y": 399,
+              "width": 32,
+              "height": 32,
+              "top": 399,
+              "right": 370,
+              "bottom": 431,
+              "left": 338
+            }
+          },
+          {
+            "name": "Open evidence panel",
+            "box": {
+              "x": 12,
+              "y": 448,
+              "width": 87.625,
+              "height": 40,
+              "top": 448,
+              "right": 99.625,
+              "bottom": 488,
+              "left": 12
+            }
+          },
+          {
+            "name": "Start new topic",
+            "box": {
+              "x": 107.625,
+              "y": 448,
+              "width": 108.59375,
+              "height": 40,
+              "top": 448,
+              "right": 216.21875,
+              "bottom": 488,
+              "left": 107.625
+            }
+          }
+        ]
+      }
+    ],
+    "keyboardLimit": "390x500 is a reduced viewport simulation; no real onscreen keyboard was tested."
+  },
+  "limits": {
+    "data": "Disposable local fixtures only",
+    "generation": "Deterministic local inference tests interface contracts, not answer accuracy",
+    "web": "Controlled RAG response boundary carrying a real owned article; no external search provider exercised",
+    "extension": "Unmodified development build, real Chrome local/sync storage and content script. Native context-menu click and docked sidepanel chrome were not exercised."
+  }
+}

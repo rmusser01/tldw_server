@@ -13,6 +13,7 @@ import {
   usePersonaBuddyShellStore
 } from "@/store/persona-buddy-shell"
 import { usePersonaVisualRuntimeStore } from "@/store/persona-visual-runtime"
+import { useBuddyManagementStore } from "@/store/buddy-management"
 import type { PersonaBuddyRenderContext } from "@/types/persona-buddy"
 import {
   asPersonaVisualCustomStateId,
@@ -411,6 +412,7 @@ const personaContext = (personaId: string): PersonaBuddyRenderContext => ({
 
 describe("BuddyShellHost", () => {
   beforeEach(() => {
+    useBuddyManagementStore.getState().setAttached(false)
     mocks.isDesktop = true
     mocks.selectedAssistant = null
     mocks.buddyShellEnabled = true
@@ -503,8 +505,76 @@ describe("BuddyShellHost", () => {
 
   afterEach(() => {
     cleanup()
+    useBuddyManagementStore.getState().setAttached(false)
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+  })
+
+  it("shares the pack list and detail through StrictMode replay", async () => {
+    const pack = buildVisualPack()
+    const summary = { ...pack, assets_by_id: {} }
+    const pending = deferred<{
+      packs: (typeof summary)[]
+      active_pack: typeof summary
+    }>()
+    visualMocks.listPersonaVisualPacks.mockReturnValue(pending.promise)
+    visualMocks.getPersonaVisualPack.mockResolvedValue(pack)
+    render(
+      <React.StrictMode>
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider
+            initialContext={personaContext("persona-1")}
+          >
+            <BuddyShellHost root="sidepanel" />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      </React.StrictMode>
+    )
+    expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      pending.resolve({ packs: [summary], active_pack: summary })
+    })
+    await screen.findByTestId("persona-buddy-visual-wrapper")
+    expect(visualMocks.getPersonaVisualPack).toHaveBeenCalledTimes(1)
+  })
+
+  it("retains loaded artwork through three effect replays and refreshes on activation", async () => {
+    let revision = 0
+    const registerEffect = React.useEffect
+    vi.spyOn(React, "useEffect").mockImplementation((effect, deps) =>
+      registerEffect(effect, deps ? [...deps, revision] : deps)
+    )
+    const pack = buildVisualPack()
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [pack],
+      active_pack: pack
+    })
+    const context = personaContext("persona-1")
+    const view = renderHost({ root: "sidepanel", context })
+    await screen.findByTestId("persona-buddy-visual-wrapper")
+    for (revision = 1; revision <= 3; revision++) {
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider initialContext={context}>
+            <BuddyShellHost root="sidepanel" />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      expect(
+        screen.getByTestId("persona-buddy-visual-wrapper")
+      ).toBeInTheDocument()
+      await act(async () => {})
+    }
+    expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledTimes(1)
+    fireEvent(
+      window,
+      new CustomEvent(PERSONA_VISUAL_PACK_ACTIVATED_EVENT, {
+        detail: { personaId: "persona-1" }
+      })
+    )
+    await waitFor(() =>
+      expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledTimes(2)
+    )
   })
 
   it("keeps expanded controls in the viewport and restores their usable position on remount", () => {
@@ -623,7 +693,7 @@ describe("BuddyShellHost", () => {
     expect(usePersonaBuddyShellStore.getState().isOpen).toBe(true)
   })
 
-  it("suppresses the web host below the desktop breakpoint", () => {
+  it("renders the active web host below the desktop breakpoint", () => {
     renderHost({
       isDesktop: false,
       context: {
@@ -631,11 +701,86 @@ describe("BuddyShellHost", () => {
         surface_active: true,
         active_persona_id: "persona-1",
         position_bucket: "web-desktop",
-        persona_source: "route-local"
+        persona_source: "route-local",
+        buddy_summary: buildBuddySummary("persona-1")
       }
     })
 
-    expect(screen.queryByTestId("persona-buddy-dock")).not.toBeInTheDocument()
+    expect(screen.getByTestId("persona-buddy-dock")).toBeInTheDocument()
+  })
+
+  it.each(["disabled", "inactive", "independent"])(
+    "keeps the %s gate on a narrow web pane",
+    (gate) => {
+      mocks.buddyShellEnabled = gate !== "disabled"
+      useBuddyManagementStore.getState().setAttached(gate === "independent")
+      renderHost({
+        isDesktop: false,
+        context: {
+          ...personaContext("persona-1"),
+          surface_active: gate !== "inactive",
+          position_bucket: "web-desktop"
+        }
+      })
+      expect(screen.queryByTestId("persona-buddy-dock")).not.toBeInTheDocument()
+    }
+  )
+
+  it("retains artwork and an unsent draft when the web pane crosses the desktop breakpoint", async () => {
+    const pack = buildVisualPack()
+    const summary = { ...pack, assets_by_id: {} }
+    visualMocks.listPersonaVisualPacks.mockResolvedValue({
+      packs: [summary],
+      active_pack: summary
+    })
+    visualMocks.getPersonaVisualPack.mockResolvedValue(pack)
+    const session = buildLiveSession()
+    liveControlMocks.state = {
+      ...liveControlMocks.state,
+      sessions: [session],
+      focusedSessionId: session.sessionId,
+      focusedSession: session,
+      streamState: "open",
+      canSendText: true
+    }
+    const context = {
+      ...personaContext("persona-1"),
+      position_bucket: "web-desktop" as const
+    }
+    const view = renderHost({ context })
+    const frame = await screen.findByTestId("persona-visual-frame")
+    const dock = screen.getByTestId("persona-buddy-dock")
+    fireEvent.click(screen.getByRole("button", { name: "Open Buddy controls" }))
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Message your Buddy" }),
+      {
+        target: { value: "Keep this draft through resizing" }
+      }
+    )
+
+    for (const width of [858, 1280]) {
+      mocks.isDesktop = width >= 1024
+      vi.stubGlobal("innerWidth", width)
+      fireEvent(window, new Event("resize"))
+      view.rerender(
+        <MemoryRouter>
+          <BuddyShellRenderContextProvider initialContext={context}>
+            <BuddyShellHost root="web" />
+          </BuddyShellRenderContextProvider>
+        </MemoryRouter>
+      )
+      expect(screen.getByTestId("persona-buddy-dock")).toBe(dock)
+      expect(screen.getByTestId("persona-visual-frame")).toBe(frame)
+      expect(
+        screen.getByRole("textbox", { name: "Message your Buddy" })
+      ).toHaveValue("Keep this draft through resizing")
+      expect(screen.getByTestId("persona-buddy-voice-link")).toHaveAttribute(
+        "href",
+        expect.stringContaining(session.sessionId)
+      )
+    }
+    expect(visualMocks.listPersonaVisualPacks).toHaveBeenCalledTimes(1)
+    expect(visualMocks.getPersonaVisualPack).toHaveBeenCalledTimes(1)
   })
 
   it("allows the sidepanel host even when the viewport is narrow", () => {

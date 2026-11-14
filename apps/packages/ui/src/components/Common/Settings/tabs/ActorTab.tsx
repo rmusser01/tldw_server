@@ -9,6 +9,8 @@ interface ActorTabProps {
   form: FormInstance
   actorSettings: ActorSettings | null
   setActorSettings: (settings: ActorSettings) => void
+  isCurrent: () => boolean
+  captureEditGuard: () => () => boolean
   actorPreview: string
   actorTokenCount: number
   onRecompute: () => void
@@ -23,6 +25,8 @@ export function ActorTab({
   form,
   actorSettings,
   setActorSettings,
+  isCurrent,
+  captureEditGuard,
   actorPreview,
   actorTokenCount,
   onRecompute,
@@ -76,7 +80,9 @@ export function ActorTab({
         <ActorEditor
           form={form}
           settings={actorSettings}
-          setSettings={(next) => setActorSettings(next)}
+          setSettings={setActorSettings}
+          isCurrent={isCurrent}
+          captureEditGuard={captureEditGuard}
           actorPreview={actorPreview}
           actorTokenCount={actorTokenCount}
           onRecompute={onRecompute}

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any, Optional
 
 import pytest
-from fastapi import Response
+from fastapi import HTTPException, Response
 from fastapi.testclient import TestClient
 from loguru import logger
 from starlette.requests import Request
@@ -13,6 +13,8 @@ from starlette.requests import Request
 from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_ep
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.MCP_unified.auth import UserRole
+from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
+from tldw_Server_API.app.core.Utils.app_services import app_services
 from tldw_Server_API.app.main import app
 
 # Disable HTTP security guard for these tests (IP allowlist/mTLS) to focus on auth behavior.
@@ -61,6 +63,7 @@ class _DummyServer:
         self.initialized = True
         self.protocol = _DummyProtocol()
         self.last_metadata: Optional[dict[str, Any]] = None
+        self.last_server_auth_scope: AuthenticatedExecutionScope | None = None
 
     async def initialize(self):
         self.initialized = True
@@ -71,10 +74,12 @@ class _DummyServer:
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ):
         from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
 
         self.last_metadata = metadata or {}
+        self.last_server_auth_scope = server_auth_scope
         return MCPResponse(result={"ok": True}, id=getattr(request, "id", None))
 
     async def handle_http_batch(
@@ -83,10 +88,12 @@ class _DummyServer:
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ):
         from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
 
         self.last_metadata = metadata or {}
+        self.last_server_auth_scope = server_auth_scope
         return [MCPResponse(result={"ok": True}, id=getattr(req, "id", None)) for req in requests]
 
 
@@ -100,8 +107,201 @@ class _LoggerStub:
 
 def _install_dummy_server(monkeypatch) -> _DummyServer:
     server = _DummyServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
     return server
+
+
+def test_authenticated_execution_scope_prefers_principal_and_fills_missing_dimension() -> None:
+    principal = AuthPrincipal(
+        kind="user",
+        user_id=41,
+        active_org_id=7,
+    )
+
+    scope = mcp_ep._authenticated_execution_scope(
+        principal=principal,
+        user=mcp_ep.TokenData(sub="41"),
+        api_key_info={"user_id": 41, "org_id": 7, "team_id": 11},
+    )
+
+    assert scope == AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)
+
+
+@pytest.mark.parametrize(
+    ("principal", "api_key_info"),
+    [
+        (
+            AuthPrincipal(kind="user", user_id=41, active_org_id=7),
+            {"user_id": 41, "org_id": 8},
+        ),
+        (None, {"user_id": 41, "org_id": True}),
+        (None, {"user_id": 41, "team_id": 0}),
+        (None, {"user_id": 41, "org_id": "7"}),
+    ],
+)
+def test_authenticated_execution_scope_rejects_conflicting_or_malformed_ids(
+    principal: AuthPrincipal | None,
+    api_key_info: dict[str, Any],
+) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        mcp_ep._authenticated_execution_scope(
+            principal=principal,
+            user=mcp_ep.TokenData(sub="41"),
+            api_key_info=api_key_info,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Invalid authenticated scope"
+
+
+def test_authenticated_execution_scope_is_absent_without_credential_scope() -> None:
+    assert mcp_ep._authenticated_execution_scope(principal=None, user=None, api_key_info=None) is None
+
+
+def test_authenticated_execution_scope_rejects_mutated_principal_scope() -> None:
+    principal = AuthPrincipal(kind="user", user_id=41)
+    principal.active_org_id = True
+
+    with pytest.raises(HTTPException) as exc_info:
+        mcp_ep._authenticated_execution_scope(
+            principal=principal,
+            user=mcp_ep.TokenData(sub="41"),
+            api_key_info=None,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Invalid authenticated scope"
+
+
+@pytest.mark.parametrize(
+    ("principal", "user", "api_key_info"),
+    [
+        (
+            AuthPrincipal(kind="user", user_id=41, active_org_id=7),
+            mcp_ep.TokenData(sub="41"),
+            {"user_id": 99, "org_id": 7},
+        ),
+        (
+            AuthPrincipal(kind="user", user_id=41, active_org_id=7),
+            mcp_ep.TokenData(sub="99"),
+            None,
+        ),
+        (
+            None,
+            mcp_ep.TokenData(sub="41"),
+            {"user_id": True, "org_id": 7},
+        ),
+    ],
+)
+def test_authenticated_execution_scope_rejects_cross_identity_scope_grafting(
+    principal: AuthPrincipal | None,
+    user: mcp_ep.TokenData | None,
+    api_key_info: dict[str, Any] | None,
+) -> None:
+    with pytest.raises(HTTPException) as exc_info:
+        mcp_ep._authenticated_execution_scope(
+            principal=principal,
+            user=user,
+            api_key_info=api_key_info,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Invalid authenticated scope"
+
+
+@pytest.mark.asyncio
+async def test_mcp_http_auth_context_rejects_cross_user_api_key_scope() -> None:
+    request = _json_request({})
+    request.state.mcp_api_key_info = {"user_id": 99, "org_id": 7}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await mcp_ep.get_mcp_auth_context(
+            request=request,
+            user=mcp_ep.TokenData(sub="41"),
+            principal=AuthPrincipal(kind="user", user_id=41, active_org_id=7),
+            x_api_key="other-users-key",
+        )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "Invalid authenticated scope"
+
+
+def test_mcp_auth_context_does_not_accept_caller_supplied_execution_scope() -> None:
+    with pytest.raises(TypeError):
+        mcp_ep.McpAuthContext(
+            user=None,
+            principal=None,
+            api_key_info=None,
+            raw_api_key=None,
+            execution_scope=AuthenticatedExecutionScope(active_org_id=7),  # type: ignore[call-arg]
+        )
+
+
+@pytest.mark.asyncio
+async def test_mcp_auth_context_resolves_typed_scope_from_authenticated_sources() -> None:
+    principal = AuthPrincipal(
+        kind="api_key",
+        user_id=41,
+        active_org_id=7,
+        active_team_id=11,
+    )
+    request = _json_request({})
+    api_key_info = {"user_id": "41", "org_id": 7, "team_id": 11}
+    request.state.mcp_api_key_info = api_key_info
+
+    auth = await mcp_ep.get_mcp_auth_context(
+        request=request,
+        user=mcp_ep.TokenData(sub="41", roles=["api_client"], permissions=[]),
+        principal=principal,
+        x_api_key="test-key",
+    )
+
+    assert auth.execution_scope == AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)
+    api_key_info["org_id"] = 19
+    assert auth.api_key_info == {"user_id": "41", "org_id": 7, "team_id": 11}
+    assert auth.execution_scope == AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)
+
+
+@pytest.mark.asyncio
+async def test_mcp_http_and_batch_forward_typed_scope_outside_metadata(monkeypatch) -> None:
+    server = _install_dummy_server(monkeypatch)
+    scope = AuthenticatedExecutionScope(active_org_id=7, active_team_id=11)
+    auth = mcp_ep.McpAuthContext(
+        user=mcp_ep.TokenData(sub="41", roles=["admin"], permissions=["*"]),
+        principal=AuthPrincipal(
+            kind="user",
+            user_id=41,
+            active_org_id=7,
+            active_team_id=11,
+        ),
+        api_key_info=None,
+        raw_api_key=None,
+    )
+
+    await mcp_ep.mcp_request(
+        server=server,
+        http_request=_json_request({"jsonrpc": "2.0", "method": "status", "id": 1}),
+        response=Response(),
+        client_id=None,
+        auth=auth,
+        mcp_session_id=None,
+        config=None,
+        _guard=None,
+    )
+    assert server.last_server_auth_scope == scope
+
+    await mcp_ep.mcp_request_batch(
+        server=server,
+        http_request=_json_request([{"jsonrpc": "2.0", "method": "status", "id": 2}]),
+        response=Response(),
+        client_id=None,
+        auth=auth,
+        mcp_session_id=None,
+        config=None,
+        _guard=None,
+    )
+    assert server.last_server_auth_scope == scope
+    assert "server_auth_scope" not in (server.last_metadata or {})
 
 
 @pytest.mark.asyncio
@@ -118,6 +318,7 @@ async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_pat
     metadata_key = "_server_standalone_html_validation_pool"
 
     await mcp_ep.mcp_request(
+        server=server,
         http_request=_json_request({"jsonrpc": "2.0", "method": "tools/call", "id": 1}),
         response=Response(),
         client_id=None,
@@ -130,6 +331,7 @@ async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_pat
     assert server.last_metadata[metadata_key] is sentinel_pool
 
     await mcp_ep.mcp_request_batch(
+        server=server,
         http_request=_json_request([{"jsonrpc": "2.0", "method": "tools/call", "id": 2}]),
         response=Response(),
         client_id=None,
@@ -142,6 +344,7 @@ async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_pat
     assert server.last_metadata[metadata_key] is sentinel_pool
 
     await mcp_ep.execute_tool(
+        server=server,
         request=mcp_ep.ToolExecutionRequest(
             tool_name="slides.presentations.restore",
             arguments={"presentation_id": "html-deck", "expected_version": 2},
@@ -163,7 +366,7 @@ async def test_shared_validation_pool_reaches_all_mcp_slides_restore_ingress_pat
             self.kwargs = kwargs
 
     websocket_server = _WebSocketServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: websocket_server)
+    monkeypatch.setattr(app_services(), "mcp_server", websocket_server)
     websocket = SimpleNamespace(app=app)
     await mcp_ep.websocket_endpoint(
         websocket=websocket,
@@ -197,7 +400,7 @@ def test_mcp_get_client_ip_sanitizes_resolution_failure_log(monkeypatch):
 async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(mcp_ep, "logger", logger_stub)
-    _install_dummy_server(monkeypatch)
+    server = _install_dummy_server(monkeypatch)
 
     original_import = builtins.__import__
 
@@ -210,6 +413,7 @@ async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
     auth = mcp_ep.McpAuthContext(user=None, principal=None, api_key_info=None, raw_api_key=None)
 
     await mcp_ep.mcp_request(
+        server=server,
         http_request=_json_request({"jsonrpc": "2.0", "method": "initialize", "id": 1}),
         response=Response(),
         client_id=None,
@@ -219,6 +423,7 @@ async def test_mcp_initialize_session_id_logs_are_sanitized(monkeypatch):
         _guard=None,
     )
     await mcp_ep.mcp_request_batch(
+        server=server,
         http_request=_json_request([{"jsonrpc": "2.0", "method": "initialize", "id": 2}]),
         response=Response(),
         client_id=None,
@@ -243,10 +448,12 @@ class _RBACAllow:
 
 class _ScopeServer:
     def __init__(self):
+        from tldw_Server_API.app.core.MCP_unified.modules.registry import ModuleRegistry
         from tldw_Server_API.app.core.MCP_unified.protocol import MCPProtocol
 
         self.initialized = True
         self.protocol = MCPProtocol()
+        self.protocol.module_registry = ModuleRegistry()
         self.protocol.rbac_policy = _RBACAllow()
 
     async def initialize(self):
@@ -258,6 +465,7 @@ class _ScopeServer:
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ):
         from tldw_Server_API.app.core.MCP_unified.protocol import RequestContext
 
@@ -267,6 +475,7 @@ class _ScopeServer:
             client_id=client_id,
             session_id=None,
             metadata=metadata or {},
+            server_auth_scope=server_auth_scope,
         )
         return await self.protocol.process_request(request, ctx)
 
@@ -315,6 +524,10 @@ async def test_mcp_http_requests_use_single_api_key_validation(monkeypatch):
     assert server.last_metadata.get("org_id") == 9
     assert server.last_metadata.get("team_id") == 7
     assert "roles" in server.last_metadata  # derived from TokenData roles=["api_client"]
+    assert server.last_server_auth_scope == AuthenticatedExecutionScope(
+        active_org_id=9,
+        active_team_id=7,
+    )
 
     # Batch MCP HTTP request
     batch_body = [
@@ -335,6 +548,10 @@ async def test_mcp_http_requests_use_single_api_key_validation(monkeypatch):
     assert server.last_metadata is not None
     assert server.last_metadata.get("org_id") == 9
     assert server.last_metadata.get("team_id") == 7
+    assert server.last_server_auth_scope == AuthenticatedExecutionScope(
+        active_org_id=9,
+        active_team_id=7,
+    )
 
 
 def test_http_api_key_scopes_enforced(monkeypatch):
@@ -356,7 +573,7 @@ def test_http_api_key_scopes_enforced(monkeypatch):
     monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
 
     server = _ScopeServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     payload = {"jsonrpc": "2.0", "method": "tools/call", "params": {"name": "media.search"}, "id": 1}
 
@@ -470,7 +687,9 @@ def test_tools_execute_preserves_rag_json_content_wrapper(monkeypatch):
             client_id: Optional[str] = None,
             user_id: Optional[str] = None,
             metadata: Optional[dict[str, Any]] = None,
+            server_auth_scope: AuthenticatedExecutionScope | None = None,
         ):
+            del server_auth_scope
             from tldw_Server_API.app.core.MCP_unified.protocol import MCPResponse
 
             self.last_metadata = metadata or {}
@@ -493,7 +712,7 @@ def test_tools_execute_preserves_rag_json_content_wrapper(monkeypatch):
             )
 
     server = _RagJsonServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     headers = {"X-API-KEY": os.getenv("SINGLE_USER_API_KEY", "THIS-IS-A-SECURE-KEY-123-FAKE-KEY")}
     payload = {"tool_name": "rag.search", "arguments": {"query": "hello"}}
@@ -530,7 +749,7 @@ def test_tools_execute_api_key_scopes_enforced(monkeypatch):
     monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fake_get_api_key_manager)
 
     server = _ScopeServer()
-    monkeypatch.setattr(mcp_ep, "get_mcp_server", lambda: server)
+    monkeypatch.setattr(app_services(), "mcp_server", server)
 
     payload = {"tool_name": "media.search", "arguments": {"query": "hello"}}
 
@@ -725,6 +944,32 @@ async def test_mcp_single_user_api_key_respects_ip_allowlist(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_mcp_single_user_api_key_grants_no_wildcard_permissions_in_test_mode(monkeypatch):
+    """TEST_MODE must not widen the single-user compat principal to ["*"]."""
+    from starlette.requests import Request
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    monkeypatch.setenv("MCP_SINGLE_USER_COMPAT_SHIM", "1")
+    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
+
+    class _Settings:
+        SINGLE_USER_API_KEY = "single-user-admin-key"
+        SINGLE_USER_FIXED_ID = 999
+        SINGLE_USER_ALLOWED_IPS = ["203.0.113.10"]
+
+    monkeypatch.setattr(mcp_ep, "get_settings", lambda: _Settings())
+
+    request_allowed = Request({"type": "http", "client": ("203.0.113.10", 12345)})
+    user_allowed = await mcp_ep._resolve_token_data_compat(
+        credentials=None,
+        x_api_key="single-user-admin-key",
+        request=request_allowed,
+    )
+    assert isinstance(user_allowed, mcp_ep.TokenData)
+    assert user_allowed.permissions == []
+
+
+@pytest.mark.asyncio
 async def test_mcp_single_user_api_key_flag_disabled_uses_api_key_manager(monkeypatch):
     """
     When MCP_SINGLE_USER_COMPAT_SHIM is disabled, even in single-user runtime
@@ -910,56 +1155,6 @@ async def test_get_current_user_authnz_and_mcp_failure_use_api_key_and_set_state
         "team_id": 7,
         "scope": ["read"],
     }
-
-
-@pytest.mark.asyncio
-async def test_single_user_test_api_key_allowed_in_test_mode_dev_context(monkeypatch):
-    """
-    In TEST_MODE with a clear dev/test context, SINGLE_USER_TEST_API_KEY should
-    be accepted via the single-user compat shim and produce an admin-style TokenData.
-    """
-    from starlette.requests import Request
-
-    test_key = "test-key-dev-123"
-
-    # Enable compat shim and single-user profile.
-    monkeypatch.delenv("MCP_SINGLE_USER_COMPAT_SHIM", raising=False)
-    monkeypatch.setattr(mcp_ep, "is_single_user_profile_mode", lambda: True)
-
-    # TEST_MODE enabled and explicit test key configured.
-    monkeypatch.setenv("TEST_MODE", "1")
-    monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", test_key)
-
-    # Dev-like config: debug_mode True.
-    class _Cfg:
-        debug_mode = True
-
-    monkeypatch.setattr(mcp_ep, "get_config", lambda: _Cfg())
-
-    # Single-user settings.
-    class _Settings:
-        SINGLE_USER_API_KEY = "real-single-user-key"
-        SINGLE_USER_FIXED_ID = 999
-
-    monkeypatch.setattr(mcp_ep, "get_settings", lambda: _Settings())
-
-    # Guard that multi-user API key manager is not used in this path.
-    async def _fail_get_api_key_manager():
-        raise AssertionError("API key manager should not be used for SINGLE_USER_TEST_API_KEY in dev TEST_MODE")
-
-    monkeypatch.setattr(mcp_ep, "get_api_key_manager", _fail_get_api_key_manager)
-
-    scope = {"type": "http", "client": ("127.0.0.1", 8000)}
-    request = Request(scope)
-
-    user = await mcp_ep._resolve_token_data_compat(credentials=None, x_api_key=test_key, request=request)
-
-    assert isinstance(user, mcp_ep.TokenData)
-    assert user.sub == str(_Settings.SINGLE_USER_FIXED_ID)
-    assert user.username == "single_user"
-    # Admin-style role and wildcard permissions in TEST_MODE.
-    assert user.roles == [UserRole.ADMIN.value]
-    assert user.permissions == ["*"]
 
 
 @pytest.mark.asyncio

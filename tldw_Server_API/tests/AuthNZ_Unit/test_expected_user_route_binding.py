@@ -40,12 +40,20 @@ def test_expected_user_guard_is_bound_only_to_scope_bound_routes() -> None:
     assert guarded_routes == {
         ("character-chat-sessions", "POST", "/"),
         ("character-chat-sessions", "POST", "/workspace-startup"),
+        # A local chat is saved to the account the user saw when they asked for it (D7 P8).
+        ("character-chat-sessions", "POST", "/import"),
         # da0f1cd3a3 (reviewed history selection) scope-binds session reads,
         # settings and the history capture routes.
         ("character-chat-sessions", "GET", "/{chat_id}"),
         ("character-chat-sessions", "GET", "/{chat_id}/settings"),
         ("character-chat-sessions", "PUT", "/{chat_id}/settings"),
         ("character-messages", "POST", "/chats/{chat_id}/messages"),
+        ("character-messages", "POST", "/chats/{chat_id}/roleplay/messages"),
+        ("character-messages", "GET", "/chats/{chat_id}/messages"),
+        ("character-messages", "GET", "/messages/{message_id}"),
+        ("character-messages", "PUT", "/messages/{message_id}"),
+        ("character-messages", "DELETE", "/messages/{message_id}"),
+        ("character-messages", "GET", "/chats/{chat_id}/messages/search"),
         ("chat", "POST", "/completions"),
         ("chat", "POST", "/conversations/{conversation_id}/history/selection"),
         ("chat", "POST", "/conversations/{conversation_id}/history/legacy-projection"),

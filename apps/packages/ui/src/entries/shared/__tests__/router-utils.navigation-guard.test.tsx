@@ -210,7 +210,7 @@ describe("guardable shared router wrappers", () => {
 
       await user.click(screen.getByRole("button", { name: "Browser Back" }))
       await waitFor(() =>
-        expect(screen.getByRole("status", { name: "Current route" })).toHaveTextContent("/")
+        expect(screen.getByRole("status", { name: "Current route" })).toHaveTextContent(/^\/$/)
       )
       view.unmount()
       await new Promise((resolve) => window.setTimeout(resolve, 10))

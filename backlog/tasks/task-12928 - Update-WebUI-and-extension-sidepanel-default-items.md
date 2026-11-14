@@ -25,11 +25,11 @@ Set the default sidepanel navigation items for the WebUI/browser extension to th
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Updated shared UI settings default sidebar selection, preserved custom order during normalization, rendered sidebar shortcuts in saved order, and renamed the English Kanban shortcut label.
 
 Verification: packages UI Vitest sidebar/header/settings tests passed; frontend route registry Vitest test passed; frontend typecheck passed; git diff --check passed. Bandit not applicable because touched runtime files are TypeScript/JSON and Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Persona.visual_starter_catalog import PersonaVisualStarterCatalogService
@@ -36,6 +37,7 @@ def db(tmp_path, monkeypatch):
 def _client(db, user_id=1):
     endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.buddies")
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(endpoint.router, prefix="/api/v1/buddies")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=user_id)
@@ -563,6 +565,7 @@ def test_starter_preview_route_requires_auth_and_never_creates_a_profile(db, mon
     from tldw_Server_API.app.api.v1.endpoints import persona
 
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(persona.router, prefix="/api/v1/persona")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[check_rate_limit] = lambda: None

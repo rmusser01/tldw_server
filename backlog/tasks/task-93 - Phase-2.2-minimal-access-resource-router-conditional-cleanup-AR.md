@@ -39,13 +39,13 @@ Convert the minimal-test resource_governor and users optional router blocks from
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline before edits: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k 'minimal_optional_router_specs and (resource or users)' -q passed 1 existing selected test. RED before production edits: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k 'access_resource' -q failed 3/3 because resource_governor and users imported eagerly, missing imports left no lazy specs, and runtime failures could not propagate during registration.
 
 Implemented resource_governor and users as ImportedRouterSpec entries using default precise optional-missing exceptions. Verification after implementation: focused access_resource tests passed 3/3; full router group contract passed 107/107; OpenAPI contract passed 69/69; main lifecycle contract passed 54/54. A stale selector command, test_main_lifecycle_contract.py -k router -q, selected zero tests on current dev and was not counted as validation. Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported zero findings; git diff --check passed.
 
 Opened PR https://github.com/rmusser01/tldw_server/pull/1334 against dev for this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

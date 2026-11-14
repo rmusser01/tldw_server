@@ -702,3 +702,34 @@ class TestFKCascadeOnHardDelete:
         db.add_workspace_note("ws-1", {"title": "N", "content": ""})
         db.hard_delete_workspace("ws-1")
         assert db.list_workspace_notes("ws-1") == []
+
+
+@pytest.mark.parametrize("selected", [True, False])
+def test_source_duplicate_preserves_first_contents_and_version(db, selected):
+    first = db.add_workspace_source(
+        "ws-1", {"id": "duplicate", "media_id": 1, "title": "First", "source_type": "web", "selected": selected}
+    )
+    retry = db.add_workspace_source(
+        "ws-1", {"id": "duplicate", "media_id": 2, "title": "Changed", "source_type": "pdf", "selected": not selected}
+    )
+    assert retry == first
+    assert len(db.list_workspace_sources("ws-1")) == 1
+
+
+def test_source_non_duplicate_constraint_failure_remains_conflict(db):
+    with pytest.raises(ConflictError):
+        db.add_workspace_source("ws-1", {"id": "invalid", "media_id": 1, "title": None, "source_type": "web"})
+    assert db.list_workspace_sources("ws-1") == []
+
+
+def test_source_batch_selection_clears_and_preserves_version_counts(db):
+    a = db.add_workspace_source("ws-1", {"id": "a", "media_id": 1, "title": "A", "source_type": "web"})
+    b = db.add_workspace_source(
+        "ws-1", {"id": "b", "media_id": 2, "title": "B", "source_type": "web", "selected": False}
+    )
+    db.update_workspace_source_selection("ws-1", selected_ids=["a"])
+    rows = {row["id"]: row for row in db.list_workspace_sources("ws-1")}
+    assert rows["a"]["version"] == a["version"] + 2
+    assert rows["b"]["version"] == b["version"] + 1
+    db.update_workspace_source_selection("ws-1", selected_ids=[])
+    assert all(not row["selected"] for row in db.list_workspace_sources("ws-1"))

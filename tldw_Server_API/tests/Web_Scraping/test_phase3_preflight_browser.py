@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight.context import _CleanupEntr
 from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakeBrowserContext,
+    FakeBrowserLocator,
     FakeBrowserPage,
     FakeBrowserRequest,
     FakeBrowserRoute,
@@ -37,8 +38,10 @@ from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakePlaywrightLauncher,
     FakeProbeEgressGuard,
     FakeWebSocketRoute,
+    RealLikeBrowser,
     RealLikeBrowserContext,
     RealLikeBrowserPage,
+    RealLikePlaywright,
     RealLikePlaywrightLauncher,
 )
 
@@ -106,7 +109,7 @@ async def test_asyncio_timeout_compatibility_uses_async_timeout_when_stdlib_is_a
         return LegacyTimeout()
 
     legacy_module = types.ModuleType("async_timeout")
-    legacy_module.timeout = legacy_timeout
+    monkeypatch.setattr(legacy_module, "timeout", legacy_timeout, raising=False)
     monkeypatch.delattr(compat.asyncio, "timeout", raising=False)
     monkeypatch.setitem(sys.modules, "async_timeout", legacy_module)
 
@@ -116,6 +119,146 @@ async def test_asyncio_timeout_compatibility_uses_async_timeout_when_stdlib_is_a
 
     assert created == [0.25]
     assert context.expired() is False
+
+
+def _legacy_reschedule_context(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, Any]:
+    compat = _asyncio_compat_module()
+
+    class LegacyTimeout:
+        deadlines: list[float]
+        update_error: Exception | None = None
+
+        def __init__(self) -> None:
+            self.deadlines = []
+
+        @property
+        def expired(self) -> bool:
+            return False
+
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> None:
+            return None
+
+        def update(self, deadline: float) -> None:
+            if self.update_error is not None:
+                raise self.update_error
+            self.deadlines.append(deadline)
+
+    legacy = LegacyTimeout()
+    legacy_module = types.ModuleType("async_timeout")
+    monkeypatch.setattr(legacy_module, "timeout", lambda _delay: legacy, raising=False)
+    monkeypatch.delattr(compat.asyncio, "timeout", raising=False)
+    monkeypatch.setitem(sys.modules, "async_timeout", legacy_module)
+    return compat.timeout(None), legacy
+
+
+@pytest.mark.asyncio
+async def test_asyncio_timeout_reschedule_native_cancels_wait_and_marks_expired() -> None:
+    context = asyncio_timeout(None)
+    cancelled = asyncio.Event()
+
+    async with asyncio_timeout(1.0):
+        with pytest.raises(TimeoutError):
+            async with context as entered:
+                assert entered is context
+                context.reschedule(asyncio.get_running_loop().time())
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+
+    assert cancelled.is_set()
+    assert context.expired() is True
+
+
+@pytest.mark.asyncio
+async def test_asyncio_timeout_reschedule_native_future_deadline_does_not_expire() -> None:
+    context = asyncio_timeout(None)
+    async with context:
+        context.reschedule(asyncio.get_running_loop().time() + 1.0)
+        await asyncio.sleep(0)
+
+    assert context.expired() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["not_entered", "exited", "expired"])
+async def test_asyncio_timeout_reschedule_preserves_native_state_errors(state: str) -> None:
+    context = asyncio_timeout(None)
+    if state == "exited":
+        async with context:
+            pass
+    elif state == "expired":
+        async with asyncio_timeout(1.0):
+            with pytest.raises(TimeoutError):
+                async with context:
+                    context.reschedule(asyncio.get_running_loop().time())
+                    await asyncio.Event().wait()
+
+    with pytest.raises(RuntimeError):
+        context.reschedule(asyncio.get_running_loop().time())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deadline", [0.0, -1.0, 123456.25])
+async def test_asyncio_timeout_reschedule_legacy_forwards_absolute_deadline_to_update(
+    monkeypatch: pytest.MonkeyPatch,
+    deadline: float,
+) -> None:
+    context, legacy = _legacy_reschedule_context(monkeypatch)
+
+    async with context as entered:
+        assert entered is context
+        context.reschedule(deadline)
+
+    assert legacy.deadlines == [deadline]
+    assert context.expired() is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [RuntimeError("legacy state error"), ValueError("legacy update error")])
+async def test_asyncio_timeout_reschedule_preserves_legacy_update_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    context, legacy = _legacy_reschedule_context(monkeypatch)
+    legacy.update_error = error
+
+    async with context:
+        with pytest.raises(type(error)) as caught:
+            context.reschedule(asyncio.get_running_loop().time())
+
+    assert caught.value is error
+    assert legacy.deadlines == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize(
+    ("deadline", "error"),
+    [(None, TypeError), (float("nan"), ValueError), (float("inf"), ValueError), (float("-inf"), ValueError)],
+)
+async def test_asyncio_timeout_reschedule_requires_finite_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+    legacy: bool,
+    deadline: Any,
+    error: type[Exception],
+) -> None:
+    if legacy:
+        context, native = _legacy_reschedule_context(monkeypatch)
+    else:
+        context = asyncio_timeout(None)
+
+    async with context:
+        with pytest.raises(error):
+            context.reschedule(deadline)
+
+    assert context.expired() is False
+    if legacy:
+        assert native.deadlines == []
 
 
 @pytest.mark.asyncio
@@ -1077,9 +1220,33 @@ async def test_exhausted_deadline_reserves_once_but_prevents_launch() -> None:
         "new_page",
     ],
 )
-async def test_each_startup_await_is_bounded_by_the_shared_deadline(stage: str) -> None:
-    controls = _live_controls(deadline_s=0.02)
+async def test_each_startup_await_is_bounded_by_the_shared_deadline(
+    stage: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _assert_selected_startup_deadline(stage, monkeypatch)
+
+
+async def _assert_selected_startup_deadline(stage: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = FakeClock(1.0)
+    controls = _controls(deadline=2.0, clock=clock)
     launcher = FakePlaywrightLauncher(block_at=stage)
+    native_timeouts = []
+
+    def observed_timeout(delay):
+        assert delay == 1.0
+        # Arm the real native timeout only once the selected operation is waiting.
+        timeout = asyncio_timeout(None)
+        native_timeouts.append(timeout)
+        return timeout
+
+    monkeypatch.setattr(_adapter_module(), "_asyncio_timeout", observed_timeout)
+
+    async def expire_selected_stage():
+        await launcher.startup_gate.started.wait()
+        assert native_timeouts, "selected startup await must have a deadline context"
+        clock.advance(1.0)
+        native_timeouts[-1].reschedule(asyncio.get_running_loop().time())
+
     probe = _probe(
         controls=controls,
         guard=FakeProbeEgressGuard([]),
@@ -1087,14 +1254,45 @@ async def test_each_startup_await_is_bounded_by_the_shared_deadline(stage: str) 
     )
     options = BrowserProbeOptions(init_scripts=("window.test = true",))
 
-    with pytest.raises(PreflightDeadlineExceeded):
-        async with asyncio_timeout(0.2):
-            async with probe.open_page(options):
-                pytest.fail("page must not be created")
+    expiry = asyncio.create_task(expire_selected_stage())
+    try:
+        async with asyncio_timeout(2.0):
+            with pytest.raises(PreflightDeadlineExceeded):
+                async with probe.open_page(options):
+                    pytest.fail("page must not be created")
+    finally:
+        if not expiry.done():
+            expiry.cancel()
+        try:
+            await expiry
+        except asyncio.CancelledError:
+            pass
+        await controls.close(grace_s=0.02)
 
     assert launcher.startup_gate.started.is_set()
+    assert native_timeouts[-1].expired()
+    assert controls.remaining_seconds() == 0.0
     assert controls.consumed.browsers == 1
-    await controls.close(grace_s=0.02)
+    assert launcher.playwright.stop_calls == (0 if stage == "launcher_start" else 1)
+    assert launcher.browser.close_calls == (0 if stage in {"launcher_start", "launch_browser"} else 1)
+    assert all(context.close_calls == 1 for context in launcher.browser.contexts)
+
+
+@pytest.mark.asyncio
+async def test_selected_startup_deadline_survives_slow_earlier_setup(monkeypatch) -> None:
+    """Earlier setup exceeding the old 20ms budget must not hide the selected await."""
+    original_start = FakePlaywrightLauncher.start
+    setup_finished = asyncio.Event()
+
+    async def slow_start(self):
+        await asyncio.sleep(0.04)
+        result = await original_start(self)
+        setup_finished.set()
+        return result
+
+    monkeypatch.setattr(FakePlaywrightLauncher, "start", slow_start)
+    await _assert_selected_startup_deadline("init_script", monkeypatch)
+    assert setup_finished.is_set()
 
 
 @pytest.mark.asyncio
@@ -1313,7 +1511,7 @@ async def test_operations_without_playwright_timeout_are_deadline_bounded(
 ) -> None:
     blocker = asyncio.Event()
 
-    class BlockingLocator:
+    class BlockingLocator(FakeBrowserLocator):
         def __init__(self, index: int | None = None) -> None:
             self.index = index
 
@@ -1726,7 +1924,9 @@ async def test_page_and_request_cleanup_share_one_idempotent_close_operation(
     monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", 0.02, raising=False)
 
     class RealLikePage(FakeBrowserPage):
-        force_close = None
+        pass
+
+    monkeypatch.setattr(RealLikePage, "force_close", None)
 
     controls = _controls()
     launcher = FakePlaywrightLauncher(
@@ -1821,7 +2021,9 @@ async def test_all_real_like_graph_uses_reserved_parent_teardown_window(
     assert launcher.playwright.stop_calls == 1
     assert page.closed
     assert context.closed
+    assert isinstance(launcher.browser, RealLikeBrowser)
     assert launcher.browser.closed
+    assert isinstance(launcher.playwright, RealLikePlaywright)
     assert launcher.playwright.stopped
     assert context.close_started_at is not None
     assert context.close_started_at - started_at < grace_s * 0.75
@@ -1866,15 +2068,13 @@ async def test_guard_and_cleanup_logs_never_include_urls_or_raw_errors() -> None
 class _ControlledBrowserClose:
     """Expose native close completion independently of its shielded waiter."""
 
-    def __init__(self, outcome: str, *, force_available: bool) -> None:
+    def __init__(self, outcome: str) -> None:
         self.outcome = outcome
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.native_calls: list[str] = []
         self.force_calls = 0
         self.closed = False
-        if not force_available:
-            self.force_close = None
 
     async def _native_close(self, method: str) -> None:
         self.native_calls.append(method)
@@ -1903,8 +2103,11 @@ async def test_browser_force_cleanup_checks_native_operation_before_forcing(
     kind: str,
     outcome: str,
     force_available: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resource = _ControlledBrowserClose(outcome, force_available=force_available)
+    resource = _ControlledBrowserClose(outcome)
+    if not force_available:
+        monkeypatch.setattr(resource, "force_close", None)
     handle = _required("_cleanup_handle")(resource, kind=kind)
     controls = _controls()
     entry = _CleanupEntry(handle=handle)
@@ -1974,3 +2177,53 @@ async def test_browser_force_cleanup_checks_native_operation_before_forcing(
         native = handle._operation_task
         if native is not None:
             await asyncio.gather(native, return_exceptions=True)
+
+
+@pytest.mark.parametrize("close_entry_advance_s", [0.0, 0.02])
+def test_cleanup_graceful_deadline_does_not_restart_on_task_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    close_entry_advance_s: float,
+) -> None:
+    # A private loop isolates the controlled clock from pytest's async runner.
+    loop = asyncio.new_event_loop()
+    now = [1000.0]
+    monkeypatch.setattr(loop, "time", lambda: now[0])
+    native_call_at = loop.call_at
+
+    async def exercise() -> None:
+        timer_registered = loop.create_future()
+        release_close = loop.create_future()
+
+        def record_timer(when, callback, *args, context=None):
+            if not timer_registered.done():
+                timer_registered.set_result(when)
+            return native_call_at(when, callback, *args, context=context)
+
+        monkeypatch.setattr(loop, "call_at", record_timer)
+
+        force_calls = []
+
+        class Handle:
+            async def close(self) -> None:
+                now[0] += close_entry_advance_s
+                await release_close
+
+            async def force_close(self) -> None:
+                force_calls.append("force")
+
+        controls = _controls()
+        started_at = now[0]
+        cleanup = loop.create_task(controls._cleanup_with_grace((Handle(),), 0.05))
+        try:
+            scheduled_deadline = await timer_registered
+            assert scheduled_deadline - started_at == pytest.approx(0.025, rel=0, abs=1e-9)
+        finally:
+            if not release_close.done():
+                release_close.set_result(None)
+            await cleanup
+            assert force_calls == []
+
+    try:
+        loop.run_until_complete(exercise())
+    finally:
+        loop.close()

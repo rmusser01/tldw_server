@@ -38,7 +38,7 @@ Source: synthesis F5
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in 475bdfb929, alongside TASK-13294 (same function).
 
 AC1: the denylist ["';", '";', "--", "/*", "*/", "xp_", "sp_", "\\x00"] is removed from BaseModule.sanitize_input; the control-character strip is retained as CONTROL_CHARS_RE.sub(""). The docstring records why it went: these values are data handed to parameterised DB_Management queries, so the denylist bought no injection protection while refusing a Markdown "---" rule, "SELECT 1 -- note", the git pathspec "-- src/app.py", the glob "src/*.py" and the filename "exp_data.csv". Its "\\x00" entry was a literal backslash-x-0-0 and never matched anything; real NULs are removed by the control-character strip.
@@ -50,7 +50,7 @@ Beyond the stated scope: web_tool_base's sanitize_input override existed only to
 Note: removing the denylist changed test_validation_and_sanitization.py::test_deep_argument_sanitization_blocks_nested_patterns, which asserted a nested "/* injected */" raised ValueError. Its real coverage was the recursion, not the denylist, so it now asserts recursion against the surviving behaviour and is renamed ...recurses_into_nested_values, with the reason recorded in the test body rather than changed silently.
 
 Verification: MCP_unified in-app 13 failed / 3301 passed vs baseline 13 / 3281, identical failure set. tests/MCP + MCP_Hub + MCP_unified 4 failed, unchanged. tests/sandbox + Services 24 failed, identical with and without the change (stash-isolated). Bandit clean over the five touched files (run via uvx; bandit is CI-only, not a local dependency).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

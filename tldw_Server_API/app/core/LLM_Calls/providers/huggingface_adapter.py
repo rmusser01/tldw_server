@@ -7,7 +7,6 @@ from urllib.parse import urlsplit
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_config import is_runtime_base_url_override
 from tldw_Server_API.app.core.exceptions import raise_detached_error
 from tldw_Server_API.app.core.http_client import (
     create_client as _hc_create_client,
@@ -23,6 +22,7 @@ from tldw_Server_API.app.core.LLM_Calls.streaming import (
     iter_sse_lines_raising,
     wrap_sync_stream,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_config import is_runtime_base_url_override
 
 from .base import ChatProvider
 
@@ -42,7 +42,7 @@ def _optional_config_text(value: Any) -> str | None:
 
 def _configuration_error() -> Exception:
     """Build one bounded configuration error without reflecting endpoint data."""
-    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
     return ChatConfigurationError(
         provider="huggingface",
@@ -178,7 +178,7 @@ class HuggingFaceAdapter(ChatProvider):
             try:
                 model_path = encode_huggingface_model_path(model)
             except ValueError:
-                from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+                from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 
                 raise ChatBadRequestError(
                     provider=self.name,

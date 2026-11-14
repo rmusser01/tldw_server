@@ -31,13 +31,13 @@ Address the actionable Qodo review thread on PR #1271 by making the new audio/vo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Changed the review-fix assertion to compare the set of imported modules, preserving the pre-resolution empty import assertion and exact post-resolution attribute access counts.
 
 Verification: focused audio/voice test passed; full router group contracts passed; main router contracts passed; OpenAPI contracts passed; Bandit on test file passed with pytest assert rule B101 skipped; git diff hygiene passed.
 
 Replied to Qodo review thread with fix commit and verification summary, then resolved thread `PRRT_kwDOL1aGf85_gbK5`.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

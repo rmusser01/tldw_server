@@ -3,21 +3,19 @@ id: TASK-385
 title: Implement local prompt cache diagnostics
 status: Done
 assignee: []
-created_date: '2026-05-15 16:16'
-updated_date: '2026-05-15 16:27'
+created_date: 2026-05-15 16:16
+updated_date: 2026-05-15 16:27
 labels:
-  - llm-cache
-  - local-llm
-  - cost-control
-  - implementation
+- llm-cache
+- local-llm
+- cost-control
+- implementation
 dependencies:
-  - TASK-377
-  - TASK-378
+- TASK-377
+- TASK-15207
 documentation:
-  - >-
-    Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md
-  - >-
-    Docs/superpowers/plans/2026-05-15-chat-worldbook-cache-cost-control-implementation-plan.md
+- Docs/superpowers/specs/2026-05-15-chat-worldbook-cache-cost-control-design.md
+- Docs/superpowers/plans/2026-05-15-chat-worldbook-cache-cost-control-implementation-plan.md
 priority: medium
 ---
 
@@ -37,11 +35,11 @@ Add local inference prompt/prefix cache diagnostics for vLLM and llama.cpp witho
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented local cache diagnostics with a separate inference_prefix_cache_intent path for vLLM and llama.cpp. Diagnostics are attached as tldw_local_cache_diagnostics on non-streaming local responses only when cache-related signal exists; strict payload filtering still removes non-OpenAI cache hint keys before sending to local OpenAI-compatible servers.
 
 Verification: focused red run failed on missing local_cache_diagnostics module; focused Stage 7 pack passed 13 tests; expanded pack passed 61 tests; py_compile passed for touched Python files; git diff --check passed; Bandit wrote /tmp/bandit_local_cache_stage7.json with results: [].
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

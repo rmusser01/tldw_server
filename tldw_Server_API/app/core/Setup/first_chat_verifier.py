@@ -18,6 +18,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatRateLimitError,
 )
 from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 
 DEFAULT_FIRST_CHAT_PROMPT = "Please reply with a short hello so setup can confirm chat works."
 FIRST_CHAT_RESPONSE_TEXT_MAX_LENGTH = 500
@@ -66,12 +67,13 @@ class FirstChatVerificationResult:
 
 async def _call_chat_completion(*, provider: str, model: str, prompt: str) -> Any:
     """Call the adapter-backed chat completion path; kept patchable for tests."""
-    return await perform_chat_api_call_async(
-        api_endpoint=provider,
-        model=model,
-        messages_payload=[{"role": "user", "content": prompt}],
-        stream=False,
-    )
+    with llm_call_context(exempt=True):
+        return await perform_chat_api_call_async(
+            api_endpoint=provider,
+            model=model,
+            messages_payload=[{"role": "user", "content": prompt}],
+            stream=False,
+        )
 
 
 async def verify_first_chat(

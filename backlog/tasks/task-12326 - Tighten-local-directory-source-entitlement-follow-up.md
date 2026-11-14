@@ -29,9 +29,9 @@ Address post-merge code-review feedback for local-directory ingestion source ent
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented post-review entitlement hardening. Local-directory ingestion source access no longer accepts global feature flags in multi-user mode. Persisted malformed or out-of-range rollout_percent values now normalize to 0 for fail-closed behavior in feature-flag reads. Verification: focused Ingestion Sources access-policy tests, admin system-ops feature-flag test, git diff --check, and Bandit on touched backend files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -34,9 +34,11 @@ Tighten the main /chat cockpit UI by reducing the existing status strip to criti
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a shared PlaygroundRailSection primitive for in-place collapsible cockpit rail sections. Wired it into the main /chat context rail and runtime rail, and added a top-level collapse control to the composition preview box. Simplified PlaygroundStatusStrip so normal Ready/Degraded state no longer repeats routine mode, session, persistence, and context-summary chips already visible in the rails, while critical session/runtime recovery state remains visible.
-<!-- SECTION:NOTES:END -->
+
+Implemented PR #1801 review fixes for the main /chat cockpit slice. Added structured sessionStatus wiring so routine loaded/idle local-history and temporary-session labels stay out of the simplified status strip while loading/failed/session-error states remain visible. Removed redundant collapse-toggle title attributes, replaced HTML hidden collapse bodies with CSS hiding plus aria-hidden, and added the missing collapse/expand rail-section locale keys with the public locale mirror synced by the repo script. Review-fix verification: bunx vitest run PlaygroundStatusStrip.first-slice, PlaygroundContextRail.first-slice, PlaygroundRuntimeInspector.first-slice, Playground.cockpit-maturity, Playground.cockpit-a11y, PlaygroundCompositionPreview, playground-locale-mirror (66 tests); bun run verify:design-system-state; git diff --check. Bandit skipped because touched code is frontend TS/TSX/JSON plus Backlog markdown only.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -53,9 +55,3 @@ Completed the main /chat cockpit status/sidechannel polish slice and PR #1801 re
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Implemented PR #1801 review fixes for the main /chat cockpit slice. Added structured sessionStatus wiring so routine loaded/idle local-history and temporary-session labels stay out of the simplified status strip while loading/failed/session-error states remain visible. Removed redundant collapse-toggle title attributes, replaced HTML hidden collapse bodies with CSS hiding plus aria-hidden, and added the missing collapse/expand rail-section locale keys with the public locale mirror synced by the repo script. Review-fix verification: bunx vitest run PlaygroundStatusStrip.first-slice, PlaygroundContextRail.first-slice, PlaygroundRuntimeInspector.first-slice, Playground.cockpit-maturity, Playground.cockpit-a11y, PlaygroundCompositionPreview, playground-locale-mirror (66 tests); bun run verify:design-system-state; git diff --check. Bandit skipped because touched code is frontend TS/TSX/JSON plus Backlog markdown only.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
 
 const state = vi.hoisted(() => ({
@@ -40,8 +40,12 @@ import {
   getChatSettingsStorageKey,
   normalizeChatSettingsRecord,
   resolveChatSettingsKey,
-  syncChatSettingsForServerChat
+  syncChatSettingsForServerChat as syncSettings
 } from "@/services/chat-settings"
+
+import { settingsTestOwner, installSettingsLocks } from "./chat-settings-fixture"
+const syncChatSettingsForServerChat = (params: Parameters<typeof syncSettings>[0]) => syncSettings({ ...settingsTestOwner, ...params })
+afterEach(() => vi.unstubAllGlobals())
 
 const createSettings = (
   overrides: Partial<ChatSettingsRecord> = {}
@@ -62,6 +66,7 @@ const createSettings = (
 describe("syncChatSettingsForServerChat", () => {
   beforeEach(() => {
     state.storage.clear()
+    installSettingsLocks()
     state.remoteSettings = null
 
     mocks.initialize.mockReset()
@@ -69,11 +74,13 @@ describe("syncChatSettingsForServerChat", () => {
     mocks.updateChatSettings.mockReset()
 
     mocks.initialize.mockResolvedValue(undefined)
-    mocks.getChatSettings.mockImplementation(async () => ({
-      settings: state.remoteSettings
+    mocks.getChatSettings.mockImplementation(async (serverChatId: string) => ({
+      conversation_id: serverChatId,
+      settings: state.remoteSettings ?? {}
     }))
     mocks.updateChatSettings.mockImplementation(
-      async (_serverChatId: string, settings: ChatSettingsRecord) => ({
+      async (serverChatId: string, settings: ChatSettingsRecord) => ({
+        conversation_id: serverChatId,
         settings
       })
     )
@@ -113,10 +120,10 @@ describe("syncChatSettingsForServerChat", () => {
     })
 
     expect(mocks.updateChatSettings).not.toHaveBeenCalled()
-    expect(result).toEqual(localSettings)
+    expect(result).toEqual(state.remoteSettings)
   })
 
-  it("pushes chat settings only when the merged result differs from the remote copy", async () => {
+  it("loads canonical server settings without automatically replaying newer cached edits", async () => {
     const serverChatId = "chat-2"
     const localSettings = createSettings({
       updatedAt: "2026-03-08T00:10:00.000Z",
@@ -139,111 +146,27 @@ describe("syncChatSettingsForServerChat", () => {
       serverChatId
     })
 
-    expect(mocks.updateChatSettings).toHaveBeenCalledTimes(1)
-    expect(mocks.updateChatSettings).toHaveBeenCalledWith(
-      serverChatId,
-      localSettings,
-      undefined
-    )
-    expect(result).toEqual(localSettings)
+    expect(mocks.updateChatSettings).not.toHaveBeenCalled()
+    expect(result).toEqual(state.remoteSettings)
   })
 
-  it("reconciles locally persisted assistant overlay settings once a server chat id exists", async () => {
-    const historyId = "history-overlay-sync"
-    const serverChatId = "chat-overlay-sync"
-    const localSettings = createSettings({
-      updatedAt: "2026-05-22T18:10:00.000Z",
-      assistantOverlay: {
-        kind: "persona",
-        id: "persona-11",
-        name: "Research Guide",
-        avatar_url: "https://example.com/persona-11.png",
-        system_prompt_snapshot: "Keep answers structured and calm.",
-        updatedAt: "2026-05-22T18:10:00.000Z"
-      }
-    })
-    state.storage.set(
-      getChatSettingsStorageKey(
-        resolveChatSettingsKey({ historyId, serverChatId: null })
-      ),
-      localSettings
-    )
-    state.remoteSettings = null
-
-    const result = await syncChatSettingsForServerChat({
-      historyId,
-      serverChatId
-    })
-
-    expect(mocks.updateChatSettings).toHaveBeenCalledTimes(1)
-    expect(mocks.updateChatSettings).toHaveBeenCalledWith(
-      serverChatId,
-      expect.objectContaining({
-        assistantOverlay: expect.objectContaining({
-          id: "persona-11",
-          system_prompt_snapshot: "Keep answers structured and calm."
-        })
-      }),
-      undefined
-    )
-    expect(
-      state.storage.get(
-        getChatSettingsStorageKey(
-          resolveChatSettingsKey({ historyId: null, serverChatId })
-        )
-      )
-    ).toMatchObject({
-      assistantOverlay: expect.objectContaining({ id: "persona-11" })
-    })
-    expect(result).toEqual(localSettings)
+  it("does not promote a local mirror's overlay when the authenticated server has no overrides", async () => {
+    const localSettings = createSettings({ assistantOverlay: {
+      kind: "persona", id: "persona-11", name: "Research Guide", updatedAt: "2026-05-22T18:10:00Z"
+    } })
+    const localKey = getChatSettingsStorageKey("local:history-overlay-sync")
+    state.storage.set(localKey, localSettings)
+    const result = await syncChatSettingsForServerChat({ historyId: "history-overlay-sync", serverChatId: "chat-overlay-sync" })
+    expect(result).toBeNull()
+    expect(mocks.updateChatSettings).not.toHaveBeenCalled()
+    expect(state.storage.get(localKey)).toEqual(localSettings)
   })
 
-  it("treats missing remote chat settings as empty without warning", async () => {
-    const serverChatId = "chat-settings-missing"
-    const warnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined)
-    const error = new Error("Chat settings not found") as Error & {
-      status?: number
-    }
-    error.status = 404
+  it.each([404, undefined])("surfaces failed remote reads without writing, status=%s", async (status) => {
+    const error = Object.assign(new Error("Chat settings not found"), { status })
     mocks.getChatSettings.mockRejectedValueOnce(error)
-
-    try {
-      const result = await syncChatSettingsForServerChat({
-        historyId: null,
-        serverChatId
-      })
-
-      expect(result).toBeNull()
-      expect(mocks.updateChatSettings).not.toHaveBeenCalled()
-      expect(warnSpy).not.toHaveBeenCalled()
-    } finally {
-      warnSpy.mockRestore()
-    }
-  })
-
-  it("does not swallow unrelated not-found messages without a 404 status", async () => {
-    const serverChatId = "chat-settings-unrelated-not-found"
-    const warnSpy = vi
-      .spyOn(console, "warn")
-      .mockImplementation(() => undefined)
-    mocks.getChatSettings.mockRejectedValueOnce(new Error("Prompt not found"))
-
-    try {
-      const result = await syncChatSettingsForServerChat({
-        historyId: null,
-        serverChatId
-      })
-
-      expect(result).toBeNull()
-      expect(warnSpy).toHaveBeenCalledWith(
-        "Failed to fetch server chat settings",
-        expect.any(Error)
-      )
-    } finally {
-      warnSpy.mockRestore()
-    }
+    await expect(syncChatSettingsForServerChat({ historyId: null, serverChatId: "chat-settings-missing" })).rejects.toBe(error)
+    expect(mocks.updateChatSettings).not.toHaveBeenCalled()
   })
 
   it("passes workspace scope through server settings sync", async () => {
@@ -259,7 +182,7 @@ describe("syncChatSettingsForServerChat", () => {
       ),
       localSettings
     )
-    state.remoteSettings = null
+    state.remoteSettings = localSettings
 
     const result = await syncChatSettingsForServerChat({
       historyId,
@@ -267,12 +190,8 @@ describe("syncChatSettingsForServerChat", () => {
       scope
     })
 
-    expect(mocks.getChatSettings).toHaveBeenCalledWith(serverChatId, { scope })
-    expect(mocks.updateChatSettings).toHaveBeenCalledWith(
-      serverChatId,
-      localSettings,
-      { scope }
-    )
+    expect(mocks.getChatSettings).toHaveBeenCalledWith(serverChatId, { requestScope: settingsTestOwner.requestScope, scope })
+    expect(mocks.updateChatSettings).not.toHaveBeenCalled()
     expect(result).toEqual(localSettings)
   })
 })

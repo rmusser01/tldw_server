@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.schemas.evaluation_recipe_schemas import (
+from tldw_Server_API.app.core.Evaluations.evaluation_recipe_schemas import (
     ConfidenceSummary,
     RecommendationSlot,
     RecipeRunRecord,

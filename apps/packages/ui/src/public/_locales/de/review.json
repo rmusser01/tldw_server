@@ -780,7 +780,7 @@
     "message": "Nicht zum Speichern berechtigt"
   },
   "mediaPage_spreadMode": {
-    "message": "Vergleich"
+    "message": "Nebeneinander"
   },
   "mediaPage_listMode": {
     "message": "Fokus"
@@ -789,13 +789,13 @@
     "message": "Stapel"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "Ausgewählte Elemente nebeneinander zum Vergleichen anzeigen"
+    "message": "Ausgewählte Elemente nebeneinander anordnen"
   },
   "mediaPage_listModeTooltip": {
     "message": "Ein Element nach dem anderen mit Navigation anzeigen"
   },
   "mediaPage_allModeTooltip": {
-    "message": "Alle ausgewählten Elemente in einer scrollbaren Liste anzeigen"
+    "message": "Das aktuelle Lesefenster als scrollbaren Stapel anzeigen"
   },
   "mediaPage_copyContentLabel": {
     "message": "Inhalt kopieren"
@@ -834,19 +834,19 @@
     "message": "Elemente auswählen"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "Klicke links in der Seitenleiste auf Elemente, um sie zur Ansicht hinzuzufügen."
+    "message": "Mit Kontrollkästchen auswählen und Auswahl lesen wählen. Klick oder Eingabe zeigt die Vorschau."
   },
   "mediaPage_firstUseStep2": {
     "message": "Ansicht wählen"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "Nutze \"Vergleich\" für nebeneinander, \"Fokus\" für jeweils ein Element oder \"Stapel\" für alle."
+    "message": "Nebeneinander ordnet an; Fokus zeigt ein Element; Stapel zeigt das aktuelle Lesefenster. Inhalte vergleichen vergleicht den Text."
   },
   "mediaPage_firstUseStep3": {
     "message": "Navigieren"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "Nutze die Zurück/Weiter-Schaltflächen oder die Tastatur (Tab + Enter), um durch die Elemente zu blättern."
+    "message": "Zurück/Weiter oder j/k navigiert im aktiven Kontext. Tab und Leertaste wählen ein Kontrollkästchen."
   },
   "mediaPage_gotIt": {
     "message": "Alles klar"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Choose an analysis provider, then retry analysis."
+  },
+  "mediaPage_resultsHint": {
+    "message": "Klick oder Eingabe zeigt die Vorschau. Leertaste am Kontrollkästchen wählt aus. Umschalt+Klick wählt einen Bereich."
+  },
+  "mediaPage_viewerAll": {
+    "message": "Lesefenster (gestapelt)"
   }
 }

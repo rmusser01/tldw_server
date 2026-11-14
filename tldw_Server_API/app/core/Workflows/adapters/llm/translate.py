@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content
@@ -33,7 +34,7 @@ async def run_translate_adapter(config: dict[str, Any], context: dict[str, Any])
 
     Output: { text: translated_text, target_lang, provider? }
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     txt_t = str(config.get("input") or "").strip()
     if txt_t:
@@ -68,6 +69,8 @@ async def run_translate_adapter(config: dict[str, Any], context: dict[str, Any])
         if not out:
             return {"text": text, "target_lang": target, "provider": "openai", "fallback": True}
         return {"text": out, "target_lang": target, "provider": "openai"}
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         # Fallback: return original
         return {"text": text, "target_lang": target, "provider": "none", "fallback": True}

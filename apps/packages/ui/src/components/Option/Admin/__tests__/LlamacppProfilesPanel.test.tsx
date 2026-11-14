@@ -1,6 +1,7 @@
 import React from "react"
+import { ConfigProvider } from "antd"
 import { describe, expect, it, vi } from "vitest"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { LlamacppProfilesPanel } from "../LlamacppProfilesPanel"
 import type {
   LlamacppAsset,
@@ -78,6 +79,7 @@ const renderPanel = (overrides = {}) => {
   const onDelete = vi.fn().mockResolvedValue(true)
 
   render(
+    <ConfigProvider theme={{ token: { motion: false } }}>
     <LlamacppProfilesPanel
       profiles={profiles}
       assets={{ assets: [ggufAsset, mmprojAsset], warnings: [], scan_limited: false }}
@@ -90,12 +92,45 @@ const renderPanel = (overrides = {}) => {
       onDelete={onDelete}
       {...overrides}
     />
+    </ConfigProvider>
   )
 
   return { onCreate, onUpdate, onDelete }
 }
 
 describe("LlamacppProfilesPanel", () => {
+  it.each([true, false])("keeps one profile save owned until its pending result %s settles", async (saved) => {
+    let complete!: (value: boolean) => void
+    const pending = new Promise<boolean>((resolve) => { complete = resolve })
+    const onCreate = vi.fn(() => pending)
+    renderPanel({ onCreate })
+    fireEvent.click(screen.getByRole("button", { name: "New profile" }))
+    fireEvent.change(screen.getByLabelText("Profile name"), { target: { value: "Owned pending profile" } })
+    const save = screen.getByRole("button", { name: "Save profile" }) as HTMLButtonElement
+    fireEvent.click(save)
+    try {
+      await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1))
+      expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true)
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+      fireEvent.click(screen.getByRole("button", { name: "New profile" }))
+      fireEvent.click(screen.getByRole("button", { name: "Edit Analysis runtime" }))
+      expect((screen.getByLabelText("Profile server args JSON") as HTMLTextAreaElement).disabled).toBe(true)
+      expect(save.disabled).toBe(true)
+      fireEvent.click(save)
+      expect((screen.getByLabelText("Profile name") as HTMLInputElement).value).toBe("Owned pending profile")
+      expect(onCreate).toHaveBeenCalledTimes(1)
+    } finally {
+      await act(async () => { complete(saved); await pending })
+    }
+    await waitFor(() => expect(Boolean(screen.queryByRole("dialog"))).toBe(!saved))
+    if (!saved) {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    }
+    fireEvent.click(screen.getByRole("button", { name: "New profile" }))
+    expect((await screen.findByLabelText("Profile name") as HTMLInputElement).value).toBe("")
+  })
+
   it("creates a saved launch profile from local assets", async () => {
     const { onCreate } = renderPanel()
 

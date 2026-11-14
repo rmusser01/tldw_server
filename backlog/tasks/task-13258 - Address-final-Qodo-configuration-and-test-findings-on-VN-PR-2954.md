@@ -35,13 +35,13 @@ Follow-up to the VN generation-readiness task (whose TASK-13249 ID collided with
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified Qodo default-enabled premise against the active lifecycle: VN workers require explicit truthy flags plus route gates; unset flags remain disabled. Fixed missing route gates using worker_route_default with the active route callback. Two disabled-route regressions failed before the change. Stable Diffusion missing-preferred/existing-legacy regression also failed before its one-line fix. Both brittle test assertions now verify public behavior and relevant no-side-effect boundaries. 96 catalog/API tests and 55 adapter/model/auth tests passed; final combined run and independent review underway. The prior eight Qodo threads remain addressed; full /agentic_review is required on the next pushed head, not Qodo chat.
 
 Final combined verification: 174 tests passed in 42.69s across VN preflight/API, image catalog/model/Stable Diffusion adapter, privilege catalog, and authorization. Production Ruff, targeted Black, git diff --check, and OpenAPI fingerprint check passed. Bandit zero findings over every production Python file in the PR. No frontend code changed since the rebased 33-test and 3-browser-scenario verification. Existing dependency/temporary-directory cleanup warnings recorded; no test failures. Independent review pending; final-head Qodo and required CI remain mandatory merge gates.
 
 Independent read-only review found no actionable issue and confirmed active startup from main.py through lifecycle bootstrap to explicit-flag-plus-route VN specs. Implementation and local verification are complete. The last acceptance item records disposition and release-gate handoff rather than claiming future CI success: a new full /agentic_review and all seven required checks must pass on the pushed final head before the separately authorized merge. The GitHub PR records that delivery outcome.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

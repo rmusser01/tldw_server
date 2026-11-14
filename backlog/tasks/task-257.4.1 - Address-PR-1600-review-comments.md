@@ -41,13 +41,13 @@ Address all actionable review comments on PR #1600 for the Persona Chat judge tr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR #1600 review surfaces and addressed still-valid findings: artifact serialization now re-sanitizes public IDs/results, emits structured calibration warning keys, counts actual input rows separately from deduplicated IDs, detects redaction collisions using sanitized prediction keys, and sorts represented dimension keys.
 
 Validation so far: focused execution tests passed, broader Persona Chat judge suite passed with 55 tests, py_compile passed, Bandit on touched Python scope passed with 0 findings, and git diff --check passed.
 
 PR replies posted and unresolved review threads resolved: Gemini deterministic dimension-key thread PRRT_kwDOL1aGf86BSxjZ, CodeRabbit final serialization boundary thread PRRT_kwDOL1aGf86BSzkQ, plus top-level PR summary comment https://github.com/rmusser01/tldw_server/pull/1600#issuecomment-4427462170.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

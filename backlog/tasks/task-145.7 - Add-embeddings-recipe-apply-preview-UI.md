@@ -38,9 +38,9 @@ Implement Task 6 from the embeddings RAG recipe implementation plan: add a serve
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: `bunx vitest run src/components/Option/Evaluations/tabs/__tests__/RecipesTab.launch.test.tsx` failed after adding Task 6 tests because the preview hook was not called and the apply-preview modal content was absent. GREEN: focused launch suite passed with 24 tests. Required combined verification passed with 2 files and 25 tests. `git diff --check` passed. Bandit skipped: frontend-only TypeScript/TSX tests and Backlog metadata, no Python touched. Known blockers: none.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -15,6 +15,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.http_client import afetch, create_async_client
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import _extract_openai_content
@@ -50,7 +51,7 @@ async def run_doi_resolve_adapter(config: dict[str, Any], context: dict[str, Any
       - metadata: dict - Paper metadata
       - resolved: bool
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -146,7 +147,7 @@ async def run_reference_parse_adapter(config: dict[str, Any], context: dict[str,
     Output:
       - parsed: dict - Structured citation data
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -198,6 +199,8 @@ Return JSON only."""
 
         return {"parsed": {}, "raw_text": result_text}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.error("Reference parse error")
         return {"parsed": {}, "error": "Reference parsing failed"}
@@ -296,7 +299,7 @@ async def run_literature_review_adapter(config: dict[str, Any], context: dict[st
       - review: str
       - paper_count: int
     """
-    from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string as _tmpl
+    from tldw_Server_API.app.core.Utils.template_render import apply_template_to_string as _tmpl
 
     if callable(context.get("is_cancelled")) and context["is_cancelled"]():
         return {"__status__": "cancelled"}
@@ -356,6 +359,8 @@ async def run_literature_review_adapter(config: dict[str, Any], context: dict[st
         review = _extract_openai_content(response) or ""
         return {"review": review, "text": review, "paper_count": len(papers), "style": style}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.error("Literature review error")
         return {"review": "", "error": "Literature review generation failed"}

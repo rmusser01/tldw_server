@@ -661,7 +661,18 @@ async def get_process_emails_form(
         _raise_422(exc)
 
 
+def media_analysis_requested(form_data: Any) -> bool:
+    """True when a media request asks for LLM analysis.
+
+    The same condition the audio and video libraries use before they call the
+    LLM: analysis on, and a provider named that is not "none".
+    """
+    api_name = getattr(form_data, "api_name", None)
+    return bool(getattr(form_data, "perform_analysis", False) and api_name and str(api_name).lower() != "none")
+
+
 __all__ = [
+    "media_analysis_requested",
     "get_process_documents_form",
     "get_process_videos_form",
     "get_process_audios_form",

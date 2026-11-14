@@ -59,7 +59,7 @@ def _close_cached_optional_workflows_db() -> None:
 
 
 async def _shutdown_llm_provider_override_recovery() -> None:
-    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
         shutdown_llm_provider_override_recovery,
     )
 

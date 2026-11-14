@@ -8,11 +8,13 @@ import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID
 
 import pytest
 
+from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
 from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import (
     MoodboardSyncStore,
 )
@@ -815,12 +817,14 @@ def test_v61_streaming_proof_is_batch_independent_and_never_materializes_rows() 
         for index in range(3)
     ]
 
-    class _Cursor:
-        def __init__(self) -> None:
+    class _Cursor(sqlite3.Cursor):
+        def __init__(self, connection: sqlite3.Connection) -> None:
+            super().__init__(connection)
             self.offset = 0
             self.fetchmany_sizes: list[int] = []
 
-        def fetchmany(self, size: int) -> list[dict[str, object]]:
+        def fetchmany(self, size: int | None = 1) -> list[dict[str, object]]:
+            size = self.arraysize if size is None else size
             self.fetchmany_sizes.append(size)
             batch = rows[self.offset : self.offset + size]
             self.offset += len(batch)
@@ -832,28 +836,36 @@ def test_v61_streaming_proof_is_batch_independent_and_never_materializes_rows() 
         def __iter__(self):
             pytest.fail("v61 product proof must not materialize cursor iteration")
 
-    class _Connection:
+    class _Connection(sqlite3.Connection):
         def __init__(self) -> None:
+            super().__init__(":memory:")
             self.cursors: list[_Cursor] = []
 
         def execute(
             self,
-            _query: str,
-            _params: tuple[object, ...] = (),
+            _query,
+            _params=(),
         ) -> _Cursor:
-            cursor = _Cursor()
+            cursor = _Cursor(self)
             self.cursors.append(cursor)
             return cursor
 
     db = object.__new__(CharactersRAGDB)
     first = _Connection()
     second = _Connection()
-    proof_one = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
-        first, "SELECT payload FROM product", page_size=1
-    )
-    proof_three = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
-        second, "SELECT payload FROM product", page_size=3
-    )
+    try:
+        proof_one = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+            first, "SELECT payload FROM product", page_size=1
+        )
+        proof_three = db._notes_moodboard_studio_v61_streaming_query_proof_sqlite(
+            second, "SELECT payload FROM product", page_size=3
+        )
+        cursor = first.execute("SELECT payload FROM product")
+        cursor.arraysize = 2
+        assert cursor.fetchmany(None) == rows[:2]
+    finally:
+        first.close()
+        second.close()
 
     assert proof_one == proof_three  # nosec B101
     assert proof_one[0] == 3  # nosec B101
@@ -896,57 +908,68 @@ def test_v61_copy_streams_all_large_product_selects_with_fetchmany(
 ) -> None:
     db_path = tmp_path / "stream-copy.sqlite"
     _prepare_v60_product_database(db_path, board_count=3)
-    original_copy = CharactersRAGDB._copy_notes_moodboard_studio_graph_v61_sqlite
+    original_connect = sqlite3.connect
     streamed_queries: list[str] = []
+    original_streaming_rows = CharactersRAGDB._notes_moodboard_studio_v61_streaming_rows_sqlite
+    tracking = False
 
-    class _StreamingCursor:
-        def __init__(self, cursor: sqlite3.Cursor, query: str) -> None:
-            self._cursor = cursor
-            self._query = query
+    def tracked_streaming_rows(self, conn, query, params=(), *, page_size=None):
+        nonlocal tracking
+        previous = tracking
+        tracking = True
+        try:
+            yield from original_streaming_rows(self, conn, query, params, page_size=page_size)
+        finally:
+            tracking = previous
 
-        def fetchmany(self, size: int):
-            streamed_queries.append(self._query)
-            return self._cursor.fetchmany(size)
+    class _StreamingCursor(sqlite3.Cursor):
+        def execute(self, query, params=()):
+            self._query = " ".join(query.lower().split())
+            self._tracked = (
+                tracking
+                and self._query.startswith("select")
+                and any(
+                    f"from {table}" in self._query
+                    for table in (
+                        "note_task_scope_authority",
+                        "moodboards",
+                        "moodboard_notes",
+                        "note_studio_documents",
+                    )
+                )
+                and "order by" in self._query
+            )
+            return super().execute(query, params)
 
-        def fetchone(self):
-            return self._cursor.fetchone()
+        def fetchmany(self, size=1):
+            if self._tracked:
+                streamed_queries.append(self._query)
+            return super().fetchmany(size)
 
         def fetchall(self):
-            pytest.fail("v61 product copy must not call fetchall")
+            if self._tracked:
+                pytest.fail("v61 product copy must not call fetchall")
+            return super().fetchall()
 
         def __iter__(self):
-            pytest.fail("v61 product copy must not materialize cursor iteration")
+            if self._tracked:
+                pytest.fail("v61 product copy must not materialize cursor iteration")
+            return super().__iter__()
 
-        def __getattr__(self, name: str):
-            return getattr(self._cursor, name)
+    class _Connection(sqlite3.Connection):
+        def execute(self, query, params=()):
+            return self.cursor(factory=_StreamingCursor).execute(query, params)
 
-    class _Connection:
-        def __init__(self, conn: sqlite3.Connection) -> None:
-            self._conn = conn
-
-        def execute(self, query: str, params: tuple[object, ...] = ()):
-            cursor = self._conn.execute(query, params)
-            normalized = " ".join(query.lower().split())
-            if normalized.startswith("select") and any(
-                f"from {table}" in normalized
-                for table in (
-                    "note_task_scope_authority",
-                    "moodboards",
-                    "moodboard_notes",
-                    "note_studio_documents",
-                )
-            ) and "order by" in normalized:
-                return _StreamingCursor(cursor, normalized)
-            return cursor
-
-    def tracked_copy(self: CharactersRAGDB, conn: sqlite3.Connection):
-        return original_copy(self, _Connection(conn))
+    def tracked_connect(*args, **kwargs):
+        kwargs["factory"] = _Connection
+        return original_connect(*args, **kwargs)
 
     monkeypatch.setattr(
         CharactersRAGDB,
-        "_copy_notes_moodboard_studio_graph_v61_sqlite",
-        tracked_copy,
+        "_notes_moodboard_studio_v61_streaming_rows_sqlite",
+        tracked_streaming_rows,
     )
+    monkeypatch.setattr(sqlite3, "connect", tracked_connect)
     db = CharactersRAGDB(str(db_path), client_id=OWNER)
     db.close_all_connections()
 
@@ -1836,7 +1859,9 @@ def test_current_v63_studio_helper_verifies_drift_instead_of_repairing(
     assert "_verify_notes_moodboard_studio_schema_sqlite" in source
 
 
-def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns() -> None:
+def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     statements: list[str] = []
 
     class _Cursor:
@@ -1864,11 +1889,12 @@ def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns
             return _Cursor()
 
     db = object.__new__(CharactersRAGDB)
-    db._backend = _Backend()
+    db._backend = PostgreSQLBackend.__new__(PostgreSQLBackend)
+    monkeypatch.setattr(db._backend, "execute", _Backend().execute)
     db._uses_shared_content_backend = False
     db._local = threading.local()
     db.client_id = OWNER
-    db._get_schema_version_postgres = lambda _conn: 60
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, *, lock=False: 60)
     db._ensure_note_studio_schema_postgres(object())
     assert any("CREATE TABLE IF NOT EXISTS note_studio_documents" in sql for sql in statements)  # nosec B101
     assert all("owner_user_id" not in sql and "dataset_id" not in sql for sql in statements)  # nosec B101
@@ -1882,12 +1908,16 @@ def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns
             return _Cursor([{"owner_user_id": OWNER, "dataset_id": DATASET_A}])
         return _Cursor()
 
-    db.execute_query = execute_query
-    db.resolve_moodboard_compatibility_dataset_id = lambda **_kwargs: pytest.fail(
-        "PostgreSQL v60 moodboard reads must not resolve v61 scope flags"
+    monkeypatch.setattr(db, "execute_query", execute_query)
+    monkeypatch.setattr(
+        db,
+        "resolve_moodboard_compatibility_dataset_id",
+        lambda **_kwargs: pytest.fail("PostgreSQL v60 moodboard reads must not resolve v61 scope flags"),
     )
-    db.resolve_studio_compatibility_dataset_id = lambda **_kwargs: pytest.fail(
-        "PostgreSQL v60 Studio reads must not resolve v61 scope flags"
+    monkeypatch.setattr(
+        db,
+        "resolve_studio_compatibility_dataset_id",
+        lambda **_kwargs: pytest.fail("PostgreSQL v60 Studio reads must not resolve v61 scope flags"),
     )
 
     assert db.get_moodboard_by_id(1) is None  # nosec B101
@@ -1900,3 +1930,59 @@ def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns
     assert "moodboard_graph_bound" not in issued  # nosec B101
     assert "studio_graph_bound" not in issued  # nosec B101
     assert "owner_user_id=? AND dataset_id=?" not in issued  # nosec B101
+
+
+@pytest.mark.parametrize("schema_version", [60, CharactersRAGDB._CURRENT_SCHEMA_VERSION])
+def test_moodboard_missing_generated_id_rolls_back_native_insert(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    schema_version: int,
+) -> None:
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", schema_version)
+    db = CharactersRAGDB(str(tmp_path / "missing-moodboard-id.sqlite"), client_id=OWNER)
+    try:
+        assert db._supports_notes_moodboard_studio_v61() is (schema_version >= 61)
+        existing_id = db.add_moodboard(name="Keep board")
+        assert isinstance(existing_id, int)
+        before = [dict(row) for row in db.execute_query("SELECT * FROM moodboards ORDER BY id").fetchall()]
+        original_transaction = db.transaction
+        inserted_ids = []
+
+        class MissingIdCursor:
+            lastrowid = None
+
+            def __init__(self, cursor):
+                self._cursor = cursor
+
+            def __getattr__(self, name):
+                return getattr(self._cursor, name)
+
+        class MissingIdConnection:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, params=()):
+                cursor = self._conn.execute(sql, params)
+                if " ".join(sql.split()).startswith("INSERT INTO moodboards("):
+                    inserted_ids.append(cursor.lastrowid)
+                    return MissingIdCursor(cursor)
+                return cursor
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        @contextmanager
+        def missing_id_transaction():
+            with original_transaction() as conn:
+                yield MissingIdConnection(conn)
+
+        monkeypatch.setattr(db, "transaction", missing_id_transaction)
+
+        with pytest.raises(CharactersRAGDBError) as error:
+            db.add_moodboard(name="Absent driver ID")
+        assert str(error.value) == "Failed to determine moodboard ID after insert."
+        assert len(inserted_ids) == 1 and isinstance(inserted_ids[0], int)
+        after = [dict(row) for row in db.execute_query("SELECT * FROM moodboards ORDER BY id").fetchall()]
+        assert after == before
+    finally:
+        db.close_all_connections()

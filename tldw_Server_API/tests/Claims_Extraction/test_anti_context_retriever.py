@@ -338,29 +338,23 @@ class TestAntiContextRetrieverRetrieve:
 
     @pytest.mark.unit
     @pytest.mark.asyncio
-    async def test_filters_by_min_score(self):
-        """Should filter documents below minimum relevance score."""
+    async def test_min_score_is_the_retrievers_floor_not_a_filter_on_fused_scores(self):
+        """The floor goes to the retriever, which applies it before fusion; fused scores are kept (TASK-13881)."""
         mock_docs = [
-            Document(id="1", content="High score", metadata={}, score=0.8),
-            Document(id="2", content="Low score", metadata={}, score=0.1),
+            Document(id="1", content="Fused rank 1", metadata={}, score=1 / 61),
+            Document(id="2", content="Fused rank 2", metadata={}, score=1 / 62),
         ]
         mock_retriever = MockRetriever(mock_docs)
         config = AntiContextConfig(min_relevance_score=0.5)
         retriever = AntiContextRetriever(mock_retriever, config)
 
-        claim = MockClaim(id="1", text="Some claim")
-
         results = await retriever.retrieve_anti_context(
-            claim=claim,
+            claim=MockClaim(id="1", text="Some claim"),
             original_doc_ids=set(),
         )
 
-        all_docs = []
-        for r in results:
-            all_docs.extend(r.documents)
-
-        # Should only include high-score document
-        assert all(d.score >= 0.5 for d in all_docs)
+        assert {call["config"].min_score for call in mock_retriever.retrieve_calls} == {0.5}
+        assert {d.id for r in results for d in r.documents} == {"1", "2"}
 
     @pytest.mark.unit
     @pytest.mark.asyncio
@@ -489,3 +483,65 @@ class TestNegationTemplates:
         assert "causal" in CONTRARY_TEMPLATES
         assert "comparative" in CONTRARY_TEMPLATES
         assert "ranking" in CONTRARY_TEMPLATES
+
+
+class _NearestNeighbourStore:
+    """A vector store whose nearest neighbour of every query is ``hit``; it notes the collections searched."""
+
+    _initialized = True
+
+    def __init__(self, hit) -> None:
+        self.hit = hit
+        self.collections: list[str] = []
+
+    async def search(self, collection_name, query_vector, k=10, filter=None, include_metadata=True):
+        self.collections.append(collection_name)
+        return [self.hit]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("with_vector_store", [False, True])
+async def test_counter_evidence_from_a_real_hybrid_retriever_is_kept(tmp_path, monkeypatch, with_vector_store):
+    """A fused (RRF) score is at most 1/61: a 0.3 floor on it dropped every document, so FVA never adjudicated.
+
+    Without a vector store the FTS hit comes through. With one, so does the vector-only hit, which FTS cannot find.
+    """
+    from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+    from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create
+    from tldw_Server_API.app.core.RAG.rag_service import database_retrievers
+    from tldw_Server_API.app.core.RAG.rag_service.vector_stores.base import VectorSearchResult
+
+    db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="7")
+    with scoped_context(user_id=7, is_admin=False):
+        fts_hit, _, _ = db.add_media_with_keywords(
+            title="Counter-evidence", media_type="text", owner_user_id=7, keywords=None,
+            content="Evidence against the claim that the sky is green: it is blue.",
+        )
+        vector_hit, _, _ = db.add_media_with_keywords(
+            title="Optics", media_type="text", owner_user_id=7, keywords=None,
+            content="Rayleigh scattering colours daylight blue.",
+        )
+    store = _NearestNeighbourStore(
+        VectorSearchResult(
+            id=f"{vector_hit}_0", content="Rayleigh scattering colours daylight blue.",
+            metadata={"media_id": str(vector_hit)}, score=0.42, distance=0.58,
+        )
+    )
+    monkeypatch.setattr(
+        database_retrievers, "create_from_settings_for_user", lambda settings, user_id="0": store if with_vector_store else None
+    )
+    monkeypatch.setattr(Embeddings_Create, "get_embedding_config", lambda: {})
+    monkeypatch.setattr(Embeddings_Create, "create_embeddings_batch", lambda texts, *a, **k: [[0.1, 0.2, 0.3] for _ in texts])
+    retriever = database_retrievers.MultiDatabaseRetriever({}, user_id="7", media_db=db)
+    try:
+        with scoped_context(user_id=7, is_admin=False):
+            results = await AntiContextRetriever(retriever).retrieve_anti_context(
+                claim=MockClaim(id="1", text="The sky is green."), original_doc_ids=set()
+            )
+    finally:
+        db.close_connection()
+
+    found = {d.id for r in results for d in r.documents}
+    assert found == ({str(fts_hit), str(vector_hit)} if with_vector_store else {str(fts_hit)})
+    assert store.collections == (["user_7_media_embeddings"] * 3 if with_vector_store else [])

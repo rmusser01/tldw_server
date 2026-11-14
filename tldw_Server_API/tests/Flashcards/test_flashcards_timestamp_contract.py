@@ -11,6 +11,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.endpoints.flashcards import router
 from tldw_Server_API.app.api.v1.schemas.flashcards import Deck, Flashcard
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 
@@ -33,6 +34,7 @@ def timestamp_db(request, tmp_path):
 @pytest.fixture
 def timestamp_client(timestamp_db):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(router, prefix="/api/v1")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: timestamp_db
     with TestClient(app) as client:

@@ -36,25 +36,28 @@ const worldBooksBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="world-books-enabled-filter"], [data-testid="world-books-attachment-filter"]',
+      target:
+        '[data-testid="world-books-enabled-filter"], [data-testid="world-books-attachment-filter"], [data-testid="world-books-filters-toggle"]',
       titleKey: "tutorials:worldBooks.basics.filtersTitle",
       titleFallback: "Status Filters",
       contentKey: "tutorials:worldBooks.basics.filtersContent",
       contentFallback:
-        "Filter by enabled/disabled state and attachment status before editing or exporting.",
+        "Filter by status and attachment before editing or exporting. On smaller screens, open Filters to show these controls.",
       placement: "bottom"
     },
     {
-      target: '[data-testid="world-books-table"]',
+      target:
+        '[data-testid="world-books-table"], [data-testid="world-books-library"], [data-testid="world-books-empty-state"]',
       titleKey: "tutorials:worldBooks.basics.tableTitle",
       titleFallback: "World Book Library",
       contentKey: "tutorials:worldBooks.basics.tableContent",
       contentFallback:
-        "Select a row to manage entries, attachments, and advanced actions for each world book.",
+        "Select a saved world book to manage entries and attachments. If the library is empty, create or import your first world book.",
       placement: "top"
     },
     {
-      target: '[data-testid="world-books-new-button"], [data-testid="world-books-import-button"]',
+      target:
+        '[data-testid="world-books-new-button"], [data-testid="world-books-import-button"]',
       titleKey: "tutorials:worldBooks.basics.actionsTitle",
       titleFallback: "Create and Import",
       contentKey: "tutorials:worldBooks.basics.actionsContent",

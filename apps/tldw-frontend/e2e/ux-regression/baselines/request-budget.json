@@ -1,0 +1,107 @@
+{
+  "$comment": "Request-budget ratchet baseline for request-budget.spec.ts. Counts are API requests started in the first windowMs after loading a primed /notes or /chat under next dev (React StrictMode runs effects twice). duplicate-get counts repeats of the same path and query within duplicateWindowMs; polling counts hits after idleFromMs for endpoints with at least pollingMinHits. Tolerances cover measured noise only (10 samples per page, 2026-10-03); the totals were lowered from a 2026-10-22 run after XP-16. See e2e/ux-regression/README.md.",
+  "settings": { "windowMs": 15000, "duplicateWindowMs": 2000, "idleFromMs": 5000, "pollingMinHits": 2 },
+  "entries": [
+    {
+      "page": "notes",
+      "kind": "total",
+      "key": "api-requests",
+      "count": 21,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "21 on 2026-10-22 after XP-16 stopped the 5 s buddy polling (it backs off after the mount read). Re-sample 10 runs before tightening further."
+    },
+    {
+      "page": "notes",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/persona/profiles",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Two concurrent requests at ~0.2 s; likely a StrictMode double effect (dev only)."
+    },
+    {
+      "page": "notes",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/buddies",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost mount fetch, issued twice concurrently (StrictMode)."
+    },
+    {
+      "page": "notes",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/buddies/attachment",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost mount fetch, issued twice concurrently (StrictMode)."
+    },
+    {
+      "page": "notes",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/auth/me",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Two sequential requests ~0.1 s apart from separate consumers, not coalesced (10 of 10 samples)."
+    },
+    {
+      "page": "chat",
+      "kind": "total",
+      "key": "api-requests",
+      "count": 22,
+      "tolerance": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "22 on 2026-10-22 after XP-16 stopped the buddy polling and FirstRunGate stopped re-reading profiles on /chat; +1 when the config/providers race loses."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/persona/profiles",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "One concurrent pair at load (StrictMode double). FirstRunGate no longer reads profiles on /chat (XP-16)."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/users/me/profile",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "users/me/profile?sections=preferences issued twice concurrently at load."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/buddies",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost mount fetch, issued twice concurrently (StrictMode)."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/buddies/attachment",
+      "count": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost mount fetch, issued twice concurrently (StrictMode)."
+    },
+    {
+      "page": "chat",
+      "kind": "duplicate-get",
+      "key": "GET /api/v1/config/providers",
+      "count": 1,
+      "tolerance": 1,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Race: Playground and PlaygroundChat both fetch provider status. In-flight coalescing merges them only while the first request is pending, so a second request appears in ~1 of 4 loads. Tolerance 1 lets it be absent, so this entry cannot report its own fix: delete it when you dedupe the two consumers."
+    }
+  ]
+}

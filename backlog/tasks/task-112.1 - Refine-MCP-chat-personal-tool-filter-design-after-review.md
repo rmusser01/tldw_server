@@ -47,9 +47,9 @@ Address review findings on the MCP chat personal tool filter design before imple
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Updated the MCP chat personal tool filter spec to address all review findings: hook contract now exposes discoveredTools separately from availableTools/chatTools; disabled preferences are versioned and scoped by connection/user; one shared chat tool normalization helper owns identity and collision behavior; no-tools requests omit tools/tool_choice on the wire while treating effective choice as none internally; tests now include scoped persistence, reload/reopen behavior, collisions, and grouping fallback. Verification: docs-only `git diff --check` passed before staging. Bandit skipped because only markdown/Backlog task documentation changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

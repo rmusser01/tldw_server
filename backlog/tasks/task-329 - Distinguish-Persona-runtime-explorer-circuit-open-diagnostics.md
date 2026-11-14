@@ -30,13 +30,13 @@ Add a persona-only runtime diagnostics slice for #1652. The optional Persona Liv
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification: `python -m pytest tldw_Server_API/tests/Persona/test_persona_ws_dialogue_tree_runtime.py::test_runtime_explorer_circuit_open_notice_has_distinct_reason -q --tb=short` failed because no `RUNTIME_EXPLORER_CIRCUIT_OPEN` notice was emitted; circuit-open diagnostics were still routed through generic fallback.
 
 Green verification: the same focused regression test passed after adding distinct circuit-open notice routing. Focused runtime suite `python -m pytest tldw_Server_API/tests/Persona/test_persona_ws_dialogue_tree_runtime.py tldw_Server_API/tests/Persona/test_runtime_explorer.py -q` passed with 30 tests.
 
 Final verification: `python -m pytest tldw_Server_API/tests/Persona/test_persona_ws_dialogue_tree_runtime.py tldw_Server_API/tests/Persona/test_runtime_explorer.py -q` passed with 30 tests. `git diff --check` passed. Bandit on `tldw_Server_API/app/api/v1/endpoints/persona.py` exited 0 with no findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

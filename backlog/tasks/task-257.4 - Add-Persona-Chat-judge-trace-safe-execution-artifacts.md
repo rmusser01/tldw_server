@@ -42,13 +42,13 @@ Implement GitHub issue #1598 as the next optional Persona Chat judge Stage 2 sli
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED/GREEN: Added failing artifact tests in test_persona_chat_judge_execution.py for successful execution artifact serialization, failure-only artifacts, calibration warning serialization, and raw-content leak resistance. Initial import check failed with ImportError for build_persona_chat_judge_execution_artifact, then passed after adding PersonaChatJudgeExecutionArtifact and the builder in persona_chat_judge_execution.py.
 
 Implementation: build_persona_chat_judge_execution_artifact now combines PersonaChatJudgeExecutionResult with calibrate_persona_chat_judge_predictions, serializes a trace-safe artifact with schema_version, offline_only=true, runtime_gating_allowed=false, sanitized provider/model, bounded input case ids, represented dimension keys, prediction/failure counts, sanitized predictions/failures, and calibration metrics/missing/unknown/warnings. Contract docs now describe the execution artifact boundary and leak constraints.
 
 Verification: baseline focused judge tests passed before implementation with 27 passed. New execution test file passed with 16 passed. Broader focused Persona Chat judge suite passed with 52 passed and 5 warnings. py_compile passed for persona_chat_judge_execution.py. Bandit on touched production/test Python paths wrote /tmp/bandit_persona_chat_judge_artifacts.json with results 0 and errors []. git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -33,7 +33,7 @@ def test_blocking_local_generation_paths_use_thread_offload_helper():
     assert chatterbox_adapter.run_tts_blocking_call is tts_utils.run_tts_blocking_call
     assert dia_adapter.run_tts_blocking_call is tts_utils.run_tts_blocking_call
     assert higgs_adapter.run_tts_blocking_call is tts_utils.run_tts_blocking_call
-    assert vibevoice_adapter.run_tts_blocking_call is tts_utils.run_tts_blocking_call
+    assert vibevoice_adapter.hold_tts_engine is tts_utils.hold_tts_engine
     assert kokoro_adapter.run_tts_blocking_next is tts_utils.run_tts_blocking_next
 
     assert _code_object_references_name(
@@ -46,5 +46,5 @@ def test_blocking_local_generation_paths_use_thread_offload_helper():
     )
     assert _code_object_references_name(dia_adapter.DiaAdapter._stream_audio_dia, "run_tts_blocking_call")
     assert _code_object_references_name(higgs_adapter.HiggsAdapter._stream_audio_higgs, "run_tts_blocking_call")
-    assert _code_object_references_name(vibevoice_adapter.VibeVoiceAdapter._stream_audio_vibevoice, "run_tts_blocking_call")
+    assert _code_object_references_name(vibevoice_adapter.VibeVoiceAdapter._stream_audio_vibevoice, "hold_tts_engine")
     assert _code_object_references_name(kokoro_adapter.KokoroAdapter._stream_audio_kokoro, "run_tts_blocking_next")

@@ -24,9 +24,12 @@ vi.mock("../server-health-probe", () => ({ probeServerHealth: vi.fn() }))
 vi.mock("react-i18next", () => ({ useTranslation: () => ({
   t: (key: string, fallback: unknown) => typeof fallback === "string" ? fallback : key
 }) }))
-vi.mock("react-router-dom", () => ({
+vi.mock("react-router-dom", async (importOriginal) => ({
+  ...await importOriginal<typeof import("react-router-dom")>(),
   Link: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  useNavigate: () => vi.fn()
+  useNavigate: () => vi.fn(),
+  useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
+  unstable_usePrompt: vi.fn()
 }))
 
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -59,7 +62,7 @@ afterEach(() => {
   vi.unstubAllEnvs()
 })
 
-it.each(["device", "session"] as const)("settles the real %s credential Disconnect while retaining the server", async (persistence) => {
+it.for(["device", "session"] as const)("settles the real %s credential Disconnect while retaining the server", async (persistence, { signal }) => {
   const serverUrl = "https://disconnect.example.test"
   await tldwClient.saveManualSingleUserCredential({ serverUrl, apiKey: "synthetic-disconnect-key", persistence })
   const observed: unknown[] = []
@@ -76,11 +79,18 @@ it.each(["device", "session"] as const)("settles the real %s credential Disconne
     expect(disconnect).toBeEnabled()
     expect(disconnect.querySelector("svg")).toBeNull()
     expect(await screen.findByText("Logged out successfully")).toBeInTheDocument()
-    expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(serverUrl)
+    const server = screen.getByLabelText("Server URL", { selector: "input" })
+    expect(server).toHaveRole("textbox")
+    expect(server).toHaveAccessibleName("Server URL")
+    expect(server).toBeVisible()
+    expect(server.closest('[aria-hidden="true"]')).toBeNull()
+    expect(server).toHaveValue(serverUrl)
     expect((await tldwClient.getConfig())?.apiKey).toBeUndefined()
     expect(await new Storage({ area: "session" }).get(MANUAL_SESSION_KEY)).toBeUndefined()
     expect(observed).toContainEqual(expect.objectContaining({ serverUrl }))
     expect(mocks.bgRequest).not.toHaveBeenCalled()
+    // Vitest timeouts do not cancel this async body or its later storage writes.
+    signal.throwIfAborted()
     await act(async () => tldwClient.saveManualSingleUserCredential({ serverUrl, apiKey: "synthetic-reconnect-key", persistence }))
     expect((await tldwClient.getConfig())?.apiKey).toBe("synthetic-reconnect-key")
   } finally {
@@ -158,3 +168,55 @@ it.each([false, true])("removes the settled Disconnect indicator with transition
   }
   await waitFor(() => expect(disconnect.querySelector("svg")).toBeNull())
 })
+
+
+it.each([false, true])(
+  "distinguishes multi-user local sign-out after remote failure=%s",
+  async (fail) => {
+    const serverUrl = "https://logout.example.test";
+    await tldwClient.updateConfig({
+      serverUrl,
+      authMode: "multi-user",
+      apiKey: undefined,
+      accessToken: "synthetic-logout-access",
+      refreshToken: "synthetic-logout-refresh",
+    });
+    mocks.bgRequest.mockImplementation(async ({ path }: { path: string }) => {
+      if (path === "/api/v1/auth/logout") {
+        if (fail) throw new TypeError("Declared remote sign-out failure");
+        return { message: "Successfully logged out" };
+      }
+      if (path === "/api/v1/auth/me")
+        return { id: 1, username: "alice", role: "user" };
+      return {};
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <App>
+          <TldwSettings />
+        </App>
+      </ConfigProvider>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Logout" }));
+    await screen.findByText(
+      fail
+        ? "The server did not confirm sign-out. This session may still be active."
+        : "Logged out successfully",
+      { exact: true },
+    );
+    if (fail)
+      expect(
+        screen.queryByText("Logged out successfully", { exact: true }),
+      ).not.toBeInTheDocument();
+    const config = await tldwClient.getConfig();
+    expect(config?.accessToken).toBeUndefined();
+    expect(config?.refreshToken).toBeUndefined();
+    expect(config?.serverUrl).toBe(serverUrl);
+    expect(
+      mocks.bgRequest.mock.calls.filter(
+        ([request]) => request.path === "/api/v1/auth/logout",
+      ),
+    ).toHaveLength(1);
+  },
+);

@@ -38,6 +38,15 @@ def _v59_migration_target(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 59)
 
 
+def _seed_historical_parent_note(db: CharactersRAGDB, title: str) -> None:
+    """Seed real historical rows without current-schema semantic hooks."""
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO notes(id,title,content,client_id) VALUES (?,?,?,?)",
+            (NOTE_ID, title, "Body", OWNER),
+        )
+
+
 def _prepare_v58_database(db_path: Path) -> None:
     """Build the actual preceding schema through the numbered migrations."""
 
@@ -45,7 +54,7 @@ def _prepare_v58_database(db_path: Path) -> None:
         db = CharactersRAGDB(str(db_path), client_id=OWNER)
     try:
         if db.get_note_by_id(NOTE_ID) is None:
-            db.add_note("Attachment parent", "Body", note_id=NOTE_ID)
+            _seed_historical_parent_note(db, "Attachment parent")
     finally:
         db.close_all_connections()
 
@@ -224,7 +233,7 @@ def test_sqlite_v59_rejects_noncanonical_registry_rows(
 ) -> None:
     db = CharactersRAGDB(str(tmp_path / f"invalid-{uuid4()}.sqlite"), client_id=OWNER)
     try:
-        db.add_note("Parent", "Body", note_id=NOTE_ID)
+        _seed_historical_parent_note(db, "Parent")
         with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
             _raw_insert(conn, **overrides)
     finally:
@@ -246,7 +255,7 @@ def test_sqlite_v59_rejects_noninteger_storage_classes(
 ) -> None:
     db = CharactersRAGDB(str(tmp_path / f"storage-class-{uuid4()}.sqlite"), client_id=OWNER)
     try:
-        db.add_note("Parent", "Body", note_id=NOTE_ID)
+        _seed_historical_parent_note(db, "Parent")
         with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:
             _raw_insert(conn, **overrides)
     finally:
@@ -256,7 +265,7 @@ def test_sqlite_v59_rejects_noninteger_storage_classes(
 def test_sqlite_v59_restricts_hard_note_delete(tmp_path: Path) -> None:
     db = CharactersRAGDB(str(tmp_path / "restrict-note-delete.sqlite"), client_id=OWNER)
     try:
-        db.add_note("Parent", "Body", note_id=NOTE_ID)
+        _seed_historical_parent_note(db, "Parent")
         with db.transaction() as conn:
             _raw_insert(conn)
         with pytest.raises(sqlite3.IntegrityError), db.transaction() as conn:

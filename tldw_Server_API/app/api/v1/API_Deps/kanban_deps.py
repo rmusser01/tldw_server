@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     KanbanDBError,
     NotFoundError,
 )
+from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
 from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
 )
@@ -143,7 +144,9 @@ def _create_kanban_db(user_id: int) -> KanbanDB:
     """
     db_path = DatabasePaths.get_kanban_db_path(user_id)
     logger.info(f"Initializing KanbanDB instance for user {user_id} at path: {db_path}")
-    db_instance = KanbanDB(db_path=str(db_path), user_id=str(user_id))
+    db_instance = KanbanDB(
+        db_path=str(db_path), user_id=str(user_id), vector_search_factory=create_kanban_vector_search
+    )
     return db_instance
 
 

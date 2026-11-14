@@ -27,7 +27,8 @@ def search_db():
         CREATE TABLE DocumentVersions(id INTEGER PRIMARY KEY, media_id INTEGER,
           version_number INTEGER, safe_metadata TEXT, deleted INTEGER);
         CREATE VIRTUAL TABLE media_fts USING fts5(title, content);
-        CREATE TABLE Keywords(id INTEGER PRIMARY KEY, keyword TEXT, deleted INTEGER DEFAULT 0);
+        CREATE TABLE Keywords(id INTEGER PRIMARY KEY, keyword TEXT COLLATE NOCASE, uuid TEXT,
+          version INTEGER DEFAULT 1, deleted INTEGER DEFAULT 0);
         CREATE TABLE MediaKeywords(media_id INTEGER, keyword_id INTEGER);
     """)
 
@@ -82,7 +83,7 @@ def test_fallback_respects_selected_fields(search_db, fields, expected):
 
 def test_fallback_retains_media_ids_keywords_and_trash_controls(search_db):
     repo, connection, _, _ = search_db
-    connection.execute("INSERT INTO Keywords VALUES(1,'retain',0)")
+    connection.execute("INSERT INTO Keywords(id, keyword, uuid) VALUES(1, 'Retain', 'kw-1')")
     connection.execute("INSERT INTO MediaKeywords VALUES(1,1)")
     rows, total = repo.search("AURORA-CYCLE5-MULTI-23", media_ids_filter=[1, 2, 3, 4],
                              media_types=["document"], must_have_keywords=["retain"])

@@ -1,0 +1,2151 @@
+{
+  "source_trace_sha256": "42ba9afc69bb55eb9d61ed8b49aa7719f8383a6536bf373ecbbb00b1f1028452",
+  "retained_events": [
+    {
+      "version": 8,
+      "type": "context-options",
+      "origin": "testRunner",
+      "browserName": "",
+      "playwrightVersion": "1.58.0",
+      "options": {},
+      "platform": "darwin",
+      "wallTime": 1791758828518,
+      "monotonicTime": 3869.633,
+      "sdkLanguage": "javascript"
+    },
+    {
+      "type": "before",
+      "callId": "hook@1",
+      "stepId": "hook@1",
+      "startTime": 3883.465,
+      "class": "Test",
+      "method": "hook",
+      "title": "Before Hooks",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@27",
+      "stepId": "fixture@27",
+      "parentId": "hook@1",
+      "startTime": 3895.626,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"browser\"",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@28",
+      "stepId": "pw:api@28",
+      "parentId": "fixture@27",
+      "startTime": 3898.613,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Launch browser",
+      "params": {
+        "handleSIGINT": "false",
+        "tracesDir": "/private/tmp/buddy-independent-clients-workspaces-results-20261011/.playwright-artifacts-0/traces",
+        "headless": "true",
+        "ignoreDefaultArgs": "undefined",
+        "ignoreAllDefaultArgs": "false",
+        "env": "undefined",
+        "timeout": "180000"
+      },
+      "stack": []
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@28",
+      "endTime": 4515.071,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "fixture@27",
+      "endTime": 4515.146,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "hook@1",
+      "endTime": 4515.2,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@29",
+      "stepId": "pw:api@29",
+      "startTime": 8141.535,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Launch persistent context",
+      "params": {
+        "handleSIGINT": "false",
+        "tracesDir": "/private/tmp/buddy-independent-clients-workspaces-results-20261011/.playwright-artifacts-0/traces",
+        "headless": "true",
+        "timeout": "30000",
+        "channel": "chromium",
+        "acceptDownloads": "accept",
+        "ignoreDefaultArgs": "[--disable-extensions]",
+        "env": "[Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object, Object]",
+        "executablePath": "/Users/macbook-dev/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "args": "[--disable-extensions-except=/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tmp-playwright-profile/user-data-SEMX6N/extension-launch/chrome-mv3-iFCjZz, --load-extension=/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tmp-playwright-profile/user-data-SEMX6N/extension-launch/chrome-mv3-iFCjZz, --no-crashpad, --disable-crash-reporter, --crash-dumps-dir=/tmp]",
+        "selectorEngines": "[]",
+        "testIdAttributeName": "data-testid",
+        "bypassCSP": "false",
+        "colorScheme": "light",
+        "deviceScaleFactor": "1",
+        "hasTouch": "false",
+        "ignoreHTTPSErrors": "false",
+        "isMobile": "false",
+        "javaScriptEnabled": "true",
+        "locale": "en-US",
+        "offline": "false",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36",
+        "viewport": "Object",
+        "serviceWorkers": "allow",
+        "noDefaultViewport": "false",
+        "extraHTTPHeaders": "undefined",
+        "storageState": "undefined",
+        "reducedMotion": "undefined",
+        "forcedColors": "undefined",
+        "contrast": "undefined",
+        "clientCertificates": "undefined",
+        "ignoreAllDefaultArgs": "false",
+        "userDataDir": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tmp-playwright-profile/user-data-SEMX6N"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 250,
+          "column": 19,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@29",
+      "endTime": 9540.349,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@30",
+      "stepId": "pw:api@30",
+      "startTime": 9572.797,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Evaluate",
+      "params": {
+        "expression": "cfg => {\n      return new Promise(resolve => {\n        chrome.storage.local.clear(() => {\n          chrome.storage.sync.clear(() => {\n            chrome.storage.sync.set(cfg, () => {\n              chrome.storage.local.set(cfg, () => {\n                chrome.storage.sync.set({\n                  __e2eSeeded: true\n                }, () => {\n                  chrome.storage.local.set({\n                    __e2eSeeded: true\n                  }, () => {\n                    resolve();\n                  });\n                });\n              });\n            });\n          });\n        });\n      });\n    }",
+        "isFunction": "true",
+        "arg": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 313,
+          "column": 14,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@30",
+      "endTime": 10580.766,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@31",
+      "stepId": "pw:api@31",
+      "startTime": 10581.717,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Add init script",
+      "params": {
+        "source": "(cfg => {\n      var _chrome$storage4;\n      if (typeof chrome === 'undefined' || !((_chrome$storage4 = chrome.storage) !== null && _chrome$storage4 !== void 0 && _chrome$storage4.local)) {\n        return;\n      }\n      chrome.storage.local.get('__e2eSeeded', items => {\n        if (items !== null && items !== void 0 && items.__e2eSeeded) return;\n        // Clear and seed both storage areas\n        chrome.storage.local.clear(() => {\n          chrome.storage.sync.clear(() => {\n            // Seed local storage\n            chrome.storage.local.set(cfg, () => {\n              chrome.storage.local.set({\n                __e2eSeeded: true\n              }, () => {\n                // Seed sync storage (used by @plasmohq/storage default)\n                chrome.storage.sync.set(cfg, () => {\n                  chrome.storage.sync.set({\n                    __e2eSeeded: true\n                  }, () => {\n                    // Both storage areas seeded\n                  });\n                });\n              });\n            });\n          });\n        });\n      });\n    })({\"__tldw_first_run_complete\":true,\"tldw_skip_landing_hub\":true,\"serverUrl\":\"http://127.0.0.1:52096\",\"apiKey\":\"buddy-qualification-synthetic-key\",\"authMode\":\"single-user\",\"tldwConfig\":{\"serverUrl\":\"http://127.0.0.1:52096\",\"apiKey\":\"buddy-qualification-synthetic-key\",\"authMode\":\"single-user\",\"authSource\":\"manual\",\"credentialSource\":\"manual\",\"apiKeyPersistence\":\"device\",\"apiKeyServerOrigin\":\"http://127.0.0.1:52096\"}})"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 354,
+          "column": 5,
+          "function": "launchWithExtension"
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@31",
+      "endTime": 10586.454,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@32",
+      "stepId": "pw:api@32",
+      "startTime": 10588.3,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Create page",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 411,
+          "column": 30,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@32",
+      "endTime": 10677.348,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@33",
+      "stepId": "pw:api@33",
+      "startTime": 10678.236,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Wait for timeout",
+      "params": {
+        "waitTimeout": "250"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 413,
+          "column": 14,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@33",
+      "endTime": 10933.179,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@34",
+      "stepId": "pw:api@34",
+      "startTime": 10934.038,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Navigate to \"/options.html\"",
+      "params": {
+        "url": "chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html",
+        "waitUntil": "load",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 414,
+          "column": 14,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@34",
+      "endTime": 11290.057,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@35",
+      "stepId": "pw:api@35",
+      "startTime": 11291.795,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Wait for function",
+      "params": {
+        "timeout": "10000",
+        "pollingInterval": "undefined",
+        "expression": "() => new Promise(resolve => {\n    var _chrome$storage;\n    // Ensure we're in an extension context with chrome.storage\n    if (typeof chrome === 'undefined' || !((_chrome$storage = chrome.storage) !== null && _chrome$storage !== void 0 && _chrome$storage.local)) {\n      resolve(false);\n      return;\n    }\n\n    // Check both local and sync for the sentinel since we seed both\n    chrome.storage.local.get('__e2eSeeded', localItems => {\n      if (localItems !== null && localItems !== void 0 && localItems.__e2eSeeded) {\n        chrome.storage.sync.get('__e2eSeeded', syncItems => {\n          resolve(!!(syncItems !== null && syncItems !== void 0 && syncItems.__e2eSeeded));\n        });\n      } else {\n        resolve(false);\n      }\n    });\n  })",
+        "isFunction": "true",
+        "arg": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 13,
+          "column": 14,
+          "function": "waitForStorageSeed"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@35",
+      "endTime": 12142.128,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@36",
+      "stepId": "pw:api@36",
+      "startTime": 12144.418,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Wait for function",
+      "params": {
+        "timeout": "5000",
+        "pollingInterval": "undefined",
+        "expression": "() => new Promise(resolve => {\n      var _chrome$storage6;\n      if (typeof chrome === 'undefined' || !((_chrome$storage6 = chrome.storage) !== null && _chrome$storage6 !== void 0 && _chrome$storage6.sync)) {\n        resolve(false);\n        return;\n      }\n      chrome.storage.sync.get('tldwConfig', items => {\n        var _items$tldwConfig;\n        resolve(!!(items !== null && items !== void 0 && (_items$tldwConfig = items.tldwConfig) !== null && _items$tldwConfig !== void 0 && _items$tldwConfig.serverUrl));\n      });\n    })",
+        "isFunction": "true",
+        "arg": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 425,
+          "column": 16,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@36",
+      "endTime": 12291.878,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@37",
+      "stepId": "pw:api@37",
+      "startTime": 12298.747,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Wait for function",
+      "params": {
+        "timeout": "15000",
+        "pollingInterval": "undefined",
+        "expression": "() => {\n      const root = document.querySelector('#root');\n      if (!root) return false;\n      const store = window.__tldw_useConnectionStore;\n      return !!(store !== null && store !== void 0 && store.getState);\n    }",
+        "isFunction": "true",
+        "arg": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 443,
+          "column": 16,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@37",
+      "endTime": 12359.95,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@38",
+      "stepId": "pw:api@38",
+      "startTime": 12361.296,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Evaluate",
+      "params": {
+        "expression": "async () => {\n      var _store$getState;\n      const store = window.__tldw_useConnectionStore;\n      if (store !== null && store !== void 0 && (_store$getState = store.getState) !== null && _store$getState !== void 0 && (_store$getState = _store$getState.call(store)) !== null && _store$getState !== void 0 && _store$getState.checkOnce) {\n        await store.getState().checkOnce();\n      }\n    }",
+        "isFunction": "true",
+        "arg": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 458,
+          "column": 16,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@38",
+      "endTime": 12396.6,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@39",
+      "stepId": "pw:api@39",
+      "startTime": 12409.377,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Wait for function",
+      "params": {
+        "timeout": "25000",
+        "pollingInterval": "undefined",
+        "expression": "() => {\n      var _store$getState2;\n      const store = window.__tldw_useConnectionStore;\n      if (!store) return false;\n      const state = (_store$getState2 = store.getState()) === null || _store$getState2 === void 0 ? void 0 : _store$getState2.state;\n      // Allow connected OR offlineBypass (demo mode)\n      return (state === null || state === void 0 ? void 0 : state.isConnected) === true || (state === null || state === void 0 ? void 0 : state.offlineBypass) === true;\n    }",
+        "isFunction": "true",
+        "arg": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/extension.ts",
+          "line": 469,
+          "column": 16,
+          "function": "launchWithExtension"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@39",
+      "endTime": 12485.005,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@40",
+      "stepId": "pw:api@40",
+      "startTime": 12494.841,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Create page",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/permissions.ts",
+          "line": 5,
+          "column": 36,
+          "function": "grantHostPermission"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@40",
+      "endTime": 12566.413,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@41",
+      "stepId": "pw:api@41",
+      "startTime": 12566.959,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Navigate to \"/options.html\"",
+      "params": {
+        "url": "chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html",
+        "waitUntil": "load",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/permissions.ts",
+          "line": 6,
+          "column": 14,
+          "function": "grantHostPermission"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@41",
+      "endTime": 12834.73,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@42",
+      "stepId": "pw:api@42",
+      "startTime": 12836.246,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Wait for load state \"domcontentloaded\"",
+      "params": {
+        "info": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/permissions.ts",
+          "line": 7,
+          "column": 14,
+          "function": "grantHostPermission"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@42",
+      "endTime": 12836.692,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@43",
+      "stepId": "pw:api@43",
+      "startTime": 12840.193,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Evaluate",
+      "params": {
+        "expression": "o => new Promise(resolve => {\n    try {\n      // @ts-ignore\n      chrome.permissions.contains({\n        origins: [o]\n      }, result => resolve(!!result));\n    } catch {\n      resolve(false);\n    }\n  })",
+        "isFunction": "true",
+        "arg": "Object"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/permissions.ts",
+          "line": 10,
+          "column": 30,
+          "function": "grantHostPermission"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@43",
+      "endTime": 12934.373,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@44",
+      "stepId": "pw:api@44",
+      "startTime": 12934.868,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Close page",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/utils/permissions.ts",
+          "line": 19,
+          "column": 16,
+          "function": "grantHostPermission"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@44",
+      "endTime": 12964.72,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@45",
+      "stepId": "expect@45",
+      "startTime": 12965.755,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBe\"",
+      "params": {
+        "expected": "true"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 468,
+          "column": 13
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@45",
+      "endTime": 12965.999,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@46",
+      "stepId": "pw:api@46",
+      "startTime": 12966.397,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Navigate to \"/options.html\"",
+      "params": {
+        "url": "chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html#/workspaces",
+        "waitUntil": "domcontentloaded",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 499,
+          "column": 20
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@46",
+      "endTime": 13033.152,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@47",
+      "stepId": "pw:api@47",
+      "startTime": 13035.414,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Click getByRole('button', { name: 'Buddy & Persona', exact: true }).first()",
+      "params": {
+        "selector": "internal:role=button[name=\"Buddy & Persona\"s] >> nth=0",
+        "strict": "true",
+        "timeout": "0"
+      },
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 267,
+          "column": 6,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@47",
+      "endTime": 13192.213,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "expect@48",
+      "stepId": "expect@48",
+      "startTime": 13193.138,
+      "class": "Test",
+      "method": "expect",
+      "title": "Expect \"toBeVisible\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 273,
+          "column": 5,
+          "function": "exerciseBuddy"
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "expect@48",
+      "endTime": 23214.226,
+      "annotations": [],
+      "error": {
+        "name": "",
+        "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })\u001b[22m\n",
+        "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mlocator\u001b[39m\u001b[2m).\u001b[22mtoBeVisible\u001b[2m(\u001b[22m\u001b[2m)\u001b[22m failed\n\nLocator: getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })\nExpected: visible\nTimeout: 10000ms\nError: element(s) not found\n\nCall log:\n\u001b[2m  - Expect \"toBeVisible\" with timeout 10000ms\u001b[22m\n\u001b[2m  - waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })\u001b[22m\n\n    at exerciseBuddy (/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts:273:5)\n    at /private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts:500:9"
+      }
+    },
+    {
+      "type": "before",
+      "callId": "pw:api@49",
+      "stepId": "pw:api@49",
+      "startTime": 23910.332,
+      "class": "Test",
+      "method": "pw:api",
+      "title": "Close context",
+      "params": {},
+      "stack": [
+        {
+          "file": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tests/e2e/buddy-independent-setup.spec.ts",
+          "line": 502,
+          "column": 9
+        }
+      ]
+    },
+    {
+      "type": "after",
+      "callId": "pw:api@49",
+      "endTime": 24183.924,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "hook@50",
+      "stepId": "hook@50",
+      "startTime": 24184.418,
+      "class": "Test",
+      "method": "hook",
+      "title": "After Hooks",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "before",
+      "callId": "attach@b1ae20be660034e2204d96d0e4b29a10",
+      "stepId": "attach@b1ae20be660034e2204d96d0e4b29a10",
+      "startTime": 24189.163,
+      "class": "Test",
+      "method": "test.attach",
+      "title": "Attach \"screenshot\"",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "after",
+      "callId": "attach@b1ae20be660034e2204d96d0e4b29a10",
+      "endTime": 24189.171,
+      "attachments": [
+        {
+          "name": "screenshot",
+          "contentType": "image/png",
+          "sha1": "78485ad26ab49de2007fe98b0854715a58aaf5b6"
+        }
+      ]
+    },
+    {
+      "type": "before",
+      "callId": "attach@43fec0805eb885ba67ba765c17dc045b",
+      "stepId": "attach@43fec0805eb885ba67ba765c17dc045b",
+      "startTime": 24189.269,
+      "class": "Test",
+      "method": "test.attach",
+      "title": "Attach \"screenshot\"",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "after",
+      "callId": "attach@43fec0805eb885ba67ba765c17dc045b",
+      "endTime": 24189.27,
+      "attachments": [
+        {
+          "name": "screenshot",
+          "contentType": "image/png",
+          "sha1": "cc03378d4d3ab9d894acc9df30dd22e66054d173"
+        }
+      ]
+    },
+    {
+      "type": "before",
+      "callId": "fixture@55",
+      "stepId": "fixture@55",
+      "parentId": "hook@50",
+      "startTime": 24189.924,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"userAgent\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@55",
+      "endTime": 24189.938,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@57",
+      "stepId": "fixture@57",
+      "parentId": "hook@50",
+      "startTime": 24190.239,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"viewport\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@57",
+      "endTime": 24190.278,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@64",
+      "stepId": "fixture@64",
+      "parentId": "hook@50",
+      "startTime": 24190.893,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"isMobile\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@64",
+      "endTime": 24190.902,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@68",
+      "stepId": "fixture@68",
+      "parentId": "hook@50",
+      "startTime": 24191.167,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"hasTouch\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@68",
+      "endTime": 24191.173,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@70",
+      "stepId": "fixture@70",
+      "parentId": "hook@50",
+      "startTime": 24191.299,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"deviceScaleFactor\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@70",
+      "endTime": 24191.304,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "hook@50",
+      "endTime": 24191.955,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "hook@80",
+      "stepId": "hook@80",
+      "startTime": 24192.04,
+      "class": "Test",
+      "method": "hook",
+      "title": "Worker Cleanup",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@81",
+      "stepId": "fixture@81",
+      "parentId": "hook@80",
+      "startTime": 24192.199,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"browser\"",
+      "params": {},
+      "stack": []
+    },
+    {
+      "type": "after",
+      "callId": "fixture@81",
+      "endTime": 24292.503,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@85",
+      "stepId": "fixture@85",
+      "parentId": "hook@80",
+      "startTime": 24293.017,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"defaultBrowserType\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@85",
+      "endTime": 24293.026,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@86",
+      "stepId": "fixture@86",
+      "parentId": "hook@80",
+      "startTime": 24293.083,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"screenshot\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@86",
+      "endTime": 24293.088,
+      "annotations": []
+    },
+    {
+      "type": "before",
+      "callId": "fixture@90",
+      "stepId": "fixture@90",
+      "parentId": "hook@80",
+      "startTime": 24293.332,
+      "class": "Test",
+      "method": "fixture",
+      "title": "Fixture \"headless\"",
+      "params": {},
+      "stack": [
+        {
+          "file": "project#chromium-extension",
+          "line": 1,
+          "column": 1
+        }
+      ],
+      "group": "configuration"
+    },
+    {
+      "type": "after",
+      "callId": "fixture@90",
+      "endTime": 24293.336,
+      "annotations": []
+    },
+    {
+      "type": "after",
+      "callId": "hook@80",
+      "endTime": 24293.417,
+      "annotations": []
+    },
+    {
+      "version": 8,
+      "type": "context-options",
+      "origin": "library",
+      "browserName": "chromium",
+      "playwrightVersion": "1.58.0",
+      "options": {
+        "channel": "chromium",
+        "executablePath": "/Users/macbook-dev/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+        "args": [
+          "--disable-extensions-except=/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tmp-playwright-profile/user-data-SEMX6N/extension-launch/chrome-mv3-iFCjZz",
+          "--load-extension=/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tmp-playwright-profile/user-data-SEMX6N/extension-launch/chrome-mv3-iFCjZz",
+          "--no-crashpad",
+          "--disable-crash-reporter",
+          "--crash-dumps-dir=/tmp"
+        ],
+        "ignoreAllDefaultArgs": false,
+        "ignoreDefaultArgs": [
+          "--disable-extensions"
+        ],
+        "handleSIGINT": false,
+        "timeout": 30000,
+        "env": [
+          {
+            "name": "BROWSER_USE_ACCESS_VERIFYING_IDENTITY",
+            "value": "MCowBQYDK2VwAyEANBL3ek7QRSzGCMQvyBiqPBctNLmlEIZdOHoxG4YWDY8="
+          },
+          {
+            "name": "BUN_INSTALL",
+            "value": "/Users/macbook-dev/.bun"
+          },
+          {
+            "name": "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+            "value": "1"
+          },
+          {
+            "name": "CODEX_APP_TOOLS_PIPE_PATH",
+            "value": "/tmp/codex-browser-use/e1c8fabb-13e6-440c-9be0-ed616dade1c8.sock"
+          },
+          {
+            "name": "CODEX_CI",
+            "value": "1"
+          },
+          {
+            "name": "CODEX_CLI_PATH",
+            "value": "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+          },
+          {
+            "name": "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+            "value": "Codex Desktop"
+          },
+          {
+            "name": "CODEX_MCP_NODE_PATH",
+            "value": "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node"
+          },
+          {
+            "name": "CODEX_PERMISSION_PROFILE",
+            "value": ":workspace"
+          },
+          {
+            "name": "CODEX_SAGE_BACKFILL_TRACKER_TAB_REUSE",
+            "value": "1"
+          },
+          {
+            "name": "CODEX_SANDBOX_NETWORK_DISABLED",
+            "value": "1"
+          },
+          {
+            "name": "CODEX_SESSION_ID",
+            "value": "01a0fa65-f38a-76b0-8738-32a6d2d59dd5"
+          },
+          {
+            "name": "CODEX_SHELL",
+            "value": "1"
+          },
+          {
+            "name": "CODEX_TASK_WORKSPACE_VERIFYING_IDENTITY",
+            "value": "MCowBQYDK2VwAyEANBL3ek7QRSzGCMQvyBiqPBctNLmlEIZdOHoxG4YWDY8="
+          },
+          {
+            "name": "CODEX_TECTONIC_PATH",
+            "value": "/Applications/ChatGPT.app/Contents/Resources/tectonic/tectonic"
+          },
+          {
+            "name": "CODEX_THREAD_ID",
+            "value": "01a12d03-7b2c-7730-b49e-f408fd508547"
+          },
+          {
+            "name": "CODEX_VERSION",
+            "value": "0.162.0-alpha.17.2"
+          },
+          {
+            "name": "COLORTERM",
+            "value": ""
+          },
+          {
+            "name": "COMMAND_MODE",
+            "value": "unix2003"
+          },
+          {
+            "name": "DISABLE_AUTO_UPDATE",
+            "value": "true"
+          },
+          {
+            "name": "GH_PAGER",
+            "value": "cat"
+          },
+          {
+            "name": "GIT_PAGER",
+            "value": "cat"
+          },
+          {
+            "name": "HOME",
+            "value": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tmp-playwright-profile/home-REuNJ3"
+          },
+          {
+            "name": "LANG",
+            "value": "C.UTF-8"
+          },
+          {
+            "name": "LC_ALL",
+            "value": "C.UTF-8"
+          },
+          {
+            "name": "LC_CTYPE",
+            "value": "C.UTF-8"
+          },
+          {
+            "name": "LESS",
+            "value": "-R"
+          },
+          {
+            "name": "LOGNAME",
+            "value": "macbook-dev"
+          },
+          {
+            "name": "LOG_FORMAT",
+            "value": "json"
+          },
+          {
+            "name": "LSCOLORS",
+            "value": "Gxfxcxdxbxegedabagacad"
+          },
+          {
+            "name": "LS_COLORS",
+            "value": "di=1;36:ln=35:so=32:pi=33:ex=31:bd=34;46:cd=34;43:su=30;41:sg=30;46:tw=30;42:ow=30;43"
+          },
+          {
+            "name": "LaunchInstanceID",
+            "value": "EDDE3655-02AB-4455-9085-184D0BD04F6E"
+          },
+          {
+            "name": "MallocNanoZone",
+            "value": "0"
+          },
+          {
+            "name": "NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S",
+            "value": "9230e2bd8b24b7ac7a0ba6774c64bf0d78ecdabbdd91d0ed627b02a587bae2df"
+          },
+          {
+            "name": "NO_COLOR",
+            "value": "1"
+          },
+          {
+            "name": "NVM_BIN",
+            "value": "/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin"
+          },
+          {
+            "name": "NVM_CD_FLAGS",
+            "value": "-q"
+          },
+          {
+            "name": "NVM_DIR",
+            "value": "/Users/macbook-dev/.nvm"
+          },
+          {
+            "name": "NVM_INC",
+            "value": "/Users/macbook-dev/.nvm/versions/node/v24.6.0/include/node"
+          },
+          {
+            "name": "OLDPWD",
+            "value": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension"
+          },
+          {
+            "name": "OSLogRateLimit",
+            "value": "64"
+          },
+          {
+            "name": "PAGER",
+            "value": "cat"
+          },
+          {
+            "name": "PATH",
+            "value": "/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:~/.local/bin/claude:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Applications/VMware Fusion.app/Contents/Public:/opt/homebrew/bin:/Users/macbook-dev/.local/bin:/Applications/ChatGPT.app/Contents/Resources/codex-cli/codex-path:/Users/macbook-dev/.codex/tmp/arg0/codex-arg0QSWEE9:/Users/macbook-dev/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/override:/Users/macbook-dev/.kimi-code/bin:/Users/macbook-dev/.bun/bin:/Users/macbook-dev/.nvm/versions/node/v24.6.0/bin:/Users/macbook-dev/.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/fallback:/Applications/ChatGPT.app/Contents/Resources:/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS"
+          },
+          {
+            "name": "PWD",
+            "value": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension"
+          },
+          {
+            "name": "RUST_LOG",
+            "value": "warn"
+          },
+          {
+            "name": "SECURITYSESSIONID",
+            "value": "186a2"
+          },
+          {
+            "name": "SHELL",
+            "value": "/bin/zsh"
+          },
+          {
+            "name": "SHLVL",
+            "value": "1"
+          },
+          {
+            "name": "SSH_AUTH_SOCK",
+            "value": "/var/run/com.apple.launchd.XdPEMzgRGh/Listeners"
+          },
+          {
+            "name": "TERM",
+            "value": "dumb"
+          },
+          {
+            "name": "TMPDIR",
+            "value": "/var/folders/sn/m80n2j152t9gw3w8qwk2nykh0000gn/T/"
+          },
+          {
+            "name": "USER",
+            "value": "macbook-dev"
+          },
+          {
+            "name": "XPC_FLAGS",
+            "value": "0x0"
+          },
+          {
+            "name": "XPC_SERVICE_NAME",
+            "value": "0"
+          },
+          {
+            "name": "ZSH",
+            "value": "/Users/macbook-dev/.oh-my-zsh"
+          },
+          {
+            "name": "ZSH_TMUX_AUTOSTART",
+            "value": "false"
+          },
+          {
+            "name": "ZSH_TMUX_AUTOSTARTED",
+            "value": "true"
+          },
+          {
+            "name": "__CF_USER_TEXT_ENCODING",
+            "value": "0x1F5:0x0:0x0"
+          },
+          {
+            "name": "TLDW_E2E_SKIP_EXTENSION_BUILD",
+            "value": "1"
+          },
+          {
+            "name": "TLDW_BUDDY_WEB_URL",
+            "value": "http://127.0.0.1:18180"
+          },
+          {
+            "name": "CI",
+            "value": "1"
+          },
+          {
+            "name": "PLAYWRIGHT_JSON_OUTPUT_NAME",
+            "value": "/private/tmp/buddy-independent-clients-workspaces-20261011.json"
+          },
+          {
+            "name": "_",
+            "value": "/opt/homebrew/bin/node"
+          },
+          {
+            "name": "PLAYWRIGHT_TEST",
+            "value": "1"
+          },
+          {
+            "name": "BROWSERSLIST_IGNORE_OLD_DATA",
+            "value": "true"
+          },
+          {
+            "name": "FORCE_COLOR",
+            "value": "1"
+          },
+          {
+            "name": "DEBUG_COLORS",
+            "value": "1"
+          },
+          {
+            "name": "TEST_WORKER_INDEX",
+            "value": "0"
+          },
+          {
+            "name": "TEST_PARALLEL_INDEX",
+            "value": "0"
+          }
+        ],
+        "headless": true,
+        "tracesDir": "/private/tmp/buddy-independent-clients-workspaces-results-20261011/.playwright-artifacts-0/traces",
+        "noDefaultViewport": false,
+        "viewport": {
+          "width": 1280,
+          "height": 720
+        },
+        "ignoreHTTPSErrors": false,
+        "javaScriptEnabled": true,
+        "bypassCSP": false,
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.7632.6 Safari/537.36",
+        "locale": "en-US",
+        "offline": false,
+        "deviceScaleFactor": 1,
+        "isMobile": false,
+        "hasTouch": false,
+        "colorScheme": "light",
+        "acceptDownloads": "accept",
+        "serviceWorkers": "allow",
+        "selectorEngines": [],
+        "testIdAttributeName": "data-testid",
+        "userDataDir": "/private/tmp/tldw-buddy-tasks-20261011/apps/extension/tmp-playwright-profile/user-data-SEMX6N"
+      },
+      "platform": "darwin",
+      "wallTime": 1791758834191,
+      "monotonicTime": 9542.895,
+      "sdkLanguage": "javascript",
+      "testIdAttributeName": "data-testid",
+      "contextId": "browser-context@257e548206b51481ee695633f351ffa7",
+      "channel": "chromium",
+      "title": "buddy-independent-setup.spec.ts:411 \u203a independent Buddy extension fresh profile setup"
+    },
+    {
+      "type": "before",
+      "callId": "call@7",
+      "startTime": 9573.953,
+      "class": "Worker",
+      "method": "evaluateExpression",
+      "params": {
+        "expression": "cfg => {\n      return new Promise(resolve => {\n        chrome.storage.local.clear(() => {\n          chrome.storage.sync.clear(() => {\n            chrome.storage.sync.set(cfg, () => {\n              chrome.storage.local.set(cfg, () => {\n                chrome.storage.sync.set({\n                  __e2eSeeded: true\n                }, () => {\n                  chrome.storage.local.set({\n                    __e2eSeeded: true\n                  }, () => {\n                    resolve();\n                  });\n                });\n              });\n            });\n          });\n        });\n      });\n    }",
+        "isFunction": true,
+        "arg": {
+          "value": {
+            "o": [
+              {
+                "k": "__tldw_first_run_complete",
+                "v": {
+                  "b": true
+                }
+              },
+              {
+                "k": "tldw_skip_landing_hub",
+                "v": {
+                  "b": true
+                }
+              },
+              {
+                "k": "serverUrl",
+                "v": {
+                  "s": "http://127.0.0.1:52096"
+                }
+              },
+              {
+                "k": "apiKey",
+                "v": {
+                  "s": "buddy-qualification-synthetic-key"
+                }
+              },
+              {
+                "k": "authMode",
+                "v": {
+                  "s": "single-user"
+                }
+              },
+              {
+                "k": "tldwConfig",
+                "v": {
+                  "o": [
+                    {
+                      "k": "serverUrl",
+                      "v": {
+                        "s": "http://127.0.0.1:52096"
+                      }
+                    },
+                    {
+                      "k": "apiKey",
+                      "v": {
+                        "s": "buddy-qualification-synthetic-key"
+                      }
+                    },
+                    {
+                      "k": "authMode",
+                      "v": {
+                        "s": "single-user"
+                      }
+                    },
+                    {
+                      "k": "authSource",
+                      "v": {
+                        "s": "manual"
+                      }
+                    },
+                    {
+                      "k": "credentialSource",
+                      "v": {
+                        "s": "manual"
+                      }
+                    },
+                    {
+                      "k": "apiKeyPersistence",
+                      "v": {
+                        "s": "device"
+                      }
+                    },
+                    {
+                      "k": "apiKeyServerOrigin",
+                      "v": {
+                        "s": "http://127.0.0.1:52096"
+                      }
+                    }
+                  ],
+                  "id": 2
+                }
+              }
+            ],
+            "id": 1
+          },
+          "handles": []
+        }
+      },
+      "stepId": "pw:api@30"
+    },
+    {
+      "type": "after",
+      "callId": "call@7",
+      "endTime": 10578.668,
+      "result": {
+        "value": {
+          "v": "undefined"
+        }
+      }
+    },
+    {
+      "type": "before",
+      "callId": "call@9",
+      "startTime": 10582.009,
+      "class": "BrowserContext",
+      "method": "addInitScript",
+      "params": {
+        "source": "(cfg => {\n      var _chrome$storage4;\n      if (typeof chrome === 'undefined' || !((_chrome$storage4 = chrome.storage) !== null && _chrome$storage4 !== void 0 && _chrome$storage4.local)) {\n        return;\n      }\n      chrome.storage.local.get('__e2eSeeded', items => {\n        if (items !== null && items !== void 0 && items.__e2eSeeded) return;\n        // Clear and seed both storage areas\n        chrome.storage.local.clear(() => {\n          chrome.storage.sync.clear(() => {\n            // Seed local storage\n            chrome.storage.local.set(cfg, () => {\n              chrome.storage.local.set({\n                __e2eSeeded: true\n              }, () => {\n                // Seed sync storage (used by @plasmohq/storage default)\n                chrome.storage.sync.set(cfg, () => {\n                  chrome.storage.sync.set({\n                    __e2eSeeded: true\n                  }, () => {\n                    // Both storage areas seeded\n                  });\n                });\n              });\n            });\n          });\n        });\n      });\n    })({\"__tldw_first_run_complete\":true,\"tldw_skip_landing_hub\":true,\"serverUrl\":\"http://127.0.0.1:52096\",\"apiKey\":\"buddy-qualification-synthetic-key\",\"authMode\":\"single-user\",\"tldwConfig\":{\"serverUrl\":\"http://127.0.0.1:52096\",\"apiKey\":\"buddy-qualification-synthetic-key\",\"authMode\":\"single-user\",\"authSource\":\"manual\",\"credentialSource\":\"manual\",\"apiKeyPersistence\":\"device\",\"apiKeyServerOrigin\":\"http://127.0.0.1:52096\"}})"
+      },
+      "stepId": "pw:api@31"
+    },
+    {
+      "type": "after",
+      "callId": "call@9",
+      "endTime": 10584.315
+    },
+    {
+      "type": "before",
+      "callId": "call@11",
+      "startTime": 10589.136,
+      "class": "BrowserContext",
+      "method": "newPage",
+      "params": {},
+      "stepId": "pw:api@32"
+    },
+    {
+      "type": "after",
+      "callId": "call@11",
+      "endTime": 10674.018,
+      "result": {
+        "page": "<Page>"
+      }
+    },
+    {
+      "type": "before",
+      "callId": "call@13",
+      "startTime": 10678.539,
+      "class": "Frame",
+      "method": "waitForTimeout",
+      "params": {
+        "waitTimeout": 250
+      },
+      "stepId": "pw:api@33",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@13"
+    },
+    {
+      "type": "after",
+      "callId": "call@13",
+      "endTime": 10932.093,
+      "afterSnapshot": "after@call@13"
+    },
+    {
+      "type": "before",
+      "callId": "call@15",
+      "startTime": 10934.236,
+      "class": "Frame",
+      "method": "goto",
+      "params": {
+        "url": "chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html",
+        "timeout": 0,
+        "waitUntil": "load"
+      },
+      "stepId": "pw:api@34",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@15"
+    },
+    {
+      "type": "log",
+      "callId": "call@15",
+      "time": 10937.561,
+      "message": "navigating to \"chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html\", waiting until \"load\""
+    },
+    {
+      "type": "after",
+      "callId": "call@15",
+      "endTime": 11153.625,
+      "result": {
+        "response": "<Response>"
+      },
+      "afterSnapshot": "after@call@15"
+    },
+    {
+      "type": "before",
+      "callId": "call@17",
+      "startTime": 11292.096,
+      "class": "Frame",
+      "method": "waitForFunction",
+      "params": {
+        "expression": "() => new Promise(resolve => {\n    var _chrome$storage;\n    // Ensure we're in an extension context with chrome.storage\n    if (typeof chrome === 'undefined' || !((_chrome$storage = chrome.storage) !== null && _chrome$storage !== void 0 && _chrome$storage.local)) {\n      resolve(false);\n      return;\n    }\n\n    // Check both local and sync for the sentinel since we seed both\n    chrome.storage.local.get('__e2eSeeded', localItems => {\n      if (localItems !== null && localItems !== void 0 && localItems.__e2eSeeded) {\n        chrome.storage.sync.get('__e2eSeeded', syncItems => {\n          resolve(!!(syncItems !== null && syncItems !== void 0 && syncItems.__e2eSeeded));\n        });\n      } else {\n        resolve(false);\n      }\n    });\n  })",
+        "isFunction": true,
+        "arg": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "timeout": 10000
+      },
+      "stepId": "pw:api@35",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@17"
+    },
+    {
+      "type": "after",
+      "callId": "call@17",
+      "endTime": 12138.172,
+      "result": {
+        "handle": "<JSHandle>"
+      },
+      "afterSnapshot": "after@call@17"
+    },
+    {
+      "type": "before",
+      "callId": "call@19",
+      "startTime": 12145.211,
+      "class": "Frame",
+      "method": "waitForFunction",
+      "params": {
+        "expression": "() => new Promise(resolve => {\n      var _chrome$storage6;\n      if (typeof chrome === 'undefined' || !((_chrome$storage6 = chrome.storage) !== null && _chrome$storage6 !== void 0 && _chrome$storage6.sync)) {\n        resolve(false);\n        return;\n      }\n      chrome.storage.sync.get('tldwConfig', items => {\n        var _items$tldwConfig;\n        resolve(!!(items !== null && items !== void 0 && (_items$tldwConfig = items.tldwConfig) !== null && _items$tldwConfig !== void 0 && _items$tldwConfig.serverUrl));\n      });\n    })",
+        "isFunction": true,
+        "arg": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "timeout": 5000
+      },
+      "stepId": "pw:api@36",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@19"
+    },
+    {
+      "type": "after",
+      "callId": "call@19",
+      "endTime": 12289.492,
+      "result": {
+        "handle": "<JSHandle>"
+      },
+      "afterSnapshot": "after@call@19"
+    },
+    {
+      "type": "before",
+      "callId": "call@21",
+      "startTime": 12308.1,
+      "class": "Frame",
+      "method": "waitForFunction",
+      "params": {
+        "expression": "() => {\n      const root = document.querySelector('#root');\n      if (!root) return false;\n      const store = window.__tldw_useConnectionStore;\n      return !!(store !== null && store !== void 0 && store.getState);\n    }",
+        "isFunction": true,
+        "arg": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "timeout": 15000
+      },
+      "stepId": "pw:api@37",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@21"
+    },
+    {
+      "type": "after",
+      "callId": "call@21",
+      "endTime": 12345.122,
+      "result": {
+        "handle": "<JSHandle>"
+      },
+      "afterSnapshot": "after@call@21"
+    },
+    {
+      "type": "before",
+      "callId": "call@23",
+      "startTime": 12362.427,
+      "class": "Frame",
+      "method": "evaluateExpression",
+      "params": {
+        "expression": "async () => {\n      var _store$getState;\n      const store = window.__tldw_useConnectionStore;\n      if (store !== null && store !== void 0 && (_store$getState = store.getState) !== null && _store$getState !== void 0 && (_store$getState = _store$getState.call(store)) !== null && _store$getState !== void 0 && _store$getState.checkOnce) {\n        await store.getState().checkOnce();\n      }\n    }",
+        "isFunction": true,
+        "arg": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        }
+      },
+      "stepId": "pw:api@38",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@23"
+    },
+    {
+      "type": "after",
+      "callId": "call@23",
+      "endTime": 12381.889,
+      "result": {
+        "value": {
+          "v": "undefined"
+        }
+      },
+      "afterSnapshot": "after@call@23"
+    },
+    {
+      "type": "before",
+      "callId": "call@25",
+      "startTime": 12409.728,
+      "class": "Frame",
+      "method": "waitForFunction",
+      "params": {
+        "expression": "() => {\n      var _store$getState2;\n      const store = window.__tldw_useConnectionStore;\n      if (!store) return false;\n      const state = (_store$getState2 = store.getState()) === null || _store$getState2 === void 0 ? void 0 : _store$getState2.state;\n      // Allow connected OR offlineBypass (demo mode)\n      return (state === null || state === void 0 ? void 0 : state.isConnected) === true || (state === null || state === void 0 ? void 0 : state.offlineBypass) === true;\n    }",
+        "isFunction": true,
+        "arg": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "timeout": 25000
+      },
+      "stepId": "pw:api@39",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@25"
+    },
+    {
+      "type": "after",
+      "callId": "call@25",
+      "endTime": 12483.533,
+      "result": {
+        "handle": "<JSHandle>"
+      },
+      "afterSnapshot": "after@call@25"
+    },
+    {
+      "type": "before",
+      "callId": "call@27",
+      "startTime": 12495.196,
+      "class": "BrowserContext",
+      "method": "newPage",
+      "params": {},
+      "stepId": "pw:api@40"
+    },
+    {
+      "type": "after",
+      "callId": "call@27",
+      "endTime": 12566.074,
+      "result": {
+        "page": "<Page>"
+      }
+    },
+    {
+      "type": "before",
+      "callId": "call@29",
+      "startTime": 12572.211,
+      "class": "Frame",
+      "method": "goto",
+      "params": {
+        "url": "chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html",
+        "timeout": 0,
+        "waitUntil": "load"
+      },
+      "stepId": "pw:api@41",
+      "pageId": "page@f47fb5a09270c09330d49d433055d926",
+      "beforeSnapshot": "before@call@29"
+    },
+    {
+      "type": "log",
+      "callId": "call@29",
+      "time": 12576.277,
+      "message": "navigating to \"chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html\", waiting until \"load\""
+    },
+    {
+      "type": "after",
+      "callId": "call@29",
+      "endTime": 12715.49,
+      "result": {
+        "response": "<Response>"
+      },
+      "afterSnapshot": "after@call@29"
+    },
+    {
+      "type": "before",
+      "callId": "call@31",
+      "startTime": 12841.963,
+      "title": "Wait for load state \"domcontentloaded\"",
+      "class": "Page",
+      "method": "waitForEventInfo",
+      "params": {
+        "info": {
+          "waitId": "62149ddeee665bc56b71299339296215",
+          "phase": "before",
+          "event": ""
+        }
+      },
+      "stepId": "pw:api@42",
+      "pageId": "page@f47fb5a09270c09330d49d433055d926",
+      "beforeSnapshot": "before@call@31"
+    },
+    {
+      "type": "log",
+      "callId": "call@31",
+      "time": 12843.306,
+      "message": "  not waiting, \"domcontentloaded\" event already fired"
+    },
+    {
+      "type": "after",
+      "callId": "call@31",
+      "endTime": 12843.328,
+      "afterSnapshot": "after@call@31"
+    },
+    {
+      "type": "before",
+      "callId": "call@35",
+      "startTime": 12843.655,
+      "class": "Frame",
+      "method": "evaluateExpression",
+      "params": {
+        "expression": "o => new Promise(resolve => {\n    try {\n      // @ts-ignore\n      chrome.permissions.contains({\n        origins: [o]\n      }, result => resolve(!!result));\n    } catch {\n      resolve(false);\n    }\n  })",
+        "isFunction": true,
+        "arg": {
+          "value": {
+            "s": "http://127.0.0.1:52096/*"
+          },
+          "handles": []
+        }
+      },
+      "stepId": "pw:api@43",
+      "pageId": "page@f47fb5a09270c09330d49d433055d926",
+      "beforeSnapshot": "before@call@35"
+    },
+    {
+      "type": "after",
+      "callId": "call@35",
+      "endTime": 12925.945,
+      "result": {
+        "value": {
+          "b": true
+        }
+      },
+      "afterSnapshot": "after@call@35"
+    },
+    {
+      "type": "before",
+      "callId": "call@37",
+      "startTime": 12935.006,
+      "class": "Page",
+      "method": "close",
+      "params": {},
+      "stepId": "pw:api@44",
+      "pageId": "page@f47fb5a09270c09330d49d433055d926"
+    },
+    {
+      "type": "after",
+      "callId": "call@37",
+      "endTime": 12964.291
+    },
+    {
+      "type": "before",
+      "callId": "call@39",
+      "startTime": 12966.564,
+      "class": "Frame",
+      "method": "goto",
+      "params": {
+        "url": "chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html#/workspaces",
+        "timeout": 0,
+        "waitUntil": "domcontentloaded"
+      },
+      "stepId": "pw:api@46",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@39"
+    },
+    {
+      "type": "log",
+      "callId": "call@39",
+      "time": 12978.074,
+      "message": "navigating to \"chrome-extension://biemafbfmdmpamjhjbbnjimmgkkgefca/options.html#/workspaces\", waiting until \"domcontentloaded\""
+    },
+    {
+      "type": "after",
+      "callId": "call@39",
+      "endTime": 13020.034,
+      "result": {},
+      "afterSnapshot": "after@call@39"
+    },
+    {
+      "type": "before",
+      "callId": "call@41",
+      "startTime": 13035.691,
+      "class": "Frame",
+      "method": "click",
+      "params": {
+        "selector": "internal:role=button[name=\"Buddy & Persona\"s] >> nth=0",
+        "strict": true,
+        "timeout": 0
+      },
+      "stepId": "pw:api@47",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@41"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13059.874,
+      "message": "waiting for getByRole('button', { name: 'Buddy & Persona', exact: true }).first()"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13137.33,
+      "message": "  locator resolved to <button type=\"button\" data-auto-title=\"true\" title=\"Buddy & Persona\" class=\"inline-flex items-center gap-1 rounded-md px-2 py-2 text-sm font-medium text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary\">\u2026</button>"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13141.845,
+      "message": "attempting click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13142.057,
+      "message": "  waiting for element to be visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13147.293,
+      "message": "  element is visible, enabled and stable"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13147.43,
+      "message": "  scrolling into view if needed"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13152.241,
+      "message": "  done scrolling"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13162.568,
+      "message": "  performing click action"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13178.521,
+      "message": "  click action done"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13178.539,
+      "message": "  waiting for scheduled navigations to finish"
+    },
+    {
+      "type": "log",
+      "callId": "call@41",
+      "time": 13186.958,
+      "message": "  navigations have finished"
+    },
+    {
+      "type": "after",
+      "callId": "call@41",
+      "endTime": 13187.108,
+      "point": {
+        "x": 855.82,
+        "y": 288
+      },
+      "afterSnapshot": "after@call@41"
+    },
+    {
+      "type": "before",
+      "callId": "call@43",
+      "startTime": 13197.233,
+      "title": "Expect \"toBeVisible\"",
+      "class": "Frame",
+      "method": "expect",
+      "params": {
+        "selector": "internal:role=dialog[name=\"Buddy & Persona Management\"i] >> internal:role=button[name=\"Use Fixture Buddy\"i]",
+        "expression": "to.be.visible",
+        "expectedValue": {
+          "value": {
+            "v": "undefined"
+          },
+          "handles": []
+        },
+        "isNot": false,
+        "timeout": 10000
+      },
+      "stepId": "expect@48",
+      "pageId": "page@7a267ee759d3ee5cf2e9a0b1b44f5630",
+      "beforeSnapshot": "before@call@43"
+    },
+    {
+      "type": "log",
+      "callId": "call@43",
+      "time": 13198.673,
+      "message": "Expect \"toBeVisible\" with timeout 10000ms"
+    },
+    {
+      "type": "log",
+      "callId": "call@43",
+      "time": 13198.682,
+      "message": "waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })"
+    },
+    {
+      "type": "after",
+      "callId": "call@43",
+      "endTime": 23200.684,
+      "error": {
+        "name": "Expect",
+        "message": "Expect failed"
+      },
+      "result": {
+        "matches": false,
+        "log": [
+          "  - Expect \"toBeVisible\" with timeout 10000ms",
+          "  - waiting for getByRole('dialog', { name: 'Buddy & Persona Management' }).getByRole('button', { name: 'Use Fixture Buddy' })"
+        ],
+        "errorMessage": "Error: element(s) not found",
+        "timedOut": true
+      },
+      "afterSnapshot": "after@call@43"
+    }
+  ],
+  "api_network": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/config/docs-info",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:15.238Z",
+      "time_ms": 14.75,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/llm/models/metadata?refresh_openrouter=true",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:15.239Z",
+      "time_ms": 12.263,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/unread-count",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:15.239Z",
+      "time_ms": 13.703,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:15.324Z",
+      "time_ms": 4.241,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:16.726Z",
+      "time_ms": 21.899,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/setup/first-run/state",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:16.938Z",
+      "time_ms": 10.61,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/health/live",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:16.938Z",
+      "time_ms": 12.252,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/setup/first-run/metadata",
+      "status": 401,
+      "startedDateTime": "2026-10-11T22:47:16.963Z",
+      "time_ms": 5.216,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/rag/health",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.033Z",
+      "time_ms": 12.661,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/users/me/capabilities",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.092Z",
+      "time_ms": 9.911,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/scheduled-tasks",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.132Z",
+      "time_ms": 32.154,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications?limit=50",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.132Z",
+      "time_ms": 32.58,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/scheduled-tasks/results?limit=50",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.132Z",
+      "time_ms": 32.547000000000004,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/health/live",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.574Z",
+      "time_ms": 2.9109999999999996,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/rag/health",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.587Z",
+      "time_ms": 5.915,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/workspaces/",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.753Z",
+      "time_ms": 4.16,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/workspaces/buddy-qualification-workspace/context",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:17.758Z",
+      "time_ms": 4.208,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:18.192Z",
+      "time_ms": 2.656,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:19.292Z",
+      "time_ms": 2.555,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:20.722Z",
+      "time_ms": 3.383,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:21.945Z",
+      "time_ms": 3.0140000000000002,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:23.384Z",
+      "time_ms": 1.145,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:24.602Z",
+      "time_ms": 0.929,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:25.863Z",
+      "time_ms": 1.674,
+      "postData": null
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:52096/api/v1/notifications/stream?after=0",
+      "status": 200,
+      "startedDateTime": "2026-10-11T22:47:27.117Z",
+      "time_ms": 2.705,
+      "postData": null
+    }
+  ],
+  "excluded": "compiled app/assets and DOM snapshots; full raw trace remains in the original private test-output directory"
+}

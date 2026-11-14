@@ -39,6 +39,11 @@ vi.mock('react-i18next', () => ({
 }))
 
 describe('FilterPanel', () => {
+  it('names the sort selector persistently', () => {
+    renderFilterPanel()
+    expect(screen.getByRole('combobox', { name: 'Sort by' })).toBeInTheDocument()
+  })
+
   afterEach(() => {
     cleanup()
     vi.clearAllMocks()

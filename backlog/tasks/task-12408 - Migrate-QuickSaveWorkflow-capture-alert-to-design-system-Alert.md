@@ -30,11 +30,7 @@ Migrate the QuickSaveWorkflow captured-content success notice from AntD Alert to
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented test-first: the QuickSaveWorkflow regression drives the mocked Chrome capture path and failed on the missing canonical Alert marker before replacing the AntD Alert.
 
 Verification recorded for this slice:
@@ -60,7 +56,7 @@ Review-fix verification:
 - Final-summary marker-count check passed with exactly one closing marker.
 - Full bunx tsc --noEmit --pretty false still exits 2 from inherited baseline debt; filtered touched-file diagnostics for QuickSaveWorkflow/task-454/baseline matched 0 lines.
 - Bandit skipped because the review fixes touch TypeScript test code and Backlog metadata only; no Python code touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

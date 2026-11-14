@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from functools import lru_cache
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union, overload
 
 from .base import BackendType
 
@@ -641,6 +641,31 @@ def transform_sqlite_query_for_postgres(
     return transformed
 
 
+@overload
+def prepare_backend_statement(
+    backend_type: BackendType,
+    query: str,
+    params: tuple[Any, ...] | dict[str, Any],
+    *,
+    transformer: Any | None = None,
+    apply_default_transform: bool = False,
+    ensure_returning: bool = False,
+) -> tuple[str, tuple[Any, ...] | dict[str, Any]]: ...
+
+
+@overload
+def prepare_backend_statement(
+    backend_type: Literal[BackendType.POSTGRESQL],
+    query: str,
+    params: ParamsType = None,
+    *,
+    transformer: Any | None = None,
+    apply_default_transform: bool = False,
+    ensure_returning: bool = False,
+) -> tuple[str, tuple[Any, ...] | dict[str, Any] | None]: ...
+
+
+@overload
 def prepare_backend_statement(
     backend_type: BackendType,
     query: str,
@@ -649,7 +674,18 @@ def prepare_backend_statement(
     transformer: Any | None = None,
     apply_default_transform: bool = False,
     ensure_returning: bool = False,
-) -> tuple[str, tuple[Any, ...] | dict[str, Any] | None]:
+) -> tuple[str, ParamsType]: ...
+
+
+def prepare_backend_statement(
+    backend_type: BackendType,
+    query: str,
+    params: ParamsType = None,
+    *,
+    transformer: Any | None = None,
+    apply_default_transform: bool = False,
+    ensure_returning: bool = False,
+) -> tuple[str, ParamsType]:
     """Prepare a query/params pair for execution on the configured backend."""
     if backend_type != BackendType.POSTGRESQL:
         return query, params
@@ -672,6 +708,19 @@ def prepare_backend_statement(
     return converted_query, prepared_params
 
 
+@overload
+def prepare_backend_many_statement(
+    backend_type: BackendType,
+    query: str,
+    params_list: Sequence[tuple[Any, ...] | list[Any] | dict[str, Any]],
+    *,
+    transformer: Any | None = None,
+    apply_default_transform: bool = False,
+    ensure_returning: bool = False,
+) -> tuple[str, list[tuple[Any, ...] | list[Any] | dict[str, Any]]]: ...
+
+
+@overload
 def prepare_backend_many_statement(
     backend_type: BackendType,
     query: str,
@@ -680,7 +729,18 @@ def prepare_backend_many_statement(
     transformer: Any | None = None,
     apply_default_transform: bool = False,
     ensure_returning: bool = False,
-) -> tuple[str, list[tuple[Any, ...] | dict[str, Any] | None]]:
+) -> tuple[str, list[ParamsType]]: ...
+
+
+def prepare_backend_many_statement(
+    backend_type: BackendType,
+    query: str,
+    params_list: Sequence[ParamsType],
+    *,
+    transformer: Any | None = None,
+    apply_default_transform: bool = False,
+    ensure_returning: bool = False,
+) -> tuple[str, Sequence[ParamsType]]:
     """Prepare a batch query/params list for execution on the configured backend."""
     if backend_type != BackendType.POSTGRESQL:
         return query, list(params_list)

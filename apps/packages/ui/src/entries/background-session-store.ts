@@ -59,9 +59,23 @@ export type PersistedSessionState = {
 
 export const SESSION_STATE_STORAGE_KEY = "tldw:backgroundSessionStateV1"
 
+// WP-19: the monolithic key above is the LEGACY shape. New writes shard the
+// state into per-funnel keys (`tldw:ingest:<funnelId>`, plus `qi-session:` /
+// `qi-batch:` / `auth-replay` sub-keys for the quick-ingest namespaces) with
+// one small index key listing every live shard. A status tick for one funnel
+// then rewrites only that funnel's shard instead of the whole world. Funnel ids
+// are generated as `ingest-*` and quick-ingest session ids as `qi-*`, so the
+// namespaces cannot collide.
+export const INGEST_STATE_KEY_PREFIX = "tldw:ingest:"
+export const SESSION_STATE_INDEX_KEY = `${INGEST_STATE_KEY_PREFIX}index`
+const AUTH_REPLAY_SHARD_KEY = `${INGEST_STATE_KEY_PREFIX}auth-replay`
+const QUICK_INGEST_SESSION_SHARD_PREFIX = `${INGEST_STATE_KEY_PREFIX}qi-session:`
+const QUICK_INGEST_BATCH_SHARD_PREFIX = `${INGEST_STATE_KEY_PREFIX}qi-batch:`
+
 export type SessionStorageArea = {
-  get: (key: string) => Promise<Record<string, unknown>>
+  get: (keys: string | string[]) => Promise<Record<string, unknown>>
   set: (items: Record<string, unknown>) => Promise<void>
+  remove?: (keys: string | string[]) => Promise<void>
 }
 
 export const emptySessionState = (): PersistedSessionState => ({
@@ -83,7 +97,9 @@ export const readQuickIngestRequestScope = (value: unknown): ServicePromptReques
   if (config.authSource != null && config.authSource !== "manual" && config.authSource !== "cookie-session") return null
   return { config: {
     serverUrl: config.serverUrl, authMode: config.authMode,
-    ...(config.authSource ? { authSource: config.authSource } : {}),
+    ...(config.authSource ? {
+      authSource: config.authSource === "manual" ? "manual" as const : "cookie-session" as const
+    } : {}),
     ...(typeof config.orgId === "number" ? { orgId: config.orgId } : {}),
     ...(config.authMode === "single-user" ? { expectedSingleUserApiKeyScope: config.expectedSingleUserApiKeyScope as string } : {})
   }, userId: config.authMode === "single-user" ? null : raw.userId as string | number }
@@ -209,6 +225,80 @@ export const serializeQuickIngestBatches = (
   return out
 }
 
+// WP-19: collected quick-ingest results keep fat server response bodies in
+// memory for the live UI, but the resume path only needs id/status/error (plus
+// the small scalar descriptors). Strip `result.data` at PERSIST time only —
+// runtime objects are never mutated.
+const stripCollectedResultForPersist = (
+  result: Record<string, unknown>
+): Record<string, unknown> => {
+  if (!("data" in result)) return result
+  const { data: _data, ...rest } = result
+  return rest
+}
+
+export const stripQuickIngestBatchForPersist = (
+  batch: PersistedQuickIngestBatch
+): Record<string, unknown> => ({
+  ...batch,
+  collectedResults: batch.collectedResults.map(stripCollectedResultForPersist)
+})
+
+// Split a serialized session state into per-funnel storage shards plus the
+// index key. Only the shards that CHANGED since the last write are written by
+// the coalescing writer, so a tick for one ingest costs O(that funnel) bytes.
+export const shardSessionState = (
+  state: PersistedSessionState
+): Record<string, unknown> => {
+  const shards: Record<string, unknown> = {}
+  for (const [funnelId, session] of Object.entries(
+    state.ingestSessions ?? {}
+  )) {
+    if (funnelId) shards[INGEST_STATE_KEY_PREFIX + funnelId] = session
+  }
+  shards[AUTH_REPLAY_SHARD_KEY] = state.pendingAuthReplay ?? []
+  for (const session of state.quickIngestSessions ?? []) {
+    shards[QUICK_INGEST_SESSION_SHARD_PREFIX + session.sessionId] = session
+  }
+  for (const batch of state.quickIngestBatches ?? []) {
+    shards[QUICK_INGEST_BATCH_SHARD_PREFIX + batch.sessionId] =
+      stripQuickIngestBatchForPersist(batch)
+  }
+  shards[SESSION_STATE_INDEX_KEY] = Object.keys(shards).sort()
+  return shards
+}
+
+// Rebuild the monolithic state shape from storage shards, then reuse the
+// existing validation/normalization in `deserializeSessionState`.
+const assembleFromShards = (
+  values: Record<string, unknown>
+): PersistedSessionState => {
+  const assembled: Record<string, unknown> = {
+    ingestSessions: {},
+    pendingAuthReplay: [],
+    quickIngestSessions: [],
+    quickIngestBatches: []
+  }
+  for (const [key, value] of Object.entries(values ?? {})) {
+    if (value == null || typeof value !== "object") continue
+    if (key === SESSION_STATE_INDEX_KEY) continue
+    if (key === AUTH_REPLAY_SHARD_KEY) {
+      if (Array.isArray(value)) {
+        (assembled.pendingAuthReplay as unknown[]).push(...value)
+      }
+    } else if (key.startsWith(QUICK_INGEST_SESSION_SHARD_PREFIX)) {
+      (assembled.quickIngestSessions as unknown[]).push(value)
+    } else if (key.startsWith(QUICK_INGEST_BATCH_SHARD_PREFIX)) {
+      (assembled.quickIngestBatches as unknown[]).push(value)
+    } else if (key.startsWith(INGEST_STATE_KEY_PREFIX)) {
+      (assembled.ingestSessions as Record<string, unknown>)[
+        key.slice(INGEST_STATE_KEY_PREFIX.length)
+      ] = value
+    }
+  }
+  return deserializeSessionState(assembled)
+}
+
 export const deserializeSessionState = (raw: unknown): PersistedSessionState => {
   const state = emptySessionState()
   if (!raw || typeof raw !== "object") return state
@@ -281,13 +371,52 @@ export const getSessionStorageArea = (): SessionStorageArea | null => {
   return null
 }
 
+// Set when a read observed the legacy monolithic key (either migrating it or
+// finding a stale leftover). The coalescing writer removes the legacy key on
+// its next successful drain, after the sharded copies are durable.
+let legacySessionStateKeyCleanupPending = false
+
 export const readPersistedSessionState = async (
   area: SessionStorageArea | null = getSessionStorageArea()
 ): Promise<PersistedSessionState> => {
   if (!area) return emptySessionState()
   try {
-    const result = await area.get(SESSION_STATE_STORAGE_KEY)
-    return deserializeSessionState(result?.[SESSION_STATE_STORAGE_KEY])
+    const head = await area.get([
+      SESSION_STATE_INDEX_KEY,
+      SESSION_STATE_STORAGE_KEY
+    ])
+    const legacy = head?.[SESSION_STATE_STORAGE_KEY]
+    const index = head?.[SESSION_STATE_INDEX_KEY]
+    if (Array.isArray(index)) {
+      // New sharded shape: index present. A lingering legacy key is removed on
+      // the next write drain (it is no longer authoritative).
+      legacySessionStateKeyCleanupPending = legacy != null
+      const shardKeys = index.filter(
+        (key): key is string =>
+          typeof key === "string" &&
+          key.startsWith(INGEST_STATE_KEY_PREFIX) &&
+          key !== SESSION_STATE_INDEX_KEY
+      )
+      if (shardKeys.length === 0) return emptySessionState()
+      const values = await area.get(shardKeys)
+      return assembleFromShards(values ?? {})
+    }
+    if (legacy && typeof legacy === "object") {
+      // Legacy monolithic shape (pre-WP-19 worker, e.g. across an extension
+      // update with an in-flight session): consume it unchanged, then
+      // one-time migrate by splitting it into per-funnel shards + index. The
+      // legacy key itself is kept until the writer's next drain so an
+      // interrupted migration can never lose the only copy.
+      const state = deserializeSessionState(legacy)
+      try {
+        await area.set(shardSessionState(state))
+        legacySessionStateKeyCleanupPending = true
+      } catch {
+        // Best-effort migration; the legacy key remains for the next read.
+      }
+      return state
+    }
+    return emptySessionState()
   } catch {
     return emptySessionState()
   }
@@ -298,7 +427,100 @@ export const writePersistedSessionState = async (
   area: SessionStorageArea | null = getSessionStorageArea()
 ): Promise<void> => {
   if (!area) return
-  await area.set({ [SESSION_STATE_STORAGE_KEY]: state })
+  await area.set(shardSessionState(state))
+}
+
+// Remove keys from the area, degrading to null-valued overwrites (read as
+// absent) when the area has no `remove` (the minimum SessionStorageArea).
+const removeFromArea = async (
+  area: SessionStorageArea,
+  keys: string[]
+): Promise<void> => {
+  if (keys.length === 0) return
+  if (typeof area.remove === "function") {
+    await area.remove(keys)
+    return
+  }
+  const nulled: Record<string, unknown> = {}
+  for (const key of keys) nulled[key] = null
+  await area.set(nulled)
+}
+
+// Coalesce fire-and-forget persist requests into diffed storage writes.
+// WP-19: the caller passes a SNAPSHOT BUILDER, so serialization of the live
+// Maps only happens when a write actually drains — a burst of status ticks
+// within one drain window serializes exactly once. Each drain additionally
+// diffs the sharded state against what this writer last wrote, so unchanged
+// funnels (and an unchanged index) cost zero bytes. Callers are never blocked
+// — the returned function is synchronous.
+export const createSerializedSessionStateWriter = (
+  area: SessionStorageArea | null = getSessionStorageArea(),
+  buildState: () => PersistedSessionState,
+  onError?: (error: unknown) => void
+): (() => void) => {
+  let dirty = false
+  let inFlight: Promise<void> | null = null
+  const lastWritten = new Map<string, string>()
+
+  const drain = async (): Promise<void> => {
+    // Yield one microtask before the first serialization so a synchronous
+    // burst of persist requests (e.g. 20 status ticks in one window) is fully
+    // absorbed before the snapshot is built: one drain window, one serialize.
+    await Promise.resolve()
+    // Keep writing while newer snapshots have arrived. There is no `await`
+    // between the loop's `dirty` check and clearing `inFlight`, so a caller
+    // can only ever run while we are suspended on a write below (inFlight
+    // set) or once we are fully idle (inFlight null) — never in between.
+    while (dirty) {
+      dirty = false
+      try {
+        const shards = shardSessionState(buildState())
+        const changed: Record<string, unknown> = {}
+        const signatures = new Map<string, string>()
+        for (const [key, value] of Object.entries(shards)) {
+          const signature = JSON.stringify(value) ?? "null"
+          if (lastWritten.get(key) === signature) continue
+          signatures.set(key, signature)
+          changed[key] = value
+        }
+        const stale: string[] = []
+        for (const key of Array.from(lastWritten.keys())) {
+          if (!(key in shards)) stale.push(key)
+        }
+        if (Object.keys(changed).length > 0) {
+          await area?.set(changed)
+          // Record signatures only AFTER the set succeeded: a failed set must
+          // leave lastWritten untouched so the next persist of identical
+          // state fails the signature compare and retries the write instead
+          // of silently dropping it (durability).
+          for (const [key, signature] of signatures) {
+            lastWritten.set(key, signature)
+          }
+        }
+        if (!area) continue
+        await removeFromArea(area, stale)
+        // Same durability rule for removals: forget the keys only after the
+        // removal landed, so a failed remove is retried on the next drain.
+        for (const key of stale) {
+          lastWritten.delete(key)
+        }
+        if (legacySessionStateKeyCleanupPending) {
+          await removeFromArea(area, [SESSION_STATE_STORAGE_KEY])
+          legacySessionStateKeyCleanupPending = false
+        }
+      } catch (error) {
+        onError?.(error)
+      }
+    }
+    inFlight = null
+  }
+
+  return () => {
+    dirty = true
+    if (!inFlight) {
+      inFlight = drain()
+    }
+  }
 }
 
 // True when a persisted ingest session is one a restarted worker cannot resume:
@@ -341,42 +563,4 @@ export const selectInterruptedIngestFunnelIds = (
     }
   }
   return out
-}
-
-// Serialize fire-and-forget writes to a single storage area so rapid, overlapping
-// persists cannot land out of order (an older snapshot overwriting a newer one).
-// Each call records the latest snapshot; while a write is in flight, further
-// calls only update the pending snapshot, and one final write is issued with the
-// newest snapshot once the in-flight write settles ("write again if dirty").
-// Callers are never blocked — the returned function is synchronous.
-export const createSerializedSessionStateWriter = (
-  area: SessionStorageArea | null = getSessionStorageArea(),
-  onError?: (error: unknown) => void
-): ((state: PersistedSessionState) => void) => {
-  let pending: PersistedSessionState | null = null
-  let inFlight: Promise<void> | null = null
-
-  const drain = async (): Promise<void> => {
-    // Keep writing while newer snapshots have arrived. There is no `await`
-    // between the loop's `pending` check and clearing `inFlight`, so a caller
-    // can only ever run while we are suspended on the write below (inFlight set)
-    // or once we are fully idle (inFlight null) — never in between.
-    while (pending) {
-      const next = pending
-      pending = null
-      try {
-        await writePersistedSessionState(next, area)
-      } catch (error) {
-        onError?.(error)
-      }
-    }
-    inFlight = null
-  }
-
-  return (state: PersistedSessionState) => {
-    pending = state
-    if (!inFlight) {
-      inFlight = drain()
-    }
-  }
 }

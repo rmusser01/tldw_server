@@ -1,7 +1,7 @@
 import React, { useState } from "react"
 import { BetaTag } from "@/components/Common/Beta"
 import { useFontSize } from "@/context/FontSizeProvider"
-import { useMessageOption } from "@/hooks/useMessageOption"
+import { useClearChat } from "@/hooks/chat/useClearChat"
 import {
   exportPageAssistData,
   importPageAssistData
@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next"
 import { Loader2, RotateCcw, Upload } from "lucide-react"
 import { toBase64 } from "@/libs/to-base64"
 import { PageAssistDatabase } from "@/db/dexie/chat"
+import { withLegacyChatStorageLock } from "@/db/dexie/legacy-chat-storage"
 import { isFireFox, isFireFoxPrivateMode } from "@/utils/is-private-mode"
 import { firefoxSyncDataForPrivateMode } from "@/db/dexie/firefox-sync"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
@@ -32,7 +33,7 @@ import {
 export const DataManagementSettings = () => {
   const { t } = useTranslation(["settings", "common"])
   const queryClient = useQueryClient()
-  const { clearChat } = useMessageOption()
+  const clearChat = useClearChat()
   const notification = useAntdNotification()
   const [resetModalOpen, setResetModalOpen] = useState(false)
   const [resetInput, setResetInput] = useState("")
@@ -51,31 +52,39 @@ export const DataManagementSettings = () => {
   const handleResetAll = async () => {
     setResetting(true)
     try {
-      const db = new PageAssistDatabase()
-      await db.clearDB()
-      queryClient.invalidateQueries({
-        queryKey: ["fetchChatHistory"]
+      if (clearChat({ discardTemporaryConfirmed: true }) === false) return
+      await withLegacyChatStorageLock(async (legacy) => {
+        if (legacy) {
+          await legacy.clear()
+          await browser.storage.sync.clear()
+        }
+        const db = new PageAssistDatabase()
+        await db.clearDB()
+        queryClient.invalidateQueries({
+          queryKey: ["fetchChatHistory"]
+        })
+        try {
+          if (!legacy) {
+            await browser.storage.sync.clear()
+            await browser.storage.local.clear()
+          }
+          await browser.storage.session.clear()
+        } catch (e) {
+          console.error("Error clearing storage:", e)
+        }
+        setResetModalOpen(false)
+        notification.success({
+          message: t("settings:systemNotifications.resetSuccess", "All data has been reset")
+        })
+        setResetInput("")
+        if (reloadTimeoutRef.current) {
+          clearTimeout(reloadTimeoutRef.current)
+        }
+        reloadTimeoutRef.current = setTimeout(() => {
+          reloadTimeoutRef.current = null
+          window.location.reload()
+        }, 1500)
       })
-      clearChat()
-      try {
-        await browser.storage.sync.clear()
-        await browser.storage.local.clear()
-        await browser.storage.session.clear()
-      } catch (e) {
-        console.error("Error clearing storage:", e)
-      }
-      setResetModalOpen(false)
-      notification.success({
-        message: t("settings:systemNotifications.resetSuccess", "All data has been reset")
-      })
-      setResetInput("")
-      if (reloadTimeoutRef.current) {
-        clearTimeout(reloadTimeoutRef.current)
-      }
-      reloadTimeoutRef.current = setTimeout(() => {
-        reloadTimeoutRef.current = null
-        window.location.reload()
-      }, 1500)
     } catch (e) {
       console.error("Reset error:", e)
       notification.error({
@@ -375,7 +384,7 @@ export const DataManagementSettings = () => {
 }
 
 export const SystemSettings = () => {
-  const { t } = useTranslation(["settings", "knowledge", "common"])
+  const { t } = useTranslation(["settings", "common"])
   const { increase, decrease, scale } = useFontSize()
   const notification = useAntdNotification()
 
@@ -720,7 +729,7 @@ export const SystemSettings = () => {
             htmlFor="background-image-upload"
             className="inline-flex cursor-pointer gap-2 rounded-md bg-primaryStrong px-4 py-2 text-white transition hover:brightness-95">
             <Upload className="size-4" />
-            {t("knowledge:form.uploadFile.label")}
+            {t("settings:chatAppearance.backgroundImage.upload", "Upload image")}
           </label>
           <input
             type="file"

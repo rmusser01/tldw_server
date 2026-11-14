@@ -355,7 +355,7 @@ describe("GenerateTab question plan controls", () => {
   }, 20000);
 
   it("submits a 5-option MCQ row with the question plan payload", async () => {
-    const mutateAsync = vi.fn(async () => ({
+    const mutateAsync = vi.fn(async (_params: Parameters<ReturnType<typeof useGenerateQuizMutation>["mutateAsync"]>[0]) => ({
       quiz: { id: 1, name: "Generated Quiz" },
       questions: Array.from({ length: 10 }, (_, index) => ({ id: index + 1 })),
     }));
@@ -447,6 +447,45 @@ describe("GenerateTab question plan controls", () => {
       }),
     );
   }, 20000);
+
+  it.each(["transport", "axios", "plain"])(
+    "shows useful provider error detail for %s errors",
+    async (shape) => {
+      const detail =
+        "The chat provider could not generate the quiz. Try again shortly.";
+      const failure =
+        shape === "plain"
+          ? new Error(detail)
+          : Object.assign(
+              new Error(`${detail} (POST /api/v1/quizzes/generate)`),
+              shape === "transport"
+                ? { status: 502, details: { detail } }
+                : { response: { status: 502, data: { detail } } },
+            );
+      const mutateAsync = vi.fn().mockRejectedValue(failure);
+      vi.mocked(useGenerateQuizMutation).mockReturnValue({
+        mutateAsync,
+        isPending: false,
+      } as ReturnType<typeof useGenerateQuizMutation>);
+      renderWithQueryClient();
+      await selectDefaultMedia();
+      fireEvent.click(screen.getByRole("button", { name: /Generate Quiz/i }));
+      expect(
+        await screen.findByText(`Failed to generate quiz: ${detail}`),
+      ).toBeVisible();
+      expect(
+        screen.queryByText(/POST \/api\/v1\/quizzes\/generate/),
+      ).not.toBeInTheDocument();
+      expect(mutateAsync).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("generate-selected-sources")).toHaveTextContent(
+        "Biology Notes",
+      );
+      expect(
+        screen.getByRole("button", { name: /Generate Quiz/i }),
+      ).toBeEnabled();
+    },
+  );
+
 });
 
 vi.mock("@/services/tldw-server", () => ({ getWebSearchPrompt: vi.fn(), promptForRag: vi.fn(), LEGACY_SERVICE_PROMPT_DEFAULTS: {} }));

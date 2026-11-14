@@ -518,7 +518,7 @@ git commit -m "feat(web): use cookie auth for quickstart requests"
 - Modify: `Dockerfiles/README.md`
 - Modify: `apps/tldw-frontend/e2e/login.spec.ts`
 - Create: `apps/tldw-frontend/e2e/single-user-cookie-lifecycle.spec.ts`
-- Modify: `backlog/tasks/task-12108 - Add-persistent-HttpOnly-sessions-for-same-origin-single-user-WebUI-auth.md`
+- Modify: `backlog/tasks/task-15052 - Add-persistent-HttpOnly-sessions-for-same-origin-single-user-WebUI-auth.md`
 
 **Interfaces:**
 - Consumes: completed backend and client cookie-session flow.
@@ -576,6 +576,6 @@ Expected: all tests pass; Bandit reports no new findings in changed code.
 Record exact commands/results, checked acceptance criteria, security scan result, known skips, and summary in Backlog.md. Then run:
 
 ```bash
-git add Dockerfiles apps/tldw-frontend/e2e "backlog/tasks/task-12108 - Add-persistent-HttpOnly-sessions-for-same-origin-single-user-WebUI-auth.md"
+git add Dockerfiles apps/tldw-frontend/e2e "backlog/tasks/task-15052 - Add-persistent-HttpOnly-sessions-for-same-origin-single-user-WebUI-auth.md"
 git commit -m "test(auth): cover single-user cookie lifecycle"
 ```

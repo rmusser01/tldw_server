@@ -39,7 +39,7 @@ Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase3-results-inbox-home-surf
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added a dedicated AutomationInboxCard for Home with empty, loading, partial, result, and failure states.
 - Added useScheduledTaskHomeSignals so scheduled-task Home signals load independently from Companion personalization using listScheduledTasks and non-blocking listNotifications({ limit: 50 }).
 - Added scheduled-task automation Home adapters for projected task results, notification-derived result targets, CompanionHomeItem mapping, and dedupe across identical run/result signals.
@@ -49,7 +49,7 @@ Docs/superpowers/plans/2026-06-09-scheduled-tasks-phase3-results-inbox-home-surf
 - Verification: ./node_modules/.bin/vitest run src/components/Option/CompanionHome/__tests__ passed 34 tests.
 - Verification: ./node_modules/.bin/vitest run src/components/Option/ScheduledTasks/__tests__ passed 138 tests.
 - Bandit: skipped because this slice only changes frontend TypeScript/React and Backlog/plan text, not Python executable code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

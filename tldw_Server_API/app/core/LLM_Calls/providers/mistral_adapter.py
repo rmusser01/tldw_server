@@ -170,7 +170,7 @@ class MistralAdapter(ChatProvider):
             log_http_400_body,
         )
         if is_http_status_error(exc):
-            from tldw_Server_API.app.core.Chat.Chat_Deps import (
+            from tldw_Server_API.app.core.exceptions import (
                 ChatAPIError,
                 ChatAuthenticationError,
                 ChatBadRequestError,
@@ -210,7 +210,7 @@ class MistralAdapter(ChatProvider):
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
         if not api_key:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Mistral API Key required.")
         url = f"{self._resolve_base_url(request)}/chat/completions"
         headers = self._headers(api_key)
@@ -235,7 +235,7 @@ class MistralAdapter(ChatProvider):
         request = validate_payload(self.name, request or {})
         api_key = request.get("api_key")
         if not api_key:
-            from tldw_Server_API.app.core.Chat.Chat_Deps import ChatConfigurationError
+            from tldw_Server_API.app.core.exceptions import ChatConfigurationError
             raise ChatConfigurationError(provider=self.name, message="Mistral API Key required.")
         url = f"{self._resolve_base_url(request)}/chat/completions"
         headers = self._headers(api_key)

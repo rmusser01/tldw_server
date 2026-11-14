@@ -50,7 +50,7 @@ Source: comprehensive core-module review prompt smoke run, findings LLM_Calls-2 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 STAGE 2 COMPLETE - the cluster is now one implementation.
 
 NEW: core/Utils/http_status_extraction.py owns get_http_status_from_exception, get_http_error_text, is_http_status_error and is_chunked_encoding_error. It lives under core/Utils/ rather than core/LLM_Calls/ because TTS, Local_LLM and Embeddings all need it and none should depend on the LLM_Calls package to classify an HTTP error.
@@ -86,7 +86,7 @@ Also still open from the original finding: consolidating the four copies (get_ht
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

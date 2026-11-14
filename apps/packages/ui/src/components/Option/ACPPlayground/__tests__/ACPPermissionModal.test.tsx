@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 import { ACPPermissionModal } from "../ACPPermissionModal"
 import type { ACPPendingPermission } from "@/services/acp/types"
@@ -57,6 +58,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={pendingPermissions}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -74,6 +76,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={pendingPermissions}
         approvePermission={approvePermission}
         denyPermission={denyPermission}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -94,6 +97,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={pendingPermissions}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -114,6 +118,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={pendingPermissions}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -123,6 +128,7 @@ describe("ACPPermissionModal", () => {
           pendingPermissions={[]}
           approvePermission={vi.fn()}
           denyPermission={vi.fn()}
+          stopOperation={vi.fn()}
         />
       )
     ).not.toThrow()
@@ -141,6 +147,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={[pendingPermissions[0]]}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -155,6 +162,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={[nextPermission]}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -162,4 +170,90 @@ describe("ACPPermissionModal", () => {
     expect(screen.getByRole("button", { name: "Show details" })).toBeInTheDocument()
     expect(screen.queryByText(/policy_cache/)).not.toBeInTheDocument()
   })
+  it("lets Stop cancel the operation from inside the permission dialog", () => {
+    const stopOperation = vi.fn()
+    const approvePermission = vi.fn()
+    const denyPermission = vi.fn()
+    render(
+      <ACPPermissionModal
+        pendingPermissions={pendingPermissions}
+        approvePermission={approvePermission}
+        denyPermission={denyPermission}
+        stopOperation={stopOperation}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Stop", exact: true }))
+    expect(stopOperation).toHaveBeenCalledTimes(1)
+    expect(approvePermission).not.toHaveBeenCalled()
+    expect(denyPermission).not.toHaveBeenCalled()
+  })
 })
+
+describe('C11 focus ownership', () => {
+  const props = () => ({
+    approvePermission: vi.fn(),
+    denyPermission: vi.fn(),
+    stopOperation: vi.fn(),
+  });
+
+  it('focuses the safe Deny action when an actual permission arrives', () => {
+    const callbacks = props();
+    const { rerender } = render(
+      <>
+        <button>Composer opener</button>
+        <ACPPermissionModal {...callbacks} pendingPermissions={[]} />
+      </>
+    );
+    screen.getByRole('button', { name: 'Composer opener' }).focus();
+    rerender(
+      <>
+        <button>Composer opener</button>
+        <ACPPermissionModal {...callbacks} pendingPermissions={pendingPermissions} />
+      </>
+    );
+    expect(screen.getByRole('button', { name: 'Deny' })).toHaveFocus();
+    expect(callbacks.approvePermission).not.toHaveBeenCalled();
+  });
+
+  it('keeps Tab and ShiftTab within the real permission controls without deciding', async () => {
+    const user = userEvent.setup();
+    const callbacks = props();
+    render(
+      <>
+        <button>Background before</button>
+        <ACPPermissionModal {...callbacks} pendingPermissions={pendingPermissions} />
+        <button>Background after</button>
+      </>
+    );
+    const dialog = screen.getByRole('dialog');
+    const first = within(dialog).getByRole('button', { name: 'Show details' });
+    const last = within(dialog).getByRole('button', { name: 'Approve' });
+    first.focus();
+    await user.tab({ shift: true });
+    expect(last).toHaveFocus();
+    await user.tab();
+    expect(first).toHaveFocus();
+    expect(callbacks.approvePermission).not.toHaveBeenCalled();
+    expect(callbacks.denyPermission).not.toHaveBeenCalled();
+    expect(callbacks.stopOperation).not.toHaveBeenCalled();
+  });
+
+  it('returns to the original opener after queued requests finish', () => {
+    const callbacks = props();
+    const view = (permissions: ACPPendingPermission[]) => (
+      <>
+        <button>Original composer</button>
+        <ACPPermissionModal {...callbacks} pendingPermissions={permissions} />
+      </>
+    );
+    const { rerender } = render(view([]));
+    const opener = screen.getByRole('button', { name: 'Original composer' });
+    opener.focus();
+    rerender(view(pendingPermissions));
+    screen.getByRole('button', { name: 'Deny' }).focus();
+    rerender(view([pendingPermissions[1]]));
+    expect(screen.getByRole('button', { name: 'Deny' })).toHaveFocus();
+    rerender(view([]));
+    expect(opener).toHaveFocus();
+  });
+});

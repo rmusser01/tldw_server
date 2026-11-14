@@ -33,9 +33,11 @@ def _select_one(db: CharactersRAGDB) -> object:
     return row
 
 
-def test_chacha_schema_initialization_lock_is_shared_for_same_sqlite_path(tmp_path: Path) -> None:
-    db_path = str(tmp_path / "schema-lock.db")
-    other_path = str(tmp_path / "other-schema-lock.db")
+def test_chacha_schema_initialization_lock_is_shared_for_same_sqlite_path() -> None:
+    # Fixed keys cover separate and colliding stripes without random tmp-path collisions.
+    db_path = "schema-lock.db"
+    other_path = "other-schema-lock.db"
+    colliding_path = "collision-schema-lock-145.db"
 
     first = CharactersRAGDB._sqlite_schema_init_lock_for_path(db_path)
     second = CharactersRAGDB._sqlite_schema_init_lock_for_path(db_path)
@@ -43,6 +45,7 @@ def test_chacha_schema_initialization_lock_is_shared_for_same_sqlite_path(tmp_pa
 
     assert first is second  # nosec B101
     assert first is not other  # nosec B101
+    assert first is CharactersRAGDB._sqlite_schema_init_lock_for_path(colliding_path)
 
 
 def test_chacha_close_all_connections_keeps_shared_pool_usable_for_canonical_backend(tmp_path: Path) -> None:

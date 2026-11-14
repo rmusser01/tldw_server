@@ -295,15 +295,12 @@ def test_build_usage_where_clause_org_scope_uses_exists_predicate():
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_status_and_breakdowns_sqlite(monkeypatch, tmp_path):
+async def test_router_analytics_status_and_breakdowns_sqlite(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -367,15 +364,12 @@ async def test_router_analytics_status_and_breakdowns_sqlite(monkeypatch, tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_status_honors_provider_and_token_filters(monkeypatch, tmp_path):
+async def test_router_analytics_status_honors_provider_and_token_filters(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -414,15 +408,12 @@ async def test_router_analytics_status_honors_provider_and_token_filters(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_quota_returns_key_budget_utilization(monkeypatch, tmp_path):
+async def test_router_analytics_quota_returns_key_budget_utilization(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -455,15 +446,12 @@ async def test_router_analytics_quota_returns_key_budget_utilization(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_providers_returns_provider_health_breakdown(monkeypatch, tmp_path):
+async def test_router_analytics_providers_returns_provider_health_breakdown(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -502,15 +490,12 @@ async def test_router_analytics_providers_returns_provider_health_breakdown(monk
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_access_returns_token_ip_and_user_agent_breakdown(monkeypatch, tmp_path):
+async def test_router_analytics_access_returns_token_ip_and_user_agent_breakdown(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -551,15 +536,12 @@ async def test_router_analytics_access_returns_token_ip_and_user_agent_breakdown
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_network_returns_ip_endpoint_and_operation_breakdown(monkeypatch, tmp_path):
+async def test_router_analytics_network_returns_ip_endpoint_and_operation_breakdown(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -598,15 +580,12 @@ async def test_router_analytics_network_returns_ip_endpoint_and_operation_breakd
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_models_returns_model_health_breakdown(monkeypatch, tmp_path):
+async def test_router_analytics_models_returns_model_health_breakdown(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -641,15 +620,12 @@ async def test_router_analytics_models_returns_model_health_breakdown(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_conversations_returns_conversation_breakdown(monkeypatch, tmp_path):
+async def test_router_analytics_conversations_returns_conversation_breakdown(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -685,15 +661,12 @@ async def test_router_analytics_conversations_returns_conversation_breakdown(mon
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_log_returns_recent_rows(monkeypatch, tmp_path):
+async def test_router_analytics_log_returns_recent_rows(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)
@@ -727,15 +700,12 @@ async def test_router_analytics_log_returns_recent_rows(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_router_analytics_log_falls_back_for_legacy_schema(monkeypatch, tmp_path):
+async def test_router_analytics_log_falls_back_for_legacy_schema(monkeypatch, tmp_path, fresh_services):
     _setup_env(tmp_path)
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
-    from tldw_Server_API.app.core.AuthNZ.session_manager import reset_session_manager
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-    await reset_db_pool()
     reset_settings()
-    await reset_session_manager()
     user_id = await _ensure_router_usage_seed_rows()
     pool = await get_db_pool()
     principal = _single_user_principal(user_id)

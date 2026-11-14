@@ -4,13 +4,14 @@ subscription_service.py
 Service for subscription and billing management.
 Coordinates between the billing repository and Stripe client.
 """
+
 from __future__ import annotations
 
 import asyncio
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -143,6 +144,11 @@ class SubscriptionService:
         self._db_pool = db_pool
         self._billing_repo = billing_repo
         self._stripe_client = stripe_client
+
+    @property
+    def has_billing_repo(self) -> bool:
+        """True when a billing repository (the hosted product's plans) is wired in."""
+        return self._billing_repo is not None
 
     @staticmethod
     def _free_plan_record() -> dict[str, Any]:
@@ -558,8 +564,18 @@ class SubscriptionService:
     # Usage & Limits
     # =========================================================================
 
-    async def get_org_limits(self, org_id: int) -> dict[str, Any]:
-        """Get the effective limits for an organization."""
+    async def get_org_limits(self, org_id: int, *, conn: Any | None = None) -> dict[str, Any]:
+        """Get effective limits, using only ``conn`` when a repository is configured.
+
+        A supplied connection requires the repository's strict API; unsupported
+        repositories fail closed instead of acquiring an extra pool slot. OSS
+        without a billing repository retains its canonical free-tier defaults.
+        """
+        if conn is not None and self._billing_repo is not None:
+            reader = getattr(self._billing_repo, "get_org_limits_on_connection", None)
+            if not callable(reader):
+                raise RuntimeError("Billing repository lacks a strict connection limits API")
+            return cast(dict[str, Any], await reader(conn, org_id))
         if self._billing_repo is not None and hasattr(self._billing_repo, "get_org_limits"):
             return await self._billing_repo.get_org_limits(org_id)
         return get_plan_limits("free")
@@ -1025,6 +1041,12 @@ async def get_subscription_service() -> SubscriptionService:
             if _subscription_service is None:
                 _subscription_service = SubscriptionService()
     return _subscription_service
+
+
+async def billing_repo_configured() -> bool:
+    """True when the subscription service has a billing repository: commercial (hosted) mode."""
+    service = await get_subscription_service()
+    return service.has_billing_repo
 
 
 async def reset_subscription_service() -> None:

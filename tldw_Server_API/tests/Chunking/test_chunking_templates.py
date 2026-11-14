@@ -488,7 +488,8 @@ class TestAPIEndpoints:
 
         # Create template
         db.create_chunking_template(
-            name="get_api_test", template_json='{"chunking": {"method": "words"}}', description="Get API test"
+            name="get_api_test", template_json='{"chunking": {"method": "words"}}', description="Get API test",
+            user_id="1",
         )
 
         # Get existing template
@@ -535,7 +536,8 @@ class TestAPIEndpoints:
 
         # Create template first
         db.create_chunking_template(
-            name="update_api_test", template_json='{"chunking": {"method": "words"}}', description="Original"
+            name="update_api_test", template_json='{"chunking": {"method": "words"}}', description="Original",
+            user_id="1",
         )
 
         # Update via API
@@ -558,7 +560,8 @@ class TestAPIEndpoints:
 
         # Create template first
         db.create_chunking_template(
-            name="delete_api_test", template_json='{"chunking": {"method": "words"}}', description="To delete"
+            name="delete_api_test", template_json='{"chunking": {"method": "words"}}', description="To delete",
+            user_id="1",
         )
 
         # Delete via API
@@ -777,6 +780,7 @@ class TestIntegration:
                 }
             ),
             description="Template for apply test",
+            user_id="1",
         )
 
         # Apply it to text
@@ -821,6 +825,7 @@ class TestIntegration:
                 }
             ),
             description="Real processor apply test",
+            user_id="1",
         )
 
         req = {

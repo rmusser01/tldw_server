@@ -1,3 +1,6 @@
+import { useStoreMessageOption } from "@/store/option";
+import { captureChatDraftSource } from "./chat-draft-transition";
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes";
 import { isAbortLikeError } from "@/hooks/chat/abort-turn-cleanup";
 import {
   isImageGenerationMessageType,
@@ -71,8 +74,44 @@ export type TldwChatMeta =
 
 export type ChatSubmitResult =
   | { status: "submitted" }
-  | { status: "failed"; errorMessage: string }
-  | { status: "skipped"; reason: string };
+  // Only a refusal before any input admission may restore the composer.
+  | { status: "failed"; errorMessage: string; restoreDraft?: true; restoreDraftIsCurrent?: () => boolean }
+  // questionKept: the question stays in the transcript (a Stop before the
+  // first token), so the composer must not get it back as well (CM-02).
+  | { status: "skipped"; reason: string; questionKept?: true };
+
+// A detached reply owns request locks, but does not make any saved row active.
+export const withDetachedHistoryResponse =
+  <T extends { historyEditResend?: NativeHistoryEditResend; historyRegenerate?: NativeHistoryRegenerate }, R>(
+    submit: (params: T, beginResponse: () => boolean) => Promise<R>
+  ) =>
+  async (params: T): Promise<R> => {
+    const source = captureChatDraftSource()
+    const intent = params.historyRegenerate ?? params.historyEditResend
+    const isCurrent = () => source.isCurrent() && (!intent || intent.isOriginCurrent())
+    let token: {
+      originalReply?: Pick<Message, "id" | "message" | "isBot">
+    } | null = null
+    const beginResponse = () => {
+      if (!isCurrent()) return false
+      token = intent
+        ? { originalReply: useStoreMessageOption.getState().messages.at(-1) }
+        : null
+      useStoreMessageOption.setState({ detachedHistoryResponse: token })
+      return isCurrent()
+    }
+    try {
+      return await submit(params, beginResponse)
+    } finally {
+      if (token) {
+        useStoreMessageOption.setState((state) =>
+          state.detachedHistoryResponse === token
+            ? { detachedHistoryResponse: null }
+            : state
+        )
+      }
+    }
+  }
 
 export const chatSubmitSubmitted = (): ChatSubmitResult => ({
   status: "submitted",
@@ -83,10 +122,19 @@ export const chatSubmitFailed = (errorMessage: string): ChatSubmitResult => ({
   errorMessage,
 });
 
-export const chatSubmitSkipped = (reason: string): ChatSubmitResult => ({
+export const chatSubmitSkipped = (
+  reason: string,
+  options: { questionKept?: boolean } = {},
+): ChatSubmitResult => ({
   status: "skipped",
   reason,
+  ...(options.questionKept ? { questionKept: true as const } : {}),
 });
+
+/** Whether a send that did not complete should put its text back in the composer. */
+export const shouldRestoreDraftAfterSubmit = (result: ChatSubmitResult) =>
+  (result.status === "skipped" && !result.questionKept) ||
+  (result.status === "failed" && result.restoreDraft === true);
 
 export const isChatSubmitSuccess = (result: ChatSubmitResult) =>
   result.status === "submitted";

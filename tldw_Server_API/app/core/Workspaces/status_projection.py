@@ -295,11 +295,11 @@ def _status_from_media(
     if chunking_status and chunking_status not in {"completed", "complete", "done"} and not vector_failed:
         return _base_status(
             source,
-            state="chunking",
+            state="partially_queryable",
             reason="chunking_pending",
             readiness=readiness,
             progress_percent=65.0,
-            progress_message="Text is available while chunking continues.",
+            progress_message="Text search is available; chunking has not completed.",
         )
 
     if vector_failed:

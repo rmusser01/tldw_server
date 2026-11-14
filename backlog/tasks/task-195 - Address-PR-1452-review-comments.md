@@ -42,7 +42,7 @@ Resolve actionable review feedback on PR #1452 for the client-managed conversati
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented review fixes: moved ChaChaNotes quick_check into sqlite_policy DB_Management helper, cleared stale conversation context on composition errors, restricted cached send reuse to ready/error-free matching input, threaded AbortSignal through context primitives and API client calls, parameterized dictionary ID validation field names, removed unreferenced TODO wording, and restored literal sort-order typing.
 
 Verification before push: git diff --check passed; focused Vitest conversation-context suite passed (6 files, 32 tests); backend focused pytest passed (27 tests); full chat dictionary endpoint unit file passed (55 tests); Bandit on touched Python production files produced 0 findings. UI package tsc still reports broader baseline errors outside this review-fix patch.
@@ -50,7 +50,7 @@ Verification before push: git diff --check passed; focused Vitest conversation-c
 Second-pass CodeRabbit review fixes: made header listener tests cleanup-safe, seeded selectedModel in first-run handoff coverage, preserved character-chat blocker readiness snapshots for modal rendering, wired quick-chat readiness to connection/model/send-blocked state, surfaced conversation-context asset save failures, disabled character-onboarding lane actions before first-run setup completion, normalized chat_dictionary_ids nested/legacy mirrors, tightened /characters route-boundary checks, fixed task wording, and enforced a shared token budget across chained chat dictionaries.
 
 Second-pass verification: git diff --check passed; initial focused Vitest run showed chat-settings/character-manager failures caused by the new readiness wiring and an empty deep-research history merge mismatch; fixes were applied. Passing follow-up runs: chat-settings sync + full Manager.first-use suite (94 tests), quick-chat subset (4 tests), full chat dictionary endpoint unit file (56 tests), and Bandit on touched backend production files with 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

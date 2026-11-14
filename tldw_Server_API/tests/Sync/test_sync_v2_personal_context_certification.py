@@ -292,6 +292,8 @@ def production_factories(
     )
     monkeypatch.setenv("SYNC_V2_BLOB_STORE_PATH", str(tmp_path / "sync_blobs"))
     monkeypatch.setenv("AUTH_MODE", "multi_user")
+    # These tests exercise sync relay behaviour, not CSRF; CSRF is on by default since TASK-13950.19 PR 4.
+    monkeypatch.setenv("CSRF_ENABLED", "false")
     _clear_factory_caches()
     from tldw_Server_API.app.api.v1.router_groups.core import iter_core_router_specs
     from tldw_Server_API.app.api.v1.router_registry import register_router_specs
@@ -408,9 +410,19 @@ def _device_payload(public_key: rsa.RSAPublicKey) -> dict[str, object]:
 
 
 def _seed_exchange(service: SyncV2Service, dataset_id: str) -> dict[str, object]:
-    """Install and acknowledge through the real journals before test-only rollout."""
+    """Install and acknowledge through the real journals before test-only rollout.
 
-    baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+    Like a client, restart activation once when told it is required: activation
+    refuses while the relay that ran first left a staged row unfinished, and
+    the restart's relay finishes it.
+    """
+
+    try:
+        baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
+    except SyncStoreError as exc:
+        if str(exc) != "personal_context_activation_required":
+            raise
+        baseline = service.prepare_personal_context_activation(user_id=_USER_ID, device_id=_DEVICE_ID)
     _receipt, proof = service.acknowledge_personal_context_activation(
         user_id=_USER_ID,
         dataset_id=dataset_id,

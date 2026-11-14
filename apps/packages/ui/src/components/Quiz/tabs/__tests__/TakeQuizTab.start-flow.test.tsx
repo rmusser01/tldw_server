@@ -446,7 +446,7 @@ describe("TakeQuizTab start flow", () => {
     const questionId = 51
     let attemptId = 251
     let shuffledEntries = buildShuffledOptionEntries(
-      ASSERTION_REASONING_OPTIONS,
+      [...ASSERTION_REASONING_OPTIONS],
       questionId,
       attemptId
     )
@@ -457,7 +457,7 @@ describe("TakeQuizTab start flow", () => {
     ) {
       attemptId += 1
       shuffledEntries = buildShuffledOptionEntries(
-        ASSERTION_REASONING_OPTIONS,
+        [...ASSERTION_REASONING_OPTIONS],
         questionId,
         attemptId
       )
@@ -575,7 +575,7 @@ describe("TakeQuizTab start flow", () => {
   }, 15000)
 
   it("shuffles multiple-choice option order per graded attempt while preserving answer mapping", async () => {
-    const optionLabels = ASSERTION_REASONING_OPTIONS
+    const optionLabels = [...ASSERTION_REASONING_OPTIONS]
     const questionId = 11
 
     const firstAttemptId = 200

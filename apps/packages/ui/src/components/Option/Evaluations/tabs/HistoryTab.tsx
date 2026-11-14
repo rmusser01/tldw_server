@@ -4,6 +4,7 @@
  */
 
 import React from "react"
+import { useSearchParams } from "react-router-dom"
 import {
   Button,
   Card,
@@ -26,6 +27,7 @@ const { Text } = Typography
 export const HistoryTab: React.FC = () => {
   const { t } = useTranslation(["evaluations", "common"])
   const [form] = Form.useForm()
+  const [searchParams, setSearchParams] = useSearchParams()
 
   // Store state
   const historyResults = useEvaluationsStore((s) => s.historyResults)
@@ -206,6 +208,19 @@ export const HistoryTab: React.FC = () => {
                             </div>
                           )}
                         </div>
+
+                        {evalId && (
+                          <Button size="small" onClick={() => {
+                            const next = new URLSearchParams(searchParams)
+                            next.set("tab", "runs")
+                            next.set("evaluationId", evalId)
+                            next.delete("runId")
+                            next.delete("recipeRunId")
+                            setSearchParams(next)
+                          }}>
+                            {t("evaluations:historyViewRunsCta", { defaultValue: "View runs" })}
+                          </Button>
+                        )}
                         {item.detail && Object.keys(item.detail).length > 0 && (
                           <pre className="mt-2 max-h-24 overflow-auto rounded bg-surface2 p-2 text-[10px] text-text">
                             {JSON.stringify(item.detail, null, 2)}

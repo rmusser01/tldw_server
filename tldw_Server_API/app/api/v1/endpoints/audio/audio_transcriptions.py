@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from loguru import logger
 import soundfile as sf
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_db_transaction, get_request_user, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_expected_user, get_auth_principal, get_db_transaction, get_request_user, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id, require_within_limit
 from tldw_Server_API.app.core.Resource_Governance import cost_units
@@ -58,6 +58,7 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
     observe_stt_latency_seconds,
 )
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
 from tldw_Server_API.app.core.Usage.audio_quota import (
     add_daily_minutes,
     can_start_job,
@@ -69,7 +70,10 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_limits_for_user,
     heartbeat_jobs,
     increment_jobs_started,
+    monthly_minutes_exhausted,
 )
+
+TRANSCRIPTIONS_KEY = "limits.audio_concurrent_transcriptions"
 
 router = APIRouter(
     tags=["Audio"],
@@ -206,26 +210,12 @@ def _audio_shim_attr(name: str):
         "can_start_job": can_start_job,
         "increment_jobs_started": increment_jobs_started,
         "finish_job": finish_job,
+        "monthly_minutes_exhausted": monthly_minutes_exhausted,
         "sf": sf,
     }
     default_value = defaults.get(name)
     package_candidate: Any = None
     module_candidate: Any = None
-
-    def _is_test_override(value: Any) -> bool:
-        try:
-            module_name = str(getattr(value, "__module__", "") or "")
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-            module_name = ""
-        if module_name.startswith("tldw_Server_API.tests") or module_name.startswith("tests."):
-            return True
-        if module_name == "__main__":
-            return True
-        try:
-            class_module = str(getattr(getattr(value, "__class__", object), "__module__", "") or "")
-        except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-            class_module = ""
-        return class_module.startswith("tldw_Server_API.tests") or class_module.startswith("tests.")
 
     try:
         from tldw_Server_API.app.api.v1.endpoints import audio as audio_pkg_shim
@@ -249,10 +239,6 @@ def _audio_shim_attr(name: str):
     if package_candidate is not None and module_candidate is not None:
         if package_candidate is module_candidate:
             return package_candidate
-        package_is_test_override = _is_test_override(package_candidate)
-        module_is_test_override = _is_test_override(module_candidate)
-        if package_is_test_override != module_is_test_override:
-            return package_candidate if package_is_test_override else module_candidate
         if default_value is not None:
             package_changed = package_candidate is not default_value
             module_changed = module_candidate is not default_value
@@ -269,6 +255,19 @@ def _audio_shim_attr(name: str):
     if name in defaults:
         return defaults[name]
     raise NameError(name)
+
+
+def _max_upload_bytes(limits: dict[str, Any]) -> int:
+    """The user's upload cap from their audio limits, else [Media-Processing] max_audio_file_size_mb."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files as audio_files
+
+    cap_mb = limits.get("max_file_size_mb")
+    if cap_mb:
+        try:
+            return int(float(cap_mb) * 1024 * 1024)
+        except (TypeError, ValueError):
+            logger.warning("Could not parse max_file_size_mb {!r}; using the media-processing cap", cap_mb)
+    return int(audio_files.MAX_FILE_SIZE)
 
 
 async def _check_daily_minutes_allow(user_id: int, minutes: float):
@@ -473,6 +472,7 @@ def _dictation_error_detail(
     summary="Transcribes audio into text (OpenAI Compatible)",
     responses=_OPENAI_AUDIO_TRANSCRIPT_RESPONSES,
     dependencies=[
+        Depends(require_expected_user),
         Depends(check_rate_limit),
         Depends(
             TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.transcriptions", count_as="call")
@@ -582,8 +582,8 @@ async def create_transcription(
         "audio/opus",
         "audio/webm",
     }
-    ctype = (file.content_type or "").lower()
-    if ctype and ctype not in allowed_types:
+    ctype = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if file.content_type and ctype not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=f"Unsupported media type: {file.content_type}"
         )
@@ -621,27 +621,13 @@ async def create_transcription(
         limits = await _audio_shim_attr("get_limits_for_user")(current_user.id)
     except EXPECTED_DB_EXC as e:
         logger.exception(
-            'Failed to get limits for user {} during upload, using defaults: {}; request_id={}',
+            'Failed to get limits for user {} during upload; using the media-processing cap: {}; request_id={}',
             current_user.id,
             e,
             rid,
         )
-        limits = {
-            "daily_minutes": 30.0,
-            "concurrent_streams": 1,
-            "concurrent_jobs": 1,
-            "max_file_size_mb": 25,
-        }
-    try:
-        max_file_size = int((limits.get("max_file_size_mb") or 25) * 1024 * 1024)
-    except (ValueError, TypeError) as e:
-        logger.warning(
-            'Could not parse max_file_size_mb for user {}; defaulting to 25MB: {}; request_id={}',
-            current_user.id,
-            e,
-            rid,
-        )
-        max_file_size = 25 * 1024 * 1024
+        limits = {}
+    max_file_size = _max_upload_bytes(limits)
     upload_chunk_size = 1024 * 1024
 
     # Resolve default model from config when omitted.
@@ -652,15 +638,32 @@ async def create_transcription(
 
         model = resolve_default_transcription_model("whisper-1")
 
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
+        parse_transcription_model,
+    )
+
+    requested_provider, _, requested_variant = parse_transcription_model(model or "")
+    if requested_provider == "parakeet" and requested_variant == "onnx":
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import (
+            check_transcription_model_status,
+        )
+
+        if check_transcription_model_status(model or "").get("usable") is False:
+            metrics_provider = "parakeet"
+            _emit_error_metrics(status_label="model_unavailable", reason="model_unavailable")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_dictation_error_detail(
+                    http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail_status="model_unavailable",
+                    message="The configured Parakeet ONNX model is not available. Check the Audio Setup Guide before retrying.",
+                ),
+            )
+
     # Before any heavy work, enforce concurrent jobs cap per user
     ok_job, msg_job = await _audio_shim_attr("can_start_job")(current_user.id)
     if not ok_job:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=msg_job)
-    try:
-        job_heartbeat_task = await _maybe_start_job_heartbeat(current_user.id)
-    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-        job_heartbeat_task = None
-
     # Record job start (best-effort)
     acquired_job_slot = False
     try:
@@ -686,6 +689,23 @@ async def create_transcription(
     except Exception:
         _emit_error_metrics(status_label="internal_error", reason="policy_resolution_failed")
         raise
+    # One of the user's direct-transcription slots, held until the finally below (TASK-13435).
+    try:
+        transcription_slot = await concurrency_quota.acquire_slot(
+            current_user.id, TRANSCRIPTIONS_KEY, "jobs"
+        )
+    except concurrency_quota.ConcurrencyQuotaExceeded as exc:
+        _emit_error_metrics(status_label="quota_exceeded", reason="quota")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Concurrent transcription limit reached ({exc.limit})",
+            headers=quota_checks.rate_limit_headers(exc.limit, 0, exc.retry_after) if exc.retry_after else None,
+        ) from exc
+    # Started after the last await that can fail or be cancelled, so no exit leaks it.
+    try:
+        job_heartbeat_task = await _maybe_start_job_heartbeat(current_user.id)
+    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+        job_heartbeat_task = None
     try:
         first_chunk = await file.read(upload_chunk_size)
         file_extension = _resolve_audio_upload_suffix(
@@ -921,12 +941,13 @@ async def create_transcription(
                 job_heartbeat_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await job_heartbeat_task
+            period = "monthly" if await _audio_shim_attr("monthly_minutes_exhausted")(current_user.id, minutes_est) else "daily"
             raise HTTPException(
                 status_code=status.HTTP_402_PAYMENT_REQUIRED,
                 detail=_dictation_error_detail(
                     http_status=status.HTTP_402_PAYMENT_REQUIRED,
                     detail_status="quota_exceeded",
-                    message="Transcription quota exceeded (daily minutes)",
+                    message=f"Transcription quota exceeded ({period} minutes)",
                 ),
             )
         # Secondary billing check with the real minute estimate (the dependency
@@ -1405,6 +1426,10 @@ async def create_transcription(
                     )
                 except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
                     logger.debug("metrics increment failed (audio tempfile_remove_failed)")
+        if job_heartbeat_task:
+            job_heartbeat_task.cancel()
+        # Last, so every cleanup above has run whatever the release does (TASK-13435).
+        await transcription_slot.release()
 
 
 @router.post(

@@ -34,11 +34,11 @@ Address actionable review comments on PR #1445 for VN Play Story/CYOA branch per
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Review comments addressed after verification: confirmed Qodo's keyword-only default claim is not a runtime syntax error in Python, but reordered record_story_choice_selection required parameters before the optional expected_scene_last_event_id parameter to satisfy static-review expectations without making branch_label/branch_path optional. Added TDD coverage first for branch label truncation, freeform event-query deferral, signature order, and repository-side branch metadata bounds. Implemented 160-character Story branch label/branch_path choice_text truncation in both the service and repository persistence path, and moved the parent-choice event-history query inside the Story choice branch only.
 
 Verification: targeted review-fix tests passed with 4 passed, 5 warnings; focused VN Play suite passed with 63 passed, 5 warnings; Bandit wrote /tmp/bandit_pr1445_review_fixes.json with zero findings; git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

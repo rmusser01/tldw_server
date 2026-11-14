@@ -34,7 +34,7 @@ Expose machine-readable isolation posture in sandbox runtime discovery so client
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation added structured runtime isolation metadata fields to sandbox runtime discovery: boundary_class, vm_grade_isolation, and untrusted_eligible. Metadata is centralized in runtime_capabilities.py and wired through SandboxService.feature_discovery() plus the Pydantic response schema.
 
 Verification passed: python -m pytest tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py tldw_Server_API/tests/Docs/test_sandbox_public_docs_contract.py -q --timeout=60; Bandit on touched Python files reported 0 findings; git diff --check produced no output.
@@ -48,7 +48,7 @@ PR #1261 review fixes applied: runtime_isolation_metadata() now validates the me
 Review-fix verification passed: python -m pytest tldw_Server_API/tests/sandbox/test_runtime_inventory_contract.py tldw_Server_API/tests/Docs/test_sandbox_public_docs_contract.py -q --timeout=60 -> 15 passed; Bandit on touched Python files -> 0 results; git diff --check -> no output.
 
 Follow-up after refreshed Qodo state: runtime_isolation_metadata() now avoids direct dictionary indexing entirely by using .get(...) plus an explicit missing-metadata ValueError after runtime coercion.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

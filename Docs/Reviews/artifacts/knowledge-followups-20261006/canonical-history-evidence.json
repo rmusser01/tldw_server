@@ -1,0 +1,142 @@
+{
+  "validated_at": "2026-10-06T21:49:59.400Z",
+  "candidate_head": "f17d581923af3aac49c8b363919135d2f31380a8",
+  "implementation_base_dev": "1fc353c3f67c93ba05102e7b0136ac4acac8f510",
+  "latest_dev_integration_preview": {
+    "head": "1e06e03b587310ec023f3810c4480ea4e69b05f5",
+    "overlapping_paths": [],
+    "merge_tree_exit": 0,
+    "rebased": false
+  },
+  "runtime": {
+    "client": "WebUI in headless desktop Chromium",
+    "sync": "inactive disposable owner profile",
+    "generation": "local Gemma4-26B-A4B through Custom OpenAI API",
+    "embeddings": "controlled fixtures"
+  },
+  "api_receipts": {
+    "initialCreate": 201,
+    "laterEdit": 200,
+    "originalAcknowledgmentReplayed": true,
+    "currentHeadPreserved": true,
+    "changedInputRejected": 409,
+    "delete": 204,
+    "replayAfterDeleteDidNotRevive": true,
+    "parentAcceptedVersion": 1,
+    "parentCurrentVersion": 2,
+    "historyVersion": 1
+  },
+  "api_lifecycle_and_exports": {
+    "coreRestore": 200,
+    "coreRestoreKeptHistoryDeleted": true,
+    "deletedExportSuppressedMarker": true,
+    "explicitRetainedRestore": 200,
+    "parentBefore": 4,
+    "parentAfter": 5,
+    "historyBefore": 2,
+    "historyAfter": 3,
+    "authoredContentUnchanged": true,
+    "restoreReceiptReplayed": true,
+    "activeExportRecreatedMatchingPortableMarker": true,
+    "ownedFixtureDeletedAgain": true
+  },
+  "direct_save": {
+    "status": 200,
+    "parentVersion": 1,
+    "historyVersion": 1,
+    "originalAnsweredQuestionRetained": true,
+    "typedUnansweredQuestion": "What is the baseline irrigation volume?",
+    "question": "When is the greenhouse review scheduled?",
+    "sourceCount": 1
+  },
+  "markdown_only_direct_update": {
+    "status": 200,
+    "parentBefore": 1,
+    "parentAfter": 2,
+    "historyVersion": 1,
+    "historyHashUnchanged": true,
+    "historyPayloadUnchanged": true,
+    "portableMarkerRemoved": true
+  },
+  "notes_history_reopen": {
+    "originalQuestionVisible": true,
+    "scopeVisible": true,
+    "trustVisible": true,
+    "excerptVisible": true,
+    "keyboardTabFocusedRegion": true,
+    "inertRetainedLinkCount": 0,
+    "editableMarkerAbsent": true
+  },
+  "core_note_restore": {
+    "status": 200,
+    "parentVersion": 4,
+    "historyVersion": 2,
+    "historyState": "deleted",
+    "historyPayloadAbsent": true,
+    "markerAbsent": true
+  },
+  "explicit_history_restore": {
+    "status": 200,
+    "parentVersion": 5,
+    "historyVersion": 3,
+    "historyActive": true,
+    "originalQuestionRetained": true,
+    "authoredRevisionRetained": true,
+    "markerStillAbsent": true
+  },
+  "ordinary_browser_save": {
+    "status": 200,
+    "parentVersion": 6,
+    "historyVersion": 3,
+    "historyRetained": true,
+    "matchingPortableMarkerRecreated": true
+  },
+  "browser_json_export": {
+    "jsonDownloaded": true,
+    "originalQuestionRetained": true,
+    "sourceCount": 1,
+    "portableMarkerValid": true,
+    "authoredRevisionRetained": true
+  },
+  "source_change_after_answer": {
+    "status": 200,
+    "originalRetrievedVersion": 1,
+    "currentOwnedSourceVersion": 2,
+    "appendixAddedAfterAnswer": true
+  },
+  "research_save": {
+    "status": 200,
+    "parentVersionAfterBrowserEdit": 2,
+    "historyVersion": 1,
+    "originalQuestionRetained": true,
+    "attachmentCount": 1,
+    "originalNoteIdentityRetained": true,
+    "snapshotVersion": 2,
+    "snapshotContentIncludesPostAnswerAppendix": true,
+    "originalExcerptUnchanged": true,
+    "authoredBrowserRevisionRetained": true
+  },
+  "markdown_only_research_update": {
+    "status": 200,
+    "parentBefore": 2,
+    "parentAfter": 3,
+    "historyVersion": 1,
+    "historyHashUnchanged": true,
+    "historyPayloadUnchanged": true,
+    "portableMarkerRemoved": true
+  },
+  "research_reopen": {
+    "browserTitle": "Greenhouse research brief — revised",
+    "canonicalHistoryVisible": true,
+    "latestOldClientRevisionVisible": true,
+    "authoredBrowserRevisionRetained": true,
+    "editableMarkerAbsent": true,
+    "refreshMethod": "Explicitly selected the canonical note from Workspace notes after reload; automatic workspace rehydration preserves the local draft."
+  },
+  "limitations": [
+    "Active Sync enrollment/encryption withdrawal and PostgreSQL RLS are covered by reviewed automated integration fixtures, not live browser attestation.",
+    "Headless keyboard focus does not qualify VoiceOver, Safari/iOS, native extension capture or participant usability.",
+    "Research restores its local draft on reload; explicitly reopening a workspace note fetches the current canonical head.",
+    "No commercial generation or live-vector retrieval qualification."
+  ]
+}

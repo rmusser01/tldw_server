@@ -183,50 +183,73 @@ def test_managed_process_registry_is_keyed_by_backend_name():
     assert get_managed_process("chatllm") is process_b  # nosec B101
 
 
+@pytest.fixture
+def ocr_probe(monkeypatch):
+    """Run the readiness probe under the production egress policy, without a network.
+
+    Traffic goes through the real core.http_client helpers over an httpx.MockTransport.
+    Returns ``(seen, connects, dns, responses)``: ``(url, request)`` for each request the
+    transport received, the URL as sent (http_client restores the logical URL on the request
+    afterwards), every attempted socket connect (a probe that bypasses the helpers reaches
+    one), a mutable DNS table, and queued responses (default 200).
+    """
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support as runtime_mod
+    from tldw_Server_API.app.core.Security import egress
+
+    seen: list[tuple[str, httpx.Request]] = []
+    connects: list[object] = []
+    dns: dict[str, str] = {}
+    responses: list[httpx.Response] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((str(request.url), request))
+        return responses.pop(0) if responses else httpx.Response(200)
+
+    def no_connect(address, *_args, **_kwargs):
+        connects.append(address)
+        raise OSError("network disabled in this test")
+
+    monkeypatch.setattr(socket, "create_connection", no_connect)
+    monkeypatch.setattr(
+        runtime_mod,
+        "create_client",
+        lambda **kwargs: http_client.create_client(transport=httpx.MockTransport(handler), **kwargs),
+        raising=False,
+    )
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda host, **_kwargs: [dns[host]] if host in dns else [])
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    return seen, connects, dns, responses
+
+
 @pytest.mark.unit
-def test_wait_for_managed_http_ready_uses_https_connection_when_requested(monkeypatch):
+@pytest.mark.parametrize(("host", "authority"), [("127.0.0.1", "127.0.0.1"), ("::1", "[::1]")])
+def test_wait_for_managed_http_ready_reaches_the_configured_loopback_server(ocr_probe, host, authority):
+    import httpx
+
     from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support as runtime_mod
 
-    captured: dict[str, object] = {"https_calls": 0, "http_calls": 0}
+    seen, connects, _dns, responses = ocr_probe
+    responses.append(httpx.Response(503))
 
-    class _Response:
-        status = 200
+    assert runtime_mod.wait_for_managed_http_ready(host=host, port=8090, timeout_total=5, interval=0.25)
 
-        def read(self):
-            return b""
+    assert [(request.method, url) for url, request in seen] == [
+        ("GET", f"http://{authority}:8090/health"),
+        ("GET", f"http://{authority}:8090/v1/models"),
+    ]
+    assert seen[0][1].extensions["timeout"] == {"connect": 0.25, "read": 0.25, "write": 0.25, "pool": 0.25}
+    assert connects == []
 
-    class _HTTPSConnection:
-        def __init__(self, host, port, timeout):
-            captured["https_calls"] = captured.get("https_calls", 0) + 1
-            captured["host"] = host
-            captured["port"] = port
-            captured["timeout"] = timeout
 
-        def request(self, method, path):
-            captured["method"] = method
-            captured["path"] = path
+@pytest.mark.unit
+def test_wait_for_managed_http_ready_uses_https_when_requested(ocr_probe):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support as runtime_mod
 
-        def getresponse(self):
-            return _Response()
-
-        def close(self):
-            return None
-
-    class _HTTPConnection:
-        def __init__(self, host, port, timeout):
-            captured["http_calls"] = captured.get("http_calls", 0) + 1
-
-        def request(self, method, path):
-            raise AssertionError("HTTPConnection should not be used for https probes")
-
-        def getresponse(self):
-            raise AssertionError("HTTPConnection should not be used for https probes")
-
-        def close(self):
-            return None
-
-    monkeypatch.setattr(runtime_mod.http.client, "HTTPSConnection", _HTTPSConnection)
-    monkeypatch.setattr(runtime_mod.http.client, "HTTPConnection", _HTTPConnection)
+    seen, connects, dns, _responses = ocr_probe
+    dns["chatllm.local"] = "192.168.1.20"
 
     assert runtime_mod.wait_for_managed_http_ready(
         host="chatllm.local",
@@ -234,8 +257,69 @@ def test_wait_for_managed_http_ready_uses_https_connection_when_requested(monkey
         scheme="https",
         timeout_total=0.5,
         interval=0.1,
-        paths=("/ready",),
+        paths=("/ready?probe=1",),
     ) is True  # nosec B101
-    assert captured["https_calls"] == 1  # nosec B101
-    assert captured["http_calls"] == 0  # nosec B101
-    assert captured["path"] == "/ready"  # nosec B101
+
+    [(url, request)] = seen
+    # The connection is pinned to the resolved address; Host carries the configured origin.
+    assert url == "https://192.168.1.20:9443/ready?probe=1"  # nosec B101
+    assert request.headers["host"] == "chatllm.local:9443"  # nosec B101
+    assert connects == []  # nosec B101
+
+
+@pytest.mark.unit
+def test_wait_for_managed_http_ready_refuses_a_cloud_metadata_answer_without_waiting(ocr_probe):
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support as runtime_mod
+
+    seen, connects, dns, _responses = ocr_probe
+    dns["ocr.internal"] = "169.254.169.254"
+
+    assert runtime_mod.wait_for_managed_http_ready(host="ocr.internal", port=80, timeout_total=0.3, interval=0.1) is False
+
+    assert seen == []
+    assert connects == []
+
+
+@pytest.mark.unit
+def test_wait_for_managed_http_ready_does_not_follow_a_redirect_to_another_private_address(ocr_probe):
+    import httpx
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support as runtime_mod
+
+    seen, connects, _dns, responses = ocr_probe
+    responses.extend(httpx.Response(302, headers={"location": "http://10.0.0.9:8090/health"}) for _ in range(50))
+
+    ready = runtime_mod.wait_for_managed_http_ready(
+        host="127.0.0.1", port=8090, timeout_total=0.2, interval=0.05, paths=("/health",)
+    )
+
+    assert ready is False
+    assert seen
+    assert {httpx.URL(url).host for url, _request in seen} == {"127.0.0.1"}
+    assert connects == []
+
+
+@pytest.mark.unit
+def test_wait_for_managed_http_ready_never_reads_env_proxies(ocr_probe, monkeypatch):
+    """With HTTP_TRUST_ENV=true the probe client must still ignore HTTP(S)_PROXY."""
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.OCR import runtime_support as runtime_mod
+
+    monkeypatch.setenv("HTTP_TRUST_ENV", "true")
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.example:3128")
+    built: list[httpx.Client] = []
+
+    def create_client(**kwargs):
+        client = http_client.create_client(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200)),
+            **{"trust_env": True, **kwargs},
+        )
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(runtime_mod, "create_client", create_client)
+
+    assert runtime_mod.wait_for_managed_http_ready(host="127.0.0.1", port=8090, timeout_total=1, interval=0.1)
+    assert [client.trust_env for client in built] == [False]

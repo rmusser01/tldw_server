@@ -140,6 +140,7 @@ def test_sqlite_get_prompt_include_deleted_and_bulk_client_id(tmp_path):
 # signature, so mypy and IDEs see the real parameters instead of *args/**kwargs.
 # These differ on purpose.
 FACADE_SIGNATURE_EXCEPTIONS = {
+    "__init__": "initializes the facade and repairs legacy records; it is not a public forwarding method",
     "update_project": "accepts updates as a dict and/or keyword fields",
     "complete_optimization_with_transition": "fixes _return_transition_applied=True",
 }

@@ -41,10 +41,10 @@ Write the implementation plan for the reviewed VZ helper launchd validation dril
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Verification: `git diff --check` passed for the docs-only planning slice.
 - Bandit: skipped for this planning slice because it only adds a plan document and Backlog task record. The implementation plan requires Bandit for the future Python changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

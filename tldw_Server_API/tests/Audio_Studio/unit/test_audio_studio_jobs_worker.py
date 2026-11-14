@@ -317,6 +317,40 @@ async def test_generation_handler_updates_generation_row_before_provider_failure
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_name", "retryable"),
+    [
+        ("TTSVoiceNotFoundError", False),
+        ("TTSProviderNotConfiguredError", False),
+        ("TTSAuthenticationError", False),
+        ("TTSNetworkError", True),
+        ("TTSRateLimitError", True),
+    ],
+)
+async def test_b06_typed_tts_failure_preserves_retry_policy(error_name: str, retryable: bool) -> None:
+    from tldw_Server_API.app.core.TTS import tts_exceptions
+
+    error = getattr(tts_exceptions, error_name)("selected voice unavailable")
+
+    class Adapter:
+        async def generate(self, request, **kwargs):
+            raise error
+
+    class Registry:
+        def get_adapter(self, provider, kind):
+            return Adapter()
+
+    db = _FakeCollectionsDb()
+    with pytest.raises(AudioStudioJobError) as caught:
+        await handle_audio_studio_job(_generation_job(), collections_db=db, provider_registry=Registry())
+
+    assert caught.value.retryable is retryable  # nosec B101 - verifies Jobs retry policy at the typed error boundary.
+    assert caught.value.__cause__ is error  # nosec B101 - retains the actual provider failure for diagnostics.
+    assert json.loads(db.updated_jobs[0]["result_json"])["retryable"] is retryable  # nosec B101 - domain and Jobs must agree.
+    assert db.artifacts == []  # nosec B101 - a failed provider cannot publish audio.
+
+
+@pytest.mark.asyncio
 async def test_generation_handler_redacts_known_secrets_from_failure_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -486,3 +520,16 @@ async def test_render_and_export_handlers_skip_stale_revisions(
 
     assert render_result == {"status": "skipped", "reason": "stale_target_revision"}
     assert export_result == {"status": "skipped", "reason": "stale_target_revision"}
+
+
+@pytest.mark.asyncio
+async def test_b06_generated_artifact_identifies_admitted_text(tmp_path, monkeypatch):
+    import hashlib
+    db = _FakeCollectionsDb()
+    monkeypatch.setattr("tldw_Server_API.app.core.Audio_Studio.jobs_worker.DatabasePaths.get_user_outputs_dir", lambda user_id: tmp_path / "outputs" / str(user_id))
+    job = _generation_job()
+    job["payload"]["provider_options"]["provider_hint"] = "pocket_tts"
+    await handle_audio_studio_job(job, collections_db=db, provider_registry=_FakeRegistry())
+    metadata = json.loads(db.artifacts[0].metadata_json)
+    assert metadata["source_text_hash"] == hashlib.sha256(job["payload"]["text"].encode("utf-8")).hexdigest()  # nosec B101 - Current audio must identify actual admitted text after unrelated project revisions or one-section edits.
+    assert metadata["source_provider_hint"] == "pocket_tts"  # nosec B101 - A different configured provider must not silently reuse this audio.

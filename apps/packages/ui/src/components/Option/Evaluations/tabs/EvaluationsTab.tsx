@@ -300,10 +300,6 @@ export const EvaluationsTab: React.FC = () => {
             title={t("evaluations:loadErrorTitle", {
               defaultValue: "Unable to load evaluations"
             })}
-            message={t("evaluations:loadErrorDescription", {
-              defaultValue:
-                "Check your tldw server connection and API credentials, then try again."
-            })}
             endpoint="/api/v1/evaluations"
             error={evalsErrorValue}
             response={evalListResp}

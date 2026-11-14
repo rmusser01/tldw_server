@@ -7,6 +7,7 @@ from sqlite3 import Error as SQLiteError
 from loguru import logger
 
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
@@ -72,10 +73,11 @@ async def run_chatbooks_cleanup_loop(stop_event: asyncio.Event | None = None) ->
             deleted_exports = 0
             deleted_imports = 0
             for user_id in _enumerate_user_ids():
-                db = _build_chacha_db_for_user(user_id)
-                svc = ChatbookService(str(user_id), db, user_id_int=user_id)
-                deleted_exports += svc.cleanup_expired_exports()
-                deleted_imports += svc.cleanup_import_orphans()
+                with chacha_operation(independent=True):  # this user's pass owns its checkouts
+                    db = _build_chacha_db_for_user(user_id)
+                    svc = ChatbookService(str(user_id), db, user_id_int=user_id)
+                    deleted_exports += svc.cleanup_expired_exports()
+                    deleted_imports += svc.cleanup_import_orphans()
             if deleted_exports:
                 logger.info(f"Chatbooks cleanup removed {deleted_exports} expired export files")
             if deleted_imports:

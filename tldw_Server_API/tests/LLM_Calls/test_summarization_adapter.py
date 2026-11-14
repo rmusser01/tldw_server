@@ -1,9 +1,13 @@
 import asyncio
 import inspect
+from contextlib import contextmanager
 from typing import Any
 
+import httpx
 import pytest
 
+import tldw_Server_API.app.core.LLM_Calls.providers.custom_openai_adapter as custom_openai_mod
+import tldw_Server_API.app.core.LLM_Calls.providers.local_adapters as local_mod
 import tldw_Server_API.app.core.LLM_Calls.providers.moonshot_adapter as moonshot_mod
 import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
@@ -15,12 +19,16 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
+    ChatBadRequestError,
     ChatConfigurationError,
     ChatProviderError,
     ChatRateLimitError,
 )
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
 from tldw_Server_API.app.core.LLM_Calls import chat_calls
+from tldw_Server_API.app.core.LLM_Calls.provider_config_resolution import TrustedProviderEndpoint
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 
 @pytest.mark.unit
@@ -47,6 +55,10 @@ class _Adapter:
         self.lines = lines
         self.error = error
         self.requests = []
+
+    def _use_native_http(self) -> bool:
+        # The kill-switch is on, so a RuntimeError from this adapter is not a configuration error.
+        return True
 
     def chat(self, request, timeout=None):
         self.requests.append((request, timeout))
@@ -381,6 +393,7 @@ def test_typed_chat_provider_error_is_sanitized(monkeypatch):
         (ChatRateLimitError(message=SECRET, provider="openai"), "rate_limit"),
         (ChatProviderError(message=SECRET, status_code=403, provider="openai"), "authentication"),
         (ChatProviderError(message=SECRET, status_code=429, provider="openai"), "rate_limit"),
+        (ChatBadRequestError(message=SECRET, provider="openai"), "request_rejected"),
     ],
 )
 def test_chat_error_taxonomy_is_preserved_without_upstream_details(
@@ -410,6 +423,216 @@ def test_chat_error_taxonomy_is_preserved_without_upstream_details(
     assert exc_info.value.code == expected_code
     assert exc_info.value.__cause__ is None
     assert SECRET not in str(exc_info.value)
+    assert SECRET not in repr(exc_info.value)
+
+
+def _openai_upstream_replies(status: int, body: dict[str, Any]):
+    """An OpenAI adapter HTTP client factory whose every request gets ``status`` and JSON ``body``."""
+    transport = httpx.MockTransport(lambda _request: httpx.Response(status, json=body))
+    return lambda *_args, **_kwargs: httpx.Client(transport=transport)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status", "error", "expected_code"),
+    [
+        (404, {"type": "invalid_request_error", "code": "model_not_found"}, "request_rejected"),
+        (400, {"type": "invalid_request_error", "code": "context_length_exceeded"}, "request_rejected"),
+        (413, {"type": "invalid_request_error"}, "request_rejected"),
+        (408, {"type": "timeout"}, "provider_failure"),
+        (498, {"type": "capacity_exceeded"}, "provider_failure"),
+        (429, {"type": "requests", "code": "rate_limit_exceeded"}, "rate_limit"),
+        (429, {"type": "insufficient_quota", "code": "insufficient_quota"}, "provider_quota_exhausted"),
+        (429, {"type": "insufficient_quota"}, "provider_quota_exhausted"),
+        (429, {"code": "insufficient_quota"}, "provider_quota_exhausted"),
+        (500, {"type": "server_error"}, "provider_failure"),
+    ],
+    ids=[
+        "unknown-model",
+        "context-overflow",
+        "too-large",
+        "timed-out",
+        "flex-capacity",
+        "rate-limit",
+        "spent-quota",
+        "spent-quota-type-only",
+        "spent-quota-code-only",
+        "server-error",
+    ],
+)
+def test_upstream_reply_reaches_the_summary_code_through_the_openai_adapter(
+    monkeypatch, status, error, expected_code
+):
+    monkeypatch.setattr(
+        openai_mod, "http_client_factory", _openai_upstream_replies(status, {"error": {"message": SECRET, **error}})
+    )
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        sgl.analyze("openai", "hello", None, api_key="key", model_override="gpt-test", raise_on_error=True)
+
+    assert exc_info.value.code == expected_code
+    assert SECRET not in str(exc_info.value)
+    assert SECRET not in repr(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming", [False, True], ids=["chat", "stream"])
+def test_a_disabled_native_http_adapter_is_a_configuration_error(monkeypatch, streaming):
+    monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENAI", "0")
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        result = sgl.analyze(
+            "openai", "hello", None, api_key="key", model_override="gpt-test", streaming=streaming, raise_on_error=True
+        )
+        if streaming:
+            list(result)
+
+    assert exc_info.value.code == "configuration"
+
+
+def _custom_openai_egress_blocked(monkeypatch, reason_code: str) -> None:
+    """Give custom-openai-api a configured endpoint whose every request the outbound policy refuses."""
+    monkeypatch.setenv("CUSTOM_OPENAI_API_IP", "http://configured-custom:18091/v1")
+
+    def _refuse(**_kwargs):
+        raise EgressPolicyError(SECRET, reason_code=reason_code)
+
+    @contextmanager
+    def _refuse_stream(**_kwargs):
+        raise EgressPolicyError(SECRET, reason_code=reason_code)
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(custom_openai_mod.CustomOpenAIAdapter, "http_fetcher", staticmethod(_refuse))
+    monkeypatch.setattr(custom_openai_mod.CustomOpenAIAdapter, "http_streamer", staticmethod(_refuse_stream))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming", [False, True], ids=["chat", "stream"])
+@pytest.mark.parametrize(
+    ("reason_code", "expected_code"),
+    [
+        ("host_denied", "configuration"),
+        ("origin_mismatch", "configuration"),
+        ("dns_unresolved", "provider_failure"),
+        ("dns_changed", "provider_failure"),
+        ("tls_pin_error", "provider_failure"),
+    ],
+    ids=["host-denied", "origin-mismatch", "dns-unresolved", "dns-changed", "tls-pin-error"],
+)
+def test_an_egress_blocked_endpoint_gets_a_summary_code(monkeypatch, reason_code, expected_code, streaming):
+    _custom_openai_egress_blocked(monkeypatch, reason_code)
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        result = sgl.analyze(
+            "custom-openai-api", "hello", None, api_key="key", model_override="m", streaming=streaming, raise_on_error=True
+        )
+        if streaming:
+            list(result)
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.__cause__ is None
+    assert SECRET not in repr(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming", [False, True], ids=["chat", "stream"])
+def test_untyped_callers_still_get_the_egress_policy_error(monkeypatch, streaming):
+    _custom_openai_egress_blocked(monkeypatch, "host_denied")
+
+    with pytest.raises(EgressPolicyError) as exc_info:
+        result = sgl.analyze("custom-openai-api", "hello", None, api_key="key", model_override="m", streaming=streaming)
+        if streaming:
+            list(result)
+
+    assert exc_info.value.reason_code == "host_denied"
+
+
+def _configured_local_endpoint(monkeypatch) -> None:
+    """Give every local adapter the configured endpoint http://127.0.0.1:8080."""
+    endpoint = TrustedProviderEndpoint(
+        base_url="http://127.0.0.1:8080", scope=ConfiguredEndpointScope.from_url("http://127.0.0.1:8080")
+    )
+    monkeypatch.setattr(local_mod, "resolve_trusted_provider_endpoint", lambda _name: endpoint)
+
+
+def _local_server_down(monkeypatch) -> None:
+    """A configured local endpoint whose server refuses every connection; no socket is opened."""
+    _configured_local_endpoint(monkeypatch)
+
+    def _refuse(request):
+        raise httpx.ConnectError("connection refused", request=request)
+
+    refusing_client = httpx.Client(transport=httpx.MockTransport(_refuse))
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client._get_httpx_client", lambda **_kwargs: refusing_client)
+
+
+@pytest.mark.unit
+def test_a_local_server_that_is_down_is_a_provider_failure(monkeypatch):
+    _local_server_down(monkeypatch)
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        sgl.analyze("kobold", "hello", None, api_key="key", model_override="m", raise_on_error=True)
+
+    assert exc_info.value.code == "provider_failure"
+    assert exc_info.value.__cause__ is None
+
+
+@pytest.mark.unit
+def test_untyped_callers_still_get_the_network_error(monkeypatch):
+    _local_server_down(monkeypatch)
+
+    with pytest.raises(NetworkError):
+        sgl.analyze("kobold", "hello", None, api_key="key", model_override="m")
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming", [False, True], ids=["chat", "stream"])
+@pytest.mark.parametrize("provider", ["custom-openai-api", "custom-openai-api-2"])
+def test_a_custom_provider_without_a_base_url_is_a_configuration_error(monkeypatch, provider, streaming):
+    monkeypatch.setattr(custom_openai_mod, "resolve_trusted_provider_endpoint", lambda _name: None)
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        result = sgl.analyze(
+            provider, "hello", None, api_key="key", model_override="m", streaming=streaming, raise_on_error=True
+        )
+        if streaming:
+            list(result)
+
+    assert exc_info.value.code == "configuration"
+
+
+def _local_upstream_replies(monkeypatch, status: int) -> None:
+    """Give every local adapter a configured endpoint whose every request gets ``status``."""
+    _configured_local_endpoint(monkeypatch)
+
+    def _reply(**kwargs):
+        return httpx.Response(status, request=httpx.Request("POST", kwargs["url"]), json={"error": {"message": SECRET}})
+
+    monkeypatch.setattr(local_mod._LocalAdapterBase, "http_fetcher", staticmethod(_reply))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["ollama", "kobold"])
+@pytest.mark.parametrize(
+    ("status", "expected_code"),
+    [
+        (401, "authentication"),
+        (403, "authentication"),
+        (429, "rate_limit"),
+        (408, "provider_failure"),
+        (404, "request_rejected"),
+        (400, "request_rejected"),
+        (500, "provider_failure"),
+    ],
+    ids=["unauthorized", "forbidden", "rate-limit", "timed-out", "unpulled-model", "bad-request", "server-error"],
+)
+def test_a_local_provider_reply_reaches_the_summary_code(monkeypatch, provider, status, expected_code):
+    _local_upstream_replies(monkeypatch, status)
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        sgl.analyze(provider, "hello", None, api_key="key", model_override="m", raise_on_error=True)
+
+    assert exc_info.value.code == expected_code
     assert SECRET not in repr(exc_info.value)
 
 

@@ -12,6 +12,7 @@ import {
   cancelNotesGraphSuggestionRun,
   createNotesGraphSuggestionCommand,
   createNotesGraphSuggestionRun,
+  createSemanticManualLink,
   fetchNotesGraph,
   getNotesGraphSuggestionCapabilities,
   getNotesGraphSuggestionRun,
@@ -525,6 +526,236 @@ describe("Notes graph suggestion client", () => {
     await expect(
       listNotesGraphSuggestions({ noteId: "note/source" })
     ).rejects.toMatchObject({ code: "notes_graph_invalid_response" })
+  })
+
+  it("requests the complete semantic edge set and validates typed status and evidence", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      nodes: [
+        {
+          id: "note:source",
+          type: "note",
+          label: "Source",
+          created_at: null,
+          deleted: false,
+          degree: 1,
+          tag_count: 0,
+          primary_source_id: null
+        },
+        {
+          id: "note:target",
+          type: "note",
+          label: "Target",
+          created_at: null,
+          deleted: false,
+          degree: 1,
+          tag_count: 0,
+          primary_source_id: null
+        }
+      ],
+      edges: [
+        {
+          id: "semantic:one",
+          source: "note:source",
+          target: "note:target",
+          type: "semantic",
+          directed: false,
+          weight: 0.87,
+          label: null,
+          evidence: {
+            similarity: 0.87,
+            qualitative_band: "high",
+            source_note_id: "note:source",
+            target_note_id: "note:target",
+            source_content_version: 2,
+            target_content_version: 3,
+            generation_id: "generation-a",
+            semantic_index_revision: 4,
+            configuration_revision: 5,
+            normalization_version: "v1",
+            chunker_version: "v1",
+            provider_label: "OpenAI",
+            model_label: "text-embedding-3-small",
+            model_revision: null,
+            excerpt_pairs: [
+              {
+                source: {
+                  field: "content",
+                  start_code_point: 0,
+                  end_code_point: 6,
+                  text: "Source"
+                },
+                target: {
+                  field: "content",
+                  start_code_point: 0,
+                  end_code_point: 6,
+                  text: "Target"
+                }
+              }
+            ]
+          }
+        }
+      ],
+      truncated: false,
+      truncated_by: [],
+      has_more: true,
+      cursor: "ordinary-page-2",
+      limits: { max_nodes: 120, max_edges: 480, max_degree: 40 },
+      radius_cap_applied: false,
+      active_note_count: 2,
+      all_notes_note_cap: 100,
+      all_notes_eligible: true,
+      semantic_status: {
+        available: true,
+        state: "ready",
+        detail_reason: null,
+        generation_id: "generation-a",
+        semantic_index_revision: 4,
+        configuration_revision: 5,
+        active_notes: 2,
+        indexed_notes: 2,
+        dirty_notes: 0,
+        excluded_notes: 0,
+        failed_notes: 0,
+        effective_top_k: 7,
+        effective_threshold: 0.72,
+        max_top_k: 20,
+        max_admission_nodes: 20,
+        max_admission_edges: 20,
+        max_evidence_pairs: 3,
+        max_excerpt_code_points: 480,
+        max_edge_evidence_code_points: 2880,
+        max_response_evidence_bytes: 262144,
+        truncated_by: []
+      }
+    })
+
+    const result = await fetchNotesGraph({
+      centerNoteId: "source",
+      edgeTypes: [
+        "manual",
+        "wikilink",
+        "backlink",
+        "tag_membership",
+        "source_membership",
+        "semantic"
+      ],
+      semanticThreshold: 0.72,
+      semanticTopK: 7
+    })
+
+    expect(mocks.bgRequest.mock.calls[0][0].path).toBe(
+      "/api/v1/notes/graph?center_note_id=source&radius=1&edge_types=manual%2Cwikilink%2Cbacklink%2Ctag_membership%2Csource_membership%2Csemantic&max_nodes=120&max_edges=480&semantic_top_k=7&semantic_threshold=0.72"
+    )
+    expect(result.edges[0]).toMatchObject({
+      type: "semantic",
+      evidence: { similarity: 0.87, qualitative_band: "high" }
+    })
+    expect(result.semantic_status).toMatchObject({
+      state: "ready",
+      effective_top_k: 7,
+      effective_threshold: 0.72
+    })
+  })
+
+  it("rejects semantic top-k above the backend contract", async () => {
+    await expect(
+      fetchNotesGraph({ edgeTypes: ["semantic"], semanticTopK: 51 })
+    ).rejects.toMatchObject({
+      status: 422,
+      code: "notes_graph_invalid_request"
+    })
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+  })
+
+  it("strictly parses manual-link authority and defaults missing legacy responses to false", async () => {
+    const base = {
+      nodes: [],
+      edges: [],
+      truncated: false,
+      truncated_by: [],
+      has_more: false,
+      cursor: null,
+      limits: { max_nodes: 120, max_edges: 480, max_degree: 40 },
+      radius_cap_applied: false,
+      active_note_count: 0,
+      all_notes_note_cap: 100,
+      all_notes_eligible: true
+    }
+    mocks.bgRequest
+      .mockResolvedValueOnce(base)
+      .mockResolvedValueOnce({ ...base, manual_link_authorized: true })
+      .mockResolvedValueOnce({ ...base, manual_link_authorized: "yes" })
+
+    await expect(fetchNotesGraph({})).resolves.toMatchObject({
+      manual_link_authorized: false
+    })
+    await expect(fetchNotesGraph({})).resolves.toMatchObject({
+      manual_link_authorized: true
+    })
+    await expect(fetchNotesGraph({})).rejects.toMatchObject({
+      code: "notes_graph_invalid_response"
+    })
+  })
+
+  it("converts a semantic relationship through the canonical nested link route", async () => {
+    mocks.bgRequest.mockResolvedValueOnce({
+      status: "created",
+      edge: {
+        edge_id: "manual:a:b",
+        from_note_id: "a",
+        to_note_id: "b"
+      }
+    })
+
+    await createSemanticManualLink({
+      sourceNoteId: "a",
+      targetNoteId: "b",
+      datasetId: "dataset-a",
+      generationId: "generation-a",
+      idempotencyKey: "semantic-conversion-a"
+    })
+
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/notes/a/links",
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": "semantic-conversion-a"
+      },
+      body: {
+        to_note_id: "b",
+        directed: false,
+        weight: 1,
+        dataset_id: "dataset-a",
+        idempotency_key: "semantic-conversion-a",
+        semantic_conversion: { generation_id: "generation-a" }
+      }
+    })
+  })
+
+  it("preserves the typed existing-manual-link conversion conflict", async () => {
+    mocks.bgRequest.mockRejectedValueOnce({
+      status: 409,
+      details: {
+        detail: {
+          error_code: "notes_semantic_conversion_manual_link_exists",
+          message: "A manual Notes link already exists."
+        }
+      }
+    })
+
+    const error = await createSemanticManualLink({
+      sourceNoteId: "a",
+      targetNoteId: "b",
+      generationId: "generation-a",
+      idempotencyKey: "semantic-conversion-a"
+    }).catch((value) => value)
+
+    expect(error).toBeInstanceOf(NotesGraphSuggestionClientError)
+    expect(error).toMatchObject({
+      status: 409,
+      code: "notes_semantic_conversion_manual_link_exists"
+    })
   })
 
   it("rejects a fabricated target title on a tag suggestion", async () => {

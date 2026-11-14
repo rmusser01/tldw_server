@@ -10,7 +10,7 @@ File_Artifacts creates, validates, stores, exports, and purges structured genera
 - `jobs_worker.py` consumes asynchronous file artifact export jobs.
 - `metrics.py` registers optional file artifact metrics.
 - Related API surface: `tldw_Server_API/app/api/v1/endpoints/files.py`, declared under `/files`.
-- Related schemas: `tldw_Server_API/app/api/v1/schemas/file_artifacts_schemas.py`.
+- Related schemas: `tldw_Server_API/app/api/v1/schemas/file_artifacts_schemas.py`, which re-exports the models defined in this package's `file_artifacts_schemas.py`.
 - Related tests: `tldw_Server_API/tests/FileArtifacts/`, `tldw_Server_API/tests/Files/`, and `tldw_Server_API/tests/Storage/test_file_artifacts_storage_integration.py`.
 
 ## Responsibilities

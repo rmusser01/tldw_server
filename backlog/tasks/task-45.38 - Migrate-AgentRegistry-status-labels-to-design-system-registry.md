@@ -48,7 +48,7 @@ Continue the shared product-state design-system migration by routing AgentRegist
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline verifier on fresh origin/dev passed with 504 allowed legacy exceptions: 480 antd-product-state-import and 24 canonical-state-label. AgentRegistry has two canonical-state-label exceptions and existing focused tests, making it a narrow next slice.
 
 RED: bunx vitest run src/components/Option/AgentRegistry/__tests__/AgentRegistryPage.connection.test.tsx --reporter=dot failed because Setup required was not rendered from the design-system registry; the component still rendered the local hardcoded Setup Required label.
@@ -64,7 +64,7 @@ PR #1633 review-fix pass: Qodo flagged the test's getDesignSystemState call-argu
 Review fix implementation: AgentRegistry now precomputes AGENT_STATUS_LABELS at module scope from AGENT_STATUS_STATE and the design-system registry/fallback definitions. The focused test now verifies visible registry-derived labels by having the design-system mock return distinct ready/setup_required labels, without asserting getDesignSystemState call arguments.
 
 Review fix verification: bunx vitest run src/components/Option/AgentRegistry/__tests__/AgentRegistryPage.connection.test.tsx src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed with 57 tests; bun run verify:design-system-state passed with 502 baseline exceptions and canonical-state-label 22; git diff --check passed. Package-wide TypeScript remains blocked by unrelated existing baseline diagnostics and still reports no AgentRegistry touched-file diagnostics.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

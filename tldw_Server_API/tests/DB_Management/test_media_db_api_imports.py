@@ -92,7 +92,7 @@ from tldw_Server_API.app.core.Sync import Sync_Client as sync_client_module
 from tldw_Server_API.app.services import ingestion_sources_worker
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import quizzes_module
 from tldw_Server_API.app.core.MCP_unified.modules.implementations import slides_module
-from tldw_Server_API.app.core.Utils import metadata_utils
+from tldw_Server_API.app.core.DB_Management.media_db.runtime import safe_metadata_write_ops
 from tldw_Server_API.app.core.Web_Scraping import Article_Extractor_Lib
 from tldw_Server_API.app.core.Watchlists import pipeline as watchlists_pipeline
 from tldw_Server_API.app.core.DB_Management.media_db import api as media_db_api
@@ -133,7 +133,6 @@ from tldw_Server_API.app.services import media_ingest_jobs_worker
 from tldw_Server_API.app.services import outputs_purge_scheduler
 from tldw_Server_API.app.services import storage_cleanup_service
 from tldw_Server_API.app.services import tts_history_cleanup_service
-from tldw_Server_API.app.services import web_scraping_service
 
 
 class _LazyLegacyMediaDBProxy(ModuleType):
@@ -389,7 +388,7 @@ def test_media_db_api_soft_delete_keyword_accepts_partial_legacy_like_db() -> No
         client_id = "tenant-42"
 
         def __init__(self) -> None:
-            self._fetchone_calls = 0
+            self._lookup_calls = 0
             self.logged_events: list[tuple[str, str]] = []
             self.deleted_fts: list[int] = []
 
@@ -403,11 +402,11 @@ def test_media_db_api_soft_delete_keyword_accepts_partial_legacy_like_db() -> No
 
             return _Tx()
 
-        def _fetchone_with_connection(self, connection, query: str, params=None):
-            self._fetchone_calls += 1
-            if self._fetchone_calls == 1:
-                return {"id": 7, "uuid": "kw-uuid", "version": 2}
-            raise AssertionError("unexpected extra fetchone call")
+        def _fetchall_with_connection(self, connection, query: str, params=None):
+            self._lookup_calls += 1
+            if self._lookup_calls == 1:
+                return [{"id": 7, "uuid": "kw-uuid", "keyword": "Science", "deleted": False, "version": 2}]
+            raise AssertionError("unexpected extra keyword lookup")
 
         def _execute_with_connection(self, connection, query: str, params=None):
             if query.startswith("UPDATE Keywords"):
@@ -2029,11 +2028,6 @@ def test_book_processing_lib_no_longer_imports_add_media_with_keywords_from_db_m
     )
 
 
-def test_web_scraping_service_imports_managed_media_database_from_media_db_api():
-    module = importlib.reload(web_scraping_service)
-    assert module.managed_media_database is media_db_api.managed_media_database
-
-
 def test_media_files_cleanup_service_imports_managed_media_database_from_media_db_api():
     module = importlib.reload(media_files_cleanup_service)
     assert module.managed_media_database is media_db_api.managed_media_database
@@ -2163,8 +2157,8 @@ def test_database_retrievers_import_media_db_factory_and_errors_outside_shim(mon
     assert module.MediaDatabaseError is media_db_errors.DatabaseError
 
 
-def test_metadata_utils_imports_database_error_from_media_db_errors():
-    source = inspect.getsource(metadata_utils)
+def test_safe_metadata_write_ops_imports_database_error_from_media_db_errors():
+    source = inspect.getsource(safe_metadata_write_ops)
 
     assert "core.DB_Management.Media_DB_v2" not in source
     assert "core.DB_Management.media_db.errors" in source

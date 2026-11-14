@@ -28,14 +28,14 @@ Write a focused implementation plan for the first MCP/profile policy decision-mo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan artifact created at Docs/superpowers/plans/2026-06-07-mcp-policy-decision-core-implementation-plan.md. The plan scopes the first implementation slice to package-owned policy decision primitives, compatibility rule compilation, optional EffectivePolicyResult decision metadata, redacted explain/simulation helpers, exports, targeted tests, and Bandit validation.
 
 Local review findings addressed before closeout:
 - Kept runtime catalog visibility, path matcher compilation, external MCP wildcard enforcement, shell alias hardening, hooks, and admin/CLI surfaces out of Slice 1.
 - Corrected stale implementation-closeout references from TASK-2307 to TASK-2308.
 - Retained TASK-2308 as the implementation task for executing the plan.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

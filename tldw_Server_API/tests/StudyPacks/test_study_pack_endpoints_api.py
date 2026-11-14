@@ -6,14 +6,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import flashcards as flashcards_endpoints
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-
 
 pytestmark = pytest.mark.integration
 
@@ -38,6 +38,7 @@ def jobs_db_path(tmp_path, monkeypatch) -> Path:
 @pytest.fixture
 def client(db: CharactersRAGDB, jobs_db_path: Path):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards_endpoints.router, prefix="/api/v1")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: db
 
@@ -329,6 +330,7 @@ def test_admin_job_status_reads_completed_pack_from_owner_database(
     monkeypatch.setattr(flashcards_endpoints, "get_chacha_db_for_owner", _owner_db_lookup, raising=False)
 
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards_endpoints.router, prefix="/api/v1")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: admin_db
     app.dependency_overrides[get_request_user] = _override_user

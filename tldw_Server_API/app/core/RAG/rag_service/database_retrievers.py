@@ -10,7 +10,6 @@ import asyncio
 import contextlib
 import copy
 import json
-import os
 import re
 import sqlite3
 import time
@@ -26,7 +25,6 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -51,7 +49,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_repository import (
     append_sqlite_media_visibility,
 )
+from tldw_Server_API.app.core.Kanban.vector_search import create_kanban_vector_search
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 from .hyde import (
     _embedding_model_from_config,
@@ -63,8 +64,7 @@ from .hyde import (
 )
 from .retrieval_plan import RetrievalPlan
 from .types import DataSource, Document
-from .utils import get_float_env as _get_float_env
-from .utils import normalize_scores as _normalize_scores
+from .utils import get_float_env as _get_float_env, normalize_scores as _normalize_scores
 from .vector_stores import (
     VectorStoreAdapter,
     create_from_settings_for_user,
@@ -754,12 +754,7 @@ class BaseRetriever(ABC):
         self.config = config or RetrievalConfig()
         self._db_adapter = db_adapter
         self.db_path = self._validate_path(db_path) if db_path else None
-        # Determine production mode from env var used across the project
-        try:
-            prod_val = str(os.getenv("tldw_production", "false")).strip().lower()
-            self._production_mode = prod_val in {"true", "1", "yes", "on", "y"}
-        except (AttributeError, TypeError, ValueError):
-            self._production_mode = False
+        self._production_mode = is_production_like_env()
         # In production, prefer adapters over any raw SQL fallbacks
         if self._production_mode and self._db_adapter is None:
             logger.warning(
@@ -1833,7 +1828,11 @@ class MediaDBRetriever(BaseRetriever):
         if raw_row_count > 0:
             return documents
 
-        fallback_query = _derive_bounded_media_term_query(query)
+        # An explicit source allowlist bounds broader terms without discarding later question facets.
+        fallback_query = _derive_bounded_media_term_query(
+            query,
+            max_terms=32 if kwargs.get("allowed_media_ids") else 3,
+        )
         if not fallback_query:
             return documents
         if _sanitize_media_fts_query(fallback_query) == search_query:
@@ -3018,8 +3017,7 @@ class NotesDBRetriever(BaseRetriever):
             )
 
         if self.chacha_db is not None and not self.config.tags_filter:
-            docs = self._retrieve_via_chacha(query, notebook_id)
-            return docs
+            return await asyncio.to_thread(self._retrieve_via_chacha, query, notebook_id)
 
         documents = []
 
@@ -3185,7 +3183,7 @@ class NotesDBRetriever(BaseRetriever):
         if self.chacha_db is None:
             return []
         try:
-            results = self.chacha_db.search_notes(query, limit=int(self.config.max_results))
+            results = self.chacha_db.search_notes(query, limit=int(self.config.max_results), match_any=True)
         except (AttributeError, ConnectionError, OSError, RuntimeError, TypeError, ValueError) as exc:
             logger.error(f"ChaCha notes search failed: {exc}")
             return []
@@ -3293,7 +3291,9 @@ class KanbanDBRetriever(BaseRetriever):
         self.kanban_db = kanban_db
         self.user_id = self._resolve_user_id(user_id)
         if self.kanban_db is None and self.db_path is not None:
-            self.kanban_db = KanbanDB(db_path=str(self.db_path), user_id=self.user_id)
+            self.kanban_db = KanbanDB(
+                db_path=str(self.db_path), user_id=self.user_id, vector_search_factory=create_kanban_vector_search
+            )
             self._owns_db = True
 
     @staticmethod
@@ -3305,7 +3305,9 @@ class KanbanDBRetriever(BaseRetriever):
         if self.kanban_db is None:
             if self.db_path is None:
                 raise MissingDatabasePathError()
-            self.kanban_db = KanbanDB(db_path=str(self.db_path), user_id=self.user_id)
+            self.kanban_db = KanbanDB(
+                db_path=str(self.db_path), user_id=self.user_id, vector_search_factory=create_kanban_vector_search
+            )
             self._owns_db = True
         return self.kanban_db
 
@@ -4503,7 +4505,7 @@ class CharacterCardsRetriever(BaseRetriever):
                 FROM messages m
                 JOIN conversations conv ON m.conversation_id = conv.id
                 LEFT JOIN character_cards cc ON conv.character_id = cc.id
-                WHERE m.deleted = 0 AND m.content LIKE ?
+                WHERE m.deleted = 0 AND conv.deleted = 0 AND m.content LIKE ?
                 ORDER BY m.timestamp DESC
                 LIMIT ?
             """
@@ -4749,6 +4751,7 @@ class MultiDatabaseRetriever:
         user_id: str = "0",
         *,
         media_db: Optional[Any] = None,
+        media_config: Optional[RetrievalConfig] = None,
         chacha_db: Optional[Any] = None,
         prompts_db: Optional[Any] = None,
         sql_retriever: Optional[BaseRetriever] = None,
@@ -4760,6 +4763,7 @@ class MultiDatabaseRetriever:
         Args:
             db_paths: Mapping of database names to paths
             user_id: User ID for vector store access
+            media_config: Media retrieval policy applied before optional vector-store initialization.
         """
         self.retrievers: dict[DataSource, BaseRetriever] = {}
         self.credential_runtime = credential_runtime
@@ -4769,6 +4773,7 @@ class MultiDatabaseRetriever:
         if media_db_path is not None or media_db is not None:
             self.retrievers[DataSource.MEDIA_DB] = MediaDBRetriever(
                 media_db_path,
+                config=media_config,
                 user_id=user_id,
                 media_db=media_db,
                 credential_runtime=credential_runtime,

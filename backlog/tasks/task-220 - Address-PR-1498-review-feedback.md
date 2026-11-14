@@ -37,11 +37,11 @@ Address actionable CodeRabbit and Qodo feedback on PR #1498 while keeping the br
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resolved actionable review feedback on PR #1498. CodeRabbit: removed redundant route fallback branch, reused MCPHubPage.VIEW_KEYS in E2E spec, normalized TASK-211 assignee to @Codex. Qodo: updated Flashcards tutorial transfer i18n keys/fallbacks with a regression test, converted local absolute design-doc links to repo-relative links, derived MCP_HUB_VIEW_KEYS from labels and made workflowForMcpHubView fail loudly for unmapped valid views, and added E2E page-object waits after workflow switches.
 
 Verification: flashcards tutorial regression test failed before the fix and passed after. Focused Vitest suite passed 31 tests across MCP Hub config/page/route/tutorial/locale coverage and flashcards tutorial coverage. Touched-file ESLint exited 0 with the existing Next pages-directory warning. git diff --check passed. MCP Hub Playwright spec passed 3 page/navigation/query tests and skipped 5 backend-dependent API checks via server availability guard. bunx tsc --noEmit --pretty false remains blocked by unrelated existing errors in EmbeddingsModelSelectionConfig.tsx, persona-visuals.ts, and lib/api/vnPlay.ts. Bandit skipped because touched implementation files are frontend TypeScript/Markdown/Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

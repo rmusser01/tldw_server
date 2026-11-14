@@ -7,7 +7,13 @@ import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { classifyAudioError } from "@/components/Option/Audio/audio-error-classification"
 
 export interface RecordingStripProps {
-  onBlobReady: (blob: Blob, durationMs: number) => void
+  onBlobReady: (blob: Blob | null, durationMs: number) => void
+  onSourceChange?: () => void
+  restoredRecording?: {
+    blob: Blob
+    durationMs: number
+    isCurrent: () => boolean
+  } | null
   onSettingsToggle?: () => void
   disabled?: boolean
   disabledReason?: string
@@ -27,6 +33,8 @@ export function formatDuration(ms: number): string {
 export const RecordingStrip: React.FC<RecordingStripProps> = ({
   onBlobReady,
   onSettingsToggle,
+  onSourceChange,
+  restoredRecording,
   disabled = false,
   disabledReason,
   disabledStatusType = "danger"
@@ -35,6 +43,19 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
   const notification = useAntdNotification()
   const recorder = useAudioRecorder()
   const audioUrlRef = useRef<string | null>(null)
+  const appliedRestoreRef = useRef<RecordingStripProps["restoredRecording"]>(null)
+
+  useEffect(() => {
+    if (!restoredRecording || appliedRestoreRef.current === restoredRecording) return
+    appliedRestoreRef.current = restoredRecording
+    if (!restoredRecording.isCurrent()) return
+    if (recorder.loadBlob(restoredRecording.blob, restoredRecording.durationMs) === false) {
+      notification.error({
+        message: t("playground:stt.captureBusy", "Recording in progress"),
+        description: t("playground:stt.stopBeforeRestore", "Stop recording before loading a saved recording.")
+      })
+    }
+  }, [restoredRecording, recorder, notification, t])
 
   const isRecording = recorder.status === "recording"
   const hasBlob = recorder.blob != null && !isRecording
@@ -57,9 +78,7 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
 
   // Notify parent when blob changes
   useEffect(() => {
-    if (recorder.blob) {
-      onBlobReady(recorder.blob, recorder.durationMs)
-    }
+    onBlobReady(recorder.blob, recorder.durationMs)
   }, [recorder.blob, recorder.durationMs, onBlobReady])
 
   // Create/revoke object URL for playback
@@ -94,6 +113,7 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
       if (isRecording) {
         recorder.stopRecording()
       } else {
+        onSourceChange?.()
         Promise.resolve(recorder.startRecording()).catch((err) => {
           const classified = classifyAudioError(err)
           notification.error({
@@ -108,13 +128,14 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
     return () => {
       window.removeEventListener("stt-toggle-record", handler)
     }
-  }, [blocksNewCapture, isRecording, recorder, notification, t])
+  }, [blocksNewCapture, isRecording, recorder, notification, t, onSourceChange])
 
   const handleRecordClick = useCallback(() => {
     if (blocksNewCapture) return
     if (isRecording) {
       recorder.stopRecording()
     } else {
+      onSourceChange?.()
       Promise.resolve(recorder.startRecording()).catch((err) => {
         const classified = classifyAudioError(err)
         notification.error({
@@ -124,15 +145,16 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
         })
       })
     }
-  }, [blocksNewCapture, isRecording, recorder, notification, t])
+  }, [blocksNewCapture, isRecording, recorder, notification, t, onSourceChange])
 
   const handleUpload = useCallback(
     (file: File) => {
       if (blocksNewCapture) return false
+      onSourceChange?.()
       recorder.loadBlob(file, 0)
       return false // prevent auto-upload
     },
-    [blocksNewCapture, recorder]
+    [blocksNewCapture, recorder, onSourceChange]
   )
 
   return (
@@ -201,7 +223,15 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
 
         {/* Playback — shown when blob exists and not recording */}
         {hasBlob && audioUrl && (
-          <audio controls src={audioUrl} className="h-8 max-w-[200px]" />
+          <audio controls src={audioUrl} className="h-8 max-w-[200px]"
+            onLoadedMetadata={(event) => {
+              const seconds = event.currentTarget.duration
+              if (audioUrlRef.current === audioUrl && recorder.blob && recorder.durationMs === 0
+                  && Number.isFinite(seconds) && seconds > 0) {
+                recorder.loadBlob(recorder.blob, seconds * 1000)
+              }
+            }}
+          />
         )}
 
         {/* Clear button */}
@@ -211,7 +241,7 @@ export const RecordingStrip: React.FC<RecordingStripProps> = ({
               type="text"
               icon={<Trash2 className="h-4 w-4" />}
               aria-label={t("playground:stt.clearRecording", "Clear recording")}
-              onClick={recorder.clearRecording}
+              onClick={() => { onSourceChange?.(); recorder.clearRecording() }}
             />
           </Tooltip>
         )}

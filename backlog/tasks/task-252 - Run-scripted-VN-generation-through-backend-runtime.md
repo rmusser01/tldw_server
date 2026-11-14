@@ -42,13 +42,13 @@ Implement Task 5 from Docs/superpowers/plans/2026-05-10-vn-scripted-generation-b
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented scripted runtime model-backed generate execution. Automatic generate opcodes now create generation/request/action/revision rows through execute_script_generation_call, confirmation-gated opcodes pause without provider calls, and one-generation batch cap pauses before a following automatic generate.
 
 scene_update generation revisions now persist applied_visuals and rejected_visuals from visual directive resolution without failing text generation on missing or failed visual resolution.
 
 Verification: focused VN Play pytest suite passed with 119 passed and 8 warnings. compileall passed. Bandit on touched backend files reported 0 findings. git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

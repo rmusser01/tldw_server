@@ -42,7 +42,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the Research Studio naming and handoff sweep across scoped WebUI, extension, tests, and source docs. Header shortcuts, Quick Chat workflow guides, docs RAG page context, Knowledge QA handoff, Knowledge empty-state CTA, Shared With Me open action, tutorials, E2E inventories, and route page objects now use /research-studio and Research Studio where user-facing.
 
 Preserved internal compatibility names: WorkspacePlayground component/module names, workspace-playground telemetry/prefill/storage imports, tutorial ID workspace-playground-basics, DOM ids such as workspace-studio-panel, and legacy /workspace-playground plus /workspace-studio aliases.
@@ -56,7 +56,7 @@ Verification run:
 - git diff --check -> clean.
 
 Bandit was not run because this slice touched frontend TypeScript, frontend tests, E2E specs, source markdown docs, and Backlog metadata only; no Python/backend code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

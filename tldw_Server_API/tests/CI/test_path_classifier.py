@@ -47,6 +47,10 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
 @pytest.mark.parametrize(
     ("path", "backend_changed", "tldw_frontend_changed", "admin_ui_changed"),
     (
+        ("apps/packages/api-types/paths.d.ts", True, True, False),
+        ("apps/packages/api-types/package.json", True, True, False),
+        ("apps/packages/api-types/scripts/generate-api-types.mjs", True, True, False),
+        ("Helper_Scripts/export_openapi_schema.py", True, False, False),
         (
             "Helper_Scripts/ci/vitest_base_ratchet.py",
             True,
@@ -86,7 +90,7 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
     ),
 )
 @pytest.mark.unit
-def test_shared_vitest_guardrail_selects_every_consuming_gate(
+def test_shared_contract_and_runner_paths_select_every_consuming_gate(
     path: str,
     backend_changed: bool,
     tldw_frontend_changed: bool,
@@ -112,6 +116,21 @@ def test_api_schema_change_enables_e2e() -> None:
     assert flags["backend_changed"] is True
     assert flags["coverage_required"] is True
     assert flags["e2e_changed"] is True
+
+
+def test_backlog_py_change_runs_backend_gate_without_coverage() -> None:
+    """The task editor's tests and the backlog task-format ratchet run in backend-required."""
+    flags = classify_paths(["tools/backlog-py/src/backlog_py/markdown/task_parser.py"])
+    assert flags["backend_changed"] is True
+    assert flags["coverage_required"] is False
+
+
+def test_merge_queue_implementation_only_change_runs_backend_safety_suites() -> None:
+    """Queue code alone must run the backend gate that owns its safety regressions."""
+    flags = classify_paths(["Helper_Scripts/ci/merge_queue.py"])
+    assert flags["backend_changed"] is True  # nosec B101 - pytest regression assertion.
+    assert flags["security_relevant_changed"] is True  # nosec B101 - pytest regression assertion.
+    assert flags["coverage_required"] is False  # nosec B101 - pytest regression assertion.
 
 
 def test_workflow_only_change_keeps_backend_gate_but_skips_coverage() -> None:

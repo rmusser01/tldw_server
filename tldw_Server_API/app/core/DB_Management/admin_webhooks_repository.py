@@ -23,9 +23,6 @@ from tldw_Server_API.app.core.Admin_Webhooks.crypto import (
     EVENT_BODY_MAX_BYTES,
     ProtectedValue,
 )
-from tldw_Server_API.app.core.Admin_Webhooks.delivery import (
-    registration_work_lifecycle_reason,
-)
 from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     AttemptState,
     DeliveryBacklogCounts,
@@ -48,6 +45,7 @@ from tldw_Server_API.app.core.Admin_Webhooks.domain import (
     WebhookEvent,
     WebhookRegistration,
     redact_target,
+    registration_work_lifecycle_reason,
 )
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.AuthNZ.database import (

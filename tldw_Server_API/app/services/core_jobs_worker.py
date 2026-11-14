@@ -16,7 +16,8 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ImportStatus,
     coerce_chatbook_export_version,
 )
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService, record_failed_import_result
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -73,6 +74,90 @@ def _count_result_items(counts: object) -> int:
     return total
 
 
+def _safe_remove_export_file(export_dir: str | Path, path_value: str | None) -> None:
+    """Best-effort cleanup for export archives created after cancellation."""
+    if not path_value:
+        return
+    try:
+        export_path = Path(path_value).resolve()
+        export_dir = Path(export_dir).resolve()
+        if os.path.commonpath([str(export_path), str(export_dir)]) != str(export_dir):
+            logger.warning(f"Refusing to delete export outside export dir: {export_path}")
+            return
+        if export_path.exists() and export_path.is_file():
+            export_path.unlink()
+    except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS as cleanup_err:
+        logger.debug(f"Core Jobs Worker: failed to remove cancelled export file {path_value}: {cleanup_err}")
+
+
+async def _run_foreign_import(
+    svc: ChatbookService, payload: dict, job: dict, jm: JobManager,
+    worker_id: str, lease_id: str, chatbooks_job_id: str | None,
+    action: str, start_renewal,
+) -> None:
+    from tldw_Server_API.app.core.Chatbooks.services.jobs_worker import (
+        _handle_import,
+        _handle_openwebui_attachment_hydration,
+    )
+
+    _renew_task = None
+    result, failure = None, None
+    try:
+        current = jm.get_job(int(job["id"])) or {}
+        if str(current.get("status") or "").lower() != "processing":
+            return
+        ij = svc._get_import_job(chatbooks_job_id) if action == "import" else None
+        if not current.get("cancel_requested_at") and not (ij and ij.status == ImportStatus.CANCELLED):
+            _renew_task = await start_renewal(int(job["id"]))
+            try:
+                if action == "import":
+                    result = await _handle_import(svc, payload, chatbooks_job_id)
+                else:
+                    result = await _handle_openwebui_attachment_hydration(svc, payload, job)
+            except Exception as exc:  # noqa: BLE001 -- Finalize one leased job; never swallow worker cancellation.
+                failure = exc
+        current = jm.get_job(int(job["id"])) or {}
+        # Public cancellation persists the linked import before its core cancel request.
+        ij = svc._get_import_job(chatbooks_job_id) if action == "import" else None
+        if current.get("cancel_requested_at") or (ij and ij.status == ImportStatus.CANCELLED):
+            if ij:
+                ij.status = ImportStatus.CANCELLED
+                ij.completed_at = datetime.now(timezone.utc)
+                svc._save_import_job(ij)
+            jm.finalize_cancelled(
+                int(job["id"]),
+                reason="cancel requested during processing",
+                expected_uuid=str(job["uuid"]),
+                worker_id=worker_id,
+                lease_id=str(lease_id),
+            )
+        elif str(current.get("status") or "").lower() != "processing":
+            return
+        elif failure is not None:
+            jm.fail_job(
+                int(job["id"]),
+                error=str(failure),
+                retryable=bool(getattr(failure, "retryable", True)),
+                backoff_seconds=getattr(failure, "backoff_seconds", 1) or 1,
+                worker_id=worker_id,
+                lease_id=str(lease_id),
+                completion_token=str(lease_id),
+            )
+        else:
+            jm.complete_job(
+                int(job["id"]),
+                result=result,
+                worker_id=worker_id,
+                lease_id=str(lease_id),
+                completion_token=str(lease_id),
+            )
+    finally:
+        if _renew_task is not None:
+            _renew_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await _renew_task
+
+
 async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     """Shared background worker for Chatbooks when using core Jobs backend.
 
@@ -87,6 +172,8 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
         if stop_event and stop_event.is_set():
             logger.info("Stopping Core Jobs worker on shutdown signal")
             return
+        job_scope = contextlib.ExitStack()  # closed after every iteration, however it ends
+        job = None
         try:
             lease_seconds = int(os.getenv("JOBS_LEASE_SECONDS", "60") or "60")
             renew_interval = int(os.getenv("JOBS_LEASE_RENEW_SECONDS", "30") or "30")
@@ -102,6 +189,8 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                 continue
             lease_id = job.get("lease_id")
             # Build a per-user service
+            # This job owns the ChaCha checkouts it takes, on whichever thread.
+            job_scope.enter_context(chacha_operation(independent=True))
             try:
                 db = _build_chacha_db_for_user(str(owner))
             except (TypeError, ValueError) as e:
@@ -123,7 +212,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
             svc = ChatbookService(owner, db, user_id_int=owner_int)
 
             payload: dict = job.get("payload") or {}
-            action = payload.get("action")
+            action = payload.get("action") or job.get("job_type")
             chatbooks_job_id = payload.get("chatbooks_job_id")
             async def _start_renewal(job_id: int, _lease_seconds=lease_seconds, _lease_id=lease_id, _renew_interval=renew_interval, _renew_jitter=renew_jitter):
                 async def _loop():
@@ -147,20 +236,13 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                         await asyncio.sleep(max(1.0, slp))
                 return asyncio.create_task(_loop())
 
-            def _safe_remove_export_file(path_value: str | None) -> None:
-                """Best-effort cleanup for export archives created after cancellation."""
-                if not path_value:
-                    return
-                try:
-                    export_path = Path(path_value).resolve()
-                    export_dir = Path(svc.export_dir).resolve()
-                    if os.path.commonpath([str(export_path), str(export_dir)]) != str(export_dir):
-                        logger.warning(f"Refusing to delete export outside export dir: {export_path}")
-                        return
-                    if export_path.exists() and export_path.is_file():
-                        export_path.unlink()
-                except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS as cleanup_err:
-                    logger.debug(f"Core Jobs Worker: failed to remove cancelled export file {path_value}: {cleanup_err}")
+
+            source_format = str(payload.get("source_format") or "chatbook").strip().lower()
+            if action == "openwebui_attachment_hydration" or (action == "import" and source_format != "chatbook"):
+                await _run_foreign_import(
+                    svc, payload, job, jm, worker_id, lease_id, chatbooks_job_id, action, _start_renewal,
+                )
+                continue
 
             if action == "export":
                 _renew_task = None
@@ -266,7 +348,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                                 ej.status = ExportStatus.CANCELLED
                                 ej.completed_at = datetime.now(timezone.utc)
                                 svc._save_export_job(ej)
-                            _safe_remove_export_file(file_path)
+                            _safe_remove_export_file(svc.export_dir, file_path)
                             jm.finalize_cancelled(
                                 int(job["id"]),
                                 reason="cancel requested during processing",
@@ -341,6 +423,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS:
                                 logger.debug("metrics increment failed for renew_task_cancel_failed")
             elif action == "import":
+                result = None
                 file_ref = payload.get("file_token") or payload.get("file_path")
                 _renew_task = None
                 try:
@@ -466,7 +549,8 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             svc._save_import_job(ij)
                         jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(lease_id), completion_token=str(lease_id))
                     else:
-                        if ij:
+                        if ij and ij.status != ImportStatus.CANCELLED:
+                            record_failed_import_result(ij, result)
                             ij.status = ImportStatus.FAILED
                             ij.completed_at = datetime.now(timezone.utc)
                             ij.error_message = msg
@@ -507,6 +591,15 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
             except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS:
                 logger.debug("metrics increment failed for worker_loop_error")
             await asyncio.sleep(poll_sleep)
+        finally:
+            try:
+                job_scope.close()
+            except Exception as exc:  # noqa: BLE001 - nothing restarts this worker; log and take the next job
+                logger.warning(
+                    "Core Jobs worker: ChaCha operation cleanup failed for job {} ({})",
+                    (job or {}).get("id"),
+                    type(exc).__name__,
+                )
 
 
 if __name__ == "__main__":

@@ -3,15 +3,15 @@ id: TASK-12934
 title: Implement chat document upload send-time processing and queue replay
 status: Done
 assignee: []
-created_date: '2026-07-09 05:31'
-updated_date: '2026-07-09 06:01'
+created_date: 2026-07-09 05:31
+updated_date: 2026-07-09 06:01
 labels:
-  - implementation
-  - chat
-  - frontend
-  - documents
+- implementation
+- chat
+- frontend
+- documents
 dependencies:
-  - TASK-12092
+- TASK-15040
 ---
 
 ## Description
@@ -29,9 +29,9 @@ Execute Task 4 from the approved plan: create visible document-processing turn s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented visible document-processing turns, send-time document preparation with explicit context/upload/RAG overrides, reserved-user-message pipeline replay, and queued document replay using stored uploaded file data. Verification: 59 focused Vitest tests passed; git diff --check passed; local ESLint on touched files exited 0 with baseline warnings; TypeScript still fails only known unrelated baseline files outside this task. Bandit skipped because Task 4 touched TS/TSX/JSON/Markdown only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

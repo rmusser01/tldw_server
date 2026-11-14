@@ -185,16 +185,20 @@ export default function HealthStatus() {
           ? resp.status
           : undefined
       const detail = resp?.ok ? resp?.data : resp?.error || resp?.data
+      const healthy = !!resp?.ok && (
+        detail?.status === 'ok' || detail?.status === 'healthy' ||
+        (c.key === 'chatMetrics' && detail?.status === undefined)
+      )
       setResults((prev) => ({
         ...prev,
         [c.key]: {
-          status: resp?.ok ? 'healthy' : 'unhealthy',
+          status: healthy ? 'healthy' : 'unhealthy',
           detail,
           statusCode,
           durationMs: Math.round(t1 - t0)
         }
       }))
-      return !!resp?.ok
+      return healthy
     } catch (e) {
       const t1 = performance.now()
       const message = (e as any)?.message || 'Network error'

@@ -159,18 +159,20 @@ async def test_warm_chacha_db_for_user_records_corrupt_db_and_fails_open(
     tmp_path,
 ) -> None:
     from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as chacha_deps
+    from tldw_Server_API.app.core.DB_Management.chacha.runtime import get_chacha_runtime
 
     user_id = 43
     db_path = tmp_path / "43" / "ChaChaNotes.db"
     db_path.parent.mkdir(parents=True)
     db_path.write_bytes(b"not a sqlite database")
 
-    with chacha_deps._chacha_db_lock:
-        chacha_deps._chacha_db_instances.clear()
-        chacha_deps._chacha_db_init_events.clear()
-        chacha_deps._chacha_db_init_errors.clear()
-    with chacha_deps._CHACHA_HEALTH_LOCK:
-        chacha_deps._CHACHA_HEALTH.update(
+    runtime = get_chacha_runtime()
+    with runtime._cache_lock:
+        runtime._instances.clear()
+        runtime._init_events.clear()
+        runtime._init_errors.clear()
+    with runtime._health_lock:
+        runtime._health.update(
             {
                 "init_attempts": 0,
                 "init_failures": 0,

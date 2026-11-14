@@ -58,20 +58,18 @@ except _SETTINGS_IMPORT_EXCEPTIONS:
     load_comprehensive_config = None  # Fallback if import graph changes
     core_settings = None
 
-try:
-    from tldw_Server_API.app.core.testing import (
-        is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
-    )
-    from tldw_Server_API.app.core.testing import (
-        is_truthy as _is_truthy,
-    )
-except _SETTINGS_IMPORT_EXCEPTIONS:
-    def _is_truthy(value: str | None) -> bool:
-        s = str(value or "").strip().lower()
-        return s == "1" or s == "true" or s == "yes" or s == "y" or s == "on"
-
-    def _is_explicit_pytest_runtime() -> bool:
-        return bool(os.getenv("PYTEST_CURRENT_TEST"))
+from tldw_Server_API.app.core.testing import (
+    is_explicit_pytest_runtime as _is_explicit_pytest_runtime,
+)
+from tldw_Server_API.app.core.testing import (
+    is_production_like_env as _is_production_like_env,
+)
+from tldw_Server_API.app.core.testing import (
+    is_truthy as _is_truthy,
+)
+from tldw_Server_API.app.core.testing import (
+    runtime_environment as _runtime_environment,
+)
 
 SECURE_KEY_INIT_COMMAND = "python -m tldw_Server_API.app.core.AuthNZ.initialize"
 SECURE_KEY_GUIDANCE = f"Generate a secure key via:\n  {SECURE_KEY_INIT_COMMAND}"
@@ -90,15 +88,22 @@ SINGLE_USER_KEY_TOO_SHORT = (
     f"{SECURE_KEY_GUIDANCE}"
 )
 SINGLE_USER_KEY_PRODUCTION_FORMAT = (
-    "In production (tldw_production=true), SINGLE_USER_API_KEY must use the "
+    "SINGLE_USER_API_KEY must use the "
     "server-generated format (tldw_<kid>.<secret>). "
     f"{SECURE_KEY_GUIDANCE}\n"
     "or set TLDW_ALLOW_LEGACY_SINGLE_USER_KEY=true to temporarily bypass."
 )
 SINGLE_USER_KEY_PRODUCTION_WEAK = (
-    "In production (tldw_production=true), SINGLE_USER_API_KEY must be set to a secure value (>=24 chars) "
+    "SINGLE_USER_API_KEY must be set to a secure value (>=24 chars) "
     f"and must not use defaults.\n{SECURE_KEY_GUIDANCE}"
 )
+
+
+def _in_production() -> str:
+    """Prefix for a production hard-fail, naming the key that made the runtime production-like."""
+    return f"In a production-like runtime ({_runtime_environment().source_key}), "
+
+
 SINGLE_USER_API_KEY_PLACEHOLDERS = {
     "CHANGE_ME_TO_SECURE_API_KEY",
     "default-secret-key-for-single-user",
@@ -323,8 +328,8 @@ class Settings(BaseSettings):
     # ===== Storage Settings =====
     DEFAULT_STORAGE_QUOTA_MB: int = Field(
         default=5120,  # 5GB
-        ge=100,
-        description="Default storage quota in MB"
+        ge=0,
+        description="Deprecated (spec 2): no longer sets any user's storage quota; only the one-time storage quota migration reads it to skip the old default."
     )
 
     USER_DATA_BASE_PATH: str = Field(
@@ -357,6 +362,7 @@ class Settings(BaseSettings):
             "moderation.review.bulk_decide",
             "moderation.audit.read",
             "notes.graph.suggest",
+            "notes.graph.semantic.manage",
             "notes.link_keyword",
             "keywords.create",
         ],
@@ -927,21 +933,20 @@ class Settings(BaseSettings):
                 )
 
             # Hard fail in production if default/weak
-            prod_flag = os.getenv("tldw_production", "false").lower() in {"true", "1", "yes", "y", "on"}
-            if prod_flag:
+            if _is_production_like_env():
                 default_values = {"CHANGE_ME_TO_SECURE_RANDOM_KEY_MIN_32_CHARS"}
                 if self.JWT_SECRET_KEY in default_values:
                     raise ValueError(
-                        "In production (tldw_production=true), JWT_SECRET_KEY must not use default template values.\n"
+                        _in_production() + "JWT_SECRET_KEY must not use default template values.\n"
                         "Set a strong key via environment or .env. Example:\n"
                         "  export JWT_SECRET_KEY=$(python -c \"import secrets; print(secrets.token_urlsafe(32))\")"
                     )
             logger.info("Using configured JWT secret key")
             return
 
-        # Allow deterministic fallback only in explicit pytest runtime.
-        test_mode = _is_explicit_pytest_runtime()
-        if test_mode:
+        # Allow deterministic fallback only in explicit pytest runtime, and never in a
+        # production-like one: the fallback secret is public, so JWTs would be forgeable.
+        if _is_explicit_pytest_runtime() and not _is_production_like_env():
             fallback = os.getenv(
                 "JWT_SECRET_TEST_KEY",
                 "test-secret-jwt-key-please-change-1234567890"
@@ -969,7 +974,11 @@ class Settings(BaseSettings):
             # Detect explicit test contexts where the server should expose a
             # stable key so client tests can authenticate. Only rely on server
             # environment variables; never trust request headers.
-            in_test_context = _is_explicit_pytest_runtime() or os.getenv("E2E_TEST_BASE_URL") is not None
+            # A production-like runtime is never a test context, even under pytest.
+            prod_flag = _is_production_like_env()
+            in_test_context = not prod_flag and (
+                _is_explicit_pytest_runtime() or bool(os.getenv("E2E_TEST_BASE_URL"))
+            )
 
             if not self.SINGLE_USER_API_KEY:
                 if explicit_env_key:
@@ -1003,7 +1012,6 @@ class Settings(BaseSettings):
                 raise ValueError(SINGLE_USER_KEY_TOO_SHORT)
 
             # Hard fail in production if key is missing/weak/default
-            prod_flag = os.getenv("tldw_production", "false").lower() in {"true", "1", "yes", "y", "on"}
             allow_legacy = os.getenv("TLDW_ALLOW_LEGACY_SINGLE_USER_KEY", "").lower() in {"true", "1", "yes", "y", "on"}
             if not in_test_context:
                 try:
@@ -1016,7 +1024,7 @@ class Settings(BaseSettings):
 
                 if not is_new_format and not allow_legacy:
                     if prod_flag:
-                        raise ValueError(SINGLE_USER_KEY_PRODUCTION_FORMAT)
+                        raise ValueError(_in_production() + SINGLE_USER_KEY_PRODUCTION_FORMAT)
                     logger.warning(
                         "SINGLE_USER_API_KEY uses a legacy format; "
                         "generate a new server-generated key for improved security."
@@ -1028,7 +1036,7 @@ class Settings(BaseSettings):
                     or len(self.SINGLE_USER_API_KEY) < 24
                 )
                 if weak:
-                    raise ValueError(SINGLE_USER_KEY_PRODUCTION_WEAK)
+                    raise ValueError(_in_production() + SINGLE_USER_KEY_PRODUCTION_WEAK)
 
     def _apply_enterprise_guardrails(self) -> None:
         """Log guardrail decisions for enterprise-only feature flags."""
@@ -1274,10 +1282,9 @@ class Settings(BaseSettings):
 
         if auth_mode == "multi_user" and v.startswith("sqlite"):
             # In production, disallow SQLite for multi-user mode
-            prod_flag = os.getenv("tldw_production", "false").lower() in {"true", "1", "yes", "y", "on"}
-            if prod_flag:
+            if _is_production_like_env():
                 raise ValueError(
-                    "In production (tldw_production=true) with AUTH_MODE=multi_user, SQLite is not supported.\n"
+                    _in_production() + "AUTH_MODE=multi_user does not support SQLite.\n"
                     "Please configure PostgreSQL via DATABASE_URL. Examples:\n"
                     "  export DATABASE_URL=postgresql://tldw_user:TestPassword123!@localhost:5432/tldw_users\n"
                     "  # With docker-compose service name:\n"
@@ -1494,16 +1501,8 @@ def _load_overrides_from_config() -> dict:
                     pwd  = cfg.get("AuthNZ", "pg_password", fallback="").strip()
                     sslm = cfg.get("AuthNZ", "pg_sslmode", fallback="prefer").strip()
                     if not pwd:
-                        # In production, require explicit password; outside, skip synthesis to avoid insecure defaults
-                        from os import getenv as _getenv
-                        prod_flag = _getenv("tldw_production", "false").lower() in {"true", "1", "yes", "y", "on"}
+                        # Never synthesize with a placeholder password; leave DATABASE_URL unset.
                         logger.warning("AuthNZ: pg_password not set in config.txt; not synthesizing DATABASE_URL.")
-                        if prod_flag:
-                            # Leave DATABASE_URL unset to force explicit configuration
-                            pass
-                        else:
-                            # Still avoid insecure default; allow env DATABASE_URL to win if present elsewhere
-                            pass
                     else:
                         overrides["DATABASE_URL"] = f"postgresql://{user}:{pwd}@{host}:{port}/{db}?sslmode={sslm}"
                 # else: ignore unknown types
@@ -1573,6 +1572,11 @@ def get_settings() -> Settings:
         except _SETTINGS_IMPORT_EXCEPTIONS:
             pass
         _settings = Settings(**overrides)
+        if os.getenv("DEFAULT_STORAGE_QUOTA_MB") is not None:
+            logger.warning(
+                "DEFAULT_STORAGE_QUOTA_MB is deprecated and no longer sets any user's storage quota; "
+                "set limits.storage_quota_mb per user instead."
+            )
         try:
             base_dir = None
             if core_settings:

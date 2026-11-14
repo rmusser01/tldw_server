@@ -12,10 +12,12 @@ from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     OrgQuotaResponse,
     SetQuotaRequest,
     SetQuotaResponse,
+    SetUserQuotaRequest,
     TeamQuotaResponse,
 )
 from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError, UserNotFoundError
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.services.admin_audit_service import emit_storage_quota_audit_event
 from tldw_Server_API.app.services.storage_quota_service import StorageQuotaService, get_storage_service
 
 router = APIRouter()
@@ -39,22 +41,28 @@ async def require_storage_admin(principal: AuthPrincipal = Depends(get_auth_prin
 @router.put("/admin/quotas/user/{user_id}", response_model=SetQuotaResponse)
 async def set_user_quota(
     user_id: int,
-    request: SetQuotaRequest,
-    _principal: AuthPrincipal = Depends(require_storage_admin),
+    request: SetUserQuotaRequest,
+    principal: AuthPrincipal = Depends(require_storage_admin),
 ) -> SetQuotaResponse:
     """Set storage quota for a user (admin only)."""
     service = await _get_storage_service()
 
     try:
-        result = await service.set_user_quota(user_id, request.quota_mb)
+        result = await service.set_user_quota(user_id, request.quota_mb, updated_by=principal.user_id)
+        await emit_storage_quota_audit_event(
+            actor_id=principal.user_id, target_user_id=user_id, quota_mb=request.quota_mb
+        )
+        pct = result.get("usage_percentage")
         status_data = {
             "quota_mb": result.get("storage_quota_mb"),
             "used_mb": result.get("storage_used_mb", 0.0),
-            "remaining_mb": result.get("available_mb", 0.0),
-            "usage_pct": result.get("usage_percentage", 0.0),
-            "at_soft_limit": result.get("usage_percentage", 0) >= request.soft_limit_pct,
-            "at_hard_limit": result.get("usage_percentage", 0) >= request.hard_limit_pct,
-            "has_quota": True,
+            "legacy_used_mb": result["legacy_storage_used_mb"],
+            "native_used_mb": result["native_storage_used_mb"],
+            "remaining_mb": result.get("available_mb"),
+            "usage_pct": pct if pct is not None else 0.0,
+            "at_soft_limit": pct is not None and pct >= request.soft_limit_pct,
+            "at_hard_limit": pct is not None and pct >= request.hard_limit_pct,
+            "has_quota": result.get("storage_quota_mb") is not None,
         }
         return SetQuotaResponse(
             success=True,
@@ -62,6 +70,8 @@ async def set_user_quota(
         )
     except UserNotFoundError:
         raise HTTPException(status_code=404, detail="User not found") from None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
     except StorageError as e:
         raise HTTPException(status_code=500, detail="Failed to set user storage quota") from e
 

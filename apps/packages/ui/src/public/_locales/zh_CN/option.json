@@ -1188,7 +1188,7 @@
     "message": "审阅后保存"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "保存前审阅"
+    "message": "保存前审核提取的内容"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "先处理，然后在提交到服务器前在本地编辑草稿。"
@@ -2725,5 +2725,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "在确认您的帐户和本地存储之前，离线保存不可用。您的更改仍未保存。"
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

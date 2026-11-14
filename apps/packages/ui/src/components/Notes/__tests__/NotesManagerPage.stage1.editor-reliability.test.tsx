@@ -345,8 +345,10 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
 
     await waitFor(() => {
       expect(createCalls()).toHaveLength(1)
-      expect(mockMessageError).toHaveBeenCalledWith("Save failed")
+      // One surface for the failure (NS-03): the issue panel, not a toast too.
+      expect(screen.getByTestId("notes-save-issue")).toBeInTheDocument()
     })
+    expect(mockMessageError).not.toHaveBeenCalled()
 
     expect(titleInput).toHaveValue("Do not lose this")
     expect(contentInput).toHaveValue("The save failed, so this text must remain.")
@@ -425,13 +427,14 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
 
     fireEvent.click(screen.getByTestId("notes-save-button"))
 
-    await waitFor(() => {
-      expect(mockMessageError).toHaveBeenCalledWith("Server temporarily unavailable")
-    })
+    // One surface for the failure (NS-03): the issue panel, not a toast too.
+    const issue = await screen.findByTestId("notes-save-issue")
+    expect(issue).toHaveAttribute("data-kind", "retrying")
+    expect(mockMessageError).not.toHaveBeenCalled()
 
     expect(titleInput).toHaveValue("Recoverable note")
     expect(contentInput).toHaveValue("Draft survives failure")
-    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "error")
+    expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "retrying")
 
     fireEvent.click(screen.getByTestId("notes-save-retry"))
 
@@ -502,19 +505,20 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  it("opens a writable, focused title field after starting a new draft from the empty state", async () => {
+  it("opens a writable, focused title field after starting a new draft from New note", async () => {
     renderPage()
 
-    expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
+    // The blank editor is a draft, not an empty state (NO-04).
+    expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Create note" }))
+    fireEvent.click(screen.getByRole("button", { name: "New note" }))
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
-    })
-
+    // Starting a draft settles asynchronously (the mutation fence), then the
+    // title is writable.
     const titleInput = screen.getByRole("textbox", { name: "Note title" })
-    expect(titleInput).toBeEnabled()
+    await waitFor(() => {
+      expect(titleInput).toBeEnabled()
+    })
     expect(screen.getByTestId("notes-save-button")).toBeDisabled()
 
     await waitFor(() => {
@@ -522,20 +526,23 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  it("keeps the empty-state create CTA disabled when the notes capability is unavailable", async () => {
+  it("keeps the draft editor read-only when the notes capability is unavailable", async () => {
     mockCapabilities.hasNotes = false
 
     renderPage()
 
-    const createButton = screen.getByTestId("notes-editor-empty-create")
-    expect(createButton).toBeDisabled()
+    expect(screen.queryByTestId("notes-editor-empty-create")).not.toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Note title" })).toBeDisabled()
+    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
+    // A read-only draft must not invite the user to type and save (NO-04).
+    expect(screen.queryByText(/Start typing to create a note/)).not.toBeInTheDocument()
+    expect(screen.getByText("Markdown + LaTeX supported")).toBeInTheDocument()
 
-    fireEvent.click(createButton)
+    fireEvent.click(screen.getByRole("button", { name: "New note" }))
 
     await waitFor(() => {
       expect(createCalls()).toHaveLength(0)
     })
-    expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
   })
 
   it("encodes reserved note ids for save refresh requests", async () => {

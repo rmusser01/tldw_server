@@ -38,7 +38,7 @@ plugins:
       enable_git_follow: false
       strict: false
       fallback_to_build_date: true
-      enable_creation_date: true
+      enable_creation_date: false
       type: timeago
       locale: en
 
@@ -59,13 +59,13 @@ markdown_extensions:
 
 extra:
   generator: false
-  version: v0.1.46
+  version: v0.1.47
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/rmusser01/tldw_server
       name: GitHub
 copyright: |
-  © 2024-2025 tldw_Server - v0.1.46 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>
+  © 2024-2025 tldw_Server - v0.1.47 - <a href="https://github.com/rmusser01/tldw_server">GitHub</a>
 
 nav:
   - Home: Wiki/index.md
@@ -166,6 +166,7 @@ nav:
           - ChaChaNotes DB: Code_Documentation/Databases/ChaChaNotes_DB.md
           - Jobs Module: Code_Documentation/Jobs_Module.md
           - Jobs Manager: Code_Documentation/Jobs_Manager.md
+          - Claims Cluster Rebuild Jobs: Operations/Claims_Cluster_Rebuild_Jobs.md
       - Ingestion and Audio Internals:
           - Ingestion Media Processing: Code_Documentation/Ingestion_Media_Processing.md
           - Audio Pipeline: Code_Documentation/Ingestion_Pipeline_Audio.md

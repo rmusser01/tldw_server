@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_api_key_scope
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.storage_helpers import _to_generated_file
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
@@ -23,7 +23,11 @@ async def _get_storage_service() -> StorageQuotaService:
     return await storage_endpoint._get_service()
 
 
-@router.get("/trash", response_model=TrashListResponse)
+@router.get(
+    "/trash",
+    response_model=TrashListResponse,
+    dependencies=[Depends(require_api_key_scope("read"))],
+)
 async def list_trashed_files(
     user: User = Depends(get_request_user),
     offset: int = Query(default=0, ge=0),
@@ -53,7 +57,11 @@ async def list_trashed_files(
     )
 
 
-@router.post("/trash/restore/{file_id}", response_model=RestoreResponse)
+@router.post(
+    "/trash/restore/{file_id}",
+    response_model=RestoreResponse,
+    dependencies=[Depends(require_api_key_scope("write"))],
+)
 async def restore_file(
     file_id: int,
     user: User = Depends(get_request_user),
@@ -80,7 +88,11 @@ async def restore_file(
     return RestoreResponse(success=False, file=None)
 
 
-@router.delete("/trash/{file_id}", response_model=PermanentDeleteResponse)
+@router.delete(
+    "/trash/{file_id}",
+    response_model=PermanentDeleteResponse,
+    dependencies=[Depends(require_api_key_scope("write"))],
+)
 async def permanently_delete_file(
     file_id: int,
     user: User = Depends(get_request_user),

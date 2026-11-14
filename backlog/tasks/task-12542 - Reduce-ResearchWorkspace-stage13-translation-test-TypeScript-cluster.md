@@ -32,14 +32,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task519-tsc-final.txt`: package `tsc` reported two diagnostics in `src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage13.source-transfer.test.tsx` because the translation mock read `count` and `workspaceName` from a parameter typed as string-or-options.
 - Root cause was translation mock narrowing only. The mock supports both string fallback and object options, but it needed a local narrowed `options` value before reading option-only interpolation fields.
 - Added an `options` local that is undefined for string fallbacks and used it for `defaultValue`, `count`, and `workspaceName` lookups.
 - Focused verification: `bunx vitest run src/components/Option/ResearchWorkspace/__tests__/ResearchWorkspace.stage13.source-transfer.test.tsx` passed: 9 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task520-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 59 in `/tmp/task519-tsc-final.txt` to 57 in `/tmp/task520-tsc-final.txt`; `rg -n 'ResearchWorkspace\.stage13\.source-transfer\.test\.tsx' /tmp/task520-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

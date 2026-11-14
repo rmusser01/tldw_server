@@ -9,7 +9,8 @@ import type { HistoryBookmark } from "../../../../packages/ui/src/db/dexie/types
 
 import { test, expect } from "../../utils/fixtures"
 import { CharactersPage, ChatPage } from "../../utils/page-objects"
-import { captureStreamedResponseBody, waitForStreamComplete } from "../../utils/journey-helpers"
+import { waitForStreamComplete } from "../../utils/journey-helpers"
+import { parseRoleplayResumeAppendRequest, parseRoleplayResumeAppendReceipt, parseRoleplayResumeCompletionRequest, parseRoleplayResumeCompletionReceipt } from "../../../../packages/ui/src/services/tldw/roleplay-resume"
 import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from "../../utils/helpers"
 
 const SYSTEM = "You are E2E-TestBot. Always respond with exactly: BEEP BOOP."
@@ -64,14 +65,19 @@ test.describe("Create Character -> Chat journey", () => {
       const createdChat = page.waitForResponse(response =>
         response.request().method() === "POST" && /\/api\/v1\/chats\/?$/.test(response.url())
       )
-      await chat.selectCharacter(characterName)
-      await chat.selectModel(model!)
-      const readCompletionBody = await captureStreamedResponseBody(page, "/api/v1/chat/completions")
-      const completed = page.waitForResponse(response =>
-        response.request().method() === "POST" && /^\/api\/v1\/chat\/completions$/.test(new URL(response.url()).pathname)
+      const capturedSelection = page.waitForResponse(response =>
+        response.request().method() === "POST" && /\/api\/v1\/chat\/conversations\/[^/]+\/history\/selection$/.test(new URL(response.url()).pathname)
       )
-      const [[chatCreation, completion]] = await Promise.all([
-        Promise.all([createdChat, completed]), chat.sendMessage(QUESTION),
+      await chat.selectModel(model!)
+      await chat.selectCharacter(characterName)
+      const admitted = page.waitForResponse(response =>
+        response.request().method() === "POST" && /\/api\/v1\/chats\/[^/]+\/roleplay\/messages$/.test(new URL(response.url()).pathname)
+      )
+      const completed = page.waitForResponse(response =>
+        response.request().method() === "POST" && /\/api\/v1\/chats\/[^/]+\/complete-v2$/.test(new URL(response.url()).pathname)
+      )
+      const [[chatCreation, capture, appendResponse, completion]] = await Promise.all([
+        Promise.all([createdChat, capturedSelection, admitted, completed]), chat.sendMessage(QUESTION),
       ])
       expect(chatCreation.ok()).toBe(true)
       expect(String(chatCreation.request().postDataJSON().character_id)).toBe(String(character.id))
@@ -81,40 +87,35 @@ test.describe("Create Character -> Chat journey", () => {
       expect(chatId).not.toMatch(/^(?:local[-_]|$)/)
       expect(conversation.character_id).toBe(character.id)
       expect(completion.status()).toBe(200)
-      const sent = completion.request().postDataJSON()
-      expect(sent).toMatchObject({ stream: true, save_to_db: true, conversation_id: chatId,
-        model, api_provider: provider, tldw_history_selection_v1: { version: 1, conversation_id: chatId } })
-      expect(sent.messages).toEqual([{ role: "user", content: QUESTION }])
+      const selected = await capture.json()
+      expect(selected.view).toMatchObject({ owner_key: expect.stringMatching(/^native-history-v1:sha256:/), conversation_id: chatId, cursor: { kind: "empty" } })
+      expect(selected.snapshot).toMatchObject({ owner_key: selected.view.owner_key, conversation_id: chatId })
+      expect(selected.snapshot.source_digest).toMatch(/^sha256:[0-9a-f]{64}$/)
+      const ownerKey = selected.view.owner_key
+      expect(appendResponse.status()).toBe(201)
+      expect(new URL(appendResponse.url()).pathname).toBe(`/api/v1/chats/${chatId}/roleplay/messages`)
+      const input = parseRoleplayResumeAppendRequest(appendResponse.request().postDataJSON())
+      expect(input.content).toBe(QUESTION)
+      expect(input.expected.tail).toEqual({ message_id: null, message_version: null })
+      const admission = parseRoleplayResumeAppendReceipt(chatId, input, await appendResponse.json())
+      expect(new URL(completion.url()).pathname).toBe(`/api/v1/chats/${chatId}/complete-v2`)
+      const sent = parseRoleplayResumeCompletionRequest(completion.request().postDataJSON())
+      expect(sent).toMatchObject({ stream: false, save_to_db: true, include_character_context: true, append_user_message: false,
+        tldw_roleplay_resume_v1: { input_message_id: admission.message_id, input_message_version: admission.message_version, expected: admission.fence } })
+      const settlement = parseRoleplayResumeCompletionReceipt(chatId, sent, await completion.json())
+      expect(settlement).toMatchObject({ character_id: character.id, provider, model, saved: true, assistant_content: ANSWER })
       evidence.chatId = chatId
       evidence.completionRequest = sent
+      evidence.originalSelection = selected.view
       await waitForStreamComplete(page, 90_000)
       await chat.waitForResponse()
       const question = QUESTION
       const answer = ANSWER
       expect((await chat.getMessages()).filter(row => row.role === "assistant").map(row => row.content)).toEqual([answer])
-
-      const frames = (await readCompletionBody()).split("\n")
-        .filter(line => line.startsWith("data: ") && line.slice(6) !== "[DONE]")
-        .map(line => JSON.parse(line.slice(6)))
-      const admission = frames.find(frame => frame.tldw_history_admission_v1)?.tldw_history_admission_v1
-      const settlement = frames.find(frame => frame.tldw_message_id)
-      expect(admission).toMatchObject({ version: 1, conversation_id: chatId,
-        owner_key: sent.tldw_history_selection_v1.owner_key,
-        selection_digest: sent.tldw_history_selection_v1.selection_digest,
-        messages: sent.tldw_history_selection_v1.messages,
-        originating_selection_revision: sent.tldw_history_selection_v1.selection_revision })
-      expect(admission.owner_key).toMatch(/^native-history-v1:sha256:/)
-      expect(admission.input_message_id).toEqual(expect.any(String))
-      expect(admission.input_message_id).not.toBe("")
-      expect(settlement).toMatchObject({ tldw_conversation_id: chatId,
-        tldw_user_message_id: admission.input_message_id, tldw_message_id: expect.any(String) })
-      expect(settlement.tldw_message_id).not.toBe("")
-      expect(settlement.tldw_message_id).not.toBe(admission.input_message_id)
-      expect(frames.map(frame => frame.choices?.[0]?.delta?.content ?? "").join("")).toBe(answer)
       let saved: CanonicalTurnMessage[] = []
       await expect.poll(async () => { saved = (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages; return saved.length }).toBe(2)
-      const user = saved.find(row => row.id === admission.input_message_id)!
-      const assistant = saved.find(row => row.id === settlement.tldw_message_id)!
+      const user = saved.find(row => row.id === admission.message_id)!
+      const assistant = saved.find(row => row.id === settlement.assistant_message_id)!
       expect(user).toMatchObject({ content: question, sender: "user", conversation_id: chatId, parent_message_id: null })
       expect(assistant).toMatchObject({ content: answer, conversation_id: chatId, parent_message_id: user.id })
       expect(["assistant", character.name.toLowerCase()]).toContain(assistant.sender.toLowerCase())
@@ -122,19 +123,21 @@ test.describe("Create Character -> Chat journey", () => {
       let bookmarks: HistoryBookmark[] = []
       await expect.poll(async () => {
         bookmarks = ((await readStore(page, "historySelections")) as HistoryBookmark[]).filter(row =>
-          row.conversation_id === chatId && row.owner_key === admission.owner_key &&
+          row.conversation_id === chatId && row.owner_key === ownerKey &&
           row.view.cursor.kind === "after_message" && row.view.cursor.message_id === assistant.id)
         return bookmarks.length
       }).toBe(1)
       const bookmark = bookmarks[0]
       expect(bookmark.view.interpretation).toEqual({ kind: "parent_graph_v1" })
       const reference = { profile_id: bookmark.profile_id, client_session_id: bookmark.client_session_id,
-        owner_key: admission.owner_key, conversation_id: chatId, owner_kind: "native" }
+        owner_key: ownerKey, conversation_id: chatId, owner_kind: "native" }
       await page.goto("/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)), { waitUntil: "domcontentloaded" })
       await waitForConnection(page)
       await chat.waitForReady()
       await expect.poll(async () => (await chat.getMessages()).filter(row => row.role === "assistant").map(row => row.content)).toEqual([answer])
-      await expect(page).toHaveURL(/\/chat$/)
+      // The handoff is consumed; a saved chat may now carry its own address (XP-05).
+      await expect(page).toHaveURL(/\/chat(?:\?chat=[^&#]+)?$/)
+      await expect(page).not.toHaveURL(/historySelection=/)
       await page.reload({ waitUntil: "domcontentloaded" })
       await waitForConnection(page)
       await chat.waitForReady()

@@ -1,0 +1,224 @@
+{
+  "base": "26ae4fd679ddd43f9f904cd3cca1b1cf8af51e48",
+  "task": "TASK-13530.2",
+  "redCount": 32,
+  "missing": [],
+  "fullVerification": {
+    "artifact": "<temporary>/knowledge-burndown-notes-all-typed-final.json",
+    "files": 122,
+    "passed": 866,
+    "failed": 0,
+    "skipped": 0,
+    "success": true
+  },
+  "cases": [
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx",
+      "name": "NotesManagerPage stage 20 accessibility shortcut discovery adds shortcut summary semantics and opens shortcut help from the toolbar",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx",
+      "name": "NotesManagerPage stage 20 accessibility shortcut discovery ignores '?' while typing in the editor and opens help from global context",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx",
+      "name": "NotesManagerPage stage 20 accessibility shortcut discovery ignores Ctrl/Cmd+K and Alt+N while typing, but still focuses search globally",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx",
+      "name": "NotesManagerPage stage 20 accessibility shortcut discovery persists tutorial state through shared storage on first visit",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx",
+      "name": "NotesManagerPage stage 20 accessibility shortcut discovery suppresses the first-visit tutorial when the user starts interacting before the timer fires",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage20.accessibility-shortcuts.test.tsx",
+      "name": "NotesManagerPage stage 20 accessibility shortcut discovery removes tutorial state from shared storage when restarting the tutorial",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+      "name": "NotesManagerPage stage 26 conversation backlink labels keeps the linked Cedar reply through the real Playground mismatch and persisted-session initialization effects",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage26.backlink-labels.test.tsx",
+      "name": "NotesManagerPage stage 26 conversation backlink labels opens an ordinary Note source in ordinary workflow after a persisted Character session",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx",
+      "name": "NotesManagerPage graph stage 1 related/backlinks panels renders related notes and backlinks, and opens clicked related note",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx",
+      "name": "NotesManagerPage graph stage 1 related/backlinks panels labels connection chips by relationship type and keeps source nodes out of related notes",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx",
+      "name": "NotesManagerPage graph stage 1 related/backlinks panels marks deleted linked-note targets as unavailable instead of opening them",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx",
+      "name": "NotesManagerPage graph stage 1 related/backlinks panels auto-saves unsaved changes before opening a related note",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx",
+      "name": "NotesManagerPage graph stage 1 related/backlinks panels shows loading and empty states for relation panels",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx",
+      "name": "NotesManagerPage graph stage 1 related/backlinks panels shows error states when neighbors request fails",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage5.graph-panels.test.tsx",
+      "name": "NotesManagerPage graph stage 1 related/backlinks panels retries neighbor loading after an error",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/notes-tags-terminology.locale-contract.test.ts",
+      "name": "notes tags terminology locale contract uses Tags language for notes organization controls while preserving keywords keys",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-bounded.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage14.sorting-pagination.test.tsx",
+      "name": "NotesManagerPage stage 14 sorting and pagination applies all sort options and sends matching API query parameters",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage17.scalability-hint.test.tsx",
+      "name": "NotesManagerPage stage 17 scalability hint shows large-list pagination hint and preserves bulk-selection behavior",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage19.accessibility-skip-links.test.tsx",
+      "name": "NotesManagerPage stage 19 accessibility skip links and labels moves focus to save failure recovery and links fields to the save status",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage22.accessibility-regression.test.tsx",
+      "name": "NotesManagerPage stage 22 accessibility regression has no core aria/name violations in the first-class graph workspace",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage33.link-aware-delete-warning.test.tsx",
+      "name": "NotesManagerPage stage 33 link-aware delete warnings adds reference-count warning text when inbound links exist",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage33.link-aware-delete-warning.test.tsx",
+      "name": "NotesManagerPage stage 33 link-aware delete warnings keeps baseline delete confirmation copy when inbound links are absent",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage45.notes-studio-export.test.tsx",
+      "name": "NotesManagerPage stage 45 notes studio export prints selected Studio note with notebook HTML, selected paper size, Cornell layout, and SVG diagram",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage45.notes-studio-export.test.tsx",
+      "name": "NotesManagerPage stage 45 notes studio export uses locale-driven default paper size: US locale -> US Letter, non-US -> A4",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage45.notes-studio-export.test.tsx",
+      "name": "NotesManagerPage stage 45 notes studio export resets Studio paper size when switching to a different selected note",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage45.notes-studio-export.test.tsx",
+      "name": "NotesManagerPage stage 45 notes studio export shows an actionable error when the print pop-up cannot be opened",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage45.notes-studio-export.test.tsx",
+      "name": "NotesManagerPage stage 45 notes studio export falls back to plain single-note print path for non-Studio notes",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.stage45.notes-studio-export.test.tsx",
+      "name": "NotesManagerPage stage 45 notes studio export falls back to plain single-note print when the Studio view is stale",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx",
+      "name": "NotesManagerPage task-backed todos renders task-backed checkboxes in preview while edit mode keeps raw markdown",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx",
+      "name": "NotesManagerPage task-backed todos uses the backend status endpoint for clean checkbox toggles and refreshes the note",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx",
+      "name": "NotesManagerPage task-backed todos keeps dirty checkbox toggles local and preserves the draft on save conflict",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    },
+    {
+      "file": "apps/packages/ui/src/components/Notes/__tests__/NotesManagerPage.task-backed-todos.test.tsx",
+      "name": "NotesManagerPage task-backed todos shows unread agent task activity and can dismiss it",
+      "redArtifact": "<temporary>/knowledge-burndown-current-notes-remainder.json",
+      "finalStatus": "passed"
+    }
+  ],
+  "boundedVerification": {
+    "artifact": "<temporary>/knowledge-burndown-notes-bounded-typed-final.json",
+    "files": 11,
+    "passed": 64
+  },
+  "sourceReceipt": "<temporary>/knowledge-burndown-notes-final-source-receipt.json",
+  "lint": {
+    "artifact": "<temporary>/knowledge-burndown-notes-changed-eslint-final.json",
+    "files": 11,
+    "errors": 0,
+    "warnings": 0,
+    "removedInheritedWarnings": 13,
+    "productionQualificationArtifact": "<temporary>/knowledge-burndown-notes-production-eslint-disposition.json",
+    "productionWarnings": 85,
+    "productionErrors": 0
+  }
+}

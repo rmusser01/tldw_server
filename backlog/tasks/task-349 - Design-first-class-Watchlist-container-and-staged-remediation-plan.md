@@ -30,9 +30,9 @@ Create an approved design specification for making Watchlist a first-class proje
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created design spec at Docs/superpowers/specs/2026-05-15-first-class-watchlists-design.md. Verification: read the generated spec back with sed, ran git diff --check against the tracked path (no output), and ran awk trailing-whitespace check on the new spec (exit 0). Bandit skipped because this is a documentation-only design spec with no Python/code changes. Spec review was local because subagent delegation was not explicitly authorized in this session.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -54,7 +54,7 @@ Planned steps:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan for the telemetry-label normalization slice before production code changes.
 
 Implemented persona telemetry label normalization. Touched files:
@@ -80,7 +80,7 @@ Review-fix verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/api/v1/endpoints/chat.py tldw_Server_API/app/core/Evaluations/persona_telemetry_metrics.py tldw_Server_API/app/core/Metrics/metrics_manager.py -f json -o /tmp/bandit_persona_chat_telemetry_labels_review.json -> 0 findings.
 - python -m py_compile touched production modules -> exit 0.
 - git diff --check -> exit 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

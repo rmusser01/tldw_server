@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
 from tldw_Server_API.app.services import outputs_service
 
 
@@ -154,3 +156,165 @@ async def test_resolve_tts_generation_defaults_omnivoice_blank_voice_falls_back_
     assert resolved_model == "omnivoice"
     assert resolved_voice == outputs_service.DEFAULT_OMNIVOICE_TTS_VOICE
     assert resolved_speed is None
+
+
+# --- LLM summaries through the real analyze() (TASK-13636) ---
+
+
+class _Adapter:
+    """The provider adapter below analyze(): records each request and replies or raises."""
+
+    def __init__(self) -> None:
+        self.reply = "Model summary."
+        self.error: BaseException | None = None
+        self.requests: list[dict] = []
+
+    def chat(self, request, timeout=None):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return {"choices": [{"message": {"content": self.reply}}]}
+
+    def sent(self) -> str:
+        """The user message of the only request."""
+        assert len(self.requests) == 1
+        return self.requests[0]["messages"][0]["content"]
+
+
+@pytest.fixture
+def adapter(monkeypatch: pytest.MonkeyPatch) -> _Adapter:
+    fake = _Adapter()
+    monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: fake))
+    return fake
+
+
+def _refusal() -> LLMQuotaExceededError:
+    return LLMQuotaExceededError(
+        category="llm_tokens_month", current=12, limit=10, message="LLM token quota exceeded", retry_after=60
+    )
+
+
+_LLM = {"api_name": "openai", "model_override": "test-model"}
+
+
+@pytest.mark.unit
+def test_summarize_single_article_returns_the_model_summary_and_sends_the_text_once(adapter: _Adapter) -> None:
+    assert outputs_service._summarize_single_article("Cedar article body.", **_LLM) == "Model summary."
+    assert adapter.sent().count("Cedar article body.") == 1
+    assert adapter.requests[0]["model"] == "test-model"
+    assert adapter.requests[0]["system_message"] == outputs_service._OUTPUTS_SYSTEM_PROMPT
+
+
+@pytest.mark.unit
+def test_summarize_text_block_returns_the_model_summary_and_sends_the_text_once(adapter: _Adapter) -> None:
+    assert outputs_service._summarize_text_block("- Cedar story", **_LLM) == "Model summary."
+    assert adapter.sent().count("- Cedar story") == 1
+    assert adapter.requests[0]["system_message"] == outputs_service._OUTPUTS_SYSTEM_PROMPT
+
+
+@pytest.mark.unit
+def test_summarize_single_article_sends_the_text_with_a_custom_prompt_that_has_no_placeholder(
+    adapter: _Adapter,
+) -> None:
+    outputs_service._summarize_single_article("Cedar article body.", custom_prompt="Summarize in French.", **_LLM)
+    assert "Summarize in French." in adapter.sent()
+    assert adapter.sent().count("Cedar article body.") == 1
+
+
+@pytest.mark.unit
+def test_summarize_single_article_returns_nothing_when_the_provider_fails(adapter: _Adapter) -> None:
+    # An excerpt of the article would render as if the model wrote it (TASK-13642).
+    adapter.reply = ""  # no usable analysis: a provider failure
+    assert outputs_service._summarize_single_article("Cedar article body.", **_LLM) == ""
+
+
+@pytest.mark.unit
+async def test_summarize_items_for_output_leaves_no_summary_when_the_provider_fails(adapter: _Adapter) -> None:
+    adapter.reply = ""
+    items = await outputs_service.summarize_items_for_output([{"id": 1, "content": "Cedar article body."}], **_LLM)
+    assert items[0]["llm_summary"] == ""
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("api_name", ["", "None"])
+def test_summarize_single_article_without_a_provider_returns_nothing(adapter: _Adapter, api_name: str) -> None:
+    # analyze() answers a missing provider with an "Error:" string, which is not a summary.
+    assert outputs_service._summarize_single_article("Cedar article body.", api_name=api_name) == ""
+    assert adapter.requests == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("helper", ["_summarize_single_article", "_summarize_text_block"])
+def test_a_summary_that_starts_with_error_is_still_the_summary(adapter: _Adapter, helper: str) -> None:
+    # Provider failures raise (raise_on_error), so a reply is the model's text, whatever it starts with.
+    adapter.reply = "Error: budgets ran out, the article says, so the bridge work stopped."
+    assert getattr(outputs_service, helper)("Cedar article body.", **_LLM) == adapter.reply
+
+
+@pytest.mark.unit
+def test_summarize_text_block_returns_nothing_when_analyze_returns_an_error(adapter: _Adapter) -> None:
+    adapter.reply = ""
+    assert outputs_service._summarize_text_block("- Cedar story", **_LLM) == ""
+
+
+@pytest.mark.unit
+def test_summarize_single_article_lets_a_quota_refusal_through(adapter: _Adapter) -> None:
+    adapter.error = _refusal()
+    with pytest.raises(LLMQuotaExceededError):
+        outputs_service._summarize_single_article("Cedar article body.", **_LLM)
+
+
+@pytest.mark.unit
+def test_summarize_text_block_lets_a_quota_refusal_through(adapter: _Adapter) -> None:
+    adapter.error = _refusal()
+    with pytest.raises(LLMQuotaExceededError):
+        outputs_service._summarize_text_block("- Cedar story", **_LLM)
+
+
+@pytest.mark.unit
+async def test_summarize_items_for_output_lets_a_quota_refusal_through(adapter: _Adapter) -> None:
+    adapter.error = _refusal()
+    with pytest.raises(LLMQuotaExceededError):
+        await outputs_service.summarize_items_for_output([{"id": 1, "content": "Cedar article body."}], **_LLM)
+
+
+@pytest.mark.unit
+async def test_generate_group_summaries_sends_text_with_braces_once(adapter: _Adapter) -> None:
+    groups = [{"name": "Rust", "items": [{"title": "Rust {macros} and {}"}]}]
+    result = await outputs_service.generate_group_summaries(groups, **_LLM)
+    assert result[0]["summary"] == "Model summary."
+    assert adapter.sent().count("Rust {macros} and {}") == 1
+
+
+@pytest.mark.unit
+async def test_generate_group_summaries_lets_a_quota_refusal_through(adapter: _Adapter) -> None:
+    adapter.error = _refusal()
+    with pytest.raises(LLMQuotaExceededError):
+        await outputs_service.generate_group_summaries([{"name": "g", "items": [{"title": "Cedar"}]}], **_LLM)
+
+
+@pytest.mark.unit
+async def test_generate_briefing_summary_lets_a_quota_refusal_through(adapter: _Adapter) -> None:
+    adapter.error = _refusal()
+    with pytest.raises(LLMQuotaExceededError):
+        await outputs_service.generate_briefing_summary([{"title": "Cedar"}], **_LLM)
+
+
+@pytest.mark.unit
+async def test_classify_items_by_topic_lets_a_quota_refusal_through(adapter: _Adapter) -> None:
+    adapter.error = _refusal()
+    with pytest.raises(LLMQuotaExceededError):
+        await outputs_service.classify_items_by_topic([{"title": "Cedar"}], **_LLM)
+
+
+@pytest.mark.unit
+def test_custom_exact_tag_rules_match_tag_identities() -> None:
+    items = [{"id": 1, "tags": ["AI"]}, {"id": 2, "tags": ["Straße"]}, {"id": 3, "tags": ["ml"]}]
+    rules = [
+        {"group_name": "AI", "match_field": "tag", "match_pattern": "ai", "match_mode": "exact"},
+        {"group_name": "Streets", "match_field": "tag", "match_pattern": "STRASSE", "match_mode": "exact"},
+    ]
+
+    groups = {group["name"]: [item["id"] for item in group["items"]] for group in outputs_service.group_items(items, group_by="custom", custom_rules=rules)}
+
+    assert groups == {"AI": [1], "Streets": [2], "Uncategorized": [3]}

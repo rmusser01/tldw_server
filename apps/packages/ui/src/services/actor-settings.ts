@@ -1,5 +1,3 @@
-import { Storage } from "@plasmohq/storage"
-import { createSafeStorage } from "@/utils/safe-storage"
 import {
   ACTOR_SETTINGS_VERSION,
   ActorSettings,
@@ -8,39 +6,53 @@ import {
   normalizeActorAspectKey
 } from "@/types/actor"
 
-const storage = createSafeStorage()
+import {
+  createLocalRegistryBucket,
+  withRecordLock,
+  type LocalRegistryRecord
+} from "./settings/local-bucket"
+import {
+  captureActorProfileTarget,
+  type ActorSettingsTarget,
+  type ActorProfileTarget
+} from "@/utils/actor-settings-target"
 
-export const getActorStorageKey = (chatKey: string) =>
-  `actorSettings:${chatKey}`
-
-export const getActorProfileStorageKey = (characterId: string | number) =>
-  `actorProfile:${String(characterId)}`
-
-export const resolveActorChatKey = (params: {
-  historyId: string | null
-  serverChatId: string | null
-}): string => {
-  const { historyId, serverChatId } = params
-  if (serverChatId) {
-    return `server:${serverChatId}`
-  }
-  if (historyId) {
-    return `local:${historyId}`
-  }
-  // Fallback key for temporary/unsaved chats.
-  return "scratch"
+const scenes = createLocalRegistryBucket<ActorSettings>({
+  prefix: "actorSettings:owned:"
+})
+const profiles = createLocalRegistryBucket<ActorSettings>({
+  prefix: "actorProfile:owned:"
+})
+export type ActorSceneRecord = LocalRegistryRecord<ActorSettings>
+export type ActorSceneRead = {
+  target: ActorSettingsTarget
+  originalRecord: ActorSceneRecord | null
+  settings: ActorSettings
+  origin: "scene" | "profile" | "default"
+  profileUnavailable: boolean
 }
 
 const isValidActorAspect = (value: any): value is ActorAspect => {
-  if (!value || typeof value !== "object") return false
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false
 
-  const { id, key, target, name, source, value: aspectValue } = value as {
+  const {
+    id,
+    key,
+    target,
+    name,
+    source,
+    value: aspectValue,
+    lorebookId,
+    entryId
+  } = value as {
     id: unknown
     key: unknown
     target: unknown
     name: unknown
     source: unknown
     value: unknown
+    lorebookId?: unknown
+    entryId?: unknown
   }
 
   const isString = (v: unknown): v is string => typeof v === "string"
@@ -56,6 +68,9 @@ const isValidActorAspect = (value: any): value is ActorAspect => {
     return false
   }
 
+  if (lorebookId !== undefined && !isString(lorebookId)) return false
+  if (entryId !== undefined && !isString(entryId)) return false
+
   // Basic enum checks; if these ever expand, this guard can be relaxed.
   const validTargets = ["user", "char", "world"]
   const validSources = ["free", "lore"]
@@ -68,7 +83,7 @@ const isValidActorAspect = (value: any): value is ActorAspect => {
 }
 
 const isValidActorSettings = (raw: any): raw is ActorSettings => {
-  if (!raw || typeof raw !== "object") {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return false
   }
 
@@ -92,7 +107,10 @@ const isValidActorSettings = (raw: any): raw is ActorSettings => {
 
   if (!isNumber(version)) return false
   if (!isBoolean(isEnabled)) return false
-  if (!Array.isArray(aspects) || !aspects.every(isValidActorAspect)) {
+  if (
+    !Array.isArray(aspects) ||
+    !Array.from(aspects).every(isValidActorAspect)
+  ) {
     return false
   }
   if (!isString(notes)) return false
@@ -179,49 +197,248 @@ const migrateSettings = (raw: any): ActorSettings => {
   }
 }
 
-const getActorSettingsForChatOrNull = async (params: {
-  historyId: string | null
-  serverChatId: string | null
-}): Promise<ActorSettings | null> => {
+const isValidSceneRecord = (raw: unknown): raw is ActorSceneRecord => {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false
+  const record = raw as ActorSceneRecord
+  return (
+    isValidActorSettings(record.value) &&
+    record.value.version === ACTOR_SETTINGS_VERSION &&
+    typeof record.updatedAt === "number" &&
+    Number.isFinite(record.updatedAt) &&
+    Number.isFinite(new Date(record.updatedAt).getTime())
+  )
+}
+
+const verifyOriginalLocalProfile = async (
+  target: ActorProfileTarget & { localProfileId?: string }
+) => {
+  if (!target.isCurrent()) throw new Error("actor_settings_scope_changed")
+  if (target.localProfileId !== undefined) {
+    const { ensureLocalProfileId } = await import(
+      "@/db/dexie/history-selection"
+    )
+    await ensureLocalProfileId(target.localProfileId)
+    if (!target.isCurrent()) throw new Error("actor_settings_scope_changed")
+  }
+}
+
+const readOwnedRecord = async (
+  bucket: typeof scenes,
+  target: ActorProfileTarget & { localProfileId?: string }
+): Promise<ActorSceneRecord | null> => {
+  if (!target.isCurrent()) throw new Error("actor_settings_scope_changed")
+  if (target.localProfileId !== undefined)
+    await verifyOriginalLocalProfile(target)
+  const record = await bucket.get(target.key, { failClosed: true })
+  if (target.localProfileId !== undefined) {
+    await verifyOriginalLocalProfile(target)
+    if (!bucket.isDurable()) throw new Error("actor_settings_unavailable")
+  }
+  if (!target.isCurrent()) throw new Error("actor_settings_scope_changed")
+  if (record !== null && !isValidSceneRecord(record))
+    throw new Error("actor_settings_invalid")
+  return record ? structuredClone(record) : null
+}
+
+export const getActorSceneForChat = async (params: {
+  target: ActorSettingsTarget
+  characterId?: string | number | null
+  validate_lease?: () => boolean
+}): Promise<ActorSceneRead> => {
+  const { target, characterId } = params
   try {
-    const chatKey = resolveActorChatKey(params)
-    const key = getActorStorageKey(chatKey)
-    const stored = await storage.get<ActorSettings | undefined>(key)
-    if (!stored) {
-      return null
+    const readTarget = {
+      key: target.key,
+      localProfileId: target.localProfileId,
+      isCurrent: () => target.isCurrent() && params.validate_lease?.() !== false
     }
-    return migrateSettings(stored)
+    const originalRecord = await readOwnedRecord(scenes, readTarget)
+    if (originalRecord)
+      return {
+        target,
+        originalRecord,
+        settings: migrateSettings(structuredClone(originalRecord.value)),
+        origin: "scene",
+        profileUnavailable: false
+      }
+    const empty = {
+      target,
+      originalRecord: null,
+      settings: createDefaultActorSettings(),
+      origin: "default" as const,
+      profileUnavailable: false
+    }
+    if (characterId == null) return empty
+    const profileTarget = captureActorProfileTarget(
+      target.accountKey,
+      characterId,
+      () => readTarget.isCurrent() && target.profileIsCurrent()
+    )
+    if (!profileTarget) return { ...empty, profileUnavailable: true }
+    let inherited: ActorSceneRead = empty
+    try {
+      const profile = await readOwnedRecord(profiles, profileTarget)
+      if (profile)
+        inherited = {
+          ...empty,
+          settings: migrateSettings(structuredClone(profile.value)),
+          origin: "profile"
+        }
+    } catch {
+      if (!readTarget.isCurrent())
+        throw new Error("actor_settings_scope_changed")
+      inherited = { ...empty, profileUnavailable: true }
+    }
+    if (target.localProfileId !== undefined) {
+      await verifyOriginalLocalProfile(readTarget)
+      if (!scenes.isDurable()) throw new Error("actor_settings_unavailable")
+    }
+    if (!readTarget.isCurrent()) throw new Error("actor_settings_scope_changed")
+    return inherited
   } catch (error) {
-    console.error("Failed to load Actor settings", error)
-    return null
+    console.error("Failed to load owned Actor scene", error)
+    throw new Error("actor_settings_unavailable")
+  }
+}
+
+/** Copy only an original saved fresh scene after its caller accepted the destination bind. */
+export const copyActorSceneToBoundChat = async (
+  source: ActorSceneRead,
+  destination: ActorSettingsTarget,
+  validate_lease: () => boolean = () => true
+): Promise<boolean> => {
+  const fresh = source.target.address
+  const boundAddress = destination.address
+  const account = source.target.account
+  const current = () =>
+    account?.isCurrent() === true && destination.isCurrent() && validate_lease()
+  if (
+    fresh?.kind !== "fresh" ||
+    fresh.temporary ||
+    !account ||
+    !source.target.accountKey ||
+    source.origin !== "scene" ||
+    !source.originalRecord ||
+    !isValidSceneRecord(source.originalRecord) ||
+    !boundAddress ||
+    boundAddress.kind === "fresh" ||
+    destination.key === source.target.key ||
+    (boundAddress.kind === "native" &&
+      (boundAddress.scope.type !== fresh.scope.type ||
+        (boundAddress.scope.type === "workspace" &&
+          fresh.scope.type === "workspace" &&
+          boundAddress.scope.workspaceId !== fresh.scope.workspaceId))) ||
+    (destination.localProfileId === undefined &&
+      destination.accountKey !== source.target.accountKey) ||
+    !current() ||
+    typeof navigator === "undefined" ||
+    !navigator.locks?.request
+  )
+    return false
+  const original = structuredClone(source.originalRecord)
+  try {
+    return await withRecordLock(
+      scenes.buildKey(source.target.key),
+      async () => {
+        const retained = await readOwnedRecord(scenes, {
+          key: source.target.key,
+          isCurrent: current
+        })
+        if (JSON.stringify(retained) !== JSON.stringify(original)) return false
+        const bound = await readOwnedRecord(scenes, {
+          ...destination,
+          isCurrent: current
+        })
+        if (
+          bound !== null &&
+          JSON.stringify(bound) !== JSON.stringify(original)
+        )
+          return false
+        // The same conditional write also certifies an exact prior copy under its destination lock.
+        const saved = await scenes.set(
+          destination.key,
+          original.value,
+          original.updatedAt,
+          bound,
+          current
+        )
+        if (saved && destination.localProfileId !== undefined) {
+          await verifyOriginalLocalProfile({
+            ...destination,
+            isCurrent: current
+          })
+          if (!scenes.isDurable()) return false
+        }
+        return saved && current()
+      }
+    )
+  } catch {
+    return false
   }
 }
 
 export const getActorSettingsForChat = async (params: {
   historyId: string | null
   serverChatId: string | null
+  target?: ActorSettingsTarget
 }): Promise<ActorSettings> => {
-  const existing = await getActorSettingsForChatOrNull(params)
-  if (existing) {
-    return existing
-  }
-  return createDefaultActorSettings()
+  if (!params.target) throw new Error("actor_settings_unavailable")
+  return (await getActorSceneForChat({ target: params.target })).settings
 }
 
 export const saveActorSettingsForChat = async (params: {
   historyId: string | null
   serverChatId: string | null
   settings: ActorSettings
+  target?: ActorSettingsTarget
+  expectedRecord?: ActorSceneRecord | null
+  validate_lease?: () => boolean
 }): Promise<boolean> => {
   try {
-    const chatKey = resolveActorChatKey(params)
-    const key = getActorStorageKey(chatKey)
-    const payload: ActorSettings = {
-      ...params.settings,
-      version: ACTOR_SETTINGS_VERSION
+    if (
+      !isValidActorSettings(params.settings) ||
+      params.settings.version !== ACTOR_SETTINGS_VERSION
+    )
+      return false
+    const { target, expectedRecord } = params
+    if (
+      !target ||
+      expectedRecord === undefined ||
+      !target.isCurrent() ||
+      params.validate_lease?.() === false
+    )
+      return false
+    if (expectedRecord !== null && !isValidSceneRecord(expectedRecord))
+      return false
+    const proposal = structuredClone(params.settings)
+    const original =
+      expectedRecord === null ? null : structuredClone(expectedRecord)
+    const updatedAt = Math.max(Date.now(), (original?.updatedAt ?? -1) + 1)
+    if (!Number.isFinite(new Date(updatedAt).getTime())) return false
+    if (target.localProfileId !== undefined)
+      await verifyOriginalLocalProfile({
+        key: target.key,
+        localProfileId: target.localProfileId,
+        isCurrent: () =>
+          target.isCurrent() && params.validate_lease?.() !== false
+      })
+    const saved = await scenes.set(
+      target.key,
+      proposal,
+      updatedAt,
+      original,
+      () => target.isCurrent() && params.validate_lease?.() !== false
+    )
+    if (saved && target.localProfileId !== undefined) {
+      await verifyOriginalLocalProfile({
+        key: target.key,
+        localProfileId: target.localProfileId,
+        isCurrent: () =>
+          target.isCurrent() && params.validate_lease?.() !== false
+      })
+      if (!scenes.isDurable()) return false
     }
-    await storage.set(key, payload)
-    return true
+    return saved && target.isCurrent() && params.validate_lease?.() !== false
   } catch (error) {
     console.error("Failed to save Actor settings", error)
     return false
@@ -229,35 +446,63 @@ export const saveActorSettingsForChat = async (params: {
 }
 
 export const getActorProfileForCharacter = async (
-  characterId: string | number | null | undefined
+  characterId: string | number | null | undefined,
+  options?: {
+    throwOnError?: boolean
+    validate_lease?: () => boolean
+    target?: ActorProfileTarget
+  }
 ): Promise<ActorSettings | null> => {
   if (!characterId) return null
   try {
-    const key = getActorProfileStorageKey(characterId)
-    const stored = await storage.get<ActorSettings | undefined>(key)
-    if (!stored) {
-      return null
-    }
-    return migrateSettings(stored)
+    const target = options?.target
+    if (!target) throw new Error("actor_settings_unavailable")
+    const record = await readOwnedRecord(profiles, {
+      key: target.key,
+      isCurrent: () =>
+        target.isCurrent() && options.validate_lease?.() !== false
+    })
+    return record ? migrateSettings(structuredClone(record.value)) : null
   } catch (error) {
     console.error("Failed to load Actor profile for character", error)
-    return null
+    throw new Error("actor_settings_unavailable")
   }
 }
 
 export const saveActorProfileForCharacter = async (params: {
   characterId: string | number
   settings: ActorSettings
-}): Promise<void> => {
+  target?: ActorProfileTarget
+  validate_lease?: () => boolean
+}): Promise<boolean> => {
   try {
-    const key = getActorProfileStorageKey(params.characterId)
-    const payload: ActorSettings = {
-      ...params.settings,
-      version: ACTOR_SETTINGS_VERSION
+    if (params.validate_lease?.() === false) return false
+    if (
+      !isValidActorSettings(params.settings) ||
+      params.settings.version !== ACTOR_SETTINGS_VERSION
+    )
+      return false
+    const captured = params.target
+    if (!captured) return false
+    const target = {
+      key: captured.key,
+      isCurrent: () =>
+        captured.isCurrent() && params.validate_lease?.() !== false
     }
-    await storage.set(key, payload)
+    const proposal = structuredClone(params.settings)
+    const original = await readOwnedRecord(profiles, target)
+    const updatedAt = Math.max(Date.now(), (original?.updatedAt ?? -1) + 1)
+    if (!Number.isFinite(new Date(updatedAt).getTime())) return false
+    return await profiles.set(
+      target.key,
+      proposal,
+      updatedAt,
+      original,
+      target.isCurrent
+    )
   } catch (error) {
     console.error("Failed to save Actor profile for character", error)
+    return false
   }
 }
 
@@ -265,20 +510,13 @@ export const getActorSettingsForChatWithCharacterFallback = async (params: {
   historyId: string | null
   serverChatId: string | null
   characterId?: string | number | null
+  target?: ActorSettingsTarget
 }): Promise<ActorSettings> => {
-  const { historyId, serverChatId, characterId } = params
-  const existing = await getActorSettingsForChatOrNull({
-    historyId,
-    serverChatId
+  if (!params.target) throw new Error("actor_settings_unavailable")
+  const read = await getActorSceneForChat({
+    target: params.target,
+    characterId: params.characterId
   })
-  if (existing) {
-    return existing
-  }
-
-  const profile = await getActorProfileForCharacter(characterId ?? null)
-  if (profile) {
-    return profile
-  }
-
-  return createDefaultActorSettings()
+  if (read.profileUnavailable) throw new Error("actor_settings_unavailable")
+  return read.settings
 }

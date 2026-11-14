@@ -209,6 +209,7 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
   const [mcpServers, setMcpServers] = useState<ACPMCPServerConfig[]>([])
   const [creationStep, setCreationStep] = useState<ACPSessionCreationStep>("idle")
   const [creationError, setCreationError] = useState<ACPStructuredError | undefined>()
+  const requestedAgent = React.useRef<string | null>(null)
 
   // Store
   const createSession = useACPSessionsStore((s) => s.createSession)
@@ -243,7 +244,14 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
   // Reset form when modal opens
   useEffect(() => {
     if (open) {
+      const hashQueryIndex = window.location.hash.indexOf("?")
+      const search = window.location.search ||
+        (hashQueryIndex >= 0 ? window.location.hash.slice(hashQueryIndex) : "")
+      requestedAgent.current = new URLSearchParams(search).get("agent")?.trim() || null
       form.resetFields()
+      if (requestedAgent.current) {
+        form.setFieldValue("agentType", requestedAgent.current)
+      }
       setMcpServers([])
       setCreationStep("idle")
       setCreationError(undefined)
@@ -257,6 +265,9 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
     }
 
     const currentAgentType = form.getFieldValue("agentType") as ACPAgentType | undefined
+    if (requestedAgent.current && currentAgentType === requestedAgent.current) {
+      return
+    }
     const currentAgent = agents.find((agent) => agent.type === currentAgentType)
     if (currentAgent && isACPAgentReadyToStart(currentAgent)) {
       return
@@ -432,6 +443,8 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
   })
 
   const handleSubmit = (values: FormValues) => {
+    const agent = agents.find((candidate) => candidate.type === values.agentType)
+    if (!agent || !isACPAgentReadyToStart(agent)) return
     createMutation.mutate(values)
   }
 
@@ -528,13 +541,28 @@ export const ACPSessionCreateModal: React.FC<ACPSessionCreateModalProps> = ({
                     key={agent.type}
                     agent={agent}
                     selected={form.getFieldValue("agentType") === agent.type}
-                    onSelect={() => form.setFieldValue("agentType", agent.type)}
+                    onSelect={() => {
+                      requestedAgent.current = agent.type
+                      form.setFieldValue("agentType", agent.type)
+                    }}
                   />
                 ))}
               </div>
             </Radio.Group>
           )}
         </Form.Item>
+
+        {!isAgentSelectionLoading && selectedAgentBlocked && requestedAgent.current === selectedAgentType && (
+          <Alert
+            className="mb-4"
+            type="warning"
+            title={t("acp.create.requestedAgentUnavailable", "Requested agent is unavailable")}
+            showIcon
+          >
+            <code>{requestedAgent.current}</code>{" "}
+            {t("acp.create.chooseReadyAgent", "Choose a ready agent explicitly before creating a session.")}
+          </Alert>
+        )}
 
         {/* Advanced Section - Collapsible */}
         <Collapse

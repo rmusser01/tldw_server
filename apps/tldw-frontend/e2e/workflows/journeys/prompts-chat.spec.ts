@@ -3,20 +3,25 @@
  * Seeded auth and a controlled downstream model do not certify fresh-install UAT.
  * Export/import, failed sync, variables and account-switch variants remain separate.
  */
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import type { Request } from '@playwright/test';
 import { test, expect } from '../../utils/fixtures';
 import { PromptsWorkspacePage, ChatPage } from '../../utils/page-objects';
-import { waitForStreamComplete } from '../../utils/journey-helpers';
+import { captureStreamedResponseBody, waitForStreamComplete } from '../../utils/journey-helpers';
 import { TEST_CONFIG, fetchWithApiKey, waitForConnection } from '../../utils/helpers';
-import { assertSavedTurn } from './uat390-grounding';
+import { assertSavedTurn, readSavedMessages } from './uat390-grounding';
 import { readStore } from '../../../../extension/tests/e2e/utils/history-selection';
-import type { HistoryBookmark, HistoryInfo, Message } from '../../../../packages/ui/src/db/dexie/types';
+import type { HistoryBookmark } from '../../../../packages/ui/src/db/dexie/types';
 
 const SYSTEM = 'You are a pirate. Respond to everything in pirate speak. Always say ARRR at least once.';
 const QUESTION = 'Tell me about the weather today.';
 // The provider selects this only for the exact system/user pair. The ordinary
 // default response cannot satisfy this oracle if applying the prompt is broken.
 const ANSWER = "ARRR, matey! I need yer location and current weather data before I can give ye today's forecast.";
+
+type CanonicalTurnMessage = {
+  id: string; conversation_id: string; content: string; sender: string; parent_message_id: string | null;
+};
 
 test.describe('Prompts -> Chat journey', () => {
   test('applies a saved system prompt and preserves its successful Chat turn on reload', async ({
@@ -42,6 +47,14 @@ test.describe('Prompts -> Chat journey', () => {
     let promptRowId = '';
     const prompts = new PromptsWorkspacePage(page);
     const inspector = page.getByTestId('prompts-inspector-panel-scaffold');
+    let browserMessageWrites = 0;
+    let completionRequests = 0;
+    const observeChatWrites = (request: Request) => {
+      if (request.method() !== 'POST') return;
+      const path = new URL(request.url()).pathname;
+      if (/^\/api\/v1\/chats\/[^/]+\/messages$/.test(path)) browserMessageWrites++;
+      if (path === '/api/v1/chat/completions') completionRequests++;
+    };
     try {
       await test.step('Save and reopen the exact synced prompt through the UI', async () => {
         await prompts.goto();
@@ -82,6 +95,7 @@ test.describe('Prompts -> Chat journey', () => {
       });
       const chat = new ChatPage(page);
       await test.step('Use the saved prompt as the actual Chat system instruction', async () => {
+        page.on('request', observeChatWrites);
         await inspector.getByRole('button', { name: 'Use', exact: true }).click();
         const choice = page.getByTestId('prompt-insert-system');
         await expect(choice).toContainText(SYSTEM);
@@ -90,19 +104,24 @@ test.describe('Prompts -> Chat journey', () => {
         await waitForConnection(page);
         await chat.waitForReady();
         await chat.selectModel(model!);
-        const nativeWrites: string[] = [];
-        page.on('request', request => {
-          if (request.method() === 'POST' && /\/api\/v1\/(?:chats(?:\/|$)|chat\/conversations(?:\/|$))/.test(request.url()))
-            nativeWrites.push(request.url());
-        });
+        const createdChat = page.waitForResponse(response =>
+          response.request().method() === 'POST' && /\/api\/v1\/chats\/?$/.test(response.url())
+        );
+        const readCompletionBody = await captureStreamedResponseBody(page, '/api/v1/chat/completions');
+        const initialCompletionRequests = completionRequests;
         const completed = page.waitForResponse(response =>
           response.request().method() === 'POST' && /\/api\/v1\/chat\/completions(?:\?|$)/.test(response.url())
         );
-        const [completion] = await Promise.all([completed, chat.sendMessage(QUESTION)]);
+        const [creation, completion] = await Promise.all([
+          createdChat, completed, chat.sendMessage(QUESTION),
+        ]);
+        expect(creation.status()).toBe(201);
+        const chatId = (await creation.json()).id;
+        expect(chatId).toEqual(expect.any(String));
+        expect(chatId).not.toMatch(/^(?:local[-_]|$)/);
         expect(completion.status()).toBe(200);
         const sent = completion.request().postDataJSON();
-        expect(sent).toMatchObject({ model, save_to_db: false });
-        expect(sent).not.toHaveProperty('conversation_id');
+        expect(sent).toMatchObject({ model, stream: true, save_to_db: true, conversation_id: chatId });
         expect(sent.provider ?? sent.api_provider).toBe(provider);
         expect(sent.messages.map(({ role, content }: { role: string; content: unknown }) => ({ role, content })))
           .toEqual([{ role: 'system', content: SYSTEM }, { role: 'user', content: QUESTION }]);
@@ -111,60 +130,88 @@ test.describe('Prompts -> Chat journey', () => {
         await chat.waitForResponse();
         const visible = (await chat.getMessages()).filter(message => message.role === 'assistant');
         expect(visible.map(message => message.content)).toEqual([ANSWER]);
-        let users: Message[] = [];
+        const events = (await readCompletionBody()).replace(/\r\n/g, '\n').split('\n\n')
+          .map(block => ({ event: block.split('\n').find(line => line.startsWith('event: '))?.slice(7),
+            data: block.split('\n').find(line => line.startsWith('data: '))?.slice(6) }))
+          .filter(entry => entry.data && entry.data !== '[DONE]')
+          .map(entry => ({ event: entry.event, data: JSON.parse(entry.data!) }));
+        const frames = events.map(entry => entry.data);
+        const admissionFrames = frames.filter(frame => frame.tldw_history_admission_v1);
+        expect(admissionFrames).toHaveLength(1);
+        const admission = admissionFrames[0].tldw_history_admission_v1;
+        const settlementFrames = frames.filter(frame => frame.tldw_message_id);
+        const successfulEnd = events.filter(entry => entry.event === 'stream_end');
+        expect(successfulEnd).toHaveLength(1);
+        expect(successfulEnd[0].data).toMatchObject({ conversation_id: chatId, success: true });
+        const settlement = frames.find(frame => frame.tldw_message_id && frame.choices?.[0]?.finish_reason === 'stop');
+        expect(settlement).toBeDefined();
+        const selection = sent.tldw_history_selection_v1;
+        expect(selection).toMatchObject({ version: 1, conversation_id: chatId,
+          owner_key: expect.stringMatching(/^native-history-v1:sha256:/), cursor: { kind: 'empty' }, messages: [] });
+        expect(admission).toMatchObject({ version: 1, conversation_id: chatId,
+          owner_key: selection.owner_key, selection_digest: selection.selection_digest,
+          messages: selection.messages, originating_selection_revision: selection.selection_revision });
+        expect(admission.input_message_id).toEqual(expect.any(String));
+        expect(admission.input_message_id).not.toBe('');
+        expect(admission.input_message_revision).toEqual(expect.any(String));
+        expect(admission.input_message_revision).not.toBe('');
+        expect(settlement).toMatchObject({ tldw_conversation_id: chatId,
+          tldw_user_message_id: admission.input_message_id, tldw_message_id: expect.any(String) });
+        expect(settlement.tldw_message_id).not.toBe('');
+        expect(settlement.tldw_message_id).not.toBe(admission.input_message_id);
+        expect(successfulEnd[0].data).toMatchObject({ tldw_conversation_id: chatId,
+          tldw_user_message_id: admission.input_message_id, tldw_message_id: settlement.tldw_message_id });
+        for (const receipt of settlementFrames)
+          expect(receipt).toMatchObject({ tldw_conversation_id: chatId,
+            tldw_user_message_id: admission.input_message_id, tldw_message_id: settlement.tldw_message_id });
+        expect(frames.map(frame => frame.choices?.[0]?.delta?.content ?? '').join('')).toBe(ANSWER);
+        expect(completionRequests - initialCompletionRequests).toBe(1);
+        expect(browserMessageWrites).toBe(0);
+        let saved: CanonicalTurnMessage[] = [];
         await expect.poll(async () => {
-          users = ((await readStore(page, 'messages')) as Message[])
-            .filter(row => row.role === 'user' && row.content === QUESTION);
-          return users.length;
-        }).toBe(1);
-        const user = users[0];
-        const historyId = user.history_id;
-        const history = ((await readStore(page, 'chatHistories')) as HistoryInfo[])
-          .find(row => row.id === historyId)!;
-        const keyScope = createHash('sha256').update('tldw:service-prompt-single-user-api-key:v1\0' + TEST_CONFIG.apiKey.trim()).digest('hex');
-        expect(history.server_scope_key).toBe(JSON.stringify([TEST_CONFIG.serverUrl, 'single-user', 'manual', null, null, 'key:sha256:' + keyScope]));
-        expect(history.server_chat_id).toBeUndefined();
-        expect(history.local_owner_key).toMatch(/^local-history-v1:/);
-        const saved = ((await readStore(page, 'messages')) as Message[]).filter(row => row.history_id === historyId);
-        expect(saved).toHaveLength(2);
-        const assistant = saved.find(row => row.role === 'assistant')!;
-        assertSavedTurn([user, assistant], QUESTION, ANSWER);
-        expect(user.parent_message_id).toBeNull();
-        expect(assistant.parent_message_id).toBe(user.id);
-        expect(user.history_admission).toMatchObject({ owner_key: history.local_owner_key, conversation_id: historyId, input_message_id: user.id });
-        expect(assistant.history_settlement?.input_message_id).toBe(user.id);
-        expect(saved.every(row => row.history_provenance?.owner_key === history.local_owner_key)).toBe(true);
-        expect(saved.every(row => !row.serverMessageId)).toBe(true);
+          saved = (await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages;
+          return saved.length;
+        }).toBe(2);
+        const user = saved.find(row => row.id === admission.input_message_id)!;
+        const assistant = saved.find(row => row.id === settlement.tldw_message_id)!;
+        expect(user).toMatchObject({ sender: 'user', content: QUESTION, conversation_id: chatId, parent_message_id: null });
+        expect(assistant).toMatchObject({ sender: 'assistant', content: ANSWER, conversation_id: chatId, parent_message_id: user.id });
+        assertSavedTurn(readSavedMessages(saved, chatId), QUESTION, ANSWER);
         let bookmarks: HistoryBookmark[] = [];
         await expect.poll(async () => {
           bookmarks = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
-            .filter(row => row.conversation_id === historyId && row.view.cursor.kind === 'after_message' && row.view.cursor.message_id === assistant.id);
+            .filter(row => row.conversation_id === chatId && row.owner_key === admission.owner_key &&
+              row.view.cursor.kind === 'after_message' && row.view.cursor.message_id === assistant.id);
           return bookmarks.length;
         }).toBe(1);
         const bookmark = bookmarks[0];
-        expect(history.local_owner_key).toBe('local-history-v1:' + bookmark.profile_id);
-        expect(bookmark.view.owner_key).toBe(history.local_owner_key);
+        expect(bookmark.view.owner_key).toBe(admission.owner_key);
+        expect(bookmark.view.conversation_id).toBe(chatId);
         expect(bookmark.view.interpretation).toEqual({ kind: 'parent_graph_v1' });
         const reference = { profile_id: bookmark.profile_id, client_session_id: bookmark.client_session_id,
-          owner_key: bookmark.owner_key, conversation_id: historyId, owner_kind: 'local' };
-        evidence.chatConversationId = historyId;
-        evidence.chatHistory = history;
+          owner_key: bookmark.owner_key, conversation_id: chatId, owner_kind: 'native' };
+        evidence.chatConversationId = chatId;
+        evidence.chatAdmission = admission;
+        evidence.chatSettlement = settlement;
         evidence.chatMessages = saved;
         evidence.chatSelection = reference;
+        const visiblePair = [{ role: 'user', content: QUESTION }, { role: 'assistant', content: ANSWER }];
         await page.goto('/chat?historySelection=' + encodeURIComponent(JSON.stringify(reference)), { waitUntil: 'domcontentloaded' });
         await waitForConnection(page);
         await chat.waitForReady();
         await expect.poll(async () => (await chat.getMessages())
-          .filter(message => message.role === 'assistant').map(message => message.content)).toEqual([ANSWER]);
-        await expect(page).toHaveURL(/\/chat$/);
+          .map(({ role, content }) => ({ role, content }))).toEqual(visiblePair);
+        // The handoff is consumed; a saved chat may now carry its own address (XP-05).
+        await expect(page).toHaveURL(/\/chat(?:\?chat=[^&#]+)?$/);
+        await expect(page).not.toHaveURL(/historySelection=/);
         await page.reload({ waitUntil: 'domcontentloaded' });
         await waitForConnection(page);
         await chat.waitForReady();
         await expect.poll(async () => (await chat.getMessages())
-          .filter(message => message.role === 'assistant').map(message => message.content)).toEqual([ANSWER]);
-        expect(((await readStore(page, 'messages')) as Message[]).filter(row => row.history_id === historyId)).toEqual(saved);
-        expect(((await readStore(page, 'chatHistories')) as HistoryInfo[]).find(row => row.id === historyId)).toEqual(history);
-        expect(nativeWrites).toEqual([]);
+          .map(({ role, content }) => ({ role, content }))).toEqual(visiblePair);
+        expect((await apiGet(`/api/v1/chats/${chatId}/messages?render_placeholders=false`)).messages).toEqual(saved);
+        expect(completionRequests - initialCompletionRequests).toBe(1);
+        expect(browserMessageWrites).toBe(0);
       });
       await test.step('The source Prompt still exists with the same identity and instructions', async () => {
         await prompts.goto();
@@ -176,6 +223,7 @@ test.describe('Prompts -> Chat journey', () => {
         expect(savedPrompt.data).toMatchObject({ id: promptId, name: promptName, system_prompt: SYSTEM });
       });
     } finally {
+      page.off('request', observeChatWrites);
       await testInfo.attach('c01-prompt-chat-evidence.json', {
         body: JSON.stringify(evidence, null, 2), contentType: 'application/json',
       });

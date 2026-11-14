@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef, useEffect, useCallback, type SetStateAction } from "react"
 import { splitMessageContent } from "@/utils/tts"
 import {
   resolveTtsProviderContext,
@@ -75,7 +75,7 @@ const createObjectUrl = (
 }
 
 export const useTtsPlayground = () => {
-  const [segments, setSegments] = useState<TtsPlaygroundSegment[]>([])
+  const [segments, setSegmentsState] = useState<TtsPlaygroundSegment[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationProgress, setGenerationProgress] = useState<{
     completed: number
@@ -84,24 +84,62 @@ export const useTtsPlayground = () => {
   const notification = useAntdNotification()
   const { t } = useTranslation("playground")
 
-  const revokeAll = (urls: (string | undefined)[]) => {
-    urls.filter(Boolean).forEach((u) => {
-      try {
-        URL.revokeObjectURL(u as string)
-      } catch {
-        // ignore
-      }
-    })
-  }
+  const segmentsRef = useRef<TtsPlaygroundSegment[]>([])
+  const ownedUrls = useRef(new Set<string>())
+  const controllerRef = useRef<AbortController | null>(null)
+  const mounted = useRef(true)
+
+  const revokeAll = useCallback((urls: Iterable<string>) => {
+    for (const url of urls) {
+      URL.revokeObjectURL(url)
+      ownedUrls.current.delete(url)
+    }
+  }, [])
+
+  // The public setter also owns URLs produced by streaming and job callers.
+  const setSegments = useCallback((next: SetStateAction<TtsPlaygroundSegment[]>) => {
+    const value = typeof next === 'function' ? next(segmentsRef.current) : next
+    const urls = new Set(value.flatMap(segment => segment.url ? [segment.url] : []))
+    if (!mounted.current) {
+      revokeAll(urls)
+      return
+    }
+    revokeAll(segmentsRef.current.flatMap(segment =>
+      segment.url && !urls.has(segment.url) ? [segment.url] : []))
+    urls.forEach(url => ownedUrls.current.add(url))
+    segmentsRef.current = value
+    setSegmentsState(value)
+  }, [revokeAll])
+
+  const clearSegments = useCallback(() => {
+    controllerRef.current?.abort()
+    controllerRef.current = null
+    revokeAll(ownedUrls.current)
+    segmentsRef.current = []
+    if (mounted.current) {
+      setSegmentsState([])
+      setIsGenerating(false)
+      setGenerationProgress(null)
+    }
+  }, [revokeAll])
+
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+      clearSegments()
+    }
+  }, [clearSegments])
 
   const generateSegments = async (
     text: string,
     overrides?: TtsPlaygroundOverrides
   ): Promise<TtsPlaygroundSegment[]> => {
-    if (!text.trim()) {
-      setSegments([])
-      return []
-    }
+    clearSegments()
+    if (!mounted.current || !text.trim()) return []
+    const controller = new AbortController()
+    controllerRef.current = controller
+    const isCurrent = () => mounted.current && !controller.signal.aborted
 
     setIsGenerating(true)
     setGenerationProgress(null)
@@ -109,6 +147,7 @@ export const useTtsPlayground = () => {
 
     try {
       const context = await resolveTtsProviderContext(text, overrides)
+      if (!isCurrent()) return []
       const {
         provider,
         utterance,
@@ -192,9 +231,11 @@ export const useTtsPlayground = () => {
       const idPrefix = provider === "elevenlabs" ? "eleven" : provider
       setGenerationProgress({ completed: 0, total: sentences.length })
       for (let i = 0; i < sentences.length; i++) {
-        const audio = await synthesize(sentences[i])
+        const audio = await synthesize(sentences[i], { signal: controller.signal })
+        if (!isCurrent()) return []
         const created = createObjectUrl(audio)
         createdUrls.push(created.url)
+        ownedUrls.current.add(created.url)
         outSegments.push({
           id: `${idPrefix}-${i}`,
           index: i,
@@ -215,7 +256,8 @@ export const useTtsPlayground = () => {
       setSegments(outSegments)
       return outSegments
     } catch (error) {
-      revokeAll(createdUrls)
+      revokeAll(createdUrls.filter(url => ownedUrls.current.has(url)))
+      if (!isCurrent()) return []
       setSegments([])
       const classified = classifyAudioError(error)
       notification.error({
@@ -230,14 +272,12 @@ export const useTtsPlayground = () => {
       })
       return []
     } finally {
-      setIsGenerating(false)
-      setGenerationProgress(null)
+      if (isCurrent()) {
+        controllerRef.current = null
+        setIsGenerating(false)
+        setGenerationProgress(null)
+      }
     }
-  }
-
-  const clearSegments = () => {
-    revokeAll(segments.map((s) => s.url))
-    setSegments([])
   }
 
   return {

@@ -3,20 +3,20 @@ id: TASK-2311
 title: Backfill Security outbound egress policy ADR
 status: Done
 assignee: []
-created_date: '2026-06-07 17:46'
-updated_date: '2026-06-07 17:49'
+created_date: 2026-06-07 17:46
+updated_date: 2026-06-07 17:49
 labels:
-  - docs
-  - process
-  - adr
-  - security
+- docs
+- process
+- adr
+- security
 dependencies:
-  - TASK-2247
+- TASK-15024
 references:
-  - Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md
-  - tldw_Server_API/app/core/Security/README.md
-  - tldw_Server_API/app/core/Security/egress.py
-  - tldw_Server_API/app/core/Security/url_validation.py
+- Docs/ADR/inventory/2026-06-04-security-confirmation-audit.md
+- tldw_Server_API/app/core/Security/README.md
+- tldw_Server_API/app/core/Security/egress.py
+- tldw_Server_API/app/core/Security/url_validation.py
 ---
 
 ## Description
@@ -36,7 +36,7 @@ Create a bounded accepted ADR for the outbound egress/SSRF portion of INV-029. S
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented ADR-026 for the bounded outbound egress/SSRF portion of INV-029. Updated the ADR index, Security module README, INV-029 inventory row, provider/integration owner-review handoff, and the Security confirmation audit to point to ADR-026 while preserving ADR-019 request-edge ownership and the separate secrets/serialization caveat.
 
 Verification recorded on 2026-06-07:
@@ -45,7 +45,7 @@ Verification recorded on 2026-06-07:
 - Portability artifact scan: no developer-machine absolute paths or temporary Bandit report artifact names found in touched docs/task files.
 
 Bandit: not run because this branch only touches Markdown ADR, inventory, audit, Security README, and Backlog task records; no Python files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

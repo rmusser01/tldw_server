@@ -69,6 +69,7 @@ def ensure_postgres_data_tables(db: PostgresDataTablesDB, conn: Any) -> None:
     # Ensure late-added columns exist before applying indexes that depend on them.
     db._ensure_postgres_data_tables_columns(conn)
 
+    indexes_ready = True
     for stmt in other_statements:
         try:
             db.backend.execute(stmt, connection=conn)
@@ -77,6 +78,11 @@ def ensure_postgres_data_tables(db: PostgresDataTablesDB, conn: Any) -> None:
                 "Could not ensure Data Tables index/statement on PostgreSQL: {}",
                 exc,
             )
+            indexes_ready = False
+    if indexes_ready:
+        # Never remove an old guard after a failed replacement-index creation.
+        db.backend.execute("DROP INDEX IF EXISTS ux_data_table_columns_table_position_active", connection=conn)
+        db.backend.execute("DROP INDEX IF EXISTS ux_data_table_rows_table_index_active", connection=conn)
 
 
 def ensure_postgres_columns(
@@ -134,6 +140,7 @@ def ensure_postgres_data_tables_columns(db: PostgresDataTablesDB, conn: Any) -> 
             column_defs={
                 "workspace_tag": "TEXT",
                 "column_hints_json": "TEXT",
+                "generation_job_json": "TEXT",
                 "last_modified": "TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP",
                 "version": "INTEGER NOT NULL DEFAULT 1",
                 "client_id": "TEXT NOT NULL DEFAULT ''",

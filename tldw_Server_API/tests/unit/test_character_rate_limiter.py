@@ -125,7 +125,7 @@ def test_get_character_rate_limiter_ignores_global_rate_limit_enabled(monkeypatc
     crl._rate_limiter = None
     monkeypatch.delenv("CHARACTER_RATE_LIMIT_ENABLED", raising=False)
     monkeypatch.setattr(crl, "is_test_mode", lambda: False)
-    monkeypatch.setattr(crl, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr(crl, "is_production_like_env", lambda: False)
     monkeypatch.setattr(
         core_config,
         "settings",

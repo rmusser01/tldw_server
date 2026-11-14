@@ -112,7 +112,7 @@ class _TrustedCompatClaimsSentinel:
 
 _TRUSTED_COMPAT_CLAIMS_SENTINEL = _TrustedCompatClaimsSentinel()
 _TRUSTED_COMPAT_CLAIMS_SENTINEL_KEY = "_server_auth_compat_sentinel"
-_TRUSTED_COMPAT_AUTH_VIA = frozenset({"single_user_api_key", "single_user_test_api_key"})
+_TRUSTED_COMPAT_AUTH_VIA = frozenset({"single_user_api_key"})
 _TRUSTED_COMPAT_CLAIMS_SOURCES = frozenset({"mounted_http", "mounted_ws"})
 
 

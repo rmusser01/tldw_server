@@ -52,7 +52,7 @@ Define the Stage 2 Persona Chat quality/evaluation follow-up from GitHub issue #
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/Reviews/PERSONA_CHAT_QUALITY_EVAL_FOLLOWUP_2026_05_10.md as the Stage 2 Persona Chat quality/evaluation definition artifact for GitHub issue #1543. Rechecked ordinary persona-backed chat backend projection, conversation identity fields, persona prompt assembly, memory mode/writeback, frontend create/restore/picker/settings contracts, existing Chat/Chat_NEW/Evaluations tests, and prior Persona Role-Play PRD/evaluation docs.
 
 The artifact preserves #635 references as inspiration only, separates Persona Chat quality/evaluation from Buddy/Persona Live reliability and VN/CYOA runtime work, defines quality axes and risks, and proposes five PR-sized follow-up slices: trace/error taxonomy, deterministic fixtures, telemetry label normalization, effective context preview, and optional calibrated LLM-as-judge evaluation.
@@ -64,7 +64,7 @@ GitHub packaging: opened PR #1545 for the Stage 2 Persona Chat quality/evaluatio
 Review fix pass for PR #1545: Qodo requested documented #635 recheck outcomes, a corrected ripgrep closeout command, and a full path for the frontend integration test evidence reference.
 
 Review fixes applied: added #635 recheck outcome rows and a recheck summary to the Stage 2 artifact, corrected the documented ripgrep closeout command, and expanded the frontend test evidence path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

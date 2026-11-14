@@ -35,11 +35,11 @@ Rebase PR #1256 onto latest dev and resolve any merge conflicts while preserving
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased PR #1256 from dev 49f46dbc39 to 1193f296bf. The only content.py conflict was outputs_templates: latest dev already included outputs_templates in the utility_spec tuple, so the resolution kept dev's utility tuple and retained this PR's lazy outputs router registration lower in the file.
 
 Verification after rebase: focused output_router_attr_lookup passed; full router_groups_contract passed 51 tests; main_router_contract passed 6 tests; openapi_contracts passed 69 tests; Bandit content.py JSON reported 0 results and 0 errors; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -8,7 +8,6 @@ import yaml
 
 from backlog_py.core.models import ChecklistItem, ParsedTaskMarkdown, TaskMarkdownSection
 
-
 _SECTION_BEGIN_RE = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):BEGIN -->\s*$")
 _SECTION_END_RE = re.compile(r"^<!-- SECTION:(?P<name>[A-Z0-9_ -]+):END -->\s*$")
 _MARKER_BEGIN_RE = re.compile(r"^<!-- (?P<name>[A-Z0-9_]+):BEGIN -->\s*$")
@@ -16,6 +15,15 @@ _MARKER_END_RE = re.compile(r"^<!-- (?P<name>[A-Z0-9_]+):END -->\s*$")
 _CHECKLIST_RE = re.compile(
     r"^\s*[-*]\s+\[(?P<mark>[ xX])\]\s+(?:(?P<item_id>#[A-Za-z0-9_.-]+)\s+)?(?P<text>.*?)\s*$"
 )
+# Node Backlog.md writes implementation notes as SECTION:NOTES; backlog-py's
+# canonical name is SECTION:IMPLEMENTATION_NOTES.
+_SECTION_ALIASES = {"NOTES": "IMPLEMENTATION_NOTES"}
+SECTION_HEADINGS = {
+    "DESCRIPTION": ("## Description",),
+    "PLAN": ("## Implementation Plan",),
+    "IMPLEMENTATION_NOTES": ("## Implementation Notes", "## Notes"),
+    "FINAL_SUMMARY": ("## Final Summary",),
+}
 
 
 @dataclass(frozen=True)
@@ -51,6 +59,132 @@ def parse_task_markdown(source: str) -> ParsedTaskMarkdown:
 
 def render_task_markdown(parsed: ParsedTaskMarkdown) -> str:
     return parsed.raw_source
+
+
+@dataclass
+class _Block:
+    """One top-level SECTION being rebuilt: a segment per occurrence, merged on render."""
+
+    name: str
+    segments: list[list[str]]
+    touched: bool = False
+
+
+def normalize_task_markdown(source: str) -> str:
+    """Rewrite SECTION blocks into backlog-py's canonical form without dropping text.
+
+    A Node ``SECTION:NOTES`` block becomes ``SECTION:IMPLEMENTATION_NOTES``. Nested
+    markers of a section already open are dropped, so NOTES wrapping
+    IMPLEMENTATION_NOTES keeps the inner then the outer text in document order. A
+    repeated top-level section merges into the first one (its own heading goes),
+    and END markers with nothing open are dropped. Frontmatter bytes are kept.
+    Canonical input comes back unchanged, which makes the rewrite idempotent.
+    """
+    parsed = parse_task_markdown(source)
+    head = source[: len(source) - len(parsed.body)]
+    items: list[str | _Block] = []
+    blocks: dict[str, _Block] = {}
+    stack: list[tuple[str, bool]] = []  # (name, kept literally); stack[0] is the top-level block
+    changed = False
+
+    for line in parsed.body.splitlines(keepends=True):
+        marker = _match_section_marker(line)
+        current = blocks[stack[0][0]] if stack else None
+        if marker is None:
+            (current.segments[-1] if current else items).append(line)
+            continue
+        raw_name, edge = marker
+        name = _SECTION_ALIASES.get(raw_name, raw_name)
+        changed = changed or name != raw_name
+        open_names = [open_name for open_name, _ in stack]
+        if edge == "BEGIN":
+            if current is None:
+                block = blocks.get(name)
+                if block is None:
+                    block = blocks[name] = _Block(name=name, segments=[[]])
+                    items.append(block)
+                else:
+                    changed = block.touched = True
+                    block.segments.append([])
+                    _drop_trailing_heading(items, name)
+                stack.append((name, False))
+            elif name in open_names:
+                changed = current.touched = True
+                stack.append((name, False))
+            else:
+                current.segments[-1].append(line)
+                stack.append((name, True))
+        elif open_names and open_names[-1] == name:
+            _, literal = stack.pop()
+            if literal and current is not None:
+                current.segments[-1].append(line)
+        elif name in open_names:
+            raise TaskMarkdownParseError(
+                code="crossed_sections",
+                message=f"Cannot normalize crossed section markers: {name} closes inside {open_names[-1]}",
+                section_name=name,
+            )
+        else:
+            changed = True
+
+    if not changed and not stack:
+        return source
+    newline = "\r\n" if "\r\n" in source else "\n"
+    return head + _render_body(items, newline)
+
+
+def _match_section_marker(line: str) -> tuple[str, str] | None:
+    """Return (section name, "BEGIN" or "END") for a SECTION marker line, else None."""
+    begin = _SECTION_BEGIN_RE.match(line)
+    if begin:
+        return begin.group("name"), "BEGIN"
+    end = _SECTION_END_RE.match(line)
+    if end:
+        return end.group("name"), "END"
+    return None
+
+
+def _drop_trailing_heading(items: list[str | _Block], name: str) -> None:
+    """Remove a repeated section's own heading (and blank lines after it) before merging."""
+    for index in range(len(items) - 1, -1, -1):
+        item = items[index]
+        if not isinstance(item, str):
+            return
+        if item.strip():
+            if item.strip() in SECTION_HEADINGS.get(name, ()):
+                del items[index:]
+            return
+
+
+def _render_body(items: list[str | _Block], newline: str) -> str:
+    """Render text lines and blocks, collapsing blank-line runs left by removed markers."""
+    out: list[str] = []
+    for item in items:
+        if isinstance(item, _Block):
+            out.append(f"<!-- SECTION:{item.name}:BEGIN -->{newline}")
+            out.append(_block_content(item, newline))
+            out.append(f"<!-- SECTION:{item.name}:END -->{newline}")
+        elif item.strip() or not out or out[-1].strip():
+            out.append(item)
+    return "".join(out).rstrip("\r\n") + newline
+
+
+def _block_content(block: _Block, newline: str) -> str:
+    """Return untouched content verbatim; join flattened or merged segments with a blank line."""
+    if not block.touched:
+        return "".join(block.segments[0])
+    parts = ["".join(_trim_blank_lines(segment)) for segment in block.segments]
+    return newline.join(part for part in parts if part)
+
+
+def _trim_blank_lines(lines: list[str]) -> list[str]:
+    """Drop leading and trailing blank lines from a segment."""
+    start, end = 0, len(lines)
+    while start < end and not lines[start].strip():
+        start += 1
+    while end > start and not lines[end - 1].strip():
+        end -= 1
+    return lines[start:end]
 
 
 def _split_frontmatter(source: str) -> tuple[str | None, dict[str, Any], str]:

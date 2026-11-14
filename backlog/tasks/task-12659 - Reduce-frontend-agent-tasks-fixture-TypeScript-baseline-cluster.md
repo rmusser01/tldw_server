@@ -27,7 +27,7 @@ Remove the frontend standalone tsc diagnostic in the agent tasks workflow by pre
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification recorded for this tsc slice:
 - RED: NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false from apps/tldw-frontend reported 6 diagnostics, including the agent-tasks.spec.ts fixture.reason diagnostic.
 - First attempt with !fixture.created still failed because this compiler did not narrow the boolean discriminant for fixture.reason; changed the guard to fixture.created === false.
@@ -35,14 +35,12 @@ Verification recorded for this tsc slice:
 - The skipped-fixture path still stores the skip reason, runs cleanup, then calls test.skip with the original reason.
 - git diff --check exits 0.
 - Bandit not applicable: touched file is a TypeScript Playwright spec only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Reduced the frontend standalone tsc baseline by removing the agent-tasks fixture.reason diagnostic. The workflow now uses an explicit false discriminant guard and snapshots the skip reason before awaited cleanup.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

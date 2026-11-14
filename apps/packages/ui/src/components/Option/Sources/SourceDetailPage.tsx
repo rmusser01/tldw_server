@@ -38,7 +38,9 @@ export const SourceDetailPage: React.FC<SourceDetailPageProps> = ({
   const [itemsFilter, setItemsFilter] = React.useState<SourceItemsFilter>("all")
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
 
-  const detailQuery = useIngestionSourceDetailQuery(sourceId)
+  const detailQuery = useIngestionSourceDetailQuery(sourceId, undefined, {
+    refetchInterval: 2000
+  })
   const itemsQuery = useIngestionSourceItemsQuery(sourceId)
   const syncMutation = useSyncIngestionSourceMutation()
   const uploadMutation = useUploadIngestionSourceArchiveMutation(sourceId)
@@ -47,7 +49,9 @@ export const SourceDetailPage: React.FC<SourceDetailPageProps> = ({
   const detail = detailQuery.data
   const items = React.useMemo(() => {
     const allItems = itemsQuery.data?.items ?? []
-    return allItems.filter((item) => matchesFilter(item.sync_status, itemsFilter))
+    return allItems.filter((item) =>
+      matchesFilter(item.sync_status, itemsFilter)
+    )
   }, [itemsFilter, itemsQuery.data?.items])
 
   if (detailQuery.isLoading) {
@@ -74,7 +78,8 @@ export const SourceDetailPage: React.FC<SourceDetailPageProps> = ({
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <Typography.Title level={2} className="!mb-0">
-              {typeof detail.config?.label === "string" && detail.config.label.length > 0
+              {typeof detail.config?.label === "string" &&
+              detail.config.label.length > 0
                 ? detail.config.label
                 : `${detail.source_type} ${detail.id}`}
             </Typography.Title>
@@ -92,7 +97,9 @@ export const SourceDetailPage: React.FC<SourceDetailPageProps> = ({
             onClick={() => {
               void syncMutation.mutateAsync(sourceId)
             }}
-            loading={Boolean((syncMutation as { isPending?: boolean }).isPending)}>
+            loading={Boolean(
+              (syncMutation as { isPending?: boolean }).isPending
+            )}>
             {t("sources:actions.sync", "Sync now")}
           </Button>
           {detail.source_type === "archive_snapshot" ? (
@@ -121,7 +128,7 @@ export const SourceDetailPage: React.FC<SourceDetailPageProps> = ({
         <Alert variant="error" title={detail.last_error} />
       ) : null}
 
-      {detail.last_successful_snapshot_id || detail.last_successful_sync_summary ? (
+      {detail.last_successful_snapshot_id ? (
         <Alert
           variant="info"
           title="Source identity is locked after the first successful sync."
@@ -143,7 +150,9 @@ export const SourceDetailPage: React.FC<SourceDetailPageProps> = ({
           onReattach={(itemId) => {
             void reattachMutation.mutateAsync(itemId)
           }}
-          isReattaching={Boolean((reattachMutation as { isPending?: boolean }).isPending)}
+          isReattaching={Boolean(
+            (reattachMutation as { isPending?: boolean }).isPending
+          )}
         />
       </div>
     </PageShell>

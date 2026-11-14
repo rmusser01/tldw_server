@@ -30,7 +30,7 @@ Harden VN Play runtime sessions against permanently stuck active_turn_request_id
 <!-- AC:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented stale active turn lock recovery for VN Play runtime sessions. `try_acquire_turn_lock` now stores turn leases atomically with session lock acquisition, and the service attempts guarded stale-lock recovery before normal turn retry and restore/checkpoint active-turn checks. Recovery only abandons `pending` or `model_calling` turn requests with expired `locked_until`, clears the session lock only when it still references the recovered request, and does not append events or advance scene state.
 
 Verification:
@@ -39,7 +39,7 @@ Verification:
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m py_compile tldw_Server_API/app/core/DB_Management/VNPlay_DB.py tldw_Server_API/app/core/VN_Play/service.py tldw_Server_API/app/core/VN_Play/constants.py` -> passed.
 - `git diff --check` -> passed.
 - `/Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m bandit -r tldw_Server_API/app/core/DB_Management/VNPlay_DB.py tldw_Server_API/app/core/VN_Play/service.py tldw_Server_API/app/core/VN_Play/constants.py -f json -o /tmp/bandit_vn_play_stale_turn_lock.json` -> 0 results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->

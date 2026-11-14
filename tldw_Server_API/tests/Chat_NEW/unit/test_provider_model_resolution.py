@@ -4,12 +4,12 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.chat_service import (
     build_call_params_from_request,
     invalidate_model_alias_caches,
     resolve_provider_and_model,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingDecision
 
 
@@ -74,8 +74,8 @@ def test_registered_slash_provider_aliases_still_qualify_models(
     monkeypatch, alias: str, canonical: str, model: str, explicit_provider: bool
 ) -> None:
     """Registered aliases keep their existing routing and prefix stripping."""
-    monkeypatch.setattr(chat_service, "_load_alias_overrides_cached", lambda: {})
-    monkeypatch.setattr(chat_service, "_load_models_with_case_cached", lambda _: ())
+    monkeypatch.setattr(gateway, "_load_alias_overrides_cached", lambda: {})
+    monkeypatch.setattr(gateway, "_load_models_with_case_cached", lambda _: ())
     request = ChatCompletionRequest(
         api_provider=canonical if explicit_provider else None,
         model=f"{alias}/{model}",
@@ -84,7 +84,7 @@ def test_registered_slash_provider_aliases_still_qualify_models(
     _, _, provider, selected_model, _ = resolve_provider_and_model(
         request, metrics_default_provider="openai", normalize_default_provider="openai"
     )
-    assert (chat_service._resolve_chat_provider_name(provider), selected_model) == (canonical, model)
+    assert (gateway._resolve_chat_provider_name(provider), selected_model) == (canonical, model)
 
 
 @pytest.mark.unit
@@ -154,18 +154,21 @@ def test_messages_shared_resolver_does_not_promote_metrics_placeholder(
 
 
 @pytest.mark.unit
-def test_resolve_provider_and_model_inline_alias(monkeypatch):
+def test_resolve_provider_and_model_inline_alias(monkeypatch, request):
     """Inline provider/model with alias should resolve to concrete model."""
+    # Aliases come from explicit configuration; there is no pytest-only alias map (TASK-13460).
+    monkeypatch.setenv("CHAT_MODEL_ALIAS_OVERRIDES", '{"anthropic": {"claude-sonnet": "claude-sonnet-4-5"}}')
+    request.addfinalizer(invalidate_model_alias_caches)
     invalidate_model_alias_caches()
 
-    request = ChatCompletionRequest(
+    chat_request = ChatCompletionRequest(
         model="anthropic/claude-sonnet",
         messages=[{"role": "user", "content": "Hello"}],
     )
 
     metrics_provider, metrics_model, selected_provider, selected_model, debug_info = (
         resolve_provider_and_model(
-            request_data=request,
+            request_data=chat_request,
             metrics_default_provider="openai",
             normalize_default_provider="openai",
         )
@@ -181,7 +184,7 @@ def test_resolve_provider_and_model_inline_alias(monkeypatch):
     assert selected_model != metrics_model
 
     # Request model should reflect the normalized model (no provider prefix)
-    assert request.model == selected_model
+    assert chat_request.model == selected_model
 
     # Debug info captures the change in model
     assert debug_info["changed"]["model_changed"] is True
@@ -238,28 +241,54 @@ def test_resolve_provider_and_model_normalizes_llama_colon_model_prefix() -> Non
 
 @pytest.mark.unit
 def test_resolve_provider_and_model_catalog_unique_match_when_provider_not_explicit(monkeypatch):
+    # Catalog inference switches only between local providers (TASK-13460).
+    request = ChatCompletionRequest(
+        model="qwen2.5:7b",
+        messages=[{"role": "user", "content": "Hello"}],
+    )
+
+    monkeypatch.setattr(gateway, "_provider_has_model_cached", lambda _provider, _model: False)
+    monkeypatch.setattr(
+        gateway,
+        "_find_catalog_providers_for_model_cached",
+        lambda _model: ("ollama",),
+    )
+
+    _, _, selected_provider, selected_model, debug_info = resolve_provider_and_model(
+        request_data=request,
+        metrics_default_provider="llama.cpp",
+        normalize_default_provider="llama.cpp",
+    )
+
+    assert selected_provider == "ollama"
+    assert selected_model == "qwen2.5:7b"
+    assert debug_info["catalog_inference"]["reason"] == "unique_catalog_match"
+    assert debug_info["catalog_inference"]["selected_provider"] == "ollama"
+
+
+@pytest.mark.unit
+def test_resolve_provider_and_model_never_infers_a_commercial_provider_from_the_static_catalog(monkeypatch):
+    """A commercial default keeps its provider; only a credentialed live list can authorize a model (TASK-13460)."""
     request = ChatCompletionRequest(
         model="deepseek-chat",
         messages=[{"role": "user", "content": "Hello"}],
     )
 
-    monkeypatch.setattr(chat_service, "_provider_has_model_cached", lambda _provider, _model: False)
+    monkeypatch.setattr(gateway, "_provider_has_model_cached", lambda _provider, _model: False)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_find_catalog_providers_for_model_cached",
         lambda _model: ("deepseek",),
     )
 
-    _, _, selected_provider, selected_model, debug_info = resolve_provider_and_model(
+    _, _, selected_provider, _selected_model, debug_info = resolve_provider_and_model(
         request_data=request,
         metrics_default_provider="openai",
         normalize_default_provider="openai",
     )
 
-    assert selected_provider == "deepseek"
-    assert selected_model == "deepseek-chat"
-    assert debug_info["catalog_inference"]["reason"] == "unique_catalog_match"
-    assert debug_info["catalog_inference"]["selected_provider"] == "deepseek"
+    assert selected_provider == "openai"
+    assert debug_info["catalog_inference"]["reason"] == "commercial_inventory_requires_credentials"
 
 
 @pytest.mark.unit
@@ -270,9 +299,9 @@ def test_resolve_provider_and_model_keeps_explicit_provider_even_when_catalog_di
         api_provider="openai",
     )
 
-    monkeypatch.setattr(chat_service, "_provider_has_model_cached", lambda _provider, _model: False)
+    monkeypatch.setattr(gateway, "_provider_has_model_cached", lambda _provider, _model: False)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_find_catalog_providers_for_model_cached",
         lambda _model: ("deepseek",),
     )
@@ -290,9 +319,8 @@ def test_resolve_provider_and_model_keeps_explicit_provider_even_when_catalog_di
 
 @pytest.mark.unit
 def test_resolve_provider_and_model_writes_back_canonical_routing_decision():
-    request = ChatCompletionRequest(
-        model="auto",
-        messages=[{"role": "user", "content": "Hello"}],
+    request = ChatCompletionRequest.model_validate(
+        {"model": "auto", "messages": [{"role": "user", "content": "Hello"}]}
     )
 
     _, _, selected_provider, selected_model, _ = resolve_provider_and_model(

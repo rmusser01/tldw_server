@@ -22,9 +22,9 @@ class BundleCreateRequest(BaseModel):
 
     datasets: list[str] | None = Field(
         None,
-        description="Datasets to include (defaults to all if omitted).",
+        description="Datasets to include. Omitted defaults to media, chacha, prompts, evaluations, audit and authnz. Select postgresql alone for a platform-admin whole-database archive; recovery is offline.",
     )
-    user_id: int | None = Field(None, description="User ID for per-user datasets.")
+    user_id: int | None = Field(None, description="User ID for per-user datasets; must be omitted for postgresql archives.")
     include_vector_store: bool = Field(
         False,
         description="Include vector store data (not yet supported).",
@@ -33,7 +33,7 @@ class BundleCreateRequest(BaseModel):
     retention_hours: int | None = Field(
         None,
         ge=1,
-        description="Auto-delete older bundles in the same user scope after creation.",
+        description="Auto-delete older bundles in the same user and recovery scope after creation.",
     )
     notes: str | None = Field(None, max_length=2000)
 

@@ -9,6 +9,8 @@ import { useSetting } from "@/hooks/useSetting"
 import { HEADER_SHORTCUTS_EXPANDED_SETTING } from "@/services/settings/ui-settings"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
 import { ChatHeader } from "./ChatHeader"
+import { AccountMenu } from "./AccountMenu"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { TtsClipsDrawer } from "@/components/Sidepanel/Chat/TtsClipsDrawer"
 import { useDarkMode } from "@/hooks/useDarkmode"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
@@ -29,6 +31,8 @@ import {
 } from "./chat-share-links"
 import { getHeaderActionPolicy } from "./header-action-policy"
 import type { NotificationLifecycleState } from "@/services/notification-lifecycle"
+import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
+import { resolveChatPersistenceKind } from "@/utils/chat-persistence-status"
 
 type Props = {
   onToggleSidebar?: () => void
@@ -60,9 +64,22 @@ export const Header: React.FC<Props> = ({
     HEADER_SHORTCUTS_EXPANDED_SETTING
   )
   const hostedMode = isHostedTldwDeployment()
+  const { config, authorityLoading } = useCanonicalConnectionConfig()
+  const hasPersonalAccount =
+    !authorityLoading && config?.authMode === "multi-user" &&
+    Boolean(config.accessToken?.trim())
   const { mode: themeMode, toggleDarkMode } = useDarkMode()
-  const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, effectiveAssistantState } =
+  const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, serverChatLoadState, messages, effectiveAssistantState } =
     useMessageOption()
+  // The session badge reports acknowledged persistence, not connectivity (CS-03).
+  const serverChatSaveStatus = useServerChatSaveStatus(serverChatId)
+  const persistenceKind = resolveChatPersistenceKind({
+    temporaryChat,
+    serverChatId,
+    serverSaveStatus: serverChatSaveStatus,
+    // A chat that failed to open must not read "Saved" (CS-06).
+    serverChatNotLoaded: serverChatLoadState === "failed" && !messages?.length
+  })
   const [selectedCharacter, setSelectedCharacter] = useSelectedCharacter<Character | null>(
     null
   )
@@ -149,7 +166,6 @@ export const Header: React.FC<Props> = ({
   }, [clearChat, setSelectedCharacter, setTemporaryChat])
 
   const startCharacterChat = React.useCallback(() => {
-    setTemporaryChat(false)
     const characterId = selectedCharacter?.id ?? null
     if (!isChatRoute) {
       navigate(buildCharacterChatPath({ characterId }))
@@ -170,7 +186,7 @@ export const Header: React.FC<Props> = ({
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("tldw:focus-composer"))
     }
-  }, [isChatRoute, navigate, selectedCharacter, setTemporaryChat])
+  }, [isChatRoute, navigate, selectedCharacter])
 
   const refreshShareLinks = React.useCallback(async () => {
     if (!serverChatId) {
@@ -391,6 +407,7 @@ export const Header: React.FC<Props> = ({
         }
         showChatTitle={headerActionPolicy.showChatTitle}
         showSessionModeBadge={headerActionPolicy.showSessionModeBadge}
+        persistenceKind={persistenceKind}
         shortcutsExpanded={headerShortcutsExpanded}
         onToggleShortcuts={toggleHeaderShortcuts}
         commandKeyLabel={cmdKey}
@@ -398,6 +415,17 @@ export const Header: React.FC<Props> = ({
         onOpenNotifications={onOpenNotifications}
         notificationState={notificationState}
         onRetryNotifications={onRetryNotifications}
+        renderAccountMenu={hasPersonalAccount
+          ? (onClose) => (
+              <AccountMenu
+                onClose={onClose}
+                onOpenNotifications={onOpenNotifications}
+                notificationCount={notificationCount}
+                notificationState={notificationState}
+                onRetryNotifications={onRetryNotifications}
+              />
+            )
+          : undefined}
       />
       {titleReady && titleOwner.saving && headerActionPolicy.showChatTitle ? (
         <div role="status" className="px-3 py-1 text-sm text-text-muted">

@@ -124,7 +124,14 @@ export interface MessageImageActionProps {
 
 export interface MessageActionCallbacks {
   onRegenerate: () => void
-  onEditFormSubmit: (index: number, value: string, isUser: boolean, isSend?: boolean) => void
+  onEditFormSubmit: (
+    index: number,
+    value: string,
+    isUser: boolean,
+    isSend?: boolean,
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
+  ) => unknown
   onSourceClick?: (source: any) => void
   onContinue?: () => void
   onRunSteeredContinue?: (

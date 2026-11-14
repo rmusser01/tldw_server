@@ -1,21 +1,23 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User, get_request_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, User, get_request_user, require_expected_user
 from tldw_Server_API.app.api.v1.API_Deps.backpressure import (
     guard_backpressure_and_quota,
 )
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import media_create_dependencies
 from tldw_Server_API.app.api.v1.API_Deps.personalization_deps import (
     UsageEventLogger,
     get_usage_event_logger,
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     IngestWebContentRequest,
 )
@@ -34,6 +36,8 @@ router = APIRouter()
 @router.post(
     "/ingest-web-content",
     dependencies=[
+        Depends(require_expected_user),
+        *media_create_dependencies(),
         Depends(guard_backpressure_and_quota),
         Depends(
             TokenScopeGuard(
@@ -49,7 +53,9 @@ async def ingest_web_content(
     request: IngestWebContentRequest,
     http_request: Request,
     background_tasks: BackgroundTasks,  # Parity with legacy signature
-    token: str = Header(..., description="Authentication token"),
+    token: str | None = Header(
+        None, deprecated=True, description="Deprecated; authenticated principal is authoritative"
+    ),
     db: Any = Depends(get_media_db_for_user),
     usage_log: UsageEventLogger = Depends(get_usage_event_logger),
     current_user: User = Depends(get_request_user),
@@ -67,6 +73,11 @@ async def ingest_web_content(
     # Basic validation: require at least one URL.
     if not request.urls:
         raise HTTPException(status_code=400, detail="At least one URL is required")
+    # Analysis alone means LLM work: the crawl methods summarize with a default provider, and the others may
+    # extract with an LLM even when no provider is named (TASK-13889).
+    if request.perform_analysis:
+        # Usage quotas (LLM usage accounting spec §4a), before any page is fetched.
+        await enforce_llm_quota(current_user.id)
 
     # Shared usage logging, topic monitoring, and per-method scraping are
     # handled by the orchestration helper.
@@ -97,6 +108,9 @@ async def ingest_web_content(
         ) from None
     if helper_results:
         raw_results.extend(helper_results)
+
+    if request.credential_free and any(not item.get("extraction_successful") for item in raw_results):
+        return {"status": "error", "message": "Article extraction failed", "results": raw_results}
 
     # Scrape method validation / logging.
     scrape_method = request.scrape_method
@@ -133,8 +147,8 @@ async def ingest_web_content(
             attach_chunking_plan_to_result(item, chunking_plan)
 
     # Timestamp results when requested.
-    if request.timestamp_option:
-        timestamp_str = datetime.now().isoformat()
+    if request.timestamp_option or request.credential_free:
+        timestamp_str = datetime.now(timezone.utc).isoformat()
         for item in raw_results:
             item["ingested_at"] = timestamp_str
 

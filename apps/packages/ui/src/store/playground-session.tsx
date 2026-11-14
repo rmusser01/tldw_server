@@ -1,9 +1,12 @@
+import type { ChatHistory, Message } from "@/store/option"
 import type { HistorySelectionReference } from "@/hooks/chat/useHistorySelection"
+import type { HistoryLoadReceipt } from "@/hooks/chat/useHistorySelection"
 import { createWithEqualityFn } from "zustand/traditional"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { QueuedRequest } from "@/utils/chat-request-queue"
 import type { AssistantSelection } from "@/types/assistant-selection"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { isChatDraftHandle, type ChatDraftHandle } from "@/utils/chat-draft-address"
 
 const STORAGE_KEY = "tldw-playground-session"
 const STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000 // 24 hours
@@ -54,6 +57,12 @@ const createBrowserStorage = (): StateStorage => {
     },
     setItem: (key, value) => {
       tabStorage.setItem(key, value)
+      // A Temporary transcript belongs to this tab; sessionStorage ends at Close.
+      const persisted = JSON.parse(value)
+      if (persisted.state?.temporaryTranscript) {
+        persisted.state.temporaryTranscript = null
+        value = JSON.stringify(persisted)
+      }
       durableStorage.setItem(key, value)
     },
     removeItem: (key) => {
@@ -64,6 +73,8 @@ const createBrowserStorage = (): StateStorage => {
 }
 
 export interface PlaygroundSessionData {
+  chatDraftHandle?: ChatDraftHandle | null
+  temporaryTranscript?: { history: ChatHistory; messages: Message[] } | null
   // Core identifier (used to restore messages from Dexie)
   historySelectionReference?: HistorySelectionReference | null
   historyId: string | null
@@ -97,8 +108,9 @@ export interface PlaygroundSessionData {
 }
 
 interface PlaygroundSessionState extends PlaygroundSessionData {
-  serverChatSelectionIntent: { chatId: string } | null
-  requestServerChatSelection: (chatId: string) => void
+  serverChatSelectionIntent: { chatId: string; onLoaded?: (receipt: HistoryLoadReceipt) => boolean; isCurrent?: () => boolean } | null
+  requestServerChatSelection: (chatId: string, onLoaded?: ((receipt: HistoryLoadReceipt) => boolean) & { isCurrent?: () => boolean }) => void
+  completeServerChatSelection: (intent: PlaygroundSessionState["serverChatSelectionIntent"]) => void
   restoreRevision: number
   sourceSelectionRevision: number
   // Actions
@@ -110,7 +122,16 @@ interface PlaygroundSessionState extends PlaygroundSessionData {
   isSessionValid: (expectedScopeKey?: string | null) => boolean
 }
 
+const isTemporarySession = (state: PlaygroundSessionData) =>
+  isChatDraftHandle(state.chatDraftHandle) &&
+  state.chatDraftHandle.address.kind === "fresh" &&
+  state.chatDraftHandle.address.temporary &&
+  (state.historyId === null || state.historyId === "temp") &&
+  state.serverChatId === null
+
 const initialState: PlaygroundSessionData = {
+  chatDraftHandle: null,
+  temporaryTranscript: null,
   historySelectionReference: null,
   historyId: null,
   serverChatId: null,
@@ -143,8 +164,11 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       restoreRevision: 0,
       sourceSelectionRevision: 0,
       serverChatSelectionIntent: null,
-      requestServerChatSelection: (chatId) =>
-        set({ serverChatSelectionIntent: { chatId } }),
+      requestServerChatSelection: (chatId, onLoaded) =>
+        set({ serverChatSelectionIntent: { chatId, onLoaded, isCurrent: onLoaded?.isCurrent } }),
+      completeServerChatSelection: (intent) => {
+        if (intent && get().serverChatSelectionIntent === intent) set({ serverChatSelectionIntent: null })
+      },
 
       saveSession: (data) =>
         set((state) => ({
@@ -170,11 +194,12 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
       isSessionStale: () => {
         const { lastUpdated } = get()
         if (lastUpdated === 0) return true
-        return Date.now() - lastUpdated > STALE_THRESHOLD_MS
+        return !isTemporarySession(get()) && Date.now() - lastUpdated > STALE_THRESHOLD_MS
       },
 
       isSessionValid: (expectedScopeKey) => {
         const {
+          chatDraftHandle,
           historyId,
           serverChatId,
           scopeKey,
@@ -185,8 +210,9 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         const hasConversationOrQueue =
           historyId !== null ||
           serverChatId !== null ||
+          isChatDraftHandle(chatDraftHandle) ||
           queuedMessages.length > 0
-        const isNotStale = lastUpdated > 0 && Date.now() - lastUpdated <= STALE_THRESHOLD_MS
+        const isNotStale = lastUpdated > 0 && (isTemporarySession(get()) || Date.now() - lastUpdated <= STALE_THRESHOLD_MS)
         const matchesScope =
           typeof expectedScopeKey === "undefined" || expectedScopeKey === null
             ? true
@@ -204,6 +230,8 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
         typeof window !== "undefined" ? createBrowserStorage() : createMemoryStorage()
       ),
       partialize: (state) => ({
+        chatDraftHandle: state.chatDraftHandle,
+        temporaryTranscript: isTemporarySession(state) ? state.temporaryTranscript ?? null : null,
         historySelectionReference: state.historySelectionReference,
         historyId: state.historyId,
         serverChatId: state.serverChatId,
@@ -232,8 +260,16 @@ export const usePlaygroundSessionStore = createWithEqualityFn<PlaygroundSessionS
   )
 )
 
+/** An explicit navigation intent takes precedence over automatic session recovery. */
+export const hasCurrentServerChatSelection = (serverChatId: string | null): boolean => {
+  const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent
+  return Boolean(intent && intent.chatId === serverChatId && intent.isCurrent?.() !== false)
+}
+
 const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
-  if (invalidated) usePlaygroundSessionStore.getState().clearSession()
+  if (!invalidated) return
+  bestEffortStorage(() => sessionStorage).removeItem("tldw-h1-playground-reference")
+  usePlaygroundSessionStore.getState().clearSession()
 })
 const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
 hot?.dispose(stopWatchingAccount)

@@ -26,7 +26,7 @@ Map upstream-style Chatterbox extra_params.voice_mode=predefined plus extra_para
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented a safe Chatterbox-only stored voice alias in TTSServiceV2. extra_params.voice_mode=predefined plus extra_params.predefined_voice_id now resolves through VoiceManager.load_voice_reference_audio() when no direct voice_reference is present. Existing voice=custom:<voice_id> handling remains intact for other providers, and reference_audio_filename is preserved as inert request metadata rather than read from disk. Updated OpenAI speech schema docs, CHATTERBOX_SETUP.md, and the Chatterbox parity plan.
 
 Verification:
@@ -36,7 +36,7 @@ Verification:
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/TTS/test_tts_service_v2.py -v (32 passed)
 - source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/TTS/tts_service_v2.py tldw_Server_API/app/api/v1/schemas/audio_schemas.py -f json -o /tmp/bandit_chatterbox_predefined_voice_task545.json (results: [])
 - git diff --check (clean)
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

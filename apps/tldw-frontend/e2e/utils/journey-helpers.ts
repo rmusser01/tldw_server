@@ -113,7 +113,7 @@ const findQuickIngestUrlInput = (dialog: Locator): Locator =>
     .first()
 
 const findQuickIngestFileInput = (dialog: Locator): Locator =>
-  dialog.locator('[data-testid="qi-file-input"], input[type="file"]').first()
+  dialog.getByTestId("qi-file-input")
 
 const clickQuickIngestTrigger = async (page: Page): Promise<void> => {
   const dialog = page.getByRole("dialog", { name: /quick ingest/i }).first()

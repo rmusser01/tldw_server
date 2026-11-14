@@ -58,17 +58,33 @@ vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
   useModeNavigationShortcuts: () => undefined
 }))
 vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => messageState }))
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (select: (state: { historyId: null; serverChatId: null }) => unknown) =>
-    select({ historyId: null, serverChatId: null })
-}))
+vi.mock('@/store/option', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/store/option')>();
+  const state = { ...actual.useStoreMessageOption.getState(), historyId: null, serverChatId: null };
+  return {
+    ...actual,
+    useStoreMessageOption: Object.assign(
+      (select: (value: typeof state) => unknown) => select(state),
+      {
+        getState: () => state,
+        subscribe: () => () => undefined,
+      }
+    ),
+  };
+});
 vi.mock("@/store/quick-chat", () => ({
   useQuickChatStore: () => ({ isOpen: false, setIsOpen: vi.fn() })
 }))
 vi.mock("@/hooks/useMigration", () => ({ useMigration: () => ({ isLoading: false }) }))
 vi.mock("@/hooks/useStorageMigrations", () => ({ useStorageMigrations: () => undefined }))
 vi.mock("@/hooks/useLayoutEffectsOwner", () => ({ useLayoutEffectsOwner: () => false }))
-vi.mock("@/hooks/useFeatureFlags", () => ({ useChatSidebar: () => [false] }))
+vi.mock("@/hooks/useFeatureFlags", async (importOriginal) => ({
+  // Spread the real module so shared help/empty-state components that read
+  // other flags (for example COMPARE_MODE) keep working; every flag reads off.
+  ...(await importOriginal<typeof import("@/hooks/useFeatureFlags")>()),
+  useFeatureFlag: () => [false, () => undefined, true],
+  useChatSidebar: () => [false]
+}))
 vi.mock("@/hooks/useMediaQuery", () => ({ useMobile: () => false }))
 vi.mock("@/hooks/useSetting", () => ({ useSetting: () => [""] }))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => undefined }))
@@ -130,7 +146,6 @@ vi.mock("@web/components/notifications/NotificationToastBridge", () => ({ Notifi
 vi.mock("@/components/Timeline", () => ({ TimelineModal: () => null }))
 vi.mock("@/components/Common/TutorialRunner", () => ({ TutorialRunner: () => null }))
 vi.mock("@/components/Common/TutorialPrompt", () => ({ TutorialPrompt: () => null }))
-vi.mock("@/components/Common/KeyboardShortcutsModal", () => ({ KeyboardShortcutsModal: () => null }))
 vi.mock("@/components/Common/PageHelpModal", () => ({
   PageHelpModal: () => <div role="dialog" aria-label="Page help">Help</div>
 }))

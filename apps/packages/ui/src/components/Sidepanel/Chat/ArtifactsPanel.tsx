@@ -7,7 +7,6 @@ import {
   Pin,
   PinOff,
   X,
-  PlayCircle,
   Table2
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
@@ -19,6 +18,7 @@ import { useStoreMessageOption } from "@/store/option"
 import { MermaidDiagramBlock } from "@/components/Common/MermaidDiagramBlock"
 import type { DataTable, DataTableColumn, DataTableSource } from "@/types/data-tables"
 import { queueDataTablesPrefill } from "@/utils/data-tables-prefill"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 const normalizeLanguage = (language?: string): string => {
   const lang = (language || "").toLowerCase()
@@ -206,7 +206,7 @@ export const ArtifactsPanel = () => {
     if (typeof document !== "undefined" && active?.id) {
       const origin = document.getElementById(`artifact-origin-${active.id}`)
       if (origin && typeof origin.scrollIntoView === "function") {
-        origin.scrollIntoView({ behavior: "smooth", block: "center" })
+        origin.scrollIntoView({ behavior: smoothScrollBehavior(), block: "center" })
         closeArtifact()
         focusArtifactsTrigger()
         return
@@ -321,31 +321,33 @@ export const ArtifactsPanel = () => {
               getTokenProps
             }) => (
               <pre
-                className={`${highlightClassName} m-0 rounded-xl bg-surface2/80 px-4 py-3 text-[0.85rem]`}
+                className={`${highlightClassName} m-0 overflow-x-auto rounded-xl bg-surface2/80 px-4 py-3 text-[0.85rem]`}
                 style={{
                   ...style,
                   fontFamily: "var(--font-mono)"
                 }}>
-                {tokens.map((line, i) => {
-                  const { key: _lineKey, ...lineProps } = getLineProps({
-                    line,
-                    key: i
-                  })
-                  return (
-                    <div key={i} {...lineProps} className="table w-full">
-                      <span className="table-cell select-none pr-3 text-right text-xs text-text-subtle">
-                        {i + 1}
-                      </span>
-                      <span className="table-cell whitespace-pre-wrap">
-                        {line.map((token, key) => {
-                          const { key: _tokenKey, ...tokenProps } =
-                            getTokenProps({ token, key })
-                          return <span key={key} {...tokenProps} />
-                        })}
-                      </span>
-                    </div>
-                  )
-                })}
+                <div className="table w-full">
+                  {tokens.map((line, i) => {
+                    const { key: _lineKey, ...lineProps } = getLineProps({
+                      line,
+                      key: i
+                    })
+                    return (
+                      <div key={i} {...lineProps} className="table-row">
+                        <span className="table-cell w-px min-w-[2ch] select-none pr-3 text-right text-xs text-text-subtle">
+                          {i + 1}
+                        </span>
+                        <span className="table-cell whitespace-pre">
+                          {line.map((token, key) => {
+                            const { key: _tokenKey, ...tokenProps } =
+                              getTokenProps({ token, key })
+                            return <span key={key} {...tokenProps} />
+                          })}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </pre>
             )}
           </Highlight>
@@ -386,13 +388,17 @@ export const ArtifactsPanel = () => {
           </pre>
         )}
       </div>
-      <div className="flex items-center gap-2 border-t border-border px-4 py-2">
+      <div
+        role="group"
+        aria-label={t("artifactsActions", "Artifact actions")}
+        className="flex flex-wrap items-center gap-2 border-t border-border px-4 py-2"
+      >
         <Tooltip title={t("artifactsJumpToSource", "Jump to source message")}>
           <button
             type="button"
             data-testid="artifacts-jump-source"
             onClick={handleJumpToSource}
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text hover:bg-surface"
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text hover:bg-surface"
             title={t("artifactsJumpToSource", "Jump to source message")}
           >
             <CornerUpLeft className="h-3 w-3" />
@@ -403,7 +409,7 @@ export const ArtifactsPanel = () => {
           <button
             type="button"
             onClick={handleCopy}
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text hover:bg-surface"
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text hover:bg-surface"
             title={t("artifactsCopy", "Copy")}
           >
             <CopyIcon className="h-3 w-3" />
@@ -414,7 +420,7 @@ export const ArtifactsPanel = () => {
           <button
             type="button"
             onClick={handleDownload}
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text hover:bg-surface"
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text hover:bg-surface"
             title={t("artifactsDownload", "Download")}
           >
             <DownloadIcon className="h-3 w-3" />
@@ -426,7 +432,7 @@ export const ArtifactsPanel = () => {
             <button
               type="button"
               onClick={handleSaveToDataTables}
-              className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text hover:bg-surface"
+              className="inline-flex items-center gap-1 whitespace-nowrap rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text hover:bg-surface"
               title={t("dataTables:saveFromArtifact", "Save to Data Tables")}
             >
               <Table2 className="h-3 w-3" />
@@ -434,15 +440,6 @@ export const ArtifactsPanel = () => {
             </button>
           </Tooltip>
         )}
-        <button
-          type="button"
-          disabled
-          className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted opacity-70"
-          title={t("artifactsRun", "Run (N/A)")}
-        >
-          <PlayCircle className="h-3 w-3" />
-          <span>{t("artifactsRun", "Run (N/A)")}</span>
-        </button>
       </div>
     </aside>
   )

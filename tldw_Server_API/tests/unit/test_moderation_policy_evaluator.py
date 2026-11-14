@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import re
 from dataclasses import FrozenInstanceError
 from typing import Any
@@ -104,20 +103,6 @@ def test_evaluation_limits_constructor_preserves_field_identities():
     assert limits.match_window_chars is match_window_chars
     assert limits.max_fallback_scan_chars is max_fallback_scan_chars
     assert limits.max_replacements_per_pattern is max_replacements_per_pattern
-
-
-def test_direct_policy_type_loader_and_evaluator_shape_are_literal():
-    descriptor = inspect.getattr_static(PolicyEvaluator, "policy_types")
-    evaluator = PolicyEvaluator()
-
-    assert isinstance(descriptor, staticmethod)
-    assert evaluator.policy_types() == (
-        ModerationPolicy,
-        PatternRule,
-        ModerationEvaluationResult,
-    )
-    assert evaluator.policy_types() is evaluator.policy_types()
-    assert vars(evaluator) == {}
 
 
 def test_direct_decision_evaluation_has_literal_result():

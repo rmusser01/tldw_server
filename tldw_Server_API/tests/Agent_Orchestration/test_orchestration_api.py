@@ -1987,3 +1987,236 @@ async def test_transition_nonexistent_task_raises(svc):
     """Transitioning a nonexistent task raises ValueError."""
     with pytest.raises(ValueError, match="Task 999 not found"):
         await svc.transition_task(999, TaskStatus.IN_PROGRESS)
+
+
+@pytest.mark.parametrize("with_reviewer", [False, True])
+async def test_native_dispatch_records_and_validates_streamed_answer(monkeypatch, tmp_path, with_reviewer):
+    """Native ACP end_turn replies carry the final answer in settled updates."""
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+    from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
+    from tldw_Server_API.app.services.admin_acp_sessions_service import ACPSessionStore
+
+    db = OrchestrationDB(user_id=1, db_dir=tmp_path)
+    project = db.create_project(name="Native public project")
+    task = db.create_task(
+        project.id,
+        title="Read public README",
+        description="Summarize README.md",
+        agent_type="opencode",
+        reviewer_agent_type="reviewer" if with_reviewer else None,
+    )
+    session_db = ACPSessionsDB(str(tmp_path / "sessions.db"))
+    store = ACPSessionStore(db=session_db)
+    completion = (
+        '<acp-task-completion>{"status":"completed","summary":"Selene tours Friday at six"}</acp-task-completion>'
+    )
+    review = '<acp-review-decision>{"approved":true,"feedback":"Source facts match"}</acp-review-decision>'
+
+    class NativeClient:
+        count = 0
+        raw_results = []
+
+        async def create_session(self, *_args, **_kwargs):
+            self.count += 1
+            return f"native-{self.count}"
+
+        async def prompt(self, session_id, _prompt, *, on_native_text=None):
+            if on_native_text is not None:
+                on_native_text(completion if session_id == "native-1" else review)
+            raw = {"stopReason": "end_turn", "usage": {"input_tokens": 3, "output_tokens": 5}}
+            self.raw_results.append(raw)
+            return raw
+
+    client = NativeClient()
+
+    async def get_store():
+        return store
+
+    async def get_client():
+        return client
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _uid: db)
+    monkeypatch.setattr(acp_mod, "get_acp_session_store", get_store)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store", get_store)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client", get_client)
+    try:
+        result = await orch_mod.dispatch_run(task.id, orch_mod.RunDispatchRequest(), user=_TestUser())
+        assert result["status"] == TaskStatus.COMPLETE  # nosec B101  # Pytest native response boundary assertion.
+        for index, text in enumerate([completion, review] if with_reviewer else [completion], 1):
+            record = await store.get_session(f"native-{index}")
+            assert [message["role"] for message in record.messages] == ["user", "assistant"]  # nosec B101  # Pytest native response boundary assertion.
+            assert record.messages[-1]["content"] == text  # nosec B101  # Pytest native response boundary assertion.
+            assert record.messages[-1]["raw_result"] == client.raw_results[index - 1]  # nosec B101  # Pytest native response boundary assertion.
+        assert all("content" not in raw for raw in client.raw_results)  # nosec B101  # Pytest native response boundary assertion.
+        detail = await orch_mod.get_task(task.id, user=_TestUser())
+        assert all(run["history"]["event_count"] == 2 for run in detail.runs)  # nosec B101  # Pytest native response boundary assertion.
+        if with_reviewer:
+            assert db.list_reviews(task.id)[0]["approved"] is True  # nosec B101  # Pytest native response boundary assertion.
+    finally:
+        db.close()
+        session_db.close()
+
+
+@pytest.mark.parametrize("close_fails", [False, True])
+async def test_native_dispatch_invalid_answer_is_retained_without_success(monkeypatch, tmp_path, close_fails):
+    """A native answer without a marker remains a failure with inspectable text."""
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+    from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
+    from tldw_Server_API.app.services.admin_acp_sessions_service import ACPSessionStore
+
+    db, task = await _build_dispatch_task(tmp_path)
+    session_db = ACPSessionsDB(str(tmp_path / "sessions.db"))
+    store = ACPSessionStore(db=session_db)
+
+    class NativeClient(_SuccessfulClient):
+        async def prompt(self, _sid, _prompt, *, on_native_text=None):
+            if on_native_text is not None:
+                on_native_text("I could not read the requested README.")
+            return {"stopReason": "end_turn"}
+
+        async def close_session(self, _sid):
+            if close_fails:
+                raise RuntimeError("runner still owns unsettled prompt")
+            return None
+
+    async def get_store():
+        return store
+
+    async def get_client():
+        return NativeClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _uid: db)
+    monkeypatch.setattr(acp_mod, "get_acp_session_store", get_store)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store", get_store)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client", get_client)
+    try:
+        with pytest.raises(HTTPException, match="ACP completion signal invalid"):
+            await orch_mod.dispatch_run(task.id, orch_mod.RunDispatchRequest(), user=_TestUser())
+        record = await store.get_session("session-private-1")
+        assert record.status == ("active" if close_fails else "closed")  # nosec B101  # Failed runs must release concurrent-session quota.
+        assert (await store.get_quota_status(1))["concurrent_sessions"]["current"] == int(close_fails)  # nosec B101  # Retained history must not consume active quota.
+        assert record.messages[-1]["content"] == "I could not read the requested README."  # nosec B101  # Pytest native response boundary assertion.
+        assert db.list_runs(task.id)[0].error == "completion_signal_invalid"  # nosec B101  # Pytest native response boundary assertion.
+        assert db.get_task(task.id).status == TaskStatus.TRIAGE  # nosec B101  # Pytest native response boundary assertion.
+    finally:
+        db.close()
+        session_db.close()
+
+
+@pytest.mark.parametrize(
+    "legacy",
+    [
+        {"content": "Legacy answer without a completion marker"},
+        {"text": '<acp-task-completion>{"status":"completed","summary":"Legacy"}</acp-task-completion>'},
+        {"taskCompletion": {"status": "rejected", "summary": "Legacy refusal"}},
+    ],
+)
+async def test_native_dispatch_preserves_authoritative_legacy_result(monkeypatch, legacy):
+    """Streamed text cannot replace or duplicate a legacy/direct result."""
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    native = '<acp-task-completion>{"status":"completed","summary":"Native"}</acp-task-completion>'
+    raw = {"stopReason": "end_turn", **legacy}
+    original = json.loads(json.dumps(raw))
+
+    class Client:
+        async def prompt(self, _sid, _prompt, *, on_native_text):
+            on_native_text(native)
+            return raw
+
+    recorder = AsyncMock()
+    monkeypatch.setattr(acp_mod, "_record_acp_prompt", recorder)
+    result = await orch_mod._prompt_with_history(Client(), "native", [{"role": "user", "content": "Read README"}])
+    assert raw == original  # nosec B101  # Pytest native response boundary assertion.
+    for key, value in legacy.items():
+        assert result[key] == value  # nosec B101  # Pytest native response boundary assertion.
+    if any(legacy.get(key) for key in ("content", "message", "output", "text")):
+        assert result is raw  # nosec B101  # Pytest native response boundary assertion.
+    else:
+        from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+            CompletionSignalValidationError,
+            validate_task_completion_signal,
+        )
+
+        with pytest.raises(CompletionSignalValidationError, match="rejected"):
+            validate_task_completion_signal(result)
+    assert recorder.await_args.kwargs["result"] is raw  # nosec B101  # Pytest native response boundary assertion.
+    assert recorder.await_args.kwargs["assistant_text"] == native  # nosec B101  # Pytest native response boundary assertion.
+
+
+@pytest.mark.parametrize("interrupted", ["cancelled", "error"])
+async def test_interrupted_native_dispatch_never_records_or_validates_partial_text(monkeypatch, interrupted):
+    """Only a successful settled prompt can supply a transcript candidate."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol as acp_mod
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+    from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
+
+    class Client:
+        async def prompt(self, _sid, _prompt, *, on_native_text):
+            on_native_text("Partial text must not be accepted")
+            if interrupted == "cancelled":
+                raise asyncio.CancelledError()
+            raise ACPResponseError("Disconnected before settlement")
+
+    recorder = AsyncMock()
+    monkeypatch.setattr(acp_mod, "_record_acp_prompt", recorder)
+    with pytest.raises(asyncio.CancelledError if interrupted == "cancelled" else ACPResponseError):
+        await orch_mod._prompt_with_history(Client(), "native", [{"role": "user", "content": "Read README"}])
+    recorder.assert_not_awaited()
+
+
+@pytest.mark.parametrize("direct", [False, True])
+@pytest.mark.parametrize("review", [False, True])
+async def test_cancelled_turn_cannot_supply_success_marker(direct, review):
+    from tldw_Server_API.app.core.Agent_Orchestration.completion_signals import (
+        CompletionSignalValidationError,
+        ReviewDecisionValidationError,
+        validate_review_decision_signal,
+        validate_task_completion_signal,
+    )
+
+    payload = {"approved": True} if review else {"status": "completed", "summary": "Partial work"}
+    key = "reviewDecision" if review else "taskCompletion"
+    tag = "acp-review-decision" if review else "acp-task-completion"
+    result = {"stopReason": "cancelled"}
+    result.update({key: payload} if direct else {"content": f"<{tag}>{json.dumps(payload)}</{tag}>"})
+    validate = validate_review_decision_signal if review else validate_task_completion_signal
+    error = ReviewDecisionValidationError if review else CompletionSignalValidationError
+    with pytest.raises(error) as caught:
+        validate(result)
+    assert caught.value.reason == "cancelled"  # nosec B101  # Pytest cancelled turn boundary.
+
+
+async def test_cancelled_dispatch_never_completes_task(monkeypatch, tmp_path):
+    from tldw_Server_API.app.api.v1.endpoints import agent_orchestration as orch_mod
+
+    db, task = await _build_dispatch_task(tmp_path)
+
+    class CancelledClient(_SuccessfulClient):
+        async def prompt(self, *_args, **_kwargs):
+            return {**(await super().prompt()), "stopReason": "cancelled"}
+
+    async def fake_store():
+        return _NoopSessionStore()
+
+    async def fake_client():
+        return CancelledClient()
+
+    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store", fake_store)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client", fake_client)
+    try:
+        with pytest.raises(HTTPException):
+            await orch_mod.dispatch_run(task.id, orch_mod.RunDispatchRequest(), user=_TestUser())
+        assert db.get_task(task.id).status == TaskStatus.TRIAGE  # nosec B101  # Pytest retained retryable state.
+        assert db.list_runs(task.id)[0].status.value == "failed"  # nosec B101  # Pytest no false completion.
+    finally:
+        db.close()

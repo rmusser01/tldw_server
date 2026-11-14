@@ -376,3 +376,40 @@ def test_function_definition_type_array():
     with pytest.raises(ValidationError) as exc_info:
         FunctionDefinition(name="invalid_union", parameters=invalid_union_params)
     assert "Invalid JSON Schema type" in str(exc_info.value)
+
+
+_REQUEST_SCHEMA_MODULES = (
+    "tldw_Server_API.app.api.v1.schemas.chat_request_schemas",
+    "tldw_Server_API.app.core.Chat.chat_request_schemas",
+)
+
+
+@pytest.mark.parametrize("module_name", _REQUEST_SCHEMA_MODULES)
+def test_api_keys_maps_are_gone(module_name):
+    import importlib
+
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+    chat_request_schemas = importlib.import_module(module_name)
+
+    assert not hasattr(chat_request_schemas, "API_KEYS")
+    assert not hasattr(chat_endpoint, "API_KEYS")
+
+
+_MOVED = ("DEFAULT_LLM_PROVIDER", "get_api_keys", "get_default_provider", "load_and_log_configs",
+          "is_test_mode", "_config", "_get_setting", "_config_default_llm_provider")
+
+
+@pytest.mark.parametrize("module_name", _REQUEST_SCHEMA_MODULES)
+def test_chat_request_schemas_has_no_config_names(module_name):
+    import importlib
+
+    chat_request_schemas = importlib.import_module(module_name)
+    assert [name for name in _MOVED if hasattr(chat_request_schemas, name)] == []
+
+
+def test_api_provider_description_names_no_provider():
+    assert ChatCompletionRequest.model_fields["api_provider"].description == (
+        "[Extension] The target LLM provider (e.g., 'openai', 'anthropic'). "
+        "If omitted, defaults to the server's configured default provider."
+    )

@@ -67,6 +67,8 @@ class RecordingConnection:
         if self._fail_on and self._fail_on in sql.lower():
             raise CharactersRAGDBError("injected statement failure")
         row = self._selected_row if sql.strip().lower().startswith("select") else None
+        if "AS can_migrate" in sql:
+            row = {"can_migrate": True}
         if "returning id" in sql.lower():
             row = {"id": self._next_id}
             self._next_id += 1
@@ -109,6 +111,11 @@ class StubDB:
         self._connections = list(connections)
         self._state = SimpleNamespace(tx_depth=0)
         self.query_calls = []
+        self.verified_dictionary_connections: list[RecordingConnection] = []
+
+    def _verify_dictionary_schema_postgres(self, conn: RecordingConnection) -> None:
+        """Stand in for database-owned catalog validation."""
+        self.verified_dictionary_connections.append(conn)
 
     def get_connection(self):
 
@@ -148,15 +155,15 @@ def _gather_sql(connection: RecordingConnection) -> str:
 
 
 @pytest.mark.unit
-def test_chat_dictionary_init_uses_postgres_friendly_schema():
+def test_chat_dictionary_init_verifies_registered_schema_without_request_ddl():
     init_conn = RecordingConnection()
     db = StubDB([init_conn])
 
     ChatDictionaryService(db)
 
     executed = _gather_sql(init_conn)
-    assert "autoincrement" not in executed
-    assert "serial" in executed
+    assert db.verified_dictionary_connections == [init_conn]
+    assert executed == ""
 
 
 @pytest.mark.unit

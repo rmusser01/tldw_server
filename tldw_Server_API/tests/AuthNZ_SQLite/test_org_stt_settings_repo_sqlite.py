@@ -9,8 +9,8 @@ pytest_plugins = ("tldw_Server_API.tests._plugins.authnz_full_fixtures",)
 
 
 @pytest.mark.asyncio
-async def test_org_stt_settings_repo_sqlite(tmp_path, monkeypatch) -> None:
-    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+async def test_org_stt_settings_repo_sqlite(tmp_path, monkeypatch, fresh_services) -> None:
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
     from tldw_Server_API.app.core.AuthNZ.repos.org_stt_settings_repo import (
         AuthnzOrgSttSettingsRepo,
@@ -23,7 +23,6 @@ async def test_org_stt_settings_repo_sqlite(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
 
     pool = await get_db_pool()
     ensure_authnz_tables(Path(str(db_path)))
@@ -97,4 +96,3 @@ async def test_org_stt_settings_repo_sqlite(tmp_path, monkeypatch) -> None:
 
     # Teardown singleton state to avoid polluting other tests
     reset_settings()
-    await reset_db_pool()

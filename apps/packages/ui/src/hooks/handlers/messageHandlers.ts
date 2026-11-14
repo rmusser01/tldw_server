@@ -1,6 +1,12 @@
+import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
+import { removeAcknowledgedServerMirrorMessage, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { nativeRegenerationFeedback } from "@/hooks/chat/native-character-preflight"
 import i18n from "i18next"
-import { getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
-import type { UploadedFile } from "@/db"
+import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
+
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
+import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser } from "@/utils/local-rag-diagnostic"
+import type { UploadedFile } from "@/db/dexie/types"
 import { commitLocalFork, prepareLocalFork } from "@/db/dexie/branch"
 import {
   type ForkDispatchClaim,
@@ -15,8 +21,16 @@ import {
   formatToMessage,
   updateMessageById
 } from "@/db/dexie/helpers"
+import type { HistoryEditAndSendBoundary } from "@/types/chat-modes"
+import { loadHistoryTurnRecoveries } from "@/db/dexie/history-selection"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import {
+  nativeHistoryMessagePayload,
+  nativeRegenerateView,
+  saveNativeHistoryMessage,
+  deleteNativeHistoryMessage,
+  assertHistoryConversationTarget,
   commitNativeFork,
   prepareNativeFork
 } from "@/services/chat-history-selection"
@@ -26,13 +40,21 @@ import type { ForkRequestV1, ForkResultV1 } from "@/types/history-selection"
 import { isGreetingMessageType } from "@/utils/character-greetings"
 import { isImageGenerationMessageType } from "@/utils/image-generation-chat"
 import type { NotificationInstance } from "antd/es/notification/interface"
-import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { chatSubmitSkipped, chatSubmitSubmitted, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 
-import { type ChatHistory, type Message } from "~/store/option"
+import { useStoreMessageOption, type ChatHistory, type Message } from "~/store/option"
+
+const editIssueDescription = (issue: unknown) => {
+  const copy = getMessageEditFeedback(issue)
+  const translated = i18n.t(`common:${copy.key}`, copy.fallback)
+  return typeof translated === "string" && translated.trim()
+    ? translated
+    : copy.fallback
+}
 
 /** Derive provider display history from the same visible identities after a successful mutation. */
 export const historyFromVisibleMessages = (messages: Message[]): ChatHistory =>
-  messages
+  excludeLocalRagDiagnostics(messages)
     .filter(
       (message) =>
         !isGreetingMessageType(message.messageType) &&
@@ -50,6 +72,9 @@ export const createRegenerateLastMessage = ({
   validateBeforeSubmitFn,
   history,
   messages,
+  getMessages,
+  captureViewFence,
+  captureSourceFence,
   setHistory,
   setMessages,
   onSubmit,
@@ -61,6 +86,9 @@ export const createRegenerateLastMessage = ({
   validateBeforeSubmitFn: () => boolean
   history: ChatHistory
   messages: Message[]
+  getMessages?: () => Message[]
+  captureViewFence?: () => () => boolean
+  captureSourceFence?: () => () => boolean
   setHistory: (history: ChatHistory) => void
   setMessages: (messages: Message[]) => void
   onSubmit: (params: any) => Promise<ChatSubmitResult | void>
@@ -75,22 +103,92 @@ export const createRegenerateLastMessage = ({
     userMessageType: Message["messageType"] | undefined
     newHistory: ChatHistory
     nextMessages: Message[]
+    dispatch?: { controller?: AbortController; assertCurrent?: () => void; actorSceneSend?: ActorSceneSend }
   }) => Promise<
     | {
         memory?: ChatHistory
         messages?: Message[]
         submitExtras?: Record<string, unknown>
+        actorSceneSend?: ActorSceneSend
+        assertCurrent?: () => void
       }
     | void
   >
 }) => {
-  return async () => {
+  const current = captureViewFence?.() ?? historySelection?.fence?.() ?? (() => true)
+  const sourceCurrent = captureSourceFence?.() ?? (() => true)
+  return async (dispatch?: { controller?: AbortController; assertCurrent?: () => void; actorSceneSend?: ActorSceneSend }) => {
+    let actorSceneSend = dispatch?.actorSceneSend
+    let assertCurrent = dispatch?.assertCurrent
+    const originalSceneIsCurrent = () => {
+      if (!actorSceneSend) return true
+      try {
+        assertCurrent?.()
+        return !dispatch?.controller?.signal.aborted && actorSceneSend.isCurrent()
+      } catch { return false }
+    }
+    dispatch?.controller?.signal.throwIfAborted()
+    dispatch?.assertCurrent?.()
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
+    if (!current() || !sourceCurrent()) return chatSubmitSkipped("stale_selection")
+    const busy = useStoreMessageOption.getState()
+    if (busy.streaming || busy.isProcessing) return chatSubmitSkipped("response_in_progress")
+    const origin = historySelection?.getCurrent()
+    if (origin?.status === "ready" && origin.owner?.kind === "native" &&
+        origin.view && origin.capture?.status === "captured") {
+      const reply = origin.capture.rows.at(-1)
+      const input = origin.capture.rows.at(-2)
+      const before = getMessages?.() ?? messages
+      const target = before.at(-1)
+      const question = before.at(-2)
+      const inputContent = origin.capture.selected_content.at(-2)
+      const replyContent = origin.capture.selected_content.at(-1)
+      if (!reply || !input || !target?.isBot || question?.isBot ||
+          (target.serverMessageId ?? target.id) !== reply.id || (question?.serverMessageId ?? question?.id) !== input.id ||
+          before.filter(row => (row.serverMessageId ?? row.id) === reply.id).length !== 1 ||
+          before.filter(row => (row.serverMessageId ?? row.id) === input.id).length !== 1 ||
+          target.message !== replyContent?.message || question?.message !== inputContent?.message ||
+          JSON.stringify(question.images ?? []) !== JSON.stringify(inputContent?.images ?? []))
+        return chatSubmitSkipped("message_changed")
+      const isCurrent = () => {
+        try {
+          dispatch?.assertCurrent?.()
+          return sourceCurrent() && !dispatch?.controller?.signal.aborted
+        } catch { return false }
+      }
+      const intent = {
+        owner_key: origin.view.owner_key, conversation_id: origin.view.conversation_id,
+        message_id: reply.id, message_revision: reply.revision,
+        input_message_id: input.id, input_message_revision: input.revision,
+        isCurrent, isOriginCurrent: () => current() && isCurrent()
+      }
+      nativeRegenerateView(origin.owner, origin.view, origin.capture, intent)
+      if (!validateBeforeSubmitFn()) return chatSubmitSkipped("validation_failed")
+      return await onSubmit({ message: inputContent!.message, image: inputContent!.images[0] ?? "", isRegenerate: true,
+        historyRegenerate: intent, controller: dispatch?.controller ?? new AbortController(),
+        actorSceneSend,
+        assertCurrent: () => { if (!intent.isOriginCurrent()) throw new Error("stale_selection") } })
+    }
+    if (origin?.status === "ready" && origin.owner?.kind === "local" && origin.view &&
+        origin.capture?.status === "captured") {
+      const answer = origin.capture.rows.at(-1)
+      const question = origin.capture.rows.at(-2)
+      const content = origin.capture.selected_content.at(-2)
+      if (!answer || answer.role !== "assistant" || !question || question.role !== "user" ||
+          (origin.view.interpretation.kind === "parent_graph_v1" && answer.parent_id !== question.id) ||
+          !content || content.images.length > 1) throw new Error("unsupported_history_regeneration")
+      if (!validateBeforeSubmitFn()) return chatSubmitSkipped("validation_failed")
+      return onSubmit({ ...dispatch, message: content.message, image: content.images[0] ?? "",
+        historyRegenerateBoundary: { answerId: answer.id, questionId: question.id,
+          questionRevision: question.revision, owner: origin.owner, originView: structuredClone(origin.view),
+          originIsCurrent: () => current() && sourceCurrent() && originalSceneIsCurrent() } })
+    }
     if (!allowOrdinaryRetry || historySelection) {
       const target = [...messages].reverse().find((row) => row.isBot && row.id)
       const error = Object.assign(new Error("unsupported_history_regeneration"), {
         boundary: target ? { kind: "before_message", message_id: target.id } : null
       })
-      notification?.error({ message: "Message action unavailable", description: error.message })
+      notification?.error({ message: "Message action unavailable", description: nativeRegenerationFeedback(error, (key, fallback) => String(i18n.t(key, fallback))) })
       throw error
     }
     if (typeof setHistory !== "function") {
@@ -156,16 +254,25 @@ export const createRegenerateLastMessage = ({
         userImage,
         userMessageType,
         newHistory,
-        nextMessages
+        nextMessages,
+        dispatch
       })) || {}
+    actorSceneSend = beforeSubmitResult.actorSceneSend ?? actorSceneSend
+    assertCurrent = beforeSubmitResult.assertCurrent ?? assertCurrent
+    dispatch?.controller?.signal.throwIfAborted()
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
+    assertCurrent?.()
     const submitHistory = beforeSubmitResult.memory ?? newHistory
     const submitMessages = beforeSubmitResult.messages ?? nextMessages
     const submitExtras = beforeSubmitResult.submitExtras ?? {}
 
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
     setHistory(submitHistory)
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
     setMessages(submitMessages)
+    if (!originalSceneIsCurrent()) return chatSubmitSkipped("actor_settings_scope_changed")
 
-    const newController = new AbortController()
+    const newController = dispatch?.controller ?? new AbortController()
     return await onSubmit({
       message: userContent,
       image: userImage,
@@ -175,96 +282,419 @@ export const createRegenerateLastMessage = ({
       controller: newController,
       messageType: userMessageType,
       regenerateFromMessage: submitExtras.serverChatIdOverride ? undefined : lastAssistant,
-      ...submitExtras
+      ...submitExtras,
+      ...(actorSceneSend ? { actorSceneSend } : {}),
+      assertCurrent
     })
   }
 }
 
-export const createEditMessage =
-  (options: {
-    messages: Message[]
-    history: ChatHistory
-    setMessages: (messages: Message[]) => void
-    setHistory: (history: ChatHistory) => void
-    historyId: string | null
-    validateBeforeSubmitFn: () => boolean
-    onSubmit: (params: any) => Promise<unknown>
-    captureViewFence?: () => () => boolean
-    mutate?: (target: Message, content: string) => Promise<void>
-    notification?: NotificationInstance
-  }) =>
-  async (index: number, message: string, isHuman: boolean, isSend: boolean) => {
+/** A retained confirmation belongs to its rendered H1 and draft source. */
+export const createNativeDeleteMessage = (options: {
+  messages: Message[]
+  getMessages: () => Message[]
+  historySelection?: HistorySelectionController | null
+  historyId: string | null
+  serverChatId?: string | null
+  captureSourceFence: () => () => boolean
+  notification: NotificationInstance
+  invalidateServerChatHistory: () => void
+}) => {
+  const selection = options.historySelection
+  const origin = selection?.getCurrent()
+  const viewCurrent = selection?.fence() ?? (() => false)
+  const sourceCurrent = options.captureSourceFence()
+  const canMutate = () => {
+    const state = useStoreMessageOption.getState()
+    return !state.streaming && !state.isProcessing
+  }
+  return async (index: number): Promise<boolean> => {
+    if (!viewCurrent() || !sourceCurrent()) return false
+    if (
+      !selection ||
+      origin?.status !== "ready" ||
+      origin.owner?.kind !== "native" ||
+      origin.capture?.status !== "captured"
+    )
+      throw new Error("native_history_mutation_unavailable")
+    if (!canMutate()) throw new Error("response_in_progress")
     const target = options.messages[index]
     if (!target?.id) throw new Error("missing_message")
-    // Capture the stable action boundary synchronously. Unsupported forms must not choose/truncate.
-    const boundary = { kind: "before_message", message_id: target.id } as const
-    if (isHuman && isSend) {
-      const error = new Error(
-        `unsupported_history_edit_and_send:${boundary.message_id}`
-      )
-      options.notification?.error({
-        message: "Message action unavailable",
-        description: error.message
+    const currentTargets = options
+      .getMessages()
+      .filter((row) => row.id === target.id)
+    if (
+      currentTargets.length !== 1 ||
+      currentTargets[0].message !== target.message
+    )
+      throw new Error("message_changed")
+    const current = () => sourceCurrent() && canMutate()
+    let acknowledged = false
+    try {
+      await assertHistoryConversationTarget(origin.owner, {
+        historyId: options.historyId,
+        serverChatId: options.serverChatId
       })
-      throw error
+      const receipt = await deleteNativeHistoryMessage(
+        origin.owner,
+        origin.capture,
+        {
+          ...target,
+          id: target.serverMessageId ?? target.id
+        },
+        {
+          signal: selection.getSignal(),
+          validate_lease: () => viewCurrent() && current()
+        }
+      )
+      acknowledged = true
+      if (!current() || !viewCurrent()) return false
+      options.invalidateServerChatHistory()
+      let mirrorFailed = false
+      if (options.historyId) {
+        try {
+          await removeAcknowledgedServerMirrorMessage({
+            historyId: options.historyId,
+            chatId: origin.owner.conversation_id,
+            serverMessageId: receipt.message_id,
+            ownerKey: serverChatMirrorOwnerKey({
+              requestScope: origin.owner.request_scope
+            }),
+            scope: origin.owner.scope ?? { type: "global" },
+            signal: selection.getSignal(),
+            validate_lease: () =>
+              viewCurrent() &&
+              current() &&
+              origin.owner!.kind === "native" &&
+              origin.owner.validate_lease()
+          })
+        } catch {
+          mirrorFailed = true
+        }
+      }
+      if (!viewCurrent() || !current()) return false
+      const refreshed = await selection.refreshDeletedMessage(
+        origin.capture,
+        receipt,
+        current
+      )
+      if (!refreshed?.isCurrent()) return false
+      if (refreshed.installed && !mirrorFailed) {
+        const reply = useStoreMessageOption.getState().replyTarget
+        if (reply?.id === target.id || reply?.id === receipt.message_id)
+          useStoreMessageOption.getState().clearReplyTarget()
+        return refreshed.isCurrent()
+      }
+      const copy = getMessageDeleteFeedback("message_delete_refresh_failed")
+      options.notification.warning({
+        message: i18n.t("common:deleted", "Deleted"),
+        description: i18n.t(`common:${copy.key}`, copy.fallback)
+      })
+      return false
+    } catch (error) {
+      if (!sourceCurrent() || !viewCurrent()) return false
+      const copy = getMessageDeleteFeedback(
+        acknowledged ? "message_delete_refresh_failed" : error
+      )
+      const description = i18n.t(`common:${copy.key}`, copy.fallback)
+      throw Object.assign(new Error(description), { cause: error })
+    }
+  }
+}
+
+// Local captures add display-adapter fields even for plain messages. Accept only
+// those known defaults; all other metadata still makes Edit-and-Send unavailable.
+const isPlainLocalEditMetadata = (metadata: unknown, targetName: string): boolean => {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false
+  const fields = metadata as Record<string, unknown>
+  if (Object.keys(fields).some((key) => !["sender_name", "sender_role", "local_history"].includes(key))) return false
+  if (fields.sender_role !== "user" ||
+    (fields.sender_name !== targetName && !(fields.sender_name === undefined && targetName === "You"))) return false
+  const local = fields.local_history
+  if (!local || typeof local !== "object" || Array.isArray(local)) return false
+  const history = local as Record<string, unknown>
+  const emptyDisplay = (value: unknown) => value == null || value === ""
+  if (Object.keys(history).some((key) => ![
+    "messageType", "sources", "search", "documents", "discoSkillComment",
+    "generationInfo", "reasoning_time_taken", "clusterId", "modelId",
+    "modelName", "modelImage"
+  ].includes(key))) return false
+  return emptyDisplay(history.messageType) &&
+    (history.sources == null || (Array.isArray(history.sources) && history.sources.length === 0)) &&
+    (history.search == null || history.search === false) &&
+    history.documents == null && history.discoSkillComment == null &&
+    history.generationInfo == null && history.reasoning_time_taken == null &&
+    emptyDisplay(history.clusterId) && emptyDisplay(history.modelId) &&
+    emptyDisplay(history.modelName) && emptyDisplay(history.modelImage)
+}
+
+export const createEditMessage = (options: {
+  messages: Message[]
+  getMessages?: () => Message[]
+  historySelection?: HistorySelectionController | null
+  history: ChatHistory
+  setMessages: (messages: Message[]) => void
+  setHistory: (history: ChatHistory) => void
+  historyId: string | null
+  validateBeforeSubmitFn: () => boolean
+  onSubmit: (params: any) => Promise<ChatSubmitResult | void>
+  serverChatId?: string | null
+  captureViewFence?: () => () => boolean
+  captureSourceFence?: () => () => boolean
+  mutate?: (target: Message, content: string) => Promise<void>
+  notification?: NotificationInstance
+}) => {
+  const current = options.captureViewFence?.() ?? (() => true)
+  const sourceCurrent = options.captureSourceFence?.() ?? (() => true)
+  const canMutate = () => {
+    const state = useStoreMessageOption.getState()
+    return !state.streaming && !state.isProcessing
+  }
+  return async (
+    index: number,
+    message: string,
+    isHuman: boolean,
+    isSend: boolean,
+    isEditorCurrent?: () => boolean,
+    isEditorOriginCurrent?: () => boolean
+  ): Promise<ChatSubmitResult> => {
+    if (!current() || !sourceCurrent())
+      return chatSubmitSkipped("stale_selection")
+    if (!canMutate()) return chatSubmitSkipped("response_in_progress")
+    const target = options.messages[index]
+    if (!target?.id) throw new Error("missing_message")
+    // Unsupported forms must not choose/truncate or mutate the captured stable target.
+    if (isHuman && isSend) {
+      const origin = options.historySelection?.getCurrent()
+      if (
+        origin?.status === "ready" &&
+        origin.owner?.kind === "native" &&
+        origin.view &&
+        origin.capture?.status === "captured" &&
+        isEditorCurrent?.()
+      ) {
+        const before = options.getMessages?.() ?? options.messages
+        const candidates = before.filter((row) => row.id === target.id)
+        const messageId = target.serverMessageId ?? target.id
+        const node = origin.capture.snapshot.nodes.find(
+          (row) => row.id === messageId
+        )
+        if (
+          candidates.length !== 1 ||
+          candidates[0].message !== target.message ||
+          node?.role !== "user"
+        )
+          return chatSubmitSkipped("message_changed")
+        nativeHistoryMessagePayload({
+          ...target,
+          id: messageId,
+          history_id: origin.view.conversation_id,
+          role: "user",
+          content: message,
+          createdAt: target.createdAt ?? Date.now()
+        })
+        if (!options.validateBeforeSubmitFn())
+          return chatSubmitSkipped("validation_failed")
+        const result = await options.onSubmit({
+          message,
+          image: target.images?.[0] ?? "",
+          historyEditResend: {
+            owner_key: origin.view.owner_key,
+            conversation_id: origin.view.conversation_id,
+            message_id: messageId,
+            message_revision: node.revision,
+            isCurrent: () => sourceCurrent() && isEditorCurrent(),
+            isOriginCurrent: () => current() && sourceCurrent()
+          },
+          assertCurrent: () => {
+            if (!current()) throw new Error("stale_selection")
+          }
+        })
+        if (result) return result
+        return chatSubmitSkipped("submission_unacknowledged")
+      }
+      const controller = options.historySelection
+      const localOrigin = controller?.getCurrent()
+      const localCurrent = controller?.fence()
+      const owner = localOrigin?.owner
+      const view = localOrigin?.view
+      const selectedTarget = localOrigin?.capture?.status === "captured"
+        ? localOrigin.capture.rows.find((row) => row.id === target.id && row.role === "user")
+        : undefined
+      const selectedContent = localOrigin?.capture?.status === "captured"
+        ? localOrigin.capture.selected_content.find((row) => row.id === target.id)
+        : undefined
+      const plainMetadata = owner?.kind === "local"
+        ? selectedContent !== undefined &&
+          isPlainLocalEditMetadata(target.metadataExtra, target.name) &&
+          isPlainLocalEditMetadata(selectedContent.extra_metadata, target.name)
+        : (!target.metadataExtra || Object.keys(target.metadataExtra).length === 0) &&
+          (!selectedContent?.extra_metadata || Object.keys(selectedContent.extra_metadata).length === 0)
+      if (
+        !controller || !localCurrent || !localOrigin ||
+        localOrigin.status !== "ready" || !owner || owner.kind !== "local" ||
+        !view || !localOrigin.bookmarkScope || !selectedTarget || !selectedContent ||
+        owner.validate_lease?.() === false ||
+        target.isBot || (target.role !== undefined && target.role !== "user") ||
+        target.message !== selectedContent.message ||
+        target.images?.length || target.documents || target.sources?.length ||
+        target.search || target.discoSkillComment || target.generationInfo ||
+        target.messageType || target.clusterId || target.modelId ||
+        target.modelName || target.modelImage || target.reasoning_time_taken != null ||
+        !plainMetadata ||
+        target.toolCalls?.length || target.toolResults?.length ||
+        selectedTarget.metadata?.length || selectedTarget.assets?.length ||
+        selectedTarget.comparison || selectedContent.images.length ||
+        selectedContent.tool_calls?.length
+      ) {
+        const error = new Error(`unsupported_history_edit_and_send:${target.id}`)
+        options.notification?.error({ message: "Message action unavailable", description: editIssueDescription(error) })
+        throw error
+      }
+      const editBoundary: HistoryEditAndSendBoundary = {
+        targetId: target.id, owner, originView: structuredClone(view),
+        originIsCurrent: () => localCurrent() && sourceCurrent() && (isEditorCurrent?.() ?? true)
+      }
+      const recoveries = await loadHistoryTurnRecoveries(localOrigin.bookmarkScope, view)
+      if (!localCurrent() || !sourceCurrent() || controller.getCurrent().owner !== owner ||
+          (isEditorCurrent && !isEditorCurrent())) throw new Error("stale_selection")
+      if (recoveries.some(({ turn }) => turn.owner_key === view.owner_key &&
+          turn.conversation_id === view.conversation_id && turn.outcome !== "complete"))
+        throw new Error("history_edit_reconciliation_required")
+      if (!options.validateBeforeSubmitFn()) return chatSubmitSkipped("validation_failed")
+      const result = await options.onSubmit({ message, image: "", historyEditBoundary: editBoundary })
+      return result ? result : chatSubmitSkipped("submission_unacknowledged")
+
+    }
+    const nativeOrigin = options.historySelection?.getCurrent()
+    if (nativeOrigin?.owner?.kind === "native") {
+      const selection = options.historySelection!
+      if (
+        nativeOrigin.status !== "ready" ||
+        nativeOrigin.capture?.status !== "captured" ||
+        !isEditorCurrent?.()
+      )
+        return chatSubmitSkipped("stale_selection")
+      const visible = options.getMessages?.() ?? options.messages
+      const candidates = visible.filter((row) => row.id === target.id)
+      if (candidates.length !== 1 || candidates[0].message !== target.message)
+        return chatSubmitSkipped("message_changed")
+      const editorCurrent = () =>
+        sourceCurrent() && canMutate() && isEditorCurrent()
+      const editorOriginCurrent = () =>
+        sourceCurrent() &&
+        canMutate() &&
+        (isEditorOriginCurrent?.() ?? isEditorCurrent())
+      let receipt: Awaited<ReturnType<typeof saveNativeHistoryMessage>>
+      try {
+        await assertHistoryConversationTarget(nativeOrigin.owner, {
+          historyId: options.historyId,
+          serverChatId: options.serverChatId
+        })
+        receipt = await saveNativeHistoryMessage(
+          nativeOrigin.owner,
+          nativeOrigin.capture,
+          { ...target, id: target.serverMessageId ?? target.id },
+          message,
+          {
+            signal: selection.getSignal(),
+            validate_lease: () => current() && editorCurrent(),
+            acknowledgement_current: () => current() && editorOriginCurrent()
+          }
+        )
+      } catch (error) {
+        if (!current() || !editorOriginCurrent())
+          return chatSubmitSkipped("stale_selection")
+        options.notification?.error({
+          message: "Message edit failed",
+          description: editIssueDescription(error)
+        })
+        throw error
+      }
+      if (!current() || !editorOriginCurrent())
+        return chatSubmitSkipped("stale_selection")
+      const installed = await selection.refreshEditedMessage(
+        nativeOrigin.capture,
+        receipt,
+        editorOriginCurrent
+      )
+      return installed && editorOriginCurrent()
+        ? chatSubmitSubmitted()
+        : chatSubmitSkipped("submission_unacknowledged")
     }
     if (!options.historyId && !options.mutate)
       throw new Error("temporary_history_unavailable")
-    const current = options.captureViewFence?.() ?? (() => true)
+    const before = options.getMessages?.() ?? options.messages
+    const candidates = before.filter((row) => row.id === target.id)
+    if (candidates.length !== 1 || candidates[0].message !== target.message)
+      return chatSubmitSkipped("message_changed")
     try {
       if (options.mutate) await options.mutate(target, message)
       else await updateMessageById(options.historyId!, target.id, message)
     } catch (error) {
-      options.notification?.error({
-        message: "Message edit failed",
-        description:
-          error instanceof Error ? error.message : "message_edit_failed"
-      })
+      if (current())
+        options.notification?.error({
+          message: "Message edit failed",
+          description: editIssueDescription(error)
+        })
       throw error
     }
-    if (!current()) return
-    const updated = options.messages.map((row) =>
+    if (!current()) return chatSubmitSkipped("stale_selection")
+    const visible = options.getMessages?.() ?? options.messages
+    const currentTargets = visible.filter((row) => row.id === target.id)
+    if (
+      currentTargets.length !== 1 ||
+      (currentTargets[0].message !== target.message &&
+        currentTargets[0].message !== message)
+    )
+      return chatSubmitSkipped("message_changed")
+    const updated = visible.map((row) =>
       row.id === target.id ? { ...row, message } : row
     )
     options.setMessages(updated)
+    if (!current()) return chatSubmitSkipped("stale_selection")
     options.setHistory(historyFromVisibleMessages(updated))
+    return current()
+      ? chatSubmitSubmitted()
+      : chatSubmitSkipped("stale_selection")
   }
+}
 
 export const createBranchMessage =
   (options: {
-    setMessages: (messages: Message[]) => void
-    setHistory: (history: ChatHistory) => void
-    historyId: string | null
-    setHistoryId: (id: string | null) => void
-    setSelectedSystemPrompt?: (prompt: string) => void
-    setSystemPrompt?: (prompt: string) => void
-    setContext?: (context: UploadedFile[]) => void
-    serverChatId?: string | null
-    scope?: ChatScope
-    setServerChatId?: (id: string | null) => void
-    setServerChatState?: (state: ConversationState | null) => void
-    setServerChatVersion?: (version: number | null) => void
-    setServerChatTitle?: (title: string | null) => void
-    setServerChatCharacterId?: (id: string | number | null) => void
-    setServerChatMetaLoaded?: (loaded: boolean) => void
-    setServerChatTopic?: (topic: string | null) => void
-    setServerChatClusterId?: (clusterId: string | null) => void
-    setServerChatSource?: (source: string | null) => void
-    setServerChatExternalRef?: (ref: string | null) => void
-    characterId?: string | number | null
-    chatTitle?: string | null
-    serverChatState?: ConversationState | null
-    serverChatTopic?: string | null
-    serverChatClusterId?: string | null
-    serverChatSource?: string | null
-    serverChatExternalRef?: string | null
-    messages?: Message[]
-    history?: ChatHistory
-    onServerChatMutated?: () => void
-    serverOnly?: boolean
-    historySelection?: HistorySelectionController | null
-    onOpened?: (childId: string) => void
-    notification: NotificationInstance
+    setMessages: (messages: Message[]) => void;
+    setHistory: (history: ChatHistory) => void;
+    historyId: string | null;
+    setHistoryId: (id: string | null) => void;
+    setSelectedSystemPrompt?: (prompt: string) => void;
+    setSystemPrompt?: (prompt: string) => void;
+    setContext?: (context: UploadedFile[]) => void;
+    serverChatId?: string | null;
+    scope?: ChatScope;
+    setServerChatId?: (id: string | null) => void;
+    setServerChatState?: (state: ConversationState | null) => void;
+    setServerChatVersion?: (version: number | null) => void;
+    setServerChatTitle?: (title: string | null) => void;
+    setServerChatCharacterId?: (id: string | number | null) => void;
+    setServerChatMetaLoaded?: (loaded: boolean) => void;
+    setServerChatTopic?: (topic: string | null) => void;
+    setServerChatClusterId?: (clusterId: string | null) => void;
+    setServerChatSource?: (source: string | null) => void;
+    setServerChatExternalRef?: (ref: string | null) => void;
+    characterId?: string | number | null;
+    chatTitle?: string | null;
+    serverChatState?: ConversationState | null;
+    serverChatTopic?: string | null;
+    serverChatClusterId?: string | null;
+    serverChatSource?: string | null;
+    serverChatExternalRef?: string | null;
+    messages?: Message[];
+    history?: ChatHistory;
+    onServerChatMutated?: (isCurrent: () => boolean) => void | Promise<void>;
+    serverOnly?: boolean;
+    historySelection?: HistorySelectionController | null;
+    onOpened?: (childId: string) => void;
+    notification: NotificationInstance;
 
     captureViewFence?: () => () => boolean
   }) =>
@@ -274,6 +704,7 @@ export const createBranchMessage =
       owner_key: request.owner_key
     }
     const current = options.captureViewFence?.() ?? (() => true)
+    const acceptDraft = captureChatDraftLoad("switch")
     const origin = options.historySelection?.getCurrent?.()
     const native = origin?.owner?.kind === "native" ? origin.owner : null
     if ((options.serverChatId || options.serverOnly) && !native)
@@ -294,12 +725,31 @@ export const createBranchMessage =
     )
       return {
         ...binding,
-        state: "rejected",
-        code: "owner_conversation_mismatch"
+        state: 'rejected',
+        code: 'owner_conversation_mismatch',
+      };
+    const account = options.historySelection?.draftAccount;
+    const accountIsCurrent =
+      native &&
+      account?.requestScope &&
+      serverChatMirrorOwnerKey({ requestScope: native.request_scope }) ===
+        serverChatMirrorOwnerKey({ requestScope: account.requestScope })
+        ? account.isCurrent
+        : () => false;
+    const notifyServerMutation = () => {
+      if (!accountIsCurrent() || !options.onServerChatMutated) return;
+      try {
+        void Promise.resolve(options.onServerChatMutated(accountIsCurrent)).catch(() =>
+          console.warn('Could not refresh the server conversation list.')
+        );
+      } catch {
+        console.warn('Could not refresh the server conversation list.');
       }
-    let observed: ForkResultV1 | undefined
-    let outcomeRecorded = false
-    let claim: ForkDispatchClaim | null = null
+    };
+    let candidateChild: string | undefined;
+    let observed: ForkResultV1 | undefined;
+    let outcomeRecorded = false;
+    let claim: ForkDispatchClaim | null = null;
     try {
       const operation = await prepareForkOperation(request, {
         kind: native ? "native" : "local",
@@ -320,25 +770,33 @@ export const createBranchMessage =
       const result = native
         ? await commitNativeFork(
             prepared as Awaited<ReturnType<typeof prepareNativeFork>>,
-            (childId) => recordForkCandidate(claim!, childId)
+            async (childId) => {
+              candidateChild = childId;
+              notifyServerMutation();
+              await recordForkCandidate(claim!, childId);
+            }
           )
-        : await commitLocalFork(
-            prepared as Awaited<ReturnType<typeof prepareLocalFork>>
-          )
-      observed = result
-      await finishForkOperation(claim, result)
-      outcomeRecorded = true
+        : await commitLocalFork(prepared as Awaited<ReturnType<typeof prepareLocalFork>>);
+      observed = result;
       if (
-        (result.state !== "committed" && result.state !== "legacy_completed") ||
-        !current()
+        native &&
+        candidateChild &&
+        result.operation_id === binding.operation_id &&
+        result.owner_key === binding.owner_key &&
+        ((result.state === 'legacy_completed' && result.child_id === candidateChild) ||
+          (result.state === 'partial' && result.candidate_child_id === candidateChild))
       )
-        return result
-      const controller = options.historySelection
-      if (!controller) return result
+        notifyServerMutation();
+      await finishForkOperation(claim, result);
+      outcomeRecorded = true;
+      if ((result.state !== 'committed' && result.state !== 'legacy_completed') || !current())
+        return result;
+      const controller = options.historySelection;
+      if (!controller) return result;
       await controller.loadConversation(
         native
-          ? { serverChatId: result.child_id, scope: native.scope }
-          : { historyId: result.child_id },
+          ? { serverChatId: result.child_id, scope: native.scope, isCurrent: acceptDraft.isCurrent }
+          : { historyId: result.child_id, isCurrent: acceptDraft.isCurrent },
         undefined,
         (receipt) => {
           const live = controller.getCurrent()
@@ -367,6 +825,7 @@ export const createBranchMessage =
                 actual.workspaceId !== expected.workspaceId)
             )
               return
+            if (!acceptDraft(receipt)) return
             options.setHistoryId(null)
             options.setContext?.([])
             options.setSelectedSystemPrompt?.("")
@@ -377,6 +836,7 @@ export const createBranchMessage =
             return
           }
           const local = prepared as Awaited<ReturnType<typeof prepareLocalFork>>
+          if (!acceptDraft(receipt)) return
           options.setHistory(formatToChatHistory(local.messages))
           options.setMessages(formatToMessage(local.messages))
           options.setContext?.(local.files?.files ?? [])

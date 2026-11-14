@@ -36,7 +36,7 @@ Execute the character-chat intent-preservation work package: preserve the select
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented selected-character intent preservation for row-level full character chat. The Characters row action now stores the selected character before readiness checks and uses the shared character-chat readiness contract before navigating.
 
 Added a local character-chat setup blocker in CharacterDialogs for missing chat-model readiness. It names the selected character and offers Open model settings, Retry character chat, and Return to character actions.
@@ -54,7 +54,7 @@ Verification: git diff --check passed.
 Typecheck: ../../tldw-frontend/node_modules/.bin/tsc --noEmit -p tsconfig.json remains blocked by known UI baseline errors. Filtered output for touched files still reports pre-existing tuple mock typing, CharacterDialogs parse-error translation typing, notification duration typing, and tag option typing; no new diagnostics point at the intent-blocker lines.
 
 Bandit: not applicable because this package only changes frontend TypeScript/React code and docs/backlog records.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

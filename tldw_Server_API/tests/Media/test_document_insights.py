@@ -385,3 +385,33 @@ async def test_generate_document_insights_sanitizes_missing_api_key(mock_user, m
     assert "openai" not in rendered_calls
 
     app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_generate_document_insights_passes_an_llm_quota_refusal_through(mock_user, mock_db):
+    """The refusal from the provider call keeps its 402; it is not reported as an LLM service error (spec §4b)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    class _RefusingAdapter:
+        def chat(self, _request, **_kwargs):
+            """Refuse, as the provider method does for a user over the LLM quota."""
+            raise LLMQuotaExceededError(
+                category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+            )
+
+    app.dependency_overrides[get_request_user] = lambda: mock_user
+    app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
+    with (
+        patch.object(insights_mod, "_get_adapter", return_value=_RefusingAdapter()),
+        patch.object(insights_mod, "resolve_provider_api_key", return_value=("key", None)),
+        patch.object(insights_mod, "provider_requires_api_key", return_value=False),
+        patch.object(insights_mod, "_resolve_model", return_value="test-model"),
+        patch.object(insights_mod, "get_cached_response", return_value=None),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/v1/media/1/insights")
+
+    app.dependency_overrides.clear()
+    assert_llm_quota_402(response)

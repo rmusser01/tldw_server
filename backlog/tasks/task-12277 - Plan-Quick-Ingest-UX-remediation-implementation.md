@@ -36,7 +36,7 @@ Create an implementation plan from the approved Quick Ingest UX Remediation Stag
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-16-quick-ingest-ux-remediation-implementation-plan.md using the writing-plans required header and the approved design spec as input.
 
 Plan includes active quick-ingest file map, candidate helper boundaries, launch surfaces, shared services/stores, current tests/e2e helpers, and a Stage 1 active-path map artifact.
@@ -46,7 +46,7 @@ Plan decomposes the remediation into seven tasks: active-path/test classificatio
 Local verification for the plan artifact: rg found no TODO/TBD/Open Questions/open question placeholders; git diff --check passed for the plan and Backlog files; heading/task scan confirmed required header and Task 1-7 structure. Bandit is not applicable because no code was changed.
 
 Plan-document-reviewer subagent was not dispatched because current session tool policy only permits delegated subagents when the user explicitly asks for them. This skip is recorded here for transparency; a future user can request a plan-review subagent before execution if desired.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

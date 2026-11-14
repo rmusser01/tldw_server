@@ -37,7 +37,7 @@ Migrate the remaining Character/Persona product-state AntD Alert usages to the c
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting from origin/dev in .worktrees/design-system-next-state-slice on branch codex/design-system-next-state-slice.
 
 RED: focused Character alert tests failed because titles had no data-ds-component="Alert" ancestor while components still used AntD Alert.
@@ -59,7 +59,7 @@ Verification:
 - git diff --check => exit 0.
 
 Bandit: skipped because this slice only changes TypeScript/TSX frontend and Backlog.md task metadata; no Python code touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

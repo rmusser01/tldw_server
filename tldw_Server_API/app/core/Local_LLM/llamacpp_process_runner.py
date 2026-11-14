@@ -11,7 +11,6 @@ import signal
 
 # Used without shell for managed llama-server process control.
 import subprocess  # nosec B404
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -316,7 +315,7 @@ class LlamaCppProcessRunner:
         """Return the current observed runtime state."""
         process = self._process
         if process is not None and process.returncode is None:
-            state = LlamaCppRuntimeState.RUNNING
+            state = LlamaCppRuntimeState.RUNNING if self._health.get("ready") is True else LlamaCppRuntimeState.STARTING
             pid = process.pid
             exit_code = None
         elif self._failed:
@@ -598,10 +597,9 @@ class LlamaCppProcessRunner:
         create_kwargs: dict[str, Any] = {"stdout": stdout_target, "stderr": stderr_target}
         if platform.system() == "Windows":
             create_kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        elif sys.version_info >= (3, 11):
-            create_kwargs["process_group"] = 0
         else:
-            create_kwargs["preexec_fn"] = os.setsid
+            # uvloop supports sessions but rejects asyncio's process_group keyword.
+            create_kwargs["start_new_session"] = True
         task = asyncio.create_task(asyncio.create_subprocess_exec(*command, **create_kwargs))
         try:
             return await asyncio.shield(task)

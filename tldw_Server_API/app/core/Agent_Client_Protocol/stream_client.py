@@ -34,6 +34,7 @@ class ACPStreamClient:
         if self.rpc_timeout_sec is None:
             self.rpc_timeout_sec = ACP_DEFAULT_RPC_TIMEOUT_SECONDS
         self._pending: dict[str, asyncio.Future] = {}
+        self._response_observers: dict[str, Callable[[], None]] = {}
         self._next_id = 1
         self._write_lock = asyncio.Lock()
         self._buffer = bytearray()
@@ -57,7 +58,10 @@ class ACPStreamClient:
         self._running = False
         self._drain_pending("ACP connection closed")
 
-    async def call(self, method: str, params: Any | None = None) -> ACPMessage:
+    async def call(
+        self, method: str, params: Any | None = None, *, timeout_sec: float | None = None,
+        on_response_received: Callable[[], None] | None = None,
+    ) -> ACPMessage:
         if not self._running:
             raise ACPResponseError("ACP stream not running")
 
@@ -65,6 +69,8 @@ class ACPStreamClient:
         self._next_id += 1
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._pending[str(request_id)] = future
+        if on_response_received is not None:
+            self._response_observers[str(request_id)] = on_response_received
 
         payload = {
             "jsonrpc": "2.0",
@@ -74,14 +80,16 @@ class ACPStreamClient:
         }
         try:
             await self._send(payload)
-            if self.rpc_timeout_sec > 0:
-                resp = await asyncio.wait_for(future, timeout=self.rpc_timeout_sec)
+            effective_timeout = self.rpc_timeout_sec if timeout_sec is None else float(timeout_sec)
+            if effective_timeout > 0:
+                resp = await asyncio.wait_for(future, timeout=effective_timeout)
             else:
                 resp = await future
         except asyncio.TimeoutError as exc:
             raise ACPResponseError(f"ACP call timed out waiting for {method}", code=-32000) from exc
         finally:
             self._pending.pop(str(request_id), None)
+            self._response_observers.pop(str(request_id), None)
         if resp.error:
             raise ACPResponseError(
                 resp.error.get("message", "ACP error"),
@@ -148,6 +156,9 @@ class ACPStreamClient:
             if msg.id is not None:
                 future = self._pending.pop(str(msg.id), None)
                 if future and not future.done():
+                    observer = self._response_observers.pop(str(msg.id), None)
+                    if observer is not None:
+                        observer()
                     future.set_result(msg)
 
     async def _handle_request(self, msg: ACPMessage) -> None:

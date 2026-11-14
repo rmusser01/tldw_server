@@ -117,8 +117,9 @@ export const buildWebNotificationScopeKey = (): string => {
 
 const hasMissingConfiguredAuth = (): boolean => {
   const config = getEffectiveStoredTldwConfig()
-  return config?.authMode === "multi-user" &&
-    config.authSource !== "cookie-session" && !getApiBearer()
+  if (config?.authSource === "cookie-session") return false
+  return (config?.authMode === "multi-user" && !getApiBearer()) ||
+    (config?.authMode === "single-user" && !getApiKey())
 }
 
 export const useOptionalNotificationLifecycle = (): NotificationLifecycleContextValue | null =>
@@ -165,6 +166,7 @@ export function NotificationLifecycleProvider({
   const pollTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
   const requestAbortRef = React.useRef<AbortController | null>(null)
   const effectSetupSeenRef = React.useRef(false)
+  const documentRetiredRef = React.useRef(false)
   const observedCredentialsRef = React.useRef({
     bearer: getSessionAccessToken() || getApiBearer(),
     apiKey: getApiKey(),
@@ -245,7 +247,7 @@ export function NotificationLifecycleProvider({
         ? { state: "auth-required" as const }
         : !connectionVerified ? { state: unverifiedState } : {})
     })
-    if (!enabled || !connectionVerified || missingCredentials ||
+    if (!enabled || !connectionVerified || missingCredentials || documentRetiredRef.current ||
       (typeof document !== "undefined" && document.visibilityState === "hidden")) return
     const requestAbort = new AbortController()
     requestAbortRef.current = requestAbort
@@ -421,8 +423,24 @@ export function NotificationLifecycleProvider({
         void startWork()
       }
     }
+    const onPageHide = () => {
+      documentRetiredRef.current = true
+      generationRef.current += 1
+      stopWork()
+    }
+    const onPageShow = () => {
+      if (!documentRetiredRef.current) return
+      documentRetiredRef.current = false
+      if (!terminalStateRef.current) void startWork()
+    }
     document.addEventListener("visibilitychange", onVisibilityChanged)
-    return () => document.removeEventListener("visibilitychange", onVisibilityChanged)
+    window.addEventListener("pagehide", onPageHide)
+    window.addEventListener("pageshow", onPageShow)
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChanged)
+      window.removeEventListener("pagehide", onPageHide)
+      window.removeEventListener("pageshow", onPageShow)
+    }
   }, [startWork, stopWork])
 
   React.useEffect(() => {

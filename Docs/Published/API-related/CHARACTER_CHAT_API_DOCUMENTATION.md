@@ -383,6 +383,18 @@ With `format_for_completions=true&include_character_context=true&include_message
 
 When `include_metadata=true`, the response also includes a top-level `metadata_extra` object keyed by `message_id`, containing stored JSON sidecar data.
 
+Assistant replies that the server saved itself (`POST /api/v1/chat/completions` with `save_to_db: true`) carry generation metadata in that sidecar:
+
+| Key | Meaning |
+|---|---|
+| `generation_status` | How the reply ended: `complete`, `length` (the model hit its output-token limit), `interrupted` (the client disconnected or the provider failed mid-stream; the content is the partial reply), `stopped` (a stop signal ended generation; the content is the partial reply) or `error` (reserved for imported replies). |
+| `model_id` | The model the request resolved to. |
+| `provider` | The provider that produced the reply. |
+| `finish_reason` | The provider's finish reason, when it reported one. |
+| `usage` | Provider-reported `prompt_tokens`, `completion_tokens` and `total_tokens`, when available. |
+
+Partial replies (`interrupted`, `stopped`) are kept only for turns sent with `tldw_history_selection_v1`. Replies saved before this metadata existed have none of these keys.
+
 ### Get Chat Context (compact)
 
 Return compact context for a chat, including character name and messages formatted for completions when available.
@@ -466,7 +478,7 @@ This endpoint supports:
 - Conversation history
 - Ephemeral or persistent operation (see `save_to_db` below)
 
-Streaming behavior follows the core Chat API: the server sends an initial `event: stream_start`, emits delta chunks as OpenAI-style `choices[].delta.content`, and terminates with a single `data: [DONE]` (heartbeat comments are sent periodically). Duplicate terminal markers are suppressed.
+Streaming behavior follows the core Chat API: the server sends an initial `event: stream_start`, emits delta chunks as OpenAI-style `choices[].delta.content`, and terminates with a single `data: [DONE]` (heartbeat comments are sent periodically). Duplicate terminal markers are suppressed. A usage chunk with empty `choices` is sent only to a client that asks for one, as the Chat API documentation describes.
 
 ### Workflow for Character Chat Completions
 
@@ -598,6 +610,7 @@ When `stream=true` and the provider supports streaming, the server emits Server-
 
 - Each chunk is sent as a line prefixed with `data: `, followed by a blank line (SSE framing).
 - If the upstream provider already emits SSE-formatted lines (beginning with `data:`), they are forwarded as-is.
+- OpenAI's usage chunk is the exception. The server asks OpenAI (`api.openai.com` and its data-residency hosts) for it and costs the stream from it, but this request cannot ask for it, so it is not sent: no line with an empty `choices` array and a usage block reaches the client. Every other OpenAI chunk carries `"usage": null`, as in OpenAI's own streams.
 - Exactly one terminal marker is sent at the end: `data: [DONE]`. Duplicate terminal markers are suppressed.
 - On transform/iteration errors mid-stream, an error payload is sent and the stream still terminates with `data: [DONE]`.
 

@@ -25,6 +25,7 @@ vi.mock("@/services/prompt-studio", () => ({
   createProject: (...args: unknown[]) => mocks.createProject(...args)
 }))
 vi.mock("@/services/prompt-studio-settings", () => ({
+  getPromptStudioDefaultsForOwner: (...args: unknown[]) => mocks.defaults(...args),
   getPromptStudioDefaults: (...args: unknown[]) => mocks.defaults(...args),
   setPromptStudioDefaults: vi.fn()
 }))
@@ -54,6 +55,11 @@ vi.mock("@/db/dexie/schema", () => ({
       },
       where: (field: string) => ({
         equals: (value: unknown) => ({
+          filter: (predicate: (row: Record<string, unknown>) => boolean) => ({
+            first: async () => [...mocks.rows.values()].find(
+              row => row[field] === value && predicate(row)
+            )
+          }),
           first: async () =>
             [...mocks.rows.values()].find((row) => row[field] === value)
         })
@@ -81,6 +87,7 @@ const response = () => ({
 const seed = (linked = false) =>
   mocks.rows.set("exact-id", {
     id: "exact-id",
+    ownerId: ownerB,
     title: "Recipe",
     syncStatus: linked ? "conflict" : "local",
     promptFormat: "structured",
@@ -213,6 +220,7 @@ describe("owner-aware sync and exact reconciliation", () => {
   })
   beforeEach(async () => {
     vi.clearAllMocks()
+    vi.spyOn(registry, "resolveRecipePersistenceOwnerView").mockResolvedValue({ ownerId: ownerB, authorizationRevision: "test-owner" })
     mocks.rows.clear()
     mocks.defaults.mockResolvedValue({
       defaultProjectId: 42,
@@ -509,7 +517,7 @@ describe("owner-aware sync and exact reconciliation", () => {
       recipeWriteBlocked: true
     })
     expect(mocks.rows.get("exact-id")).toMatchObject({
-      name: "Reconciled",
+      title: "Recipe",
       syncStatus: "error",
       serverId: 101,
       studioProjectId: 42
@@ -523,9 +531,74 @@ describe("owner-aware sync and exact reconciliation", () => {
     ).toBe("scoped")
   })
 
+  it.each(["owner", "link", "schema"] as const)(
+    "legacy pull preserves a replaced %s while GET is pending", async field => {
+      seed(true)
+      Object.assign(mocks.rows.get("exact-id"), {
+        promptFormat: "legacy", promptSchemaVersion: null,
+        structuredPromptDefinition: null
+      })
+      let replacement: Record<string, unknown>
+      mocks.get.mockImplementationOnce(async () => {
+        Object.assign(mocks.rows.get("exact-id"), field === "owner"
+          ? { ownerId: ownerA }
+          : field === "link"
+            ? { serverId: 202, studioProjectId: 77, studioPromptId: 202 }
+            : { promptFormat: "structured", promptSchemaVersion: 2,
+                structuredPromptDefinition: CLEAR_TASK_RECIPE.definition })
+        replacement = structuredClone(mocks.rows.get("exact-id"))
+        return { ...response(), data: { success: true, data: {
+          ...server, prompt_format: "legacy", prompt_schema_version: null,
+          prompt_definition: null
+        } } }
+      })
+      expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({ success: false })
+      expect(mocks.rows.get("exact-id")).toEqual(replacement!)
+    }
+  )
+
+  it.each([
+    ["get", "owner"], ["get", "link"],
+    ["lease", "owner"], ["lease", "link"],
+    ["copy", "owner"], ["copy", "link"],
+    ["final", "owner"], ["final", "link"]
+  ] as const)("pull preserves a replaced %s-stage %s", async (stage, field) => {
+    seed(true)
+    mocks.rows.get("exact-id").syncStatus = "error"
+    let replacement: Record<string, unknown>
+    const replace = () => {
+      Object.assign(mocks.rows.get("exact-id"), field === "owner"
+        ? { ownerId: ownerA }
+        : { serverId: 202, studioProjectId: 77, studioPromptId: 202 })
+      replacement = structuredClone(mocks.rows.get("exact-id"))
+    }
+    const reconcile = registry.reconcileRecipePersistenceExact
+    const delayedLease = vi.spyOn(registry, "reconcileRecipePersistenceExact")
+      .mockImplementationOnce(async (...args) => {
+        if (stage === "lease") replace()
+        return reconcile(...args)
+      })
+    mocks.get.mockImplementationOnce(async () => {
+      if (stage === "get") replace()
+      return response()
+    })
+    if (stage === "copy") mocks.reconcile.mockImplementationOnce(replace)
+    if (stage === "final") mocks.reconcile
+      .mockResolvedValueOnce(undefined).mockImplementationOnce(replace)
+    try {
+      expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({ success: false })
+      expect(mocks.rows.get("exact-id")).toEqual(replacement!)
+      expect(await registry.readRecipePersistenceUncertainty("exact-id", ownerB))
+        .not.toBe("unknown_owner")
+    } finally {
+      delayedLease.mockRestore()
+    }
+  })
+
   it("a different pull owner cannot erase another owner's durable lock", async () => {
     seed(true)
     mocks.rows.get("exact-id").syncStatus = "error"
+    const original = structuredClone(mocks.rows.get("exact-id"))
     await registry.markRecipePersistenceScoped("exact-id", ownerA)
 
     expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
@@ -533,12 +606,7 @@ describe("owner-aware sync and exact reconciliation", () => {
       syncStatus: "error",
       recipeWriteBlocked: true
     })
-    expect(mocks.rows.get("exact-id")).toMatchObject({
-      name: "Reconciled",
-      syncStatus: "error",
-      serverId: 101,
-      studioProjectId: 42
-    })
+    expect(mocks.rows.get("exact-id")).toEqual(original)
     expect(
       await registry.readRecipePersistenceUncertainty("exact-id", ownerA)
     ).toBe("scoped")
@@ -565,6 +633,7 @@ describe("owner-aware sync and exact reconciliation", () => {
   it("keep-server preserves the durable lock when exact reconciliation is blocked", async () => {
     seed(true)
     mocks.rows.get("exact-id").syncStatus = "error"
+    const original = structuredClone(mocks.rows.get("exact-id"))
     await registry.markRecipePersistenceScoped("exact-id", ownerA)
 
     expect(
@@ -576,16 +645,13 @@ describe("owner-aware sync and exact reconciliation", () => {
       syncStatus: "error",
       recipeWriteBlocked: true
     })
-    expect(mocks.rows.get("exact-id")).toMatchObject({
-      name: "Reconciled",
-      syncStatus: "error",
-      serverId: 101
-    })
+    expect(mocks.rows.get("exact-id")).toEqual(original)
   })
 
-  it("pull preserves copied content and durable error when reconciliation authority fails", async () => {
+  it("pull preserves the original row when reconciliation authority fails", async () => {
     seed(true)
     mocks.rows.get("exact-id").syncStatus = "error"
+    const original = structuredClone(mocks.rows.get("exact-id"))
     const reconcile = vi
       .spyOn(registry, "reconcileRecipePersistenceExact")
       .mockRejectedValueOnce(new Error("background unavailable"))
@@ -595,11 +661,7 @@ describe("owner-aware sync and exact reconciliation", () => {
         syncStatus: "error",
         recipeWriteBlocked: true
       })
-      expect(mocks.rows.get("exact-id")).toMatchObject({
-        name: "Reconciled",
-        syncStatus: "error",
-        serverId: 101
-      })
+      expect(mocks.rows.get("exact-id")).toEqual(original)
     } finally {
       reconcile.mockRestore()
     }

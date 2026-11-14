@@ -1,10 +1,11 @@
 import React from "react"
 
 import { useQueuedRequests } from "@/hooks/chat/useQueuedRequests"
-import type {
-  QueuedRequest,
-  QueuedRequestInput,
-  QueuedRequestSnapshot
+import {
+  blockQueuedRequest,
+  type QueuedRequest,
+  type QueuedRequestInput,
+  type QueuedRequestSnapshot
 } from "@/utils/chat-request-queue"
 import type { ChatDocuments } from "@/models/ChatTypes"
 
@@ -78,7 +79,7 @@ export interface UseComposerQueueOptions {
    * May throw — the underlying primitive converts a throw into a blocked
    * state on the queue head item.
    */
-  sendQueuedRequest: (item: QueuedRequest) => Promise<void>
+  sendQueuedRequest: (item: QueuedRequest, assertDispatchReady: () => void) => Promise<void>
   /** Refuse a late result that belongs to a replaced composer/conversation. */
   canCommitDispatchResult?: () => boolean
 
@@ -120,8 +121,7 @@ export interface UseComposerQueueOptions {
   /**
    * Fires after the underlying `queuedRequestActions.enqueue` has pushed
    * a new item. `isStreaming` is the value at the time of enqueue — both
-   * surfaces use it to pick between "will run after current response" vs
-   * "will send when reconnected" copy.
+   * surfaces use it for their connected busy-response acknowledgement.
    */
   onEnqueueSuccess?: (isStreaming: boolean, item: QueuedRequest) => void
 
@@ -213,6 +213,7 @@ export function useComposerQueue(
       }
 
       const queuedItem = queuedRequestActions.enqueue(input)
+      if (!queuedItem) return null
       onEnqueueSuccess?.(isStreaming, queuedItem)
       return queuedItem
     },
@@ -264,12 +265,25 @@ export function useComposerQueue(
     queuedRequestActions
   ])
 
-  // Auto-drain queued requests when the composer is ready and idle.
-  const autoDrainingRef = React.useRef(false)
+  // Retain interrupted requests for explicit review/run; reconnect is not Send.
+  React.useLayoutEffect(() => {
+    if (isConnectionReady || !queuedMessages.some(item => item.status === "queued")) return
+    setQueuedMessages(previous => previous.map(item => item.status === "queued"
+      ? blockQueuedRequest(item, "connection_unavailable") : item))
+  }, [isConnectionReady, queuedMessages, setQueuedMessages])
+
+  // Auto-drain only connected queued work after the current response.
+  const autoDrainingRef = React.useRef<{ isCurrent: () => boolean } | null>(null)
+  const [autoDrainRevision, resumeAutoDrain] = React.useReducer(revision => revision + 1, 0)
+  React.useLayoutEffect(() => {
+    const active = autoDrainingRef.current
+    if (active && !active.isCurrent()) autoDrainingRef.current = null
+  })
   React.useEffect(() => {
     const next = queuedMessages[0]
     if (
       autoDrainingRef.current ||
+      canCommitDispatchResult?.() === false ||
       !next ||
       !isConnectionReady ||
       isStreaming ||
@@ -279,11 +293,17 @@ export function useComposerQueue(
       return
     }
 
-    autoDrainingRef.current = true
+    const attempt = { isCurrent: canCommitDispatchResult ?? (() => true) }
+    autoDrainingRef.current = attempt
     void queuedRequestActions.flushNext().finally(() => {
-      autoDrainingRef.current = false
+      if (autoDrainingRef.current === attempt) {
+        autoDrainingRef.current = null
+        if (attempt.isCurrent()) resumeAutoDrain()
+      }
     })
   }, [
+    autoDrainRevision,
+    canCommitDispatchResult,
     isConnectionReady,
     isQueuedDispatchBlocked,
     isStreaming,

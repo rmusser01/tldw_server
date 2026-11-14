@@ -43,7 +43,7 @@ Source: synthesis F6
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 DONE (converter). Evaluations_DB._ensure_unix_timestamp now treats naive datetimes as UTC via a local _to_epoch helper, and all five naive datetime.now() fallbacks became datetime.now(timezone.utc). Fixes both the string-parse path AND the isinstance(value, datetime) branch at :2483, which had the same defect and was not in the original finding.
 
 KEY CHOICE: rather than depending on a CI timezone change, the test CARRIES ITS OWN TZ - tldw_Server_API/tests/Evaluations/unit/test_created_timestamp_utc_contract.py sets TZ=America/Los_Angeles with time.tzset() and restores it. So it catches this class even in UTC CI, which removes the hard dependency on TASK-13336. Red before (2 failed on the naive cases), green after (4 passed).
@@ -55,7 +55,7 @@ STILL OPEN: the three bypassing copies (unified_evaluation_service.py:1503, eval
 2026-09-23 reconciliation: AC2 met - Evaluations_DB._ensure_unix_timestamp fallbacks use _utc_now_epoch() (datetime.now(timezone.utc)); datasets endpoint fallback also already aware. (Premise note: naive datetime.now().timestamp() is in fact the correct epoch, so this fallback was never numerically wrong; the change is hygiene.) AC4 met - tests/Evaluations/unit/test_created_timestamp_utc_contract.py (commit 7c348a05ae) forces TZ=America/Los_Angeles via tzset and asserts identical conversion under LA and UTC: 4 passed. AC1 PARTIAL, NOT checked - fixed in Evaluations_DB (verified naive datetime and naive string both map to UTC epoch under TZ=America/Los_Angeles), and datasets/runs/evals all route through it so the datasets endpoint's own string branch is unreachable in practice. But evaluations_rag_pipeline.py to_ts() copies at :72-79, :116-123, :173-180 still call .timestamp() on naive fromisoformat/strptime results, so pipeline preset created_at/updated_at are still off by the host UTC offset. unified_evaluation_service._extract_created_ts (:1496) has the same defect but has no callers (dead code - delete). AC3 NOT checked - for datasets the premise is weaker than stated: rows reach _normalize_dataset_payload already carrying an int 'created' from _row_to_dataset_dict, whose isinstance(datetime) branch now treats naive as UTC, so PG datetimes are handled. But the pipeline-preset to_ts() does '"T" in x' on a PG datetime -> TypeError -> created_at=None, and _normalize_dataset_payload still has no datetime branch. Remaining: route the three rag_pipeline to_ts copies (and the datasets endpoint branch) through the DB converter, delete _extract_created_ts. Bandit on Evaluations_DB.py: no findings.
 
 2026-09-23: AC1+AC3 done (a250262292). Evaluations_DB.to_unix_timestamp is now module-level (method delegates); the three evaluations_rag_pipeline to_ts() copies and the datasets normalizer's string branch route through it, so naive SQLite strings and PostgreSQL datetimes both read as UTC. Deleted uncalled UnifiedEvaluationService._extract_created_ts. Tests: test_created_timestamp_utc_contract.py +2 (PG naive datetime; dataset payload for str and datetime under TZ=America/Los_Angeles) -> 6 passed; the dataset test fails on HEAD. tests/Evaluations: 18 failures before and after, identical set. Bandit (uvx, -ll): no findings. Docs: none needed (ADR-014 already states the contract). No known skips.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

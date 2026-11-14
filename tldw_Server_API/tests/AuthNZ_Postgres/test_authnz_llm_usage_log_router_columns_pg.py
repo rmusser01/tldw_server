@@ -45,3 +45,4 @@ async def test_llm_usage_log_has_router_analytics_columns_pg(test_db_pool):
     idx_names = {str(row["indexname"]) for row in idx_rows}
     assert "idx_llm_usage_log_remote_ip_ts" in idx_names
     assert "idx_llm_usage_log_token_name_ts" in idx_names
+    assert "idx_llm_usage_log_user_ts" in idx_names

@@ -8,7 +8,7 @@ vi.mock("@plasmohq/storage", () => import("../../../../../tldw-frontend/extensio
 vi.mock("@plasmohq/storage/hook", async importOriginal => {
   const actual = await importOriginal<typeof import("@plasmohq/storage/hook")>()
   const web = await import("../../../../../tldw-frontend/extension/shims/plasmo-storage-hook")
-  return { useStorage: (...args: Parameters<typeof web.useStorage>) => authority.plasmo ? actual.useStorage(...args) : web.useStorage(...args) }
+  return { useStorage: (...args: Parameters<typeof web.useStorage>) => authority.plasmo ? Reflect.apply(actual.useStorage, undefined, args) : web.useStorage(...args) }
 })
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
@@ -90,6 +90,146 @@ describe("private assistant account ownership with native storage adapters", () 
     view.unmount()
     const reloaded = await mount()
     expect(reloaded.result.current[0]).toBeNull()
+  })
+
+  it.each([false, true])("acknowledges only the current owned write when a newer same-account selection supersedes held storage (extension hook: %s)", async plasmo => {
+    authority.plasmo = plasmo
+    const view = await mount()
+    const originalSet = Storage.prototype.set
+    let release!: () => void
+    let started = false
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (key, value) {
+      if (JSON.stringify(value).includes(alice.name)) { started = true; await barrier }
+      return originalSet.call(this, key, value)
+    })
+    let first!: ReturnType<typeof view.result.current[1]>
+    let second!: ReturnType<typeof view.result.current[1]>
+    act(() => { first = view.result.current[1](alice) })
+    await waitFor(() => expect(started).toBe(true))
+    act(() => { second = view.result.current[1](bob) })
+    await act(async () => { release(); expect(await first).toBe(false); expect(await second).toBe(true) })
+    expect(view.result.current[0]).toMatchObject(bob)
+  })
+
+  it.each([[false, false], [false, true], [true, false], [true, true]])("restores the acknowledged source if both a held write and its newer queued choice retire (extension hook: %s, watch before ACK: %s)", async (plasmo, afterWrite) => {
+    authority.plasmo = plasmo
+    const view = await mount()
+    const source = { kind: "character" as const, id: "source", name: "Acknowledged source" }
+    await act(async () => { expect(await view.result.current[1](source)).toBe(true) })
+    const replacement = await mount()
+    const originalSet = Storage.prototype.set
+    let release!: () => void
+    let started = false
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (key, value) {
+      if (!JSON.stringify(value).includes(alice.name)) return originalSet.call(this, key, value)
+      if (afterWrite) await originalSet.call(this, key, value)
+      started = true
+      await barrier
+      if (!afterWrite) return originalSet.call(this, key, value)
+    })
+    let first!: ReturnType<typeof view.result.current[1]>
+    let second!: ReturnType<typeof view.result.current[1]>
+    let newerCurrent = true
+    act(() => { first = view.result.current[1](alice) })
+    await waitFor(() => expect(started).toBe(true))
+    await settle()
+    expect(replacement.result.current[0]).toMatchObject(source)
+    expect(await replacement.result.current[2].readSelection()).toMatchObject(source)
+    act(() => { second = replacement.result.current[1](bob, { isCurrent: () => newerCurrent }) })
+    newerCurrent = false
+    await act(async () => { release(); expect(await first).toBe(false); expect(await second).toBe(false) })
+    expect(view.result.current[0]).toMatchObject(source)
+    expect(replacement.result.current[0]).toMatchObject(source)
+    expect(await view.result.current[2].readSelection()).toMatchObject(source)
+  })
+
+  it.each([false, true])("restores the accepted source if a newer queued write fails (extension hook: %s)", async plasmo => {
+    authority.plasmo = plasmo
+    const first = await mount()
+    const source = { kind: "character" as const, id: "source", name: "Accepted source" }
+    await act(async () => { await first.result.current[1](source) })
+    const second = await mount()
+    const originalSet = Storage.prototype.set
+    let release!: () => void
+    let started = false
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (key, value) {
+      if (JSON.stringify(value).includes(bob.name)) throw new Error("Current write failed")
+      await originalSet.call(this, key, value)
+      if (JSON.stringify(value).includes(alice.name)) { started = true; await barrier }
+    })
+    let older!: ReturnType<typeof first.result.current[1]>
+    act(() => { older = first.result.current[1](alice) })
+    await waitFor(() => expect(started).toBe(true))
+    await settle()
+    let newer!: Promise<unknown>
+    act(() => { newer = second.result.current[1](bob).catch(error => error) })
+    await act(async () => { release(); expect(await older).toBe(false); expect(await newer).toBeInstanceOf(Error) })
+    expect(first.result.current[0]).toMatchObject(source)
+    expect(second.result.current[0]).toMatchObject(source)
+    expect(await second.result.current[2].readSelection()).toMatchObject(source)
+  })
+
+  it.each([[false, false], [false, true], [true, false], [true, true]])("retires an old account write across Alice logout/login (extension hook: %s, newer choice: %s)", async (plasmo, chooseNewer) => {
+    authority.plasmo = plasmo
+    const view = await mount()
+    const source = { kind: "character" as const, id: "source", name: "Accepted Alice source" }
+    await act(async () => { await view.result.current[1](source) })
+    const originalSet = Storage.prototype.set
+    let release!: () => void
+    let started = false
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    vi.spyOn(Storage.prototype, "set").mockImplementation(async function (key, value) {
+      if (JSON.stringify(value).includes(alice.name)) { started = true; await barrier }
+      return originalSet.call(this, key, value)
+    })
+    let older!: ReturnType<typeof view.result.current[1]>
+    act(() => { older = view.result.current[1](alice) })
+    await waitFor(() => expect(started).toBe(true))
+    await switchTo("alice")
+    const warm = await mount()
+    let newer: ReturnType<typeof warm.result.current[1]> | undefined
+    if (chooseNewer) act(() => { newer = warm.result.current[1](bob) })
+    await act(async () => { release(); expect(await older).toBe(false); if (newer) expect(await newer).toBe(true) })
+    const expected = chooseNewer ? bob : source
+    expect(warm.result.current[0]).toMatchObject(expected)
+    view.unmount(); warm.unmount()
+    const cold = await mount()
+    expect(cold.result.current[0]).toMatchObject(expected)
+    expect(await cold.result.current[2].readSelection()).toMatchObject(expected)
+  })
+
+  it.each([false, true])("reports failed rollback without claiming durable restoration, then permits retry (extension hook: %s)", async plasmo => {
+    authority.plasmo = plasmo
+    const view = await mount()
+    const source = { kind: "character" as const, id: "source", name: "Accepted source" }
+    await act(async () => { await view.result.current[1](source) })
+    const originalSet = Storage.prototype.set
+    let release!: () => void
+    let started = false
+    const barrier = new Promise<void>(resolve => { release = resolve })
+    const spy = vi.spyOn(Storage.prototype, "set").mockImplementation(async function (key, value) {
+      if (!JSON.stringify(value).includes(alice.name)) throw new Error("Storage unavailable")
+      await originalSet.call(this, key, value)
+      started = true
+      await barrier
+    })
+    let older!: ReturnType<typeof view.result.current[1]>
+    act(() => { older = view.result.current[1](alice) })
+    await waitFor(() => expect(started).toBe(true))
+    let newer!: Promise<unknown>
+    act(() => { newer = view.result.current[1](bob).catch(error => error) })
+    await act(async () => { release(); expect(await older).toBe(false); expect(await newer).toMatchObject({ message: "assistant_selection_restore_failed" }) })
+    expect(view.result.current[0]).toMatchObject(source)
+    const storage = new Storage({ area: "local" })
+    expect(await storage.get(view.result.current[2].assistantKey!)).toMatchObject({ selection: alice })
+    spy.mockRestore()
+    await act(async () => { expect(await view.result.current[1](bob)).toBe(true) })
+    view.unmount()
+    const reloaded = await mount()
+    expect(reloaded.result.current[0]).toMatchObject(bob)
   })
 
   it("retains the same user's selection on an ordinary config refresh", async () => {

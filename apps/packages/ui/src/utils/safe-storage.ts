@@ -9,7 +9,7 @@ import type { SerdeOptions, StorageOptions } from "@plasmohq/storage"
  * This prevents runtime JSON.parse errors such as:
  *   SyntaxError: "[object Object]" is not valid JSON
  */
-export const safeStorageSerde: SerdeOptions = {
+export const safeStorageSerde: SerdeOptions & { deserializer: <T = unknown>(value: unknown) => T } = {
   serializer: JSON.stringify,
   deserializer: (value: any) => {
     if (typeof value === "string") {

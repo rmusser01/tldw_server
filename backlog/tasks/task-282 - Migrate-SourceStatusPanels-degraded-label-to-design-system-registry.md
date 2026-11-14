@@ -27,7 +27,7 @@ Replace the hardcoded degraded status label in SourceStatusPanels with the desig
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red test first: SourceStatusPanels.design-system.test.tsx initially failed because the component rendered Degraded 2 instead of the mocked registry label Registry Degraded 2.
 
 Verification passed: SourceStatusPanels design-system test; SourceDetailPage plus SourceStatusPanels tests; product-state guard tests; bun run verify:design-system-state; git diff --check; touched-path tsc filter produced no SourceStatusPanels or baseline errors. Bandit skipped because this is frontend TypeScript/test-only work.
@@ -37,7 +37,7 @@ PR review follow-up: Gemini flagged the module-level degraded label constant and
 PR review fix implemented: removed the module-level DEGRADED_STATE_LABEL constant, resolves the degraded state inside SourceStatusPanels render, and renders the degraded summary with the design-system Badge primitive using getBadgeVariantForDesignSystemSeverity. Added test assertions that the registry lookup happens during render and the degraded summary renders as data-ds-component=Badge with warning variant, not AntD Tag.
 
 Review-fix verification passed: SourceDetailPage plus SourceStatusPanels tests; product-state guard tests; bun run verify:design-system-state; git diff --check; touched-path tsc filter produced no SourceStatusPanels or baseline output.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -42,9 +42,9 @@ Adjusted after code inspection: monitor clone and source clone actions already e
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implementation changed source clone from immediate create API call to a create-mode SourceFormModal draft. The cloned draft preserves name suffix, URL/type/tags/settings/group_ids/watchlist_id and applies active:false on save. Existing monitor clone behavior remains direct paused-copy creation and is covered by clone utility tests. No backend APIs were added.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

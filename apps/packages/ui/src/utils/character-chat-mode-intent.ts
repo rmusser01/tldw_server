@@ -77,6 +77,7 @@ export type ChatRouteReplacementDetail = {
   // Undefined means the clear action owns navigation; null is a neutral assistant.
   characterId?: string | null
   nextChatId?: string | null
+  onRestoreCancelled?: (revision: number) => boolean
 }
 export const dispatchChatRouteReplacement = (
   owner: Omit<ChatRouteReplacementDetail, "href">

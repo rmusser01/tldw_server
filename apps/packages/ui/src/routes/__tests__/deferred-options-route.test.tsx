@@ -70,6 +70,7 @@ vi.mock("../option-media-view-route-registry", () => ({
 
 vi.mock("../option-media-review-route-registry", () => ({
   optionMediaReviewRoutes: [
+    { kind: "options", path: "/claims-review", element: <div data-testid="deferred-claims-route">Claims Review</div> },
     {
       kind: "options",
       path: "/media-multi",
@@ -81,6 +82,14 @@ vi.mock("../option-media-review-route-registry", () => ({
 import { DeferredOptionsRoute } from "../deferred-options-route"
 
 describe("DeferredOptionsRoute", () => {
+  it("resolves Claims decisions through the shared media-review registry", async () => {
+    render(<MemoryRouter initialEntries={["/claims-review"]}>
+      <DeferredOptionsRoute attemptedRoute="/claims-review" capabilities={null} capabilitiesLoading={false} label="Loading" description="Preparing routes" />
+    </MemoryRouter>)
+    expect(await screen.findByTestId("deferred-claims-route")).toBeInTheDocument()
+    expect(screen.queryByTestId("route-not-found")).not.toBeInTheDocument()
+  })
+
   it("resolves chat deep links through the dedicated chat registry", async () => {
     render(
       <MemoryRouter initialEntries={["/chat"]}>

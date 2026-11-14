@@ -51,6 +51,11 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn()
 }))
 
+vi.mock('@/services/tldw/quick-ingest-authority', () => ({
+  useQuickIngestAuthority: () => 'verified-alice',
+  quickIngestAuthority: { capture: () => ({ authorityKey: 'verified-alice', isCurrent: () => true, signal: new AbortController().signal }) }
+}))
+
 const interpolate = (template: string, values?: Record<string, unknown>) =>
   template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(values?.[key] ?? ""))
 
@@ -78,7 +83,8 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => mocks.navigate
+  useNavigate: () => mocks.navigate,
+  useLocation: () => ({ key: 'initial' })
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
@@ -102,33 +108,39 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: mocks.bgRequest
 }))
 
-vi.mock("@tanstack/react-query", () => {
-  const React = require("react") as typeof import("react")
+vi.mock("@tanstack/react-query", async () => {
+  const React = await import("react");
   return {
     keepPreviousData: {},
-    useQuery: ({ queryFn, queryKey }: { queryFn: () => Promise<unknown>; queryKey: unknown[] }) => {
-      const [data, setData] = React.useState<unknown>([])
-      const [isFetching, setIsFetching] = React.useState(false)
-      const queryFnRef = React.useRef(queryFn)
-      queryFnRef.current = queryFn
-      const queryHash = JSON.stringify(queryKey)
+    useQuery: ({
+      queryFn,
+      queryKey,
+    }: {
+      queryFn: () => Promise<unknown>;
+      queryKey: unknown[];
+    }) => {
+      const [data, setData] = React.useState<unknown>([]);
+      const [isFetching, setIsFetching] = React.useState(false);
+      const queryFnRef = React.useRef(queryFn);
+      queryFnRef.current = queryFn;
+      const queryHash = JSON.stringify(queryKey);
 
       const run = React.useCallback(async () => {
-        setIsFetching(true)
-        const result = await queryFnRef.current()
-        setData(result)
-        setIsFetching(false)
-        return { data: result }
-      }, [])
+        setIsFetching(true);
+        const result = await queryFnRef.current();
+        setData(result);
+        setIsFetching(false);
+        return { data: result };
+      }, []);
 
       React.useEffect(() => {
-        void run()
-      }, [run, queryHash])
+        void run();
+      }, [run, queryHash]);
 
-      return { data, isFetching, refetch: run }
-    }
-  }
-})
+      return { data, isFetching, refetch: run };
+    },
+  };
+});
 
 vi.mock("@tanstack/react-virtual", () => ({
   useVirtualizer: ({ count }: { count: number }) => ({
@@ -158,18 +170,22 @@ vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: () => [true, mocks.setHelpDismissed, { isLoading: false }]
 }))
 
-vi.mock("@/hooks/useSetting", () => {
-  const React = require("react") as typeof import("react")
+vi.mock("@/hooks/useSetting", async () => {
+  const React = await import("react");
   return {
     useSetting: (setting: { defaultValue: unknown }) => {
-      const [value, setValue] = React.useState(setting.defaultValue)
+      const [value, setValue] = React.useState(setting.defaultValue);
       const setter = async (next: unknown | ((prev: unknown) => unknown)) => {
-        setValue((prev: unknown) => (typeof next === "function" ? (next as (prev: unknown) => unknown)(prev) : next))
-      }
-      return [value, setter, { isLoading: false }] as const
-    }
-  }
-})
+        setValue((prev: unknown) =>
+          typeof next === "function"
+            ? (next as (prev: unknown) => unknown)(prev)
+            : next,
+        );
+      };
+      return [value, setter, { isLoading: false }] as const;
+    },
+  };
+});
 
 vi.mock("@/services/settings/registry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/settings/registry")>()
@@ -189,6 +205,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   MEDIA_REVIEW_FILTERS_COLLAPSED_SETTING: { key: "mediaReviewFiltersCollapsed", defaultValue: false },
   MEDIA_REVIEW_FOCUSED_ID_SETTING: { key: "mediaReviewFocusedId", defaultValue: null },
   MEDIA_REVIEW_ORIENTATION_SETTING: { key: "mediaReviewOrientation", defaultValue: "vertical" },
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING: { key: 'media-review-selection-snapshot', defaultValue: null },
   MEDIA_REVIEW_SELECTION_SETTING: { key: "mediaReviewSelection", defaultValue: [] },
   MEDIA_REVIEW_VIEW_MODE_SETTING: { key: "mediaReviewViewMode", defaultValue: "spread" }
 }))
@@ -485,6 +502,7 @@ describe("MediaReviewPage stage4 card density improvements", () => {
   it("uses adaptive content-height behavior for short vs long content", async () => {
     render(<MediaReviewPage />)
     await selectItems(0, 1)
+    fireEvent.click(screen.getByRole("button", {name:/Review selected/i}))
 
     await waitFor(() => {
       expect(screen.getByTestId("media-review-content-body-1")).toBeInTheDocument()
@@ -503,6 +521,7 @@ describe("MediaReviewPage stage4 card density improvements", () => {
   it("uses a unified copy menu and suppresses empty analysis by default", async () => {
     render(<MediaReviewPage />)
     await selectItems(1)
+    fireEvent.click(screen.getByRole("button", {name:/Review selected/i}))
 
     await waitFor(() => {
       expect(screen.getByTestId("media-review-copy-menu-2")).toBeInTheDocument()
@@ -519,9 +538,10 @@ describe("MediaReviewPage stage4 card density improvements", () => {
       expect(mocks.messageSuccess).toHaveBeenCalled()
     })
 
-    fireEvent.click(screen.getByRole("button", { name: /show panel/i }))
-    expect(screen.getByTestId("media-review-analysis-panel-2")).toBeInTheDocument()
-    expect(screen.getByText(/No analysis available/i)).toBeInTheDocument()
+    fireEvent.click(
+      screen.getByRole("button", { name: /generate analysis in media/i }),
+    )
+    expect(mocks.navigate).toHaveBeenCalledWith("/media?id=2")
   })
 
   it("keeps helper thresholds aligned with card behavior", () => {

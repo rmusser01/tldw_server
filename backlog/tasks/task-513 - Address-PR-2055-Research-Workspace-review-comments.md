@@ -33,7 +33,7 @@ Resolve the active PR #2055 review comments after rebasing onto latest dev. Scop
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Rebased PR #2055 branch onto latest origin/dev (d883054a05d05ee8c40ec599a4b77a0c6f822295) and force-pushed rebased head before review fixes.
 - Verified actions/upload-artifact tag v7 resolves to upstream commit 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a via git ls-remote; pinned the Research Workspace parity and nightly upload steps to that immutable SHA.
 - Added bounded timeout handling to the extension real-backend apiFetch helper using an AbortController; caller-provided abort signals propagate into the timeout controller instead of being dropped.
@@ -44,7 +44,7 @@ Resolve the active PR #2055 review comments after rebasing onto latest dev. Scop
 - Verification passed: git diff --check; jq . apps/packages/ui/src/assets/locale/es/option.json; bun run compile from apps/extension; bunx playwright test tests/e2e/research-workspace.real-backend.spec.ts --list from apps/extension; bunx vitest run src/components/Option/ResearchWorkspace/__tests__/ChatPane.stage3.test.tsx --maxWorkers=1 --no-file-parallelism from apps/packages/ui.
 - Verification caveats: ad hoc bunx tsc over the extension E2E file still reports pre-existing helper typing issues in tests/e2e/utils/extension-build.ts and tests/e2e/utils/extension-id.ts; a broader ChatPane Vitest run still reports pre-existing failures in ChatPane.input-availability.guard.test.ts and ChatPane.stage4.lorebook-activity.test.tsx unrelated to this review slice.
 - Bandit not applicable: no Python files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

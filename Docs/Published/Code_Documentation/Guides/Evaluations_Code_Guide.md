@@ -133,7 +133,7 @@ results = await rag_eval.evaluate(
 
 **Auth, Limits, and Error Handling**
 - Auth modes handled in `evaluations_auth.verify_api_key`; admin gating is claim-first (`get_auth_principal` + `RequireRole("admin")` / heavy-admin claim checks).
-- Path limiter (`check_evaluation_rate_limit`) + per‑user `UserRateLimiter` estimate tokens and enforce daily/cost quotas; usage headers are applied by helpers.
+- Path limiter (`check_evaluation_rate_limit`) + per‑user `UserRateLimiter` estimate tokens and enforce the daily evaluations/tokens quotas (LLM spend is capped by the general `limits.llm_cost_*` quotas); usage headers are applied by helpers.
 - Errors are normalized via `create_error_response` and `sanitize_error_message` for consistent API error shapes.
 
 **API Usage Examples (curl)**

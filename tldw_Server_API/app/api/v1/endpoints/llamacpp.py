@@ -578,8 +578,8 @@ async def cancel_llamacpp_asset_download_endpoint(
 async def get_llamacpp_inventory_endpoint(
     llm_manager: LLMInferenceManager = Depends(_resolve_llm_manager),
 ) -> LlamaCppInventoryResponse:
-    config_state = llamacpp_config_service.get_config_state(llm_manager)
-    return llamacpp_inventory_service.scan_inventory(config_state)
+    config_state = await run_in_threadpool(llamacpp_config_service.get_config_state, llm_manager)
+    return await run_in_threadpool(llamacpp_inventory_service.scan_inventory, config_state)
 
 
 @router.post(

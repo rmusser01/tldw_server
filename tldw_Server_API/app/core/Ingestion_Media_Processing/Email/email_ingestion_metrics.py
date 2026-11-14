@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
@@ -15,7 +15,6 @@ _BACKENDS = frozenset({"sqlite", "postgresql", "other"})
 _NATIVE_PATHS = frozenset({"primary", "attachment_child", "archive_child", "other"})
 _NATIVE_OUTCOMES = frozenset({"success", "noop", "error", "skipped_flag"})
 _METRICS_ERRORS = (ArithmeticError, AttributeError, ImportError, KeyError, OSError, RuntimeError, TypeError, ValueError)
-_DURATION_BUCKETS = [0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300]
 
 
 def _bounded(value: Any, allowed: frozenset[str], fallback: str) -> str:
@@ -27,33 +26,6 @@ def _bounded(value: Any, allowed: frozenset[str], fallback: str) -> str:
 def _duration(value: float) -> float:
     """Keep histogram observations finite and nonnegative."""
     return value if math.isfinite(value) and value >= 0 else 0.0
-
-
-def iter_email_metric_definitions() -> Iterator[dict[str, Any]]:
-    """Yield the persistent email families for central registry initialization."""
-    families = (
-        ("email_ingestion_parse", ["format", "outcome"], "Email message parse outcomes and container parse failures"),
-        ("email_ingestion_persist", ["backend", "outcome"], "Completed email Media repository operations"),
-        ("email_native_persist", ["path_kind", "outcome"], "Native email graph persistence attempts"),
-    )
-    for name, labels, description in families:
-        # The native counter already belongs to the standard registry.
-        if name != "email_native_persist":
-            yield {"name": f"{name}_total", "type": "counter", "description": description, "labels": labels}
-        yield {
-            "name": f"{name}_seconds",
-            "type": "histogram",
-            "description": f"{description}: duration in seconds",
-            "unit": "s",
-            "labels": labels,
-            "buckets": list(_DURATION_BUCKETS),
-        }
-    yield {
-        "name": "email_ingestion_dedupe_total",
-        "type": "counter",
-        "description": "Actual existing email identity matches, including attempts that subsequently fail",
-        "labels": ["backend"],
-    }
 
 
 def _record(

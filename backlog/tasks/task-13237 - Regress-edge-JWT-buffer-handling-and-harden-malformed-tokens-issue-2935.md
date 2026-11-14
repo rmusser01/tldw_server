@@ -36,11 +36,11 @@ Completed JWT regression and malformed-token hardening; design, audit, and verif
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Regression detects the historical raw ArrayBuffer crash on Node 20 and a strict typed-array boundary. Confirmed malformed base64url signatures threw and added fail-closed handling. Initial focused middleware run: 10 passed; Node 20 and 24 JWT runs: 5 passed each; lint and TypeScript pass. Independent review found a related non-string alg header exception; adding regression and guard before final checks.
 
 Final independent re-review cleared the prior non-string alg finding and the existing typed-array regression. Fresh focused Vitest: 11 tests across 4 files passed; Node 20 and Node 24 JWT tests: 6 passed each. Scoped ESLint, production TypeScript, and git diff checks passed. Bandit is not applicable to TypeScript. Full admin UI suite was not run; Vitest reports an existing Node 26 deprecation warning. Nearby WebCrypto and malformed JSON type probes found no additional uncaught exceptions.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

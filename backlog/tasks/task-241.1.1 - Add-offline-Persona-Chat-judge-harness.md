@@ -53,7 +53,7 @@ Build the next #1566 slice from #1572: a deterministic offline Persona Chat judg
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created after PR #1569 merged. #1572 tracks the executable offline harness slice; #1566 remains the parent optional judge evaluation tracker.
 
 Implemented offline Persona Chat judge harness under app/core/Evaluations with pure dataclass report generation, strict candidate envelope validation, and bounded mismatch reporting. Verification on 2026-05-11: focused harness pytest passed 5 tests; combined judge harness/contract pytest passed 15 tests; Bandit reported zero findings for touched Python; placeholder scan found no matches; git diff --check passed.
@@ -77,7 +77,7 @@ Additional PR #1576 sweep completed. Resolved offline_only thread as already fix
 Review-fix follow-up started. Verified current code already has the non-mapping candidate guard and only calls _candidate_validation_errors after Mapping validation. Still-valid issue: mismatch key is invalid_candidate_envelope while the review requested invalid_candidate. No second compare block exists in persona_chat_judge_harness.py, so that part is skipped as not applicable.
 
 Review-fix follow-up completed. Verified current code: non-mapping candidate guard already exists and _candidate_validation_errors is only called after Mapping validation. Still-valid issue was the mismatch key; changed invalid_candidate_envelope to invalid_candidate and updated the regression test. Skipped the requested second compare block because no second _compare_case/compare block exists in persona_chat_judge_harness.py. Verification on 2026-05-12: harness+contract pytest passed 18 tests; Bandit reported zero findings on touched Python; placeholder scan found no matches; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

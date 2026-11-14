@@ -69,13 +69,18 @@ describe("WorkspaceSandboxDiagnosticsPanel", () => {
       { sourceLabel: "research_workspace", limit: 10 }
     )
     expect(screen.queryByText(/workspace_playground/i)).toBeNull()
+    expect(screen.getByRole("link", { name: /runtime config/i }))
+      .toHaveAttribute("href", "/admin/runtime-config")
   })
 
-  it("does not render unsafe runtime config links from diagnostics payloads", async () => {
+  it.each([
+    "javascript:alert(1)",
+    "/admin/monitoring"
+  ])("omits an unexpected runtime config link: %s", async (runtimeConfig) => {
     mockGetSandboxWorkspaceDiagnostics.mockResolvedValue(
       makeDiagnostics({
         links: {
-          runtime_config: "javascript:alert(1)",
+          runtime_config: runtimeConfig,
           admin_runs: "/admin/monitoring?focus=sandbox&workspace_id=workspace-alpha"
         }
       })

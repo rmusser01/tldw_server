@@ -11,11 +11,13 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
 from tldw_Server_API.app.api.v1.endpoints import flashcards, quizzes
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat import chat_target_resolution as targets
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import (
     ChatAuthenticationError,
@@ -63,7 +65,7 @@ def provider_boundary(monkeypatch):
         lambda provider: TerminalAdapter(provider) if provider in {"llama.cpp", "openai"} else None,
     )
     monkeypatch.setattr(adapter_registry, "get_registry", lambda: registry)
-    monkeypatch.setattr(targets, "load_and_log_configs", lambda: state.config)
+    monkeypatch.setattr(config_llm_providers, "load_and_log_configs", lambda: state.config)
     monkeypatch.setattr(adapter_utils, "ensure_app_config", lambda _config=None: state.config)
 
     def override_snapshot(provider):
@@ -218,9 +220,12 @@ def study_route(request, study_database, provider_boundary):
         db.submit_attempt(int(attempt["id"]), answers=[{"question_id": question, "user_answer": 1}])
         path = f"/api/v1/quizzes/attempts/{attempt['id']}/questions/{question}/assistant"
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router, prefix="/api/v1")
     app.include_router(quizzes.router, prefix="/api/v1")
     app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db
+    # The study-assistant routes depend on study_assistant_own_key, which resolves the user itself.
+    app.dependency_overrides[flashcards.get_request_user] = lambda: SimpleNamespace(id=1)
     app.dependency_overrides[get_study_assistant_guidance] = lambda: "Stay with the study context."
     with TestClient(app, raise_server_exceptions=False) as client:
         initial = client.get(path)
@@ -315,6 +320,35 @@ def test_study_failure_is_safe_and_preserves_existing_history(study_route, provi
         assert state.calls == []
     reloaded = route.client.get(route.path).json()
     assert [row["id"] for row in reloaded["messages"]] == [prior["id"]]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("stored", "api_key", "source"),
+    [(True, "sk-users-own-key", "user"), (False, "synthetic-test-key", None)],
+    ids=["own-key", "server-key"],
+)
+def test_a_reply_runs_on_the_users_stored_key_else_the_servers(
+    study_route, provider_boundary, monkeypatch, stored, api_key, source
+):
+    """The reply's provider call carries a runtime-issued handle for the user's own key when they stored one;
+    without one it keeps the server's key and no handle (TASK-15426)."""
+    from tldw_Server_API.app.core.Usage import llm_quota_gate
+    from tldw_Server_API.app.core.Usage.llm_call_context import call_credential_source
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls, users_own_key
+
+    if stored:
+        users_own_key(monkeypatch, "openai")
+        # Over the limit, so a call without the handle is refused at the call; the fixture's user override sets
+        # no content scope, so the check is told the user.
+        refuse_llm_calls(monkeypatch)
+        monkeypatch.setattr(llm_quota_gate, "current_llm_user_id", lambda: 1)
+    payload = {"action": "follow_up", "message": "Which day?", "provider": "openai", "model": "remote-explicit"}
+    response = study_route.client.post(study_route.path + "/respond", json=payload)
+    assert response.status_code == 200, response.text
+    [(provider, request)] = provider_boundary.calls
+    assert provider == "openai"
+    assert (request["api_key"], call_credential_source(request)) == (api_key, source)
 
 
 @pytest.mark.integration

@@ -1,3 +1,38 @@
+/**
+ * DEPRECATED (WP-18 / TASK-13522): legacy `chrome.storage` blob "database".
+ *
+ * Hot paths must not read or rewrite whole collections through this module.
+ * New code uses the Dexie implementations in `db/dexie/` (`db/dexie/helpers.ts`
+ * wrappers, `PageAssistDatabase` in `db/dexie/chat.ts`); message-content
+ * search lives in the Dexie class (`fullTextSearchChatHistories`) — the
+ * `searchChatHistories` below is titles-only.
+ *
+ * This module is reachable ONLY through the three entry points below; do
+ * not add new callers, and do not delete a listed method without checking
+ * them:
+ *
+ * 1. Startup legacy-data migration — `db/dexie/migration.ts` (run via
+ *    `hooks/useMigration.tsx`) imports `PageAssitDatabase` directly and
+ *    uses `getUserID`, `getChatHistories`, `getChatHistory`,
+ *    `getAllPrompts`, `getAllWebshares`, and
+ *    `getSessionFilesInfo`; explicit Dexie history erasure also removes
+ *    retained legacy copies through `db/dexie/legacy-chat-storage.ts`.
+ * 2. Firefox-private-mode fallback (Dexie throws DatabaseClosedError
+ *    there):
+ *    - `db/dexie/firefox-sync.ts` `firefoxSyncDataForPrivateMode`
+ *      (Settings UI) -> `bulkAddPromptsFB`
+ *    - `db/dexie/helpers.ts` DatabaseClosedError fallbacks ->
+ *      `getPromptByIdFB`, `getAllPromptsFB`, `savePromptFB`,
+ *      `deletePromptByIdFB`, `updatePromptFB`, `restorePromptSnapshotFB`
+ *      (prompt CRUD on `chrome.storage`)
+ * 3. Legacy-only utilities:
+ *    - `libs/export-import.ts` `importPageAssistDataOld` (deprecated
+ *      legacy export format) -> `importChatHistory`, `importPrompts`
+ *    - `entries/background.ts` imports `generateID` (pure id generator,
+ *      no storage access)
+ *
+ * Everything else here is an untouched fallback-only surface.
+ */
 import {
   type ChatHistory as ChatHistoryType,
   type Message as MessageType
@@ -44,6 +79,10 @@ type SessionFiles = {
   retrievalEnabled: boolean
   createdAt: number
 }
+
+const isLegacySessionFiles = (value: unknown, sessionId: string): value is SessionFiles =>
+  !!value && typeof value === "object" && "files" in value && Array.isArray(value.files) &&
+  (!("sessionId" in value) || value.sessionId === sessionId)
 
 type Message = {
   id: string
@@ -118,6 +157,7 @@ type Webshare = {
 }
 
 type Prompt = {
+  ownerId?: string | null
   id: string
   title: string
   content: string
@@ -143,6 +183,9 @@ type Prompt = {
   sourceSystem?: "workspace" | "studio" | "copilot"
   lastSyncedAt?: number | null
   serverUpdatedAt?: string | null
+  // ─── Server prompt library link (/api/v1/prompts, not Prompt Studio) ───
+  serverLibraryId?: number | null
+  serverLibraryUuid?: string | null
   fewShotExamples?: Array<{
     inputs: Record<string, any>
     outputs: Record<string, any>
@@ -172,6 +215,30 @@ export class PageAssitDatabase {
     this.db = chrome.storage.local
   }
 
+  private readLegacyValues(key: string | null): Promise<Record<string, unknown>> {
+    return new Promise((resolve, reject) => {
+      this.db.get(key, (items) => {
+        const error = chrome.runtime?.lastError
+        if (error || !items) reject(new Error(error?.message || "Storage unavailable"))
+        else resolve(items)
+      })
+    })
+  }
+
+  private async readLegacyValue<T>(key: string): Promise<T | undefined> {
+    return (await this.readLegacyValues(key))[key] as T | undefined
+  }
+
+  private writeLegacyValues(write: (done: () => void) => void): Promise<void> {
+    return new Promise((resolve, reject) => {
+      write(() => {
+        const error = chrome.runtime?.lastError
+        if (error) reject(new Error(error.message || "Storage unavailable"))
+        else resolve()
+      })
+    })
+  }
+
   async getSessionFiles(sessionId: string): Promise<UploadedFile[]> {
     return new Promise((resolve) => {
       this.db.get(`session_files_${sessionId}`, (result) => {
@@ -184,11 +251,10 @@ export class PageAssitDatabase {
   }
 
   async getSessionFilesInfo(sessionId: string): Promise<SessionFiles | null> {
-    return new Promise((resolve) => {
-      this.db.get(`session_files_${sessionId}`, (result) => {
-        resolve(result[`session_files_${sessionId}`] || null)
-      })
-    })
+    const stored = await this.readLegacyValue<unknown>(`session_files_${sessionId}`)
+    if (stored == null) return null
+    if (!isLegacySessionFiles(stored, sessionId)) throw new Error("Invalid legacy session files")
+    return stored
   }
 
   async addFileToSession(sessionId: string, file: UploadedFile) {
@@ -248,31 +314,27 @@ export class PageAssitDatabase {
     this.db.remove(`session_files_${sessionId}`)
   }
 
-  async getChatHistory(id: string): Promise<MessageHistory> {
+  async getStoredChatMessages(id: string) {
+    return this.readLegacyValue<MessageHistory>(id)
+  }
+
+  async getChatHistoryWithSource(id: string) {
     const modelNicknames = await getAllModelNicknames()
-    return new Promise((resolve, reject) => {
-      this.db.get(id, (result) => {
-        resolve(
-          (result[id] || []).map((message: any) => {
-            return {
-              ...message,
-              modelName:
-                modelNicknames[message.name]?.model_name || message.name,
-              modelImage:
-                modelNicknames[message.name]?.model_avatar || undefined
-            }
-          })
-        )
-      })
-    })
+    const source = await this.getStoredChatMessages(id)
+    const messages = (source ?? []).map((message) => ({
+      ...message,
+      modelName: modelNicknames[message.name]?.model_name || message.name,
+      modelImage: modelNicknames[message.name]?.model_avatar || undefined
+    }))
+    return { messages, source }
+  }
+
+  async getChatHistory(id: string): Promise<MessageHistory> {
+    return (await this.getChatHistoryWithSource(id)).messages
   }
 
   async getChatHistories(): Promise<ChatHistory> {
-    return new Promise((resolve, reject) => {
-      this.db.get("chatHistories", (result) => {
-        resolve(result.chatHistories || [])
-      })
-    })
+    return await this.readLegacyValue<ChatHistory>("chatHistories") ?? []
   }
 
   async getChatHistoryTitleById(id: string): Promise<string> {
@@ -337,24 +399,33 @@ export class PageAssitDatabase {
   }
 
   async clear() {
-    this.db.clear()
+    await this.writeLegacyValues((done) => this.db.clear(done))
   }
 
-  async deleteChatHistory(id: string) {
-    const chatHistories = await this.getChatHistories()
-    const newChatHistories = chatHistories.filter(
-      (history) => history.id !== id
-    )
-    this.db.set({ chatHistories: newChatHistories })
-    this.db.remove(id)
+  async deleteChatHistory(id: string, chatHistories: ChatHistory, hasMessages: boolean) {
+    const keys = [`session_files_${id}`]
+    if (hasMessages) keys.push(id)
+    await this.writeLegacyValues((done) => this.db.remove(keys, done))
+    await this.writeLegacyValues((done) => this.db.set({
+      chatHistories: chatHistories.filter((history) => history.id !== id)
+    }, done))
   }
 
   async deleteAllChatHistory() {
-    const chatHistories = await this.getChatHistories()
-    chatHistories.forEach((history) => {
-      this.db.remove(history.id)
+    const items = await this.readLegacyValues(null)
+    const histories = Array.isArray(items.chatHistories) ? items.chatHistories : []
+    const historyIds = new Set(histories.flatMap((history) =>
+      typeof history?.id === "string" ? [history.id] : []
+    ))
+    const keys = Object.keys(items).filter((key) => {
+      const value = items[key]
+      if (key.startsWith("session_files_") && isLegacySessionFiles(value, key.slice("session_files_".length))) return true
+      const catalogued = historyIds.has(key)
+      return Array.isArray(value) && value.length > 0 &&
+        value.every((row) => row && typeof row.history_id === "string" && typeof row.role === "string" &&
+          (catalogued || (row.history_id === key && typeof row.id === "string" && typeof row.content === "string")))
     })
-    this.db.set({ chatHistories: [] })
+    await this.writeLegacyValues((done) => this.db.remove(["chatHistories", ...keys], done))
   }
 
   async deleteMessage(history_id: string) {
@@ -362,11 +433,7 @@ export class PageAssitDatabase {
   }
 
   async getAllPrompts(): Promise<Prompts> {
-    return new Promise((resolve, reject) => {
-      this.db.get("prompts", (result) => {
-        resolve(result.prompts || [])
-      })
-    })
+    return await this.readLegacyValue<Prompts>("prompts") ?? []
   }
 
   async bulkAddPrompts(prompts: Prompt[]) {
@@ -478,11 +545,7 @@ export class PageAssitDatabase {
   }
 
   async getAllWebshares(): Promise<Webshare[]> {
-    return new Promise((resolve, reject) => {
-      this.db.get("webshares", (result) => {
-        resolve(result.webshares || [])
-      })
-    })
+    return await this.readLegacyValue<Webshare[]>("webshares") ?? []
   }
 
   async addWebshare(webshare: Webshare) {
@@ -497,60 +560,30 @@ export class PageAssitDatabase {
     this.db.set({ webshares: newWebshares })
   }
 
-  async getUserID() {
-    return new Promise((resolve, reject) => {
-      this.db.get("user_id", (result) => {
-        resolve(result.user_id || "")
-      })
-    })
+  async getUserID(): Promise<string> {
+    return await this.readLegacyValue<string>("user_id") ?? ""
   }
 
   async setUserID(id: string) {
     this.db.set({ user_id: id })
   }
 
+  /**
+   * Titles-only since WP-18 (TASK-13522): this legacy fallback never
+   * deserializes per-history message blobs to run a content scan. Search
+   * that must match message content uses the Dexie implementation
+   * (`PageAssistDatabase#fullTextSearchChatHistories` in `db/dexie/chat.ts`).
+   */
   async searchChatHistories(query: string): Promise<ChatHistory> {
     const normalizedQuery = query.toLowerCase().trim()
-    if (!normalizedQuery) {
-      return this.getChatHistories()
-    }
-
     const allHistories = await this.getChatHistories()
-    const matchedHistories: ChatHistory = []
-    const matchedHistoryIds = new Set<string>()
-
-    for (const history of allHistories) {
-      if (simpleFuzzyMatch(history.title, normalizedQuery)) {
-        if (!matchedHistoryIds.has(history.id)) {
-          matchedHistories.push(history)
-          matchedHistoryIds.add(history.id)
-        }
-        continue
-      }
-
-      try {
-        const messages = await this.getChatHistory(history.id)
-        for (const message of messages) {
-          if (
-            message.content &&
-            simpleFuzzyMatch(message.content, normalizedQuery)
-          ) {
-            if (!matchedHistoryIds.has(history.id)) {
-              matchedHistories.push(history)
-              matchedHistoryIds.add(history.id)
-            }
-            break
-          }
-        }
-      } catch (error) {
-        console.error(
-          `Error fetching messages for history ${history.id}:`,
-          error
-        )
-      }
+    if (!normalizedQuery) {
+      return allHistories
     }
 
-    return matchedHistories
+    return allHistories.filter((history) =>
+      simpleFuzzyMatch(history.title, normalizedQuery)
+    )
   }
 }
 
@@ -1000,12 +1033,20 @@ export const deleteHistoriesByDateRange = async (
       return []
   }
 
-  const deletedIds: string[] = []
-  for (const history of historiesToDelete) {
-    await db.deleteMessage(history.id)
-    await db.removeChatHistory(history.id)
-    deletedIds.push(history.id)
+  const deletedIds = historiesToDelete.map((history) => history.id)
+  if (deletedIds.length === 0) {
+    return []
   }
+
+  // WP-18 (TASK-13522): one batched remove for every per-history message blob
+  // plus ONE rewrite of the chatHistories index. The previous per-history
+  // loop re-read and re-wrote the whole index for each deletion (O(N^2)
+  // storage traffic on the fallback path).
+  await db.db.remove(deletedIds)
+  const remainingHistories = allHistories.filter(
+    (history) => !deletedIds.includes(history.id)
+  )
+  await db.db.set({ chatHistories: remainingHistories })
 
   return deletedIds
 }

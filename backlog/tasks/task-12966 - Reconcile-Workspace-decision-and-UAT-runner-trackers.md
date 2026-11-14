@@ -57,13 +57,13 @@ Close the tracker drift left after the canonical Workspace decision and Research
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Audit confirmed #2605 runner work is complete in canonical TASK-12877, TASK-12020.28, and TASK-12020.36. Removed the obsolete duplicate #2605 TASK-12130 file while preserving the unrelated Chat Workspace TASK-12130. Marked stale TASK-12020.35 Done. PR #2633 merged at 8601d41f807be65cfb7f8a3878c2606dbb1cb1ca with 20/20 review threads resolved; its colliding Workspace TASK-12949 history is preserved under unique TASK-12967. Two unrelated pre-existing TASK-12949 records remain outside this scoped Workspace reconciliation.
 
 GitHub closeout completed on 2026-07-13: #2605 closed as completed with comment https://github.com/rmusser01/tldw_server/issues/2605#issuecomment-4965722834; #1526 closed as completed with comment https://github.com/rmusser01/tldw_server/issues/1526#issuecomment-4965724496. Parent #1522 automatically marks #1526 complete. Fresh GraphQL verification confirms #2606, #2607, and #2608 remain OPEN and unchanged.
 
 Final verification: Backlog CLI parsed TASK-12020.35, TASK-12966, and TASK-12967; focused identity validation found exactly one Workspace-scoped TASK-12130, TASK-12877, TASK-12966, and TASK-12967 plus one canonical #2605 runner record; all 8 local decision links resolve; issue-state GraphQL matched the closeout contract; git diff checks passed. Bandit is not applicable because no executable code changed. Draft PR #2729 remains gated on the required human-written Change summary.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

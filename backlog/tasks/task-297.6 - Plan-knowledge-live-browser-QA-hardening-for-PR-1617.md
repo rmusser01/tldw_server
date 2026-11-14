@@ -38,7 +38,7 @@ Create and commit a design spec for a verification-first /knowledge QA hardening
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design approved in brainstorming: keep PR #1617 verification-first with a narrow same-PR fix gate; use both repeatable seeded browser QA and one local real-data pass; treat saved-view/profile sharing and advanced organization as observation-only for this PR; create a product-expansion issue after QA synthesis so it can cite evidence.
 
 Spec path: Docs/superpowers/specs/2026-05-13-knowledge-live-browser-qa-hardening-design.md
@@ -82,7 +82,7 @@ Task 6 keyboard/power-user pass completed with seeded browser coverage. Desktop 
 Task 7 current-PR fixes completed within the narrow gate. Added capture-phase Escape handling in KnowledgeContextBar and SettingsPanel so nested controls cannot swallow Escape before source/settings overlays close. Renamed the compact toolbar settings control label and tooltip to Open Knowledge QA settings to distinguish it from global app Settings. Added focused regression tests before implementation and verified the red run failed as expected; after the fix, `bunx vitest run src/components/Option/KnowledgeQA/__tests__/KnowledgeContextBar.test.tsx src/components/Option/KnowledgeQA/__tests__/CompactToolbar.test.tsx src/components/Option/KnowledgeQA/__tests__/SettingsPanel.behavior.test.tsx` passed 3 files / 30 tests. Bandit not applicable because no Python production files were touched.
 
 Task 8 product-expansion issue created: https://github.com/rmusser01/tldw_server/issues/1631. The issue keeps saved views, profile sharing/export/import, advanced source organization, workspace grouping, keyboard shortcuts, and mobile disclosure refinements out of PR #1617 unless later user-trial evidence proves the QA workflow needs them. It preserves the non-goals that `/knowledge` remains QA-only, web fallback stays user-toggleable/default-provider based, generated/test/workspace artifacts stay hidden unless workspace-scoped, and older extension route investment requires shipped-versus-legacy confirmation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Implementation Plan
 

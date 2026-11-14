@@ -51,7 +51,7 @@ describe("PlaygroundStatusStrip first-slice state", () => {
 
     const status = screen.getByRole("status", { name: "Chat status" });
     expect(status).toHaveTextContent("Ready");
-    expect(status).toHaveTextContent("openai:gpt-4.1-mini");
+    expect(status).toHaveTextContent("gpt-4.1-mini (OpenAI)");
     expect(status).toHaveTextContent("3 messages");
     expect(status).not.toHaveTextContent("Cockpit");
     expect(status).not.toHaveTextContent("Server chat");
@@ -200,7 +200,7 @@ describe("PlaygroundStatusStrip first-slice state", () => {
 
     const status = screen.getByRole("status", { name: "Chat status" });
     expect(status).toHaveTextContent("Ready");
-    expect(status).toHaveTextContent("openai:gpt-4.1-mini");
+    expect(status).toHaveTextContent("gpt-4.1-mini (OpenAI)");
     expect(status).toHaveTextContent("1 message");
     expect(status).not.toHaveTextContent("Temporary chat");
     expect(status).not.toHaveTextContent("Local only");
@@ -696,7 +696,7 @@ describe("PlaygroundStatusStrip first-slice state", () => {
 
     const status = screen.getByRole("status", { name: "Chat status" });
     expect(status).toHaveTextContent("Ready");
-    expect(status).toHaveTextContent("openai:gpt-4.1-mini");
+    expect(status).toHaveTextContent("gpt-4.1-mini (OpenAI)");
   });
 
   it("shows context preview loading without treating the chat route as degraded", () => {

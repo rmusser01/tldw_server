@@ -12,6 +12,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
+from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
 
 #######################################################################################################################
 #
@@ -22,10 +23,6 @@ CONVERSATION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,100}$')
 
 # Valid character ID pattern (numeric or name)
 CHARACTER_ID_PATTERN = re.compile(r'^(\d+|[a-zA-Z0-9_\- ]{1,100})$')
-
-# Pre-compiled pattern for redacting base64 image data in request size validation
-# Matches data:image URIs and captures the prefix for redaction
-DATA_URI_REDACT_PATTERN = re.compile(r'(data:image[^,]*,)[^"\s]+')
 
 # Maximum tool definition size (reduced from 10KB to 5KB for security)
 MAX_TOOL_DEFINITION_SIZE = 5000  # characters
@@ -338,7 +335,7 @@ def validate_request_size(request_data: Any) -> bool:
         # If it's already a JSON string, avoid re-serializing: redact via regex only.
         if isinstance(request_data, str):
             # Use pre-compiled pattern to replace base64 payload with <redacted>
-            request_json = DATA_URI_REDACT_PATTERN.sub(r'\1<redacted>', request_data)
+            request_json = DATA_URI_REDACT_RE.sub(r'\1<redacted>', request_data)
         else:
             # Convert to a serializable dict and sanitize recursively
             raw = request_data.model_dump() if hasattr(request_data, 'model_dump') else request_data

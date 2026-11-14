@@ -1,20 +1,57 @@
 import React from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { bgRequest } from '@/services/background-proxy'
+import { useDebounce } from '@/hooks/useDebounce'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
 import {
   buildWikilinkIndex,
+  collectWikilinkTargets,
   getActiveWikilinkQuery,
   insertWikilinkAtCursor,
+  parseWikilinkResolutions,
   renderContentWithResolvedWikilinks,
 } from '@/components/Notes/wikilinks'
 import {
   normalizeGraphNoteId,
   extractMarkdownHeadings,
+  continueMarkdownList,
   LARGE_NOTE_PREVIEW_THRESHOLD,
   LARGE_NOTE_PREVIEW_DELAY_MS,
 } from '../notes-manager-utils'
 
+const WIKILINK_SUGGESTION_LIMIT = 8
+const WIKILINK_SERVER_SUGGESTION_LIMIT = 20
+const WIKILINK_SUGGEST_DEBOUNCE_MS = 200
+const WIKILINK_RESOLVE_DEBOUNCE_MS = 250
+const NO_WIKILINK_TARGETS_KEY = JSON.stringify([[], []])
+
+const toWikilinkCandidates = (payload: unknown): WikilinkCandidate[] => {
+  const body = payload as { items?: unknown; notes?: unknown; results?: unknown } | null
+  const rows = Array.isArray(payload)
+    ? payload
+    : Array.isArray(body?.items)
+      ? body.items
+      : Array.isArray(body?.notes)
+        ? body.notes
+        : Array.isArray(body?.results)
+          ? body.results
+          : []
+  const candidates: WikilinkCandidate[] = []
+  for (const row of rows as Array<{ id?: unknown; title?: unknown } | null>) {
+    const id = normalizeGraphNoteId(row?.id as string | number | null | undefined)
+    const title = String(row?.title || '').trim()
+    if (id && title) candidates.push({ id, title })
+  }
+  return candidates
+}
+
 export interface UseNotesWikilinksDeps {
+  /** Server lookups run only while online and for a verified notes owner. */
+  isOnline: boolean
+  authorityScope: string | null | undefined
+  /** Tooltip for an unresolved link, e.g. `Create note "Title"`. */
+  createNoteLabel?: (title: string) => string
   /** From editor hook */
   selectedId: string | number | null
   title: string
@@ -49,6 +86,9 @@ export interface UseNotesWikilinksDeps {
 
 export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
   const {
+    isOnline,
+    authorityScope,
+    createNoteLabel,
     selectedId,
     title,
     content,
@@ -117,15 +157,50 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
     return getActiveWikilinkQuery(content, editorCursorIndex)
   }, [content, editorCursorIndex, editorDisabled])
 
+  const serverLookupsEnabled = isOnline && authorityScope != null
+
+  // Autocomplete searches titles across the whole library, not just the
+  // loaded list page (NE-02).
+  const wikilinkQueryText = activeWikilinkQuery?.query.trim() ?? ''
+  const debouncedWikilinkQueryText = useDebounce(wikilinkQueryText, WIKILINK_SUGGEST_DEBOUNCE_MS)
+  const { data: serverWikilinkCandidates } = useQuery({
+    queryKey: ['notes-wikilink-suggest', authorityScope, debouncedWikilinkQueryText],
+    enabled: serverLookupsEnabled && !editorDisabled && debouncedWikilinkQueryText.length > 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
+    // Keep the previous owner's titles out of a new owner's suggestions.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === authorityScope ? previous : undefined,
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        query: debouncedWikilinkQueryText,
+        title_only: 'true',
+        limit: String(WIKILINK_SERVER_SUGGESTION_LIMIT)
+      })
+      const response = await bgRequest<unknown>({
+        path: `/api/v1/notes/search/?${params.toString()}`,
+        method: 'GET'
+      })
+      return toWikilinkCandidates(response)
+    }
+  })
+
   const wikilinkSuggestions = React.useMemo(() => {
     if (!activeWikilinkQuery) return [] as WikilinkCandidate[]
     const queryLower = activeWikilinkQuery.query.trim().toLowerCase()
     const selectedNormalized = normalizeGraphNoteId(selectedId)
-    const filtered = wikilinkCandidates.filter((candidate) => {
+    const seenIds = new Set<string>()
+    const pool = queryLower
+      ? [...wikilinkCandidates, ...(serverLookupsEnabled ? serverWikilinkCandidates ?? [] : [])]
+      : wikilinkCandidates
+    const filtered = pool.filter((candidate) => {
       if (!candidate.title) return false
       if (selectedNormalized && candidate.id === selectedNormalized) return false
-      if (!queryLower) return true
-      return candidate.title.toLowerCase().includes(queryLower)
+      if (seenIds.has(candidate.id)) return false
+      if (queryLower && !candidate.title.toLowerCase().includes(queryLower)) return false
+      seenIds.add(candidate.id)
+      return true
     })
     return filtered
       .sort((a, b) => {
@@ -136,8 +211,8 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
         if (aStarts !== bStarts) return aStarts ? -1 : 1
         return a.title.localeCompare(b.title) || a.id.localeCompare(b.id)
       })
-      .slice(0, 8)
-  }, [activeWikilinkQuery, selectedId, wikilinkCandidates])
+      .slice(0, WIKILINK_SUGGESTION_LIMIT)
+  }, [activeWikilinkQuery, selectedId, serverLookupsEnabled, serverWikilinkCandidates, wikilinkCandidates])
 
   const wikilinkSuggestionDisplayCounts = React.useMemo(() => {
     const counts = new Map<string, number>()
@@ -148,11 +223,49 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
     return counts
   }, [wikilinkSuggestions])
 
+  // The server resolves each link the same way it builds backlinks, so a link
+  // opens the note its backlink points to, even beyond the loaded list page.
+  const wikilinkTargetsKey = React.useMemo(() => {
+    const targets = collectWikilinkTargets(content)
+    return JSON.stringify([targets.titles, targets.ids])
+  }, [content])
+  const debouncedWikilinkTargetsKey = useDebounce(wikilinkTargetsKey, WIKILINK_RESOLVE_DEBOUNCE_MS)
+  const sourceNoteId = normalizeGraphNoteId(selectedId)
+  const { data: serverWikilinkResolutions } = useQuery({
+    queryKey: ['notes-wikilink-resolve', authorityScope, sourceNoteId, debouncedWikilinkTargetsKey],
+    enabled: serverLookupsEnabled && debouncedWikilinkTargetsKey !== NO_WIKILINK_TARGETS_KEY,
+    retry: false,
+    refetchOnWindowFocus: false,
+    // Keep earlier answers while a newly typed link resolves, but never
+    // another owner's.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === authorityScope ? previous : undefined,
+    queryFn: async () => {
+      const [titles, ids] = JSON.parse(debouncedWikilinkTargetsKey) as [string[], string[]]
+      const response = await bgRequest<unknown>({
+        path: '/api/v1/notes/wikilinks/resolve',
+        method: 'POST',
+        body: {
+          titles,
+          ids,
+          ...(sourceNoteId ? { source_note_id: sourceNoteId } : {})
+        }
+      })
+      return parseWikilinkResolutions(response)
+    }
+  })
+  const wikilinkResolutions = serverLookupsEnabled ? serverWikilinkResolutions ?? null : null
+
   const previewContent = React.useMemo(
-    () => renderContentWithResolvedWikilinks(content, wikilinkIndex),
-    [content, wikilinkIndex]
+    () =>
+      renderContentWithResolvedWikilinks(content, wikilinkIndex, {
+        resolutions: wikilinkResolutions,
+        labels: { createNote: createNoteLabel }
+      }),
+    [content, createNoteLabel, wikilinkIndex, wikilinkResolutions]
   )
-  const tocEntries = React.useMemo(() => extractMarkdownHeadings(content), [content])
+  const tocEntries = React.useMemo(() => extractMarkdownHeadings(content).filter((entry) =>
+    entry.text.trim() !== title.trim() && entry.text.trim().toLowerCase() !== 'table of contents'), [content, title])
   const shouldShowToc = tocEntries.length >= 3
 
   const usesLargePreviewGuardrails = React.useMemo(
@@ -165,7 +278,15 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
   const applyWikilinkSuggestion = React.useCallback(
     (candidate: WikilinkCandidate) => {
       if (!activeWikilinkQuery) return
-      const next = insertWikilinkAtCursor(content, activeWikilinkQuery, candidate.title)
+      // A title shared by several notes is ambiguous, so link the picked note by id.
+      const titleIsAmbiguous =
+        (wikilinkSuggestionDisplayCounts.get(candidate.title.toLowerCase()) || 0) > 1
+      const next = insertWikilinkAtCursor(
+        content,
+        activeWikilinkQuery,
+        candidate.title,
+        titleIsAmbiguous ? candidate.id : null
+      )
       setContentDirty(next.content)
       setEditorCursorIndex(next.cursor)
       setWikilinkSelectionIndex(0)
@@ -177,12 +298,28 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
         resizeEditorTextarea()
       })
     },
-    [activeWikilinkQuery, content, contentTextareaRef, resizeEditorTextarea, setContentDirty, setEditorCursorIndex]
+    [activeWikilinkQuery, content, contentTextareaRef, resizeEditorTextarea, setContentDirty, setEditorCursorIndex, wikilinkSuggestionDisplayCounts]
   )
 
   const handleEditorKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (!activeWikilinkQuery || wikilinkSuggestions.length === 0) return
+      if (editorDisabled || event.currentTarget.readOnly || event.nativeEvent.isComposing) return
+      if (!activeWikilinkQuery || wikilinkSuggestions.length === 0) {
+        if (event.key !== 'Enter' || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return
+        const next = continueMarkdownList(content, event.currentTarget.selectionStart, event.currentTarget.selectionEnd)
+        if (!next) return
+        event.preventDefault()
+        setContentDirty(next.content)
+        setEditorCursorIndex(next.cursor)
+        window.requestAnimationFrame(() => {
+          const textarea = contentTextareaRef.current
+          if (!textarea) return
+          textarea.focus({ preventScroll: true })
+          textarea.setSelectionRange(next.cursor, next.cursor)
+          resizeEditorTextarea()
+        })
+        return
+      }
       if (event.key === 'ArrowDown') {
         event.preventDefault()
         setWikilinkSelectionIndex((current) => (current + 1) % wikilinkSuggestions.length)
@@ -215,7 +352,7 @@ export function useNotesWikilinks(deps: UseNotesWikilinksDeps) {
         })
       }
     },
-    [activeWikilinkQuery, applyWikilinkSuggestion, contentTextareaRef, setEditorCursorIndex, wikilinkSelectionIndex, wikilinkSuggestions]
+    [activeWikilinkQuery, applyWikilinkSuggestion, content, contentTextareaRef, editorDisabled, resizeEditorTextarea, setContentDirty, setEditorCursorIndex, wikilinkSelectionIndex, wikilinkSuggestions]
   )
 
   // Effects

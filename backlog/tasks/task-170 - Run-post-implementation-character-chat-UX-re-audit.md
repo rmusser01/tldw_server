@@ -45,7 +45,7 @@ Repeat the first-time and returning-user character-chat walkthrough after the re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Protocol was written to Docs/Reviews/CHARACTER_CHAT_WEBUI_UX_REAUDIT_2026_05_09.md before Puppeteer execution.
 
 Puppeteer/Chrome evidence captured first-time direct /characters, first-run splash, explicit character-chat onboarding intent route, UI character creation, returning search/edit, row chat action, chat empty state, and header character-mode attempt.
@@ -55,7 +55,7 @@ Key findings: generic first-run splash still intercepts character-chat route int
 Verification recorded: `node /private/tmp/character-chat-reaudit.mjs` completed with 13 states, `jq empty Docs/Reviews/assets/2026-05-09-character-chat-reaudit/puppeteer-states.json` passed, `git diff --check` passed, and the final asset directory contains 11 screenshots plus the JSON state capture.
 
 Bandit was skipped because final touched scope is documentation, Backlog task metadata, and generated browser evidence only; no Python or production code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

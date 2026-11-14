@@ -50,7 +50,7 @@ def moodboard_client(tmp_path: Path) -> Generator[TestClient, None, None]:
 
     app.dependency_overrides.clear()
     try:
-        db.close()
+        db.close_all_connections()
     except Exception:
         _ = None
 
@@ -164,3 +164,39 @@ def test_moodboard_not_found_endpoints(moodboard_client: TestClient):
     client = moodboard_client
     assert client.get("/api/v1/notes/moodboards/999999").status_code == 404
     assert client.get("/api/v1/notes/moodboards/999999/notes").status_code == 404
+
+
+@pytest.mark.parametrize("operation", ["create", "get", "update"])
+def test_malformed_stored_moodboard_returns_sanitized_server_error(
+    moodboard_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    app = moodboard_client.app
+    assert isinstance(app, FastAPI)
+    db = app.dependency_overrides[get_chacha_db_for_user]()
+    assert isinstance(db, CharactersRAGDB)
+    stored_secret = "private-row-value-" + "x" * 2001
+    path = "/api/v1/notes/moodboards"
+    if operation == "create":
+        original_add = db.add_moodboard
+
+        def add_malformed_moodboard(name: str, description: str | None = None, smart_rule: object = None) -> int | None:
+            return original_add(name=name, description=stored_secret, smart_rule=smart_rule)
+
+        monkeypatch.setattr(db, "add_moodboard", add_malformed_moodboard)
+    else:
+        moodboard_id = db.add_moodboard(name="Stored board", description=stored_secret)
+        path += f"/{moodboard_id}"
+
+    with TestClient(moodboard_client.app, raise_server_exceptions=False) as client:
+        if operation == "create":
+            response = client.post(path, json={"name": "Valid request"})
+        elif operation == "get":
+            response = client.get(path)
+        else:
+            response = client.patch(path, json={"name": "Updated board"}, headers={"expected-version": "1"})
+
+    assert response.status_code == 500, response.text
+    assert "private-row-value-" not in response.text
+    assert "input_value" not in response.text

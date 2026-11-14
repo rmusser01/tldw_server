@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.endpoints import flashcards
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
@@ -43,6 +44,7 @@ def _tags(db, card):
 
 def test_http_create_with_tags_populates_actual_keyword_links(tags_db):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router)
     app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: tags_db
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -57,6 +59,7 @@ def test_http_patch_replaces_existing_keyword_links(tags_db):
     card = _card(tags_db, linked=True)
     before = tags_db.get_flashcard(card)
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router)
     app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: tags_db
     with TestClient(app, raise_server_exceptions=False) as client:
@@ -73,6 +76,7 @@ def test_http_tag_replacement_updates_links_and_json_mirror(tags_db, linked):
     card = _card(db, linked=linked)
     before = db.get_flashcard(card)
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router)
     app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db
     with TestClient(app, raise_server_exceptions=False) as client:

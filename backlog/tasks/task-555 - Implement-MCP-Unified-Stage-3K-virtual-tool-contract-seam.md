@@ -37,13 +37,13 @@ Use TDD. First add failing package-boundary tests proving host VirtualExternalTo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 3K with a narrow contract seam. Host external server manager now imports mcp_unified.federation.models.VirtualExternalTool instead of defining a duplicate dataclass. Package VirtualExternalTool now exposes copy() with caller-owned nested input_schema and metadata. Added package-boundary regression tests for host/package identity and virtual-tool copy isolation.
 
 Review fixes: addressed Gemini review comment by making _summarize_runtime_auth() tolerate runtime_auth.headers/env being None and added a focused regression test. Addressed Qodo cached-state feedback by returning caller-owned copies from ExternalServerManager.list_virtual_tools(), defensively copying in ExternalFederationModule.get_tools(), and adding a cache-isolation regression test. Fixed the malformed duplicate Backlog description marker in TASK-555.
 
 Verification: targeted runtime-auth regression 1 passed, 3 warnings; targeted caller-owned list regression 1 passed, 3 warnings; websocket module integration test skipped in this environment; focused MCP suite 39 passed, 2 skipped, 3 warnings; Ruff all checks passed; Bandit 0 findings on touched implementation files; git diff --check clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

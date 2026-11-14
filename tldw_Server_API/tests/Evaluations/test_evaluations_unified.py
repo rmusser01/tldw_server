@@ -52,7 +52,6 @@ async def test_eval_required_credentials_are_not_bypassed_in_pytest_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Pytest timing helpers must not disable the credential trust boundary."""
-    monkeypatch.setattr(eval_endpoint, "_is_eval_test_mode", lambda: True)
     missing_credentials = SimpleNamespace(
         api_key=None,
         app_config={"openai_api": {"model": "model-a"}},
@@ -243,7 +242,7 @@ async def test_eval_bedrock_auth_contract_distinguishes_default_chain_from_absen
             assert (provider, model) == ("bedrock", "model-a")
             return handle
 
-    monkeypatch.setattr(eval_endpoint, "_is_eval_test_mode", lambda: False)
+    monkeypatch.setattr(eval_endpoint, "is_test_context", lambda: False)
     if expected_status is None:
         provider, model, resolved, runtime = await eval_endpoint._resolve_and_validate_eval_provider(
             eval_request,
@@ -667,7 +666,7 @@ class TestTldwSpecificEndpoints:
             async def close(self):
                 return None
 
-        monkeypatch.setattr(eval_ep, "_is_eval_test_mode", lambda: False)
+        monkeypatch.setattr(eval_ep, "is_test_context", lambda: False)
         monkeypatch.setattr(eval_ep, "ProviderCredentialRuntime", _MissingRuntime)
 
         response = client.post(

@@ -151,14 +151,23 @@ func Load() (*Config, error) {
 	return LoadFrom(path)
 }
 
-// LoadFrom reads configuration from a specific file path.
+// LoadFrom reads configuration, preserving defaults when the file is absent.
 func LoadFrom(path string) (*Config, error) {
+	return loadFrom(path, true)
+}
+
+// LoadFromRequired reads an explicitly selected file without missing-file fallback.
+func LoadFromRequired(path string) (*Config, error) {
+	return loadFrom(path, false)
+}
+
+func loadFrom(path string, allowMissing bool) (*Config, error) {
 	cfg := Default()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil // Return defaults if file doesn't exist
+		if allowMissing && os.IsNotExist(err) {
+			return cfg, nil // Preserve the legacy optional-file behavior.
 		}
 		return nil, err
 	}

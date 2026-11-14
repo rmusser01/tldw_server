@@ -286,6 +286,7 @@ const TtsPlaygroundPage: React.FC = () => {
       openAiModel,
       openAiVoice
     })
+    if (nextSegments.length === 0) return
 
     if (ttsSettings) {
       void setTTSSettings({
@@ -331,6 +332,7 @@ const TtsPlaygroundPage: React.FC = () => {
   }
 
   const handleStop = () => {
+    if (isGenerating) clearSegments()
     stopBrowserSpeech()
     const el = audioRef.current
     if (el) {
@@ -456,7 +458,7 @@ const TtsPlaygroundPage: React.FC = () => {
   const canStop =
     provider === "browser"
       ? browserIsSpeaking || browserIsPaused
-      : Boolean(segments.length || audioRef.current)
+      : Boolean(isGenerating || segments.length || audioRef.current)
   const stopDisabledReason =
     !canStop &&
     t(

@@ -33,7 +33,26 @@ vi.mock("wxt/browser", () => ({
   }
 }))
 
-import { hasResumableSidepanelChat } from "../sidepanel-chat-resume"
+import { durableSidepanelTabs, hasResumableSidepanelChat, type SidepanelTabsState } from "../sidepanel-chat-resume"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
+import type { SidepanelChatSnapshot } from "@/store/sidepanel-chat-tabs"
+
+const draftOnlyTabs = (temporary: boolean) => ({
+  version: 2,
+  ownerKey: '["http://chat.test","multi-user","manual",null,"alice",null]',
+  tabs: [{ id: "logical-draft", label: "New chat", historyId: null, serverChatId: null, serverChatTopic: null, updatedAt: 1 }],
+  activeTabId: "logical-draft",
+  snapshotsById: {
+    "logical-draft": {
+      chatDraftHandle: { ownerHash: chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }), address: { kind: "fresh", id: "unsent", scope: { type: "global" }, temporary } },
+      history: [], messages: [], chatMode: "normal", historyId: null, serverChatId: null,
+      webSearch: false, toolChoice: "none", selectedModel: null, selectedSystemPrompt: null,
+      selectedQuickPrompt: null, temporaryChat: temporary, useOCR: false,
+      serverChatState: null, serverChatTopic: null, serverChatClusterId: null,
+      serverChatSource: null, serverChatExternalRef: null, queuedMessages: [], modelSettings: {}
+    } as SidepanelChatSnapshot
+  }
+})
 
 describe("hasResumableSidepanelChat", () => {
   beforeEach(() => {
@@ -49,6 +68,19 @@ describe("hasResumableSidepanelChat", () => {
 
   it("does not offer another account's unowned cached tabs", async () => {
     mocks.storageGet.mockResolvedValue({ tabs: [{ id: "old-tab", historyId: "alice-private" }], activeTabId: "old-tab", snapshotsById: {} })
+    await expect(hasResumableSidepanelChat()).resolves.toBe(false)
+  })
+
+  it.each([false, true])("offers resume for a verified draft-only view with no saved messages (Temporary %s)", async temporary => {
+    mocks.storageGet.mockResolvedValue(draftOnlyTabs(temporary))
+    await expect(hasResumableSidepanelChat()).resolves.toBe(true)
+    expect(mocks.copilotResumeLastChat).not.toHaveBeenCalled()
+  })
+
+  it("does not offer another principal's draft handle from an otherwise owner-keyed scaffold", async () => {
+    const saved = draftOnlyTabs(false)
+    saved.snapshotsById["logical-draft"].chatDraftHandle!.ownerHash = "b".repeat(64)
+    mocks.storageGet.mockImplementation(async key => key.startsWith("sidepanelChatTabsState:v2:") ? saved : null)
     await expect(hasResumableSidepanelChat()).resolves.toBe(false)
   })
 
@@ -271,3 +303,80 @@ describe("hasResumableSidepanelChat", () => {
     await expect(hasResumableSidepanelChat()).resolves.toBe(false)
   })
 })
+
+
+it.each([false, true])("does not durably retain an active insertion command in a saved tab (Temporary %s)", temporary => {
+  const saved = draftOnlyTabs(temporary)
+  const original = saved.snapshotsById["logical-draft"]
+  original.selectedQuickPrompt = "one-time command"
+  original.selectedSystemPrompt = "system context"
+  const durable = durableSidepanelTabs(saved as SidepanelTabsState, original.chatDraftHandle!.ownerHash)
+  expect({ quick: durable.snapshotsById["logical-draft"].selectedQuickPrompt, system: durable.snapshotsById["logical-draft"].selectedSystemPrompt, originalQuick: original.selectedQuickPrompt })
+    .toEqual({ quick: null, system: "system context", originalQuick: "one-time command" })
+})
+
+
+it.each(["current", "wrong-owner", "unowned", "saved-id", "server-id"])(
+  "retains only an owned fresh Temporary transcript (%s)",
+  (source) => {
+    const saved = draftOnlyTabs(true)
+    const original = saved.snapshotsById["logical-draft"]
+    const ownerHash = original.chatDraftHandle!.ownerHash
+    original.historyId = "temp"
+    original.history = [{ role: "assistant", content: "TEMP EXACT REPLY" }]
+    original.messages = [
+      {
+        id: "temp-reply",
+        isBot: true,
+        name: "Assistant",
+        message: "TEMP EXACT REPLY",
+        sources: []
+      }
+    ]
+    if (source === "wrong-owner")
+      original.chatDraftHandle!.ownerHash = "b".repeat(64)
+    if (source === "unowned") original.chatDraftHandle = null
+    if (source === "saved-id") original.historyId = "saved-local"
+    if (source === "server-id") original.serverChatId = "saved-server"
+    const durable = durableSidepanelTabs(saved as SidepanelTabsState, ownerHash)
+      .snapshotsById["logical-draft"]
+    expect({
+      history: durable.history,
+      messages: durable.messages,
+      historyId: durable.historyId,
+      serverChatId: durable.serverChatId
+    }).toEqual({
+      history: source === "current" ? original.history : [],
+      messages: source === "current" ? original.messages : [],
+      historyId: null,
+      serverChatId: null
+    })
+  }
+)
+
+it.each(["history-null", "history-shape", "messages-null", "messages-shape"])(
+  "does not retain malformed owned Temporary rows (%s)",
+  (malformed) => {
+    const saved = draftOnlyTabs(true)
+    const original = saved.snapshotsById["logical-draft"]
+    const ownerHash = original.chatDraftHandle!.ownerHash
+    original.history = [{ role: "assistant", content: "VALID REPLY" }]
+    original.messages = [
+      { isBot: true, name: "Assistant", message: "VALID REPLY", sources: [] }
+    ]
+    if (malformed.startsWith("history"))
+      original.history = [
+        malformed.endsWith("null") ? null : { role: "assistant", content: {} }
+      ] as unknown as SidepanelChatSnapshot["history"]
+    else
+      original.messages = [
+        malformed.endsWith("null") ? null : {}
+      ] as unknown as SidepanelChatSnapshot["messages"]
+    const durable = durableSidepanelTabs(saved as SidepanelTabsState, ownerHash)
+      .snapshotsById["logical-draft"]
+    expect({ history: durable.history, messages: durable.messages }).toEqual({
+      history: [],
+      messages: []
+    })
+  }
+)

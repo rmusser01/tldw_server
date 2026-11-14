@@ -25,11 +25,11 @@ pyproject pinned fastapi>=0.141.1,<0.142.0 while 0.142.1 is the latest stable an
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified with FastAPI 0.142.1 installed. tests/Utils/test_fastapi_routes.py and test_dependency_security_floor.py: 17 passed. The private state the helper relies on (RouteContext._effective_route, scope effective_route_context) is unchanged in 0.142. The OpenAPI fingerprint regenerated identically. Ran the backend-required tenant-isolation and contract ratchets, every route-walk test touched by #3053, and the privilege tests: 1149 passed, 20 failed, 6 skipped. The failures are 19 in test_chacha_postgres_http_operation_lifecycle.py (connection ACTIVE instead of IDLE after owner close) plus 1 order-dependent route/CORS guard that passes alone. All of them also fail locally under FastAPI 0.141.1 (15 failed, same five tests), and the db-management-a-l CI shard passed on #3053, so they are local macOS timing issues, not 0.142. Bandit: not applicable (version pin and a docstring only).
 
 CI on #3065: gap-verified-4 failed on test_ingestion_sources_access_policy::test_capabilities_endpoint_uses_explicit_response_model (StopIteration). It walked app.routes directly, a spot the #3053 conversion missed, and it fails on 0.141.1 too. Converted to iter_served_routes; the file passes 19/19 on both versions. A repo grep found no other whole-app route walks outside the helper.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

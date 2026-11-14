@@ -22,7 +22,6 @@ from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.Chat import bounded_daemon as bounded_daemon_module
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat import request_queue as request_queue_module
 from tldw_Server_API.app.core.Chat.bounded_daemon import BoundedDaemonPool
@@ -41,6 +40,10 @@ from tldw_Server_API.app.core.Chat.chat_service import (
     write_mandatory_moderation_audit,
 )
 from tldw_Server_API.app.core.Chat.request_queue import RateLimitedQueue, RequestQueue
+from tldw_Server_API.app.core.LLM_Calls import bounded_daemon as bounded_daemon_module
+from tldw_Server_API.app.core.LLM_Calls import gateway
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import _StreamUsage
+from tldw_Server_API.app.core.Usage.llm_accounting import drain_accounting
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     resolved_request_fields,
     resolved_request_fields_async,
@@ -2997,7 +3000,7 @@ async def test_execute_non_stream_async_fallback_provider_cancellation_is_saniti
     registry = SimpleNamespace(
         get_adapter=lambda _provider: CancelledFallbackAdapter()
     )
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
 
     def failing_primary_call() -> None:
@@ -3057,6 +3060,7 @@ async def test_execute_non_stream_cancellation_drains_provider_before_usage_and_
     drain_entered = _install_owned_worker_drain_probe(monkeypatch)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
     def blocked_call() -> dict[str, object]:
         entered.set()
@@ -3148,6 +3152,7 @@ async def test_execute_non_stream_starts_without_default_executor_and_drains_can
     default_blocker = loop.run_in_executor(None, block_default_executor)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     try:
         await _wait_for_thread_event(default_entered)
         kwargs = _nonstream_call_kwargs(
@@ -3208,6 +3213,7 @@ async def test_execute_non_stream_saturation_fails_closed_before_dispatch(
     pool = BoundedDaemonPool(capacity=1)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
     def blocked_call() -> dict[str, object]:
         entered.set()
@@ -3305,12 +3311,13 @@ async def test_real_queue_and_direct_chat_share_one_sync_adapter_capacity_cap(
 
     monkeypatch.setattr(adapter, "chat", adapter_chat)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: queue)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
         request_queue_module,
         "SYNC_ADAPTER_CALL_POOL",
@@ -3510,12 +3517,13 @@ async def test_real_queued_chat_cancellation_classifies_late_adapter_result_befo
 
     monkeypatch.setattr(adapter, "chat", adapter_chat)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: queue)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
         request_queue_module,
         "SYNC_ADAPTER_CALL_POOL",
@@ -3601,12 +3609,13 @@ async def test_real_queued_chat_stop_drains_adapter_before_runtime_close(
 
     monkeypatch.setattr(adapter, "chat", adapter_chat)
     monkeypatch.setattr(
-        chat_service,
+        gateway,
         "_get_llm_registry",
         lambda: SimpleNamespace(get_adapter=lambda _provider: adapter),
     )
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: queue)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
         request_queue_module,
         "SYNC_ADAPTER_CALL_POOL",
@@ -3759,6 +3768,7 @@ async def test_success_is_marked_before_cancelled_postprocessing(
     release_save = asyncio.Event()
     marked: list[str] = []
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+    monkeypatch.setattr(chat_service, "log_llm_usage", AsyncMock(return_value=None))
 
     def successful_call() -> dict[str, object]:
         return {
@@ -3825,7 +3835,7 @@ async def test_perform_async_chat_genuine_caller_cancellation_stays_prompt(
                 cancellation_observed.set()
 
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="resolved-key",
@@ -3873,8 +3883,9 @@ async def test_perform_async_chat_requires_explicit_native_async_opt_in(
             return {"choices": [{"message": {"content": "unbounded"}}]}
 
     registry = SimpleNamespace(get_adapter=lambda _provider: UnmarkedAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
     resolved_fields = await resolved_request_fields_async(
         "openai",
@@ -3915,7 +3926,7 @@ async def test_perform_async_chat_cancellation_drains_sync_adapter(
             return {"choices": [{"message": {"content": "completed"}}]}
 
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingSyncAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="resolved-key",
@@ -4028,8 +4039,9 @@ async def test_perform_async_chat_starts_without_default_executor_and_drains_can
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingAdapter())
     loop.set_default_executor(default_executor)
     default_blocker = loop.run_in_executor(None, block_default_executor)
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     try:
         await _wait_for_thread_event(default_entered)
         resolved_fields = await resolved_request_fields_async(
@@ -4055,14 +4067,15 @@ async def test_perform_async_chat_starts_without_default_executor_and_drains_can
         task.cancel()
         await asyncio.wait_for(drain_entered.wait(), timeout=1.0)
         assert task.done() is False
-        assert lifecycle == ["adapter-start"]
+        # Model discovery (TASK-13460) takes and returns its own pool slot before the adapter starts.
+        assert lifecycle == ["capacity-release", "adapter-start"]
 
         adapter_release.set()
         with pytest.raises(asyncio.CancelledError):
             await asyncio.wait_for(task, timeout=1.0)
 
-        assert lifecycle == ["adapter-start", "adapter-exit", "capacity-release"]
-        assert pool.release_count == 1
+        assert lifecycle == ["capacity-release", "adapter-start", "adapter-exit", "capacity-release"]
+        assert pool.release_count == 2
         assert pool.active_count == 0
     finally:
         adapter_release.set()
@@ -4105,13 +4118,14 @@ async def test_perform_async_chat_cancellation_drains_builtin_sync_worker(
             return await asyncio.to_thread(self.chat, request)
 
     registry = SimpleNamespace(get_adapter=lambda _provider: BlockingBuiltInAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(
         chat_service,
         "SYNC_ADAPTER_CALL_POOL",
         pool,
         raising=False,
     )
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="resolved-key",
@@ -4171,13 +4185,14 @@ async def test_perform_async_chat_saturation_fails_closed_before_dispatch(
             return await asyncio.to_thread(self.chat, request)
 
     registry = SimpleNamespace(get_adapter=lambda _provider: SaturatedBuiltInAdapter())
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: registry)
     monkeypatch.setattr(
         chat_service,
         "SYNC_ADAPTER_CALL_POOL",
         pool,
         raising=False,
     )
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
     first_resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="first-key",
@@ -5490,6 +5505,7 @@ async def test_factory_handoff_timeout_closes_delivered_stream_exactly_once(
         "time",
         SimpleNamespace(time=real_time.time, monotonic=clock.monotonic),
     )
+    monkeypatch.setattr(gateway, "time", chat_service.time)
     task = asyncio.create_task(
         chat_service._call_stream_factory_bounded(
             CloseCountingStream,
@@ -6286,10 +6302,13 @@ async def test_execute_streaming_call_finalize_runs_without_refund_cb(monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
+async def test_execute_streaming_call_commits_a_cancelled_stream_instead_of_refunding(monkeypatch):
+    """A cancelled stream was read, so its estimate is recorded and committed; nothing is refunded (TASK-13953)."""
     metrics = _DummyMetrics()
     provider_manager = _DummyProviderManager()
     refund_calls: list[dict[str, bool]] = []
+    committed: list[int] = []
+    usage_log = AsyncMock(return_value=None)
 
     def llm_call_func():
         def _stream():
@@ -6304,7 +6323,9 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
     def fake_create_streaming_response_with_timeout(*_args, finalize_callback=None, **_kwargs):
         async def _gen():
             if callable(finalize_callback):
-                await finalize_callback(success=False, cancelled=True, error=False)
+                received = _StreamUsage()
+                received.chars = len("hi")  # the stream delivered its text before the cancel
+                await finalize_callback(success=False, cancelled=True, error=False, stream_usage=received)
             yield "data: [DONE]\n\n"
 
         return _gen()
@@ -6314,6 +6335,7 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
 
     monkeypatch.setattr(chat_service, "create_streaming_response_with_timeout", fake_create_streaming_response_with_timeout)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+    monkeypatch.setattr(chat_service, "log_llm_usage", usage_log)
 
     request = SimpleNamespace(
         method="POST",
@@ -6321,12 +6343,13 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
         headers={},
         state=SimpleNamespace(user_id=None, api_key_id=None),
     )
+    prompt = [{"role": "user", "content": "hello there"}]
 
     resp = await execute_streaming_call(
         current_loop=asyncio.get_running_loop(),
         cleaned_args={
             "api_endpoint": "openai",
-            "messages_payload": [],
+            "messages_payload": prompt,
             "model": "gpt-test",
             "streaming": True,
         },
@@ -6337,7 +6360,7 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
         request=request,
         metrics=metrics,
         provider_manager=provider_manager,
-        templated_llm_payload=[],
+        templated_llm_payload=prompt,
         should_persist=False,
         final_conversation_id="conv-finalize-2",
         character_card_for_context=None,
@@ -6351,6 +6374,7 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
         llm_call_func=llm_call_func,
         refresh_provider_params=lambda _provider: ({}, None),
         moderation_getter=lambda: _DummyModeration(),
+        rg_commit_cb=committed.append,
         rg_refund_cb=rg_refund_cb,
     )
 
@@ -6362,8 +6386,13 @@ async def test_execute_streaming_call_refund_cb_still_conditional(monkeypatch):
     finally:
         with contextlib.suppress(Exception):
             await agen.aclose()
+    await drain_accounting()
 
-    assert refund_calls == [{"cancelled": True, "error": False}]
+    assert refund_calls == []
+    usage_log.assert_awaited_once()
+    row = usage_log.await_args.kwargs
+    assert (row["estimate_source"], row["prompt_tokens"]) == ("stream_estimate", chat_service._estimate_tokens_from_messages(prompt))
+    assert committed == [row["total_tokens"]]
     assert any(call[3] == "stream_cancelled" for call in metrics.llm_calls)
 
 
@@ -6562,10 +6591,16 @@ async def test_concurrent_stream_semantic_gate_is_request_local(
     audits[1].log_event.assert_awaited_once()
     assert managers[1].success_records == ["openai"]
     assert any(call[2] is True for call in metrics[1].llm_calls)
-    usage_log.assert_awaited_once()
-    assert usage_log.await_args.kwargs["conversation_id"] == (
-        f"stream-semantic-{invalid_outcome}-1"
-    )
+    await drain_accounting()
+    rows = {call.kwargs["conversation_id"]: call.kwargs for call in usage_log.await_args_list}
+    if invalid_outcome == "missing-finish-eof":
+        # The invalid stream delivered its text, so it is recorded too, from its estimate (TASK-13953).
+        assert sorted(rows) == [f"stream-semantic-{invalid_outcome}-{index}" for index in range(2)]
+        assert rows[f"stream-semantic-{invalid_outcome}-0"]["estimate_source"] == "stream_estimate"
+    else:
+        # Its only chunk is rejected before anything is counted: nothing received, no row, as before.
+        assert sorted(rows) == [f"stream-semantic-{invalid_outcome}-1"]
+    assert rows[f"stream-semantic-{invalid_outcome}-1"]["usage_metadata"] == {"prompt_tokens": 3, "completion_tokens": 2}
 
 
 @pytest.mark.asyncio
@@ -6864,7 +6899,9 @@ async def test_real_queue_combined_output_done_late_error_never_records_provider
     assert sentinel not in wire
     assert recorded_providers == []
     save_message.assert_not_awaited()
-    usage_log.assert_not_awaited()
+    await drain_accounting()
+    usage_log.assert_awaited_once()  # read, so recorded, although it failed (TASK-13953)
+    assert usage_log.await_args.kwargs["estimate_source"] == "stream_estimate"
     audit_service.log_event.assert_not_awaited()
     assert provider_manager.success_records == []
     assert not any(call[2] is True for call in metrics.llm_calls)
@@ -7124,7 +7161,12 @@ async def test_direct_done_then_adapter_failure_records_valid_output_without_cle
     else:
         on_provider_output.assert_awaited_once_with("openai")
     save_message.assert_not_awaited()
-    usage_log.assert_not_awaited()
+    await drain_accounting()
+    if expected_content is None:
+        usage_log.assert_not_awaited()  # nothing received, so nothing recorded, as before
+    else:
+        usage_log.assert_awaited_once()  # read, so recorded, although it failed (TASK-13953)
+        assert usage_log.await_args.kwargs["estimate_source"] == "stream_estimate"
     audit_service.log_event.assert_not_awaited()
     assert provider_manager.success_records == []
     assert not any(call[2] is True for call in metrics.llm_calls)
@@ -7254,8 +7296,11 @@ async def test_concurrent_direct_failure_and_queued_success_record_provider_use_
     healthy_on_success.assert_awaited_once_with("openai")
     healthy_save.assert_awaited_once()
     healthy_audit.log_event.assert_awaited_once()
-    usage_log.assert_awaited_once()
-    assert usage_log.await_args.kwargs["conversation_id"] == "direct-overlap-healthy"
+    # The faulty stream was read too, so it is recorded from its estimate (TASK-13953).
+    await drain_accounting()
+    rows = {call.kwargs["conversation_id"]: call.kwargs for call in usage_log.await_args_list}
+    assert sorted(rows) == ["direct-overlap-faulty", "direct-overlap-healthy"]
+    assert rows["direct-overlap-faulty"]["estimate_source"] == "stream_estimate"
     assert healthy_manager.success_records == ["openai"]
     assert any(call[2] is True for call in healthy_metrics.llm_calls)
 
@@ -7283,3 +7328,108 @@ def test_merge_api_keys_prefers_dynamic_over_module():
     )
     assert raw_anthropic == "module-anthropic"
     assert normalized_anthropic == "module-anthropic"
+
+
+def _refusals():
+    """A quota refusal (§4b) and a gateway policy refusal (TASK-13950.13): the user's, not the provider's."""
+    from tldw_Server_API.app.core.exceptions import LLMPolicyRefusal, LLMQuotaExceededError
+
+    return [
+        LLMQuotaExceededError(
+            category="llm_tokens_month", current=10, limit=10, message="Monthly LLM token limit reached", retry_after=60
+        ),
+        LLMPolicyRefusal("Input violates moderation policy"),
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal", _refusals(), ids=["quota", "policy"])
+@pytest.mark.parametrize("queued", [False, True])
+async def test_execute_non_stream_call_quota_refusal_is_not_a_provider_failure(monkeypatch, queued, refusal):
+    """An LLM quota or policy refusal reaches the caller as is, records no provider failure and starts no fallback (§4b)."""
+    metrics = _DummyMetrics()
+    provider_manager = _DummyProviderManager()
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: _ProcessorQueue() if queued else None)
+
+    def refused_llm_call():
+        raise refusal
+
+    with pytest.raises(type(refusal)) as captured:
+        await execute_non_stream_call(
+            **_nonstream_call_kwargs(
+                llm_call_func=refused_llm_call,
+                provider_manager=provider_manager,
+                metrics=metrics,
+                refresh_provider_params=lambda _provider: ({}, None),
+                queue_execution_enabled=queued,
+            )
+        )
+
+    assert (captured.value.status_code, captured.value.detail) == (refusal.status_code, refusal.detail)
+    assert provider_manager.failure_records == []
+    assert provider_manager.fallback_requests == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refusal", _refusals(), ids=["quota", "policy"])
+async def test_execute_streaming_call_quota_refusal_is_raised_not_an_error_frame(monkeypatch, refusal):
+    """A streamed chat call's quota or policy refusal is the caller's own status, not a provider-style error frame (§4b)."""
+    metrics = _DummyMetrics()
+    provider_manager = _DummyProviderManager()
+    refund_calls = []
+
+    def refused_llm_call():
+        raise refusal
+
+    async def rg_refund_cb(*, cancelled: bool, error: bool):
+        refund_calls.append({"cancelled": cancelled, "error": error})
+
+    async def save_message_fn(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
+
+    request = SimpleNamespace(
+        method="POST",
+        url=SimpleNamespace(path="/api/v1/chat/completions"),
+        headers={},
+        state=SimpleNamespace(user_id=None, api_key_id=None),
+    )
+
+    with pytest.raises(type(refusal)) as captured:
+        await execute_streaming_call(
+            current_loop=asyncio.get_running_loop(),
+            cleaned_args={
+                "api_endpoint": "openai",
+                "messages_payload": [],
+                "model": "gpt-test",
+                "streaming": True,
+            },
+            selected_provider="openai",
+            provider="openai",
+            model="gpt-test",
+            request_json="{}",
+            request=request,
+            metrics=metrics,
+            provider_manager=provider_manager,
+            templated_llm_payload=[],
+            should_persist=False,
+            final_conversation_id="conv-test",
+            character_card_for_context={"name": "Test"},
+            chat_db=None,
+            save_message_fn=save_message_fn,
+            audit_service=None,
+            audit_context=None,
+            client_id="client-test",
+            queue_execution_enabled=False,
+            enable_provider_fallback=False,
+            llm_call_func=refused_llm_call,
+            refresh_provider_params=lambda _provider: ({}, None),
+            moderation_getter=lambda: _DummyModeration(),
+            rg_refund_cb=rg_refund_cb,
+        )
+
+    assert captured.value.status_code == refusal.status_code
+    assert provider_manager.failure_records == []
+    assert provider_manager.fallback_requests == []
+    assert refund_calls == [{"cancelled": False, "error": True}]

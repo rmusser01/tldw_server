@@ -37,7 +37,7 @@ Continue the frontend design-system product-state cleanup by replacing Review de
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TDD red: demo-content.design-system.test.ts mocked getDesignSystemState('ready') to return 'Ready via registry' and failed while getDemoMediaItems still returned literal Ready statuses. Green: getDemoMediaItems now uses getDesignSystemState('ready').label for the two ready demo media records and preserves Processing/item order. Removed the three demo-content Ready baseline exceptions.
 
 Verification: bunx vitest run src/utils/__tests__/demo-content.design-system.test.ts --reporter=dot passed 1 test; bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot passed 52 tests; bun run verify:design-system-state exited 0 and reports baseline exceptions 510 with canonical-state-label 37; git diff --check exited 0. Broad bunx tsc --noEmit --pretty false still exits 2 with the existing 239-line repo baseline and no touched-scope matches for demo-content, baseline, task-242, getDemoMediaItems, or getDesignSystemState. Bandit skipped because this slice only touches UI TypeScript, JSON baseline data, and Backlog metadata.
@@ -49,7 +49,7 @@ Review-fix verification: bunx vitest run src/utils/__tests__/demo-content.design
 PR review follow-up: Gemini requested a more concise structural assertion in the focused demo-content test. Updated the test to assert each demo media item's id, typed status key, display status label, and title in one expected structure while preserving the same behavior coverage.
 
 Follow-up verification: bunx vitest run src/utils/__tests__/demo-content.design-system.test.ts --reporter=dot passed 1 test; git diff --check exited 0.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

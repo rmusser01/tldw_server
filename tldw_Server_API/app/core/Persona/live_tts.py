@@ -7,8 +7,8 @@ from contextlib import aclosing, asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.audio_schemas import OpenAISpeechRequest
 from tldw_Server_API.app.core.TTS.adapter_registry import TTSAdapterRegistry
+from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 
 
 def _text(value: Any) -> str:

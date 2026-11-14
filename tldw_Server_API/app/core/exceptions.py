@@ -13,10 +13,10 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from loguru import logger
 
-from .AuthNZ.exceptions import DatabaseError as AuthNZDatabaseError
 from .exception_types import (  # noqa: F401 - centralized compatibility exports.
     PersonaArtworkValidationError,
     PromptCatalogError,
+    ProviderUsageReservationError,
 )
 
 if TYPE_CHECKING:
@@ -57,6 +57,52 @@ class BuddyNotFoundError(LookupError):
 
 class BuddyConflictError(ValueError):
     """An optimistic Buddy resource version no longer matches stored state."""
+
+
+class VNAssetGenerationError(ValueError):
+    """A stable VN generation code with internal operation context."""
+
+    def __init__(self, code: str, *, retryable: bool = False, **context: Any) -> None:
+        """Keep the public ValueError string stable and context immutable."""
+        self.code = code
+        self.retryable = retryable
+        self.context = MappingProxyType(dict(context))
+        super().__init__(code)
+
+
+class JobsRetryAdmissionIndexError(RuntimeError):
+    """Safe Jobs retry-index coordination, definition or verification failure.
+
+    RuntimeError compatibility is retained. Native database failures are not
+    wrapped in this type; the helper preserves their original propagation.
+    """
+
+
+class VNLegacyActivityCursorError(RuntimeError):
+    """A stalled read-only Jobs cursor during VN legacy display reconciliation.
+
+    Retains RuntimeError compatibility and the constant safe cursor error code.
+    Native Jobs/database read failures are not wrapped in this domain type.
+    """
+
+
+class LegacyDisplayReconciliationError(RuntimeError):
+    """Safe VN display rollback error, not a generation or SDK retry outcome.
+
+    Construct with the original reconciliation Exception. The public message
+    is always ``VN legacy display reconciliation failed``; ``error_type`` and
+    ``error_traceback`` retain its class and traceback for internal frame-only
+    diagnostics. Traceback frames may retain sensitive locals/source: never
+    format or publish them, or the original chained exception. Construction
+    does not log or change generation disposition; the repository raises this
+    wrapper with ``from None`` and the worker logs only frame metadata.
+    """
+
+    def __init__(self, error: Exception) -> None:
+        """Retain no original message; callers must not format traceback source/locals."""
+        super().__init__("VN legacy display reconciliation failed")
+        self.error_type = type(error)
+        self.error_traceback = error.__traceback__
 
 
 class BuddyPublicationRevokedError(RuntimeError):
@@ -141,6 +187,92 @@ class APIKeyRotationRejected(ValueError, TransactionPassthroughError):
         super().__init__("API key not found or unauthorized")
 
 
+# AuthNZ re-exports these bases so foundation code need not import AuthNZ.
+class UserRegistrationException(Exception):
+    """Base exception for user registration system."""
+
+
+class DatabaseError(UserRegistrationException):
+    """Base database exception."""
+
+
+class RollbackSignal(Exception):
+    """Trusted control-flow signal that requires transaction rollback."""
+
+
+class MembershipWriterContractError(ValueError):
+    """Raised when membership planning input violates the closed contract."""
+
+    def __init__(self) -> None:
+        super().__init__("Invalid membership writer contract.")
+
+
+class OfflineMigrationContextRejected(MembershipWriterContractError):
+    """Raised when an offline-only context reaches a serving boundary."""
+
+    def __init__(self) -> None:
+        ValueError.__init__(
+            self,
+            "Offline migration membership context is unavailable while serving.",
+        )
+
+
+class MembershipWriteError(UserRegistrationException):
+    """Base class for sanitized runtime membership-write failures."""
+
+
+class MembershipReadError(UserRegistrationException):
+    """A membership-state read failed without exposing backend details."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership state could not be read.")
+
+
+class MembershipAuthorizationError(MembershipWriteError):
+    """The persisted actor authority is insufficient for the locked scopes."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership write is not authorized.")
+
+
+class MembershipScopeNotFound(MembershipWriteError):
+    """A requested organization or team is absent or inactive."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership scope was not found.")
+
+
+class MembershipTargetNotFound(MembershipWriteError):
+    """A requested target user is absent."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership target was not found.")
+
+
+class MembershipParentRequired(MembershipWriteError):
+    """A team-add target lacks an active parent-organization membership."""
+
+    def __init__(self) -> None:
+        super().__init__("Active parent organization membership is required.")
+
+
+class MembershipPreflightChanged(MembershipWriteError):
+    """Database-derived lock inputs changed before all locks were held."""
+
+    def __init__(self) -> None:
+        super().__init__("Membership write preconditions changed.")
+
+
+class _MembershipScopeDeletionRetry(RollbackSignal):
+    """Private signal forcing scope-deletion retry after transaction rollback."""
+
+
+class ProviderCredentialAliasConflictError(
+    ValueError, UserRegistrationException, TransactionPassthroughError
+):
+    """Raised when more than one legacy alias row exists for one provider."""
+
+
 class BuiltinCharacterSeedError(TransactionPassthroughError):
     """Raised when a bundled character cannot be installed with verified assets."""
 
@@ -155,6 +287,16 @@ class CharacterBehaviorSourceDrift(RuntimeError):
 
 class ConversationSettingsTargetMissing(RuntimeError):
     """Force rollback when settings outlive their live conversation target."""
+
+
+class SemanticAPIError(RuntimeError):
+    """Stable HTTP-facing semantic application error."""
+
+    def __init__(self, status_code: int, code: str) -> None:
+        self.status_code = status_code
+        self.code = code
+        self.failure_code = code
+        super().__init__(code)
 
 
 class WebhookError(TransactionPassthroughError):
@@ -777,7 +919,7 @@ class _ParseDeadlineExceeded(Exception):
     pass
 
 
-class AudioQuotaStoreUnavailable(AuthNZDatabaseError):
+class AudioQuotaStoreUnavailable(DatabaseError):
     """Raised when canonical audio daily-minute quota storage is unavailable."""
 
 
@@ -820,6 +962,9 @@ class PersonaBuddyValidationError(BadRequestError):
 class ChatAPIError(Exception):
     """Base exception for chat API call errors."""
 
+    # Set only on a provider 401 that a refreshed credential may safely retry (no generation output sent).
+    credential_refresh_retry_safe: bool = False
+
     def __init__(
         self,
         message: str = "An error occurred during the chat API call.",
@@ -852,6 +997,7 @@ class ChatConfigurationError(ChatAPIError):
         {
             "provider_configuration_invalid",
             "missing_provider_credentials",
+            "provider_model_inventory_unavailable",
         }
     )
 
@@ -876,14 +1022,42 @@ class ChatBadRequestError(ChatAPIError):
         super().__init__(message, status_code=400, provider=provider)
 
 
+class ChatModelNotAvailableError(ChatBadRequestError):
+    """The selected model is not in the provider's current model list.
+
+    The message is built here from the request's own provider and model, never from upstream text, so it is
+    safe to show the client.
+    """
+
+    error_code = "model_not_available"
+
+    @staticmethod
+    def message_for(provider: str, model: object) -> str:
+        """Name the model and provider, and say how to pick the right provider."""
+        return (
+            f"Model '{model}' is not available for provider '{provider}'. "
+            "Set api_provider to the model's provider, or use '<provider>/<model>'."
+        )
+
+    def __init__(self, provider: str, model: object) -> None:
+        self.model = model
+        super().__init__(message=self.message_for(provider, model), provider=provider)
+
+
 class ChatRateLimitError(ChatAPIError):
-    """Raised when a chat provider rate-limits a request."""
+    """Raised when a chat provider rate-limits a request.
+
+    ``quota_exhausted`` is True when the provider said the account's billing quota is spent
+    (OpenAI ``insufficient_quota``), so waiting will not help. It is a bool, never upstream text.
+    """
 
     def __init__(
         self,
         message: str = "Rate limit exceeded with the chat provider.",
         provider: str | None = None,
+        quota_exhausted: bool = False,
     ) -> None:
+        self.quota_exhausted = quota_exhausted is True
         super().__init__(message, status_code=429, provider=provider)
 
 
@@ -971,6 +1145,14 @@ class SchemaReadinessError(RuntimeError):
     Messages are fixed operator-facing reasons, never row data, so transaction
     boundaries that sanitize other failures pass this reason through.
     """
+
+
+class PGUsageSchemaError(SchemaReadinessError, TransactionPassthroughError):
+    """A hard usage-schema failure that must survive transaction translation."""
+
+    def __init__(self) -> None:
+        """Expose a fixed readiness code without native failure data."""
+        super().__init__("AUTHNZ_PG_USAGE_SCHEMA_NOT_READY")
 
 
 def exception_type_chain(error: BaseException, *, limit: int = 6) -> str:
@@ -1688,6 +1870,10 @@ class UnknownBackupDatasetError(AdminDataOpsError):
     """Raised when a backup request references an unknown dataset."""
 
 
+class UnsupportedBackupBackendError(AdminDataOpsError):
+    """Requested dataset scope has no compatible backup/restore implementation."""
+
+
 class InvalidBackupUserIdError(AdminDataOpsError):
     """Raised when a backup request references an invalid user id."""
 
@@ -2024,3 +2210,49 @@ async def video_processing_exception_handler(
 
 def setup_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(VideoProcessingError, video_processing_exception_handler)
+
+
+class LLMQuotaExceededError(HTTPException):
+    """The user is over an LLM quota: HTTP 402 with a ``limit_exceeded`` body (LLM usage accounting spec §4).
+
+    An ``HTTPException`` and not a ``ChatAPIError``: endpoints report a
+    ``ChatAPIError`` as a provider failure, and most let an ``HTTPException``
+    through unchanged.
+    """
+
+    # Job workers read these: a quota window does not reset in seconds, so a refused job is not retried.
+    retryable = False
+    failure_code = "llm_quota_exceeded"
+
+    def __init__(self, *, category: str, current: float, limit: int | float, message: str, retry_after: int) -> None:
+        super().__init__(
+            status_code=402,
+            detail={
+                "error": "limit_exceeded",
+                "category": category,
+                "current": current,
+                "limit": limit,
+                "message": message,
+            },
+            headers={"Retry-After": str(int(retry_after))},
+        )
+        self.category = category
+        self.current = current
+        self.limit = limit
+        self.retry_after = int(retry_after)
+
+
+class LLMPolicyRefusal(HTTPException):
+    """A gateway pre-call policy hook refused an LLM call: always HTTP 400 (TASK-13950.13).
+
+    An ``HTTPException``, like ``LLMQuotaExceededError`` and for the same reason: endpoints report
+    a ``ChatAPIError`` as a provider failure, and most let an ``HTTPException`` through unchanged.
+    ``detail`` is client-safe text the hook author writes. It never echoes the request, the system
+    prompt or retrieved context.
+    """
+
+    retryable = False  # job workers read these, as for LLMQuotaExceededError
+    failure_code = "llm_policy_refused"
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(status_code=400, detail=detail)

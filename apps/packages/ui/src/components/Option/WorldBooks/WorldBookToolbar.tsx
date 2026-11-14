@@ -1,4 +1,5 @@
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { Button, Dropdown, Input, Select } from "antd"
 import type { MenuProps } from "antd"
 import { Link, useInRouterContext } from "react-router-dom"
@@ -57,6 +58,7 @@ export const WorldBookToolbar: React.FC<WorldBookToolbarProps> = ({
   compact
 }) => {
   const inRouterContext = useInRouterContext()
+  const { t } = useTranslation(["option"])
 
   const toolsMenuItems: MenuProps["items"] = [
     // Group 1: Analysis
@@ -85,7 +87,7 @@ export const WorldBookToolbar: React.FC<WorldBookToolbarProps> = ({
     // Group 2: I/O
     {
       key: "import-json",
-      label: "Import JSON",
+      label: <span data-testid="world-books-import-button">Import JSON</span>,
       icon: <FileUp size={14} />,
       onClick: onImport
     },
@@ -100,7 +102,9 @@ export const WorldBookToolbar: React.FC<WorldBookToolbarProps> = ({
       ? [
           {
             key: "export-selected",
-            label: bulkExportSelectedLoading ? "Exporting..." : "Export Selected",
+            label: bulkExportSelectedLoading
+              ? "Exporting..."
+              : "Export Selected",
             icon: <FileDown size={14} />,
             disabled: bulkExportSelectedLoading,
             onClick: onExportSelected
@@ -130,13 +134,40 @@ export const WorldBookToolbar: React.FC<WorldBookToolbarProps> = ({
     }
   ]
 
+  const filters = (
+    <>
+      <Select
+        data-testid="world-books-enabled-filter"
+        value={enabledFilter}
+        onChange={onEnabledFilterChange}
+        aria-label="Filter by enabled status"
+        className={compact ? "w-full" : "w-40"}
+        options={[
+          { label: "All statuses", value: "all" },
+          { label: "Enabled", value: "enabled" },
+          { label: "Disabled", value: "disabled" }
+        ]}
+      />
+      <Select
+        data-testid="world-books-attachment-filter"
+        value={attachmentFilter}
+        onChange={onAttachmentFilterChange}
+        aria-label="Filter by attachment state"
+        className={compact ? "w-full" : "w-44"}
+        options={[
+          { label: "All attachments", value: "all" },
+          { label: "Has attachments", value: "attached" },
+          { label: "Unattached only", value: "unattached" }
+        ]}
+      />
+    </>
+  )
+
   if (compact) {
     return (
-      <div
-        className="space-y-2"
-        data-testid="world-books-toolbar"
-      >
+      <div className="space-y-2" data-testid="world-books-toolbar">
         <Input
+          data-testid="world-books-search-input"
           allowClear
           placeholder={"Search world books\u2026"}
           aria-label="Search world books"
@@ -144,6 +175,15 @@ export const WorldBookToolbar: React.FC<WorldBookToolbarProps> = ({
           onChange={(e) => onSearchChange(e.target.value)}
           className="w-full"
         />
+        <details className="rounded-md border border-border">
+          <summary
+            data-testid="world-books-filters-toggle"
+            className="min-h-[44px] cursor-pointer px-3 py-3 text-sm font-medium text-text focus-visible:ring-2 focus-visible:ring-focus"
+          >
+            {t("worldBooks.filtersToggle", "Filters")}
+          </summary>
+          <div className="space-y-2 border-t border-border p-3">{filters}</div>
+        </details>
         <div className="flex items-center justify-between gap-2">
           <Dropdown menu={{ items: toolsMenuItems }} trigger={["click"]}>
             <Button icon={<Wrench size={14} />} aria-label="Tools" />
@@ -167,6 +207,7 @@ export const WorldBookToolbar: React.FC<WorldBookToolbarProps> = ({
     >
       <div className="flex flex-wrap items-center gap-2">
         <Input
+          data-testid="world-books-search-input"
           allowClear
           placeholder={"Search world books\u2026"}
           aria-label="Search world books"
@@ -174,28 +215,7 @@ export const WorldBookToolbar: React.FC<WorldBookToolbarProps> = ({
           onChange={(e) => onSearchChange(e.target.value)}
           className="w-full min-w-[220px] md:w-72"
         />
-        <Select
-          value={enabledFilter}
-          onChange={onEnabledFilterChange}
-          aria-label="Filter by enabled status"
-          className="w-40"
-          options={[
-            { label: "All statuses", value: "all" },
-            { label: "Enabled", value: "enabled" },
-            { label: "Disabled", value: "disabled" }
-          ]}
-        />
-        <Select
-          value={attachmentFilter}
-          onChange={onAttachmentFilterChange}
-          aria-label="Filter by attachment state"
-          className="w-44"
-          options={[
-            { label: "All attachments", value: "all" },
-            { label: "Has attachments", value: "attached" },
-            { label: "Unattached only", value: "unattached" }
-          ]}
-        />
+        {filters}
       </div>
       <div className="flex items-center gap-2">
         <Dropdown menu={{ items: toolsMenuItems }} trigger={["click"]}>

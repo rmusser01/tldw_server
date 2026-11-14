@@ -316,6 +316,7 @@ NOTES_GRAPH_READ = "notes.graph.read"
 NOTES_GRAPH_WRITE = "notes.graph.write"
 NOTES_GRAPH_ADMIN = "notes.graph.admin"
 NOTES_GRAPH_SUGGEST = "notes.graph.suggest"
+NOTES_GRAPH_SEMANTIC_MANAGE = "notes.graph.semantic.manage"
 NOTES_LINK_KEYWORD = "notes.link_keyword"
 KEYWORDS_CREATE = "keywords.create"
 

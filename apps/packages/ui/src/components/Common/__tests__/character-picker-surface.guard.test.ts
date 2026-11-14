@@ -41,7 +41,10 @@ describe("character picker popup surfaces", () => {
     )
 
     expect(greetingSource).not.toContain("dropdownRender")
-    expect(greetingSource).toContain("popupRender")
+    expect(greetingSource).toContain('import { Select } from "antd"')
+    expect(greetingSource).toContain(
+      '<Select aria-label={t("sidepanel:greetingPicker.choose", "Choose greeting")}'
+    )
     expect(attachmentSource).not.toContain("overlayClassName")
     expect(attachmentSource).toContain('root: "playground-attachment-menu"')
     expect(toolsSource).not.toContain("overlayClassName")

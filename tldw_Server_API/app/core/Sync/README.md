@@ -20,7 +20,8 @@ a restore manifest before hydrating a new device.
 
 Core implementation:
 
-- `tldw_Server_API/app/core/Sync/v2/models.py`: internal protocol records.
+- `tldw_Server_API/app/core/Sync_Contracts/models.py`: internal protocol records
+  (`core/Sync/v2/models.py` is an alias of it).
 - `tldw_Server_API/app/core/Sync/v2/store.py`: persistence facade over
   `DB_Management/Sync_DB.py`.
 - `tldw_Server_API/app/core/Sync/v2/service.py`: protocol invariants,

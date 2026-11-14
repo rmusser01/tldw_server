@@ -34,11 +34,11 @@ Resolve actionable review feedback on PR #1264 for the native CodeGraph JavaScri
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Resolved PR #1264 review feedback by adding regression coverage for invalid JSONC config fallback, optional parser import errors, non-ValueError extractor failures, TypeScript registration without TSX parser availability, and one-config-load-per-JS-file behavior. Implementation updates keep optional parser/import failures structured, cache project config per JS/TS extracted file, publicize the JS graph builder helpers consumed by the TypeScript extractor, and keep index runs alive when one extractor raises an expected boundary exception.
 
 Verification: focused red tests failed before implementation and passed after; CodeGraph/MCP subset passed with 77 passed and 5 warnings; Ruff passed; Bandit JSON reported errors 0 and results 0; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

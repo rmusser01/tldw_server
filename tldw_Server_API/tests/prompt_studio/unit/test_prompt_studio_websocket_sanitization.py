@@ -1,8 +1,11 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import WebSocket, WebSocketException
 
 from tldw_Server_API.app.api.v1.endpoints.prompt_studio import prompt_studio_websocket as ws_mod
+from tldw_Server_API.app.core.AuthNZ import websocket_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.event_broadcaster import (
     EventBroadcaster,
     EventType,
@@ -41,18 +44,13 @@ def test_sanitize_error_message_logs_safe_error_label(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_prompt_studio_websocket_rejects_when_no_auth_path_succeeds(monkeypatch):
+async def test_prompt_studio_websocket_closes_with_the_resolver_code(monkeypatch):
     websocket = _ClosingWebSocket()
 
-    async def no_cookie(_websocket):
-        return None
+    async def refused(_websocket, *, required_scope):
+        raise WebSocketException(code=4401, reason="authentication_required")
 
-    async def no_explicit_auth(_websocket, **_kwargs):
-        return None
-
-    monkeypatch.setattr(ws_mod, "resolve_single_user_cookie_websocket", no_cookie)
-    monkeypatch.setattr(ws_mod, "_authenticate_ws", no_explicit_auth, raising=False)
-    monkeypatch.setattr(ws_mod, "cookie_websocket_rejection_code", lambda _websocket: None)
+    monkeypatch.setattr(ws_mod, "_authenticate_ws", refused)
 
     user_id = await ws_mod._allow_prompt_studio_cookie_websocket(websocket)
 
@@ -63,45 +61,48 @@ async def test_prompt_studio_websocket_rejects_when_no_auth_path_succeeds(monkey
 @pytest.mark.asyncio
 async def test_prompt_studio_websocket_accepts_explicit_auth_identity(monkeypatch):
     websocket = _ClosingWebSocket()
+    scopes: list[str] = []
 
-    async def no_cookie(_websocket):
-        return None
-
-    async def explicit_auth(_websocket, **_kwargs):
+    async def explicit_auth(_websocket, *, required_scope):
+        scopes.append(required_scope)
         return 42
 
-    monkeypatch.setattr(ws_mod, "resolve_single_user_cookie_websocket", no_cookie)
     monkeypatch.setattr(ws_mod, "_authenticate_ws", explicit_auth)
-    monkeypatch.setattr(ws_mod, "cookie_websocket_rejection_code", lambda _websocket: None)
 
-    user_id = await ws_mod._allow_prompt_studio_cookie_websocket(
-        websocket,
-        token="valid-token",
-    )
+    user_id = await ws_mod._allow_prompt_studio_cookie_websocket(websocket)
 
     assert user_id == "42"
+    assert scopes == ["read"]
     assert websocket.closed_with is None
 
 
 @pytest.mark.asyncio
 async def test_prompt_studio_websocket_accepts_canonical_api_key_header(monkeypatch):
-    websocket = _ClosingWebSocket()
-    websocket.headers["x-api-key"] = "valid-api-key"
+    """The X-API-KEY header reaches the resolver's verifier, which checks the read scope."""
+    verified: list[str | None] = []
 
-    async def no_cookie(_websocket):
-        return None
+    async def verifier(request):
+        verified.append(request.headers.get("x-api-key"))
+        request.state._api_key_scope = "read"
+        return AuthPrincipal(kind="api_key", user_id=42, api_key_id=3)
 
-    async def explicit_auth(_websocket, **kwargs):
-        return 42 if kwargs.get("api_key") == "valid-api-key" else None
-
-    monkeypatch.setattr(ws_mod, "resolve_single_user_cookie_websocket", no_cookie)
-    monkeypatch.setattr(ws_mod, "_authenticate_ws", explicit_auth)
-    monkeypatch.setattr(ws_mod, "cookie_websocket_rejection_code", lambda _websocket: None)
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", verifier)
+    websocket = WebSocket(
+        {
+            "type": "websocket",
+            "path": "/api/v1/prompt-studio/ws",
+            "headers": [(b"x-api-key", b"valid-api-key")],
+            "query_string": b"",
+            "client": ("127.0.0.1", 50000),
+        },
+        receive=AsyncMock(),
+        send=AsyncMock(),
+    )
 
     user_id = await ws_mod._allow_prompt_studio_cookie_websocket(websocket)
 
     assert user_id == "42"
-    assert websocket.closed_with is None
+    assert verified == ["valid-api-key"]
 
 
 @pytest.mark.asyncio
@@ -110,7 +111,7 @@ async def test_project_websocket_resolves_database_after_authentication(monkeypa
     fake_db = object()
     access_calls: list[tuple[int, dict, object]] = []
 
-    async def allow_auth(_websocket, **_kwargs):
+    async def allow_auth(_websocket):
         return "42"
 
     class ManagedDbScope:
@@ -136,7 +137,7 @@ async def test_project_websocket_resolves_database_after_authentication(monkeypa
     monkeypatch.setattr(ws_mod, "require_project_access", require_access)
     monkeypatch.setattr(ws_mod, "_guard_prompt_studio_websocket_start", stop_before_accept)
 
-    await ws_mod.websocket_endpoint(websocket, 7, token="valid-token")
+    await ws_mod.websocket_endpoint(websocket, 7)
 
     assert access_calls == [
         (

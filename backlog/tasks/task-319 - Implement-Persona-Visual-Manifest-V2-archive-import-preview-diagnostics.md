@@ -39,7 +39,7 @@ Wire Manifest V2/non-sprite Persona Visual archive metadata into the backend imp
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Manifest V2 archive preview routing through the existing renderer import-preview validator for non-V1 manifests. Known disabled renderers such as live2d now return proposed_plan.renderer_import_preview diagnostics and blocked preview status instead of malformed_visual_manifest.
 
 Updated the import-preview worker to persist result.status so renderer-blocked previews remain non-committable through the existing commit status gate.
@@ -57,7 +57,7 @@ Review follow-up: fixed Qodo version-coercion finding by accepting integer-like 
 Review follow-up: updated Backlog verification notes to use reproducible python -m commands and to clarify Bandit scanned preview.py and visual_jobs_worker.py specifically.
 
 Review verification: python -m pytest tldw_Server_API/tests/Persona/test_persona_visual_portability.py tldw_Server_API/tests/Persona/test_persona_visual_import_preview_validators.py tldw_Server_API/tests/Persona/test_persona_visual_portability_worker.py -q => 31 passed, 5 warnings. git diff --check => passed. python -m bandit -r tldw_Server_API/app/core/Persona/visual_portability/preview.py tldw_Server_API/app/core/Persona/visual_jobs_worker.py -f json -o /tmp/bandit_persona_visual_v2_archive_preview_review_fix.json => 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

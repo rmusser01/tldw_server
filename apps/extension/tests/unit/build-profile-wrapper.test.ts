@@ -2,7 +2,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   getExportedArtifactDir,
@@ -121,4 +121,55 @@ describe("extension build profile wrapper", () => {
       "bun run locales:sync && cross-env TLDW_BUILD_PROFILE=development node scripts/zip-with-profile.mjs --browser=firefox"
     )
   })
+})
+
+
+afterEach(() => {
+  vi.doUnmock("node:child_process")
+  vi.resetModules()
+  vi.restoreAllMocks()
+})
+
+describe.each(["build", "zip"] as const)("%s child heap policy", (mode) => {
+  it.each([undefined, "--max-old-space-size=8192", ""])(
+    "defaults only absent options and preserves parent env (%s)",
+    async (nodeOptions) => {
+      const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tldw-build-env-"))
+      const stopped = new Error("captured WXT child")
+      const execFileSync = vi.fn((command: string) => {
+        if (command === "git") return "dev\n"
+        throw stopped
+      })
+      vi.doMock("node:child_process", () => ({ execFileSync }))
+      const run = mode === "build"
+        ? (await import("../../scripts/build-with-profile.mjs")).buildWithProfile
+        : (await import("../../scripts/zip-with-profile.mjs")).zipWithProfile
+      const env: NodeJS.ProcessEnv = { TLDW_BUILD_PROFILE: "production" }
+      if (nodeOptions !== undefined) env.NODE_OPTIONS = nodeOptions
+      const parentOptions = process.env.NODE_OPTIONS
+      try {
+        expect(() => run({ argv: ["--browser=chrome"], cwd: tempRoot, env })).toThrow(stopped)
+        expect(execFileSync).toHaveBeenLastCalledWith(
+          process.platform === "win32" ? "wxt.cmd" : "wxt",
+          [mode],
+          expect.objectContaining({
+            cwd: tempRoot,
+            stdio: "inherit",
+            env: {
+              ...env,
+              TARGET: "chrome",
+              NODE_OPTIONS: nodeOptions ?? "--max-old-space-size=6144",
+            },
+          })
+        )
+        expect(env).toEqual({
+          TLDW_BUILD_PROFILE: "production",
+          ...(nodeOptions === undefined ? {} : { NODE_OPTIONS: nodeOptions }),
+        })
+        expect(process.env.NODE_OPTIONS).toBe(parentOptions)
+      } finally {
+        fs.rmSync(tempRoot, { recursive: true, force: true })
+      }
+    }
+  )
 })

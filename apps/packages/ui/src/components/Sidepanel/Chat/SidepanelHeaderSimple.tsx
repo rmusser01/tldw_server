@@ -13,12 +13,27 @@ import { TtsClipsDrawer } from "./TtsClipsDrawer"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { CHAT_PATH } from "@/routes/route-paths"
 
+/**
+ * Keyboard focus ring for header controls. A box-shadow ring is used because
+ * antd's link reset removes outlines from <a> elements (AX-08).
+ */
+const HEADER_FOCUS_RING_CLASS =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+const HEADER_ICON_CONTROL_CLASS = `rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2 ${HEADER_FOCUS_RING_CLASS}`
+
 type SidepanelHeaderSimpleProps = {
+  chatReady?: boolean
   sidebarOpen?: boolean
   setSidebarOpen?: (open: boolean) => void
   activeTitle?: string
   onRenameTitle?: (nextTitle: string) => void
-  onOpenChatInWebUi?: () => Promise<void> | void
+  /**
+   * The conversation's full title for an edit to start from. `activeTitle`
+   * is the tab label, truncated for display, so it is used only when this is
+   * missing or resolves to null.
+   */
+  loadEditableTitle?: () => Promise<string | null>
+  onOpenChatInWebUi?: () => Promise<boolean | void> | boolean | void
 }
 
 /**
@@ -31,10 +46,12 @@ type SidepanelHeaderSimpleProps = {
  * All other controls moved to ControlRow in the composer area.
  */
 export const SidepanelHeaderSimple = ({
+  chatReady = true,
   sidebarOpen: propSidebarOpen,
   setSidebarOpen: propSetSidebarOpen,
   activeTitle,
   onRenameTitle,
+  loadEditableTitle,
   onOpenChatInWebUi
 }: SidepanelHeaderSimpleProps = {}) => {
   const historySelection = useHistorySelectionContext()
@@ -46,6 +63,10 @@ export const SidepanelHeaderSimple = ({
   const [ttsClipsOpen, setTtsClipsOpen] = React.useState(false)
   const [isEditingTitle, setIsEditingTitle] = React.useState(false)
   const [draftTitle, setDraftTitle] = React.useState(activeTitle || "")
+  // The title an edit started from; submitting it unchanged renames nothing.
+  const [titleBaseline, setTitleBaseline] = React.useState(activeTitle || "")
+  const [titleLoading, setTitleLoading] = React.useState(false)
+  const titleRequestRef = React.useRef(0)
   const titleBlurActionRef = React.useRef<"submit" | "cancel" | null>(null)
   const titleInputRef = React.useRef<HTMLInputElement>(null)
   const fullChatHandoffDescriptionId = React.useId()
@@ -60,14 +81,21 @@ export const SidepanelHeaderSimple = ({
   const sidebarToggleLabel = sidebarOpen
     ? t("common:chatSidebar.collapse", "Collapse sidebar")
     : t("common:chatSidebar.expand", "Expand sidebar")
-  const openFullChatLabel = historySelection ? t("playground:historySelection.expand", "Expand in full page") : t(
-    "sidepanel:header.openFullChatWebui",
-    "Open full chat in WebUI"
-  )
-  const openFullChatDescription = historySelection ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.") : t(
-    "sidepanel:header.openFullChatWebuiDescription",
-    "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
-  )
+  const usesExtensionExpansion = Boolean(historySelection && (browser.runtime.id || !onOpenChatInWebUi))
+  const usesWebUiHandoff = Boolean(onOpenChatInWebUi && !usesExtensionExpansion)
+  const openFullChatLabel = usesExtensionExpansion
+    ? t("playground:historySelection.expand", "Expand in full page")
+    : usesWebUiHandoff
+      ? t("sidepanel:header.openFullChatWebui", "Open full chat in WebUI")
+      : t("sidepanel:header.openFullChatExtension", "Open full extension chat")
+  const openFullChatDescription = !chatReady
+    ? t("sidepanel:header.restoreBeforeExpand", "Restore or start a conversation before opening it in a full page.")
+    : usesExtensionExpansion
+      ? t("playground:historySelection.expandDescription", "Opens this selected history in the extension full page. Active streaming stays in this panel.")
+      : usesWebUiHandoff
+        ? t("sidepanel:header.openFullChatWebuiHandoffDescription", "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there.")
+        : t("sidepanel:header.openFullChatExtensionDescription", "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.")
+
 
   const handleSidebarToggle = React.useCallback(() => {
     const next = !sidebarOpen
@@ -79,35 +107,69 @@ export const SidepanelHeaderSimple = ({
   }, [isControlled, propSetSidebarOpen, sidebarOpen])
 
   React.useEffect(() => {
+    titleRequestRef.current++
     setDraftTitle(activeTitle || "")
+    setTitleBaseline(activeTitle || "")
+    setTitleLoading(false)
     setIsEditingTitle(false)
   }, [activeTitle])
 
   React.useEffect(() => {
-    if (!isEditingTitle) return
+    if (!isEditingTitle || titleLoading) return
     titleInputRef.current?.focus()
     titleInputRef.current?.select()
-  }, [isEditingTitle])
+  }, [isEditingTitle, titleLoading])
+
+  const startTitleEdit = React.useCallback(() => {
+    const request = ++titleRequestRef.current
+    setDraftTitle(activeTitle || "")
+    setTitleBaseline(activeTitle || "")
+    setIsEditingTitle(true)
+    if (!loadEditableTitle) return
+    setTitleLoading(true)
+    loadEditableTitle()
+      .then((title) => {
+        if (request !== titleRequestRef.current || !title?.trim()) return
+        setDraftTitle(title)
+        setTitleBaseline(title)
+      })
+      .catch((error) => {
+        console.warn("[sidepanel] Could not load the chat's title to rename", error)
+      })
+      .finally(() => {
+        if (request === titleRequestRef.current) setTitleLoading(false)
+      })
+  }, [activeTitle, loadEditableTitle])
 
   const cancelTitleEdit = React.useCallback(() => {
+    titleRequestRef.current++
+    setTitleLoading(false)
     setDraftTitle(activeTitle || "")
     setIsEditingTitle(false)
   }, [activeTitle])
 
   const submitTitleEdit = React.useCallback(() => {
+    if (titleLoading) return
     const trimmed = draftTitle.trim()
     if (!trimmed) {
       setDraftTitle(activeTitle || "")
       setIsEditingTitle(false)
       return
     }
-    if (trimmed !== (activeTitle || "").trim()) {
+    if (trimmed !== titleBaseline.trim()) {
       onRenameTitle?.(trimmed)
     }
     setIsEditingTitle(false)
-  }, [activeTitle, draftTitle, onRenameTitle])
+  }, [activeTitle, draftTitle, onRenameTitle, titleBaseline, titleLoading])
+
+  const webUiOpenAttemptRef = React.useRef(0)
+  const mountedRef = React.useRef(false)
+  const webUiViewRef = React.useRef({ chatReady, onOpenChatInWebUi, activeTitle })
+  webUiViewRef.current = { chatReady, onOpenChatInWebUi, activeTitle }
+  React.useLayoutEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false } }, [])
 
   const openFullScreen = React.useCallback(async () => {
+    if (!chatReady) return
     const showFailure = () => {
       notification.error({
         message: t(
@@ -116,8 +178,13 @@ export const SidepanelHeaderSimple = ({
         )
       })
     }
-    if (!historySelection && onOpenChatInWebUi) {
+    if (onOpenChatInWebUi && !usesExtensionExpansion) {
+      const attempt = ++webUiOpenAttemptRef.current
+      const expected = webUiViewRef.current
+      const current = () => webUiOpenAttemptRef.current === attempt && mountedRef.current && webUiViewRef.current.chatReady &&
+        webUiViewRef.current.onOpenChatInWebUi === expected.onOpenChatInWebUi && webUiViewRef.current.activeTitle === expected.activeTitle
       Promise.resolve(onOpenChatInWebUi()).catch((error) => {
+        if (!current()) return
         console.error("Failed to open WebUI chat handoff:", error)
         showFailure()
       })
@@ -140,7 +207,7 @@ export const SidepanelHeaderSimple = ({
       return
     }
     openFallback()
-  }, [historySelection, notification, onOpenChatInWebUi, t])
+  }, [chatReady, historySelection, notification, onOpenChatInWebUi, t, usesExtensionExpansion])
 
   const openDashboard = React.useCallback(() => {
     const url = browser.runtime.getURL("/options.html#/flashcards")
@@ -157,10 +224,10 @@ export const SidepanelHeaderSimple = ({
     <div
       data-istemporary-chat={temporaryChat}
       data-testid="chat-header"
-      className="absolute top-0 z-10 flex h-11 w-full items-center justify-between border-b border-border bg-surface/95 px-3 py-2 text-body text-text backdrop-blur data-[istemporary-chat='true']:bg-purple-50 data-[istemporary-chat='true']:dark:bg-purple-900/30"
+      className="absolute top-0 z-10 flex h-11 w-full items-center justify-between border-b border-border bg-surface/95 px-2 py-2 sm:px-3 text-body text-text backdrop-blur data-[istemporary-chat='true']:bg-purple-50 data-[istemporary-chat='true']:dark:bg-purple-900/30"
     >
       {/* Left: Sidebar toggle + Status dot + Logo + Title */}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-1 items-center gap-1 pr-1 sm:gap-2">
         <Tooltip
           title={sidebarToggleLabel}>
           <button
@@ -168,29 +235,31 @@ export const SidepanelHeaderSimple = ({
             aria-label={sidebarToggleLabel}
             aria-expanded={sidebarOpen}
             onClick={handleSidebarToggle}
-            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text"
+            className={`shrink-0 rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text ${HEADER_FOCUS_RING_CLASS}`}
             title={sidebarToggleLabel}
           >
             <Menu className="size-4" />
           </button>
         </Tooltip>
         <StatusDot />
-        <div className="flex items-center text-text">
+        <div
+          className={`${activeTitle ? "hidden sm:flex" : "flex"} min-w-0 items-center text-text`}>
           <img
-            className="h-5 w-auto"
+            className="h-5 w-auto shrink-0"
             src={logoSrc}
             alt={t("common:pageAssist")}
           />
-          <span className="ml-2 text-sm font-medium">
+          <span className="ml-2 min-w-0 truncate text-sm font-medium max-[379px]:hidden">
             {t("common:pageAssist")}
           </span>
         </div>
         {activeTitle && (
-          <div className="ml-2 hidden max-w-[12rem] sm:inline">
+          <div className="min-w-0 max-w-[12rem] flex-1 sm:ml-2">
             {isEditingTitle && onRenameTitle ? (
               <input
                 ref={titleInputRef}
                 value={draftTitle}
+                disabled={titleLoading}
                 onChange={(event) => setDraftTitle(event.target.value)}
                 onBlur={() => {
                   if (!onRenameTitle) return
@@ -224,25 +293,26 @@ export const SidepanelHeaderSimple = ({
               onRenameTitle ? (
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsEditingTitle(true)
-                  }}
-                  className="group flex max-w-full items-center gap-1 text-caption text-text-muted hover:text-text"
+                  onClick={startTitleEdit}
+                  className="group flex min-h-8 w-full min-w-0 items-center gap-1 text-left text-caption text-text-muted hover:text-text"
                   title={activeTitle}
                   aria-label={t(
                     "sidepanel:header.renameTitle",
                     "Rename conversation"
                   )}
                 >
-                  <span className="truncate">{activeTitle}</span>
-                  <Pencil className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-80" />
+                  <span className="min-w-0 flex-1 truncate">{activeTitle}</span>
+                  <Pencil
+                    className="hidden h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-80 sm:block"
+                    aria-hidden="true"
+                  />
                 </button>
               ) : (
                 <span
-                  className="flex max-w-full items-center gap-1 text-caption text-text-muted"
+                  className="flex min-w-0 items-center gap-1 text-caption text-text-muted"
                   title={activeTitle}
                 >
-                  <span className="truncate">{activeTitle}</span>
+                  <span className="min-w-0 flex-1 truncate">{activeTitle}</span>
                 </span>
               )
             )}
@@ -251,13 +321,13 @@ export const SidepanelHeaderSimple = ({
       </div>
 
       {/* Right: Full-screen + Settings */}
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center sm:gap-1">
         <Tooltip title={t("playground:ttsClips.title", "TTS clips")}>
           <button
             type="button"
             onClick={() => setTtsClipsOpen(true)}
             aria-label={t("playground:ttsClips.title", "TTS clips")}
-            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            className={HEADER_ICON_CONTROL_CLASS}
             title={t("playground:ttsClips.title", "TTS clips")}
             data-testid="chat-open-tts-clips"
           >
@@ -269,7 +339,7 @@ export const SidepanelHeaderSimple = ({
             <Link
               to="/persona"
               aria-label={t("sidepanel:persona.openPersona", "Open Persona Garden") as string}
-              className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+              className={HEADER_ICON_CONTROL_CLASS}
               title={t("sidepanel:persona.openPersona", "Open Persona Garden")}
               data-testid="chat-open-persona"
             >
@@ -282,7 +352,7 @@ export const SidepanelHeaderSimple = ({
             type="button"
             onClick={openDashboard}
             aria-label={t("sidepanel:header.openDashboard", "Open dashboard")}
-            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            className={HEADER_ICON_CONTROL_CLASS}
             title={t("sidepanel:header.openDashboard", "Open dashboard")}
             data-testid="chat-open-dashboard"
           >
@@ -293,9 +363,10 @@ export const SidepanelHeaderSimple = ({
           <button
             type="button"
             onClick={openFullScreen}
+            disabled={!chatReady}
             aria-describedby={fullChatHandoffDescriptionId}
             aria-label={openFullChatLabel}
-            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            className={HEADER_ICON_CONTROL_CLASS}
             title={openFullChatDescription}
             data-testid="chat-open-full-screen"
           >
@@ -309,7 +380,7 @@ export const SidepanelHeaderSimple = ({
           <Link
             to="/settings"
             aria-label={t("sidepanel:header.openSettingsAria") as string}
-            className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
+            className={HEADER_ICON_CONTROL_CLASS}
             title={t("sidepanel:header.settingsShortLabel", "Settings")}
           >
             <CogIcon className="size-4" aria-hidden="true" />

@@ -467,3 +467,36 @@ def test_middleware_key_limits_missing_fails_closed(monkeypatch, mock_middleware
     data = r.json()
     assert data.get("error") == "budget_limits_unavailable"
     assert "Failed to load virtual key limits" in data.get("message", "")
+
+
+@pytest.mark.parametrize("body_model", [{"name": "allowed-model"}, ["allowed-model"]])
+def test_middleware_model_allowlist_refuses_an_unhashable_model_instead_of_skipping(
+    monkeypatch, mock_middleware_dependencies, body_model
+):
+    """A dict allowlist with a dict or list body model raised TypeError, which skipped enforcement (fail open)."""
+    import tldw_Server_API.app.core.AuthNZ.llm_budget_middleware as mw
+
+    mock_middleware_dependencies(False, 100, 0.1)
+
+    async def fake_get_key_limits(_key_id: int):
+        return {"is_virtual": True, "llm_allowed_models": {"allowed-model": True}}
+
+    class StubAuthGovernor:
+        async def check_llm_budget_for_api_key(self, principal, key_id):
+            return {"over": False, "reasons": []}
+
+    async def fake_get_auth_governor():
+        return StubAuthGovernor()
+
+    monkeypatch.setattr(mw, "get_key_limits", fake_get_key_limits)
+    monkeypatch.setattr(mw, "get_auth_governor", fake_get_auth_governor)
+
+    client = TestClient(_build_app_with_middleware())
+    r = client.post(
+        "/api/v1/chat/completions",
+        headers={"X-API-KEY": "dummy-key"},
+        json={"model": body_model, "messages": []},
+    )
+
+    assert r.status_code == 403
+    assert r.json().get("error") == "forbidden"

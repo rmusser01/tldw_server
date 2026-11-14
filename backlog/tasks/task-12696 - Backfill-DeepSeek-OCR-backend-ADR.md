@@ -46,14 +46,14 @@ Create a bounded accepted ADR for the confirmed DeepSeek OCR backend decision fr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Started in isolated worktree `.worktrees/deepseek-ocr-adr-backfill` from `origin/dev`.
 - Duplicate active `TASK-2276` files exist in `backlog/tasks/`, so Backlog CLI numeric task edits are unsafe for this task. This DeepSeek task record is maintained by exact file path in this branch.
 - Plan: create ADR-024 from the TASK-2275 confirmation audit, update the ADR index and INV-026 inventory row, add a historical-source ADR reference to `Docs/Design/DeepSeek_OCR_Backend.md`, then verify docs and focused OCR tests.
 - Verification: `git diff --check` exited 0. Reference scan across touched docs/task files found no absolute developer-machine paths or temporary Bandit report artifact names. Focused tests passed with 18 passed, 6 warnings: `source ../../.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/MediaIngestion_NEW/test_ocr_backend_deepseek.py tldw_Server_API/tests/Media_Ingestion_Modification/test_ocr_runtime_auto_selection.py tldw_Server_API/tests/Media_Ingestion_Modification/test_ocr_runtime_discovery.py`.
 - Bandit was not run because this task changed only documentation and Backlog metadata, not Python/code.
 - Known skip: the live DeepSeek OCR PDF integration test remains intentionally gated by `DEEPSEEK_OCR_RUN_INTEGRATION=1`, CUDA, and local model dependencies.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

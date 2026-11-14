@@ -12,15 +12,21 @@ The active `dev-core-required-gates` repository ruleset requires these checks:
 4. `frontend-required`
 5. `e2e-required`
 6. `container-build-check`
+7. `E2E Critical (Tier 1 + Journeys)`
 
 These check names are stable and must remain unchanged. Each status is bound to
 GitHub Actions integration `15368`.
+
+`E2E Critical (Tier 1 + Journeys)` is the `critical` job of `frontend-e2e-tiers.yml`.
+Add it to the ruleset only once that workflow's unfiltered `pull_request` trigger is on
+`dev`: an open PR whose last run predates it, and was path-filtered out, shows the check
+as "Expected" until its next push (which strict enforcement forces anyway).
 
 ## Live `dev` Enforcement
 
 GitHub aggregates two active, `dev`-only repository rulesets:
 
-- `dev-core-required-gates` (ID `21824526`) requires all six checks above,
+- `dev-core-required-gates` (ID `21824526`) requires all seven checks above,
   uses strict/current-base enforcement, and has no bypass actors.
 - `frontend-license-gate-dev` (ID `19362594`) retains the pull-request rule
   and requires `frontend-license-policy/trusted/dev` from integration `15368`.
@@ -41,6 +47,12 @@ responses in TASK-13013.2.
 
 See [Container Image Lifecycle](Container_Image_Lifecycle.md) for the full build and publish pipeline.
 
+### security-required: TEST_MODE-unset suites
+
+The "Security suites with TEST_MODE unset" step runs `tests/http_client`, `tests/AuthNZ/unit`, `tests/AuthNZ_Unit`, `tests/Security` and the sentinel `tests/CI/test_unset_test_flags_run.py` with `TLDW_UNSET_TEST_FLAGS=1`, which makes `tests/conftest.py` drop `TEST_MODE`, `TESTING` and `TLDW_TEST_MODE`; the same variable un-skips the sentinel, and `test_license_first_workflow_contracts.py` pins it. AuthNZ means the unit-level suites only, because the integration suites take about 90 shard-minutes. The run is not production parity: `PYTEST_CURRENT_TEST`-keyed branches stay live, and the root conftests' other test settings still apply (`WORKFLOWS_EGRESS_BLOCK_PRIVATE=false`, `WORKFLOWS_EGRESS_ALLOWED_PORTS=*`, `WORKFLOWS_WEBHOOK_ALLOWLIST=*`, `MINIMAL_TEST_APP=1`, the single-user test key). Postgres cases skip (`TLDW_TEST_NO_DOCKER=1`) and run in ci.yml's Postgres shard. A test that fails only here means production code still branches on `TEST_MODE`, `TESTING` or `TLDW_TEST_MODE`.
+
+Reproduce a failure locally: `env -u TEST_MODE -u TESTING -u TLDW_TEST_MODE TLDW_UNSET_TEST_FLAGS=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 TLDW_TEST_NO_DOCKER=1 PYTHONPATH=. python -m pytest -p pytest_asyncio.plugin -p pytest_timeout <file>`
+
 ## Conditional Execution and No-op Behavior
 
 Each required gate is designed to always report a status, so branch protection behaves
@@ -50,12 +62,26 @@ and check current behaviour rather than assuming.
 
 - If relevant paths changed, the gate executes its full checks.
 - If relevant paths did not change, the gate exits with an explicit no-op success message.
+  `E2E Critical (Tier 1 + Journeys)` instead skips its job, which GitHub counts as passing;
+  its workflow has no `paths:` filter, so the check always reports.
+- If the change-detection job itself fails, the gate reports failure. Before TASK-13462 the gate job was skipped in
+  that case, and GitHub counts a skipped required job as satisfied.
+- `backend-required`'s change-detection job also fails when two backlog task files share an id
+  (`Helper_Scripts/ci/check_backlog_task_ids.py`, TASK-13960). That job runs on every PR, backlog-only ones
+  included, so a duplicate id turns `backend-required` red even when no backend path changed. Its log names
+  each file; renumber the newer one with `task renumber` (AGENTS.md, Backlog.md Task Tracking).
+- If the gate's own license wait (`await_license`) is cancelled, fails, or reports a negative verdict, the gate reports
+  failure. Each required workflow has its own `await_license` job, so a runner that never picks one up affects only
+  that workflow. Before TASK-13502 only `backend-required` reported this; the other five were skipped and read as
+  passed (seen on #3188, where `container-build-check` showed as satisfied with nothing built).
 
 Examples:
 
 - UI-only PRs no-op `backend-required` and `coverage-required`.
 - Backend-only PRs no-op `frontend-required`.
 - `e2e-required` runs on frontend changes and selected backend API/schema/auth paths.
+- `E2E Critical (Tier 1 + Journeys)` runs on any backend, workflow, shared-UI, web or
+  extension change (`backend_changed || e2e_changed`); docs- and backlog-only PRs skip it.
 
 ## Gate Reporting and the `workflow_run` Admission Path
 
@@ -165,16 +191,17 @@ nothing.
 
 ### Checking the current state
 
-Do not trust the prose above; check. The question that matters is whether the six
+Do not trust the prose above; check. The question that matters is whether the seven
 required check *names* reach a conclusion on the pull request, so ask the pull request:
 
 ```bash
 gh pr checks <pr> --json name,state \
   --template '{{range .}}{{.state}} {{.name}}{{"\n"}}{{end}}' \
-  | grep -E "required|container-build-check"
+  | grep -E "required|container-build-check|E2E Critical"
 ```
 
-- `SUCCESS` for all six: gates are reporting, nothing to work around.
+- `SUCCESS` for all seven (`SKIPPED` also passes for `E2E Critical`): gates are reporting,
+  nothing to work around.
 - `CANCELLED`: the run that would have reported was superseded. Use the landing
   procedure below.
 - A name missing entirely: that lane never started for this head.
@@ -210,10 +237,10 @@ The steps it performs, and why each is shaped that way:
 2. **Wait for the audit on that exact head SHA to complete.** Not merely "the latest
    audit" -- a rebase-push spawns a new one, and re-running gates while it is pending
    gets them cancelled when it finishes.
-3. **Re-run the six gates individually, paced roughly 40 seconds apart.** A burst makes
+3. **Re-run the seven gates individually, paced roughly 40 seconds apart.** A burst makes
    them cancel each other, and `gh run rerun` fails on a run that is already queued or
    in progress, which silently skips that gate.
-4. **Merge once all six are green**, before anything else lands on `dev`.
+4. **Merge once all seven are green**, before anything else lands on `dev`.
 
 **Landing several PRs is serial, not parallel.** Strict-base enforcement means each merge
 moves `dev` and puts every remaining PR behind, so each one needs its own
@@ -234,6 +261,85 @@ Three traps worth stating outright:
   branch"*. Merging through the GitHub UI as a user whose own admin bypass applies does
   work.
 - **`--squash` is rejected repository-wide**; merges must use `--merge`.
+
+## Merge Queue
+
+Tracked as TASK-13462, decided in [ADR-063](../ADR/063-in-repo-merge-queue.md), designed in
+`Docs/superpowers/specs/2026-10-04-merge-queue-design.md` and amended by
+`Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md` (TASK-13639).
+
+Strict enforcement means one merge puts every other ready PR behind, and without a queue each of them rebases and
+re-runs the required gates to race for the next merge. The queue makes that serial: only the armed PR at the front of
+the line is rebased and tested.
+
+### Mode
+
+The repository variable `MERGE_QUEUE` is the switch. Check it before landing anything:
+
+```bash
+gh variable get MERGE_QUEUE
+```
+
+- unset or `off`: the queue does nothing. Use the manual procedure (rebase the one PR about to merge, wait for the
+  required statuses, merge).
+- `dry`: the queue writes what it would do to the `Merge queue` job summary and changes nothing. Manual procedure.
+- `on`: the queue acts. Follow the rules below.
+
+### Rules when the queue is `on`
+
+1. When reviews are settled, arm auto-merge: `gh pr merge <n> --auto --merge`. That is the whole landing procedure.
+2. Do not rebase or update an armed PR, and do not merge it by hand. The queue rebases it when it reaches the front.
+3. To push more work, disarm first (`gh pr merge <n> --disable-auto`), push, then arm again. Re-arming puts the PR at
+   the back of the line.
+4. The queue approves a rebased PR's seven required gate runs itself; approving one by hand is harmless. Never dispatch
+   a required gate by hand to unblock a PR: a dispatched run's check does not count toward the PR's required statuses,
+   so the PR stays blocked.
+5. An evicted PR gets one comment saying why (conflicts, a gate failed twice, a gate run GitHub would not re-run or
+   approve, a gate kept being cancelled, a gate run waiting for someone else's approval, `dev` changed workflow files,
+   auto-merge did not fire). Fix the cause and arm
+   again.
+
+Fork PRs and PRs opened by bots or apps are never queued and stay manual.
+
+### What the queue does to the front PR
+
+- **Behind `dev`:** rebases it with a pinned head. GitHub then holds the new head's `pull_request` runs for approval.
+  The queue dispatches `frontend-license-gate.yml` on `dev` with the PR number, approves the held runs of the seven
+  required gates, deletes the other held runs, cancels the old head's runs and comments once. A dispatched gate would
+  not count, so the queue never dispatches one.
+- **A status failed:** re-runs that gate's failed jobs once (the license gate is dispatched on `dev` again), and evicts
+  the PR if it fails a second time on the same head. A gate run that finished without reporting its check counts as a
+  failure; a cancelled gate run is restarted once per head.
+- **All eight green:** checks the head against `dev` (the merge state can lag right after a merge) and waits for
+  auto-merge. The merge pushes `dev`, which wakes the queue for the next PR.
+
+Non-required workflows (`ci.yml` and the rest) are not re-run on the rebased head: their held runs are deleted.
+
+### Three details that surprise people
+
+- **The queue cannot rebase a PR across a change to workflow files.** GitHub does not let an Actions token create or
+  update anything under `.github/workflows`. If `dev` gained a workflow change after your branch was cut, the queue
+  removes the PR from the line with the steps to take: `git fetch origin dev && git rebase origin/dev`, force-push with
+  lease, arm again. After that the queue can rebase it itself until the next workflow change lands.
+
+- `frontend-required.yml` publishes `frontend-required-diagnostic`, never the protected name, on any dispatch.
+- The queue wakes on arm, disarm, close, pushes to `dev`, and a failed required gate: that run's `queue-tick` job
+  dispatches `security-required.yml` on `dev` with `queue_kick=true`, whose `queue-kick` job waits for the failed run to
+  finish and then runs the queue. Nothing wakes it on a timer. If the line looks stuck, arming or disarming a PR moves
+  it.
+
+### Switching it on (owner)
+
+1. Enable **Allow auto-merge** in repository settings.
+2. `gh variable set MERGE_QUEUE --body dry` for about a day; compare the job summaries with what armed PRs do.
+3. `gh variable set MERGE_QUEUE --body on` with one low-risk PR first. That run answers the questions listed in the
+   spec's rollout section, which cannot be checked without a real queue run. One throwaway PR with a deliberately
+   failing gate shows the tick, the kick and the retry, and that the retry's own tick fires when the retry fails too.
+   Check on the first PR that the queue's rebase commits (committed by `github-actions[bot]`) do not make the `dev`
+   ruleset ask for an approving review: its `require_extra_approval_for_unattributed_changes` is on, and GitHub does not
+   say which commits it counts. If they do, switch that option off for `dev`; nothing in the queue can change who
+   commits a rebase.
+4. Roll back at any time with `gh variable set MERGE_QUEUE --body off`.
 
 ## Security Threshold Policy
 
@@ -263,4 +369,4 @@ the ready pull request as `BLOCKED`.
 ## Legacy CI Workflow
 
 The large legacy `.github/workflows/ci.yml` workflow remains available during rollout for broad visibility and historical comparison.
-Required merge protection is provided by the six lanes listed above.
+Required merge protection is provided by the seven lanes listed above.

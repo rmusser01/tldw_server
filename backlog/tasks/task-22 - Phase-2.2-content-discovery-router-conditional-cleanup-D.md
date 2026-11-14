@@ -46,7 +46,7 @@ Move only the covered content discovery/search router specs onto the shared lazy
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Red check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "content_router_specs_defers_discovery" -q` failed before implementation because selected content discovery router attributes were resolved during spec construction.
 - Green focused check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "content_router_specs_defers_discovery or content_router_specs_populates_expected or canonical_rag_key" -q` passed with `3 passed`.
 - Review red check: `python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k "append_imported_router_spec" -q` failed on the current branch because imported specs still imported modules during helper append, missing optional routers were pruned before registration, unexpected import errors escaped during append, and lazy attribute misses logged twice.
@@ -55,7 +55,7 @@ Move only the covered content discovery/search router specs onto the shared lazy
 - Security and hygiene: `python -m bandit -r tldw_Server_API/app/api/v1/router_groups/conditional.py tldw_Server_API/app/api/v1/router_groups/spec.py tldw_Server_API/app/api/v1/router_registry.py tldw_Server_API/app/api/v1/router_groups/admin.py tldw_Server_API/app/api/v1/router_groups/core.py tldw_Server_API/app/api/v1/router_groups/content.py -f json -o /tmp/bandit_phase2_2_content_router_conditionals_d_review.json` reported `0 results` and `0 errors`; `git diff --check` passed.
 - Documentation: no user-facing docs required for this internal router registration refactor.
 - Known skips or blockers: `rag_unified` intentionally remains unchanged because its current skip behavior catches only `ImportError`.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

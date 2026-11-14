@@ -16,10 +16,14 @@ import { useNotesDockStore, type NotesDockNote } from "@/store/notes-dock"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { bgRequest } from "@/services/background-proxy"
+import type { ServicePromptTargetConfig } from "@/services/tldw/TldwApiClient"
+import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
 import { classNames } from "@/libs/class-name"
 import { useNavigate } from "react-router-dom"
+import { buildNotePath } from "@/routes/hooks/useNotesRouteAddress"
 import { getQueryClient } from "@/services/query-client"
 import TaskChecklistPreview, {
   type TaskChecklistTogglePayload
@@ -52,6 +56,24 @@ type NotesSearchResponse = {
   results?: NoteListItem[]
   items?: NoteListItem[]
 }
+
+type DockOperation = {
+  ready: Promise<ServicePromptSnapshot>
+  readonly requestScope: ServicePromptRequestScope | undefined
+  isCurrent: () => boolean
+  commit: (write: () => NotesDockNote | null) => NotesDockNote | null
+  release: () => void
+}
+type DockRequestOptions = {
+  servicePromptConfig: ServicePromptTargetConfig
+  abortSignal: AbortSignal
+  headers: Record<string, string>
+}
+const dockRequestOptions = (snapshot: ServicePromptSnapshot): DockRequestOptions => ({
+  servicePromptConfig: { ...snapshot.requestScope.config, expectedUserId: snapshot.requestScope.userId },
+  abortSignal: snapshot.scopeSignal,
+  headers: snapshot.requestScope.userId == null ? {} : { "X-TLDW-Expected-User-ID": String(snapshot.requestScope.userId) }
+})
 
 type CloseChoice = "save" | "discard" | "cancel"
 
@@ -185,7 +207,7 @@ export const NotesDockPanel: React.FC = () => {
   } = useNotesDockStore()
 
   const [searchQuery, setSearchQuery] = useState("")
-  const [notesList, setNotesList] = useState<NoteListItem[]>([])
+  const [notesList, setNotesList] = useState<Array<{ note: NoteListItem; operation: DockOperation }>>([])
   const [loadingList, setLoadingList] = useState(false)
   const [unsavedModalOpen, setUnsavedModalOpen] = useState(false)
   const [pendingCloseNoteId, setPendingCloseNoteId] = useState<string | null>(null)
@@ -197,7 +219,10 @@ export const NotesDockPanel: React.FC = () => {
   const [taskReconciliation, setTaskReconciliation] =
     useState<NoteTaskReconciliationSummary | null>(null)
   const [taskActivityEvents, setTaskActivityEvents] = useState<NoteTaskActivityEvent[]>([])
+  const taskActivityEventsRef = useRef(taskActivityEvents)
+  taskActivityEventsRef.current = taskActivityEvents
   const [dismissingTaskActivityId, setDismissingTaskActivityId] = useState<string | null>(null)
+  const dismissingTaskActivityOperationRef = useRef<DockOperation | null>(null)
 
   const dockRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
@@ -207,6 +232,94 @@ export const NotesDockPanel: React.FC = () => {
   const activeServerNoteIdRef = useRef<string | null>(null)
   const cacheSyncInFlightRef = useRef(0)
   const unsavedModalReturnFocusRef = useRef<HTMLElement | null>(null)
+  const mountedRef = useRef(true)
+  const operationsRef = useRef(new Map<AbortController, () => void>())
+  const archiveOperationRef = useRef<DockOperation | null>(null)
+  const closeIntentRef = useRef(0)
+
+  useEffect(() => {
+    mountedRef.current = true
+    const operations = operationsRef.current
+    return () => {
+      mountedRef.current = false
+      closeIntentRef.current += 1
+      archiveOperationRef.current?.release()
+      for (const release of operations.values()) release()
+    }
+  }, [])
+
+  const captureDockOperation = useCallback((
+    note?: NotesDockNote,
+    requireActive = false,
+    requestScope = note?.requestScope
+  ): DockOperation | null => {
+    const originalState = useNotesDockStore.getState()
+    if (!mountedRef.current || !originalState.isOpen ||
+        (note && originalState.notes.find((item) => item.localId === note.localId) !== note)) return null
+    if (note?.id != null && !requestScope) return null
+    const controller = new AbortController()
+    let watchedNote = note
+    let activeId = originalState.activeNoteId
+    let activeRow = requireActive ? originalState.notes.find((item) => item.localId === activeId) : undefined
+    let committing = false
+    let snapshot: ServicePromptSnapshot | undefined
+    const isCurrent = () => mountedRef.current && !controller.signal.aborted &&
+      !snapshot?.scopeSignal.aborted && useNotesDockStore.getState().isOpen &&
+      (!watchedNote || useNotesDockStore.getState().notes.find((item) => item.localId === watchedNote?.localId) === watchedNote) &&
+      (!requireActive || (useNotesDockStore.getState().activeNoteId === activeId &&
+        useNotesDockStore.getState().notes.find((item) => item.localId === activeId) === activeRow))
+    const unsubscribe = useNotesDockStore.subscribe(() => {
+      if (!committing && !isCurrent()) controller.abort()
+    })
+    let released = false
+    const abort = () => controller.abort()
+    const release = () => {
+      if (released) return
+      released = true
+      controller.signal.removeEventListener("abort", release)
+      controller.abort()
+      unsubscribe()
+      snapshot?.scopeSignal.removeEventListener("abort", abort)
+      snapshot?.release()
+      operationsRef.current.delete(controller)
+    }
+    controller.signal.addEventListener("abort", release, { once: true })
+    operationsRef.current.set(controller, release)
+    const ready = loadServicePromptSnapshot([], { requestScope, signal: controller.signal }).then((resolved) => {
+      snapshot = resolved
+      if (!isCurrent()) {
+        resolved.release()
+        throw new DOMException("Dock operation changed", "AbortError")
+      }
+      resolved.scopeSignal.addEventListener("abort", abort, { once: true })
+      return resolved
+    }).catch((error: unknown) => { release(); throw error })
+    // Some callers hold the operation until another callback awaits it.
+    void ready.catch(() => undefined)
+    return {
+      ready, isCurrent,
+      get requestScope() { return snapshot?.requestScope },
+      commit: (write) => {
+        if (!isCurrent()) return null
+        committing = true
+        try {
+          const accepted = write()
+          const live = useNotesDockStore.getState()
+          if (!accepted || live.notes.find((item) => item.localId === accepted.localId) !== accepted ||
+              (requireActive && live.activeNoteId !== accepted.localId)) {
+            controller.abort()
+            return null
+          }
+          // Only the exact synchronous row returned by our own accepted response
+          // can replace the watched object. Later edits still abort this operation.
+          watchedNote = accepted
+          if (requireActive) { activeId = accepted.localId; activeRow = accepted }
+          return isCurrent() ? accepted : null
+        } finally { committing = false }
+      },
+      release
+    }
+  }, [])
 
   const hasDirtyNotes = useMemo(
     () => notes.some((note) => note.isDirty),
@@ -217,6 +330,9 @@ export const NotesDockPanel: React.FC = () => {
     () => notes.find((note) => note.localId === activeNoteId) ?? null,
     [notes, activeNoteId]
   )
+  // The Notes page opens a saved dock note by its address (XP-05).
+  const activeNotePagePath =
+    activeNote?.id != null ? buildNotePath(String(activeNote.id)) : "/notes"
 
   useEffect(() => {
     activeServerNoteIdRef.current = activeNote?.id != null ? String(activeNote.id) : null
@@ -252,6 +368,7 @@ export const NotesDockPanel: React.FC = () => {
   }, [notes])
 
   const handleRequestClose = useCallback(() => {
+    closeIntentRef.current += 1
     if (hasDirtyNotes) {
       unsavedModalReturnFocusRef.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -278,20 +395,23 @@ export const NotesDockPanel: React.FC = () => {
   }, [])
 
   const handleSaveChoice = async () => {
+    const intent = closeIntentRef.current
     const ok = await saveAllDirtyNotes()
-    if (ok) {
+    if (ok && intent === closeIntentRef.current && mountedRef.current) {
       setUnsavedModalOpen(false)
       setOpen(false)
     }
   }
 
   const handleDiscardChoice = () => {
+    closeIntentRef.current += 1
     discardAll()
     setUnsavedModalOpen(false)
     setOpen(false)
   }
 
   const handleCancelChoice = () => {
+    closeIntentRef.current += 1
     setUnsavedModalOpen(false)
     restoreFocusAfterUnsavedModalClose()
   }
@@ -299,16 +419,32 @@ export const NotesDockPanel: React.FC = () => {
   const fetchNotesList = useCallback(
     async (query: string) => {
       const requestId = ++fetchRequestIdRef.current
+      archiveOperationRef.current?.release()
+      archiveOperationRef.current = null
+      setNotesList([])
       if (editorDisabled) {
         setLoadingList(false)
         setNotesList([])
         return
       }
+      const operation = captureDockOperation()
+      if (!operation) return
+      archiveOperationRef.current = operation
       setLoadingList(true)
       try {
+        const snapshot = await operation.ready
+        if (!operation.isCurrent()) return
+        snapshot.scopeSignal.addEventListener("abort", () => {
+          if (mountedRef.current && requestId === fetchRequestIdRef.current) {
+            setNotesList([])
+            setLoadingList(false)
+          }
+        }, { once: true })
+        const ownedRequest = dockRequestOptions(snapshot)
         let response: NotesSearchResponse
         if (query.trim()) {
           response = await bgRequest<NotesSearchResponse>({
+            ...ownedRequest,
             path: `/api/v1/notes/search/?query=${encodeURIComponent(
               query.trim()
             )}&limit=20&include_keywords=true` as AllowedPath,
@@ -316,40 +452,43 @@ export const NotesDockPanel: React.FC = () => {
           })
         } else {
           response = await bgRequest<NotesSearchResponse>({
+            ...ownedRequest,
             path: "/api/v1/notes/?page=1&results_per_page=20&include_keywords=true" as AllowedPath,
             method: "GET"
           })
         }
-        if (requestId !== fetchRequestIdRef.current) return
+        if (requestId !== fetchRequestIdRef.current || !operation.isCurrent()) return
         const normalized = pickNotesArray(response).map((note) => ({
-          ...note,
-          keywords: extractKeywords(note)
+          note: { ...note, keywords: extractKeywords(note) },
+          operation
         }))
         setNotesList(normalized)
       } catch (error) {
-        if (requestId !== fetchRequestIdRef.current) return
+        if (requestId !== fetchRequestIdRef.current || !operation.isCurrent()) return
         setNotesList([])
         message.error(t("option:notesDock.loadError", "Failed to load notes"))
       } finally {
-        if (requestId === fetchRequestIdRef.current) {
+        if (requestId === fetchRequestIdRef.current && mountedRef.current) {
           setLoadingList(false)
         }
       }
     },
-    [editorDisabled, message, t]
+    [captureDockOperation, editorDisabled, message, t]
   )
-
-  useEffect(() => {
-    fetchNotesList("")
-  }, [fetchNotesList])
 
   useEffect(() => {
     if (searchTimeoutRef.current) {
       window.clearTimeout(searchTimeoutRef.current)
+      searchTimeoutRef.current = null
     }
-    searchTimeoutRef.current = window.setTimeout(() => {
-      fetchNotesList(searchQuery)
-    }, 250)
+    if (!searchQuery.trim()) {
+      fetchNotesList("")
+    } else {
+      searchTimeoutRef.current = window.setTimeout(() => {
+        searchTimeoutRef.current = null
+        fetchNotesList(searchQuery)
+      }, 250)
+    }
     return () => {
       if (searchTimeoutRef.current) {
         window.clearTimeout(searchTimeoutRef.current)
@@ -357,28 +496,37 @@ export const NotesDockPanel: React.FC = () => {
     }
   }, [fetchNotesList, searchQuery])
 
-  const handleOpenNote = async (noteId: number) => {
-    if (editorDisabled) return
+  const handleOpenNote = async (noteId: number, archive: DockOperation) => {
+    if (editorDisabled || !archive.isCurrent() || !archive.requestScope) return
+    const existing = useNotesDockStore.getState().notes.find((note) => note.id === noteId)
+    // Capture the row and selection synchronously at the native Open intent.
+    const operation = captureDockOperation(existing, true, archive.requestScope)
+    if (!operation) return
     try {
+      const snapshot = await operation.ready
+      if (!operation.isCurrent()) return
       const detail = await bgRequest<NoteListItem>({
+        ...dockRequestOptions(snapshot),
         path: `/api/v1/notes/${noteId}` as AllowedPath,
         method: "GET"
       })
+      if (!operation.isCurrent()) return
       const keywords = extractKeywords(detail)
-      openNote({
+      operation.commit(() => openNote({
         id: detail.id,
         title: detail.title || "",
         content: detail.content || "",
         keywords,
-        version: detail.version ?? null
-      })
+        version: detail.version ?? null,
+        requestScope: snapshot.requestScope
+      }))
     } catch (error) {
-      message.error(t("option:notesDock.loadDetailError", "Failed to open note"))
-    }
+      if (operation.isCurrent()) message.error(t("option:notesDock.loadDetailError", "Failed to open note"))
+    } finally { operation.release() }
   }
 
   const refreshTaskStateForNote = useCallback(
-    async (noteId: string | number | null | undefined) => {
+    async (noteId: string | number | null | undefined, capturedOperation?: DockOperation) => {
       const noteIdText = noteId != null ? String(noteId) : null
       if (noteIdText && activeServerNoteIdRef.current !== noteIdText) {
         return
@@ -390,50 +538,60 @@ export const NotesDockPanel: React.FC = () => {
         setTaskActivityEvents([])
         return
       }
-
+      const row = useNotesDockStore.getState().notes.find((note) => String(note.id) === noteIdText)
+      const operation = capturedOperation ?? (row ? captureDockOperation(row, true) : null)
+      if (!operation) { setActiveNoteTasks([]); setTaskReconciliation(null); setTaskActivityEvents([]); return }
       try {
-        const response = await listNoteTasks(noteId, { limit: 500 })
-        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
-        setActiveNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
-        setTaskReconciliation(response.reconciliation ?? null)
+        const snapshot = await operation.ready
+        if (!operation.isCurrent()) return
+        const ownedRequest = dockRequestOptions(snapshot)
+        try {
+          const response = await listNoteTasks(noteId, { limit: 500 }, ownedRequest)
+          if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText || !operation.isCurrent()) return
+          setActiveNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
+          setTaskReconciliation(response.reconciliation ?? null)
+        } catch {
+          if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText || !operation.isCurrent()) return
+          setActiveNoteTasks([])
+          setTaskReconciliation(null)
+        }
+        try {
+          if (!operation.isCurrent()) return
+          const response = await listTaskActivity({ note_id: noteId, limit: 50 }, ownedRequest)
+          if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText || !operation.isCurrent()) return
+          const events = Array.isArray(response.events)
+            ? response.events.filter((event) => {
+                return (
+                  String(event.note_id || "") === noteIdText &&
+                  !event.dismissed_at &&
+                  event.actor_type === "agent"
+                )
+              })
+            : []
+          setTaskActivityEvents(events)
+        } catch {
+          if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText || !operation.isCurrent()) return
+          setTaskActivityEvents([])
+        }
       } catch {
-        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
-        setActiveNoteTasks([])
-        setTaskReconciliation(null)
-      }
-
-      try {
-        const response = await listTaskActivity({ note_id: noteId, limit: 50 })
-        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
-        const events = Array.isArray(response.events)
-          ? response.events.filter((event) => {
-              return (
-                String(event.note_id || "") === noteIdText &&
-                !event.dismissed_at &&
-                event.actor_type === "agent"
-              )
-            })
-          : []
-        setTaskActivityEvents(events)
-      } catch {
-        if (requestId !== taskRequestIdRef.current || activeServerNoteIdRef.current !== noteIdText) return
-        setTaskActivityEvents([])
-      }
+        // A failed owner snapshot cannot authorize either read or publication.
+      } finally { if (!capturedOperation) operation.release() }
     },
-    [editorDisabled]
+    [captureDockOperation, editorDisabled]
   )
 
   useEffect(() => {
     void refreshTaskStateForNote(activeNote?.id)
-  }, [activeNote?.id, refreshTaskStateForNote])
+  }, [activeNote?.id, activeNote?.requestScope, refreshTaskStateForNote])
 
-  const syncNotesPageCache = useCallback(async () => {
+  const syncNotesPageCache = useCallback(async (operation: DockOperation) => {
+    if (!operation.isCurrent()) return
     cacheSyncInFlightRef.current += 1
     setSyncingNotesList(true)
     try {
       await getQueryClient().invalidateQueries({ queryKey: ["notes"] })
     } catch {
-      message.warning(
+      if (operation.isCurrent()) message.warning(
         t(
           "option:notesDock.syncRefreshWarning",
           "Saved note, but notes page refresh may be delayed."
@@ -441,7 +599,7 @@ export const NotesDockPanel: React.FC = () => {
       )
     } finally {
       cacheSyncInFlightRef.current = Math.max(0, cacheSyncInFlightRef.current - 1)
-      if (cacheSyncInFlightRef.current === 0) {
+      if (mountedRef.current && cacheSyncInFlightRef.current === 0) {
         setSyncingNotesList(false)
       }
     }
@@ -449,6 +607,8 @@ export const NotesDockPanel: React.FC = () => {
 
   const saveNote = async (note: NotesDockNote) => {
     if (editorDisabled) return false
+    const operation = captureDockOperation(note)
+    if (!operation) return false
     if (!note.title.trim() && !note.content.trim()) {
       message.warning(
         t(
@@ -456,11 +616,15 @@ export const NotesDockPanel: React.FC = () => {
           "Add a title or content before saving."
         )
       )
+      operation.release()
       return false
     }
 
     setSavingNoteId(note.localId)
     try {
+      const snapshot = await operation.ready
+      if (!operation.isCurrent()) return false
+      const ownedRequest = dockRequestOptions(snapshot)
       const payload: Record<string, unknown> = {
         title: note.title.trim() || "Untitled Note",
         content: note.content,
@@ -476,37 +640,45 @@ export const NotesDockPanel: React.FC = () => {
           : (`/api/v1/notes/${note.id}` as AllowedPath)
 
         saved = await bgRequest<NoteListItem>({
+          ...ownedRequest,
           path,
           method: "PUT",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...ownedRequest.headers, "Content-Type": "application/json" },
           body: payload
         })
       } else {
         saved = await bgRequest<NoteListItem>({
+          ...ownedRequest,
           path: "/api/v1/notes/" as AllowedPath,
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { ...ownedRequest.headers, "Content-Type": "application/json" },
           body: payload
         })
       }
 
+      if (!operation.isCurrent()) return false
       const extractedKeywords = extractKeywords(saved)
-      markSaved(note.localId, {
+      const accepted = operation.commit(() => markSaved(note.localId, {
         id: saved.id ?? note.id,
         title: saved.title ?? note.title,
         content: saved.content ?? note.content,
         keywords: extractedKeywords.length > 0 ? extractedKeywords : note.keywords,
-          version: saved.version ?? note.version ?? null
-      })
+        version: saved.version ?? note.version ?? null,
+        requestScope: snapshot.requestScope
+      }))
+      if (!accepted) return false
 
       const savedId = saved.id ?? note.id
       if (savedId != null) {
-        await refreshTaskStateForNote(savedId)
+        await refreshTaskStateForNote(savedId, operation)
       }
-      void syncNotesPageCache()
+      if (!operation.isCurrent()) return false
+      await syncNotesPageCache(operation)
+      if (!operation.isCurrent()) return false
       message.success(t("option:notesDock.saved", "Note saved"))
-      return true
+      return accepted
     } catch (error: any) {
+      if (!operation.isCurrent()) return false
       if (error?.status === 409 || error?.message?.includes("version")) {
         message.error(
           t(
@@ -519,7 +691,8 @@ export const NotesDockPanel: React.FC = () => {
       }
       return false
     } finally {
-      setSavingNoteId(null)
+      operation.release()
+      if (mountedRef.current) setSavingNoteId((current) => current === note.localId ? null : current)
     }
   }
 
@@ -556,8 +729,12 @@ export const NotesDockPanel: React.FC = () => {
         )
         return
       }
-
+      const operation = captureDockOperation(activeNote, true)
+      if (!operation) return
       try {
+        const snapshot = await operation.ready
+        if (!operation.isCurrent()) return
+        const ownedRequest = dockRequestOptions(snapshot)
         await setNoteTaskStatus([
           {
             task_id: task.id,
@@ -565,22 +742,28 @@ export const NotesDockPanel: React.FC = () => {
             expected_task_version: task.version,
             expected_note_version: expectedNoteVersion
           }
-        ])
+        ], ownedRequest)
+        if (!operation.isCurrent()) return
         const detail = await bgRequest<NoteListItem>({
+          ...ownedRequest,
           path: `/api/v1/notes/${activeNote.id}` as AllowedPath,
           method: "GET"
         })
+        if (!operation.isCurrent()) return
         const keywords = extractKeywords(detail)
-        markSaved(activeNote.localId, {
+        const accepted = operation.commit(() => markSaved(activeNote.localId, {
           id: detail.id ?? activeNote.id,
           title: detail.title ?? activeNote.title,
           content: detail.content ?? activeNote.content,
           keywords,
-          version: detail.version ?? activeNote.version ?? null
-        })
-        await refreshTaskStateForNote(activeNote.id)
-        void syncNotesPageCache()
+          version: detail.version ?? activeNote.version ?? null,
+          requestScope: snapshot.requestScope
+        }))
+        if (!accepted) return
+        await refreshTaskStateForNote(activeNote.id, operation)
+        if (operation.isCurrent()) await syncNotesPageCache(operation)
       } catch (error: any) {
+        if (!operation.isCurrent()) return
         if (error?.status === 409 || error?.message?.includes("version")) {
           message.error(
             t(
@@ -591,10 +774,11 @@ export const NotesDockPanel: React.FC = () => {
         } else {
           message.error(t("option:notesSearch_taskUpdateError", "Task update failed"))
         }
-      }
+      } finally { operation.release() }
     },
     [
       activeNote,
+      captureDockOperation,
       markSaved,
       message,
       refreshTaskStateForNote,
@@ -606,26 +790,55 @@ export const NotesDockPanel: React.FC = () => {
 
   const dismissTaskActivity = useCallback(
     async (eventId: string) => {
+      const event = taskActivityEventsRef.current.find((item) => item.id === eventId &&
+        activeNote?.id != null && String(item.note_id) === String(activeNote.id))
+      if (!event || !activeNote) return
+      const operation = captureDockOperation(activeNote, true)
+      if (!operation) return
+      dismissingTaskActivityOperationRef.current?.release()
+      dismissingTaskActivityOperationRef.current = operation
+      const isCurrent = () => operation.isCurrent() &&
+        dismissingTaskActivityOperationRef.current === operation && taskActivityEventsRef.current.includes(event)
       setDismissingTaskActivityId(eventId)
       try {
-        await markTaskActivityRead(eventId, { dismissed: true })
-        setTaskActivityEvents((current) => current.filter((event) => event.id !== eventId))
+        const snapshot = await operation.ready
+        if (!isCurrent()) return
+        await markTaskActivityRead(eventId, { dismissed: true }, dockRequestOptions(snapshot))
+        if (!isCurrent()) return
+        setTaskActivityEvents((current) => current.filter((item) => item !== event))
       } catch {
-        message.error(t("option:notesSearch_taskActivityDismissError", "Failed to dismiss task activity"))
+        if (isCurrent()) message.error(t("option:notesSearch_taskActivityDismissError", "Failed to dismiss task activity"))
       } finally {
-        setDismissingTaskActivityId(null)
+        operation.release()
+        if (dismissingTaskActivityOperationRef.current === operation) {
+          dismissingTaskActivityOperationRef.current = null
+          if (mountedRef.current) setDismissingTaskActivityId(null)
+        }
       }
     },
-    [message, t]
+    [activeNote, captureDockOperation, message, t]
   )
 
   const saveAllDirtyNotes = async () => {
-    const dirtyNotes = notes.filter((note) => note.isDirty)
-    for (const note of dirtyNotes) {
-      const ok = await saveNote(note)
-      if (!ok) return false
-    }
-    return true
+    const original = useNotesDockStore.getState().notes
+    const dirtyNotes = original.filter((note) => note.isDirty)
+    if (dirtyNotes.length === 0) return true
+    const operation = captureDockOperation(undefined, false, dirtyNotes[0].requestScope)
+    if (!operation) return false
+    const acceptedRows = new Map(original.map((note) => [note.localId, note]))
+    try {
+      await operation.ready
+      for (const note of dirtyNotes) {
+        if (!operation.isCurrent()) return false
+        const accepted = await saveNote(note)
+        if (!accepted || !operation.isCurrent()) return false
+        acceptedRows.set(note.localId, accepted)
+      }
+      const live = useNotesDockStore.getState().notes
+      return operation.isCurrent() && live.length === original.length &&
+        live.every((note) => !note.isDirty && acceptedRows.get(note.localId) === note)
+    } catch { return false }
+    finally { operation.release() }
   }
 
   const handleNewNote = () => {
@@ -647,9 +860,16 @@ export const NotesDockPanel: React.FC = () => {
     }
 
     setPendingCloseNoteId(localId)
+    closeIntentRef.current += 1
   }
 
   const handleConfirmClose = async (choice: CloseChoice) => {
+    if (choice === "cancel") {
+      closeIntentRef.current += 1
+      setPendingCloseNoteId(null)
+      return
+    }
+    const intent = closeIntentRef.current
     if (!pendingCloseNoteId) return
     const note = notes.find((item) => item.localId === pendingCloseNoteId)
     if (!note) {
@@ -658,18 +878,20 @@ export const NotesDockPanel: React.FC = () => {
     }
 
     if (choice === "save") {
-      const ok = await saveNote(note)
-      if (ok) {
+      const accepted = await saveNote(note)
+      if (accepted && intent === closeIntentRef.current &&
+          useNotesDockStore.getState().notes.find((item) => item.localId === note.localId) === accepted) {
         removeNote(note.localId)
       }
     }
 
     if (choice === "discard") {
+      closeIntentRef.current += 1
       discardNoteChanges(note.localId)
       removeNote(note.localId)
     }
 
-    setPendingCloseNoteId(null)
+    if (choice === "discard" || intent === closeIntentRef.current) setPendingCloseNoteId(null)
   }
 
   const startDrag = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -885,13 +1107,13 @@ export const NotesDockPanel: React.FC = () => {
                   />
                 ) : (
                   <div className="space-y-2">
-                    {notesList.map((note) => {
+                    {notesList.map(({ note, operation }) => {
                       const isOpenNote = note.id != null && openNoteIds.has(note.id)
                       return (
                         <button
                           key={note.id}
                           type="button"
-                          onClick={() => handleOpenNote(note.id)}
+                          onClick={() => handleOpenNote(note.id, operation)}
                           className={classNames(
                             "flex w-full items-start gap-2 rounded-lg border border-border bg-surface px-2 py-2 text-left",
                             "transition hover:border-primary/50 hover:bg-primary/5",
@@ -931,7 +1153,7 @@ export const NotesDockPanel: React.FC = () => {
               <div className="border-t border-border px-3 py-2">
                 <button
                   type="button"
-                  onClick={() => navigate("/notes")}
+                  onClick={() => navigate(activeNotePagePath)}
                   className="text-xs text-primary hover:text-primaryStrong"
                 >
                   {t("option:notesDock.openNotes", "Open Notes page")}
@@ -1025,7 +1247,7 @@ export const NotesDockPanel: React.FC = () => {
               testId="notes-dock-task-activity-notice"
               compact
               dismissingEventId={dismissingTaskActivityId}
-              onInspect={() => navigate("/notes")}
+              onInspect={() => navigate(activeNotePagePath)}
               onDismiss={(eventId) => void dismissTaskActivity(eventId)}
             />
             {hasIncompleteTaskReconciliation && (

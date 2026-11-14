@@ -37,7 +37,7 @@ Docs/superpowers/plans/2026-06-23-audio-core-review-hardening.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan: Docs/superpowers/plans/2026-06-23-audio-core-review-hardening.md
 
 Verification results:
@@ -58,7 +58,16 @@ PR review follow-up:
 - Preserved parent cancellation by re-raising asyncio.CancelledError in producer/consumer paths before broad noncritical handlers.
 - Added regression tests for parent cancellation during TTS stream cleanup and failed completion-sentinel enqueue cancelling the consumer instead of hanging.
 - Focused audio pytest after follow-up: 8 passed in 3.62s.
-<!-- SECTION:NOTES:END -->
+
+PR review follow-up 2:
+- Verified the completed-consumer observation gap is still present in the producer-done branch of streaming_service.py.
+- Applying the minimal fix to observe consumer_task when it is already in the done set.
+Follow-up verification:
+- py_compile passed for streaming_service.py and test_audio_streaming_service_core.py.
+- Focused audio pytest passed: 9 passed in 1.95s.
+- git diff --check passed.
+- Bandit touched audio scope completed with 0 results and 0 errors (/tmp/bandit_audio_core_2446_observe_consumer.json).
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -75,16 +84,3 @@ Validated and fixed all reviewed audio-core findings: disabled WebSocket query-t
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR review follow-up 2:
-- Verified the completed-consumer observation gap is still present in the producer-done branch of streaming_service.py.
-- Applying the minimal fix to observe consumer_task when it is already in the done set.
-Follow-up verification:
-- py_compile passed for streaming_service.py and test_audio_streaming_service_core.py.
-- Focused audio pytest passed: 9 passed in 1.95s.
-- git diff --check passed.
-- Bandit touched audio scope completed with 0 results and 0 errors (/tmp/bandit_audio_core_2446_observe_consumer.json).
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

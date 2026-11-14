@@ -1,9 +1,12 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
+import { ChatAttachmentImage } from "./ChatAttachmentImage"
 import { useTTS } from "@/hooks/useTTS"
 import { useStorage } from "@plasmohq/storage/hook"
 import React from "react"
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 import { useTranslation } from "react-i18next"
 import { EditMessageForm } from "./EditMessageForm"
-import { Image, Tooltip } from "antd"
+import { Popover, Tooltip } from "antd"
 import {
   CheckIcon,
   CopyIcon,
@@ -11,7 +14,8 @@ import {
   PlayIcon,
   Square,
   CornerUpLeft,
-  Trash2
+  Trash2,
+  MoreHorizontal
 } from "lucide-react"
 import { HumanMessage } from "./HumanMessge"
 import { ChatDocuments } from "@/models/ChatTypes"
@@ -26,6 +30,7 @@ import type { MessageMetadataExtra } from "@/store/option/types"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import { CHAT_MESSAGE_OPACITY_ALPHA } from "@/services/settings/chat-opacity-css-vars"
+import { USER_TURN_TINT_STYLE, userBubbleWidthClass } from "./turn-presentation"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
@@ -61,6 +66,7 @@ const formatMessageTypeFallback = (messageType?: string): string => {
 }
 
 type Props = {
+  messageView?: ChatMessageView
   message: string
   message_type?: string
   hideCopy?: boolean
@@ -73,7 +79,12 @@ type Props = {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate: () => void
-  onEditFormSubmit: (value: string, isSend: boolean) => void
+  onEditFormSubmit: (
+    value: string,
+    isSend: boolean,
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
+  ) => unknown
   isProcessing: boolean
   webSearch?: unknown
   isSearchingInternet?: boolean
@@ -98,6 +109,10 @@ type Props = {
 }
 
 export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
+  const actionButtonClass = props.messageView
+    ? "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors duration-200"
+    : ACTION_BUTTON_CLASS
+  const isAlignedView = props.messageView === "transcript" || props.messageView === "research"
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [userTextColor] = useStorage("chatUserTextColor", "default")
   const [userTextFont] = useStorage("chatUserTextFont", "default")
@@ -112,14 +127,36 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const { cancel, isSpeaking, speak } = useTTS()
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
+  const bubbleShapeClass = isAlignedView
+    ? "rounded-xl border border-border px-4 py-3 w-full"
+    : "shadow-sm rounded-3xl border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg"
+  // A read-only Conversation bubble reads as the user's side of the chat
+  // (userBubbleWidthClass); the edit form keeps the full width.
+  const readBubbleShapeClass = isAlignedView
+    ? bubbleShapeClass
+    : `shadow-sm rounded-3xl border ${userBubbleWidthClass(isProMode)} px-4 py-3 rounded-br-lg`
   const setReplyTarget = useStoreMessageOption((state) => state.setReplyTarget)
-  const actionRowVisibility = isProMode
-    ? "flex"
-    : "hidden group-hover:flex group-focus-within:flex"
-  const overflowChipVisibility = isProMode
-    ? "hidden"
-    : "inline-flex group-hover:hidden"
+  const [actionsOpen, setActionsOpen] = React.useState(false)
+  const actionTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const actionMenuRef = React.useRef<HTMLDivElement>(null)
+  const actionMenuOpenRef = React.useRef(actionsOpen)
+  actionMenuOpenRef.current = actionsOpen
+  const actionMenuId = React.useId()
+  const changeActionMenu = (open: boolean) => {
+    const restoreFocus = !open && actionMenuRef.current?.contains(document.activeElement)
+    setActionsOpen(open)
+    if (restoreFocus) actionTriggerRef.current?.focus()
+  }
+  React.useEffect(() => {
+    const menu = actionMenuRef.current
+    if (!actionsOpen || !menu) return
+    scheduleFocusFirstVisibleElement("button:not(:disabled)", menu, () =>
+      actionMenuOpenRef.current && actionMenuRef.current === menu && menu.isConnected)
+  }, [actionsOpen])
   const showInlineActions = !props.isProcessing && !editMode
+  React.useEffect(() => {
+    if (!showInlineActions) setActionsOpen(false)
+  }, [showInlineActions])
   const replyId = props.messageId ?? props.serverMessageId ?? null
   const canReply =
     isProMode && Boolean(replyId) && !props.message_type?.startsWith("compare")
@@ -197,18 +234,110 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const messageBubbleStyle = isSystemMessage
     ? undefined
     : ({
-        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
+        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`,
+        ...USER_TURN_TINT_STYLE
       } as React.CSSProperties)
+
+  const actionControls = (
+    <div className="flex flex-wrap items-center gap-1">
+      {props.isTTSEnabled && (
+        <Tooltip title={t("tts")}>
+          <IconButton
+            ariaLabel={t("tts") as string}
+            onClick={() => {
+              if (isSpeaking) {
+                cancel()
+              } else {
+                speak({
+                  utterance: props.message,
+                  saveClip: false
+                })
+              }
+            }}
+            className={`${actionButtonClass} h-11 w-11`}>
+            {!isSpeaking ? (
+              <PlayIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
+            ) : (
+              <Square className="w-3 h-3 text-danger group-hover:text-danger" />
+            )}
+          </IconButton>
+        </Tooltip>
+      )}
+      {!props.hideCopy && (
+        <Tooltip title={t("copyToClipboard")}>
+          <IconButton
+            ariaLabel={t("copyToClipboard") as string}
+            onClick={() => {
+              navigator.clipboard.writeText(props.message)
+              setIsBtnPressed(true)
+              if (timerRef.current) {
+                clearTimeout(timerRef.current)
+              }
+              timerRef.current = setTimeout(() => {
+                setIsBtnPressed(false)
+              }, 2000)
+            }}
+            className={`${actionButtonClass} h-11 w-11`}>
+            {!isBtnPressed ? (
+              <CopyIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
+            ) : (
+              <CheckIcon className="w-3 h-3 text-success group-hover:text-success" />
+            )}
+          </IconButton>
+        </Tooltip>
+      )}
+      {canReply && (
+        <Tooltip title={t("reply", "Reply")}>
+          <IconButton
+            ariaLabel={t("reply", "Reply") as string}
+            onClick={() => {
+              if (!replyId) return
+              setReplyTarget({
+                id: replyId,
+                preview: buildReplyPreview(props.message),
+                name: props.name,
+                isBot: props.isBot
+              })
+            }}
+            className={`${actionButtonClass} h-11 w-11`}>
+            <CornerUpLeft className="w-3 h-3 text-text-subtle group-hover:text-text" />
+          </IconButton>
+        </Tooltip>
+      )}
+
+      {!props.hideEditAndRegenerate && (
+        <Tooltip title={t("edit")}>
+          <IconButton
+            onClick={() => setEditMode(true)}
+            ariaLabel={t("edit") as string}
+            className={`${actionButtonClass} h-11 w-11`}>
+            <Pen className="w-3 h-3 text-text-subtle group-hover:text-text" />
+          </IconButton>
+        </Tooltip>
+      )}
+      {props.onDelete && (
+        <Tooltip title={t("delete", "Delete")}>
+          <IconButton
+            onClick={props.onDelete}
+            ariaLabel={t("delete", "Delete") as string}
+            className={`${actionButtonClass} h-11 w-11`}>
+            <Trash2 className="w-3 h-3 text-danger group-hover:text-danger" />
+          </IconButton>
+        </Tooltip>
+      )}
+    </div>
+  )
 
   return (
     <div
       data-testid="chat-message"
+      data-message-view={props.messageView}
       data-role={isSystemMessage ? "system" : "user"}
       data-index={props.currentMessageIndex}
       data-message-id={props.messageId}
       data-server-message-id={props.serverMessageId}
-      className={`group gap-2 relative flex w-full max-w-5xl flex-col items-end justify-center pb-2 md:px-4 text-text ${checkWideMode ? "max-w-none" : ""}`}>
-      <div className="flex w-full flex-wrap items-center justify-end gap-2">
+      className={`group gap-2 relative flex w-full max-w-5xl flex-col ${isAlignedView ? "items-start" : "items-end"} justify-center ${props.messageView ? "pb-4" : "pb-2"} md:px-4 text-text ${checkWideMode ? "max-w-none" : props.messageView === "transcript" ? "max-w-[72ch]" : ""}`}>
+      <div className={`flex w-full flex-wrap items-center ${isAlignedView ? "justify-start" : "justify-end"} gap-2`}>
         <div className="flex flex-wrap items-center gap-2">
           {isSystemMessage ? (
             <Badge
@@ -286,7 +415,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
         <div
           dir="auto"
           data-is-not-editable={!editMode}
-          className={`message-bubble ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
+          className={`message-bubble ${bubbleToneClass} ${readBubbleShapeClass} prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
           }`}
           style={messageBubbleStyle}>
@@ -303,12 +432,13 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
       {editMode && (
         <div
           dir="auto"
-          className={`message-bubble w-full min-w-0 ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
+          className={`message-bubble w-full min-w-0 ${bubbleToneClass} ${bubbleShapeClass} prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
           }`}
           style={messageBubbleStyle}>
           <div className="w-full min-w-0">
             <EditMessageForm
+              key={props.serverMessageId ?? props.messageId ?? `${props.role ?? props.isBot}:${props.currentMessageIndex}`}
               value={props.message}
               onSumbit={props.onEditFormSubmit}
               onClose={() => setEditMode(false)}
@@ -324,11 +454,9 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
             {props.images
               .filter((image) => image.length > 0)
               .map((image, index) => (
-                <Image
+                <ChatAttachmentImage
                   key={index}
                   src={image}
-                  alt="Uploaded Image"
-                  width={180}
                   className="rounded-lg relative"
                 />
               ))}
@@ -336,104 +464,37 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
         )}
 
       {showInlineActions && (
-        <div className="flex w-full justify-end">
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label={t("moreActions", "More actions") as string}
-              title={t("moreActions", "More actions") as string}
-              className={`${overflowChipVisibility} rounded-full border border-border bg-surface2 px-2 py-0.5 text-xs text-text-muted transition-colors hover:text-text`}>
-              •••
-            </button>
-            <div
-              className={`${actionRowVisibility} flex-wrap items-center gap-1`}>
-              {props.isTTSEnabled && (
-                <Tooltip title={t("tts")}>
-                  <IconButton
-                    ariaLabel={t("tts") as string}
-                    onClick={() => {
-                      if (isSpeaking) {
-                        cancel()
-                      } else {
-                        speak({
-                          utterance: props.message,
-                          saveClip: false
-                        })
-                      }
-                    }}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    {!isSpeaking ? (
-                      <PlayIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                    ) : (
-                      <Square className="w-3 h-3 text-danger group-hover:text-danger" />
-                    )}
-                  </IconButton>
-                </Tooltip>
-              )}
-              {!props.hideCopy && (
-                <Tooltip title={t("copyToClipboard")}>
-                  <IconButton
-                    ariaLabel={t("copyToClipboard") as string}
-                    onClick={() => {
-                      navigator.clipboard.writeText(props.message)
-                      setIsBtnPressed(true)
-                      if (timerRef.current) {
-                        clearTimeout(timerRef.current)
-                      }
-                      timerRef.current = setTimeout(() => {
-                        setIsBtnPressed(false)
-                      }, 2000)
-                    }}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    {!isBtnPressed ? (
-                      <CopyIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                    ) : (
-                      <CheckIcon className="w-3 h-3 text-success group-hover:text-success" />
-                    )}
-                  </IconButton>
-                </Tooltip>
-              )}
-              {canReply && (
-                <Tooltip title={t("reply", "Reply")}>
-                  <IconButton
-                    ariaLabel={t("reply", "Reply") as string}
-                    onClick={() => {
-                      if (!replyId) return
-                      setReplyTarget({
-                        id: replyId,
-                        preview: buildReplyPreview(props.message),
-                        name: props.name,
-                        isBot: props.isBot
-                      })
-                    }}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    <CornerUpLeft className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                  </IconButton>
-                </Tooltip>
-              )}
-
-              {!props.hideEditAndRegenerate && (
-                <Tooltip title={t("edit")}>
-                  <IconButton
-                    onClick={() => setEditMode(true)}
-                    ariaLabel={t("edit") as string}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    <Pen className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                  </IconButton>
-                </Tooltip>
-              )}
-              {props.onDelete && (
-                <Tooltip title={t("delete", "Delete")}>
-                  <IconButton
-                    onClick={props.onDelete}
-                    ariaLabel={t("delete", "Delete") as string}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    <Trash2 className="w-3 h-3 text-danger group-hover:text-danger" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </div>
-          </div>
+        <div className={`flex w-full ${isAlignedView ? "justify-start" : "justify-end"}`}>
+          {isProMode || props.messageView === "research" ? actionControls : (
+            <Popover
+              open={actionsOpen}
+              onOpenChange={changeActionMenu}
+              trigger="click"
+              placement="bottomRight"
+              content={
+                <div
+                  id={actionMenuId}
+                  ref={actionMenuRef}
+                  onClick={() => changeActionMenu(false)}
+                  onKeyDown={event => {
+                    if (event.key !== "Escape") return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    changeActionMenu(false)
+                  }}>
+                  {actionControls}
+                </div>
+              }>
+              <IconButton
+                ref={actionTriggerRef}
+                ariaLabel={t("moreActions", "More actions") as string}
+                ariaExpanded={actionsOpen}
+                ariaControls={actionsOpen ? actionMenuId : undefined}
+                className={`${actionButtonClass} h-11 w-11`}>
+                <MoreHorizontal className="h-3 w-3" />
+              </IconButton>
+            </Popover>
+          )}
         </div>
       )}
 

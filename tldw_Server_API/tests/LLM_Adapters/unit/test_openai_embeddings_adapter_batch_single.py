@@ -1,6 +1,7 @@
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
+import httpx
 import pytest
 
 
@@ -110,6 +111,118 @@ def test_openai_embeddings_adapter_uses_single_helper_for_scalar(monkeypatch):
     adapter = OpenAIEmbeddingsAdapter()
     out = adapter.embed({"input": "hi", "model": "text-embedding-3-small", "app_config": {}})
     assert out.get("data", [])[0]["embedding"] == [0.5, 0.6]
+
+
+@pytest.mark.unit
+def test_resolved_openai_request_forces_pinned_native_transport_without_redirects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_OPENAI", raising=False)
+    monkeypatch.setenv("OPENAI_API_BASE_URL", "https://ambient-attacker.example/v1")
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_embeddings_adapter import (
+        OpenAIEmbeddingsAdapter,
+    )
+
+    calls: list[dict[str, object]] = []
+
+    class Response:
+        status_code = 200
+
+        def json(self) -> dict[str, object]:
+            return {"data": [{"index": 0, "embedding": [0.1, 0.2]}]}
+
+    def fetch(**kwargs: object) -> Response:
+        calls.append(kwargs)
+        return Response()
+
+    monkeypatch.setattr(http_client, "fetch", fetch)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.LLM_Calls.chat_calls.get_openai_embeddings_batch",
+        lambda *_args, **_kwargs: pytest.fail("resolved request used legacy transport"),
+    )
+
+    result = OpenAIEmbeddingsAdapter().embed(
+        {
+            "input": ["note text"],
+            "model": "text-embedding-3-small",
+            "api_key": "trusted-key",
+            "base_url": "https://pinned-openai.example/v1",
+            "credentials_resolved": True,
+            "_runtime_base_url_override": runtime_base_url_override_provenance(),
+        }
+    )
+
+    assert result["data"]
+    assert calls[0]["url"] == "https://pinned-openai.example/v1/embeddings"
+    assert calls[0]["allow_redirects"] is False
+    assert "ambient-attacker" not in repr(calls)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status_code", "location"),
+    [
+        (307, "https://cross-origin.example/receive"),
+        (308, "https://cross-origin.example/receive"),
+        (307, "https://pinned-openai.example/v1/redirected"),
+    ],
+)
+def test_resolved_openai_request_rejects_redirect_without_replaying_note_text(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+    location: str,
+) -> None:
+    monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_OPENAI", "1")
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.AuthNZ.byok_config import (
+        runtime_base_url_override_provenance,
+    )
+    from tldw_Server_API.app.core.Chat.Chat_Deps import ChatProviderError
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_embeddings_adapter import (
+        OpenAIEmbeddingsAdapter,
+    )
+
+    seen: list[tuple[str, bytes]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.host, request.content))
+        if len(seen) == 1:
+            return httpx.Response(status_code, headers={"location": location}, json={})
+        return httpx.Response(
+            200,
+            json={"data": [{"index": 0, "embedding": [0.1, 0.2]}]},
+        )
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    )
+    monkeypatch.setattr(http_client, "_get_httpx_client", lambda **_kwargs: client)
+    monkeypatch.setattr(http_client, "_validate_egress_or_raise", lambda *_args, **_kwargs: None)
+
+    try:
+        with pytest.raises(ChatProviderError):
+            OpenAIEmbeddingsAdapter().embed(
+                {
+                    "input": ["note text must stay pinned"],
+                    "model": "text-embedding-3-small",
+                    "api_key": "trusted-key",
+                    "base_url": "https://pinned-openai.example/v1",
+                    "credentials_resolved": True,
+                    "_runtime_base_url_override": runtime_base_url_override_provenance(),
+                }
+            )
+    finally:
+        client.close()
+
+    assert [host for host, _body in seen] == ["pinned-openai.example"]
+    assert b"note text must stay pinned" in seen[0][1]
 
 
 @pytest.mark.unit
@@ -277,9 +390,6 @@ def test_concurrent_openai_legacy_embedding_routes_keep_endpoint_key_model_and_i
     monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_OPENAI", raising=False)
     monkeypatch.setenv("OPENAI_API_BASE_URL", "https://ambient-attacker.example/v1")
 
-    from tldw_Server_API.app.core.AuthNZ.byok_config import (
-        runtime_base_url_override_provenance,
-    )
     from tldw_Server_API.app.core.LLM_Calls.providers.openai_embeddings_adapter import (
         OpenAIEmbeddingsAdapter,
     )
@@ -306,20 +416,16 @@ def test_concurrent_openai_legacy_embedding_routes_keep_endpoint_key_model_and_i
         _legacy_single,
     )
     adapter = OpenAIEmbeddingsAdapter()
-    provenance = runtime_base_url_override_provenance()
 
     def _invoke(label: str) -> dict[str, object]:
         return adapter.embed(
             {
                 "input": label,
                 "model": f"model-{label}",
-                "api_key": f"key-{label}",
-                "base_url": f"https://openai-{label}.example/v1",
-                "credentials_resolved": True,
-                "_runtime_base_url_override": provenance,
                 "app_config": {
                     "openai_api": {
-                        "api_base_url": f"https://stale-{label}.example/v1",
+                        "api_base_url": f"https://openai-{label}.example/v1",
+                        "api_key": f"key-{label}",
                         "organization": f"org-{label}",
                     }
                 },
@@ -351,7 +457,6 @@ def test_concurrent_openai_legacy_embedding_routes_keep_endpoint_key_model_and_i
         ),
     }
     assert "ambient-attacker" not in repr(calls)
-    assert "stale-" not in repr(calls)
 
 
 @pytest.mark.unit
@@ -362,9 +467,6 @@ def test_concurrent_openai_legacy_auth_failures_are_status_preserving_and_detach
     """Legacy transport failures must reach OAuth policy without raw exception chains."""
     monkeypatch.delenv("LLM_EMBEDDINGS_NATIVE_HTTP_OPENAI", raising=False)
 
-    from tldw_Server_API.app.core.AuthNZ.byok_config import (
-        runtime_base_url_override_provenance,
-    )
     from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAuthenticationError
     from tldw_Server_API.app.core.LLM_Calls.providers.openai_embeddings_adapter import (
         OpenAIEmbeddingsAdapter,
@@ -396,7 +498,6 @@ def test_concurrent_openai_legacy_auth_failures_are_status_preserving_and_detach
         "tldw_Server_API.app.core.LLM_Calls.chat_calls.get_openai_embeddings",
         _legacy_single,
     )
-    provenance = runtime_base_url_override_provenance()
     adapter = OpenAIEmbeddingsAdapter()
 
     def _invoke(label: str) -> ChatAuthenticationError:
@@ -405,10 +506,12 @@ def test_concurrent_openai_legacy_auth_failures_are_status_preserving_and_detach
                 {
                     "input": label,
                     "model": f"model-{label}",
-                    "api_key": f"key-{label}",
-                    "base_url": f"https://openai-{label}.example/v1",
-                    "credentials_resolved": True,
-                    "_runtime_base_url_override": provenance,
+                    "app_config": {
+                        "openai_api": {
+                            "api_base_url": f"https://openai-{label}.example/v1",
+                            "api_key": f"key-{label}",
+                        }
+                    },
                 }
             )
         except ChatAuthenticationError as error:

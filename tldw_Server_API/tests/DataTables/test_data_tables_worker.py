@@ -9,7 +9,27 @@ from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDa
 from tldw_Server_API.app.core.exceptions import DataTablesJobError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")]
+
+
+
+@pytest.fixture(autouse=True)
+def _isolate_worker_database_paths():
+    """Each test binds its own temporary paths, never a previous cached table."""
+    for db in jobs_worker._MEDIA_DB_CACHE.values():
+        db.close_connection()
+    jobs_worker._MEDIA_DB_CACHE.clear()
+    yield
+    for db in jobs_worker._MEDIA_DB_CACHE.values():
+        db.close_connection()
+    jobs_worker._MEDIA_DB_CACHE.clear()
+
+
+def _acquire_generation(jm, job):
+    """Exercise the real acquired-attempt contract while stubbing only the LLM."""
+    jm.create_job(domain="data_tables", queue="default", job_type=job["job_type"],
+                  owner_user_id=job["owner_user_id"], payload=job["payload"])
+    return jm.acquire_next_job(domain="data_tables", queue="default", worker_id="worker-test", lease_seconds=60)
 
 
 class _StubAdapter:
@@ -124,7 +144,7 @@ async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
-    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {})
 
     job = {
@@ -146,8 +166,13 @@ async def test_data_tables_worker_generates_rows(monkeypatch, tmp_path):
         },
     }
 
-    jm = JobManager()
+    jm = JobManager(tmp_path / "jobs.db")
+    job = _acquire_generation(jm, job)
     result = await jobs_worker._handle_job(job, jm)
+    assert jm.complete_job(job["id"], result=result, expected_uuid=job["uuid"],
+                           worker_id=job["worker_id"], lease_id=job["lease_id"],
+                           completion_token=job["lease_id"], enforce=True)  # nosec B101 -- actual completion.
+    assert jobs_worker.publish_completed_generation(jm, job["id"], expected_uuid=job["uuid"], db=db) == "ready"  # nosec B101 -- actual saved result.
     assert result["row_count"] == 2
 
     refreshed = db.get_data_table(table_id, include_deleted=True)
@@ -397,6 +422,8 @@ def test_resolve_worker_user_id_rejects_job_owner_mismatch_without_payload():
 
 class _TimeoutAdapter:
     def chat(self, _request, *, timeout=None):
+        import time
+        time.sleep(0.03)
         return {"choices": [{"message": {"content": "{}"}}]}
 
 
@@ -418,15 +445,11 @@ async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path
     )
     table_id = int(table.get("id"))
 
-    async def _raise_timeout(_future, timeout=None):
-        raise asyncio.TimeoutError
-
-    monkeypatch.setattr(jobs_worker.asyncio, "wait_for", _raise_timeout)
     monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: _TimeoutAdapter())
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
-    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {})
     monkeypatch.setattr(jobs_worker, "_LLM_TIMEOUT_SECONDS", 0.01)
 
@@ -449,7 +472,8 @@ async def test_retryable_llm_timeout_keeps_table_retriable(monkeypatch, tmp_path
         },
     }
 
-    jm = JobManager()
+    jm = JobManager(tmp_path / "jobs.db")
+    job = _acquire_generation(jm, job)
     with pytest.raises(DataTablesJobError) as exc:
         await jobs_worker._handle_job(job, jm)
 
@@ -502,7 +526,7 @@ async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(jobs_worker, "_resolve_model", lambda *_args, **_kwargs: "test-model")
     monkeypatch.setattr(jobs_worker, "provider_requires_api_key", lambda _p: False)
     monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_k: ("", {}))
-    monkeypatch.setattr(jobs_worker, "DEFAULT_LLM_PROVIDER", "openai")
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "openai")
     monkeypatch.setattr(jobs_worker, "load_and_log_configs", lambda: {})
     monkeypatch.setattr(jobs_worker, "_LLM_TIMEOUT_SECONDS", 12)
 
@@ -524,8 +548,130 @@ async def test_llm_request_includes_adapter_timeout(monkeypatch, tmp_path):
         },
     }
 
-    result = await jobs_worker._handle_job(job, JobManager())
+    jm = JobManager(tmp_path / "jobs.db")
+    result = await jobs_worker._handle_job(_acquire_generation(jm, job), jm)
 
     assert result["row_count"] == 1
     assert "timeout" not in seen_request
     assert seen_timeout["value"] == 12
+
+
+@pytest.mark.parametrize(
+    ("provider", "section"),
+    [
+        ("llamacpp", "llama_api"),
+        ("llama.cpp", "llama_api"),
+        ("tabbyapi", "tabby_api"),
+        ("local-llm", "local_llm"),
+        ("custom-openai-api-99", "custom_openai_api_99"),
+    ],
+)
+def test_default_model_uses_registered_configuration_section(provider, section):
+    config = {section: {"model": "configured-model"}}
+    assert jobs_worker._resolve_model(provider, None, config) == "configured-model"  # nosec B101 -- default model regression.
+
+
+@pytest.mark.parametrize("provider", ["llamacpp", "openai"])
+def test_explicit_model_precedes_default_configuration(provider):
+    assert jobs_worker._resolve_model(provider, "selected-model", {}) == "selected-model"  # nosec B101 -- explicit model precedence.
+
+
+@pytest.mark.parametrize("owner", ["test_client", "0", "-1", "01", "+1", "1.0", None])
+def test_owned_document_read_refuses_invalid_owner_before_lookup(monkeypatch, owner):
+    calls = []
+    monkeypatch.setattr(jobs_worker, "_extract_media_text", lambda *args: calls.append(args))
+    with pytest.raises(DataTablesJobError, match="invalid_media_owner") as caught:
+        jobs_worker._extract_owned_media_text(object(), 1, owner)
+    assert (
+        calls == [] and caught.value.retryable is False
+    )  # nosec B101 -- invalid identities never reach source storage.
+
+
+@pytest.mark.parametrize("fails", [False, True])
+def test_owned_document_read_restores_context_and_drops_ambient_admin(monkeypatch, fails):
+    from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
+
+    def extract(_db, media_id):
+        scope = get_scope()
+        assert (
+            scope.user_id == 401 and scope.is_admin is False and scope.org_ids == scope.team_ids == [] and media_id == 7
+        )  # nosec B101 -- only the validated personal owner is delegated.
+        if fails:
+            raise DataTablesJobError("media_not_found:7", retryable=False)
+        return "Selene"
+
+    monkeypatch.setattr(jobs_worker, "_extract_media_text", extract)
+    with scoped_context(user_id=999, is_admin=True, org_ids=[3], team_ids=[4]) as parent:
+        if fails:
+            with pytest.raises(DataTablesJobError, match="media_not_found:7"):
+                jobs_worker._extract_owned_media_text(object(), 7, "401")
+        else:
+            assert (
+                jobs_worker._extract_owned_media_text(object(), 7, "401") == "Selene"
+            )  # nosec B101 -- successful owner-scoped content retained.
+        assert get_scope() is parent  # nosec B101 -- success/failure restores the exact caller context.
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", ["timeout", "cancel"])
+async def test_provider_thread_exits_before_job_can_finish_or_retry(monkeypatch, tmp_path, interruption):
+    import threading
+
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+    from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
+
+    media_path = tmp_path / "owned-media.db"
+    monkeypatch.setattr(jobs_worker, "get_user_media_db_path", lambda _user: str(media_path))
+    monkeypatch.setattr(jobs_worker, "get_user_chacha_db_path", lambda _user: str(tmp_path / "owned-chacha.db"))
+    monkeypatch.setattr(jobs_worker, "get_default_provider", lambda: "llama.cpp")
+    monkeypatch.setattr(jobs_worker, "resolve_provider_api_key", lambda *_a, **_kw: (None, {}))
+    monkeypatch.setattr(jobs_worker, "_LLM_TIMEOUT_SECONDS", 0.03 if interruption == "timeout" else 2)
+    entered, release, exited = threading.Event(), threading.Event(), threading.Event()
+    owners = []
+
+    class HeldAdapter:
+        def chat(self, request, *, timeout=None):
+            owners.append(current_llm_user_id())
+            entered.set()
+            try:
+                if not release.wait(2):
+                    raise RuntimeError("test provider release was not delivered")
+                return {"choices": [{"message": {"content": '{"columns": [{"name": "Term"}], "rows": [["alpha"]]}'}}]}
+            finally:
+                exited.set()
+
+    monkeypatch.setattr(jobs_worker, "_get_adapter", lambda _provider: HeldAdapter())
+    db = MediaDatabase(db_path=str(media_path), client_id="1")
+    jm = JobManager(tmp_path / "owned-jobs.db")
+    table = db.create_data_table(name="Owned inference", prompt="Source facts", status="queued")
+    job = _acquire_generation(jm, {
+        "job_type": "data_table_generate", "owner_user_id": "1",
+        "payload": {
+            "table_id": table["id"], "table_uuid": table["uuid"], "prompt": "Source facts", "model": "test-model",
+            "sources": [{"source_type": "rag_query", "source_id": "facts",
+                         "snapshot": {"chunks": [{"chunk_text": "alpha"}]}}],
+        },
+    })
+    with llm_call_root(1):
+        work = asyncio.create_task(jobs_worker._handle_job(job, jm))
+    try:
+        async with asyncio.timeout(1):
+            while not entered.is_set():
+                await asyncio.sleep(0)
+        if interruption == "cancel":
+            work.cancel()
+        await asyncio.sleep(0.06)
+        assert not work.done() and not exited.is_set()  # nosec B101 - no retry/resource release while provider owns work.
+    finally:
+        release.set()
+        try:
+            await work
+        except (DataTablesJobError, asyncio.CancelledError):
+            pass
+        db.close_connection()
+    assert exited.is_set() and owners == [1]  # nosec B101 - actual thread exit and SDK-style user attribution.
+    if interruption == "timeout":
+        with pytest.raises(DataTablesJobError, match="llm_timeout") as error:
+            work.result()
+        assert error.value.retryable is True  # nosec B101 - retain the existing retry policy after provider drain.
+    else:
+        assert work.cancelled()  # nosec B101 - caller cancellation remains cancellation after draining.

@@ -32,7 +32,7 @@ Migrate the Layouts ConnectionStatus local StatusDot product-state indicator to 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-09: Added a focused red test for Layouts/ConnectionStatus requiring the dot indicator to render through data-ds-component="Badge" across connected, checking, unconfigured, and offline states while preserving custom click handling and default /settings/health navigation. Initial run failed because the existing indicator was a raw span with no connection-status-dot-badge element.
 
 2026-05-09: Migrated StatusDot to return the shared Badge primitive. ConnectionStatus now maps core connection status through getDesignSystemState using ready, retrying, setup_required, and unavailable before selecting Badge variants. Removed the ConnectionStatus local-status-badge baseline exception.
@@ -40,7 +40,7 @@ Migrate the Layouts ConnectionStatus local StatusDot product-state indicator to 
 Verification: bunx vitest run src/components/Layouts/__tests__/ConnectionStatus.design-system.test.tsx --reporter=dot -> 6 passed. bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot -> 46 passed. bun run verify:design-system-state -> passed; baseline exceptions 509 and local-status-badge 3. git diff --check -> passed. bunx tsc --noEmit --pretty false | rg touched files -> no touched-file diagnostics (rg exit 1/no matches).
 
 Bandit skip: touched runtime/test files are TypeScript/TSX plus JSON Backlog metadata; no Python security surface changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

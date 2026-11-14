@@ -30,7 +30,7 @@ Address validated review findings in tldw_Server_API/app/core/Notes_Graph and re
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: add failing regression coverage, harden service and endpoint limit handling, add direct tag/source seed DB lookups, run focused pytest and Bandit verification.
 
 Implemented request cap clamping before traversal, gated elevated allow_heavy limits behind notes.graph.admin/admin/*, validated graph cursor payloads, preserved neighbor offsets across cursor pages, added direct tag/source graph seed queries, ordered note nodes deterministically, and normalized timezone-aware time filters to UTC before comparison.
@@ -40,7 +40,7 @@ Verification: py_compile on touched Python files passed. TEST_MODE=1 MINIMAL_TES
 Worktree PR prep verification on branch codex/notes-graph-review-hardening: py_compile passed, focused Notes Graph unit/DB tests passed (62 passed), endpoint allow_heavy permission regression passed (1 passed), Bandit JSON output had 0 results, and git diff --check passed.
 
 PR review follow-up: rebased codex/notes-graph-review-hardening onto origin/dev, dropped the unrelated local-only Claims_Extraction design commit from the branch, addressed Qodo comments for _to_utc_naive typing, AuthNZ-compatible heavy graph admin detection, and deterministic tag/source edge ordering. Verification after follow-up: py_compile passed, focused Notes Graph unit/DB tests passed (63 passed), endpoint heavy-permission tests passed (8 passed), Bandit had 0 findings, and git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -8,7 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.study_packs import StudyPackCreateJobRequest
+from tldw_Server_API.app.core.StudyPacks.study_pack_schemas import StudyPackCreateJobRequest
 
 STUDY_PACKS_DOMAIN = "study_packs"
 STUDY_PACKS_JOB_TYPE = "study_pack_generate"

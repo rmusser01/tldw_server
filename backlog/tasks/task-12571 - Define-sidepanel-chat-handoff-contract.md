@@ -28,9 +28,9 @@ Address /chat UX rebaseline F8 by making the browser-extension sidepanel full-sc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: focused Vitest failed on missing SidepanelHeaderSimple accessible handoff label/description and missing ControlRow accessible description. GREEN: bunx vitest run src/components/Sidepanel/Chat/__tests__/SidepanelHeaderSimple.fullscreen-route.test.tsx src/components/Sidepanel/Chat/__tests__/ControlRow.role-play-handoff.test.tsx --reporter=verbose passed 2 files / 6 tests. TypeScript: default bunx tsc --noEmit --pretty false OOMed before diagnostics; retry with NODE_OPTIONS=--max-old-space-size=8192 failed only on known unrelated CharacterListContent.design-system GalleryCardDensity baseline. git diff --check passed. Bandit skipped because touched code is frontend TS/TSX, locale JSON, docs, and Backlog markdown only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

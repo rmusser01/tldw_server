@@ -50,8 +50,9 @@ async def test_get_current_user_missing_credentials_returns_401(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_get_current_user_test_mode_single_user_respects_ip_allowlist(monkeypatch):
+async def test_get_current_user_single_user_respects_ip_allowlist(monkeypatch):
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ import User_DB_Handling
 
     fake_settings = SimpleNamespace(
         AUTH_MODE="single_user",
@@ -62,7 +63,7 @@ async def test_get_current_user_test_mode_single_user_respects_ip_allowlist(monk
     )
 
     monkeypatch.setattr(auth_deps, "get_settings", lambda: fake_settings)
-    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setattr(User_DB_Handling, "get_settings", lambda: fake_settings)
 
     fake_session = SimpleNamespace(is_token_blacklisted=lambda *_args, **_kwargs: False)
     fake_db_pool = SimpleNamespace(pool=None)
@@ -90,8 +91,6 @@ async def test_get_current_user_test_mode_single_user_respects_ip_allowlist(monk
         x_api_key="test-api-key",
     )
     assert user["id"] == fake_settings.SINGLE_USER_FIXED_ID
-
-    monkeypatch.delenv("TEST_MODE", raising=False)
 
 
 @pytest.mark.asyncio

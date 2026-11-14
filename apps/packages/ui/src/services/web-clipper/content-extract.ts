@@ -1,6 +1,61 @@
-import { defaultExtractContent } from "@/parser/default"
 import { getScreenshotFromCurrentTab } from "@/libs/get-screenshot"
 import { browser } from "wxt/browser"
+
+type DefaultExtractContent = (html: string) => string
+
+// The default parser drags cheerio + Readability + Turndown with it. In
+// extension contexts it is loaded on demand from a web-accessible chunk so
+// the every-page web-clipper content script (an IIFE build that inlines any
+// bundler-analyzable import) stays small.
+const PARSER_CHUNK_RESOURCE = "parser-main.js"
+const PARSER_GLOBAL = "__tldwParserDefaultExtractContent"
+
+let parserLoad: Promise<DefaultExtractContent> | null = null
+
+const extensionRuntime = (): { getURL?: (path: string) => string } | null => {
+  const scope = globalThis as Record<string, any> | undefined
+  if (!scope) return null
+  if (scope.browser?.runtime?.id && scope.browser.runtime.getURL) {
+    return scope.browser.runtime
+  }
+  if (scope.chrome?.runtime?.id && scope.chrome.runtime.getURL) {
+    return scope.chrome.runtime
+  }
+  return null
+}
+
+const loadDefaultExtractContent = async (): Promise<DefaultExtractContent> => {
+  const runtime = extensionRuntime()
+  if (runtime?.getURL) {
+    const chunkUrl = runtime.getURL(PARSER_CHUNK_RESOURCE)
+    await import(/* @vite-ignore */ chunkUrl)
+    const handle = (globalThis as Record<string, unknown>)[PARSER_GLOBAL]
+    if (typeof handle === "function") {
+      return handle as DefaultExtractContent
+    }
+  }
+  // Non-extension contexts (tests, web app): a variable specifier keeps IIFE
+  // content-script builds from inlining the parser while ESM/vitest runtimes
+  // still resolve the alias at runtime.
+  const specifier = "@/parser/default"
+  const mod = (await import(/* @vite-ignore */ specifier)) as {
+    defaultExtractContent?: DefaultExtractContent
+  }
+  if (typeof mod?.defaultExtractContent !== "function") {
+    throw new Error("Failed to load the default page parser.")
+  }
+  return mod.defaultExtractContent
+}
+
+const getDefaultExtractContent = (): Promise<DefaultExtractContent> => {
+  if (!parserLoad) {
+    parserLoad = loadDefaultExtractContent().catch((error) => {
+      parserLoad = null
+      throw error
+    })
+  }
+  return parserLoad
+}
 
 export type ClipCaptureType =
   | "bookmark"
@@ -64,13 +119,40 @@ export const isRestrictedClipperPage = (pageUrl: string): boolean => {
   return RESTRICTED_PAGE_PREFIXES.some((prefix) => normalized.startsWith(prefix))
 }
 
-export const extractClipPageTextFromDocument = (
-  doc: Document = document
-): Pick<ClipCaptureInput, "selectionText" | "articleText" | "fullPageText"> => {
+export const extractClipPageTextFromDocument = async (
+  doc: Document = document,
+  requestedType?: ClipCaptureType
+): Promise<Pick<ClipCaptureInput, "selectionText" | "articleText" | "fullPageText">> => {
   const selectionText = trimText(window.getSelection()?.toString())
+
+  // Tiered capture (WP-56/WP-57): when a selection clip is requested and a
+  // selection exists, it already wins the capture resolution tier order, so
+  // return it immediately — selection clips never pay for the full-page
+  // serialize, the heavy parser pass, or the forced innerText layout below.
+  if (requestedType === "selection" && selectionText) {
+    return { selectionText: selectionText || undefined }
+  }
+
+  // The tiered clip types (selection/article) compute the full-page text
+  // only as the final fallback, when the article tier came up empty. The
+  // other clip types keep the general flow's existing eager capture.
+  const tieredCapture =
+    requestedType === "selection" || requestedType === "article"
+
   const html = doc.documentElement?.outerHTML || ""
-  const articleText = trimText(defaultExtractContent(html))
-  const fullPageText = trimText(doc.body?.innerText || doc.body?.textContent)
+  let articleText = ""
+  try {
+    const defaultExtractContent = await getDefaultExtractContent()
+    articleText = trimText(defaultExtractContent(html))
+  } catch {
+    // Parser unavailable: the capture flow degrades to full-page text or a
+    // bookmark fallback, so never block the clip on this.
+  }
+
+  const fullPageText =
+    !tieredCapture || !articleText
+      ? trimText(doc.body?.innerText || doc.body?.textContent)
+      : ""
   return {
     selectionText: selectionText || undefined,
     articleText: articleText || undefined,

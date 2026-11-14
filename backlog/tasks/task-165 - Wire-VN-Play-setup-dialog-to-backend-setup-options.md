@@ -38,7 +38,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: focused Vitest passed (2 files, 21 tests); ESLint passed on touched frontend files; git diff --check passed; Playwright smoke passed after approved local dev-server bind; Bandit skipped because this slice touched only frontend TypeScript/TSX, e2e mock, docs, and Backlog task files with no Python backend code.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/1419
@@ -46,7 +46,7 @@ PR opened: https://github.com/rmusser01/tldw_server/pull/1419
 PR review pass: live review surface has five unresolved threads. Treating Gemini reset-state, Qodo warning acknowledgement, and Qodo duplicate setup-options refetch as actionable. Qodo listCharacters/listVNAssetPacks findings conflict with the chosen backend setup-options API direction and will be answered as non-actionable design mismatch.
 
 PR review fixes: reset all new-session form fields on reopen; added frontend acknowledgement for high-risk setup warnings and persisted settings.setup_acknowledgements on create; suppressed the extra setup-options request caused by applying backend default character IDs. Verification after review fixes: focused Vitest passed (2 files, 24 tests); ESLint passed on touched frontend files; git diff --check passed; Playwright VN Play smoke passed after approved local dev-server bind. Bandit remains skipped because no Python files are touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

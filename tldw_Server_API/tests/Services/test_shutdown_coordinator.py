@@ -118,8 +118,8 @@ def test_shutdown_legacy_adapters_import_is_lazy_for_optional_stop_helpers(
     monkeypatch.delitem(sys.modules, module_name, raising=False)
     monkeypatch.setitem(
         sys.modules,
-        "tldw_Server_API.app.core.AuthNZ.scheduler",
-        types.ModuleType("tldw_Server_API.app.core.AuthNZ.scheduler"),
+        "tldw_Server_API.app.services.authnz_scheduler",
+        types.ModuleType("tldw_Server_API.app.services.authnz_scheduler"),
     )
     monkeypatch.setitem(
         sys.modules,

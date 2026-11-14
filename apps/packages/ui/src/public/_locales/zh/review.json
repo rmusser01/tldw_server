@@ -780,7 +780,7 @@
     "message": "正在导航至第 {{page}} 页"
   },
   "mediaPage_spreadMode": {
-    "message": "对比"
+    "message": "并排布局"
   },
   "mediaPage_listMode": {
     "message": "聚焦"
@@ -789,13 +789,13 @@
     "message": "堆叠"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "并排显示所选项目以便对比"
+    "message": "将所选项目并排排列"
   },
   "mediaPage_listModeTooltip": {
     "message": "使用导航一次查看一个项目"
   },
   "mediaPage_allModeTooltip": {
-    "message": "在可滚动列表中查看所有选中项目"
+    "message": "以可滚动堆叠显示当前阅读窗口"
   },
   "mediaPage_copyContentLabel": {
     "message": "复制内容"
@@ -834,19 +834,19 @@
     "message": "选择项目"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "点击左侧面板中的项目，将其添加到查看器。"
+    "message": "使用复选框选择项目，然后点击阅读所选项目。点击或 Enter 预览。"
   },
   "mediaPage_firstUseStep2": {
     "message": "选择视图"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "使用“对比”进行并排查看，“聚焦”一次查看一个项目，或使用“堆叠”查看全部。"
+    "message": "并排用于布局；聚焦显示单个项目；堆叠显示当前阅读窗口。比较内容用于比较文本。"
   },
   "mediaPage_firstUseStep3": {
     "message": "导航"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "使用上一项/下一项按钮或键盘（Tab + Enter）在项目间移动。"
+    "message": "使用上一项/下一项或 j/k 浏览当前预览或所选集合。Tab 定位复选框，空格选择。"
   },
   "mediaPage_gotIt": {
     "message": "知道了"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "请选择分析提供方，然后重试分析。"
+  },
+  "mediaPage_resultsHint": {
+    "message": "点击或 Enter 预览。复选框上的空格键选择项目。Shift+点击选择范围。"
+  },
+  "mediaPage_viewerAll": {
+    "message": "阅读窗口（堆叠）"
   }
 }

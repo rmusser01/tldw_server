@@ -8,6 +8,8 @@ import {
   WorkflowIcon
 } from "lucide-react"
 import React, {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useId,
@@ -16,9 +18,14 @@ import React, {
   useState
 } from "react"
 import Mermaid, { type MermaidRenderState } from "./Mermaid"
-import { MermaidPreviewDialog } from "./MermaidPreviewDialog"
 import { useArtifactsStore } from "@/store/artifacts"
 import { stableHashString } from "@/utils/stable-hash"
+
+const MermaidPreviewDialog = lazy(() =>
+  import("./MermaidPreviewDialog").then((m) => ({
+    default: m.MermaidPreviewDialog
+  }))
+)
 
 export type MermaidDiagramBlockProps = {
   source: string
@@ -57,6 +64,7 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
   const [generatedSvg, setGeneratedSvg] = useState<string | undefined>()
   const [copied, setCopied] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [hasMountedPreview, setHasMountedPreview] = useState(false)
   const [previousSource, setPreviousSource] = useState(source)
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const componentId = useId()
@@ -193,7 +201,10 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
                 <button
                   type="button"
                   aria-label="Open Mermaid preview"
-                  onClick={() => setPreviewOpen(true)}
+                  onClick={() => {
+                    setHasMountedPreview(true)
+                    setPreviewOpen(true)
+                  }}
                   className="inline-flex size-8 items-center justify-center rounded text-text-muted hover:bg-surface hover:text-text"
                 >
                   <EyeIcon className="size-4" />
@@ -251,12 +262,16 @@ export const MermaidDiagramBlock: React.FC<MermaidDiagramBlockProps> = ({
           </div>
         </div>
       </div>
-      <MermaidPreviewDialog
-        generatedSvg={generatedSvg}
-        onClose={() => setPreviewOpen(false)}
-        open={previewOpen}
-        source={source}
-      />
+      {hasMountedPreview && (
+        <Suspense fallback={null}>
+          <MermaidPreviewDialog
+            generatedSvg={generatedSvg}
+            onClose={() => setPreviewOpen(false)}
+            open={previewOpen}
+            source={source}
+          />
+        </Suspense>
+      )}
     </>
   )
 }

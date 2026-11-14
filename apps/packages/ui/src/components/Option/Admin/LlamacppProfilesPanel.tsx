@@ -153,7 +153,7 @@ const assetOptions = (
   return options
 }
 
-export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
+const LlamacppProfilesPanelImpl: React.FC<LlamacppProfilesPanelProps> = ({
   profiles,
   assets,
   loading = false,
@@ -170,14 +170,19 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
     formFromProfile(undefined, assetList, "create")
   )
   const [formError, setFormError] = React.useState<string | null>(null)
+  const savingRef = React.useRef(false)
+  const [saving, setSaving] = React.useState(false)
+  const pendingSave = saving || savingProfileId !== null
 
   const openForm = (mode: FormMode, profile?: LlamacppProfile) => {
+    if (savingRef.current || savingProfileId !== null) return
     setActiveForm({ mode, profile })
     setForm(formFromProfile(profile, assetList, mode))
     setFormError(null)
   }
 
   const closeForm = () => {
+    if (savingRef.current || savingProfileId !== null) return
     setActiveForm(null)
     setFormError(null)
   }
@@ -197,6 +202,18 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
       serverArgsSerializationError: null
     }))
   }
+
+  // Build the asset Select options only when the asset list or the selected
+  // id changes (admin perf C-S3 / F18): every other keystroke in the profile
+  // form re-renders the modal without re-filtering the asset catalog.
+  const ggufOptions = React.useMemo(
+    () => assetOptions(assetList, "gguf", form.modelId),
+    [assetList, form.modelId]
+  )
+  const mmprojOptions = React.useMemo(
+    () => assetOptions(assetList, "mmproj", form.mmprojModelId),
+    [assetList, form.mmprojModelId]
+  )
 
   const buildPayload = () => {
     const name = form.name.trim()
@@ -268,17 +285,24 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
   }
 
   const handleSave = async () => {
-    if (!activeForm) return
+    if (!activeForm || savingRef.current || savingProfileId !== null) return
     const payload = buildPayload()
     if (!payload) return
 
-    const saved =
-      activeForm.mode === "edit" && activeForm.profile
-        ? await onUpdate(activeForm.profile.profile_id, payload)
-        : await onCreate(payload)
-
-    if (saved) {
-      closeForm()
+    savingRef.current = true
+    setSaving(true)
+    try {
+      const saved =
+        activeForm.mode === "edit" && activeForm.profile
+          ? await onUpdate(activeForm.profile.profile_id, payload)
+          : await onCreate(payload)
+      if (saved) {
+        setActiveForm(null)
+        setFormError(null)
+      }
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
   }
 
@@ -301,6 +325,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             size="small"
             type="primary"
             icon={<Plus size={14} />}
+            disabled={pendingSave}
             onClick={() => openForm("create")}
           >
             New profile
@@ -360,6 +385,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
                     icon={<Edit3 size={14} />}
                     onClick={() => openForm("edit", profile)}
                     loading={savingProfileId === profile.profile_id}
+                    disabled={pendingSave}
                     aria-label={`Edit ${profile.name}`}
                   >
                     Edit
@@ -368,6 +394,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
                     size="small"
                     icon={<Copy size={14} />}
                     onClick={() => openForm("duplicate", profile)}
+                    disabled={pendingSave}
                     aria-label={`Duplicate ${profile.name}`}
                   >
                     Duplicate
@@ -380,6 +407,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
                       void handleDelete(profile)
                     }}
                     loading={savingProfileId === profile.profile_id}
+                    disabled={pendingSave}
                     aria-label={`Delete ${profile.name}`}
                   >
                     Delete
@@ -405,10 +433,12 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
           void handleSave()
         }}
         onCancel={closeForm}
-        confirmLoading={
-          savingProfileId === "__create__" ||
-          Boolean(activeForm?.profile && savingProfileId === activeForm.profile.profile_id)
-        }
+        confirmLoading={pendingSave}
+        okButtonProps={{ disabled: pendingSave }}
+        cancelButtonProps={{ disabled: pendingSave }}
+        closable={!pendingSave}
+        maskClosable={!pendingSave}
+        keyboard={!pendingSave}
         destroyOnHidden
       >
         <Space orientation="vertical" size="middle" className="w-full">
@@ -420,6 +450,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
           <div>
             <Text>Name</Text>
             <Input
+              disabled={pendingSave}
               aria-label="Profile name"
               value={form.name}
               onChange={(event) => updateForm("name", event.target.value)}
@@ -431,6 +462,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             <div>
               <Text>Mode</Text>
               <Select
+              disabled={pendingSave}
                 aria-label="Profile mode"
                 value={form.mode}
                 onChange={(value) => updateForm("mode", value)}
@@ -442,6 +474,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             <div>
               <Text>Port policy</Text>
               <Select
+              disabled={pendingSave}
                 aria-label="Profile port policy"
                 value={form.portPolicy}
                 onChange={(value) => updateForm("portPolicy", value)}
@@ -453,6 +486,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             <div>
               <Text>Host</Text>
               <Input
+              disabled={pendingSave}
                 aria-label="Profile host"
                 value={form.host}
                 onChange={(event) => updateForm("host", event.target.value)}
@@ -462,6 +496,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             <div>
               <Text>Port</Text>
               <InputNumber
+              disabled={pendingSave}
                 aria-label="Profile port"
                 value={form.port}
                 min={1}
@@ -475,10 +510,11 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
           <div>
             <Text>Model asset</Text>
             <Select
+              disabled={pendingSave}
               aria-label="Profile model"
               value={form.modelId || undefined}
               onChange={(value) => updateForm("modelId", value || "")}
-              options={assetOptions(assetList, "gguf", form.modelId)}
+              options={ggufOptions}
               placeholder="Select a GGUF asset"
               allowClear
               showSearch
@@ -490,10 +526,11 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
           <div>
             <Text>mmproj asset</Text>
             <Select
+              disabled={pendingSave}
               aria-label="Profile mmproj"
               value={form.mmprojModelId || undefined}
               onChange={(value) => updateForm("mmprojModelId", value || "")}
-              options={assetOptions(assetList, "mmproj", form.mmprojModelId)}
+              options={mmprojOptions}
               placeholder="Optional projector asset"
               allowClear
               showSearch
@@ -506,6 +543,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             <div className="flex items-center justify-between">
               <Text>Enabled</Text>
               <Switch
+              disabled={pendingSave}
                 aria-label="Profile enabled"
                 checked={form.enabled}
                 onChange={(checked) => updateForm("enabled", checked)}
@@ -515,6 +553,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
             <div className="flex items-center justify-between">
               <Text>Autostart</Text>
               <Switch
+              disabled={pendingSave}
                 aria-label="Profile autostart"
                 checked={form.autostart}
                 onChange={(checked) => updateForm("autostart", checked)}
@@ -525,6 +564,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
           <div>
             <Text>Provider alias</Text>
             <Input
+              disabled={pendingSave}
               aria-label="Profile provider alias"
               value={form.providerAlias}
               onChange={(event) => updateForm("providerAlias", event.target.value)}
@@ -535,6 +575,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
           <div>
             <Text>Tags</Text>
             <Input
+              disabled={pendingSave}
               aria-label="Profile tags"
               value={form.tagsText}
               onChange={(event) => updateForm("tagsText", event.target.value)}
@@ -545,6 +586,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
           <div>
             <Text>Server args JSON</Text>
             <TextArea
+              disabled={pendingSave}
               aria-label="Profile server args JSON"
               value={form.serverArgsText}
               onChange={(event) => updateServerArgsText(event.target.value)}
@@ -556,5 +598,7 @@ export const LlamacppProfilesPanel: React.FC<LlamacppProfilesPanelProps> = ({
     </Card>
   )
 }
+
+export const LlamacppProfilesPanel = React.memo(LlamacppProfilesPanelImpl)
 
 export default LlamacppProfilesPanel

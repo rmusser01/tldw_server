@@ -97,11 +97,11 @@ def test_run_claims_rebuild_iteration_submits_selected_media_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     startup_claims = _import_startup_claims_rebuild()
-    submissions: list[tuple[int, str]] = []
+    submissions: list[tuple[int, str, object]] = []
 
     class _FakeService:
-        def submit(self, *, media_id: int, db_path: str) -> None:
-            submissions.append((media_id, db_path))
+        def submit(self, *, media_id: int, db_path: str, owner_user_id: object = None) -> None:
+            submissions.append((media_id, db_path, owner_user_id))
 
     @contextmanager
     def _fake_db_session(app_settings):
@@ -127,6 +127,6 @@ def test_run_claims_rebuild_iteration_submits_selected_media_ids(
     )
 
     assert submissions == [
-        (101, "/tmp/media.db"),
-        (202, "/tmp/media.db"),
+        (101, "/tmp/media.db", 1),
+        (202, "/tmp/media.db", 1),
     ]

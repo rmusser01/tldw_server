@@ -39,11 +39,11 @@ Continue issue #1346 by replacing the display-only dayjs relative-time usage in 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the WorldBooks display-only dayjs reduction by replacing dayjs.from(...) usage in apps/packages/ui/src/components/Option/WorldBooks/worldBookListUtils.ts with a local relative-time helper. Added table-driven tests for dayjs-compatible representative labels, preserved UTC absolute formatting coverage, and added a source guard that failed before implementation and passes after removing dayjs imports.
 
 Verification: bunx vitest run src/components/Option/WorldBooks/__tests__/worldBookListUtils.test.ts exited 0 from apps/packages/ui; git diff --check exited 0; bun run lint exited 0 from apps/tldw-frontend with existing unrelated warnings only; rg found no dayjs in worldBookListUtils.ts and 17 remaining shared UI dayjs import lines. Bandit skipped because no Python files changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -27,9 +27,9 @@ Reduce the package-wide TypeScript baseline by removing redundant test type impo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed redundant standalone type imports from the StudySuggestions hook test and TldwApiClient chat sanitization regression test. Full package tsc dropped from 7 src diagnostics to 3, with no duplicate identifier diagnostics remaining. Bandit is not applicable for this JS/TS-only touched scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

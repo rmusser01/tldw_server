@@ -1,11 +1,12 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ConnectionPhase } from "@/types/connection";
 import { EmptySidePanel } from "../empty";
 
 const connectionStateMock = vi.hoisted(() => ({
+  checkOnce: vi.fn(),
   state: {
     phase: "unconfigured",
     isConnected: false,
@@ -45,6 +46,7 @@ vi.mock("antd", () => ({
 vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionState: () => connectionStateMock.state,
   useConnectionUxState: () => connectionStateMock.uxState,
+  useConnectionActions: () => ({ checkOnce: connectionStateMock.checkOnce }),
 }));
 
 describe("EmptySidePanel", () => {
@@ -64,7 +66,7 @@ describe("EmptySidePanel", () => {
     };
   });
 
-  it("frames setup around Companion Home instead of a chat-only launch", () => {
+  it("frames setup around the Chat destination", () => {
     renderPanel();
 
     const panel = screen.getByTestId("chat-empty-connection");
@@ -72,11 +74,11 @@ describe("EmptySidePanel", () => {
     expect(panel).toHaveAttribute("data-ds-component", "RecoveryCallout");
     expect(screen.getByText("Setup required")).toBeInTheDocument();
     expect(
-      screen.getByText("Finish setup to open Companion Home"),
+      screen.getByText("Finish setup to start chatting"),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Before you can use Companion Home here, finish the short setup flow in Options to connect tldw Assistant to your tldw server or choose demo mode.",
+        "Finish setup in Options to connect to your tldw server, then return here to chat.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByText("Setup step")).toBeInTheDocument();
@@ -145,6 +147,40 @@ describe("EmptySidePanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers Retry now and Diagnostics when the server cannot be reached (XS-11)", async () => {
+    const { browser } = await import("wxt/browser");
+    connectionStateMock.checkOnce.mockClear();
+    vi.mocked(browser.tabs.create).mockClear();
+    connectionStateMock.state = {
+      phase: "error",
+      isConnected: false,
+      serverUrl: "http://localhost:8000",
+    };
+    connectionStateMock.uxState = {
+      uxState: "error_unreachable",
+      mode: "normal",
+      configStep: "health",
+      hasCompletedFirstRun: true,
+    };
+
+    renderPanel();
+
+    expect(screen.getByText(/Retrying automatically/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
+    expect(connectionStateMock.checkOnce).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open diagnostics" }));
+    expect(browser.tabs.create).toHaveBeenCalledWith({
+      url: "chrome-extension://test/options.html#/settings/health",
+    });
+  });
+
+  it("does not claim to retry while setup is unfinished (XS-11)", () => {
+    renderPanel();
+    expect(screen.queryByText(/Retrying automatically/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry now" })).not.toBeInTheDocument();
+  });
+
   it("shows the post-onboarding connection copy when first run is complete", () => {
     connectionStateMock.uxState = {
       uxState: "unconfigured",
@@ -157,7 +193,7 @@ describe("EmptySidePanel", () => {
 
     expect(
       screen.getByText(
-        "Connect tldw Assistant to your server to open Companion Home",
+        "Connect to your server to start chatting",
       ),
     ).toBeInTheDocument();
     expect(
@@ -191,5 +227,19 @@ describe("EmptySidePanel", () => {
     expect(screen.getByTestId("chat-suggestion-1")).toBeInTheDocument();
     expect(screen.getByTestId("chat-suggestion-2")).toBeInTheDocument();
     expect(screen.queryByTestId("chat-suggestion-3")).not.toBeInTheDocument();
+  });
+});
+
+
+describe("starter prompt draft handoff", () => {
+  it.each([["chat-suggestion-1", "Summarize this page"], ["chat-suggestion-2", "What are the key points?"]])("updates controlled draft through the existing composer command: %s", (id, message) => {
+    connectionStateMock.state = { phase: ConnectionPhase.CONNECTED, isConnected: true, serverUrl: "http://localhost:8000" };
+    const receive = vi.fn();
+    window.addEventListener("tldw:set-composer-message", receive);
+    try {
+      render(<EmptySidePanel />);
+      fireEvent.click(screen.getByTestId(id));
+      expect(receive).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ detail: { message } }));
+    } finally { window.removeEventListener("tldw:set-composer-message", receive); }
   });
 });

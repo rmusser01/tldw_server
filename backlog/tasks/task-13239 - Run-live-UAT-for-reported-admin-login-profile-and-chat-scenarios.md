@@ -36,7 +36,7 @@ Verify PR #2939 against the original issue 2935–2938 reproduction scenarios us
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Live PostgreSQL 18.6 UAT exposed an additional full-profile 500: Usage/audio_quota.py passes an ISO date string to asyncpg DATE in get_daily_minutes_used. Bearer and API-key calls both reproduce. Investigating matching backfill and jobs-started queries; add PostgreSQL regressions and repeat live checks after repair.
 
 Live UAT after quota DATE fix: full profile Bearer and API key 200 for 0/1/2 org and team memberships; team override value/source correct; token refresh and subsequent profile200; real registration auto-creates org/team and profile200. Compiled Next16.2.2 on Node20.19.5 admin browser login and reload pass; invalid JWT matrix redirects307. Local provider wire logs verify streaming/nonstreaming omitted/blank/default/explicit/missing-default behavior; Ollama adapter file default also passes. WebUI Save reports server responded successfully; persistence check in progress.
@@ -46,7 +46,7 @@ Quota DATE fix verified: 4 new regressions red with asyncpg DataError, then 5 Po
 Live acceptance verification is complete. Real browser admin login/reload and WebUI API-key Save/persistence pass; exact Node20.20.2 runtime also passes valid JWT and all five invalid/missing-token redirects. Six profile membership/authentication cases, session activity, refresh, real signup, and24 streaming/nonstreaming chat cases pass. UAT exposed and repaired audio DATE binding and RBAC event-loop stalls, with cache concurrency followups from review. Final fresh API and lock replays pass. Disposable DB removal and all owned server ports stopped are verified; temporary fixture and completed plan removed. Report and sanitized evidence are prepared for PR publication; full-suite/external-provider/Docker limits are explicit.
 
 Published UAT fixes and evidence to PR2939 against dev (quota74f86e5c76; RBAC/cache/report a8464cd510), then updated the PR description with all live scenarios and explicit limits. Original Lawrence908 attribution and human-authored pre-merge Change summary gate remain intact. No merge performed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

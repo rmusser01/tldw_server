@@ -33,21 +33,21 @@ describe("NoResultsRecovery", () => {
   })
 
   it("offers source and web recovery while hiding nearest matches without candidates", () => {
-    const onBroadenScope = vi.fn()
+    const onSearchMoreResults = vi.fn()
+    const onSelect = vi.fn()
     const onEnableWeb = vi.fn()
     const onShowNearestMatches = vi.fn()
 
-    renderNoResultsRecovery(
-      {
-        onBroadenScope,
-        onOpenQuickIngest: vi.fn(),
-        onEnableWeb,
-        onShowNearestMatches,
-        webEnabled: false,
-        webAvailable: true,
-        hasNearestMatches: false,
-      }
-    )
+    renderNoResultsRecovery({
+      onSearchMoreResults,
+      onChangeIncludedSources: onSelect,
+      onOpenQuickIngest: vi.fn(),
+      onEnableWeb,
+      onShowNearestMatches,
+      webEnabled: false,
+      webAvailable: true,
+      hasNearestMatches: false
+    })
 
     expect(screen.getByText("No results found")).toBeInTheDocument()
     expect(screen.getByText("Try different keywords or fewer constraints.")).toBeInTheDocument()
@@ -55,10 +55,15 @@ describe("NoResultsRecovery", () => {
     expect(screen.getByText("Confirm your sources were ingested and indexed.")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Show nearest matches" })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Broaden source scope" }))
+    fireEvent.click(
+      screen.getByRole("button", { name: "Change included sources" })
+    )
+    expect(onSelect).toHaveBeenCalledOnce()
+    expect(onSearchMoreResults).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Search more results" }))
     fireEvent.click(screen.getByRole("button", { name: "Enable web fallback" }))
 
-    expect(onBroadenScope).toHaveBeenCalledTimes(1)
+    expect(onSearchMoreResults).toHaveBeenCalledTimes(1)
     expect(onEnableWeb).toHaveBeenCalledTimes(1)
     expect(onShowNearestMatches).not.toHaveBeenCalled()
   })
@@ -66,17 +71,15 @@ describe("NoResultsRecovery", () => {
   it("surfaces nearest matches, web availability, and recent indexing guidance only when relevant", () => {
     recentlyIngestedDocs = [{ id: "doc-1" }]
     const onShowNearestMatches = vi.fn()
-    const { rerender } = renderNoResultsRecovery(
-      {
-        onBroadenScope: vi.fn(),
-        onOpenQuickIngest: vi.fn(),
-        onEnableWeb: vi.fn(),
-        onShowNearestMatches,
-        webEnabled: true,
-        webAvailable: true,
-        hasNearestMatches: true,
-      }
-    )
+    const { rerender } = renderNoResultsRecovery({
+      onSearchMoreResults: vi.fn(),
+      onOpenQuickIngest: vi.fn(),
+      onEnableWeb: vi.fn(),
+      onShowNearestMatches,
+      webEnabled: true,
+      webAvailable: true,
+      hasNearestMatches: true
+    })
 
     expect(screen.getByText("Web fallback enabled")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Show nearest matches" })).toBeEnabled()
@@ -88,7 +91,7 @@ describe("NoResultsRecovery", () => {
     rerender(
       <MemoryRouter>
         <NoResultsRecovery
-          onBroadenScope={vi.fn()}
+          onSearchMoreResults={vi.fn()}
           onOpenQuickIngest={vi.fn()}
           onEnableWeb={vi.fn()}
           onShowNearestMatches={vi.fn()}

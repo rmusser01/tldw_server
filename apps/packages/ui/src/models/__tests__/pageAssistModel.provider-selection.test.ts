@@ -47,6 +47,18 @@ describe("provider-qualified Chat model construction", () => {
     expect(mocks.stream.mock.calls[0][1]).toMatchObject({ model: "shared", apiProvider: "llama.cpp" })
   })
 
+  it('keeps a provider-qualified replacement authoritative over the retained New provider', async () => {
+    useStoreChatModelSettings.getState().reset('custom');
+    const chat = await pageAssistModel({ model: 'llama.cpp:shared', saveToDb: false });
+    for await (const _ of await chat.stream([new HumanMessage('Hello')])) {
+      /* consume */
+    }
+    expect(mocks.stream.mock.calls[0][1]).toMatchObject({
+      model: 'shared',
+      apiProvider: 'llama.cpp',
+    });
+  });
+
   it("retains the existing unqualified model and default-provider behavior", async () => {
     const chat = await pageAssistModel({ model: "tldw:shared", saveToDb: false })
     for await (const _ of await chat.stream([new HumanMessage("Hello")])) { /* consume */ }

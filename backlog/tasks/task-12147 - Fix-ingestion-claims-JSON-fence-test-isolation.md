@@ -35,20 +35,14 @@ The broad mid-slice now passes the Claims LLM config precedence test and stops a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Updated the JSON-fence ingestion claims test so it patches and invokes the same ingestion_claims module instance in broad runs.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Fixed the order-dependent ingestion claims JSON-fence parsing test by removing the stale top-level function import and invoking extract_claims_for_chunks through the patched module. Verification: focused touched-scope command passed (44 passed); Chat_NEW through Claims slice passed (1362 passed, 15 skipped, 15 xfailed, 2 xpassed); Discord-to-Jobs slice passed (3247 passed, 156 skipped); git diff --check passed; Bandit on touched tests reported no findings.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

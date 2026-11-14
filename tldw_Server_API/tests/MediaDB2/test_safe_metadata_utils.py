@@ -63,7 +63,9 @@ def test_normalize_safe_metadata_arxiv_pass_through():
 
 def test_update_version_safe_metadata_propagates_unexpected_identifier_index_failure():
     from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
-    from tldw_Server_API.app.core.Utils.metadata_utils import update_version_safe_metadata_in_transaction
+    from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_write_ops import (
+        update_version_safe_metadata_in_transaction,
+    )
 
     db = _FakeMetadataDB(index_error=DatabaseError("constraint failed"))
 
@@ -79,7 +81,9 @@ def test_update_version_safe_metadata_propagates_unexpected_identifier_index_fai
 
 def test_update_version_safe_metadata_propagates_unrelated_unsupported_identifier_failure():
     from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
-    from tldw_Server_API.app.core.Utils.metadata_utils import update_version_safe_metadata_in_transaction
+    from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_write_ops import (
+        update_version_safe_metadata_in_transaction,
+    )
 
     db = _FakeMetadataDB(index_error=DatabaseError("unsupported column type"))
 
@@ -96,7 +100,9 @@ def test_update_version_safe_metadata_propagates_unrelated_unsupported_identifie
 def test_update_version_safe_metadata_skips_missing_identifier_table_for_legacy_schema():
     import sqlite3
 
-    from tldw_Server_API.app.core.Utils.metadata_utils import update_version_safe_metadata_in_transaction
+    from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_write_ops import (
+        update_version_safe_metadata_in_transaction,
+    )
 
     db = _FakeMetadataDB(index_error=sqlite3.OperationalError("no such table: DocumentVersionIdentifiers"))
 
@@ -109,3 +115,19 @@ def test_update_version_safe_metadata_skips_missing_identifier_table_for_legacy_
     )
 
     assert len(db.queries) == 2
+
+
+def test_update_version_safe_metadata_uses_on_conflict_upsert_on_postgres():
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+    from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_write_ops import (
+        update_version_safe_metadata_in_transaction,
+    )
+
+    db = _FakeMetadataDB()
+    db.backend_type = BackendType.POSTGRESQL
+    update_version_safe_metadata_in_transaction(
+        db=db, dv_id=7, safe_metadata_json="{}", merged_metadata={"doi": "10.1000/x"}, connection=object()
+    )
+
+    ident_sql = next(query for query, _params, _conn in db.queries if "DocumentVersionIdentifiers" in query)
+    assert "ON CONFLICT (dv_id) DO UPDATE" in ident_sql

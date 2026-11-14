@@ -34,14 +34,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task527-tsc-final.txt`: package `tsc` reported one diagnostic in `src/components/Chat/composer/__tests__/useComposerVoiceChat.test.tsx` where the test assigned `"start_browser"` to a mock field inferred as literal `"start_server"`.
 - Root cause was test mock literal narrowing only. The production hook uses the `DictationToggleIntent` union, and the test intentionally exercises both `start_server` and `start_browser` branches.
 - Imported the `DictationToggleIntent` type and widened the initial mocked `toggleIntent` value to that union.
 - Focused verification: `bunx vitest run src/components/Chat/composer/__tests__/useComposerVoiceChat.test.tsx` passed: 9 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task528-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 41 in `/tmp/task527-tsc-final.txt` to 40 in `/tmp/task528-tsc-final.txt`; searching for `useComposerVoiceChat.test.tsx` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

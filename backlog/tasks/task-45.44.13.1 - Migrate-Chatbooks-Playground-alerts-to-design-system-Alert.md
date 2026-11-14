@@ -40,11 +40,11 @@ Migrate ChatbooksPlaygroundPage product-state AntD Alert usage to the shared des
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Migrated ChatbooksPlaygroundPage and ContentTypePicker product-state alerts from AntD Alert to the design-system Alert primitive. Added DS marker assertions for load-error, hydration-warning, and capability-unavailable states. Verification: Chatbooks focused Vitest 2 files passed; product-state guard test passed; verify:design-system-state passed; baseline JSON parse passed; git diff --check passed. Full UI tsc was run and remains blocked by pre-existing repo-wide unrelated TypeScript errors outside touched files. Bandit skipped because this task only touches frontend TypeScript/JSON/backlog files.
 
 PR #1738 review fixes: made static Chatbooks notices polite status regions, rendered preview/hydration warning arrays as block children instead of newline-joined text, and added focused assertions for include-all status notices and hydration warning block rendering. Verification: ContentTypePicker.error-state.test.tsx passed; targeted OpenWebUI hydration preview test passed; product-state guard test passed; verify:design-system-state passed; baseline JSON parse passed; git diff --check passed. Full OpenWebUI import file still hit existing local 10s timeouts in unrelated tests; full UI tsc remains blocked by pre-existing unrelated errors outside touched paths. Bandit not applicable for frontend TypeScript/backlog-only changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import pytest
 
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
@@ -5,7 +7,11 @@ from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantMessage,
     StudyAssistantThreadSummary,
 )
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    CharactersRAGDB,
+    CharactersRAGDBError,
+    ConflictError,
+)
 
 
 @pytest.fixture
@@ -148,6 +154,7 @@ def test_append_study_assistant_message_updates_thread_counts_and_persists_json(
 
     messages = chacha_db.list_study_assistant_messages(thread["id"])
     reloaded_thread = chacha_db.get_study_assistant_thread(thread["id"])
+    assert reloaded_thread is not None
 
     assert first_message["role"] == "user"
     assert second_message["role"] == "assistant"
@@ -232,3 +239,82 @@ def test_study_assistant_schema_models_accept_thread_and_messages():
 
     assert response.thread.id == 7
     assert response.messages[0].structured_payload["summary"] == "renal physiology"
+
+
+@pytest.mark.parametrize("target", ["thread", "message"])
+def test_study_assistant_missing_generated_id_rolls_back_native_insert(
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+) -> None:
+    flashcard_uuid = _create_flashcard(chacha_db)
+    if target == "message":
+        thread = chacha_db.get_or_create_study_assistant_thread(context_type="flashcard", flashcard_uuid=flashcard_uuid)
+        chacha_db.append_study_assistant_message(
+            thread_id=thread["id"],
+            role="user",
+            action_type="explain",
+            input_modality="text",
+            content="Keep message",
+        )
+    before_threads = [
+        dict(row) for row in chacha_db.execute_query("SELECT * FROM study_assistant_threads ORDER BY id").fetchall()
+    ]
+    before_messages = [
+        dict(row) for row in chacha_db.execute_query("SELECT * FROM study_assistant_messages ORDER BY id").fetchall()
+    ]
+    target_table = "study_assistant_threads" if target == "thread" else "study_assistant_messages"
+    original_transaction = chacha_db.transaction
+    inserted_ids = []
+
+    class MissingIdCursor:
+        lastrowid = None
+
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def __getattr__(self, name):
+            return getattr(self._cursor, name)
+
+    class MissingIdConnection:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, params=()):
+            cursor = self._conn.execute(sql, params)
+            if " ".join(sql.split()).startswith(f"INSERT INTO {target_table}("):
+                inserted_ids.append(cursor.lastrowid)
+                return MissingIdCursor(cursor)
+            return cursor
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    @contextmanager
+    def missing_id_transaction():
+        with original_transaction() as conn:
+            yield MissingIdConnection(conn)
+
+    monkeypatch.setattr(chacha_db, "transaction", missing_id_transaction)
+
+    with pytest.raises(CharactersRAGDBError) as error:
+        if target == "thread":
+            chacha_db.get_or_create_study_assistant_thread(context_type="flashcard", flashcard_uuid=flashcard_uuid)
+        else:
+            chacha_db.append_study_assistant_message(
+                thread_id=thread["id"],
+                role="assistant",
+                action_type="explain",
+                input_modality="text",
+                content="Absent ID",
+            )
+    assert str(error.value) == f"Failed to determine study assistant {target} ID after insert"
+    assert len(inserted_ids) == 1 and isinstance(inserted_ids[0], int)
+    after_threads = [
+        dict(row) for row in chacha_db.execute_query("SELECT * FROM study_assistant_threads ORDER BY id").fetchall()
+    ]
+    after_messages = [
+        dict(row) for row in chacha_db.execute_query("SELECT * FROM study_assistant_messages ORDER BY id").fetchall()
+    ]
+    assert after_threads == before_threads
+    assert after_messages == before_messages

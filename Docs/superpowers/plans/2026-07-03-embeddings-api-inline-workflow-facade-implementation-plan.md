@@ -1110,7 +1110,7 @@ git commit -m "feat(embeddings): route orchestrator path through workflow runner
 ### Task 4: Focused Verification And Task Finalization
 
 **Files:**
-- Modify: `backlog/tasks/task-12142 - Implement-Embeddings-API-inline-workflow-facade.md`
+- Modify: `backlog/tasks/task-15065 - Implement-Embeddings-API-inline-workflow-facade.md`
 - Modify: `Docs/superpowers/plans/2026-07-03-embeddings-api-inline-workflow-facade-implementation-plan.md` if execution notes are recorded in the plan.
 
 - [ ] **Step 1: Run the focused Stage 1 workflow suite**
@@ -1187,7 +1187,7 @@ Add the final verification commands and results to the task notes.
 - [ ] **Step 5: Commit final task/plan updates**
 
 ```bash
-git add "backlog/tasks/task-12142 - Implement-Embeddings-API-inline-workflow-facade.md" \
+git add "backlog/tasks/task-15065 - Implement-Embeddings-API-inline-workflow-facade.md" \
   Docs/superpowers/plans/2026-07-03-embeddings-api-inline-workflow-facade-implementation-plan.md
 git commit -m "docs(embeddings): record workflow facade verification"
 ```

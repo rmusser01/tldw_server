@@ -11,6 +11,11 @@ vi.mock("react-i18next", () => ({
 }))
 
 describe("TtsVoiceTab", () => {
+  it("forwards unavailable-provider guidance to preview", () => {
+    render(<TtsVoiceTab provider="tldw" model="kitten" voice="Bella" previewDisabledReason="Configure a provider in Speech Settings." onProviderChange={vi.fn()} onModelChange={vi.fn()} onVoiceChange={vi.fn()} modelOptions={[]} voiceOptions={[]} focusField={null} onFocusHandled={vi.fn()} />)
+    expect(screen.getByRole("button", { name: "Preview voice" })).toBeDisabled()
+  })
+
   it("renders provider, model, and voice selectors", () => {
     render(
       <TtsVoiceTab

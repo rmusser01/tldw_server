@@ -34,13 +34,13 @@ Create an implementation-ready design spec for splitting moderation IA so `/mode
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Design spec drafted and reviewed at Docs/superpowers/specs/2026-05-12-moderation-review-rules-remediation-design.md. Review revisions added an explicit backend review contract stage before frontend review MVP, minimal endpoint/query/permission contracts, separate queue status and decision action vocabulary, backend-sanitized/permission-gated review content requirements, and a Stage 2 minimum recovery requirement for destructive rules edits.
 
 Focused spec review loop completed: first pass found sequencing/API/status/sensitive-context/recovery issues; second pass approved after revisions. Applied the minor approved-review note by tightening recommended_action to the decision-action enum or null.
 
 Second self-review before implementation planning found four planning gaps and patched the spec: explicit extension-sidepanel behavior after the route split, backend event-capture/idempotency for production review items, retention/minimization requirements for stored review data, and stage dependency rules clarifying which work can proceed in parallel versus what blocks the review queue MVP.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

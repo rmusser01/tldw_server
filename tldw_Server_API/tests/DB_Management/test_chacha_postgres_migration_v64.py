@@ -90,7 +90,8 @@ def test_postgres_initializer_routes_schema_v63_through_v64(
     monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 63)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: None)
+    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: True)
+    monkeypatch.setattr(db, "_postgres_v61_progress_row", lambda _conn, _phase: {"status": "complete"})
     monkeypatch.setattr(
         db,
         "_configure_notes_moodboard_studio_v61_postgres_transaction",

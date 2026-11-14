@@ -53,7 +53,7 @@ Turn the Persona Chat trace/error taxonomy into redaction-safe deterministic fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented redaction-safe Persona Chat quality fixture artifact and shared Python fixture loader.
 
 Added backend fixture-linked assertions for PC-ID-001, PC-ID-002, PC-EX-002, PC-EX-003, PC-EX-004, PC-EX-005, PC-PREV-001, PC-MEM-001, PC-MEM-002, and PC-TRACE-001.
@@ -67,7 +67,7 @@ Review follow-up: hardened fixture redaction guard to reject macOS /Users, Linux
 Post-review verification refresh: fixture/schema plus exemplar retrieval passed with the hardened parser/redaction tests: 13 passed, 5 warnings; focused Vitest suite passed: 2 files, 25 tests; Bandit with B101 excluded reported 0 errors and 0 results; git diff --check passed.
 
 Second review follow-up: addressed Qodo findings by adding function docstrings for the fixture loader, anchoring taxonomy path resolution to the repository root, restricting taxonomy parsing to the Failure Labels section before the next heading with an explicit PC-CASE label guard, and returning defensive fixture copies from cached data. Verification refresh: fixture/schema plus exemplar retrieval passed: 14 passed, 5 warnings; prompt preview/runtime chat contract passed in isolation with --timeout=120: 1 passed, 5 warnings; focused Vitest suite passed: 2 files, 25 tests; Bandit with B101 excluded reported 0 errors and 0 results; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

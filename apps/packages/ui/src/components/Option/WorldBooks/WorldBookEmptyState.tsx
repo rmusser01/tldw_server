@@ -49,6 +49,7 @@ export const WorldBookEmptyState: React.FC<WorldBookEmptyStateProps> = ({
 
   return (
     <EmptyState
+      data-testid="world-books-empty-state"
       title={title}
       description={description}
       icon={BookOpen}

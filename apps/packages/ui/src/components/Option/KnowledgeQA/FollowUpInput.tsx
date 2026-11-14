@@ -15,9 +15,18 @@ type FollowUpInputProps = {
 
 const MAX_FOLLOW_UP_LENGTH = 20000
 
-export function FollowUpInput({ className, mode = "default" }: FollowUpInputProps) {
-  const { askFollowUp, isSearching, startNewTopic, results, answer } =
-    useKnowledgeQA()
+export function FollowUpInput({
+  className,
+  mode = "default",
+}: FollowUpInputProps) {
+  const {
+    askFollowUp,
+    isSearching,
+    startNewTopic,
+    results,
+    answer,
+    setEvidenceRailOpen,
+  } = useKnowledgeQA()
   const isMobile = useMobile()
   const [input, setInput] = useState("")
   const [pendingAction, setPendingAction] = useState<"followup" | "new-topic" | null>(null)
@@ -54,7 +63,7 @@ export function FollowUpInput({ className, mode = "default" }: FollowUpInputProp
         setPendingAction(null)
       }
     },
-    [askFollowUp, controlsDisabled, input]
+    [askFollowUp, controlsDisabled, input],
   )
 
   const handleNewTopic = useCallback(async () => {
@@ -75,14 +84,14 @@ export function FollowUpInput({ className, mode = "default" }: FollowUpInputProp
 
   return (
     <>
-      {useStickyMobileLayout && <div aria-hidden="true" className="h-28" />}
+      {useStickyMobileLayout && <div aria-hidden="true" className="h-44" />}
       <div
         data-testid={useStickyMobileLayout ? "knowledge-followup-sticky" : undefined}
         className={cn(
           useStickyMobileLayout
             ? "fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur supports-[backdrop-filter]:bg-surface/80"
             : "border-t border-border pt-4",
-          className
+          className,
         )}
       >
         {promptTitle ? (
@@ -94,12 +103,17 @@ export function FollowUpInput({ className, mode = "default" }: FollowUpInputProp
         <form
           onSubmit={handleSubmit}
           className={cn(
-            "flex items-center gap-2",
-            useStickyMobileLayout && "mx-auto max-w-4xl"
+            "flex flex-wrap items-center gap-2",
+            useStickyMobileLayout && "mx-auto max-w-4xl",
           )}
         >
           {/* Input */}
-          <div className="relative flex-1">
+          <div
+            className={cn(
+              "relative min-w-0 flex-1",
+              useStickyMobileLayout && "basis-full",
+            )}
+          >
             <input
               type="text"
               value={input}
@@ -114,7 +128,7 @@ export function FollowUpInput({ className, mode = "default" }: FollowUpInputProp
                 "focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent",
                 "placeholder:text-text-subtle",
                 "transition-all duration-200",
-                controlsDisabled && "opacity-75 cursor-not-allowed"
+                controlsDisabled && "opacity-75 cursor-not-allowed",
               )}
             />
 
@@ -129,7 +143,7 @@ export function FollowUpInput({ className, mode = "default" }: FollowUpInputProp
                 "bg-primary text-white",
                 "transition-all duration-200",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
-                "hover:bg-primaryStrong"
+                "hover:bg-primaryStrong",
               )}
             >
               {controlsDisabled ? (
@@ -139,6 +153,17 @@ export function FollowUpInput({ className, mode = "default" }: FollowUpInputProp
               )}
             </button>
           </div>
+
+          {useStickyMobileLayout && setEvidenceRailOpen ? (
+            <button
+              type="button"
+              onClick={() => setEvidenceRailOpen(true)}
+              aria-label="Open evidence panel"
+              className="h-10 rounded-lg border border-border px-3 text-sm"
+            >
+              Evidence
+            </button>
+          ) : null}
 
           {/* New topic button */}
           <button
@@ -158,7 +183,7 @@ export function FollowUpInput({ className, mode = "default" }: FollowUpInputProp
           <p
             className={cn(
               "mt-2 text-xs text-text-muted text-center",
-              useStickyMobileLayout && "mx-auto max-w-4xl"
+              useStickyMobileLayout && "mx-auto max-w-4xl",
             )}
           >
             {helperText}
@@ -169,7 +194,7 @@ export function FollowUpInput({ className, mode = "default" }: FollowUpInputProp
             className={cn(
               "mt-1 text-right text-xs",
               useStickyMobileLayout && "mx-auto max-w-4xl",
-              hitCharacterLimit ? "text-warn" : "text-text-muted"
+              hitCharacterLimit ? "text-warn" : "text-text-muted",
             )}
           >
             {input.length}/{MAX_FOLLOW_UP_LENGTH}

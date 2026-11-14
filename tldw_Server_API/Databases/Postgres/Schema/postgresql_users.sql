@@ -151,3 +151,23 @@ CREATE INDEX IF NOT EXISTS idx_teams_org ON public.teams(org_id);
 CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_hash ON audio_studio_media_tickets(token_hash);
 CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_expiry ON audio_studio_media_tickets(expires_at);
 CREATE INDEX IF NOT EXISTS idx_audio_studio_media_tickets_artifact ON audio_studio_media_tickets(user_id, project_id, artifact_id);
+
+-- Native retained chat accounting; released keys remain terminal.
+CREATE TABLE IF NOT EXISTS native_chat_quota_reservations (
+            user_id BIGINT NOT NULL,
+            user_uuid TEXT NOT NULL,
+            owner_key TEXT NOT NULL,
+            candidate_key TEXT NOT NULL,
+            scope_type TEXT NOT NULL CHECK (scope_type IN ('global', 'workspace')),
+            workspace_id TEXT,
+            org_id BIGINT,
+            team_id BIGINT,
+            size_bytes BIGINT NOT NULL CHECK (size_bytes >= 0),
+            state TEXT NOT NULL CHECK (state IN ('active', 'released')),
+            PRIMARY KEY (user_id, candidate_key),
+            CHECK (team_id IS NULL OR org_id IS NOT NULL),
+            CHECK ((scope_type = 'global' AND workspace_id IS NULL) OR (scope_type = 'workspace' AND workspace_id IS NOT NULL))
+        );
+CREATE INDEX IF NOT EXISTS native_chat_quota_user ON native_chat_quota_reservations(user_id, user_uuid, state);
+CREATE INDEX IF NOT EXISTS native_chat_quota_org ON native_chat_quota_reservations(org_id, state);
+CREATE INDEX IF NOT EXISTS native_chat_quota_team ON native_chat_quota_reservations(team_id, state);

@@ -40,7 +40,6 @@ Used a temporary four-stage implementation plan for refresh, review fixes, CI fo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Fetched latest `origin/dev` and rebased `codex/mcp-residual-ux-clean`; after `origin/dev` advanced during the first rebase, rebased again onto `5b61874981` and the local branch is `0 5` relative to `origin/dev`.
 - Verified new CodeRabbit comments against current code and reproduced each behavior with RED tests:
@@ -69,7 +68,6 @@ Verification:
 - Bandit touched production scope wrote `/tmp/bandit_pr2548_followup.json`: exit 0, no findings.
 - Final post-rebase verification on `9cbb86936e`: docs/basic/http suite 67 passed, full package gateway suite 208 passed, Docker packaging contract 4 passed, `git diff --check` passed, and Bandit touched production scope wrote `/tmp/bandit_pr2548_rebase.json` with exit 0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

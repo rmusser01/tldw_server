@@ -61,7 +61,7 @@ Resolve the current PR #1375 GitHub Actions failures after the axios-to-fetch We
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root-cause evidence: Notes backend remediation failed because count_notes/count_keyword_collections mocks returned MagicMock values, which build_offset_pagination_meta compared against ints. UX Smoke Gate failed on ElevenLabs timeout retry assertions after the axios-to-fetch rewrite; the fetch service only maps our own AbortError timeout and passes route-aborted browser fetch failures through as generic errors.
 
 Verification so far: `bunx vitest run src/services/__tests__/elevenlabs.test.ts` passed 6 tests after the red test initially failed as expected; `source .venv/bin/activate && python -m pytest tldw_Server_API/tests/Notes/test_notes_api_integration.py::test_list_notes tldw_Server_API/tests/Notes/test_notes_api_integration.py::test_list_keyword_collections_with_keywords` passed 2 tests after reproducing both failures; `bunx vitest run src/services/__tests__/elevenlabs.test.ts src/hooks/__tests__/useTtsProviderData.test.tsx src/components/Option/Speech/__tests__/SpeechPlaygroundPage.render.test.tsx` passed 21 tests; focused Playwright `bunx playwright test e2e/smoke/stage7-audio-regression.spec.ts --grep "ElevenLabs timeout" --reporter=line --workers=1` passed 2 tests after fixing E2E seedAuth; `git diff --check` passed; Bandit on the touched Notes test file with `-s B101` produced 0 findings in `/tmp/bandit_task123_notes.json`.
@@ -79,7 +79,7 @@ Fresh PR check follow-up after pushing `b4dd21847`: workflows are now starting i
 PR review follow-up scope: live GraphQL review threads on PR #1375 showed unresolved feedback for API default header merging, request-specific auth header clobbering, protocol-relative URL support, explicit `responseType: "json"`, error response parsing before binary/success response parsing, `captureSessionIdFromHeaders()` input normalization, a 401 cleanup/redirect regression test, and routing `generateSpeech()` through the shared ElevenLabs fetch helper.
 
 PR review follow-up verification: the new WebUI API client regression tests first failed on the current implementation for the default headers, auth override, protocol-relative URL, explicit JSON responseType, binary error detail, and malformed 401 cleanup cases. After fixes, `bunx vitest run lib/__tests__/api-client.fetch.test.ts ../packages/ui/src/services/__tests__/elevenlabs.test.ts` passed 18 tests. `bun run lint -- lib/api.ts lib/__tests__/api-client.fetch.test.ts ../packages/ui/src/services/elevenlabs.ts ../packages/ui/src/services/__tests__/elevenlabs.test.ts` exited 0 with existing project warnings; the shared UI paths are outside that command's base path, so `apps/tldw-frontend/node_modules/.bin/eslint --config apps/tldw-frontend/eslint.config.mjs apps/packages/ui/src/services/elevenlabs.ts apps/packages/ui/src/services/__tests__/elevenlabs.test.ts` was run with the repo-pinned ESLint and exited 0. `git diff --check` passed. Bandit is not applicable to this TypeScript-only follow-up.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -651,8 +651,9 @@ def test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log(
     heartbeat_calls = 0
     heartbeat_observed = audio_tx.asyncio.Event()
 
-    async def _slow_increment_jobs_started(*_args, **_kwargs):
+    async def _wait_for_heartbeat_before_quota_check(*_args, **_kwargs):
         await audio_tx.asyncio.wait_for(heartbeat_observed.wait(), timeout=1.0)
+        return True, None
 
     async def _failing_heartbeat_jobs(*_args, **_kwargs):
         nonlocal heartbeat_calls
@@ -665,8 +666,8 @@ def test_audio_transcriptions_sanitizes_heartbeat_jobs_failure_log(
     def _shim_attr(name):
         if name == "get_job_heartbeat_interval_seconds":
             return lambda: 0.001
-        if name == "increment_jobs_started":
-            return _slow_increment_jobs_started
+        if name == "check_daily_minutes_allow":
+            return _wait_for_heartbeat_before_quota_check
         if name == "heartbeat_jobs":
             return _failing_heartbeat_jobs
         return original_shim_attr(name)

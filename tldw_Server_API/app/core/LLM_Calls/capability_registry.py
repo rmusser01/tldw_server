@@ -13,11 +13,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_number,
     custom_openai_section_name,
 )
+from tldw_Server_API.app.core.exceptions import ChatBadRequestError
 from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 
 SCHEMA_VERSION = 1
@@ -37,6 +37,7 @@ class ProviderCallPolicy:
     allow_tools: bool | None = None
     allow_stop: bool | None = None
     allow_response_format: bool | None = None
+    allow_sampling_modifiers: bool | None = None
     candidate_count: int | None = None
     temperature: float | None = None
     top_p: float | None = None
@@ -65,6 +66,8 @@ class ProviderCallPolicy:
             self.allow_response_format, bool
         ):
             raise TypeError("allow_response_format must be a boolean or None")
+        if self.allow_sampling_modifiers is not None and not isinstance(self.allow_sampling_modifiers, bool):
+            raise TypeError("allow_sampling_modifiers must be a boolean or None")
         if (
             self.candidate_count is not None
             and (
@@ -148,6 +151,34 @@ _TOOL_CONTROL_KEYS = frozenset(
 )
 _STOP_CONTROL_KEYS = frozenset({"stop", "stop_sequence", "stop_sequences"})
 _RESPONSE_FORMAT_CONTROL_KEYS = frozenset({"response_format", "format"})
+_SAMPLING_MODIFIER_KEYS = frozenset(
+    {
+        "seed",
+        "top_k",
+        "topk",
+        "topK",
+        "k",
+        "min_p",
+        "minp",
+        "top_a",
+        "typical_p",
+        "typical",
+        "tfs",
+        "tfs_z",
+        "presence_penalty",
+        "frequency_penalty",
+        "logit_bias",
+        "rep_pen",
+        "rep_pen_range",
+        "rep_pen_slope",
+        "repeat_penalty",
+        "repeat_last_n",
+        "mirostat",
+        "mirostat_mode",
+        "mirostat_tau",
+        "mirostat_eta",
+    }
+)
 
 
 def _provider_config_sections(provider_key: str) -> tuple[str, ...]:
@@ -196,6 +227,9 @@ def _copy_policy_app_config(
         for key in _RESPONSE_FORMAT_CONTROL_KEYS:
             if key in copied:
                 copied[key] = None
+    if policy.allow_sampling_modifiers is False:
+        for key in _SAMPLING_MODIFIER_KEYS:
+            copied.pop(key, None)
     if policy.maximum_timeout_seconds is not None:
         copied["api_timeout"] = _clamp_timeout(
             copied.get("api_timeout"), policy.maximum_timeout_seconds
@@ -221,6 +255,9 @@ def _copy_policy_app_config(
             if policy.allow_response_format is False:
                 for key in _RESPONSE_FORMAT_CONTROL_KEYS:
                     provider_config[key] = None
+            if policy.allow_sampling_modifiers is False:
+                for key in _SAMPLING_MODIFIER_KEYS:
+                    provider_config.pop(key, None)
             if policy.maximum_timeout_seconds is not None:
                 provider_config["api_timeout"] = _clamp_timeout(
                     provider_config.get("api_timeout"), policy.maximum_timeout_seconds
@@ -253,6 +290,8 @@ def _copy_policy_extra_body(
         reserved.update(_STOP_CONTROL_KEYS)
     if policy.allow_response_format is False:
         reserved.update(_RESPONSE_FORMAT_CONTROL_KEYS)
+    if policy.allow_sampling_modifiers is False:
+        reserved.update(_SAMPLING_MODIFIER_KEYS)
     if policy.candidate_count is not None:
         reserved.update({"n", "num_generations", "num_return_sequences"})
     if policy.temperature is not None:
@@ -301,6 +340,9 @@ def apply_provider_call_policy(
         effective["stop"] = None
     if policy.allow_response_format is False:
         effective["response_format"] = None
+    if policy.allow_sampling_modifiers is False:
+        for key in _SAMPLING_MODIFIER_KEYS:
+            effective.pop(key, None)
     if policy.candidate_count is not None:
         effective["n"] = policy.candidate_count
         if provider_key == "cohere":
@@ -353,6 +395,7 @@ def _record_validation_rejection(provider_key: str) -> None:
     except Exception:
         return
 
+
 # Base OpenAI-compatible request fields supported across providers.
 BASE_FIELDS: set[str] = {
     "messages",
@@ -404,7 +447,7 @@ PROVIDER_EXTENSIONS: dict[str, set[str]] = {
     "cohere": {"top_k", "num_generations"},
     "zai": {"do_sample", "request_id"},
     "llama.cpp": {"top_k", "min_p"},
-    "kobold": {"top_k"},
+    "kobold": {"top_k", "repetition_penalty"},
     "ooba": {"top_k", "min_p"},
     "tabbyapi": {"top_k", "min_p"},
     "vllm": {"top_k", "min_p"},
@@ -573,6 +616,14 @@ def _validate_nested_fields(provider_key: str, payload: Mapping[str, Any]) -> No
     _validate_tools(provider_key, payload.get("tools"))
     _validate_response_format(provider_key, payload.get("response_format"))
     _validate_logit_bias(provider_key, payload.get("logit_bias"))
+    if "repetition_penalty" in payload:
+        value = payload["repetition_penalty"]
+        if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 3:
+            _raise_nested_error(
+                provider_key,
+                "repetition_penalty",
+                "must be a finite number between 0 and 3",
+            )
 
 
 def validate_payload(provider: str, payload: Mapping[str, Any]) -> dict[str, Any]:

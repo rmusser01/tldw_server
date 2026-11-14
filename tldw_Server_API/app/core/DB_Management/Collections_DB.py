@@ -28,6 +28,8 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from loguru import logger
+from sqlglot import exp, parse_one
+from sqlglot.errors import ParseError
 
 from tldw_Server_API.app.core.Collections.utils import (
     build_highlight_context,
@@ -41,11 +43,19 @@ from tldw_Server_API.app.core.DB_Management.content_backend import (
     load_content_db_settings,
 )
 from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
+from tldw_Server_API.app.core.DB_Management.tag_identity import (
+    COLLECTION_TAGS,
+    ensure_tag_identity,
+    ensure_tag_ids,
+    match_tag_ids,
+    tags_containing,
+)
 from tldw_Server_API.app.core.exceptions import (
     InvalidStorageUserIdError,
     StorageUnavailableError,
 )
 from tldw_Server_API.app.core.testing import is_truthy
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 from .backends.base import BackendType, DatabaseBackend, DatabaseConfig, DatabaseError
 from .backends.factory import (
@@ -641,6 +651,491 @@ _COLLECTIONS_REQUIRED_TABLES = (
 )
 
 
+# Required readable columns and uniqueness after canonical owner backfills.
+_POSTGRES_COLLECTIONS_SCHEMA = {
+    "output_templates": (
+        "id user_id name type format body description is_default created_at updated_at metadata_json",
+        "id",
+    ),
+    "reading_highlights": (
+        "id user_id item_id quote start_offset end_offset color note created_at "
+        "anchor_strategy content_hash_ref context_before context_after state",
+        "id",
+    ),
+    "outputs": (
+        "id user_id job_id run_id type title format storage_path metadata_json workspace_tag created_at "
+        "media_item_id chatbook_path idempotency_key deleted deleted_at retention_until",
+        "id",
+    ),
+    "reading_digest_schedules": (
+        "id tenant_id user_id name cron timezone enabled require_online filters_json "
+        "template_id template_name format retention_days last_run_at next_run_at "
+        "last_status created_at updated_at",
+        "id",
+    ),
+    "reminder_tasks": (
+        "id user_id tenant_id title body link_type link_id link_url schedule_kind run_at cron "
+        "timezone enabled last_run_at next_run_at last_status created_at updated_at",
+        "id",
+    ),
+    "reminder_task_runs": (
+        "id task_id user_id scheduled_for job_id run_slot_utc run_slot_key status error "
+        "created_at started_at completed_at",
+        "id",
+    ),
+    "user_notifications": (
+        "id user_id kind title message severity source_task_id source_task_run_id "
+        "source_job_id source_domain source_job_type link_type link_id link_url dedupe_key "
+        "retention_until archived_at created_at read_at dismissed_at snooze_task_id "
+        "delivery_status delivered_at",
+        "id",
+    ),
+    "notification_preferences": (
+        "user_id reminder_enabled job_completed_enabled job_failed_enabled updated_at",
+        "user_id",
+    ),
+    "notification_bridge_state": (
+        "consumer_name last_event_id lease_owner_id lease_expires_at updated_at",
+        "consumer_name",
+    ),
+    "file_artifacts": (
+        "id user_id file_type title structured_json validation_json export_status export_format "
+        "export_storage_path export_bytes export_content_type export_job_id export_expires_at "
+        "export_consumed_at metadata_json created_at updated_at deleted deleted_at retention_until",
+        "id",
+    ),
+    "audiobook_projects": ("id user_id project_id title source_ref status settings_json created_at updated_at", "id"),
+    "audiobook_chapters": (
+        "id project_id chapter_index title start_offset end_offset voice_profile_id speed metadata_json",
+        "id",
+    ),
+    "audiobook_artifacts": ("id project_id artifact_type format output_id metadata_json", "id"),
+    "audiobook_voice_profiles": (
+        "profile_id user_id name default_voice default_speed chapter_overrides_json created_at updated_at",
+        "profile_id",
+    ),
+    "audiobook_output_usage": ("user_id used_bytes updated_at", "user_id"),
+    "audio_studio_projects": (
+        "id user_id project_id title workflow status settings_json current_revision_id "
+        "created_at updated_at archived_at deleted deleted_at retention_until",
+        "id",
+    ),
+    "audio_studio_project_revisions": (
+        "id revision_id project_row_id user_id parent_revision_id mutation_kind "
+        "resource_kind resource_id content_hash payload_json created_at",
+        "id",
+    ),
+    "audio_studio_sections": (
+        "id project_row_id section_id workflow title body_text speaker_id order_index "
+        "settings_json current_revision_id archived_at deleted deleted_at",
+        "id",
+    ),
+    "audio_studio_tracks": (
+        "id project_row_id track_id name kind order_index muted solo volume settings_json "
+        "current_revision_id archived_at deleted deleted_at",
+        "id",
+    ),
+    "audio_studio_clips": (
+        "id project_row_id clip_id section_id track_id title clip_type start_ms duration_ms "
+        "volume fade_in_ms fade_out_ms muted artifact_id settings_json current_revision_id "
+        "archived_at deleted deleted_at",
+        "id",
+    ),
+    "audio_studio_artifacts": (
+        "id project_row_id artifact_id artifact_type provider output_id storage_path "
+        "mime_type size_bytes source_resource_kind source_resource_id source_revision_id "
+        "content_hash metadata_json created_at archived_at deleted deleted_at",
+        "id",
+    ),
+    "audio_studio_generation_jobs": (
+        "id project_row_id job_id provider operation target_resource_kind "
+        "target_resource_id target_revision_id idempotency_key status request_json "
+        "result_json created_at updated_at",
+        "id",
+    ),
+    "audio_studio_idempotency_keys": (
+        "namespace key user_id project_row_id request_hash response_json created_at updated_at",
+        "namespace key user_id",
+    ),
+    "collection_tags": ("id user_id name", "id"),
+    "content_items": (
+        "id user_id origin origin_type origin_id url canonical_url domain title summary notes "
+        "content_hash word_count published_at status favorite metadata_json media_id job_id run_id "
+        "source_id read_at created_at updated_at",
+        "id",
+    ),
+    "media_collections": (
+        "id user_id name kind description source_url metadata_json default_tags_json deleted created_at updated_at",
+        "id",
+    ),
+    "media_collection_items": (
+        "id user_id collection_id ordinal source_url normalized_source_id source_kind "
+        "title speaker published_at track duplicate_status status media_id content_item_id "
+        "latest_job_id latest_run_id idempotency_key retry_count error_summary "
+        "warnings_json metadata_json tags_json created_at updated_at",
+        "id",
+    ),
+    "media_collection_runs": (
+        "id user_id collection_id batch_id status requested_count queued_count "
+        "processing_count completed_count failed_count skipped_count cancelled_count "
+        "options_json summary_json started_at completed_at created_at updated_at",
+        "id",
+    ),
+    "content_item_tags": ("item_id tag_id", ""),
+    "saved_searches": ("id user_id name query_json sort created_at updated_at", "id"),
+    "content_item_note_links": ("user_id item_id note_id created_at", "user_id item_id note_id"),
+}
+_POSTGRES_COLLECTIONS_UNIQUE_KEYS = {"collection_tags": ["user_id name"], "content_item_tags": ["item_id tag_id"]}
+_POSTGRES_COLLECTIONS_UNIQUE_INDEXES = {
+    "ux_output_templates_user_name": ("output_templates", "user_id name", None),
+    "ux_reminder_task_runs_slot": ("reminder_task_runs", "task_id run_slot_key", None),
+    "ux_user_notifications_user_dedupe": ("user_notifications", "user_id dedupe_key", "dedupe_key IS NOT NULL"),
+    "ux_audiobook_chapters_project_index": ("audiobook_chapters", "project_id chapter_index", None),
+    "ux_audio_studio_projects_user_project_id": ("audio_studio_projects", "user_id project_id", None),
+    "ux_audio_studio_revisions_user_revision_id": ("audio_studio_project_revisions", "user_id revision_id", None),
+    "ux_audio_studio_sections_project_section": ("audio_studio_sections", "project_row_id section_id", None),
+    "ux_audio_studio_tracks_project_track": ("audio_studio_tracks", "project_row_id track_id", None),
+    "ux_audio_studio_clips_project_clip": ("audio_studio_clips", "project_row_id clip_id", None),
+    "ux_audio_studio_artifacts_project_artifact": ("audio_studio_artifacts", "project_row_id artifact_id", None),
+    "ux_audio_studio_generation_jobs_project_job": ("audio_studio_generation_jobs", "project_row_id job_id", None),
+    "ux_content_items_user_canonical": ("content_items", "user_id canonical_url", "canonical_url IS NOT NULL"),
+    "ux_content_items_user_hash": ("content_items", "user_id content_hash", "content_hash IS NOT NULL"),
+    "ux_media_collection_items_collection_ordinal": ("media_collection_items", "user_id collection_id ordinal", None),
+    "ux_saved_searches_user_name": ("saved_searches", "user_id name", None),
+    "ux_outputs_user_idempotency_active": (
+        "outputs",
+        "user_id idempotency_key",
+        "idempotency_key IS NOT NULL AND deleted = FALSE",
+    ),
+    "ux_outputs_user_title_format": ("outputs", "user_id title format", "deleted = FALSE"),
+}
+
+
+
+def _postgres_predicate_matches(actual: str | None, expected: str | None) -> bool:
+    """Ignore redundant parentheses while preserving the expression's operator tree."""
+    if actual is None or expected is None:
+        return actual is expected
+
+    def undecorate(node: exp.Expression) -> exp.Expression:
+        if isinstance(node, exp.Paren):
+            return node.this.transform(undecorate, copy=False)
+        return node
+
+    try:
+        return parse_one(actual, read="postgres").transform(undecorate) == parse_one(
+            expected, read="postgres"
+        ).transform(undecorate)
+    except (ParseError, ValueError, TypeError):
+        return False
+
+
+POSTGRES_CONTENT_DDL = """
+            CREATE TABLE IF NOT EXISTS collection_tags (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                UNIQUE (user_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS content_items (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                origin_type TEXT,
+                origin_id BIGINT,
+                url TEXT,
+                canonical_url TEXT,
+                domain TEXT,
+                title TEXT,
+                summary TEXT,
+                notes TEXT,
+                content_hash TEXT,
+                word_count INTEGER,
+                published_at TEXT,
+                status TEXT,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT,
+                media_id BIGINT,
+                job_id BIGINT,
+                run_id BIGINT,
+                source_id BIGINT,
+                read_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_hash ON content_items(user_id, content_hash) WHERE content_hash IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_content_items_user_updated ON content_items(user_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
+            CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
+            CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
+
+            CREATE TABLE IF NOT EXISTS media_collections (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                description TEXT,
+                source_url TEXT,
+                metadata_json TEXT,
+                default_tags_json TEXT,
+                deleted BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
+                ON media_collections(user_id, deleted, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
+                ON media_collections(user_id, kind, deleted, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS media_collection_items (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id BIGINT NOT NULL,
+                ordinal INTEGER NOT NULL,
+                source_url TEXT NOT NULL,
+                normalized_source_id TEXT,
+                source_kind TEXT,
+                title TEXT,
+                speaker TEXT,
+                published_at TEXT,
+                track TEXT,
+                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
+                status TEXT NOT NULL DEFAULT 'planned',
+                media_id BIGINT,
+                content_item_id BIGINT,
+                latest_job_id TEXT,
+                latest_run_id BIGINT,
+                idempotency_key TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                error_summary TEXT,
+                warnings_json TEXT,
+                metadata_json TEXT,
+                tags_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
+                ON media_collection_items(user_id, normalized_source_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
+                ON media_collection_items(user_id, media_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
+                ON media_collection_items(user_id, latest_job_id);
+
+            CREATE TABLE IF NOT EXISTS media_collection_runs (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id BIGINT NOT NULL,
+                batch_id TEXT,
+                status TEXT NOT NULL,
+                requested_count INTEGER NOT NULL DEFAULT 0,
+                queued_count INTEGER NOT NULL DEFAULT 0,
+                processing_count INTEGER NOT NULL DEFAULT 0,
+                completed_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                cancelled_count INTEGER NOT NULL DEFAULT 0,
+                options_json TEXT,
+                summary_json TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
+                ON media_collection_runs(user_id, collection_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
+                ON media_collection_runs(user_id, batch_id);
+
+            CREATE TABLE IF NOT EXISTS content_item_tags (
+                item_id BIGINT NOT NULL,
+                tag_id BIGINT NOT NULL,
+                UNIQUE (item_id, tag_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS saved_searches (
+                id BIGSERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                query_json TEXT NOT NULL,
+                sort TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_saved_searches_user_name ON saved_searches(user_id, name);
+            CREATE INDEX IF NOT EXISTS idx_saved_searches_user_updated ON saved_searches(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS content_item_note_links (
+                user_id TEXT NOT NULL,
+                item_id BIGINT NOT NULL,
+                note_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, item_id, note_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_item_note_links_user_item
+                ON content_item_note_links(user_id, item_id, created_at DESC);
+            """
+
+
+SQLITE_CONTENT_DDL = """
+            CREATE TABLE IF NOT EXISTS collection_tags (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                UNIQUE (user_id, name)
+            );
+
+            CREATE TABLE IF NOT EXISTS content_items (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                origin_type TEXT,
+                origin_id INTEGER,
+                url TEXT,
+                canonical_url TEXT,
+                domain TEXT,
+                title TEXT,
+                summary TEXT,
+                notes TEXT,
+                content_hash TEXT,
+                word_count INTEGER,
+                published_at TEXT,
+                status TEXT,
+                favorite INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT,
+                media_id INTEGER,
+                job_id INTEGER,
+                run_id INTEGER,
+                source_id INTEGER,
+                read_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_hash ON content_items(user_id, content_hash) WHERE content_hash IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_content_items_user_updated ON content_items(user_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
+            CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
+            CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
+
+            CREATE TABLE IF NOT EXISTS media_collections (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                description TEXT,
+                source_url TEXT,
+                metadata_json TEXT,
+                default_tags_json TEXT,
+                deleted INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
+                ON media_collections(user_id, deleted, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
+                ON media_collections(user_id, kind, deleted, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS media_collection_items (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id INTEGER NOT NULL,
+                ordinal INTEGER NOT NULL,
+                source_url TEXT NOT NULL,
+                normalized_source_id TEXT,
+                source_kind TEXT,
+                title TEXT,
+                speaker TEXT,
+                published_at TEXT,
+                track TEXT,
+                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
+                status TEXT NOT NULL DEFAULT 'planned',
+                media_id INTEGER,
+                content_item_id INTEGER,
+                latest_job_id TEXT,
+                latest_run_id INTEGER,
+                idempotency_key TEXT,
+                retry_count INTEGER NOT NULL DEFAULT 0,
+                error_summary TEXT,
+                warnings_json TEXT,
+                metadata_json TEXT,
+                tags_json TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
+                ON media_collection_items(user_id, collection_id, ordinal);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
+                ON media_collection_items(user_id, normalized_source_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
+                ON media_collection_items(user_id, media_id);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
+                ON media_collection_items(user_id, latest_job_id);
+
+            CREATE TABLE IF NOT EXISTS media_collection_runs (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                collection_id INTEGER NOT NULL,
+                batch_id TEXT,
+                status TEXT NOT NULL,
+                requested_count INTEGER NOT NULL DEFAULT 0,
+                queued_count INTEGER NOT NULL DEFAULT 0,
+                processing_count INTEGER NOT NULL DEFAULT 0,
+                completed_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                skipped_count INTEGER NOT NULL DEFAULT 0,
+                cancelled_count INTEGER NOT NULL DEFAULT 0,
+                options_json TEXT,
+                summary_json TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
+                ON media_collection_runs(user_id, collection_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
+                ON media_collection_runs(user_id, batch_id);
+
+            CREATE TABLE IF NOT EXISTS content_item_tags (
+                item_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                UNIQUE (item_id, tag_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS saved_searches (
+                id INTEGER PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                query_json TEXT NOT NULL,
+                sort TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE (user_id, name)
+            );
+            CREATE INDEX IF NOT EXISTS idx_saved_searches_user_updated ON saved_searches(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS content_item_note_links (
+                user_id TEXT NOT NULL,
+                item_id INTEGER NOT NULL,
+                note_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, item_id, note_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_content_item_note_links_user_item
+                ON content_item_note_links(user_id, item_id, created_at DESC);
+            """
+
+
 @_decorate_collections_public_operations
 class CollectionsDatabase:
     """Adapter for Collections tables stored in the per-user Media DB."""
@@ -673,7 +1168,7 @@ class CollectionsDatabase:
             ensure_once(
                 "collections",
                 getattr(getattr(self._backend, "config", None), "sqlite_path", None),
-                self.ensure_schema,
+                self._ensure_schema_and_tag_identity,
                 verify=self._collections_schema_present,
             )
             # Deliberately outside the memo. This reconciles output templates
@@ -737,8 +1232,89 @@ class CollectionsDatabase:
         self._backend = refreshed_backend
         return self._backend
 
-    def _backend_target_key(self, backend: DatabaseBackend | None) -> str | None:
-        return backend_target_key(backend)
+    @staticmethod
+    def _backend_target_key(backend: DatabaseBackend | None) -> str | None:
+        key = backend_target_key(backend)
+        if key and backend is not None and backend.backend_type == BackendType.POSTGRESQL:
+            user = getattr(getattr(backend, "config", None), "pg_user", None)
+            return f"{key}:role:{user or ''}"
+        return key
+
+    @staticmethod
+    def _postgres_can_migrate(backend: DatabaseBackend) -> bool:
+        """Use effective table ownership, including inherited pg_database_owner authority."""
+        row = backend.execute(
+            "SELECT CASE WHEN to_regclass('public.output_templates') IS NULL "
+            "THEN has_schema_privilege(current_user,'public','CREATE') "
+            "ELSE pg_has_role(current_user,(SELECT relowner FROM pg_class "
+            "WHERE oid=to_regclass('public.output_templates')),'USAGE') END AS can_migrate"
+        ).first
+        if not row or type(row.get("can_migrate")) is not bool:
+            raise DatabaseError("Collections PostgreSQL schema authority is unavailable")
+        return row["can_migrate"]
+
+    @staticmethod
+    def _validate_postgres_runtime_schema(backend: DatabaseBackend) -> None:
+        """Admit only readable canonical columns and immediate valid unique arbiters."""
+        columns = backend.execute(
+            "SELECT table_name,column_name, "
+            "has_column_privilege(current_user,format('%I.%I',table_schema,table_name),column_name,'SELECT') "
+            "AS readable FROM information_schema.columns WHERE table_schema='public'"
+        ).rows
+        readable: dict[str, set[str]] = {}
+        for row in columns:
+            if row["readable"] is True:
+                readable.setdefault(row["table_name"], set()).add(row["column_name"])
+        for table, (required, _primary) in _POSTGRES_COLLECTIONS_SCHEMA.items():
+            if not set(required.split()) <= readable.get(table, set()):
+                raise DatabaseError("Collections PostgreSQL columns require owner migration")
+        indexes = backend.execute(
+            """
+            SELECT relation.relname AS table_name,index_relation.relname AS index_name,
+                   indexes.indisunique AND indexes.indisvalid AND indexes.indisready
+                     AND indexes.indimmediate AS ready,
+                   indexes.indisprimary AS is_primary,
+                   ARRAY(SELECT attribute.attname::text
+                         FROM unnest(indexes.indkey) WITH ORDINALITY AS key_part(number,position)
+                         LEFT JOIN pg_attribute AS attribute ON attribute.attrelid=indexes.indrelid
+                           AND attribute.attnum=key_part.number
+                         WHERE key_part.position<=indexes.indnkeyatts ORDER BY key_part.position) AS columns,
+                   pg_get_expr(indexes.indpred,indexes.indrelid) AS predicate,
+                   indexes.indexprs IS NULL AS plain
+            FROM pg_index AS indexes
+            JOIN pg_class AS index_relation ON index_relation.oid=indexes.indexrelid
+            JOIN pg_class AS relation ON relation.oid=indexes.indrelid
+            JOIN pg_namespace AS namespace ON namespace.oid=relation.relnamespace
+            WHERE namespace.nspname='public'
+            """
+        ).rows
+        if any(row["index_name"] == "ux_outputs_user_idempotency" for row in indexes):
+            raise DatabaseError("Collections legacy output idempotency requires owner migration")
+        valid = [row for row in indexes if row["ready"] is True and row["plain"] is True]
+        for table, (_columns, primary) in _POSTGRES_COLLECTIONS_SCHEMA.items():
+            if primary and not any(
+                row["table_name"] == table
+                and row["is_primary"] is True
+                and tuple(row["columns"]) == tuple(primary.split())
+                and row["predicate"] is None
+                for row in valid
+            ):
+                raise DatabaseError("Collections PostgreSQL primary keys require owner migration")
+        for table, required_keys in _POSTGRES_COLLECTIONS_UNIQUE_KEYS.items():
+            for keys in required_keys:
+                if not any(
+                    row["table_name"] == table and tuple(row["columns"]) == tuple(keys.split()) and row["predicate"] is None
+                    for row in valid
+                ):
+                    raise DatabaseError("Collections PostgreSQL unique keys require owner migration")
+        by_name = {row["index_name"]: row for row in valid}
+        for name, (table, keys, predicate) in _POSTGRES_COLLECTIONS_UNIQUE_INDEXES.items():
+            row = by_name.get(name)
+            if row is None or row["table_name"] != table or tuple(row["columns"]) != tuple(keys.split()):
+                raise DatabaseError("Collections PostgreSQL unique indexes require owner migration")
+            actual = row["predicate"]
+            if not _postgres_predicate_matches(actual, predicate):
+                raise DatabaseError("Collections PostgreSQL unique predicates require owner migration")
 
     def _get_pinned_backend(self) -> DatabaseBackend | None:
         return getattr(self._local, "backend_pin", None)
@@ -768,8 +1344,50 @@ class CollectionsDatabase:
         found = {row["name"] for row in rows}
         return found.issuperset(_COLLECTIONS_REQUIRED_TABLES)
 
-    def _run_backend_bootstrap(self) -> None:
+    def _ensure_schema_and_tag_identity(self) -> None:
         self.ensure_schema()
+        if not self._fts_available:  # Postgres: no FTS table to keep in step
+            ensure_tag_identity(self.backend, COLLECTION_TAGS)
+            return
+        # One SQLite transaction (the merge's own joins it on the thread's connection): the
+        # index gates the merge, so it must not commit unless the FTS rebuild does too.
+        with self.backend.transaction():
+            if ensure_tag_identity(self.backend, COLLECTION_TAGS):
+                self._rebuild_content_fts()
+
+    def _rebuild_content_fts(self, batch_size: int = 500) -> None:
+        """Re-index every content item after a tag merge changed tag text (TASK-13950.5).
+
+        The contentless FTS table can only drop a row given the exact text it indexed, which a
+        merge no longer has, so the index is cleared and rebuilt from current rows, in batches.
+        Errors propagate so the caller's transaction rolls the merge back with it.
+        """
+        clear = (
+            "DELETE FROM content_items_fts"
+            if self._fts_supports_direct_delete
+            else "INSERT INTO content_items_fts(content_items_fts) VALUES('delete-all')"
+        )
+        self.backend.execute(clear, ())
+        last_id = 0
+        while rows := self.backend.execute(
+            "SELECT id, title, summary, notes, metadata_json FROM content_items WHERE id > ? ORDER BY id LIMIT ?",
+            (last_id, batch_size),
+        ).rows:
+            tags_map = self._fetch_tags_for_item_ids([int(row["id"]) for row in rows])
+            for row in rows:
+                last_id = int(row["id"])
+                metadata_text = self._build_content_fts_metadata_text(
+                    notes=row.get("notes"),
+                    tags=tags_map.get(last_id, []),
+                    metadata_json=row.get("metadata_json"),
+                )
+                self.backend.execute(
+                    "INSERT INTO content_items_fts(rowid, title, summary, metadata) VALUES (?, ?, ?, ?)",
+                    (last_id, row.get("title") or "", row.get("summary") or "", metadata_text),
+                )
+
+    def _run_backend_bootstrap(self) -> None:
+        self._ensure_schema_and_tag_identity()
         self._seed_watchlists_output_templates()
 
     def _mark_backend_bootstrapped(self, backend: DatabaseBackend | None) -> None:
@@ -780,8 +1398,9 @@ class CollectionsDatabase:
     def _ensure_bootstrap_for_backend(self, backend: DatabaseBackend) -> None:
         if backend.backend_type != BackendType.POSTGRESQL:
             return
+        can_migrate = self._postgres_can_migrate(backend)
         key = self._backend_target_key(backend)
-        if key in type(self)._bootstrapped_backend_targets:
+        if can_migrate and key in type(self)._bootstrapped_backend_targets:
             return
         previous_suspend = self._backend_refresh_suspended
         self._backend_refresh_suspended = True
@@ -790,7 +1409,7 @@ class CollectionsDatabase:
             self._run_backend_bootstrap()
         finally:
             self._backend_refresh_suspended = previous_suspend
-        if key:
+        if can_migrate and key:
             type(self)._bootstrapped_backend_targets.add(key)
 
     def _resolve_backend(self) -> tuple[DatabaseBackend, bool]:
@@ -1027,8 +1646,9 @@ class CollectionsDatabase:
     def _backfill_audiobook_project_ids(self) -> None:
         try:
             rows = self.backend.execute(
-                "SELECT id, settings_json FROM audiobook_projects WHERE project_id IS NULL OR project_id = ''",
-                (),
+                "SELECT id, settings_json FROM audiobook_projects "
+                "WHERE user_id = ? AND (project_id IS NULL OR project_id = '')",
+                (self.user_id,),
             ).rows
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("collections backfill: audiobook_projects.project_id fetch failed: {}", exc)
@@ -1085,6 +1705,10 @@ class CollectionsDatabase:
 
     def ensure_schema(self) -> None:
         """Create tables if they do not already exist."""
+        if self.backend.backend_type == BackendType.POSTGRESQL and not self._postgres_can_migrate(self.backend):
+            self._validate_postgres_runtime_schema(self.backend)
+            self._backfill_audiobook_project_ids()
+            return
         if self.backend.backend_type == BackendType.POSTGRESQL:
             ddl = """
             CREATE TABLE IF NOT EXISTS output_templates (
@@ -2213,309 +2837,9 @@ class CollectionsDatabase:
         # Collections layer tables
         fts_available = self.backend.backend_type == BackendType.SQLITE
         if self.backend.backend_type == BackendType.POSTGRESQL:
-            content_ddl = """
-            CREATE TABLE IF NOT EXISTS collection_tags (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                UNIQUE (user_id, name)
-            );
-
-            CREATE TABLE IF NOT EXISTS content_items (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                origin TEXT NOT NULL,
-                origin_type TEXT,
-                origin_id BIGINT,
-                url TEXT,
-                canonical_url TEXT,
-                domain TEXT,
-                title TEXT,
-                summary TEXT,
-                notes TEXT,
-                content_hash TEXT,
-                word_count INTEGER,
-                published_at TEXT,
-                status TEXT,
-                favorite INTEGER NOT NULL DEFAULT 0,
-                metadata_json TEXT,
-                media_id BIGINT,
-                job_id BIGINT,
-                run_id BIGINT,
-                source_id BIGINT,
-                read_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_hash ON content_items(user_id, content_hash) WHERE content_hash IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_content_items_user_updated ON content_items(user_id, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
-            CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
-            CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
-
-            CREATE TABLE IF NOT EXISTS media_collections (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                description TEXT,
-                source_url TEXT,
-                metadata_json TEXT,
-                default_tags_json TEXT,
-                deleted BOOLEAN NOT NULL DEFAULT FALSE,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
-                ON media_collections(user_id, deleted, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
-                ON media_collections(user_id, kind, deleted, updated_at DESC);
-
-            CREATE TABLE IF NOT EXISTS media_collection_items (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                collection_id BIGINT NOT NULL,
-                ordinal INTEGER NOT NULL,
-                source_url TEXT NOT NULL,
-                normalized_source_id TEXT,
-                source_kind TEXT,
-                title TEXT,
-                speaker TEXT,
-                published_at TEXT,
-                track TEXT,
-                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
-                status TEXT NOT NULL DEFAULT 'planned',
-                media_id BIGINT,
-                content_item_id BIGINT,
-                latest_job_id TEXT,
-                latest_run_id BIGINT,
-                idempotency_key TEXT,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                error_summary TEXT,
-                warnings_json TEXT,
-                metadata_json TEXT,
-                tags_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
-                ON media_collection_items(user_id, collection_id, ordinal);
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
-                ON media_collection_items(user_id, collection_id, ordinal);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
-                ON media_collection_items(user_id, normalized_source_id);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
-                ON media_collection_items(user_id, media_id);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
-                ON media_collection_items(user_id, latest_job_id);
-
-            CREATE TABLE IF NOT EXISTS media_collection_runs (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                collection_id BIGINT NOT NULL,
-                batch_id TEXT,
-                status TEXT NOT NULL,
-                requested_count INTEGER NOT NULL DEFAULT 0,
-                queued_count INTEGER NOT NULL DEFAULT 0,
-                processing_count INTEGER NOT NULL DEFAULT 0,
-                completed_count INTEGER NOT NULL DEFAULT 0,
-                failed_count INTEGER NOT NULL DEFAULT 0,
-                skipped_count INTEGER NOT NULL DEFAULT 0,
-                cancelled_count INTEGER NOT NULL DEFAULT 0,
-                options_json TEXT,
-                summary_json TEXT,
-                started_at TEXT,
-                completed_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
-                ON media_collection_runs(user_id, collection_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
-                ON media_collection_runs(user_id, batch_id);
-
-            CREATE TABLE IF NOT EXISTS content_item_tags (
-                item_id BIGINT NOT NULL,
-                tag_id BIGINT NOT NULL,
-                UNIQUE (item_id, tag_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS saved_searches (
-                id BIGSERIAL PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                query_json TEXT NOT NULL,
-                sort TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_saved_searches_user_name ON saved_searches(user_id, name);
-            CREATE INDEX IF NOT EXISTS idx_saved_searches_user_updated ON saved_searches(user_id, updated_at DESC);
-
-            CREATE TABLE IF NOT EXISTS content_item_note_links (
-                user_id TEXT NOT NULL,
-                item_id BIGINT NOT NULL,
-                note_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                PRIMARY KEY (user_id, item_id, note_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_content_item_note_links_user_item
-                ON content_item_note_links(user_id, item_id, created_at DESC);
-            """
+            content_ddl = POSTGRES_CONTENT_DDL
         else:
-            content_ddl = """
-            CREATE TABLE IF NOT EXISTS collection_tags (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                UNIQUE (user_id, name)
-            );
-
-            CREATE TABLE IF NOT EXISTS content_items (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                origin TEXT NOT NULL,
-                origin_type TEXT,
-                origin_id INTEGER,
-                url TEXT,
-                canonical_url TEXT,
-                domain TEXT,
-                title TEXT,
-                summary TEXT,
-                notes TEXT,
-                content_hash TEXT,
-                word_count INTEGER,
-                published_at TEXT,
-                status TEXT,
-                favorite INTEGER NOT NULL DEFAULT 0,
-                metadata_json TEXT,
-                media_id INTEGER,
-                job_id INTEGER,
-                run_id INTEGER,
-                source_id INTEGER,
-                read_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_canonical ON content_items(user_id, canonical_url) WHERE canonical_url IS NOT NULL;
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_content_items_user_hash ON content_items(user_id, content_hash) WHERE content_hash IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_content_items_user_updated ON content_items(user_id, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_content_items_user_domain ON content_items(user_id, domain);
-            CREATE INDEX IF NOT EXISTS idx_content_items_job ON content_items(job_id);
-            CREATE INDEX IF NOT EXISTS idx_content_items_run ON content_items(run_id);
-
-            CREATE TABLE IF NOT EXISTS media_collections (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                description TEXT,
-                source_url TEXT,
-                metadata_json TEXT,
-                default_tags_json TEXT,
-                deleted INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collections_user_updated
-                ON media_collections(user_id, deleted, updated_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_media_collections_user_kind
-                ON media_collections(user_id, kind, deleted, updated_at DESC);
-
-            CREATE TABLE IF NOT EXISTS media_collection_items (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                collection_id INTEGER NOT NULL,
-                ordinal INTEGER NOT NULL,
-                source_url TEXT NOT NULL,
-                normalized_source_id TEXT,
-                source_kind TEXT,
-                title TEXT,
-                speaker TEXT,
-                published_at TEXT,
-                track TEXT,
-                duplicate_status TEXT NOT NULL DEFAULT 'unknown',
-                status TEXT NOT NULL DEFAULT 'planned',
-                media_id INTEGER,
-                content_item_id INTEGER,
-                latest_job_id TEXT,
-                latest_run_id INTEGER,
-                idempotency_key TEXT,
-                retry_count INTEGER NOT NULL DEFAULT 0,
-                error_summary TEXT,
-                warnings_json TEXT,
-                metadata_json TEXT,
-                tags_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_collection
-                ON media_collection_items(user_id, collection_id, ordinal);
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_media_collection_items_collection_ordinal
-                ON media_collection_items(user_id, collection_id, ordinal);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_source
-                ON media_collection_items(user_id, normalized_source_id);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_media
-                ON media_collection_items(user_id, media_id);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_items_job
-                ON media_collection_items(user_id, latest_job_id);
-
-            CREATE TABLE IF NOT EXISTS media_collection_runs (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                collection_id INTEGER NOT NULL,
-                batch_id TEXT,
-                status TEXT NOT NULL,
-                requested_count INTEGER NOT NULL DEFAULT 0,
-                queued_count INTEGER NOT NULL DEFAULT 0,
-                processing_count INTEGER NOT NULL DEFAULT 0,
-                completed_count INTEGER NOT NULL DEFAULT 0,
-                failed_count INTEGER NOT NULL DEFAULT 0,
-                skipped_count INTEGER NOT NULL DEFAULT 0,
-                cancelled_count INTEGER NOT NULL DEFAULT 0,
-                options_json TEXT,
-                summary_json TEXT,
-                started_at TEXT,
-                completed_at TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_collection
-                ON media_collection_runs(user_id, collection_id, created_at DESC);
-            CREATE INDEX IF NOT EXISTS idx_media_collection_runs_batch
-                ON media_collection_runs(user_id, batch_id);
-
-            CREATE TABLE IF NOT EXISTS content_item_tags (
-                item_id INTEGER NOT NULL,
-                tag_id INTEGER NOT NULL,
-                UNIQUE (item_id, tag_id)
-            );
-
-            CREATE TABLE IF NOT EXISTS saved_searches (
-                id INTEGER PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                query_json TEXT NOT NULL,
-                sort TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE (user_id, name)
-            );
-            CREATE INDEX IF NOT EXISTS idx_saved_searches_user_updated ON saved_searches(user_id, updated_at DESC);
-
-            CREATE TABLE IF NOT EXISTS content_item_note_links (
-                user_id TEXT NOT NULL,
-                item_id INTEGER NOT NULL,
-                note_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                PRIMARY KEY (user_id, item_id, note_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_content_item_note_links_user_item
-                ON content_item_note_links(user_id, item_id, created_at DESC);
-            """
+            content_ddl = SQLITE_CONTENT_DDL
         try:
             self.backend.create_tables(content_ddl)
         except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as e:
@@ -2805,10 +3129,6 @@ class CollectionsDatabase:
     # Collections Tags helpers
     # ------------------------
     @staticmethod
-    def _normalize_collection_tag(name: str) -> str:
-        return name.strip().lower()
-
-    @staticmethod
     def _infer_output_template_type(name: str, fmt: str) -> str:
         if fmt == "html":
             return "newsletter_html"
@@ -2877,45 +3197,8 @@ class CollectionsDatabase:
         )
 
     def ensure_collection_tag_ids(self, names: Iterable[str]) -> list[int]:
-        normed: list[str] = []
-        seen: set[str] = set()
-        for raw in names or []:
-            if not raw:
-                continue
-            nm = self._normalize_collection_tag(str(raw))
-            if not nm or nm in seen:
-                continue
-            seen.add(nm)
-            normed.append(nm)
-        if not normed:
-            return []
-
-        ids: list[int] = []
-        select_sql = "SELECT id FROM collection_tags WHERE user_id = ? AND name = ?"
-        insert_sql = "INSERT INTO collection_tags (user_id, name) VALUES (?, ?)"
-        for nm in normed:
-            select_params = (self.user_id, nm)
-            row = self.backend.execute(select_sql, select_params).first
-            if row:
-                ids.append(int(row.get("id")))
-                continue
-            insert_exc: Exception | None = None
-            tag_id: int | None = None
-            try:
-                res = self._execute_insert(insert_sql, (self.user_id, nm))
-                tag_id = self._extract_lastrowid(res)
-            except _COLLECTIONS_NONCRITICAL_EXCEPTIONS as exc:
-                insert_exc = exc
-            if tag_id is None:
-                row = self.backend.execute(select_sql, select_params).first
-                if row:
-                    tag_id = int(row.get("id"))
-            if tag_id is None:
-                if insert_exc:
-                    raise insert_exc
-                raise DatabaseError("Failed to ensure collection tag id")
-            ids.append(tag_id)
-        return ids
+        """Return this owner's tag ids for ``names``, matched by identity; new tags keep their casing."""
+        return ensure_tag_ids(self.backend, COLLECTION_TAGS, self.user_id, names)
 
     def _replace_item_tags(self, item_id: int, tag_ids: Iterable[int]) -> None:
         self.backend.execute("DELETE FROM content_item_tags WHERE item_id = ?", (item_id,))
@@ -2955,7 +3238,7 @@ class CollectionsDatabase:
             name = str(row.get("name"))
             mapping.setdefault(item_id, []).append(name)
         for tag_list in mapping.values():
-            tag_list.sort()
+            tag_list.sort(key=normalize_keyword_identity)
         return mapping
 
     def _update_content_fts_entry(
@@ -4037,7 +4320,6 @@ class CollectionsDatabase:
         where: list[str] = ["ci.user_id = ?"]
         params: list[Any] = [self.user_id]
         joins: list[str] = []
-        having = ""
 
         if ids:
             id_list = [int(i) for i in ids]
@@ -4082,35 +4364,31 @@ class CollectionsDatabase:
             where.append("ci.favorite = ?")
             params.append(1 if favorite else 0)
 
-        tag_filters: list[str] = []
-        if tags:
-            for t in tags:
-                if t:
-                    tag_filters.append(self._normalize_collection_tag(str(t)))
+        tag_filters = dedupe_keywords(tags or [])
         if tag_filters:
-            tag_filters = list(dict.fromkeys(tag_filters))
-            joins.append("INNER JOIN content_item_tags cit ON cit.item_id = ci.id")
-            joins.append("INNER JOIN collection_tags ct ON ct.id = cit.tag_id")
-            placeholders = ",".join("?" for _ in tag_filters)
-            where.append(f"ct.name IN ({placeholders})")
-            params.extend(tag_filters)
-            having = f"HAVING COUNT(DISTINCT ct.name) >= {len(tag_filters)}"
+            tag_ids = match_tag_ids(self.backend, COLLECTION_TAGS, self.user_id, tag_filters, all_matches=True)
+            if len(tag_ids) < len(tag_filters):
+                return [], 0
+            for ids in tag_ids.values():
+                marks = ", ".join("?" for _ in ids)
+                where.append(f"EXISTS (SELECT 1 FROM content_item_tags cit WHERE cit.item_id = ci.id AND cit.tag_id IN ({marks}))")  # nosec B608
+                params.extend(ids)
 
         def _apply_like_search(where_clause: list[str], clause_params: list[Any]) -> None:
             q_like = f"%{q.lower()}%"
+            # Tags match by identity substring (SQLite LOWER() cannot fold "É" or "ß"), so "%" and
+            # "_" in q are literal for tags while title/summary/notes still treat them as LIKE wildcards.
+            tag_ids = [int(row["id"]) for row in tags_containing(self.backend, COLLECTION_TAGS, self.user_id, q or "")]
+            tag_match = f"cit_q.tag_id IN ({', '.join('?' for _ in tag_ids)})" if tag_ids else "1 = 0"  # nosec B608
             where_clause.append(
                 "("
                 "LOWER(COALESCE(ci.title, '')) LIKE ? OR "
                 "LOWER(COALESCE(ci.summary, '')) LIKE ? OR "
                 "LOWER(COALESCE(ci.notes, '')) LIKE ? OR "
-                "EXISTS ("
-                "SELECT 1 FROM content_item_tags cit_q "
-                "JOIN collection_tags ct_q ON ct_q.id = cit_q.tag_id "
-                "WHERE cit_q.item_id = ci.id AND ct_q.user_id = ? AND LOWER(ct_q.name) LIKE ?"
-                ")"
+                f"EXISTS (SELECT 1 FROM content_item_tags cit_q WHERE cit_q.item_id = ci.id AND {tag_match})"  # nosec B608
                 ")"
             )
-            clause_params.extend([q_like, q_like, q_like, self.user_id, q_like])
+            clause_params.extend([q_like, q_like, q_like, *tag_ids])
 
         def _execute_query(
             where_clause: list[str],
@@ -4119,10 +4397,9 @@ class CollectionsDatabase:
             fts_joined: bool,
         ) -> tuple[list[ContentItemRow], int]:
             where_sql = " AND ".join(where_clause) if where_clause else "1=1"
-            group_by = "GROUP BY ci.id" if tag_filters else ""
             joins_sql = f" {' '.join(query_joins)}" if query_joins else ""
             base_from = f"FROM content_items ci{joins_sql}"
-            subquery = f"SELECT ci.id {base_from} WHERE {where_sql} {group_by} {having}"
+            subquery = f"SELECT ci.id {base_from} WHERE {where_sql}"
             count_sql = f"SELECT COUNT(*) AS cnt FROM ({subquery}) AS subq"  # nosec B608
 
             resolved_limit = limit if isinstance(limit, int) and limit > 0 else size
@@ -4150,8 +4427,6 @@ class CollectionsDatabase:
                     ci.source_id, ci.read_at, ci.created_at, ci.updated_at
                 {base_from}
                 WHERE {where_sql}
-                {group_by}
-                {having}
                 ORDER BY {order_by}
                 LIMIT ? OFFSET ?
             """
@@ -5580,6 +5855,44 @@ class CollectionsDatabase:
         include_archived: bool = False,
     ) -> AudioStudioProjectRow:
         return self._get_audio_studio_project(project_row_id=project_row_id, include_archived=include_archived)
+
+    def get_audio_studio_project_snapshot(
+        self, project_row_id: int
+    ) -> tuple[AudioStudioProjectRow, list[AudioStudioSectionRow], list[AudioStudioTrackRow], list[AudioStudioClipRow]]:
+        """Read one owner-bound project and its live resources at the same revision."""
+        with self._operation_backend_pin(), self._read_snapshot() as connection:
+            project = self._get_audio_studio_project(project_row_id=project_row_id, connection=connection)
+            params = (
+                project.id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+            )
+            sections = self.backend.execute(
+                "SELECT id, project_row_id, section_id, workflow, title, body_text, speaker_id, order_index, settings_json, current_revision_id, archived_at, deleted, deleted_at "
+                "FROM audio_studio_sections WHERE project_row_id = ? AND deleted = ? AND archived_at IS NULL "
+                "ORDER BY order_index, section_id",
+                params,
+                connection=connection,
+            ).rows
+            tracks = self.backend.execute(
+                "SELECT id, project_row_id, track_id, name, kind, order_index, muted, solo, volume, settings_json, current_revision_id, archived_at, deleted, deleted_at "
+                "FROM audio_studio_tracks WHERE project_row_id = ? AND deleted = ? AND archived_at IS NULL "
+                "ORDER BY order_index, track_id",
+                params,
+                connection=connection,
+            ).rows
+            clips = self.backend.execute(
+                "SELECT id, project_row_id, clip_id, section_id, track_id, title, clip_type, start_ms, duration_ms, volume, fade_in_ms, fade_out_ms, muted, artifact_id, settings_json, current_revision_id, archived_at, deleted, deleted_at "
+                "FROM audio_studio_clips WHERE project_row_id = ? AND deleted = ? AND archived_at IS NULL "
+                "ORDER BY start_ms, clip_id",
+                params,
+                connection=connection,
+            ).rows
+            return (
+                project,
+                [AudioStudioSectionRow(**row) for row in sections],
+                [AudioStudioTrackRow(**row) for row in tracks],
+                [AudioStudioClipRow(**row) for row in clips],
+            )
 
     def get_audio_studio_project_by_project_id(
         self,

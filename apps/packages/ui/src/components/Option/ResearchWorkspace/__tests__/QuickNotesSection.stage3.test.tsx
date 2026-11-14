@@ -1,6 +1,11 @@
-import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+vi.mock(
+  "@plasmohq/storage",
+  () =>
+    import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
+);
+import React from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   QuickNotesSection,
   rankKeywordSuggestions
@@ -33,8 +38,9 @@ const {
       content: "",
       keywords: [] as string[],
       version: undefined as number | undefined,
-      isDirty: false
+      isDirty: false,
     },
+    workspaceId: "workspace-test",
     workspaceTag: "workspace:test",
     updateNoteTitle: vi.fn(),
     updateNoteContent: vi.fn(),
@@ -42,9 +48,12 @@ const {
     setCurrentNote,
     clearCurrentNote: vi.fn(),
     loadNote: vi.fn(),
-    noteFocusTarget: null as { field: "title" | "content"; token: number } | null,
-    clearNoteFocusTarget: vi.fn()
-  }
+    noteFocusTarget: null as {
+      field: "title" | "content";
+      token: number;
+    } | null,
+    clearNoteFocusTarget: vi.fn(),
+  };
 
   return {
     mockBgRequest: bgRequest,
@@ -77,9 +86,54 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
-  useWorkspaceStore: (
-    selector: (state: typeof workspaceStoreState) => unknown
-  ) => selector(workspaceStoreState)
+  hasResearchWorkspaceMigrationTombstone: () => false,
+  // The save flow drains the coalescing persist writer before the
+  // accepted-identity read-back; this partial mock only needs the no-op.
+  flushWorkspacePersistence: async () => {},
+  useWorkspaceStore: Object.assign(
+    (selector: (state: typeof workspaceStoreState) => unknown) =>
+      selector(workspaceStoreState),
+    {
+      getState: () => workspaceStoreState,
+      subscribe: () => () => {},
+      persist: {
+        getOptions: () => ({
+          name: "tldw-workspace",
+          storage: {
+            getItem: async () => ({
+              state: {
+                workspaceSnapshots: {
+                  [workspaceStoreState.workspaceId]: {
+                    workspaceTag: workspaceStoreState.workspaceTag,
+                    currentNote: workspaceStoreState.currentNote,
+                  },
+                },
+              },
+            }),
+          },
+        }),
+      },
+    },
+  ),
+}));
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) },
+}));
+
+vi.mock("@/services/service-prompts", () => ({
+  loadServicePromptSnapshot: async () => ({
+    requestScope: {
+      config: {
+        serverUrl: "https://research.example",
+        authMode: "single-user"
+      },
+      userId: null
+    },
+    scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: () => {}
+  })
 }))
 
 vi.mock("@/services/background-proxy", () => ({
@@ -116,8 +170,24 @@ vi.mock("antd", async () => {
 })
 
 describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.stubGlobal(
+      "navigator",
+      Object.create(window.navigator, {
+        locks: {
+          value: {
+            request: (_key: string, operation: () => unknown) =>
+              Promise.resolve().then(operation),
+          },
+        },
+      }),
+    );
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    mockSetCurrentNote.mockImplementation((note) => {
+      workspaceStoreState.currentNote = note;
+    });
     workspaceStoreState.currentNote = {
       id: undefined,
       title: "",
@@ -195,7 +265,7 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       if (path.includes("/api/v1/notes/search/") && path.includes("limit=8")) {
         return []
       }
-      if (path.includes("/api/v1/notes/42?expected_version=1")) {
+      if (path === "/api/v1/notes/42" && request.method === "PUT") {
         throw { status: 409, message: "version conflict" }
       }
       if (path.endsWith("/api/v1/notes/42")) {
@@ -221,6 +291,11 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       expect(mockMessageOpen).toHaveBeenCalledTimes(1)
     })
 
+    expect(mockSetCurrentNote.mock.calls[0]?.[0]).toMatchObject({
+      content: "Local unsaved paragraph",
+      version: 1,
+      isDirty: true,
+    });
     const conflictConfig = mockMessageOpen.mock.calls[0]?.[0]
     const renderedConflict = render(<>{conflictConfig?.content}</>)
     expect(renderedConflict.getByText("Reload latest")).toBeInTheDocument()
@@ -237,7 +312,7 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       )
     })
 
-    const merged = mockSetCurrentNote.mock.calls[0]?.[0]
+    const merged = mockSetCurrentNote.mock.calls.at(-1)?.[0]
     expect(merged.content).toContain("Server copy")
     expect(merged.content).toContain("## Local Draft (Unsaved)")
     expect(merged.content).toContain("Local unsaved paragraph")
@@ -261,7 +336,7 @@ describe("QuickNotesSection Stage 3 authoring and conflict recovery", () => {
       if (path.includes("/api/v1/notes/search/") && path.includes("limit=8")) {
         return []
       }
-      if (path.includes("/api/v1/notes/7?expected_version=1")) {
+      if (path === "/api/v1/notes/7" && request.method === "PUT") {
         return {
           id: 7,
           title: "Saved Note",

@@ -3,7 +3,7 @@ from __future__ import annotations
 PROFILE_MAP: dict[str, set[str] | None] = {
     "full": None,
     "llm-only": {"embeddings", "media_ingest"},
-    "tts-only": {"audio", "audio_jobs"},
+    "tts-only": {"audio", "audio_jobs", "tts"},
     "ingest-only": {"media_ingest"},
 }
 

@@ -131,10 +131,11 @@ def route_debugger():
 
 
 @pytest.fixture(scope="function")
-def jobs_pg_dsn(pg_temp_db, monkeypatch):
-    """Function-scoped DSN for Jobs tests using a temp Postgres DB.
+def jobs_pg_dsn(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Initialize Jobs on the selected fixture-owned per-test PostgreSQL DB.
 
-    - Allocates a per-test database via the unified pg_temp_db fixture.
+    - Opted-in modules delegate lifecycle to isolated_test_environment.
+    - Historical modules retain the unified pg_temp_db fixture.
     - Ensures Jobs schema exists on that DB.
     - Sets JOBS_DB_URL for the duration of the test.
     """
@@ -147,8 +148,14 @@ def jobs_pg_dsn(pg_temp_db, monkeypatch):
     if "jobs" not in parts:
         parts.append("jobs")
     monkeypatch.setenv("ROUTES_ENABLE", ",".join(parts))
-    # Resolve a fresh temp database
-    dsn = str(pg_temp_db["dsn"])  # type: ignore[index]
+    if getattr(request.module, "USE_SHARED_JOBS_POSTGRES", False):
+        from psycopg.conninfo import conninfo_to_dict
+
+        _, db_name = request.getfixturevalue("isolated_test_environment")
+        dsn = os.environ["TEST_DATABASE_URL"]
+        assert conninfo_to_dict(dsn)["dbname"] == db_name, "DSN must belong to the shared fixture"
+    else:
+        dsn = str(request.getfixturevalue("pg_temp_db")["dsn"])
     # Initialize Jobs schema
     from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_tables_pg, ensure_job_counters_pg
     ensure_jobs_tables_pg(dsn)
@@ -164,13 +171,157 @@ def jobs_pg_dsn(pg_temp_db, monkeypatch):
     return dsn
 
 
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
+def uninstalled_workflow_case(request, tmp_path, monkeypatch, _workflow_pg_case_factory):
+    """Ordinary Jobs only; PostgreSQL lifecycle belongs to jobs_pg_dsn."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.tests.Jobs.workflow_test_support import WorkflowCase
+
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_EMBEDDINGS", "workflow")
+    if request.param == "sqlite":
+        return WorkflowCase.from_manager(JobManager(db_path=tmp_path / "workflow.db", backend="sqlite"))
+    return _workflow_pg_case_factory()
+
+
+@pytest.fixture
+def workflow_case(uninstalled_workflow_case):
+    """Install support explicitly before capability behavior tests."""
+    uninstalled_workflow_case.install()
+    return uninstalled_workflow_case
+
+
+@pytest.fixture
+def _workflow_pg_case_factory(request, monkeypatch):
+    """Privileged installer and a distinct non-bypassing runtime login."""
+    import secrets
+    from urllib.parse import quote, urlparse, urlunparse
+
+    import psycopg
+    from psycopg import sql
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.pg_migrations import ensure_jobs_rls_policies_pg
+    from tldw_Server_API.tests.Jobs.workflow_test_support import WorkflowCase
+
+    created = []
+
+    def make_case():
+        dsn = request.getfixturevalue("jobs_pg_dsn")
+        monkeypatch.setenv("JOBS_ALLOWED_QUEUES_EMBEDDINGS", "workflow")
+        monkeypatch.delenv("JOBS_PG_RLS_ROLE", raising=False)
+        installer = JobManager(backend="postgres", db_url=dsn)
+        # Provision ordinary Jobs RLS before the runtime skips schema initialization.
+        ensure_jobs_rls_policies_pg(dsn)
+        role = "jobs_workflow_" + secrets.token_hex(8)
+        password = secrets.token_hex(32)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(
+                sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD {}").format(
+                    sql.Identifier(role), sql.Literal(password)
+                )
+            )
+            created.append((dsn, role))
+            conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role)))
+            tables = (
+                "jobs",
+                "jobs_archive",
+                "job_events",
+                "job_counters",
+                "job_queue_controls",
+                "job_dependencies",
+                "job_idempotency_receipts",
+                "job_attachments",
+                "job_sla_policies",
+            )
+            conn.execute(
+                sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON {} TO {}").format(
+                    sql.SQL(",").join(map(sql.Identifier, tables)), sql.Identifier(role)
+                )
+            )
+            sequences = conn.execute(
+                "SELECT pg_get_serial_sequence(table_name,column_name) FROM information_schema.columns "
+                "WHERE table_schema='public' AND table_name=ANY(%s) AND column_default LIKE 'nextval%%'",
+                (list(tables),),
+            ).fetchall()
+            for (sequence,) in sequences:
+                conn.execute(
+                    sql.SQL("GRANT USAGE,SELECT ON {} TO {}").format(
+                        sql.Identifier(*sequence.split(".")), sql.Identifier(role)
+                    )
+                )
+        monkeypatch.setenv("JOBS_PG_SKIP_SCHEMA_INIT", "true")
+        monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
+        parsed = urlparse(dsn)
+        authority = f"{quote(role)}:{quote(password)}@{parsed.hostname}:{parsed.port or 5432}"
+        runtime_dsn = urlunparse(parsed._replace(netloc=authority))
+        case = WorkflowCase.from_manager(JobManager(backend="postgres", db_url=runtime_dsn))
+        case.installer = installer
+        return case
+
+    try:
+        yield make_case
+    finally:
+        JobManager.clear_rls_context()
+        for dsn, role in created:
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+                conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+
+
+@pytest.fixture
+def workflow_pg_case(_workflow_pg_case_factory):
+    """Request just the installed PostgreSQL variant without a second matrix."""
+    case = _workflow_pg_case_factory()
+    case.install()
+    return case
+
+
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
+def workflow_example_factory(request, tmp_path, monkeypatch, _workflow_pg_case_factory):
+    """Fresh state per Hypothesis example; reuse the fixture-owned PG database."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.tests.Jobs.workflow_test_support import WorkflowCase
+
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_EMBEDDINGS", "workflow")
+    pg_case = None
+    serial = 0
+
+    def fresh_case():
+        nonlocal pg_case, serial
+        serial += 1
+        if request.param == "sqlite":
+            case = WorkflowCase.from_manager(JobManager(db_path=tmp_path / f"example-{serial}.db", backend="sqlite"))
+            case.install()
+            return case
+        if pg_case is None:
+            pg_case = _workflow_pg_case_factory()
+            pg_case.install()
+            pg_case.install_effect_guard()
+        with pg_case.connection() as conn:
+            conn.execute(
+                "TRUNCATE job_workflow_effect_receipts,job_workflow_roots,jobs,jobs_archive,job_events,"
+                "job_counters,job_dependencies,job_idempotency_receipts,job_attachments"
+            )
+            conn.execute("UPDATE workflow_effect_domain SET applications=0")
+            conn.commit()
+        case = WorkflowCase.from_manager(pg_case.manager)
+        case.installer = pg_case.installer
+        case.guard_installed = True
+        return case
+
+    return fresh_case
+
+
 @pytest.fixture(autouse=True)
-def _pg_jobs_db_url(request, monkeypatch):
-    """Provide JOBS_DB_URL for pg_jobs tests that don't request jobs_pg_dsn."""
+def _pg_jobs_db_url(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bind pg_jobs to the opted-in shared lifecycle or the historical route."""
     try:
         if "pg_jobs" not in request.keywords:
             return
     except Exception:
+        return
+    if getattr(request.module, "USE_SHARED_JOBS_POSTGRES", False):
+        monkeypatch.setenv("JOBS_DB_URL", request.getfixturevalue("jobs_pg_dsn"))
         return
     # Default to the per-test temp DB for pg_jobs, unless explicitly overridden.
     if _truthy(os.getenv("JOBS_PG_USE_ENV_DB")) and os.getenv("JOBS_DB_URL", "").startswith("postgres"):

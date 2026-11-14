@@ -44,11 +44,11 @@ Migrate the remaining PlaygroundChatErrorBanner local-recovery-banner debt from 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PlaygroundChatErrorBanner through RecoveryCallout with state=error, preserving the existing data-testid and role=alert surface. Diagnostics navigation now uses the RecoveryCallout primary action and navigate("/settings/health"); dismiss uses the secondary action and existing onDismiss(error.key) callback.
 
 The PlaygroundChatErrorBanner local-recovery-banner baseline exception was removed. While verifying against current dev, the design-system verifier exposed unrelated baseline drift in CharacterDialogs and Sidepanel conversation-context labels, so this task also refreshed those existing legacy entries and removed stale CharacterDialogs ids to keep the guard passing without re-adding the Playground debt.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

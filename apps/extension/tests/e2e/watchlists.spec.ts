@@ -232,6 +232,7 @@ const watchlistsContentShell = (page: Page) =>
 
 const navigateWatchlistsDestination = async (page: Page, name: string) => {
   await expect(page.getByRole('heading', { name: 'Watchlists' })).toBeVisible({ timeout: 15_000 })
+  await expect(watchlistsContentShell(page)).toBeVisible()
   const destination = watchlistsDestinationConfig(name)
   const experimentButton = page.getByTestId(`watchlists-experimental-tab-${destination.key}`)
   if (await isVisibleLocator(experimentButton)) {

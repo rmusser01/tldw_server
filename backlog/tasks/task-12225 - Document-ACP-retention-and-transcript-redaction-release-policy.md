@@ -43,13 +43,13 @@ Define the #1502 release policy for ACP session/artifact retention and transcrip
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Audit findings: ACP session TTL closes active sessions but does not hard-delete session rows/messages/artifact references; audit metadata and diagnostics have sanitizers; detail/events/artifacts remain full-fidelity authenticated drill-through surfaces; audit purge helper exists but automatic configured enforcement is not release-certified. Follow-up issues created: #1512 retention cleanup, #1513 redacted transcript/artifact views.
 
 Verification: git diff --check passed. Targeted rg confirmed policy wording and #1512/#1513 links in CHANGELOG.md, Docs/Development/Agent_Client_Protocol.md, and Docs/Development/ACP_Production_Readiness.md. Bandit skipped because this slice changes docs/backlog only.
 
 Review follow-up for PR #1515: added an explicit compliant/partial/blocked classification table for ACP session detail/events, artifacts, diagnostics, audit metadata, session TTL cleanup, audit retention, workspace environment metadata, and redacted transcript/artifact views. Replaced ambiguous `/events` shorthand with the full session-scoped `/api/v1/acp/sessions/{session_id}/events` route.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

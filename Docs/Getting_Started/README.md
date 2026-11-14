@@ -32,7 +32,7 @@ Canonical base profiles:
    - Start: `make start-docker-single`
    - Verify: `make verify-docker-single`
 2. [Docker multi-user + Postgres](./Profile_Docker_Multi_User_Postgres.md)
-   - Prepare: export generated `ADMIN_USERNAME` / `ADMIN_PASSWORD`, then `make setup-docker-multi`
+   - Prepare: export `ADMIN_USERNAME` and your chosen `ADMIN_PASSWORD`, then `make setup-docker-multi`
    - Start: `make start-docker-multi`
    - Verify: `make verify-docker-multi`
 3. [Local single-user](./Profile_Local_Single_User.md)
@@ -50,11 +50,16 @@ Solo completion gate:
 4. Complete the first successful chat. This is the setup completion gate.
 5. Add your first source as the next guided milestone.
 
-Generated multi-user admin bootstrap:
+Multi-user admin bootstrap:
+
+Choose a unique admin password with at least 10 characters, uppercase and lowercase letters, a number, and a symbol. Avoid your username and three-character repeats or sequences. The prompt below hides your input.
 
 ```bash
 export ADMIN_USERNAME=tldw-admin
-export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+printf 'Admin password: '
+IFS= read -rs ADMIN_PASSWORD
+printf '\n'
+export ADMIN_PASSWORD
 make setup-docker-multi
 ```
 

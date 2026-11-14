@@ -24,7 +24,9 @@ vi.mock("react-i18next", () => ({
 }));
 
 const renderInspector = (
-  overrides: Partial<React.ComponentProps<typeof PlaygroundRuntimeInspector>> = {},
+  overrides: Partial<
+    React.ComponentProps<typeof PlaygroundRuntimeInspector>
+  > = {},
 ) => {
   const props = {
     streaming: false,
@@ -35,16 +37,7 @@ const renderInspector = (
     runtimeStatusDetail: null,
     messageCount: 2,
     threadSearchOpen: false,
-    assistantSummary: {
-      mode: "character" as const,
-      name: "Mira Vale",
-      detail: "Character selected",
-    },
     onOpenModelSettings: vi.fn(),
-    onOpenAssistantSelect: vi.fn(),
-    onClearAssistant: vi.fn(),
-    onInspectAssistant: vi.fn(),
-    onOpenSceneDirector: vi.fn(),
     onOpenMcpSettings: vi.fn(),
     toolChoice: "auto" as const,
     onToolChoiceChange: vi.fn(),
@@ -65,10 +58,29 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     renderInspector();
 
     expect(screen.getByText("Provider")).toBeInTheDocument();
-    expect(screen.getByText("openai")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI")).toBeInTheDocument();
     expect(screen.getByText("Model")).toBeInTheDocument();
     expect(screen.getByText("gpt-4.1-mini")).toBeInTheDocument();
     expect(screen.getByText("Route openai:gpt-4.1-mini")).toBeInTheDocument();
+  });
+
+  it("CC-06: names the provider and model plainly and keeps the raw route off screen", () => {
+    renderInspector({
+      selectedProvider: "custom-openai-api",
+      selectedModel: "mock-gpt-4o",
+      providerRouteLabel: "custom-openai-api:mock-gpt-4o",
+    });
+
+    const modelRoute = screen.getByRole("region", { name: "Model route" });
+    const values = within(modelRoute).getAllByRole("definition");
+    expect(values.map((value) => value.textContent)).toEqual([
+      "Custom OpenAI API",
+      "mock-gpt-4o",
+    ]);
+    expect(
+      within(modelRoute).getByRole("button", { name: "Open model settings" }),
+    ).toHaveAttribute("title", "custom-openai-api:mock-gpt-4o");
+    expect(within(modelRoute).getByText("Route custom-openai-api:mock-gpt-4o")).toHaveClass("sr-only");
   });
 
   it("keeps cockpit rail sections in runtime configuration order", () => {
@@ -82,14 +94,10 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     });
 
     expect(
-      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
-    ).toEqual([
-      "Runtime",
-      "Model route",
-      "Assistant",
-      "MCP tools",
-      "Run controls",
-    ]);
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual(["Current run", "Model & settings", "MCP tools"]);
   });
 
   it("keeps first-time runtime controls discoverable when nothing is configured", () => {
@@ -98,11 +106,6 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       selectedModel: null,
       providerRouteLabel: null,
       messageCount: 0,
-      assistantSummary: {
-        mode: "none",
-        name: null,
-        detail: null,
-      },
       canRegenerate: false,
       toolSummary: {
         state: "unavailable",
@@ -117,25 +120,13 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       screen.getByRole("button", { name: "Open model settings" }),
     ).toBeInTheDocument();
 
-    const assistant = screen.getByRole("region", { name: "Assistant" });
-    expect(
-      within(assistant).getByText("No runtime assistant selected"),
-    ).toBeInTheDocument();
-    expect(
-      within(assistant).queryByText("No assistant selected"),
-    ).not.toBeInTheDocument();
-    expect(
-      within(assistant).getByText("No persona or character will shape replies."),
-    ).toBeInTheDocument();
-    expect(
-      within(assistant).getByRole("button", {
-        name: "Select character or persona",
-      }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Assistant" })).toBeNull();
 
     const tools = screen.getByRole("region", { name: "MCP tools" });
     expect(within(tools).getByText("MCP unavailable")).toBeInTheDocument();
-    expect(within(tools).getByText("MCP tools unavailable")).toBeInTheDocument();
+    expect(
+      within(tools).getByText("MCP tools unavailable"),
+    ).toBeInTheDocument();
     expect(
       within(tools).getByRole("button", { name: "Configure MCP tools" }),
     ).toBeInTheDocument();
@@ -144,9 +135,11 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     ).toBeNull();
 
     const runControls = screen.getByRole("region", { name: "Run controls" });
-    expect(within(runControls).getByText("0 messages")).toBeInTheDocument();
-    expect(within(runControls).getByText("Search closed")).toBeInTheDocument();
-    expect(within(runControls).getByText("No turn is running.")).toBeInTheDocument();
+    expect(within(runControls).queryByText("0 messages")).toBeNull();
+    expect(within(runControls).queryByText("Search closed")).toBeNull();
+    expect(
+      within(runControls).getByText("No turn is running."),
+    ).toBeInTheDocument();
     expect(
       within(runControls).getByText(
         "Regenerate becomes available after an assistant response.",
@@ -155,109 +148,39 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
   });
 
   it("lets each right rail section collapse without replacing the side rail", () => {
-    renderInspector({
-      settingSummaries: [{ label: "Temperature", value: "0.7" }],
-      toolSummary: {
-        state: "available",
-        label: "MCP tools",
-        detail: "3 chat tools enabled",
-      },
-    });
-
+    renderInspector();
     const rail = screen.getByTestId("playground-runtime-inspector");
-    const collapseRuntime = within(rail).getByRole("button", {
-      name: "Collapse Runtime",
-    });
-    const runtimePanelId = collapseRuntime.getAttribute("aria-controls");
-    const runtimePanel = runtimePanelId
-      ? document.getElementById(runtimePanelId)
-      : null;
-
-    expect(collapseRuntime).toHaveAttribute("aria-expanded", "true");
-    expect(runtimePanel).not.toBeNull();
-    expect(runtimePanel).toHaveAttribute("aria-hidden", "false");
-    expect(runtimePanel).not.toHaveClass("hidden");
-
-    fireEvent.click(collapseRuntime);
-
-    expect(rail).toBeInTheDocument();
-    expect(collapseRuntime).toHaveAttribute("aria-expanded", "false");
-    expect(runtimePanel).toHaveAttribute("aria-hidden", "true");
-    expect(runtimePanel).toHaveClass("hidden");
-    expect(
-      within(rail).getByRole("button", { name: "Expand Runtime" }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      within(rail).getByRole("button", { name: "Collapse Model route" }),
-    );
-    fireEvent.click(
-      within(rail).getByRole("button", { name: "Collapse Assistant" }),
-    );
-    fireEvent.click(
-      within(rail).getByRole("button", { name: "Collapse MCP tools" }),
-    );
-    fireEvent.click(
-      within(rail).getByRole("button", { name: "Collapse Run controls" }),
-    );
-
-    expect(screen.getByRole("heading", { name: "Runtime" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Model route" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Assistant" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "MCP tools" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Run controls" })).toBeInTheDocument();
+    for (const title of ["Current run", "Model & settings", "MCP tools"]) {
+      const toggle = within(rail).getByRole("button", {
+        name: `Collapse ${title}`,
+      });
+      const panel = document.getElementById(
+        toggle.getAttribute("aria-controls")!,
+      );
+      fireEvent.click(toggle);
+      expect(panel).toHaveAttribute("aria-hidden", "true");
+      expect(
+        within(rail).getByRole("button", { name: `Expand ${title}` }),
+      ).toBeVisible();
+    }
   });
 
-  it("starts advanced runtime sections collapsed in setup recovery mode", () => {
+  it("keeps recovery visible while secondary tools collapse in setup mode", () => {
     renderInspector({
       setupRecoveryMode: true,
       runtimeStatus: "error",
       runtimeStatusDetail: "Provider setup needed",
-      modelUsabilityStatus: "provider_unconfigured",
-      modelUsabilityCanSend: false,
-      modelUsabilityDetail: "Provider setup needed",
-      settingSummaries: [{ label: "Temperature", value: "0.7" }],
-      toolSummary: {
-        state: "unavailable",
-        label: "MCP unavailable",
-        detail: "MCP tools unavailable",
-      },
     });
-
-    const rail = screen.getByTestId("playground-runtime-inspector");
+    expect(screen.getByText("Provider setup needed")).toBeVisible();
     expect(
-      within(rail).getByRole("button", { name: "Collapse Runtime" }),
-    ).toHaveAttribute("aria-expanded", "true");
+      screen.getByRole("button", { name: "Open model settings" }),
+    ).toBeVisible();
     expect(
-      within(rail).getByRole("button", { name: "Collapse Model route" }),
-    ).toHaveAttribute("aria-expanded", "true");
-    expect(
-      within(rail).getByRole("button", { name: "Expand Assistant" }),
+      screen.getByRole("button", { name: "Expand MCP tools" }),
     ).toHaveAttribute("aria-expanded", "false");
     expect(
-      within(rail).getByRole("button", { name: "Expand MCP tools" }),
-    ).toHaveAttribute("aria-expanded", "false");
-    expect(
-      within(rail).getByRole("button", { name: "Expand Run controls" }),
-    ).toHaveAttribute("aria-expanded", "false");
-    expect(
-      within(rail).getByRole("button", { name: "Open model settings" }),
-    ).toBeInTheDocument();
-    expect(
-      within(rail).queryByRole("button", {
-        name: "Select character or persona",
-      }),
-    ).toBeNull();
-
-    fireEvent.click(
-      within(rail).getByRole("button", { name: "Expand Assistant" }),
-    );
-
-    expect(
-      within(rail).getByRole("button", {
-        name: "Select character or persona",
-      }),
-    ).toBeInTheDocument();
+      screen.getByRole("button", { name: "Regenerate last response" }),
+    ).toBeVisible();
   });
 
   it("preserves existing right rail actions after regrouping", () => {
@@ -278,22 +201,6 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       screen.getByRole("button", { name: "Open model settings" }),
     );
 
-    const assistant = screen.getByRole("region", { name: "Assistant" });
-    fireEvent.click(
-      within(assistant).getByRole("button", {
-        name: "Select character or persona",
-      }),
-    );
-    fireEvent.click(
-      within(assistant).getByRole("button", { name: "Manage assistant" }),
-    );
-    fireEvent.click(
-      within(assistant).getByRole("button", { name: "Open Scene Director" }),
-    );
-    fireEvent.click(
-      within(assistant).getByRole("button", { name: "Clear assistant" }),
-    );
-
     const tools = screen.getByRole("region", { name: "MCP tools" });
     fireEvent.click(
       within(tools).getByRole("button", { name: "MCP tool choice Required" }),
@@ -308,10 +215,6 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     );
 
     expect(props.onOpenModelSettings).toHaveBeenCalledTimes(1);
-    expect(props.onOpenAssistantSelect).toHaveBeenCalledTimes(1);
-    expect(props.onInspectAssistant).toHaveBeenCalledTimes(1);
-    expect(props.onOpenSceneDirector).toHaveBeenCalledTimes(1);
-    expect(props.onClearAssistant).toHaveBeenCalledTimes(1);
     expect(props.onToolChoiceChange).toHaveBeenCalledWith("required");
     expect(props.onOpenMcpSettings).toHaveBeenCalledTimes(1);
     expect(props.onStopStreaming).toHaveBeenCalledTimes(1);
@@ -325,26 +228,19 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       providerRouteLabel: null,
     });
 
-    expect(screen.getByText("anthropic")).toBeInTheDocument();
+    expect(screen.getByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("claude-sonnet-4")).toBeInTheDocument();
     expect(
       screen.getByText("Route anthropic:claude-sonnet-4"),
     ).toBeInTheDocument();
   });
 
-  it("opens model/chat settings and assistant selection through supplied callbacks", () => {
+  it("opens scoped model settings through the supplied callback", () => {
     const props = renderInspector();
-
     fireEvent.click(
       screen.getByRole("button", { name: "Open model settings" }),
     );
-    fireEvent.click(
-      screen.getByRole("button", { name: "Select character or persona" }),
-    );
-
-    expect(props.onOpenModelSettings).toHaveBeenCalledTimes(1);
-    expect(props.onOpenAssistantSelect).toHaveBeenCalledTimes(1);
-    expect(props.onOpenSceneDirector).not.toHaveBeenCalled();
+    expect(props.onOpenModelSettings).toHaveBeenCalledOnce();
   });
 
   it("distinguishes inherited defaults from provider:model overrides", () => {
@@ -365,68 +261,12 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
 
     expect(screen.getByText("Temperature")).toBeInTheDocument();
     expect(screen.getByText("0.7")).toBeInTheDocument();
-    expect(screen.getByText("Inherited")).toBeInTheDocument();
+    expect(screen.getByText("0.7")).not.toBeVisible();
+    fireEvent.click(screen.getByText("Default settings"));
+    expect(screen.getByText("0.7")).toBeVisible();
     expect(screen.getByText("Context")).toBeInTheDocument();
     expect(screen.getByText("8192")).toBeInTheDocument();
     expect(screen.getByText("Override")).toBeInTheDocument();
-  });
-
-  it("shows a clear assistant action when a character is selected", () => {
-    const props = renderInspector();
-
-    fireEvent.click(screen.getByRole("button", { name: "Clear assistant" }));
-
-    expect(props.onClearAssistant).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows a clear assistant action when a persona is selected", () => {
-    const props = renderInspector({
-      assistantSummary: {
-        mode: "persona",
-        name: "Research Persona",
-        detail: "Persona selected",
-      },
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Clear assistant" }));
-
-    expect(props.onClearAssistant).toHaveBeenCalledTimes(1);
-  });
-
-  it("opens the supplied manage path for selected assistants", () => {
-    const props = renderInspector();
-
-    fireEvent.click(screen.getByRole("button", { name: "Manage assistant" }));
-
-    expect(props.onInspectAssistant).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps Scene Director secondary to the primary assistant selector", () => {
-    const props = renderInspector();
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Open Scene Director" }),
-    );
-
-    expect(props.onOpenSceneDirector).toHaveBeenCalledTimes(1);
-    expect(props.onOpenAssistantSelect).not.toHaveBeenCalled();
-  });
-
-  it("keeps Scene Director character-only and explains persona mode", () => {
-    renderInspector({
-      assistantSummary: {
-        mode: "persona",
-        name: "Research Persona",
-        detail: "Persona selected",
-      },
-    });
-
-    expect(
-      screen.queryByRole("button", { name: "Open Scene Director" }),
-    ).toBeNull();
-    expect(
-      screen.getByText("Scene Director is available for character-backed chats."),
-    ).toBeInTheDocument();
   });
 
   it("changes MCP tool choice and opens MCP settings directly", () => {
@@ -461,7 +301,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "MCP tool choice Required" }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Configure MCP tools" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Configure MCP tools" }),
+    );
 
     expect(props.onToolChoiceChange).toHaveBeenCalledWith("required");
     expect(props.onOpenMcpSettings).toHaveBeenCalledTimes(1);
@@ -483,7 +325,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       screen.queryByRole("button", { name: "MCP tool choice Auto" }),
     ).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Configure MCP tools" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Configure MCP tools" }),
+    );
 
     expect(props.onToolChoiceChange).not.toHaveBeenCalled();
     expect(props.onOpenMcpSettings).toHaveBeenCalledTimes(1);
@@ -504,7 +348,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       screen.getByRole("button", { name: "Regenerate last response" }),
     ).toBeDisabled();
     expect(
-      screen.getByText("Wait for the current turn to finish before regenerating."),
+      screen.getByText(
+        "Wait for the current turn to finish before regenerating.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -521,7 +367,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     );
 
     expect(props.onRegenerate).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Stop generation" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Stop generation" }),
+    ).toBeDisabled();
     expect(screen.getByText("No turn is running.")).toBeInTheDocument();
   });
 
@@ -543,7 +391,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       name: "Empty assistant response",
     });
     expect(status).toHaveTextContent(
-      "openai:gpt-4.1-mini returned no response text.",
+      "gpt-4.1-mini (OpenAI) returned no response text.",
     );
     expect(status).toHaveTextContent(
       "Regenerate this turn, or choose a different model if this provider keeps returning empty output.",
@@ -574,7 +422,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     ).toBeDisabled();
     expect(screen.getByText("No turn is running.")).toBeInTheDocument();
     expect(
-      screen.getByText("Regenerate becomes available after an assistant response."),
+      screen.getByText(
+        "Regenerate becomes available after an assistant response.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -651,7 +501,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(screen.getByText("Streaming")).toBeInTheDocument();
     expect(screen.queryByText("Error")).toBeNull();
     expect(
-      screen.getByText("Configure the selected model provider before chatting as Ada"),
+      screen.getByText(
+        "Configure the selected model provider before chatting as Ada",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -677,9 +529,9 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     });
 
     expect(screen.getByText("Checking model")).toBeInTheDocument();
-    expect(screen.getAllByText("Checking chat model readiness").length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getAllByText("Checking chat model readiness").length,
+    ).toBeGreaterThan(0);
     expect(screen.queryByText("Error")).toBeNull();
     expect(screen.queryByText("Ready")).toBeNull();
   });

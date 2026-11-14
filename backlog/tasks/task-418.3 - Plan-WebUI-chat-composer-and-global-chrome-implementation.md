@@ -42,7 +42,7 @@ Documentation-only child implementation plan for the approved WebUI/extension UX
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created the WP6 documentation-only implementation plan for chat, composer, command palette, and global chrome remediation.
 
 Verification recorded for the planning artifact:
@@ -52,7 +52,7 @@ Verification recorded for the planning artifact:
 - Required-scope coverage check passed for findings, routes, files, and test targets.
 
 Bandit skip: documentation-only change; no Python or executable product code touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

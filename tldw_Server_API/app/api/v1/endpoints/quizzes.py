@@ -9,7 +9,10 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import get_study_assistant_guidance
+from tldw_Server_API.app.api.v1.API_Deps.study_assistant_deps import (
+    get_study_assistant_guidance,
+    study_assistant_own_key,
+)
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.flashcards import (
     StudyAssistantContextResponse,
@@ -785,6 +788,7 @@ async def respond_quiz_attempt_question_assistant(
     attempt_id: int,
     question_id: int,
     payload: StudyAssistantRespondRequest,
+    own_key: Any = Depends(study_assistant_own_key),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     guidance: str | None = Depends(get_study_assistant_guidance),
 ):
@@ -802,6 +806,7 @@ async def respond_quiz_attempt_question_assistant(
             provider=payload.provider,
             model=payload.model,
             guidance=guidance,
+            provider_credentials=own_key,
         )
         context_snapshot = _build_assistant_context_snapshot(context)
         user_message = db.append_study_assistant_message(
@@ -933,6 +938,26 @@ async def generate_quiz(
         ) from e
     except ChatConfigurationError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except ChatAuthenticationError:
+        raise HTTPException(
+            status_code=400,
+            detail="The chat provider rejected its credentials. Check provider settings or ask your server administrator.",
+        ) from None
+    except ChatBadRequestError:
+        raise HTTPException(
+            status_code=400,
+            detail="The chat provider rejected the request. Check the selected provider and model.",
+        ) from None
+    except ChatRateLimitError:
+        raise HTTPException(
+            status_code=429,
+            detail="The chat provider is rate limited. Try again shortly.",
+        ) from None
+    except ChatAPIError:
+        raise HTTPException(
+            status_code=502,
+            detail="The chat provider could not generate the quiz. Try again shortly.",
+        ) from None
     except (InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to generate quiz") from exc
     except ValueError as e:

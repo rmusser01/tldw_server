@@ -37,7 +37,7 @@ Discovered during TASK-13239 live UAT for PR2939: WebUI periodic requests trigge
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Native sample identified psycopg wait_c on the uvloop main thread. Isolated pg_stat_activity: role SELECT waits on a relation lock held by an asyncpg schema transaction after CREATE rbac_user_rate_limits. Cancelling that read alone did not restore health within5s; investigate all synchronous RBAC helper reads. Related quota fix is committed as74f86e5c76.
 
 Live replay with the fix passed: real roles-table lock observed while authenticated /api/v1/buddies waited; /health200 in7ms before unlocking; authenticated request200 after unlock. WebUI Save received profile200, showed success, and reloaded successfully; final sanitized persistence evidence being captured. Scope is complete _enrich_user_with_rbac offload at JWT/API-key callers.
@@ -45,7 +45,7 @@ Live replay with the fix passed: real roles-table lock observed while authentica
 Independent review found concurrent cold-cache construction and configuration publication races after RBAC moved to worker threads. Added shared initialization/reset RLock and public-entrypoint concurrency regressions; four initially failed, then42 related tests and4 PostgreSQL lock tests passed with clean exits. Final review identified a reset_lazy gap before the cold getter, now receiving its own red-green regression. Fresh live API: four simultaneous authenticated requests200, exactly one shared DB construction, profile200, health200. Real role-lock replay: health200 in8ms while authenticated request waits, then200 after unlock. Exact Node20.20.2 runtime also passed fresh-login JWT and invalid-cookie matrix.
 
 Final review also reproduced a lazy-reset gap between configuration lookup and cold database creation. Added a fifth public-entrypoint regression, observed its stale-path failure, then rechecked initialization inside the existing RLock. The final 26-test configuration/backend batch passed with exit0; previous 42-test batch and four real PostgreSQL lock regressions also passed. Final fresh API replay: four concurrent authenticated requests200, one DB construction, profile200, health200; held-role-lock health200 in7ms, waiting authentication200 after unlock. Reviewer reran its original probe and found no remaining actionable issues. Ruff, compilation, formatting of new tests, whitespace checks, and scoped Bandit pass; three pre-existing low Bandit credential-type literals in User_DB_Handling.py are unchanged. Standard UAT fixture exited0, its database was confirmed absent, all owned ports and browsers stopped. No external LLM or full-suite qualification claimed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

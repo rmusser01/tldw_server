@@ -1167,7 +1167,7 @@
     "message": "검토 후 저장"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "저장 전에 검토"
+    "message": "저장하기 전에 추출된 콘텐츠 검토"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "지금 처리한 뒤 서버에 저장하기 전에 로컬에서 초안을 편집하세요."
@@ -2758,5 +2758,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "계정과 로컬 저장소가 확인될 때까지 오프라인 저장을 사용할 수 없습니다. 변경 사항은 저장되지 않은 상태로 유지됩니다."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

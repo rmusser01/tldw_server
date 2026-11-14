@@ -1297,6 +1297,7 @@ class PromptStudioDatabase:
             # as PostgreSQL so durable state can never fall back to audit ID.
             self.tenant_user_id = str(tenant_user_id)
             self._impl.tenant_user_id = str(tenant_user_id)
+        PromptsRepository(self._impl).repair_generated_uuids()
 
     def __getattr__(self, item):
         return getattr(self._impl, item)
@@ -1641,6 +1642,14 @@ class PromptStudioDatabase:
         return TestCasesRepository(self._impl).get_golden(project_id, limit, offset)
 
     # Test run delegation -------------------------------------------------
+
+    def get_test_run(self, run_id: int) -> Optional[dict[str, Any]]:
+        """Read a saved execution snapshot with its original prompt version."""
+        return TestRunsRepository(self._impl).get(run_id)
+
+    def list_test_runs(self, project_id: int, *, page: int = 1, per_page: int = 20) -> dict[str, Any]:
+        """Read a bounded, stable project history page without executing tests."""
+        return TestRunsRepository(self._impl).list(project_id, page=page, per_page=per_page)
 
     def create_test_run(
         self,

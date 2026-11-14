@@ -39,13 +39,13 @@ Continue issue #1116 Phase 2.2 after PR #1327. Convert the next small minimal-te
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1327 merge was verified on origin/dev as 62002bcd8 in the git log. Worktree: local feature worktree for phase2-2-minimal-writing-router-conditionals-an. Branch: codex/phase2-2-minimal-writing-router-conditionals-an. Baseline router group contract tests passed with 91 passed before edits.
 
 RED verification: focused writing/email tests failed before production changes because writing, writing_manuscripts, and email were imported during spec construction and no named lazy specs existed for registration-time skip/propagation assertions.
 
 GREEN verification: converted writing, writing_manuscripts, and email to ImportedRouterSpec-backed lazy specs with skip_exceptions=(ImportError, AttributeError). Focused writing/email tests passed with 3 passed; full test_router_groups_contract.py passed with 94 passed; test_main_router_contract.py passed with 6 passed; test_openapi_contracts.py passed with 69 passed; Bandit on minimal.py reported 0 results and 0 errors; git diff --check was clean.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -75,6 +75,7 @@ vi.mock("@/hooks/useServerChatHistory", () => ({
 }))
 
 vi.mock("@/db/dexie/chat", () => ({
+  watchOnDeviceHistoryChanges: () => () => {},
   PageAssistDatabase: vi.fn(
     function MockPageAssistDatabase(this: { fullTextSearchChatHistories: typeof fullTextSearchChatHistoriesMock }) {
       this.fullTextSearchChatHistories = fullTextSearchChatHistoriesMock
@@ -127,6 +128,10 @@ vi.mock("../ConversationContextMenu", () => ({
 
 vi.mock("../FolderPickerModal", () => ({
   FolderPickerModal: () => null
+}))
+
+vi.mock("@/hooks/useUndoNotification", () => ({
+  useUndoNotification: () => ({ showUndoNotification: vi.fn() })
 }))
 
 describe("SidepanelChatSidebar coordinator integration", () => {

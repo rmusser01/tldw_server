@@ -37,11 +37,11 @@ Implement the backend-only report evidence/readiness contract for Watchlists rep
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 5A implementation in worktree .worktrees/watchlists-stage1a. Scope is backend schemas, deterministic report evidence/readiness helper, and focused pytest coverage only.
 
 Verification recorded for Stage 5A. Red check: importing WatchlistOutputEvidenceResponse failed before implementation. Green checks: focused Stage 5A report evidence tests pass; regression Watchlists selectors pass; git diff --check passes; Bandit reports 0 errors and 0 findings for touched backend files. Frontend/browser QA intentionally not run because this slice adds backend schemas and deterministic helper logic only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

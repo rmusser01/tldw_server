@@ -33,13 +33,13 @@ Implement Task 4 from the llama.cpp model-family/mmproj profile wiring plan: sur
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the display-only WebUI capability visibility slice. Added optional response-only profile/runtime capability, modality, capability warning, and mmproj display fields to the llama.cpp admin TS types while excluding those response-only fields from create/update request types. Updated LlamacppRuntimePanel to render compact Vision input, Embeddings, Rerank, and mmproj tags from profile/runtime capability metadata, mmproj display/path/model IDs, and merged profile/runtime capability warnings with existing runtime warnings. Added regression coverage for managed profile capability and projector state visibility.
 
 PR review follow-up: Qodo reported two actionable findings on PR #1799: narrow the capability/modalities map types to known optional keys, and merge runtime/profile modalities so an empty runtime modalities object does not suppress profile-derived capability tags. Reopening TASK-397.7 for the minimal review-fix patch.
 
 PR review fix complete: narrowed llama.cpp capability/modalities metadata to known optional keys and merged profile/runtime modalities so an empty runtime modalities object no longer suppresses profile-derived capability tags. Added focused regression coverage for the fallback case.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

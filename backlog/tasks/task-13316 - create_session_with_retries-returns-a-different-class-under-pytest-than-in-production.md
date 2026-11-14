@@ -39,9 +39,9 @@ Source: synthesis F17
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in 61ae349512. create_session_with_retries no longer branches on PYTEST_CURRENT_TEST; it always returns _SessionShim. Streaming still delegates to the legacy facade inside the shim, so iter_lines callers are unchanged. AC2: test_provider_unsafe_post_no_retry no longer monkeypatches the factory back to http_helpers; it drives the real shim, injecting the mock transport into both paths (http_helpers._hc_create_client for streaming, http_client._get_httpx_client for non-streaming) and now asserts the shim does NOT close the shared cached client on the non-streaming path. Added test_session_factory_returns_the_production_shim_under_pytest. Red on ea1cbc6941: 7 failed (6 non-streaming no-retry cases + the new test); green after: 13 passed. tests/LLM_Calls + tests/LLM_Adapters + the other files that touch the factory: 9 failed/1260 passed before and after, identical FAILED lists (all 9 are pre-existing 'local model provider is currently unavailable' in local-LLM strict-filter tests, unrelated). Bandit clean. Docs: the factory docstring and header comment updated; no external docs reference the pytest branch.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

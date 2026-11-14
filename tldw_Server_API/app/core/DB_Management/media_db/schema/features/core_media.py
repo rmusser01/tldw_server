@@ -336,7 +336,9 @@ def apply_sqlite_core_media_schema(
         raise DatabaseError(f"Unexpected error applying schema V1: {exc}") from exc
 
 
-def ensure_postgres_sync_log_contract(db: SupportsPostgresCoreMediaSchema, conn: Any) -> None:
+def ensure_postgres_sync_log_contract(
+    db: SupportsPostgresCoreMediaSchema, conn: Any, *, validate_only: bool = False
+) -> None:
     """Preserve either application-owned sync identity while ensuring Media's contract.
 
     ChaCha may create this shared table first. Normalize only its known older
@@ -375,6 +377,12 @@ def ensure_postgres_sync_log_contract(db: SupportsPostgresCoreMediaSchema, conn:
     if definition not in {known_old, known_current}:
         raise SchemaError("Unsupported sync_log operation constraint")
 
+    if validate_only and (
+        any(name not in columns for name in ("org_id", "team_id"))
+        or definition != known_current or not columns["payload"]["nullable"]
+    ):
+        raise SchemaError("PostgreSQL sync_log requires schema-owner migration")
+
     for name in ("org_id", "team_id"):
         if name not in columns:
             backend.execute(
@@ -392,6 +400,139 @@ def ensure_postgres_sync_log_contract(db: SupportsPostgresCoreMediaSchema, conn:
     if not columns["payload"]["nullable"]:
         backend.execute("ALTER TABLE sync_log ALTER COLUMN payload DROP NOT NULL", connection=conn)
     db._sync_entity_column = identifier
+
+
+_KEYWORD_IDENTITY_INDEX = "idx_keywords_keyword_identity"
+# Lookup indexes for KeywordsRepository.match_identities: every row by LOWER(keyword)
+# (restoring a soft-deleted keyword needs deleted rows too) and the non-ASCII rows its
+# identity fallback reads.
+_KEYWORD_LOOKUP_INDEXES = {
+    "idx_keywords_lower_keyword": "ON keywords (LOWER(keyword))",
+    "idx_keywords_non_ascii": "ON keywords (id) WHERE keyword ~ '[^[:ascii:]]'",
+}
+
+
+def ensure_postgres_keyword_identity(db: Any, conn: Any, *, validate_only: bool = False) -> None:
+    """Give Postgres Media keywords SQLite's case-insensitive uniqueness (TASK-13950.5).
+
+    The Postgres conversion strips ``keyword UNIQUE COLLATE NOCASE`` to an exact-case
+    unique, so Postgres gets a unique ``LOWER(keyword)`` index over active rows. Case
+    variants that already coexist are merged first, as ChaCha's ``merge_keywords``
+    does: the earliest active row survives with its casing, the others' MediaKeywords
+    links move to it without duplicates, and they are soft-deleted (version + 1,
+    ``merge_parent_uuid`` = survivor uuid). Like every schema migration, this writes
+    no sync_log rows (sync_log is FORCE RLS-scoped per user). The indexes gate it, so it
+    runs once; the table lock serializes concurrent bootstraps. Bootstrap calls it after
+    the RLS policy ensures, so it takes the keywords lock last.
+    """
+    backend = db.backend
+    names = (_KEYWORD_IDENTITY_INDEX, *_KEYWORD_LOOKUP_INDEXES)
+    existing = backend.execute(
+        "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND indexname IN (%s, %s, %s)",
+        names,
+        connection=conn,
+    )
+    if len(existing.rows) == len(names):
+        return
+    if validate_only:
+        raise SchemaError("PostgreSQL keyword indexes require schema-owner reconciliation")
+    backend.execute("LOCK TABLE keywords IN SHARE ROW EXCLUSIVE MODE", connection=conn)
+    merges = backend.execute(
+        "SELECT id, survivor_id, survivor_uuid FROM ("
+        " SELECT id, FIRST_VALUE(id) OVER w AS survivor_id, FIRST_VALUE(uuid) OVER w AS survivor_uuid"
+        " FROM keywords WHERE deleted = FALSE"
+        " WINDOW w AS (PARTITION BY LOWER(keyword) ORDER BY id)"
+        ") ranked WHERE id <> survivor_id ORDER BY id",
+        connection=conn,
+    ).rows
+    for merge in merges:
+        backend.execute(
+            "INSERT INTO mediakeywords (media_id, keyword_id) "
+            "SELECT media_id, %s FROM mediakeywords WHERE keyword_id = %s ON CONFLICT DO NOTHING",
+            (merge["survivor_id"], merge["id"]),
+            connection=conn,
+        )
+        backend.execute("DELETE FROM mediakeywords WHERE keyword_id = %s", (merge["id"],), connection=conn)
+        backend.execute(
+            "UPDATE keywords SET deleted = TRUE, version = version + 1, last_modified = CURRENT_TIMESTAMP, "
+            "merge_parent_uuid = %s, keyword_fts_tsv = NULL WHERE id = %s",
+            (merge["survivor_uuid"], merge["id"]),
+            connection=conn,
+        )
+    if merges:
+        logger.info("Merged {} case-variant Media keyword rows into their earliest variant", len(merges))
+    backend.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {_KEYWORD_IDENTITY_INDEX} ON keywords (LOWER(keyword)) WHERE deleted = FALSE",
+        connection=conn,
+    )
+    for name, definition in _KEYWORD_LOOKUP_INDEXES.items():
+        backend.execute(f"CREATE INDEX IF NOT EXISTS {name} {definition}", connection=conn)
+_POSTGRES_MEDIA_IDENTITY_INDEXES = {
+    "ux_media_owner_url": "CREATE UNIQUE INDEX ux_media_owner_url ON public.media USING btree "
+    "(COALESCE(owner_user_id::text,client_id,''::text),url)",
+    "ux_media_clone_url": "CREATE UNIQUE INDEX ux_media_clone_url ON public.media USING btree "
+    "(url) WHERE url LIKE 'tldw-clone://workspace/%'::text",
+}
+
+
+def ensure_postgres_media_owner_identity(db: Any, conn: Any, *, validate_only: bool = False) -> None:
+    """Migrate source identity atomically, or verify it without runtime DDL."""
+    from sqlglot import exp, parse_one
+    from sqlglot.errors import ParseError
+
+    backend = db.backend
+    if not validate_only:
+        backend.execute("LOCK TABLE public.media IN SHARE ROW EXCLUSIVE MODE", connection=conn)
+        for definition in _POSTGRES_MEDIA_IDENTITY_INDEXES.values():
+            backend.execute(
+                definition.replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ", 1), connection=conn
+            )
+        # Dependency failures abort the owner's transaction; never cascade into user data.
+        backend.execute("ALTER TABLE public.media DROP CONSTRAINT IF EXISTS media_url_key", connection=conn)
+    rows = backend.execute(
+        """
+        SELECT relation.relname AS name,indexes.indisunique,
+               indexes.indisvalid AND indexes.indisready AND indexes.indimmediate AS ready,
+               pg_get_indexdef(indexes.indexrelid) AS definition
+        FROM pg_index AS indexes JOIN pg_class AS relation ON relation.oid=indexes.indexrelid
+        WHERE indexes.indrelid='public.media'::regclass
+    """,
+        connection=conn,
+    ).rows
+    by_name = {row["name"]: row for row in rows}
+
+    def canonical(definition: str) -> exp.Expression:
+        def undecorate(node: exp.Expression) -> exp.Expression:
+            if isinstance(node, exp.Paren):
+                return node.this.transform(undecorate, copy=False)
+            return node
+
+        return parse_one(definition, read="postgres").transform(undecorate)
+
+    for row in rows:
+        if row["indisunique"] is not True or row["name"] in _POSTGRES_MEDIA_IDENTITY_INDEXES:
+            continue
+        try:
+            keys = canonical(row["definition"]).this.args["params"].args["columns"]
+            restricts_url = any(column.name.lower() == "url" for key in keys for column in key.find_all(exp.Column))
+        except (ParseError, AttributeError, KeyError, TypeError, ValueError) as error:
+            raise SchemaError("PostgreSQL source uniqueness requires schema-owner inspection") from error
+        if restricts_url:
+            raise SchemaError("PostgreSQL source URL identity requires schema-owner migration")
+
+    for name, definition in _POSTGRES_MEDIA_IDENTITY_INDEXES.items():
+        row = by_name.get(name)
+        try:
+            valid = (
+                row is not None
+                and row["ready"] is True
+                and row["indisunique"] is True
+                and canonical(row["definition"]) == canonical(definition)
+            )
+        except (ParseError, TypeError, ValueError):
+            valid = False
+        if not valid:
+            raise SchemaError("PostgreSQL source identity indexes require schema-owner migration")
 
 
 def apply_postgres_core_media_schema(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -168,7 +169,7 @@ async def admin_get_top_api_key_usage(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> ApiKeyUsageTopResponse:
     """Return top API keys ranked by total token consumption (admin)."""
-    items_raw = svc_list_api_key_usage(limit=limit)
+    items_raw = await asyncio.to_thread(svc_list_api_key_usage, limit=limit)
     items = [
         ApiKeyUsageTopItem(
             key_id=str(item.get("key_id", "")),

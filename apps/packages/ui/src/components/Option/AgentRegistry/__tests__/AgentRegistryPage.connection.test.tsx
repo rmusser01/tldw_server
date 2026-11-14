@@ -1,9 +1,12 @@
 import React from "react"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { render as renderUi, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AgentRegistryPage } from "../index"
+
+const render = (ui: React.ReactElement) => renderUi(<MemoryRouter>{ui}</MemoryRouter>)
 
 const baseACPHealthPayload = {
   runner: "ok",
@@ -537,7 +540,7 @@ describe("AgentRegistryPage connection config", () => {
       "/api/v1/admin/acp/execution-health/summary?range_days=30"
     )
     expect(diagnostics).not.toHaveTextContent("http://127.0.0.1:8000")
-    expect(screen.getByText("Runner Binary")).toBeInTheDocument()
+    expect(screen.getByText("Runner status")).toBeInTheDocument()
   })
 
   it("renders shared ACP health recovery with diagnostics while keeping registry cards usable", async () => {
@@ -632,4 +635,20 @@ describe("AgentRegistryPage connection config", () => {
     expect(screen.getByText("No setup blockers in this window")).toBeInTheDocument()
     expect(screen.getByText("Review redaction settings")).toBeInTheDocument()
   })
+
+  it("shows a failed live runner probe and only actually configured agent availability", async () => {
+    installACPFetchMock({ healthPayload: {
+      runner: { status: "ok", source: "PATH" },
+      runner_probe: { status: "error", detail: "Check runner_cwd before dispatch" },
+      agents: [
+        { status: "available", is_configured: false, api_key_set: true },
+        { status: "available", is_configured: true, api_key_set: true }
+      ]
+    } })
+    render(<AgentRegistryPage />)
+    const label = await screen.findByText("Runner status")
+    expect(within(label.parentElement!).getByText("error")).toBeInTheDocument()
+    expect(screen.getByText(/Check runner_cwd before dispatch/)).toHaveTextContent("1/2 agents available")
+  })
+
 })

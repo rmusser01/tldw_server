@@ -100,7 +100,7 @@ describe("frontend CI workflow networking", () => {
 
     expect(script).toContain("chat-cockpit.real-server.spec.ts")
     expect(script).toContain("uses the running server and keeps cockpit/focus controls working")
-    expect(script).toContain("keeps mobile cockpit tabs and focus composer usable")
+    expect(script).toContain("keeps mobile cockpit panels and focus composer usable")
     expect(script).toContain("sends a real mobile focus conversation")
     expect(script).toContain("proves model provider confidence")
     expect(script).toContain("captures streaming stop and the selected-history regeneration gate")

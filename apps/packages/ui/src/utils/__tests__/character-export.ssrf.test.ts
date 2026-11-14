@@ -100,7 +100,7 @@ describe("exportCharacterToPNG avatar fetch hardening", () => {
 
   it("fetches a same-origin avatar with an AbortSignal and no credentials", async () => {
     const png = makeMinimalPng()
-    const fetchFn = vi.fn(async () =>
+    const fetchFn = vi.fn(async (_url: string, _init?: RequestInit) =>
       makeResponse(png, { "content-length": String(png.byteLength) })
     )
     vi.stubGlobal("fetch", fetchFn)
@@ -109,7 +109,7 @@ describe("exportCharacterToPNG avatar fetch hardening", () => {
     await exportCharacterToPNG({ name: "Ada" }, { avatarUrl: sameOriginUrl })
 
     expect(fetchFn).toHaveBeenCalledTimes(1)
-    const [calledUrl, init] = fetchFn.mock.calls[0] as [string, RequestInit]
+    const [calledUrl, init] = fetchFn.mock.calls[0]
     expect(calledUrl).toBe(sameOriginUrl)
     expect(init?.credentials).toBe("omit")
     expect(init?.signal).toBeInstanceOf(AbortSignal)

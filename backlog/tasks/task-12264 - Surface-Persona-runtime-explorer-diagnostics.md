@@ -30,7 +30,7 @@ Expose trace-safe Persona runtime explorer diagnostics from the optional Persona
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification: `python -m pytest tldw_Server_API/tests/Persona/test_persona_ws_dialogue_tree_runtime.py::test_runtime_explorer_fallback_notice_is_bounded_and_trace_safe tldw_Server_API/tests/Persona/test_persona_ws_dialogue_tree_runtime.py::test_runtime_explorer_disabled_emits_no_runtime_diagnostic_notice -q --tb=short` failed because no `RUNTIME_EXPLORER_FALLBACK` notice was emitted.
 
 Green verification: focused runtime websocket/explorer tests passed: `python -m pytest tldw_Server_API/tests/Persona/test_persona_ws_dialogue_tree_runtime.py tldw_Server_API/tests/Persona/test_runtime_explorer.py -q` (26 passed). `git diff --check` passed. Bandit on `tldw_Server_API/app/api/v1/endpoints/persona.py` exited 0 with no findings.
@@ -38,7 +38,7 @@ Green verification: focused runtime websocket/explorer tests passed: `python -m 
 Review sweep for PR #1647 found still-valid comments from Gemini and CodeRabbit: defensively handle malformed runtime budget diagnostics, normalize non-string safe_denial sentinels, decouple fallback-notice test assertions from tool_plan event ordering, and remove local absolute paths from task notes. Red review verification failed for missing/null budget fields and boolean safe_denial sentinel before the fix. Focused review regression tests passed after the fix.
 
 Review-fix verification: `python -m pytest tldw_Server_API/tests/Persona/test_persona_ws_dialogue_tree_runtime.py tldw_Server_API/tests/Persona/test_runtime_explorer.py -q` passed with 29 tests. `git diff --check` passed. Bandit on `tldw_Server_API/app/api/v1/endpoints/persona.py` exited 0 with no findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

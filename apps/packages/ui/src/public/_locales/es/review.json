@@ -780,7 +780,7 @@
     "message": "No autorizado para guardar"
   },
   "mediaPage_spreadMode": {
-    "message": "Comparar"
+    "message": "Lado a lado"
   },
   "mediaPage_listMode": {
     "message": "Enfoque"
@@ -789,13 +789,13 @@
     "message": "Pila"
   },
   "mediaPage_spreadModeTooltip": {
-    "message": "Ver los elementos seleccionados lado a lado para comparar"
+    "message": "Organizar los elementos seleccionados lado a lado"
   },
   "mediaPage_listModeTooltip": {
     "message": "Ver un elemento a la vez con navegación"
   },
   "mediaPage_allModeTooltip": {
-    "message": "Ver todos los elementos seleccionados en una lista desplazable"
+    "message": "Ver la ventana de lectura actual en una pila desplazable"
   },
   "mediaPage_copyContentLabel": {
     "message": "Copiar contenido"
@@ -834,19 +834,19 @@
     "message": "Selecciona elementos"
   },
   "mediaPage_firstUseStep1Desc": {
-    "message": "Haz clic en los elementos del panel izquierdo para añadirlos al visor."
+    "message": "Seleccione con las casillas y pulse Revisar seleccionados. Clic o Intro previsualiza."
   },
   "mediaPage_firstUseStep2": {
     "message": "Elige una vista"
   },
   "mediaPage_firstUseStep2Desc": {
-    "message": "Usa \"Comparar\" para ver en paralelo, \"Enfoque\" para ver uno a la vez, o \"Pila\" para ver todos."
+    "message": "Lado a lado organiza; Foco muestra un elemento; Pila muestra la ventana actual. Comparar contenido compara el texto."
   },
   "mediaPage_firstUseStep3": {
     "message": "Navega"
   },
   "mediaPage_firstUseStep3Desc": {
-    "message": "Usa los botones Anterior/Siguiente o el teclado (Tab + Enter) para moverte entre los elementos."
+    "message": "Anterior/Siguiente o j/k navega por el contexto activo. Tabulador y Espacio seleccionan una casilla."
   },
   "mediaPage_gotIt": {
     "message": "Entendido"
@@ -1327,5 +1327,11 @@
   },
   "mediaPage_analysisProviderRequired": {
     "message": "Elige un proveedor de análisis y vuelve a intentar el análisis."
+  },
+  "mediaPage_resultsHint": {
+    "message": "Clic o Intro para previsualizar. Espacio en una casilla selecciona. Mayús+clic selecciona un rango."
+  },
+  "mediaPage_viewerAll": {
+    "message": "Ventana de lectura (apilada)"
   }
 }

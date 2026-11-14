@@ -1,0 +1,47 @@
+# Knowledge workstream mechanism correction
+
+TASK-13534; requester explicitly authorized fixes and removal of demonstrated duplicate mechanisms on 2026-10-08. Audit baseline: current dev 97ea9cd5fa7e3a61ee4e7c56f3d9643b7311d511. Preserve the primary checkout.
+
+## Problem and evidence
+
+Review the actual first-parent changes of PR3196, PR3205, PR3211 and PR3213. Git-derived full inventories are authoritative; GitHub file lists cap at100. Independent audits cover45 unique backend production paths and all client production paths. Reports will be published with the final corrections; private originals and failed receipts are retained.
+
+Confirmed corrections: Quick Notes advances the note body base after409 without merging content, enabling a second stale overwrite. Quick Notes and Knowledge Export retain an uncertain write only in component memory despite ordinary collapse/Close unmounts; reuse existing Notes durable drafts and exact pending-write identities. Migrated Workspace restore with missing capture checkpoints can discard a public capture pin and bypass Ask/current-head checks; recover through existing owned WebClipper/Media versions, retaining known pins or surfacing unavailable/ambiguous evidence. Do not infer that the latest version is the accepted snapshot.
+
+Public capture forcibly overrides canonical router/preflight choices to HTTPX and refuses curl. Restore existing selection only after shared transports enforce the same public egress, DNS pinning, fresh credential-free sessions, env/proxy isolation, bounded identity-encoded reads and manual redirect checks. Existing HTTPX stream_response is the consolidation candidate for the copied pin/open/restore code; verify equivalence, including injected headers, certificate policy and strict constructor behavior. Existing public preflight needs the existing async byte bound, not another reader. The installed optional curl0.16.3 source proves trust_env=False alone is ineffective; verify actual CurlOpt/session/request behavior. No new transport, dependency declaration or acquisition subsystem.
+
+Remove unused capture_note_with_provenance only after lifecycle tests cover production plan_compound_note/provenance_step/durable batch. Add notes.provenance discovery using its existing strict Pydantic contract. Keep independent persistence, receipt tables, transaction/RLS, lifecycle and migration contracts; they have no interchangeable earlier implementation in the audited scope.
+
+Fresh locked owning tests reproduce four default quota-eviction failures and one native split-storage spy failure. Repair instrumentation against the actual Storage prototype without weakening assertions. CSV owning33 and serial predecessor120 cases pass, leaving historical cause unknown; observed lazy module readiness is an actual test dependency. Exercise the house act+dynamicImportSettled contract under a controlled delayed real module and retain export assertions; cover CSV download as well as JSON. Do not raise timeouts or call the historical cause proved on a passing rerun.
+
+Investigate owned lint/type/format/security findings under canonical tools. Current189-file client lint finds failures; identical-rules historical blobs distinguish prior findings from workstream additions. Fix every scoped error and introduced finding, including findings introduced by these corrections. Classify unchanged wider warnings individually using identical-rule historical evidence; retain existing owners instead of an unrelated mass type refactor. Do not disable checks or erase failed evidence. Whole-file format results and wider warning ownership remain explicit, with actual baseline evidence; no indiscriminate unrelated refactor.
+
+## Preservation requirements
+
+No destructive revert of all four PRs; remove only demonstrated redundant/unsupported code. Preserve successful ingestion outcomes, immutable retry bodies, source selection, original evidence, Notes tombstones/ownership and server confirmation. No force push to shared dev, gate/queue/AGENTS changes, test bypass or global egress relaxation. Actual backend/caller/test evidence governs corrections; unresolved observations remain unresolved.
+
+## ADR assessment
+
+No new durable rule is proposed: restore existing transport selection and apply accepted ownership, bounds and evidence requirements. ADR026/042/066 govern acquisition and snapshots; ADR031/034/065 govern Notes/Sync; ADR059 governs tracking. Historical substantive additions to accepted ADR065 are a verified governance deviation. Record their exact commits in the review/task; do not silently rewrite accepted rationale or infer missing requester approval. Any genuinely changed durable decision requires a new ADR rather than editing accepted rationale.
+
+## Acceptance
+
+All confirmed defects get red/green behavioral regressions through real existing seams and independent review. Publish full reuse inventory and exact changes, updated tracking including13514, preserved failed receipts, limitations, touched-scope Bandit and canonical checks. User review gets a concrete branch/PR; landing follows the actual queue mode, required exact-head statuses, real rebase where applicable and human-owned Change summary.
+
+## Task4 integration fix1: whitespace-prefixed HTML recognition
+
+Actual legacy `/media/add` live ingestion received valid NN/G HTML but rejected it as `text/plain`: six leading LF bytes defeat puremagic 2.2.0 offset-zero HTML signatures. The privately preserved 141947-byte response has SHA256 `9d989bdcdd1643cc69baf2f0a9c9e5ac659b977282e6f481d57f0c1e9df43ce6`; unchanged validation reproduces the failure, while removing only those LF bytes in memory gives a positive HTML signature. Earlier response bytes were cleaned up and remain an unknown-content historical failure; only the second retained response establishes this cause.
+
+Ruling9 authorizes a correction inside the existing shared MIME detector only when the target is HTML and detected MIME is generic `text/plain`: inspect at most4096 bytes, normalize leading ASCII HTML whitespace and an optional UTF8 BOM in memory, and require the existing detector to identify `text/html`. Keep the original file bytes, extension/size gates, nontext mismatch refusal, YARA and downstream sanitizer. No blanket plain-text allowance, HTTP-header/extension trust, alternate downloader, dependency change or new validation subsystem. Test synthetic whitespace/BOM HTML through existing upload and downloaded-file wrappers, normal HTML, plain/fake/nontext/malformed/over-bound prefixes and preserved safety/sanitization behavior. The remote article remains a private diagnostic, never a committed fixture.
+
+ADR required: no. This restores valid content recognition within existing shared validation and ADR026/042/066 acquisition constraints, without a changed durable security or architecture rule.
+
+## Integrated footer fixture qualification
+
+The supported Node20 shared-UI affected51-file run recorded1415passes and one5000ms footer-test timeout. Private read-only diagnostics reached every original state and measured two BODY role queries consuming1847.187ms combined while the reading state was already ready; queries inside existing reading controls resolved the same elements in1.244ms combined. Scope only those two test queries with the existing within helper and testIDs. Preserve all40checkbox selections, original transition/footer assertions and5000ms timeout. The exact original timeout boundary remains unproven, so retain the failed receipt separately and validate the changed fixture through named, owning-file and affected-union checks. No production behavior, test assertion, config, dependency or gate changes are authorized by this qualification. ADR required:no new durable rule; the existing governing ADRs remain applicable.
+
+## Task2 fix4: later Quick Notes draft recovery
+
+Real tombstoned browser reload preserves only the frozen save, losing later edits and hiding recovery on a blank editor. Use the main Notes mutable-draft/immutable-pendingWrite lifecycle in the same owner per-record queue. Read/merge/write/readback under the existing local-bucket record lock; mutable transitions fail closed without the lock. Preserve service authority after ACK and bind retained text to the accepted ID and exact receipt version. Discover matching recovery through fresh verified authority; retry explicitly, then resume local text explicitly with dirty state. Existing house confirmation protects saved-note/local-draft replacement, and authority/Workspace/selection fences reject late completion. No new store, queue, TTL, auto-resume or tombstone bypass. ADR required: no; ADR031/034/065 govern the existing ownership and receipt rules.
+
+Fix4 amended retirement contract (controller rulings, measured ACK absence-window RED and canonical-update409 RED): keep a validated clean Quick Notes row after ACK, with no pendingWrite and exact accepted ID/base/authority, so delayed bound edits cannot disappear into an absent row. Hide clean rows from Resume. Definitively rejected canonical updates retain dirty fields at their unchanged expected base with an explicit rejected-key marker; rejected creates retain prior removal behavior. Neither path guesses a newer server base or resurrects the operation. Cost: clean and conflicted rows consume the existing local storage; quota/readback failures remain visible. No TTL, automatic cleanup, second record/store, or tab-scheduling guarantee.

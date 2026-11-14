@@ -4,10 +4,15 @@ import sqlite3
 import uuid
 
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.admin import _load_bulk_user_candidates
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
     add_org_member,
     add_team_member,
@@ -16,17 +21,52 @@ from tldw_Server_API.app.core.AuthNZ.orgs_teams import (
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
+from tldw_Server_API.app.services import admin_profiles_service
+
+
+@pytest.mark.unit
+async def test_profile_admin_scope_enterprise_mode_denies_single_user_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Enterprise mode's denial of single-user platform-admin rights must apply here too
+    (same bug class as Qodo Q2; round 2 finding).
+
+    subject="single_user" makes the real is_single_user_principal() return True for
+    every caller, so this exercises the real enterprise-mode gate, not a per-module mock.
+    user_id=None means the only way past is_platform_admin() is the old single-user
+    short-circuit; with it removed, the function falls through to its own "no user_id"
+    403 instead of granting full scope.
+    """
+    monkeypatch.setenv("ADMIN_UI_ENTERPRISE_MODE", "1")
+    principal = AuthPrincipal(kind="user", user_id=None, is_admin=False, subject="single_user")
+    with pytest.raises(HTTPException) as exc:
+        await admin_profiles_service._get_profile_admin_scope(principal)
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.unit
+async def test_profile_admin_scope_allows_single_user_principal_outside_enterprise_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Outside enterprise mode, the single-user principal keeps full profile-admin scope."""
+    monkeypatch.delenv("ADMIN_UI_ENTERPRISE_MODE", raising=False)
+    principal = AuthPrincipal(kind="user", user_id=None, is_admin=False, subject="single_user")
+    scope = await admin_profiles_service._get_profile_admin_scope(principal)
+    assert scope.is_platform_admin is True
+
+_BOOTSTRAP_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.BOOTSTRAP,
+)
 
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_team_admin_scope_bulk_candidates(tmp_path, monkeypatch) -> None:
+async def test_team_admin_scope_bulk_candidates(tmp_path, monkeypatch, fresh_services) -> None:
     db_path = tmp_path / "users.db"
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
 
     reset_settings()
-    await reset_db_pool()
     await ensure_authnz_schema_ready_once()
 
     pool = await get_db_pool()
@@ -70,14 +110,14 @@ async def test_team_admin_scope_bulk_candidates(tmp_path, monkeypatch) -> None:
 
     org = await create_organization(name=f"Scope Org {suffix}", owner_user_id=None)
     org_id = int(org["id"])
-    await add_org_member(org_id=org_id, user_id=int(admin_id), role="member")
-    await add_org_member(org_id=org_id, user_id=int(member_id), role="member")
-    await add_org_member(org_id=org_id, user_id=int(outsider_id), role="member")
+    await add_org_member(org_id=org_id, user_id=int(admin_id), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_org_member(org_id=org_id, user_id=int(member_id), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_org_member(org_id=org_id, user_id=int(outsider_id), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     team = await create_team(org_id=org_id, name=f"Scope Team {suffix}")
     team_id = int(team["id"])
-    await add_team_member(team_id=team_id, user_id=int(admin_id), role="lead")
-    await add_team_member(team_id=team_id, user_id=int(member_id), role="member")
+    await add_team_member(team_id=team_id, user_id=int(admin_id), role="lead", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
+    await add_team_member(team_id=team_id, user_id=int(member_id), role="member", context=_BOOTSTRAP_MEMBERSHIP_CONTEXT)
 
     principal = AuthPrincipal(
         kind="user",

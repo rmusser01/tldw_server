@@ -45,7 +45,7 @@ SEPARATE, DO NOT FOLD IN: test_rag_module.py and test_gateway_protocol_stdio.py 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 DONE in 7934c39e40 and 64c253c0c3. Shard is green: 3343 passed, 14 skipped, 0 failed, 0 errors (was 13 failed + 8 errors).
 
 AC3: all 50 --ignore lines removed from ci.yml (the matrix is duplicated five times). The stale "SHRINKING quarantine" comment is replaced with an instruction not to add new entries.
@@ -72,7 +72,7 @@ ONE FINDING WORTH THE OWNER'S ATTENTION (not a defect, but a governance change t
 NOT FOLDED IN, as the task instructed: test_rag_module.py and test_gateway_protocol_stdio.py were never quarantined. They pass in isolation and in this shard but fail in-process with tests/MCP_unified -- cross-test state pollution, which is why the tree has its own shard. Still worth its own investigation.
 
 Verification: full tree 3343 passed / 14 skipped / 0 failed / 0 errors. -m "not packaging" 3317 passed / 34 deselected. -m packaging 26 passed / 8 skipped in 5s. ci.yml parses as YAML after the edit.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

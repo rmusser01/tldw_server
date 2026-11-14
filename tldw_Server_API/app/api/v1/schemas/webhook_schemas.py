@@ -204,25 +204,18 @@ class RateLimitStatusResponse(BaseModel):
                 },
                 "daily": {
                     "evaluations": 10000,
-                    "tokens": 10000000,
-                    "cost": 100.0
+                    "tokens": 10000000
                 }
             },
             "usage": {
                 "today": {
                     "evaluations": 150,
-                    "tokens": 50000,
-                    "cost": 1.50
-                },
-                "month": {
-                    "cost": 45.00
+                    "tokens": 50000
                 }
             },
             "remaining": {
                 "daily_evaluations": 9850,
-                "daily_tokens": 9950000,
-                "daily_cost": 98.50,
-                "monthly_cost": 955.00
+                "daily_tokens": 9950000
             }
         }
     })

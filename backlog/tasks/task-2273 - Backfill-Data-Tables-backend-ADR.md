@@ -33,7 +33,7 @@ Backfill a bounded Data Tables ADR from TASK-2272 evidence. Scope the accepted d
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started ADR backfill in isolated worktree .worktrees/data-tables-adr-backfill from origin/dev. Plan: create ADR-023 from TASK-2272 audit evidence; update ADR README and INV-025 disposition; add source/module backlinks; verify docs and focused Data Tables tests; record Bandit applicability.
 
 Implemented ADR-023 as Docs/ADR/023-data-tables-backend-storage-jobs-and-exports.md. Updated Docs/ADR/README.md, INV-025 inventory/default disposition, Docs/Design/Data_Tables_Backend.md, and tldw_Server_API/app/core/Data_Tables/README.md backlinks.
@@ -41,7 +41,7 @@ Implemented ADR-023 as Docs/ADR/023-data-tables-backend-storage-jobs-and-exports
 Verification before task closeout: git diff --check passed; reference scan for ADR-023/TASK-2273/INV-025/backlink paths found expected references and no developer-machine absolute paths in touched docs; focused Data Tables tests passed with source ../../.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/DataTables/test_data_tables_api.py tldw_Server_API/tests/DataTables/test_data_tables_export.py tldw_Server_API/tests/DataTables/test_data_tables_jobs_integration.py tldw_Server_API/tests/DataTables/test_data_tables_worker.py tldw_Server_API/tests/DB_Management/test_data_tables_crud.py tldw_Server_API/tests/DB_Management/test_media_db_data_table_child_ops.py tldw_Server_API/tests/DB_Management/test_media_db_data_table_generation_ops.py (77 passed, 6 warnings).
 
 Bandit applicability: skipped because touched files are Markdown docs and Backlog task records only; no Python/code paths changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import threading
+from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -438,6 +439,20 @@ def _principal_has_admin_claims(principal: AuthPrincipal) -> bool:
     return bool(permissions & _ADMIN_CLAIM_PERMISSIONS)
 
 
+async def get_scoped_job_manager(
+    current_user: User = Depends(get_request_user),
+    principal: AuthPrincipal = Depends(get_auth_principal),
+    manager: JobManager = Depends(get_job_manager),
+) -> AsyncIterator[JobManager]:
+    """Keep the authenticated tenant bound through response streaming and cleanup."""
+    with JobManager.scoped_rls_context(
+        is_admin=_principal_has_admin_claims(principal),
+        domain_allowlist="media_ingest",
+        owner_user_id=str(current_user.id),
+    ):
+        yield manager
+
+
 def _job_to_status(job: dict[str, Any]) -> MediaIngestJobStatus:
     payload = _normalize_payload(job.get("payload"))
     id_value = job.get("id")
@@ -447,16 +462,17 @@ def _job_to_status(job: dict[str, Any]) -> MediaIngestJobStatus:
         job_id = int(id_value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Invalid job id {id_value!r} in job: {job!r}") from exc
+    timestamps = {}
+    for field in ("created_at", "started_at", "completed_at", "cancelled_at"):
+        value = job.get(field)
+        timestamps[field] = value.isoformat() if isinstance(value, datetime) else value
     return MediaIngestJobStatus(
+        **timestamps,
         id=job_id,
         uuid=job.get("uuid"),
         status=job.get("status"),
         job_type=job.get("job_type"),
         owner_user_id=job.get("owner_user_id"),
-        created_at=job.get("created_at"),
-        started_at=job.get("started_at"),
-        completed_at=job.get("completed_at"),
-        cancelled_at=job.get("cancelled_at"),
         cancellation_reason=job.get("cancellation_reason"),
         progress_percent=job.get("progress_percent"),
         progress_message=job.get("progress_message"),
@@ -610,7 +626,7 @@ async def submit_media_ingest_jobs(
         description="Optional JSON/list of idempotency keys, one per URL",
     ),
     current_user: User = Depends(get_request_user),
-    jm: JobManager = Depends(get_job_manager),
+    jm: JobManager = Depends(get_scoped_job_manager),
     collections_db: CollectionsDatabase | None = Depends(try_get_collections_db_for_user),
 ) -> SubmitMediaIngestJobsResponse:
     rid = ensure_request_id(request) if request is not None else None
@@ -806,7 +822,7 @@ async def get_media_ingest_job(
     job_id: int,
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
-    jm: JobManager = Depends(get_job_manager),
+    jm: JobManager = Depends(get_scoped_job_manager),
 ) -> MediaIngestJobStatus:
     job = jm.get_job(int(job_id))
     if not job or str(job.get("domain") or "") != "media_ingest":
@@ -832,7 +848,7 @@ async def list_media_ingest_jobs(
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
     _: None = Depends(check_rate_limit),
-    jm: JobManager = Depends(get_job_manager),
+    jm: JobManager = Depends(get_scoped_job_manager),
 ) -> MediaIngestJobListResponse:
     owner_filter = None if _principal_has_admin_claims(principal) else str(current_user.id)
     # Backward compatibility: legacy rows may only have payload.batch_id, so the
@@ -888,7 +904,7 @@ async def stream_media_ingest_job_events(
     after_id: int = Query(0, ge=0),
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
-    jm: JobManager = Depends(get_job_manager),
+    jm: JobManager = Depends(get_scoped_job_manager),
 ) -> StreamingResponse:
     assert_may_start_work(request.app, "media.ingest.jobs.events.stream")
     is_admin = _principal_has_admin_claims(principal)
@@ -1026,7 +1042,7 @@ async def cancel_media_ingest_job(
     job_id: int,
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
-    jm: JobManager = Depends(get_job_manager),
+    jm: JobManager = Depends(get_scoped_job_manager),
     reason: str | None = Query(None, description="Reason for cancellation"),
 ) -> CancelMediaIngestJobResponse:
     job = jm.get_job(int(job_id))
@@ -1070,7 +1086,7 @@ async def cancel_media_ingest_jobs_batch(
     reason: str | None = Query(None, description="Reason for cancellation"),
     current_user: User = Depends(get_request_user),
     principal: AuthPrincipal = Depends(get_auth_principal),
-    jm: JobManager = Depends(get_job_manager),
+    jm: JobManager = Depends(get_scoped_job_manager),
 ) -> CancelMediaIngestBatchResponse:
     resolved_batch_id = _resolve_batch_or_session_id(batch_id=batch_id, session_id=session_id)
     is_admin = _principal_has_admin_claims(principal)

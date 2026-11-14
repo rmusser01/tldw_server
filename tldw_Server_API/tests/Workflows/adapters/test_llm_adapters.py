@@ -32,7 +32,7 @@ from tldw_Server_API.app.core.Workflows.adapters import (
     run_translate_adapter,
 )
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")]
 
 
 def _real_moderation_service(policy: ModerationPolicy) -> ModerationService:
@@ -107,7 +107,7 @@ async def test_llm_adapter_template_fallback_log_sanitizes_backend_error(monkeyp
     monkeypatch.delenv("TEST_MODE", raising=False)
 
     import tldw_Server_API.app.core.Chat.chat_service as chat_service
-    import tldw_Server_API.app.core.Chat.prompt_template_manager as prompt_template_manager
+    import tldw_Server_API.app.core.Utils.template_render as template_render
     from tldw_Server_API.app.core.Workflows.adapters.llm import llm
 
     async def fake_call(**kwargs):
@@ -117,7 +117,7 @@ async def test_llm_adapter_template_fallback_log_sanitizes_backend_error(monkeyp
         raise RuntimeError("template backend exploded at /private/templates.db")
 
     monkeypatch.setattr(chat_service, "perform_chat_api_call_async", fake_call)
-    monkeypatch.setattr(prompt_template_manager, "apply_template_to_string", broken_template)
+    monkeypatch.setattr(template_render, "apply_template_to_string", broken_template)
 
     messages = []
     sink_id = llm.logger.add(lambda message: messages.append(str(message)), level="DEBUG")

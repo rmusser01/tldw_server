@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import uuid
 from typing import Callable
 
@@ -9,36 +8,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-SAFE_REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-MAX_REQUEST_ID_LENGTH = 128
+from tldw_Server_API.app.core.Logging.log_context import (  # noqa: F401 - re-exported; defined in Logging (TASK-13950.12)
+    _clean_id,
+    _clean_request_id,
+)
+
 SESSION_HEADER_NAME = "X-Session-ID"
 SESSION_ID_PREFIX = "sess_"
 
 
-def _generate_request_id() -> str:
-    return str(uuid.uuid4())
-
-
 def _generate_session_id() -> str:
     return f"{SESSION_ID_PREFIX}{uuid.uuid4().hex}"
-
-
-def _clean_id(value: str | None, generator: Callable[[], str]) -> str:
-    if not value:
-        return generator()
-
-    candidate = value.strip()
-    if not candidate:
-        return generator()
-
-    if len(candidate) > MAX_REQUEST_ID_LENGTH or not SAFE_REQUEST_ID_PATTERN.fullmatch(candidate):
-        return generator()
-
-    return candidate
-
-
-def _clean_request_id(value: str | None) -> str:
-    return _clean_id(value, _generate_request_id)
 
 
 def _clean_session_id(value: str | None) -> str:

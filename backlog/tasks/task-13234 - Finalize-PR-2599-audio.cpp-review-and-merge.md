@@ -26,7 +26,7 @@ Continue the completed audio.cpp review archived under the original TASK-13231 a
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased the eight PR commits cleanly onto origin/dev 40345571a2cfc8b3a8893545836097d27e4ee86c. Current dev has audio.cpp STT but no equivalent TTS provider, so this remains useful.
 Verified and fixed: inactive cloning capability; non-private reference files and cancellation cleanup; WAV bytes incorrectly returned to PCM service chunking; wrong WAV rate/channel metadata; stale managed clients after a child crash; cancelled-startup resource leaks; shared generated config paths; raw upstream error-body exposure; invalid installer backend flags, binary paths, obsolete model manager and package layout; missing PocketTTS default voice. Removed the unrelated Chatterbox alias rewrite. Installer now follows the current Helper_Scripts/TTS_Installers layout.
 Existing review feedback: constructor typing/client docstring and blocking file I/O addressed; broad shutdown exception suppression narrowed. The bot claim that asyncio markers violate AGENTS.md is not supported by repository policy or pytest conventions; existing async markers are retained.
@@ -44,7 +44,7 @@ Qodo follow-up 5611102940 addressed: startup retries confirmed bind collisions o
 Latest rebase: 456eafb7a603449722ba8db806071a5e2aa5e7d6. All ten commits replayed cleanly and git range-diff showed identical patches. The new dev changes only affect VZ guest Go code and its Backlog record. Qodo /agentic_review reported no code changes since its last review after the follow-up push.
 
 2026-09-10 01:45 UTC follow-up: all GitHub checks passed on head 87c8690003c42ff17e0bf07e2ec3640164431bdd and Qodo posted no new findings. Dev advanced to f0248aaa00047d2ffcc3bde295d9fbb8296add8a (PR 2613 audio-download test/docs). Rebased all eleven commits cleanly; git range-diff shows identical patches and production TTS/test files are unchanged. Focused/adjacent suite rerun on latest dev: 147 passed, 4 existing warnings. Prior Bandit evidence remains applicable to identical production scope. Latest requester summary was posted verbatim but still lacks the human-owned implementation rationale required by repository policy; final merge awaits that input and fresh rebased-head CI.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

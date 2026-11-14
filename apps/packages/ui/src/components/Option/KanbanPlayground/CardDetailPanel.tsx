@@ -12,7 +12,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Trash2, Archive, Copy, Send } from "lucide-react"
 
 import type { Card, CardUpdate, ListWithCards, PriorityType, Comment } from "@/types/kanban"
-import { copyCard, listComments, createComment, generateClientId } from "@/services/kanban"
+import { generateClientId } from "@/services/kanban"
+import { useKanbanScope } from "./KanbanScope"
 import { LabelManager } from "./LabelManager"
 import { ChecklistSection } from "./ChecklistSection"
 import {
@@ -53,6 +54,8 @@ export const CardDetailPanel = ({
   onCopied
 }: CardDetailPanelProps) => {
   const queryClient = useQueryClient()
+  const { api, key, isActive } = useKanbanScope()
+  const { copyCard, listComments, createComment } = api
 
   // Form state
   const [title, setTitle] = useState("")
@@ -69,17 +72,19 @@ export const CardDetailPanel = ({
   const copyCardMutation = useMutation({
     mutationFn: (cardId: number) => copyCard(cardId),
     onSuccess: () => {
+      if (!isActive()) return
       message.success("Card copied")
       onCopied?.()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to copy card. Please try again.")
     }
   })
 
   // Comments query
   const { data: comments = [] } = useQuery({
-    queryKey: ["kanban-card-comments", card?.id],
+    queryKey: key("kanban-card-comments", card?.id),
     queryFn: () => listComments(card!.id),
     enabled: !!card?.id && open,
     staleTime: 30 * 1000
@@ -90,12 +95,14 @@ export const CardDetailPanel = ({
     mutationFn: ({ cardId, content }: { cardId: number; content: string }) =>
       createComment(cardId, { content, client_id: generateClientId() }),
     onSuccess: () => {
+      if (!isActive()) return
       setNewComment("")
       queryClient.invalidateQueries({
-        queryKey: ["kanban-card-comments", card?.id]
+        queryKey: key("kanban-card-comments", card?.id)
       })
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to add comment. Please try again.")
     }
   })
@@ -113,7 +120,7 @@ export const CardDetailPanel = ({
   }, [card])
 
   const handleSave = async () => {
-    if (!card) return
+    if (!card || !isActive()) return
 
     const updates: CardUpdate = {}
 
@@ -135,6 +142,7 @@ export const CardDetailPanel = ({
       return
     }
 
+    if (!isActive()) return
     setDueDateTouched(false)
     setIsDirty(false)
   }

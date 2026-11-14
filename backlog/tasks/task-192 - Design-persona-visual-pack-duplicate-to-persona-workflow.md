@@ -33,13 +33,13 @@ Create the design/spec for GitHub issue #1450: duplicate a Persona Visual pack f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created draft spec at Docs/superpowers/specs/2026-05-09-persona-visual-duplicate-to-persona-design.md in worktree .worktrees/persona-visual-duplicate-spec on branch codex/persona-visual-duplicate-spec. Spec review subagent dispatched after whitespace check passed.
 
 Spec review iteration 1 found one blocking ambiguity: same-persona duplication was both allowed and left open. Resolved V1 to require a different target persona and reject same-persona duplicate with a stable error. Spec review iteration 2 approved. Verification: git diff --check passed. Bandit not run because this task only adds design/backlog markdown.
 
 Design self-review before implementation planning found and patched three issues: public API response is now the existing PersonaVisualPackResponse with asset_id_map kept internal only; idempotency keys are explicitly out of V1; duplicate now copies only manifest-referenced assets so unaccepted generated candidates and stale uploads are not copied. Also tightened preflight/cleanup guidance for source asset membership, checksum, file existence, and partial target draft failures.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

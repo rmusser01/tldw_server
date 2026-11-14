@@ -6,7 +6,7 @@ import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from starlette.responses import StreamingResponse
@@ -17,6 +17,9 @@ from tldw_Server_API.app.core.Chat.tool_auto_exec import (
     ToolExecutionBatchResult,
     ToolExecutionRecord,
 )
+from tldw_Server_API.app.core.Usage import usage_tracker
+from tldw_Server_API.app.core.Usage.llm_accounting import drain_accounting
+from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 
 
 class _DummyStreamTracker:
@@ -198,6 +201,8 @@ async def _run_execute_streaming_call(
     queue_execution_enabled: bool = False,
     enable_provider_fallback: bool = False,
     refresh_provider_params=None,
+    rg_commit_cb=None,
+    rg_refund_cb=None,
 ) -> StreamingResponse:
     cleaned_args = {
         "api_endpoint": selected_provider,
@@ -240,6 +245,8 @@ async def _run_execute_streaming_call(
         llm_call_func=llm_call_func,
         refresh_provider_params=refresh_provider_params or (lambda *_args, **_kwargs: ({}, None)),
         moderation_getter=lambda: _NoModeration(),
+        rg_commit_cb=rg_commit_cb,
+        rg_refund_cb=rg_refund_cb,
     )
 
 
@@ -1004,3 +1011,576 @@ def test_emit_chat_run_first_rollout_metrics_propagates_unexpected_failures(
         )
 
     warning.assert_not_called()
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("unified, reject", [(False, False), (True, False), (False, True)])
+async def test_chat_sse_forbids_proxy_compression(monkeypatch, unified, reject):
+    """Proxies must forward each Chat frame while generation is still running."""
+    monkeypatch.setenv("STREAMS_UNIFIED", "1" if unified else "0")
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: reject)
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-stream-header"
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_content_stream,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={
+            "n": 2 if reject else 1,
+            **(
+                {"tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}]}
+                if reject
+                else {}
+            ),
+        },
+    )
+    try:
+        assert "no-transform" in response.headers["cache-control"]  # nosec B101: Required SSE proxy behavior.
+    finally:
+        await _collect_sse_chunks(response)
+
+
+# --- A streamed reply is recorded from the provider's usage chunk (TASK-13951) ---
+
+
+@pytest.fixture
+def stream_usage_rows(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """The llm_usage_log rows the stream's real log_llm_usage inserts, costed by the shipped catalog."""
+    rows: list[dict[str, Any]] = []
+
+    class _Repo:
+        """Stands in for AuthnzUsageRepo and keeps the inserted rows."""
+
+        def __init__(self, _pool: Any) -> None:
+            """No database."""
+
+        async def insert_llm_usage_log(self, **kwargs: Any) -> None:
+            """Record the row instead of writing it."""
+            rows.append(kwargs)
+
+    async def _none() -> None:
+        """No pool and no daily ledger."""
+
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    monkeypatch.setenv("LLM_USAGE_ENABLED", "true")
+    monkeypatch.setattr(usage_tracker, "get_db_pool", _none)
+    monkeypatch.setattr(usage_tracker, "_get_tokens_daily_ledger", _none)
+    monkeypatch.setattr(usage_tracker, "AuthnzUsageRepo", _Repo)
+    monkeypatch.setattr(chat_service, "get_topic_monitoring_service", lambda: None)
+    reset_pricing_catalog()
+    yield rows
+    reset_pricing_catalog()
+
+
+def _reply_then(*frames: dict[str, Any]) -> Any:
+    """A provider call that streams "hello world!", stops, then sends ``frames`` before DONE."""
+
+    def _call() -> Any:
+        def _stream() -> Any:
+            yield 'data: {"choices": [{"delta": {"content": "hello world!"}}]}\n\n'
+            yield 'data: {"choices": [{"delta": {}, "finish_reason": "stop"}]}\n\n'
+            for frame in frames:
+                yield f"data: {json.dumps(frame)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return _stream()
+
+    return _call
+
+
+async def _save_nothing(*_args: Any, **_kwargs: Any) -> str:
+    return "message-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("provider", "model", "usage_chunk", "tier", "total_cost", "forwarded"),
+    [
+        # OpenAI Fast, reported as priority: 2,000 uncached and 8,000 cached input tokens and 1,000 output tokens
+        # at gpt-4o-mini's priority rates ($0.25, $0.125 and $1.00 per million).
+        (
+            "openai",
+            "gpt-4o-mini",
+            {
+                "service_tier": "priority",
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 1_000,
+                    "total_tokens": 11_000,
+                    "prompt_tokens_details": {"cached_tokens": 8_000},
+                },
+            },
+            "priority",
+            (2_000 * 0.25 + 8_000 * 0.125 + 1_000 * 1.00) / 1_000_000,
+            False,
+        ),
+        # OpenRouter reports the call's cost; an uncatalogued model is not costed at the unknown-model rate.
+        # Its usage chunk carries one content-free choice, not empty choices (OpenRouter's streaming reference).
+        (
+            "openrouter",
+            "acme/brand-new-model",
+            {
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"content": "", "role": "assistant"},
+                        "finish_reason": "stop",
+                        "native_finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 10_000, "completion_tokens": 1_000, "total_tokens": 11_000, "cost": 0.0042},
+            },
+            None,
+            0.0042,
+            True,
+        ),
+        # Gemini: the chunk GoogleAdapter.stream ends with (TASK-13952), 8,000 of 10,000 prompt tokens cached and
+        # the thinking share inside completion_tokens, at gemini-2.5-flash's standard rates ($0.30, $0.03, $2.50
+        # per million), then at its flex rates ($0.15, $0.03, $1.25) when usageMetadata.serviceTier says so.
+        (
+            "google",
+            "gemini-2.5-flash",
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 1_000,
+                    "total_tokens": 11_000,
+                    "thoughtsTokenCount": 400,
+                    "cachedContentTokenCount": 8_000,
+                },
+            },
+            None,
+            (2_000 * 0.30 + 8_000 * 0.03 + 1_000 * 2.50) / 1_000_000,
+            False,
+        ),
+        (
+            "google",
+            "gemini-2.5-flash",
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 10_000,
+                    "completion_tokens": 1_000,
+                    "total_tokens": 11_000,
+                    "thoughtsTokenCount": 400,
+                    "cachedContentTokenCount": 8_000,
+                    "service_tier": "flex",
+                },
+            },
+            "flex",
+            (2_000 * 0.15 + 8_000 * 0.03 + 1_000 * 1.25) / 1_000_000,
+            False,
+        ),
+    ],
+    ids=["openai-fast-cached", "openrouter-reported-cost", "gemini-cached-thinking", "gemini-flex"],
+)
+async def test_a_streamed_reply_is_recorded_from_the_usage_chunk_its_provider_sends(
+    stream_usage_rows, provider, model, usage_chunk, tier, total_cost, forwarded
+) -> None:
+    """Its service tier, cache rate and reported cost apply, as for a reply that is not streamed (AC #1)."""
+    committed: list[int] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then(usage_chunk),
+        save_message_fn=_save_nothing,
+        selected_provider=provider,
+        provider=provider,
+        model=model,
+        rg_commit_cb=committed.append,
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    await drain_accounting()
+    (row,) = stream_usage_rows
+    assert row["estimate_source"] == "provider_usage"
+    assert row["estimated"] is False
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (10_000, 1_000)
+    assert row["total_cost_usd"] == pytest.approx(total_cost)
+    assert json.loads(row["raw_usage_metadata_json"]).get("service_tier") == tier
+    assert committed == [11_000]
+    # This client did not ask for usage: OpenAI's empty-choices chunk is not forwarded, and OpenRouter's,
+    # which carries a choice, reaches it as today (Decision 2).
+    assert [payload["usage"] for _, payload in _json_payload_chunks(chunks) if payload.get("usage")] == (
+        [usage_chunk["usage"]] if forwarded else []
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "frames",
+    [
+        (),
+        ({"choices": [], "usage": None},),
+        ({"choices": [], "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}},),
+    ],
+    ids=["no-usage-chunk", "null-usage", "zero-usage"],
+)
+async def test_a_streamed_reply_without_usage_is_recorded_from_the_estimate(stream_usage_rows, frames) -> None:
+    """No usable usage chunk: the row is the stream estimate, as before (AC #2)."""
+    committed: list[int] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then(*frames),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+    )
+    await _collect_sse_chunks(response)
+
+    await drain_accounting()
+    (row,) = stream_usage_rows
+    assert row["estimate_source"] == "stream_estimate"
+    assert row["estimated"] is True
+    assert row["completion_tokens"] == len("hello world!") // 4
+    assert row["raw_usage_metadata_json"] is None
+    assert committed == [row["total_tokens"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("usage", "expected_tokens"),
+    [
+        ({"prompt_tokens": 50}, (50, len("hello world!") // 4)),
+        (
+            {"completion_tokens": 7},
+            (chat_service._estimate_tokens_from_messages([{"role": "user", "content": "hi"}]), 7),
+        ),
+    ],
+    ids=["prompt-only", "completion-only"],
+)
+async def test_a_usage_block_without_completion_tokens_counts_the_reply_from_the_estimate(
+    stream_usage_rows, usage, expected_tokens
+) -> None:
+    """A block that counts one side takes the other from the estimate, so neither counts as nothing (TASK-13951)."""
+    committed: list[int] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then({"choices": [], "usage": usage}),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+    )
+    await _collect_sse_chunks(response)
+
+    await drain_accounting()
+    (row,) = stream_usage_rows
+    assert (row["prompt_tokens"], row["completion_tokens"]) == expected_tokens
+    assert row["estimated"] is True
+    assert committed == [row["total_tokens"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_streamed_tool_call_reply_is_recorded_once_from_its_usage_chunk(
+    monkeypatch: pytest.MonkeyPatch, stream_usage_rows
+) -> None:
+    """Auto-executed tools add no row of their own; the reply's usage chunk is recorded (TASK-13951)."""
+    executed: list[str] = []
+
+    async def fake_autoexec(**kwargs):
+        executed.extend(call["id"] for call in kwargs["tool_calls"])
+        return ToolExecutionBatchResult(0, 0, 0, 0, False, [])
+
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: True)
+    monkeypatch.setattr(chat_service, "execute_assistant_tool_calls", fake_autoexec)
+    usage_chunk = {"choices": [], "usage": {"prompt_tokens": 300, "completion_tokens": 40, "total_tokens": 340}}
+
+    def llm_call_func() -> Any:
+        def _stream() -> Any:
+            *frames, done = _tool_call_stream()
+            yield from frames
+            yield f"data: {json.dumps(usage_chunk)}\n\n"
+            yield done
+
+        return _stream()
+
+    async def save_message_fn(_db, _conv_id, payload, use_transaction=True):
+        return "m-1"
+
+    response = await _run_execute_streaming_call(llm_call_func=llm_call_func, save_message_fn=save_message_fn)
+    await _collect_sse_chunks(response)
+
+    assert executed == ["c1"]
+    await drain_accounting()
+    (row,) = stream_usage_rows
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (300, 40)
+    assert row["estimate_source"] == "provider_usage"
+
+
+# --- A stream that ends early still writes one usage row (TASK-13953) ---
+
+_PROMPT_ESTIMATE = chat_service._estimate_tokens_from_messages([{"role": "user", "content": "hi"}])
+
+
+def _content_then(*frames: dict[str, Any], then: str = "wait") -> Any:
+    """A provider call that streams "hello world!" and ``frames``, then waits for a client that never comes back,
+    or fails. ``then="wait_after_frames"`` signals ``read`` once every frame was read, before waiting."""
+    read = asyncio.Event()
+
+    def _call() -> Any:
+        async def _stream() -> Any:
+            if then != "fail_before_output":
+                yield 'data: {"choices": [{"delta": {"content": "hello world!"}}]}\n\n'
+            for frame in frames:
+                yield f"data: {json.dumps(frame)}\n\n"
+            if then.startswith("fail"):
+                raise RuntimeError("upstream reset")
+            read.set()
+            await asyncio.Event().wait()
+
+        return _stream()
+
+    _call.read = read  # type: ignore[attr-defined]
+    return _call
+
+
+async def _drop_after(response: StreamingResponse, ready: asyncio.Event | None = None) -> None:
+    """Read the stream until "hello world!" (and ``ready``), then cancel the reading task, as a disconnect does."""
+    delivered = asyncio.Event()
+
+    async def _read() -> None:
+        async for chunk in response.body_iterator:
+            if "hello world!" in str(chunk):
+                delivered.set()
+
+    reader = asyncio.ensure_future(_read())
+    await asyncio.wait_for(delivered.wait(), timeout=10)
+    if ready is not None:
+        await asyncio.wait_for(ready.wait(), timeout=10)
+    reader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+
+
+async def _settled(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows once the stream's own task, which outlives a cancelled reader, has written its row."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 10
+    while not rows and loop.time() < deadline:
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)  # a second row, were one written, shows up here
+    await drain_accounting()
+    return rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_stream_the_client_drops_still_writes_one_row_and_commits_its_tokens(stream_usage_rows) -> None:
+    """The client read the reply and closed on it; the reply counts toward the user's limits (AC #1, AC #2)."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_content_then(),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    await _drop_after(response)
+
+    (row,) = await _settled(stream_usage_rows)
+    assert row["estimate_source"] == "stream_estimate"
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (_PROMPT_ESTIMATE, len("hello world!") // 4)
+    assert committed == [row["total_tokens"]]
+    assert refunded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_dropped_stream_is_recorded_from_the_usage_chunk_that_arrived(stream_usage_rows) -> None:
+    """The provider's count wins over the estimate when the chunk arrived before the drop (AC #1)."""
+    committed: list[int] = []
+    usage = {"prompt_tokens": 40, "completion_tokens": 9, "total_tokens": 49}
+    llm_call_func = _content_then({"choices": [], "usage": usage})
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=llm_call_func, save_message_fn=_save_nothing, rg_commit_cb=committed.append
+    )
+    await _drop_after(response, ready=llm_call_func.read)
+
+    (row,) = await _settled(stream_usage_rows)
+    assert row["estimate_source"] == "provider_usage"
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (40, 9)
+    assert committed == [49]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_client_drop_during_the_save_still_writes_one_row_and_commits_its_tokens(stream_usage_rows) -> None:
+    """The client closed on finish_reason while the message was being saved, where a close on the last frame
+    lands; the reply counts all the same (AC #1, AC #2)."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+    saving = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _blocked_save(*_args: Any, **_kwargs: Any) -> str:
+        saving.set()
+        await release.wait()
+        return "message-1"
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then(),
+        save_message_fn=_blocked_save,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    await _drop_after(response, ready=saving)
+    release.set()
+
+    (row,) = await _settled(stream_usage_rows)
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (_PROMPT_ESTIMATE, len("hello world!") // 4)
+    assert committed == [row["total_tokens"]]
+    assert refunded == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_stream_that_fails_writes_one_row_from_what_it_received(stream_usage_rows) -> None:
+    """A provider error after output records the prompt and what arrived, as the provider-level recorder does;
+    the tokens are committed, not refunded (AC #1, AC #2)."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_content_then(then="fail_after_output"),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    chunks = await _collect_sse_chunks(response)
+
+    (row,) = await _settled(stream_usage_rows)
+    assert (row["prompt_tokens"], row["completion_tokens"]) == (_PROMPT_ESTIMATE, len("hello world!") // 4)
+    assert row["estimate_source"] == "stream_estimate"
+    assert committed == [row["total_tokens"]]
+    assert refunded == []
+    assert any('"success": false' in chunk for chunk in chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_stream_that_fails_before_any_output_is_refunded_and_writes_no_row(stream_usage_rows) -> None:
+    """Nothing came back, and the endpoint retries such a failure (an OAuth refresh, a fallback provider) on the
+    same request and reservation: a row here would charge the prompt twice. Refunded, as before (AC #1)."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_content_then(then="fail_before_output"),
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    chunks = await _collect_sse_chunks(response)
+    await drain_accounting()
+
+    assert stream_usage_rows == []
+    assert committed == []
+    assert refunded == [{"cancelled": False, "error": True}]
+    assert any('"success": false' in chunk for chunk in chunks)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_stream_dropped_before_any_output_is_refunded_and_writes_no_row(stream_usage_rows) -> None:
+    """Nothing was received, so nothing is recorded, as the provider-level recorder does for an unread stream;
+    the endpoint's own close of a failed attempt before its retry reaches the pipeline as such a drop."""
+    committed: list[int] = []
+    refunded: list[dict[str, Any]] = []
+    entered = asyncio.Event()
+
+    def llm_call_func() -> Any:
+        async def _stream() -> Any:
+            entered.set()
+            await asyncio.Event().wait()
+            yield ""  # never reached
+
+        return _stream()
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=llm_call_func,
+        save_message_fn=_save_nothing,
+        rg_commit_cb=committed.append,
+        rg_refund_cb=lambda **kwargs: refunded.append(kwargs),
+    )
+    reader = asyncio.ensure_future(_collect_sse_chunks(response))
+    await asyncio.wait_for(entered.wait(), timeout=10)
+    reader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await reader
+    deadline = asyncio.get_running_loop().time() + 10
+    while not refunded and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)  # the stream's own task finishes after the cancelled reader
+    await drain_accounting()
+
+    assert stream_usage_rows == []
+    assert committed == []
+    assert refunded == [{"cancelled": True, "error": False}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_the_tokens_are_committed_even_when_the_row_write_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A usage write that fails with a driver error still commits to the Resource Governor and billing: a commit
+    skipped on a failed write would be a quota bypass (AC #2)."""
+
+    class _DriverError(Exception):
+        """Not one of the chat pipeline's non-critical exceptions."""
+
+    committed: list[int] = []
+    monkeypatch.setattr(chat_service, "log_llm_usage", AsyncMock(side_effect=_DriverError("disk full")))
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_reply_then(), save_message_fn=_save_nothing, rg_commit_cb=committed.append
+    )
+    await _collect_sse_chunks(response)
+    await drain_accounting()
+
+    assert committed == [_PROMPT_ESTIMATE + len("hello world!") // 4]
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_a_dropped_stream_on_the_users_own_key_is_recorded_as_such(
+    monkeypatch: pytest.MonkeyPatch, stream_usage_rows
+) -> None:
+    """The row carries credential_source 'user', which the limits skip, as a completed one does (ADR-083)."""
+    monkeypatch.setattr(chat_service, "call_credential_source", lambda _args: "user")
+
+    response = await _run_execute_streaming_call(llm_call_func=_content_then(), save_message_fn=_save_nothing)
+    await _drop_after(response)
+
+    (row,) = await _settled(stream_usage_rows)
+    assert row["credential_source"] == "user"
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_the_stream_estimate_counts_reasoning_and_tool_call_arguments(stream_usage_rows) -> None:
+    """A tool-call-only reply is not free: its arguments and reasoning count, as the provider-level recorder
+    counts them (AC #3)."""
+    arguments = json.dumps({"query": "x" * 30})
+    tool_delta = {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "type": "function",
+                                                         "function": {"name": "notes.search", "arguments": arguments}}]}}]}
+    reasoning = {"choices": [{"delta": {"reasoning_content": "y" * 40}}]}
+
+    def llm_call_func() -> Any:
+        def _stream() -> Any:
+            yield f"data: {json.dumps(reasoning)}\n\n"
+            yield f"data: {json.dumps(tool_delta)}\n\n"
+            yield 'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n'
+            yield "data: [DONE]\n\n"
+
+        return _stream()
+
+    response = await _run_execute_streaming_call(llm_call_func=llm_call_func, save_message_fn=_save_nothing)
+    await _collect_sse_chunks(response)
+
+    await drain_accounting()
+    (row,) = stream_usage_rows
+    assert row["completion_tokens"] == (len(arguments) + 40) // 4
+    assert row["estimate_source"] == "stream_estimate"

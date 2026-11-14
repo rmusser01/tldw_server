@@ -25,13 +25,13 @@ Fix unbaselined canonical-state-label guard findings in Knowledge QA source heal
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Routed ready/searchable and unavailable source-health labels through design-system registry label constants so canonical labels keep defensive non-empty fallbacks.
 
 Verification: RED sourceHealth registry-label test failed against hardcoded labels; GREEN sourceHealth test passed 4/4; product-state guard unit passed 52/52; verify:design-system-state exited 0 and no longer reports sourceHealth.ts as blocked.
 
 Known verification note: full UI TypeScript check still fails on existing repo-wide type debt outside touched files. Bandit is not applicable to this TypeScript-only frontend slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

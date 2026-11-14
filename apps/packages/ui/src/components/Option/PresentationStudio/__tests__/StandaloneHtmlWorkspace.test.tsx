@@ -32,17 +32,22 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
-  const ReactModule = await import("react")
   return {
     ...actual,
-    useNavigate: () => mocks.navigate,
-    useBlocker: () => ({ state: "unblocked", proceed: undefined, reset: undefined }),
-    unstable_usePrompt: function usePrompt(...args: unknown[]) {
-      mocks.usePrompt(...args)
+    useNavigate: () => mocks.navigate
+  }
+})
+
+vi.mock("@/entries/shared/route-leave-prompt", async () => {
+  const ReactModule = await import("react")
+  return {
+    RouteLeavePrompt: (props: { when: boolean; message: string }) => {
+      mocks.usePrompt(props)
       ReactModule.useEffect(() => {
-        mocks.promptActive = true
+        mocks.promptActive = props.when
         return () => { mocks.promptActive = false }
-      }, [])
+      }, [props.when])
+      return null
     }
   }
 })
@@ -2801,10 +2806,12 @@ describe("StandaloneHtmlWorkspace", () => {
     expect(screen.getByText(/Recovery unavailable/i)).toBeVisible()
     fireEvent.change(screen.getByLabelText("HTML source"), { target: { value: SECOND_EDIT } })
     await waitFor(() => expect(screen.getByLabelText("HTML source")).toHaveValue(SECOND_EDIT))
-    const beforeReload = Array.from({ length: sessionStorage.length }, (_, index) =>
-      sessionStorage.getItem(sessionStorage.key(index)!)
-    ).join("\n")
-    expect(beforeReload).toContain(SECOND_EDIT)
+    await waitFor(() => {
+      const beforeReload = Array.from({ length: sessionStorage.length }, (_, index) =>
+        sessionStorage.getItem(sessionStorage.key(index)!)
+      ).join("\n")
+      expect(beforeReload).toContain(SECOND_EDIT)
+    })
 
     blockedRemove.mockRestore()
     mocks.slidesCapabilities = {

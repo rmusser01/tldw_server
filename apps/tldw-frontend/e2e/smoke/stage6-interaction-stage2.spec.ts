@@ -222,7 +222,7 @@ test.describe('Stage 6 interaction stage 2 positive regressions', () => {
     });
     await waitForAppShell(page, LOAD_TIMEOUT);
 
-    const palette = page.getByRole('dialog', { name: /command palette/i });
+    const palette = page.getByRole('dialog', { name: 'Search commands', exact: true });
     const shortcut = (await page.evaluate(() => /Mac|iPod|iPhone|iPad/.test(navigator.platform)))
       ? { key: 'k', metaKey: true }
       : { key: 'k', ctrlKey: true };

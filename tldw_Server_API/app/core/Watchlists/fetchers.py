@@ -75,10 +75,6 @@ _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-def _in_test_mode() -> bool:
-    return _is_test_mode()
-
-
 async def _close_response(resp: Any) -> None:
     if resp is None:
         return
@@ -296,7 +292,7 @@ async def fetch_rss_items(urls: list[str], *, limit: int = 10, tenant_id: str = 
         return []
 
     # Offline mode for unit tests
-    if _in_test_mode():
+    if _is_test_mode():
         return [{"title": "Test Item", "url": "https://example.com/x", "summary": "Test", "published": None}][:limit]
 
     try:
@@ -334,7 +330,7 @@ def fetch_site_article(url: str) -> dict[str, Any] | None:
 
     try:
         data = scrape_article_blocking(url)
-        if not data:
+        if not data or data.get("error") or data.get("extraction_successful") is False:
             return None
         # Normalize
         title = data.get("title") or "Untitled"
@@ -344,6 +340,8 @@ def fetch_site_article(url: str) -> dict[str, Any] | None:
             content = ContentMetadataHandler.strip_metadata(content)  # type: ignore[attr-defined]
         except _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS:
             pass
+        if not isinstance(content, str) or not content.strip():
+            return None
         return {"title": title, "url": url, "content": content, "author": author}
     except _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS as e:
         logger.warning(f"fetch_site_article failed for {url}: {e}")
@@ -371,7 +369,7 @@ async def fetch_site_top_links(base_url: str, *, top_n: int = 10, method: str = 
     if top_n <= 0:
         return []
 
-    if _in_test_mode():
+    if _is_test_mode():
         # Provide stable deterministic links
         return [base_url] * min(top_n, 3)
 
@@ -506,7 +504,7 @@ async def fetch_site_items_with_rules(
     if max_pages is None or max_pages < 1:
         max_pages = 1
 
-    if _in_test_mode():
+    if _is_test_mode():
         max_items = limit if limit is not None else 3
         max_items = min(max_items, 5)
         samples: list[dict[str, Any]] = []
@@ -650,7 +648,7 @@ async def fetch_rss_feed(
             resp = await afetch(method="GET", url=url, headers=headers, timeout=timeout)
             if resp is not None:
                 status = int(resp.status_code)
-                resp_headers = dict(getattr(resp, "headers", {}) or {})
+                resp_headers = {key.lower(): value for key, value in (getattr(resp, "headers", {}) or {}).items()}
                 text = resp.text or ""
         finally:
             await _close_response(resp)
@@ -661,7 +659,7 @@ async def fetch_rss_feed(
             return {"status": 500, "items": []}
         # Retry-After handling
         if status == 429:
-            ra = resp_headers.get("Retry-After")
+            ra = resp_headers.get("retry-after")
             retry_after_secs = None
             if ra:
                 ra = ra.strip()
@@ -682,8 +680,8 @@ async def fetch_rss_feed(
             return {
                 "status": 304,
                 "items": [],
-                "etag": resp_headers.get("ETag"),
-                "last_modified": resp_headers.get("Last-Modified"),
+                "etag": resp_headers.get("etag"),
+                "last_modified": resp_headers.get("last-modified"),
             }
 
         if status // 100 != 2:
@@ -692,12 +690,7 @@ async def fetch_rss_feed(
         try:
             root = ET.fromstring(text)
         except _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS:
-            return {
-                "status": status,
-                "items": [],
-                "etag": resp_headers.get("ETag"),
-                "last_modified": resp_headers.get("Last-Modified"),
-            }
+            return {"status": 502, "items": [], "error": "Invalid RSS/Atom XML"}
 
         def _find_text(node, names):
             for n in names:
@@ -764,8 +757,8 @@ async def fetch_rss_feed(
         return {
             "status": 200,
             "items": items,
-            "etag": resp_headers.get("ETag"),
-            "last_modified": resp_headers.get("Last-Modified"),
+            "etag": resp_headers.get("etag"),
+            "last_modified": resp_headers.get("last-modified"),
             "atom_links": atom_links,
         }
     except _WATCHLISTS_FETCHERS_NONCRITICAL_EXCEPTIONS as e:
@@ -885,7 +878,7 @@ async def fetch_rss_feed_history(
         return out
 
     if status // 100 != 2:
-        return {"status": status, "items": [], "pages_fetched": 0, "strategy_used": strategy}
+        return {"status": status, "items": [], "pages_fetched": 0, "strategy_used": strategy, "error": first.get("error")}
 
     base_items = list(first.get("items") or [])
     agg_items.extend(_trim(base_items))

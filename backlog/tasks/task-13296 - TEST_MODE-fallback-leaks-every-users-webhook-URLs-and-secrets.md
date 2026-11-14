@@ -54,7 +54,7 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fix commit 41124033df. Verified premise: the unscoped 'all active webhooks' fallback in _get_webhooks was dead code - the first TEST_MODE branch always returned early (user-scoped, but with the event filter dropped). So TEST_MODE in a deployment did not leak cross-user rows, but it did deliver every evaluation event to a user's webhooks regardless of subscription. Removed all three TEST_MODE relaxations (early event-filter bypass, per-user fallback, unscoped fallback); lookup is now always WHERE user_id = ? AND active = ? AND events LIKE ?. No pytest-only relaxation kept (AC3 n/a): no test needed one.
 AC1 amended (removed and re-added as #6) because a cross-user red test cannot exist on old code; see AC text.
 Regression test tldw_Server_API/tests/Evaluations/unit/test_webhook_manager_tenant_scoping.py (TEST_MODE=1, PYTEST_CURRENT_TEST removed, users a/b/c): test_unsubscribed_event_is_not_delivered_under_test_mode_env FAILS on ea1cbc6941 and passes after; the two cross-user tests pass on both (lock the invariant).
@@ -62,7 +62,7 @@ AC4 secret: only selected in _get_webhooks, whose sole caller _deliver_webhook u
 RUN_EVALUATIONS=1 tests/Evaluations: before 19 failed/861 passed; after 18 failed/862 passed. Diff of FAILED lists = only the new regression test; the 18 are pre-existing (route-mount/startup, integration test_api_endpoints incl. TestWebhookEndpoints::test_webhook_delivery_on_evaluation, which fails identically before and after).
 Bandit (uvx bandit -q -ll webhook_manager.py): no findings.
 Follow-up NOT fixed (out of scope, flag for filing): _deliver_webhook sets skip_dns = is_test_mode() or PYTEST_CURRENT_TEST, so TEST_MODE in a deployment skips webhook SSRF/DNS-rebinding validation. Same env-var-gate class; should use is_explicit_pytest_runtime or an injected flag.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

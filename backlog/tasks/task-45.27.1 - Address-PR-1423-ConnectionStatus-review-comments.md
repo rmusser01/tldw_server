@@ -32,13 +32,13 @@ Follow-up review-fix task for PR #1423. Resolve the Gemini review comment on Con
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-05-09: Addressed Gemini review comment by moving severity class mapping to a module-level SEVERITY_STYLES constant typed with DesignSystemSeverity and replacing two render-time lookup objects with a single severityStyles lookup.
 
 Verification: bunx vitest run src/components/Layouts/__tests__/ConnectionStatus.design-system.test.tsx --reporter=dot -> 6 passed. bunx vitest run src/design-system/__tests__/product-state-guard.test.ts --reporter=dot -> 46 passed. bun run verify:design-system-state -> passed; baseline exceptions remain 509 and local-status-badge remains 3. git diff --check -> passed. bunx tsc --noEmit --pretty false | rg touched files -> no touched-file diagnostics (rg exit 1/no matches).
 
 Bandit skip: touched runtime/test files are TypeScript/TSX plus Backlog metadata only; no Python security surface changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

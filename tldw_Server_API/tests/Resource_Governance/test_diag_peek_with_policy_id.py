@@ -9,15 +9,13 @@ pytestmark = pytest.mark.rate_limit
 
 
 @pytest.mark.asyncio
-async def test_diag_peek_with_policy_id(monkeypatch, tmp_path):
+async def test_diag_peek_with_policy_id(monkeypatch, tmp_path, fresh_services):
     async def _init_authnz_sqlite(db_path) -> None:
         monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
         monkeypatch.setenv("AUTH_MODE", "multi_user")
         try:
-            from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
             from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-            await reset_db_pool()
             reset_settings()
         except Exception:
             _ = None

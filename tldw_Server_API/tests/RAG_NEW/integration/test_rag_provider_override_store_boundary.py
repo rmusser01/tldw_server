@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.endpoints import rag_unified as rag_endpoint
+from tldw_Server_API.app.core import config_llm_providers
 from tldw_Server_API.app.core.AuthNZ import byok_runtime, provider_credential_runtime
 from tldw_Server_API.app.core.AuthNZ import llm_provider_overrides as overrides_module
 from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import LLMProviderOverride
@@ -238,8 +239,6 @@ async def test_rag_static_fallback_freezes_one_config_generation_at_adapter_boun
     expected_app_config: dict[str, Any] | None,
 ) -> None:
     """RAG cannot combine an earlier static decision with a later config load."""
-    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-    from tldw_Server_API.app.api.v1.schemas import chat_request_schemas
     from tldw_Server_API.app.core.AuthNZ import byok_helpers
 
     rotated_config = {
@@ -292,9 +291,7 @@ async def test_rag_static_fallback_freezes_one_config_generation_at_adapter_boun
         load_static_snapshot,
     )
     monkeypatch.setattr(byok_runtime, "loaded_config_data", initial_config)
-    monkeypatch.setattr(chat_request_schemas, "get_api_keys", legacy_dynamic_keys)
-    monkeypatch.setattr(chat_request_schemas, "API_KEYS", {})
-    monkeypatch.setattr(chat_endpoint, "API_KEYS", {})
+    monkeypatch.setattr(config_llm_providers, "get_api_keys", legacy_dynamic_keys)
     monkeypatch.setattr(
         rag_endpoint,
         "_trusted_credential_runtime_scope",

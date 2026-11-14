@@ -23,6 +23,8 @@ from tldw_Server_API.app.core.Claims_Extraction.monitoring import (
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 _CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AssertionError,
@@ -49,6 +51,8 @@ _TIMESTAMP_PARSE_EXCEPTIONS: tuple[type[BaseException], ...] = (
 class ClaimsRebuildTask:
     media_id: int
     db_path: str
+    # The user the rebuild's LLM calls are recorded and quota-checked for (ADR-067).
+    owner_user_id: int | str | None = None
 
 
 def _claims_monitoring_system_user_id() -> int:
@@ -173,8 +177,10 @@ class ClaimsRebuildService:
             q=self._queue.qsize(),
         )
 
-    def submit(self, media_id: int, db_path: str) -> None:
-        self._queue.put_nowait(ClaimsRebuildTask(media_id=int(media_id), db_path=str(db_path)))
+    def submit(self, media_id: int, db_path: str, owner_user_id: int | str | None = None) -> None:
+        self._queue.put_nowait(
+            ClaimsRebuildTask(media_id=int(media_id), db_path=str(db_path), owner_user_id=owner_user_id)
+        )
         with self._stats_lock:
             self._stats["enqueued"] += 1
         record_claims_rebuild_metrics(queue_size=self._queue.qsize())
@@ -253,13 +259,20 @@ class ClaimsRebuildService:
                     queue_size=self._queue.qsize(),
                 )
                 self._persist_health()
-            except _CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Claims rebuild failed for media_id={task.media_id}: {e}")
+            # A quota refusal fails this task only; uncaught, it would end the worker thread.
+            except (*_CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS, LLMQuotaExceededError) as e:
+                if isinstance(e, LLMQuotaExceededError):
+                    # The owner's limit, not a fault: a warning, and no quota details in the shared health row.
+                    error = "llm_quota_exceeded"
+                    logger.warning(f"Claims rebuild refused for media_id={task.media_id}: {error}")
+                else:
+                    error = str(e)
+                    logger.error(f"Claims rebuild failed for media_id={task.media_id}: {e}")
                 with self._stats_lock:
                     self._stats["failed"] += 1
                 self._last_failure = {
                     "media_id": task.media_id,
-                    "error": str(e),
+                    "error": error,
                     "timestamp": time.time(),
                 }
                 record_claims_rebuild_metrics(
@@ -272,7 +285,8 @@ class ClaimsRebuildService:
                 self._queue.task_done()
 
     def _process_task(self, task: ClaimsRebuildTask) -> None:
-        rebuild_claims_for_media(db_path=task.db_path, media_id=task.media_id)
+        with llm_call_root(task.owner_user_id):
+            rebuild_claims_for_media(db_path=task.db_path, media_id=task.media_id)
 
     def get_stats(self) -> dict[str, int]:
         with self._stats_lock:

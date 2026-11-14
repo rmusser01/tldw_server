@@ -51,3 +51,25 @@ def test_scraping_job_queue_zero_completed_retention_discards_completed_jobs():
 
     assert queue._completed_jobs == {}
     assert queue.get_job("job-1") is None
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_summarize_content_runs_analyze_off_the_event_loop_thread(monkeypatch):
+    """The summary runs on a worker thread, where it can be quota-checked (spec §4b)."""
+    import threading
+
+    from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced_service
+
+    seen = []
+
+    def fake_analyze(**kwargs):
+        """Record the thread."""
+        seen.append(threading.get_ident())
+        return "summary"
+
+    monkeypatch.setattr(enhanced_service, "analyze", fake_analyze)
+    svc = WebScrapingService()
+
+    assert await svc._summarize_content("body", None, "openai", None, None, 0.7) == "summary"
+    assert seen and seen[0] != threading.get_ident()

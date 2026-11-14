@@ -411,10 +411,10 @@
     "message": "Switch between active notes and trash to recover or permanently remove entries."
   },
   "notes_basics_filtersTitle": {
-    "message": "Sort and Filter"
+    "message": "Sort notes"
   },
   "notes_basics_filtersContent": {
-    "message": "Sort by date/title and use notebook/keyword filters to narrow your working set."
+    "message": "Sort the list by date or title. Use Filters below it to narrow the list by tag."
   },
   "notes_basics_editorTitle": {
     "message": "Editor Workspace"
@@ -427,6 +427,30 @@
   },
   "notes_basics_saveContent": {
     "message": "Save updates, duplicate notes, export content, and run helper actions from the header."
+  },
+  "notes_basics_tagsTitle": {
+    "message": "Tags"
+  },
+  "notes_basics_tagsContent": {
+    "message": "Add tags to organize your notes. Use the filter in the sidebar to find notes by tag."
+  },
+  "notes_basics_connectionsTitle": {
+    "message": "Note Connections"
+  },
+  "notes_basics_connectionsContent": {
+    "message": "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here."
+  },
+  "notes_basics_organizeTitle": {
+    "message": "Saved filters"
+  },
+  "notes_basics_organizeContent": {
+    "message": "Save tag filters here to reuse them. To group notes by hand, choose the Collection view."
+  },
+  "notes_basics_createTitle": {
+    "message": "Create a note"
+  },
+  "notes_basics_createContent": {
+    "message": "Click + to start a note. To see this tour again, press ? and choose Restart tutorial."
   },
   "flashcards_basics_label": {
     "message": "Flashcards Basics"
@@ -516,13 +540,13 @@
     "message": "Status Filters"
   },
   "worldBooks_basics_filtersContent": {
-    "message": "Filter by enabled/disabled state and attachment status before editing or exporting."
+    "message": "Filter by status and attachment before editing or exporting. On smaller screens, open Filters to show these controls."
   },
   "worldBooks_basics_tableTitle": {
     "message": "World Book Library"
   },
   "worldBooks_basics_tableContent": {
-    "message": "Select a row to manage entries, attachments, and advanced actions for each world book."
+    "message": "Select a saved world book to manage entries and attachments. If the library is empty, create or import your first world book."
   },
   "worldBooks_basics_actionsTitle": {
     "message": "Create and Import"
@@ -655,5 +679,14 @@
   },
   "monitoring_basics_historyContent": {
     "message": "When alerts trigger, they appear here. You can assign alerts to yourself, snooze them, or escalate to critical."
+  },
+  "playground_basics_customizeTitle": {
+    "message": "Customize Responses"
+  },
+  "playground_basics_customizeContent": {
+    "message": "A system prompt guides how the assistant replies. Use chat customization controls to choose one or adjust the response; create reusable prompts in the Prompts workspace."
+  },
+  "playground_basics_newChatContentV2": {
+    "message": "Start a new conversation from the sidebar or with the New chat shortcut listed in keyboard help. Saved conversations can be reopened with Find conversations. A Temporary conversation asks before you discard it."
   }
 }

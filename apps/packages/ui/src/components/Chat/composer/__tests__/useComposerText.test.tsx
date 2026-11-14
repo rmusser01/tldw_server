@@ -18,6 +18,37 @@ describe("useComposerText", () => {
     window.localStorage.clear()
   })
 
+  it.each(["", "data:image/png;base64,replacement"])(
+    "clears the image filename when the selected image becomes %s",
+    (nextImage) => {
+      const { result } = renderHook(() => useComposerText({
+        draftKey: "tldw:test:image-filename",
+        textareaRef: createRef()
+      }))
+      act(() => {
+        result.current.form.setFieldValue("image", "data:image/png;base64,original")
+        result.current.form.setFieldValue("imageFilename", "private-diagram.png")
+      })
+      act(() => result.current.form.setFieldValue("image", nextImage))
+      expect(result.current.form.values.imageFilename).toBe("")
+      expect(result.current.form.values.image).toBe(nextImage)
+    }
+  )
+
+  it("clears filename metadata through the existing composer reset", () => {
+    const { result } = renderHook(() => useComposerText({
+      draftKey: "tldw:test:image-reset",
+      textareaRef: createRef()
+    }))
+    act(() => {
+      result.current.form.setFieldValue("image", "data:image/png;base64,original")
+      result.current.form.setFieldValue("imageFilename", "private-diagram.png")
+    })
+    act(() => result.current.form.reset())
+    expect(result.current.form.values.imageFilename).toBe("")
+    expect(result.current.form.values.image).toBe("")
+  })
+
   it("initializes with an empty message", () => {
     const { result } = renderHook(() =>
       useComposerText({
@@ -110,6 +141,33 @@ describe("useComposerText", () => {
       expect(result.current.form.values.message).toBe("restored draft")
     })
     expect(result.current.messageRevision).toBe(1)
+  })
+
+  it("separates qualified draft hydration from later input edits and Undo for setup retirement", async () => {
+    const draftKey = "tldw:test:setup-input-lineage"
+    window.localStorage.setItem(
+      `registry:draft:${draftKey}:owner:unit-owner`,
+      JSON.stringify({ value: "Restored owned draft", updatedAt: Date.now() })
+    )
+    const { result } = renderHook(() =>
+      useComposerText({ draftKey, textareaRef: createRef() })
+    )
+    await waitFor(() =>
+      expect(result.current.form.values.message).toBe("Restored owned draft")
+    )
+    expect({
+      raw: result.current.form.getRevision(),
+      input: result.current.getSetupInputRevision()
+    }).toEqual({ raw: 1, input: 0 })
+    act(() => {
+      result.current.form.setFieldValue("message", "Changed")
+      result.current.form.setFieldValue("message", "Restored owned draft")
+    })
+    expect({
+      raw: result.current.form.getRevision(),
+      input: result.current.getSetupInputRevision(),
+      value: result.current.form.getValues().message
+    }).toEqual({ raw: 3, input: 2, value: "Restored owned draft" })
   })
 
   it("uses reset as the send invalidation signal while clearDraft only clears persistence", () => {
@@ -289,4 +347,30 @@ describe("useComposerText", () => {
     expect(typeof props.onChange).toBe("function")
     expect(props.value).toBe("")
   })
+  it("acknowledges exact text and collapse metadata without resetting input", async () => {
+    const draftKey = "tldw:test:greeting-retain"
+    const { result } = renderHook(() => useComposerText({ draftKey, textareaRef: createRef(),
+      getDraftMetadata: () => ({ collapsedRange: { start: 2, end: 7 }, wasExpanded: true }) }))
+    await waitFor(() => expect(result.current.draftReady).toBe(true))
+    act(() => result.current.form.setValues({ message: "  UNSENT\nexact  ", image: "" }))
+    let retained = false
+    await act(async () => { retained = await result.current.retainCurrentDraft() })
+    expect(retained).toBe(true)
+    expect(result.current.form.getValues()).toEqual({ message: "  UNSENT\nexact  ", image: "", imageFilename: "" })
+    const stored = JSON.parse(window.localStorage.getItem(`registry:draft:${draftKey}:owner:unit-owner`)!)
+    expect(stored).toMatchObject({ value: { content: "  UNSENT\nexact  ", metadata: { collapsedRange: { start: 2, end: 7 }, wasExpanded: true } } })
+  })
+  it("cannot acknowledge draft retention before hydration", async () => {
+    const { result } = renderHook(() => useComposerText({ draftKey: "tldw:test:retain-cold", textareaRef: createRef() }))
+    expect(await result.current.retainCurrentDraft()).toBe(false)
+  })
+
+  it("does not promise durable retention for an attached image", async () => {
+    const { result } = renderHook(() => useComposerText({ draftKey: "tldw:test:retain-image-limit", textareaRef: createRef() }))
+    await waitFor(() => expect(result.current.draftReady).toBe(true))
+    act(() => result.current.form.setValues({ message: "Keep this", image: "data:image/png;base64,abc" }))
+    expect(await result.current.retainCurrentDraft()).toBe(false)
+    expect(result.current.form.getValues()).toEqual({ message: "Keep this", image: "data:image/png;base64,abc", imageFilename: "" })
+  })
+
 })

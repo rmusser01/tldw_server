@@ -16,7 +16,7 @@ describe("deriveRequestTimeout generation defaults", () => {
     ["/api/v1/chat/completions", 120000],
     ["/api/v1/rag/search", 120000],
     ["/api/v1/notes/", 10000]
-  ])("preserves absent-config defaults for %s", (path, expected) => {
+  ] as const)("preserves absent-config defaults for %s", (path, expected) => {
     expect(deriveRequestTimeout(undefined, path)).toBe(expected)
   })
 
@@ -25,7 +25,7 @@ describe("deriveRequestTimeout generation defaults", () => {
     ["/api/v1/rag/search", { ragRequestTimeoutMs: "20000" }],
     ["/api/v1/media/process", { mediaRequestTimeoutMs: "20000" }],
     ["/api/v1/files/download", { mediaRequestTimeoutMs: "20000" }]
-  ])("preserves endpoint-specific precedence for %s", (path, specific) => {
+  ] as const)("preserves endpoint-specific precedence for %s", (path, specific) => {
     const config = { requestTimeoutMs: 15000, ...specific }
     expect(deriveRequestTimeout(config, path)).toBe(20000)
     expect(deriveRequestTimeout(config, path, 5000)).toBe(5000)
@@ -259,7 +259,11 @@ describe("tldwRequest timeout bounds", () => {
     // and resolve rather than hang.
     await vi.advanceTimersByTimeAsync(120001)
     const resp = await pending
-    expect(resp.status).toBe(200)
-    expect(resp.data).toBeNull()
+    expect(resp).toMatchObject({
+      ok: false,
+      status: 0,
+      code: "REQUEST_TIMEOUT",
+      error: "Request timed out.",
+    })
   })
 })

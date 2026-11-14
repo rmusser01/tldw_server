@@ -593,3 +593,36 @@ async def test_remote_runtime_concurrent_failures_keep_sanitized_errors_request_
     for result in results:
         assert isinstance(result, Exception)
         _assert_exception_graph_is_sanitized(result, *sentinels)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("config_timeout", "expected"), [(None, 60.0), (90, 90.0)])
+@pytest.mark.parametrize("stream", [False, True])
+async def test_remote_runtime_passes_its_configured_timeout(monkeypatch, config_timeout, expected, stream):
+    """Both paths send ``config["timeout"]`` (default 60 s), the value its errors report."""
+    config = {"base_url": "http://127.0.0.1:8001/v1/audio/speech", "api_key": "test-key"}
+    if config_timeout is not None:
+        config["timeout"] = config_timeout
+    runtime = RemoteQwenRuntime(config)
+    calls: list[dict] = []
+
+    async def fake_apost(**kwargs):
+        calls.append(kwargs)
+        return httpx.Response(200, request=httpx.Request("POST", kwargs["url"]), content=b"pcm")
+
+    async def fake_astream_bytes(**kwargs):
+        calls.append(kwargs)
+        yield b"pcm"
+
+    monkeypatch.setattr(remote_runtime_mod, "apost", fake_apost)
+    monkeypatch.setattr(remote_runtime_mod, "astream_bytes", fake_astream_bytes)
+    response = await runtime.generate(
+        TTSRequest(text="hello", format=AudioFormat.PCM, stream=stream),
+        resolved_model="Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
+        mode="custom_voice",
+    )
+    if stream:
+        assert response.audio_stream is not None
+        assert [chunk async for chunk in response.audio_stream] == [b"pcm"]
+
+    assert [call["timeout"] for call in calls] == [expected]

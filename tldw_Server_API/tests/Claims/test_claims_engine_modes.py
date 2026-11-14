@@ -773,3 +773,93 @@ async def test_aps_extraction_deadline_keeps_event_loop_responsive_and_degrades(
         "capacity-release",
     ]
     assert pool.active_count == 0
+
+
+def _flag_probe_stub(seen: list[bool]):
+    """Build an analyze stub that records the records_itself flag it sees on its pool thread."""
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+
+    def _stub(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
+              api_key: Optional[str] = None, system_message: Optional[str] = None,
+              temp: Optional[float] = None, **kwargs):
+        seen.append(current_llm_call_context().records_itself)
+        return _analyze_stub(api_name, input_data, custom_prompt_arg, api_key, system_message, temp, **kwargs)
+
+    return _stub
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claims_extract_call_is_marked_self_recorded():
+    """The LLM extractor's provider call runs with records_itself=True."""
+    seen: list[bool] = []
+    engine = ClaimsEngine(_flag_probe_stub(seen))
+
+    await engine.extract_claims_only("Alpha is true. Beta is true.", claim_extractor="llm", claims_max=2)
+
+    assert seen == [True]
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claims_verify_call_is_marked_self_recorded():
+    """The LLM verifier's provider call runs with records_itself=True."""
+    seen: list[bool] = []
+    engine = ClaimsEngine(_flag_probe_stub(seen))
+
+    await engine.verify_claims_only(
+        [Claim(id="c1", text="Alpha is true.")],
+        "Q",
+        [Doc("d1", "Alpha is true context", 0.5)],
+        claim_verifier="llm",
+        claims_top_k=1,
+    )
+
+    assert seen == [True]
+
+
+@pytest.fixture
+def claims_rows(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Capture the usage rows the claims recorder writes."""
+    captured: list[dict[str, Any]] = []
+
+    async def _fake_log(**kwargs: Any) -> None:
+        """Keep the row instead of writing it."""
+        captured.append(kwargs)
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Usage.usage_tracker.log_llm_usage", _fake_log)
+    return captured
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claims_extract_row_falls_back_to_the_context_user(claims_rows):
+    """With no job context, the extract row is attributed to the scope user."""
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    engine = ClaimsEngine(_analyze_stub)
+    with scoped_context(user_id=9):
+        await engine.extract_claims_only("Alpha is true. Beta is true.", claim_extractor="llm", claims_max=2)
+
+    (row,) = claims_rows
+    assert (row["operation"], row["user_id"]) == ("claims_extract", 9)
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_claims_verify_row_falls_back_to_the_context_user(claims_rows):
+    """With no job context, the verify row is attributed to the scope user."""
+    from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+
+    engine = ClaimsEngine(_analyze_stub)
+    with scoped_context(user_id=9):
+        await engine.verify_claims_only(
+            [Claim(id="c1", text="Alpha is true.")],
+            "Q",
+            [Doc("d1", "Alpha is true context", 0.5)],
+            claim_verifier="llm",
+            claims_top_k=1,
+        )
+
+    (row,) = claims_rows
+    assert (row["operation"], row["user_id"]) == ("claims_verify", 9)

@@ -29,9 +29,9 @@ Address PR #2086 review feedback for PostgreSQL note folder case-insensitive pat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added a PostgreSQL schema-initialization backfill before idx_note_folders_path_lower is created. The migration chooses one canonical folder per LOWER(path), prefers non-deleted rows, moves note memberships, source memberships, source keys, and child parent references to the canonical folder, deletes duplicate folder rows, then creates the unique LOWER(path) index. Added fake-Postgres SQL-order coverage for the duplicate backfill statements.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

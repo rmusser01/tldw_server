@@ -30,7 +30,7 @@ Rebase PR #2577 onto latest dev, verify all current PR review comments are addre
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Rebased detached worktree from origin/feat/frontend-audit-round2-followup onto origin/dev 5d241e720c, then onto dev 142c19997f, and finally onto current origin/dev 9672abdbe7. Earlier conflicts were resolved by preserving newer dev content while retaining PR task records and validation summaries.
 
 After new CodeRabbit review threads appeared, verified and fixed the still-valid issues: shared dictation append helper, service-worker-safe STT base64, background STT payload normalization, stale dictation websocket isolation, divergent full_transcript correction handling, audio.chat.stream strict-protocol error status/payload alignment, shared AudioProtocolError base, redundant base64 exception catch, unified websocket close suppression, and Backlog task marker/DoD hygiene.
@@ -42,7 +42,7 @@ After push, investigated failing PR checks. Fixed onboarding docs gate by restor
 Code review follow-up found one remaining Important issue: useVoiceChatStream should use the runtime single-user API key override before saved config apiKey, matching dictation and shared request behavior.
 
 Implemented the code-review follow-up with TDD: first added a failing useVoiceChatStream defaults test proving runtime-only single-user auth produced an empty preflight token, then changed useVoiceChatStream to prefer getRuntimeSingleUserApiKeyOverride() before config.apiKey for single-user mode.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

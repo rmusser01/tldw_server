@@ -31,13 +31,11 @@ Implement Task 3 from the MCP effective permission explain implementation plan: 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 3 quality-review fix: _gateway_admin_identity_dependency now preserves local identity only for disabled admin auth and returns a distinct generic authenticated gateway admin identity (actor_id=gateway-admin, source=gateway_admin_auth) after successful enabled admin auth without deriving from the credential. Added focused async test coverage for valid enabled auth identity plus missing/invalid GatewayAdminAuthError reason codes. Verification for review fix passed: focused policy explain API seam pytest (5 passed), existing app/core gateway admin auth pytest (7 passed), Bandit touched scope with B101 skipped (no issues), and git diff --check.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Final review results: latest spec compliance review passed; latest code-quality review found no Critical or Important issues. The only reviewer note was final task bookkeeping, addressed here.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

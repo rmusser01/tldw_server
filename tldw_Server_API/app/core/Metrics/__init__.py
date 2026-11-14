@@ -116,3 +116,9 @@ __all__ = [
 
 # Version information
 __version__ = "2.0.0"
+
+# core.http_client is foundation and cannot import this package, so its metrics and
+# tracing are wired in from here (TASK-13950.12).
+from .http_client_metrics import install_http_client_observability  # noqa: E402
+
+install_http_client_observability()

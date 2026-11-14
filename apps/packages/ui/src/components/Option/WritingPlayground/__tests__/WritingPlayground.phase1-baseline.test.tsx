@@ -20,7 +20,8 @@ const mockState = vi.hoisted(() => ({
   queryKey: (queryKey: unknown) =>
     JSON.stringify(Array.isArray(queryKey) ? queryKey : [queryKey]),
   executeMutations: false,
-  resolveApiProviderForModel: vi.fn(async () => null as string | null),
+  trackMutationPending: false,
+  resolveApiProviderForModel: vi.fn(async (_options: { modelId?: string | null; explicitProvider?: string | null }) => null as string | null),
   streamCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendResponses: [] as Array<string | Promise<string>>,
@@ -74,9 +75,13 @@ vi.mock("@tanstack/react-query", () => {
         context: unknown
       ) => void
     }) => {
+      const [isPending, setIsPending] = React.useState(false)
+      const pendingCount = React.useRef(0)
       const mutate = vi.fn(async (variables: unknown) => {
         if (!mockState.executeMutations) return undefined
         const context = options?.onMutate?.(variables)
+        pendingCount.current++
+        if (mockState.trackMutationPending) setIsPending(true)
         try {
           const result = await options?.mutationFn?.(variables)
           options?.onSuccess?.(result, variables, context)
@@ -84,12 +89,15 @@ vi.mock("@tanstack/react-query", () => {
         } catch (error) {
           options?.onError?.(error, variables, context)
           throw error
+        } finally {
+          pendingCount.current--
+          if (mockState.trackMutationPending) setIsPending(pendingCount.current > 0)
         }
       })
       return {
         mutate,
         mutateAsync: mutate,
-        isPending: false
+        isPending
       }
     },
     useQueryClient: () => ({
@@ -294,7 +302,8 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
 import {
   updateWritingSession,
-  type ManuscriptAnnotationResponse
+  type ManuscriptAnnotationResponse,
+  type WritingSessionResponse
 } from "@/services/writing-playground"
 
 const DEFAULT_WRITING_CAPABILITIES = {
@@ -554,6 +563,7 @@ beforeEach(() => {
   mockState.storageValues.clear()
   mockState.queryData.clear()
   mockState.executeMutations = false
+  mockState.trackMutationPending = false
   mockState.resolveApiProviderForModel.mockReset()
   mockState.resolveApiProviderForModel.mockResolvedValue(null)
   mockState.streamCalls.length = 0
@@ -614,6 +624,127 @@ afterEach(() => {
 })
 
 describe("WritingPlayground phase1 baseline", () => {
+  it("protects pending session edits from document navigation until the save completes", async () => {
+    seedWritingSession({ prompt: "Saved source." })
+    mockState.executeMutations = true
+    mockState.trackMutationPending = true
+    const gate = deferred<void>()
+    vi.mocked(updateWritingSession).mockImplementation(async (sessionId, patch, expectedVersion) => {
+      await gate.promise
+      const key = mockState.queryKey(["writing-session", sessionId])
+      const saved = { ...(mockState.queryData.get(key) as WritingSessionResponse),
+        ...patch, version: expectedVersion + 1 }
+      mockState.queryData.set(key, saved)
+      return saved
+    })
+    try {
+      const view = render(<WritingPlayground />)
+      const clean = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(clean)
+      expect(clean.defaultPrevented).toBe(false)
+      fireEvent.change(getEditor(), { target: { value: "Unsaved chosen text." } })
+      expect(screen.getByText("Unsaved changes")).toBeInTheDocument()
+      const pending = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(pending)
+      expect(pending.defaultPrevented).toBe(true)
+      await waitFor(() => expect(updateWritingSession).toHaveBeenCalledOnce(), { timeout: 2000 })
+      await act(async () => { gate.resolve() })
+      await waitFor(() => expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument())
+      expect(getEditor()).toHaveValue("Unsaved chosen text.")
+      const saved = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(saved)
+      expect(saved.defaultPrevented).toBe(false)
+      view.unmount()
+      const retired = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(retired)
+      expect(retired.defaultPrevented).toBe(false)
+    } finally {
+      await act(async () => { gate.resolve() })
+    }
+  })
+
+  it("protects reverted text while an earlier save is still in flight", async () => {
+    seedWritingSession({ prompt: "Saved source." })
+    mockState.executeMutations = true
+    mockState.trackMutationPending = true
+    const gate = deferred<void>()
+    vi.mocked(updateWritingSession).mockImplementation(async (sessionId, patch, expectedVersion) => {
+      await gate.promise
+      const key = mockState.queryKey(["writing-session", sessionId])
+      const saved = { ...(mockState.queryData.get(key) as WritingSessionResponse), ...patch, version: expectedVersion + 1 }
+      mockState.queryData.set(key, saved)
+      return saved
+    })
+    try {
+      render(<WritingPlayground />)
+      fireEvent.change(getEditor(), { target: { value: "Earlier saving text." } })
+      await waitFor(() => expect(updateWritingSession).toHaveBeenCalledOnce(), { timeout: 2000 })
+      expect(screen.getByText("Saving...")).toBeInTheDocument()
+      fireEvent.change(getEditor(), { target: { value: "Saved source." } })
+      const pending = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(pending)
+      expect(pending.defaultPrevented).toBe(true)
+      await act(async () => { gate.resolve() })
+      await waitFor(() => expect(screen.queryByText("Saving...")).not.toBeInTheDocument())
+      const saved = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(saved)
+      expect(saved.defaultPrevented).toBe(false)
+    } finally {
+      await act(async () => { gate.resolve() })
+    }
+  })
+
+  it("keeps document protection while the next queued save is pending", async () => {
+    seedWritingSession({ prompt: "Saved source." })
+    mockState.executeMutations = true
+    mockState.trackMutationPending = true
+    const first = deferred<void>()
+    const second = deferred<void>()
+    let calls = 0
+    vi.mocked(updateWritingSession).mockImplementation(async (sessionId, patch, expectedVersion) => {
+      await (calls++ === 0 ? first.promise : second.promise)
+      const key = mockState.queryKey(["writing-session", sessionId])
+      const saved = { ...(mockState.queryData.get(key) as WritingSessionResponse), ...patch, version: expectedVersion + 1 }
+      mockState.queryData.set(key, saved)
+      return saved
+    })
+    try {
+      render(<WritingPlayground />)
+      fireEvent.change(getEditor(), { target: { value: "First saving text." } })
+      await waitFor(() => expect(updateWritingSession).toHaveBeenCalledTimes(1), { timeout: 2000 })
+      fireEvent.change(getEditor(), { target: { value: "Second queued text." } })
+      await act(async () => { first.resolve() })
+      await waitFor(() => expect(updateWritingSession).toHaveBeenCalledTimes(2), { timeout: 2000 })
+      expect(screen.getByText("Saving...")).toBeInTheDocument()
+      fireEvent.change(getEditor(), { target: { value: "First saving text." } })
+      const pending = new Event("beforeunload", { cancelable: true })
+      window.dispatchEvent(pending)
+      expect(pending.defaultPrevented).toBe(true)
+      await act(async () => { second.resolve() })
+      await waitFor(() => expect(screen.queryByText("Saving...")).not.toBeInTheDocument())
+    } finally {
+      await act(async () => { first.resolve(); second.resolve() })
+    }
+  })
+
+  it("protects unsaved manuscript scene text and removes its document guard on unmount", async () => {
+    seedWritingSession({ prompt: "Independent saved session." })
+    seedManuscriptStructure()
+    seedManuscriptScene("Saved scene text.")
+    useWritingPlaygroundStore.setState({ activeProjectId: "project-1", activeNodeId: "scene-1", activeNodeType: "scene", editorMode: "tiptap" })
+    const view = render(<WritingPlayground />)
+    const editor = await screen.findByLabelText("Mock rich editor")
+    await waitFor(() => expect(editor).toHaveValue("Saved scene text."))
+    fireEvent.change(editor, { target: { value: "Unsaved chosen scene." } })
+    const pending = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(pending)
+    expect(pending.defaultPrevented).toBe(true)
+    view.unmount()
+    const retired = new Event("beforeunload", { cancelable: true })
+    window.dispatchEvent(retired)
+    expect(retired.defaultPrevented).toBe(false)
+  })
+
   describe("scoped continuation", () => {
     it.each([
       ["preset", "partial"], ["reject", "partial"], ["apply", "partial"],
@@ -638,7 +769,7 @@ describe("WritingPlayground phase1 baseline", () => {
       mockState.sendResponses.push(structuredReplacement("The sharper sentence."))
       render(<WritingPlayground />)
       selectEditorText(getEditor(), "The old sentence.")
-      fireEvent.click(screen.getByRole("button", { name: /^rewrite$/i }))
+      fireEvent.click(within(screen.getByTestId("writing-revision-action-bar")).getByRole("button", { name: /^rewrite$/i }))
       await waitFor(() => expect(screen.getByText("The sharper sentence.")).toBeInTheDocument())
       await waitFor(() => {
         expect(persistedPayloads.map((payload) => payload.prompt)).toEqual([original])
@@ -651,7 +782,7 @@ describe("WritingPlayground phase1 baseline", () => {
       const mutateRevision = () => {
         fireEvent.click(mutation === "preset"
           ? screen.getByRole("radio", { name: /make concise/i })
-          : screen.getByRole("button", { name: new RegExp(`^${mutation}$`, "i") }))
+          : within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: new RegExp(`^${mutation}$`, "i") }))
       }
       vi.useFakeTimers()
       await act(async () => {
@@ -675,13 +806,40 @@ describe("WritingPlayground phase1 baseline", () => {
       vi.useRealTimers()
       expect(persistedPayloads).toHaveLength(2)
       expect(persistedPayloads[1]?.prompt).not.toContain("provisional")
-      if (mutation !== "apply") expect(persistedPayloads[1]?.prompt).toBe(original)
+      expect(persistedPayloads[1]?.prompt).toBe(mutation === "apply" ? rewritten : original)
       if (mutation === "preset") {
         expect(persistedPayloads[1]?.revision_preset_id).toBe("make_concise")
       } else {
         expect(JSON.stringify(persistedPayloads[1]?.revisions)).toContain(
           mutation === "apply" ? '"applied"' : '"rejected"'
         )
+      }
+    })
+
+    it.each([
+      [false, ""], [true, ""], [false, "  "], [true, "  "]
+    ] as const)("rejects empty writing output without changing text or history, streaming=%s output=%j", async (streaming, output) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      const original = "Opening{fill} tail"
+      seedWritingSession({ prompt: original, settings: { token_streaming: streaming } })
+      const { snapshot } = continuationSnapshot("writing.continuation.fill")
+      mockState.loadSnapshot.mockResolvedValue(snapshot)
+      mockState.sendResponses.push(output)
+      mockState.streamResults.push((async function* () { if (output) yield output })())
+      const error = vi.spyOn(message, "error").mockImplementation(() => (() => {}) as never)
+      try {
+        render(<WritingPlayground />)
+        fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+        await waitFor(() => expect(error).toHaveBeenCalledExactlyOnceWith(
+          "No writing text was returned. Increase Max tokens or disable reasoning, then try again."
+        ))
+        expect(streaming ? mockState.streamCalls : mockState.sendCalls).toHaveLength(1)
+        expect(getEditor()).toHaveValue(original)
+        expect(screen.getByTitle("Undo generation")).toBeDisabled()
+        expect(screen.getByTestId("writing-topbar-generate")).toHaveTextContent("Generate")
+        expect(snapshot.release).toHaveBeenCalledTimes(1)
+      } finally {
+        error.mockRestore()
       }
     })
 
@@ -1533,10 +1691,10 @@ describe("WritingPlayground phase1 baseline", () => {
     const editor = getEditor()
     selectEditorText(editor, "The old sentence.")
 
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-action-bar")).getByRole("button", { name: /^rewrite$/i }))
 
     await waitFor(() => {
-      expect(screen.getByText("The sharper sentence.")).toBeInTheDocument()
+      expect(within(screen.getByTestId("writing-revision-queue")).getByText("The sharper sentence.")).toBeInTheDocument()
     })
 
     act(() => {
@@ -1548,12 +1706,12 @@ describe("WritingPlayground phase1 baseline", () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /apply/i })).toBeDisabled()
+      expect(within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: /^apply$/i })).toBeDisabled()
     })
-    expect(screen.getByRole("button", { name: /reject/i })).toBeDisabled()
-    expect(screen.getByRole("button", { name: /regenerate/i })).toBeDisabled()
+    expect(within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: /^reject$/i })).toBeDisabled()
+    expect(within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: /^regenerate$/i })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole("button", { name: /apply/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: /^apply$/i }))
     expect(getEditor()).toHaveValue("Intro. The old sentence. Outro.")
   })
 
@@ -1722,10 +1880,10 @@ describe("WritingPlayground phase1 baseline", () => {
     const editor = getEditor()
     selectEditorText(editor, "The old sentence.")
 
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-action-bar")).getByRole("button", { name: /^rewrite$/i }))
 
     await waitFor(() => {
-      expect(screen.getByText("The sharper sentence.")).toBeInTheDocument()
+      expect(within(screen.getByTestId("writing-revision-queue")).getByText("The sharper sentence.")).toBeInTheDocument()
     })
     expect(editor.value).toBe("Intro. The old sentence. Outro.")
     expect(mockState.streamCalls).toHaveLength(0)
@@ -1734,7 +1892,7 @@ describe("WritingPlayground phase1 baseline", () => {
       "1 pending"
     )
 
-    fireEvent.click(screen.getByRole("button", { name: /apply/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: /^apply$/i }))
 
     await waitFor(() => {
       expect(editor.value).toBe("Intro. The sharper sentence. Outro.")
@@ -1771,8 +1929,8 @@ describe("WritingPlayground phase1 baseline", () => {
     await waitFor(() => {
       expect(richEditor).toHaveValue(sceneText)
     })
-    fireEvent.click(screen.getByRole("button", { name: "Focus annotation annotation-fix" }))
-    fireEvent.click(await screen.findByRole("button", { name: "Create revision" }))
+    fireEvent.click(within(screen.getByTestId("writing-annotation-margin-card")).getByRole("button", { name: "Focus annotation annotation-fix" }))
+    fireEvent.click(await within(screen.getByTestId("writing-annotation-margin-card")).findByRole("button", { name: "Create revision" }))
 
     const queue = screen.getByTestId("writing-revision-queue")
     await waitFor(() => {
@@ -1802,12 +1960,12 @@ describe("WritingPlayground phase1 baseline", () => {
     render(<WritingPlayground />)
     const editor = getEditor()
     selectEditorText(editor, "sentence")
-    fireEvent.click(screen.getByRole("button", { name: /continue/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-action-bar")).getByRole("button", { name: /^continue$/i }))
 
     await waitFor(() => {
       expect(mockState.sendCalls).toHaveLength(1)
     })
-    fireEvent.click(screen.getByRole("button", { name: /apply/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: /^apply$/i }))
 
     await waitFor(() => {
       expect(editor.value).toBe("Intro sentence continued. Outro.")
@@ -1971,7 +2129,7 @@ describe("WritingPlayground phase1 baseline", () => {
 
     render(<WritingPlayground />)
     selectEditorText(getEditor(), "Rewrite this line.")
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-action-bar")).getByRole("button", { name: /^rewrite$/i }))
 
     await waitFor(() => {
       expect(mockState.sendCalls).toHaveLength(1)
@@ -1987,7 +2145,7 @@ describe("WritingPlayground phase1 baseline", () => {
       resolveResponse(structuredReplacement("Resolved rewrite."))
     })
     await waitFor(() => {
-      expect(screen.getByText("Resolved rewrite.")).toBeInTheDocument()
+      expect(within(screen.getByTestId("writing-revision-queue")).getByText("Resolved rewrite.")).toBeInTheDocument()
     })
   })
 
@@ -2148,15 +2306,15 @@ describe("WritingPlayground phase1 baseline", () => {
 
     render(<WritingPlayground />)
     selectEditorText(getEditor(), "Replace this sentence.")
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-action-bar")).getByRole("button", { name: /^rewrite$/i }))
 
     await waitFor(() => {
-      expect(screen.getByText("First replacement.")).toBeInTheDocument()
+      expect(within(screen.getByTestId("writing-revision-queue")).getByText("First replacement.")).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /regenerate/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: /^regenerate$/i }))
 
     await waitFor(() => {
-      expect(screen.getByText("Second replacement.")).toBeInTheDocument()
+      expect(within(screen.getByTestId("writing-revision-queue")).getByText("Second replacement.")).toBeInTheDocument()
     })
     const queue = screen.getByTestId("writing-revision-queue")
     expect(within(queue).getByText("rejected")).toBeInTheDocument()
@@ -2180,12 +2338,12 @@ describe("WritingPlayground phase1 baseline", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Rich" }))
     const richEditor = await screen.findByLabelText("Mock rich editor")
     expect(richEditor).toHaveValue("Rich original.")
-    fireEvent.click(screen.getByRole("button", { name: /rewrite/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-action-bar")).getByRole("button", { name: /^rewrite$/i }))
 
     await waitFor(() => {
-      expect(screen.getByText("Rich replacement.")).toBeInTheDocument()
+      expect(within(screen.getByTestId("writing-revision-queue")).getByText("Rich replacement.")).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByRole("button", { name: /apply/i }))
+    fireEvent.click(within(screen.getByTestId("writing-revision-queue")).getByRole("button", { name: /^apply$/i }))
 
     await waitFor(() => {
       expect(
@@ -2220,4 +2378,115 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(within(queue).getByRole("button", { name: /apply/i })).toBeEnabled()
     expect(latestRevisionPrompt()).toContain("Target summary: whole document")
   })
+})
+
+
+describe("Writing model target", () => {
+  it.each(["stream", "nonstream", "revision"])(
+    "resolves the catalog provider and strips only the client namespace for %s",
+    async (mode) => {
+      mockState.storageValues.set("selectedModel", "tldw:qwen2.5:0.5b")
+      mockState.resolveApiProviderForModel.mockResolvedValue("ollama")
+      seedWritingSession({ prompt: "Original paragraph.", settings: { token_streaming: mode === "stream" } })
+      mockState.sendResponses.push(structuredReplacement("Reviewed paragraph."))
+      render(<WritingPlayground />)
+      if (mode === "revision") {
+        selectEditorText(getEditor(), "Original paragraph.")
+        fireEvent.click(screen.getByRole("button", { name: /^rewrite$/i }))
+      } else {
+        fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      }
+      const calls = mode === "stream" ? mockState.streamCalls : mockState.sendCalls
+      await waitFor(() => expect(calls).toHaveLength(1))
+      expect(calls[0]?.options).toMatchObject({ model: "qwen2.5:0.5b", apiProvider: "ollama" })
+      expect(mockState.resolveApiProviderForModel).toHaveBeenCalledWith({ modelId: "tldw:qwen2.5:0.5b", explicitProvider: undefined })
+      if (mode === "revision") expect(getEditor()).toHaveValue("Original paragraph.")
+    }
+  )
+
+  it.each(["auto", "family:model/opaque"])("preserves opaque or server-routed model %s", async (model) => {
+    mockState.storageValues.set("selectedModel", model)
+    seedWritingSession({ prompt: "Original paragraph." })
+    render(<WritingPlayground />)
+    fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+    await waitFor(() => expect(mockState.streamCalls).toHaveLength(1))
+    expect(mockState.streamCalls[0]?.options.model).toBe(model)
+    expect(mockState.streamCalls[0]?.options.apiProvider).toBeUndefined()
+  })
+
+  it("normalizes a padded client catalog model without changing its local tag", async () => {
+    mockState.storageValues.set("selectedModel", "  tldw:qwen2.5:0.5b  ")
+    mockState.resolveApiProviderForModel.mockResolvedValue("ollama")
+    seedWritingSession({ prompt: "Original paragraph." })
+    render(<WritingPlayground />)
+    fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+    await waitFor(() => expect(mockState.streamCalls).toHaveLength(1))
+    expect(mockState.streamCalls[0]?.options).toMatchObject({ model: "qwen2.5:0.5b", apiProvider: "ollama" })
+  })
+
+  it("retains explicit provider preference at the target resolver", async () => {
+    mockState.storageValues.set("selectedModel", "tldw:model-local")
+    useStoreChatModelSettings.setState({ apiProvider: "ollama" })
+    mockState.resolveApiProviderForModel.mockResolvedValue("ollama")
+    seedWritingSession({ prompt: "Original paragraph." })
+    render(<WritingPlayground />)
+    fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+    await waitFor(() => expect(mockState.streamCalls).toHaveLength(1))
+    expect(mockState.streamCalls[0]?.options).toMatchObject({ model: "model-local", apiProvider: "ollama" })
+    expect(mockState.resolveApiProviderForModel).toHaveBeenCalledWith({ modelId: "tldw:model-local", explicitProvider: "ollama" })
+  })
+
+  it.each(["continuation", "revision"])("does not dispatch %s after unmount during target lookup", async (mode) => {
+    const lookup = deferred<string | null>()
+    mockState.storageValues.set("selectedModel", "tldw:qwen2.5:0.5b")
+    mockState.resolveApiProviderForModel.mockImplementation(() => lookup.promise)
+    seedWritingSession({ prompt: "Original paragraph." })
+    const view = render(<WritingPlayground />)
+    if (mode === "revision") {
+      selectEditorText(getEditor(), "Original paragraph.")
+      fireEvent.click(screen.getByRole("button", { name: /^rewrite$/i }))
+    } else {
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+    }
+    await waitFor(() => expect(mockState.resolveApiProviderForModel.mock.calls.some(([target]) =>
+      target?.modelId === "tldw:qwen2.5:0.5b" && Object.hasOwn(target, "explicitProvider")
+    )).toBe(true))
+    view.unmount()
+    await act(async () => { lookup.resolve("ollama"); await lookup.promise })
+    expect(mockState.streamCalls).toHaveLength(0)
+    expect(mockState.sendCalls).toHaveLength(0)
+  })
+})
+
+describe("Writing malformed regeneration", () => {
+  it.each(["Unstructured model advice.", '{"replacement":42}'])(
+    "retains the usable source and copy-only output for %s",
+    async (responseText) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      mockState.sendResponses.push(
+        structuredReplacement("Useful revision.", "Usable original"),
+        responseText
+      )
+      seedWritingSession({ prompt: "Original paragraph." })
+      render(<WritingPlayground />)
+      selectEditorText(getEditor(), "Original paragraph.")
+      fireEvent.click(within(screen.getByTestId("writing-revision-action-bar")).getByRole("button", { name: /^rewrite$/i }))
+      await screen.findByText("Usable original")
+      const original = screen.getByText("Usable original").closest("article")!
+      fireEvent.click(within(original).getByRole("button", { name: /regenerate/i }))
+      const rawText = await screen.findByText(responseText)
+      const raw = rawText.closest("article")!
+
+      expect(within(raw).getByText("raw_suggestion")).toBeInTheDocument()
+      expect(within(raw).getByRole("button", { name: /copy/i })).toBeEnabled()
+      expect(
+        within(raw).queryByRole("button", { name: /apply|reject|regenerate/i })
+      ).toBeNull()
+      expect(within(original).getByText("pending")).toBeInTheDocument()
+      expect(within(original).getByRole("button", { name: /apply/i })).toBeEnabled()
+      expect(getEditor()).toHaveValue("Original paragraph.")
+      fireEvent.click(within(original).getByRole("button", { name: /apply/i }))
+      await waitFor(() => expect(getEditor()).toHaveValue("Useful revision."))
+    }
+  )
 })

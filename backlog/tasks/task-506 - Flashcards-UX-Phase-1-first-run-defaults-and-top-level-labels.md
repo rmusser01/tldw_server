@@ -36,11 +36,11 @@ Phase 1: first-run trust and top-level labels for the flashcards UX remediation 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed empty-deck auto-navigation from Study to Import / Export. Renamed the transfer tab label to Create & Import while preserving the importExport tab key. Kept Scheduler visible but disabled with explanatory tooltip when no decks exist, and clamped scheduler deep links back to Study. Gated Test with Quiz behind a valid Quiz-linked flashcard handoff. Formatted transfer limits directly and hid Manage expert chrome for the loaded no-card first-run state. Added focused component coverage and updated the Playwright page object for the Create & Import tab label.
 
 Post-merge rebase verification on 2026-05-25 after PR #2064 landed: rebased codex/flashcards-ux-phase1-first-run onto origin/dev at 073c1c4d0c; resolved the branch-local Backlog ID collision by replacing duplicate TASK-503 with TASK-506; reran focused Vitest 26/26 and focused Playwright route smoke 2/2; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

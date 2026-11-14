@@ -22,7 +22,9 @@ def _set_base_env(monkeypatch, tmp_path: Path):
     # Webhooks worker configuration
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_WEBHOOKS_ENABLED", "true")
-    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "http://127.0.0.1/webhook")  # loopback OK in TEST_MODE
+    monkeypatch.setenv("JOBS_WEBHOOKS_URL", "http://127.0.0.1/webhook")
+    # The worker enforces the egress policy in every mode; allow the stub host explicitly.
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "127.0.0.1")
     monkeypatch.setenv("JOBS_WEBHOOKS_SECRET_KEYS", "testsecret,oldsecret")
     monkeypatch.setenv("JOBS_WEBHOOKS_INTERVAL_SEC", "0.01")
     monkeypatch.setenv("JOBS_WEBHOOKS_TIMEOUT_SEC", "1.0")
@@ -162,30 +164,30 @@ async def test_webhooks_enabled_without_outbox_refuses_before_database_access(
 
 
 @pytest.mark.asyncio
-async def test_webhooks_tldw_test_mode_y_skips_egress_policy_check(monkeypatch, tmp_path):
+async def test_webhooks_enforce_the_egress_policy_in_test_mode(monkeypatch, tmp_path):
     _set_base_env(monkeypatch, tmp_path)
     monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.setenv("TLDW_TEST_MODE", "y")
 
-    egress_calls = {"count": 0}
+    from loguru import logger
 
     from tldw_Server_API.app.core.Security import egress as egress_mod
 
-    def _fake_eval_policy(url):  # noqa: ANN001
-        egress_calls["count"] += 1
+    class _Denied:
+        allowed = False
+        reason = "blocked-by-test"
 
-        class _Denied:
-            allowed = False
-            reason = "blocked-by-test"
-
-        return _Denied()
-
-    monkeypatch.setattr(egress_mod, "evaluate_url_policy", _fake_eval_policy)
+    monkeypatch.setattr(egress_mod, "evaluate_url_policy", lambda url: _Denied())
 
     from tldw_Server_API.app.services import jobs_webhooks_service as svc
 
-    stop_event = asyncio.Event()
-    stop_event.set()
-    await svc.run_jobs_webhooks_worker(stop_event=stop_event)
+    messages: list[str] = []
+    sink_id = logger.add(messages.append, level="WARNING")
+    try:
+        stop_event = asyncio.Event()
+        stop_event.set()
+        await svc.run_jobs_webhooks_worker(stop_event=stop_event)
+    finally:
+        logger.remove(sink_id)
 
-    assert egress_calls["count"] == 0
+    assert any("URL not allowed by egress policy (blocked-by-test)" in m for m in messages)

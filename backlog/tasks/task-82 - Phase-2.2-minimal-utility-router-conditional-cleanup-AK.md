@@ -38,11 +38,11 @@ Red-green utility tranche: add focused router-group tests for lazy web_clipper, 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification: focused utility router tests failed before production changes because selected routers were imported during spec construction and named lazy specs were absent.
 
 Green verification: focused utility tests, full router group contract tests, main router contract tests, touched-source Bandit, and git diff --check all passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

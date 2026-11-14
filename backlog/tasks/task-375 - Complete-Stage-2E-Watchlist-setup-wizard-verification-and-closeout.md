@@ -37,11 +37,11 @@ Close out the Stage 2 Watchlist-first setup wizard implementation. Scope: focuse
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started Stage 2E closeout after Stage 2D commit 3fcd79284. Known incoming blocker: CDP smoke against /watchlists could not complete because Next dev servers stayed at 'Compiling /watchlists' until page.goto timed out.
 
 Verification closeout passed after fixing two ambiguous OverviewTab copy assertions introduced by the Add initial collection wording. Focused Stage 2 suite: 7 files, 48 tests passed. Watchlists static guard: 1 file, 3 tests passed. CDP/Playwright smoke loaded /watchlists on the current worktree, dismissed first-run onboarding, exercised desktop source-backed setup and 390x844 topic-only setup, confirmed no document-level horizontal overflow on mobile review, and confirmed source/job POST payloads included watchlist_id. Screenshots: /tmp/watchlists-stage2-desktop-cdp.png and /tmp/watchlists-stage2-mobile-cdp.png. git diff --check passed. Bandit skipped because touched code is frontend TypeScript/Markdown/Backlog only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import os
 import re
@@ -20,7 +19,8 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     normalize_output_storage_filename,
 )
-from tldw_Server_API.app.core.exceptions import InvalidStoragePathError
+from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, LLMQuotaExceededError
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
 
@@ -636,31 +636,45 @@ def delete_outputs_by_ids(cdb, user_id: int, ids: list[int]) -> int:
 
 _SUMMARIZE_MAX_CHARS = 12_000
 _SUMMARIZE_DEFAULT_PROMPT = "Summarize the following article in 2-3 concise sentences:\n\n{text}"
+# analyze's own default system prompt asks for bulleted notes; these prompts say what they want.
+_OUTPUTS_SYSTEM_PROMPT = (
+    "You are a concise assistant. Follow the instructions in the message exactly and return only what they ask for."
+)
 
 
-def _content_cache_key(content: str) -> str:
-    """SHA256[:16] content hash for summary caching."""
-    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+def _fill_prompt(template: str, text: str) -> str:
+    """Put ``text`` at the template's ``{text}``, or after the template when it has none."""
+    if "{text}" in template:
+        return template.replace("{text}", text, 1)
+    return f"{template}\n\n{text}"
 
 
-def _get_cached_summary(metadata_json: str | None, content_hash: str) -> str | None:
-    """Return a cached summary from item metadata if the content hash matches."""
-    if not metadata_json:
-        return None
+def _llm_reply(prompt: str, *, api_name: str, model_override: str | None) -> str:
+    """The model's reply to ``prompt``, or "" when the call fails. A quota refusal propagates.
+
+    Provider failures raise (raise_on_error), so any text that comes back is the model's,
+    even a reply that starts with "Error:".
+    """
+    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+
+    if not api_name.strip() or api_name.strip().lower() == "none":
+        return ""  # analyze answers a missing provider with an "Error:" string, not a raise
     try:
-        meta = json.loads(metadata_json) if isinstance(metadata_json, str) else metadata_json
-        if not isinstance(meta, dict):
-            return None
-        # Format 1: flat keys
-        if meta.get("cached_summary_hash") == content_hash:
-            return meta.get("cached_summary")
-        # Format 2: nested dict
-        cached = meta.get("cached_summary")
-        if isinstance(cached, dict) and cached.get("content_hash") == content_hash:
-            return cached.get("text")
-    except (TypeError, ValueError, json.JSONDecodeError):
-        pass
-    return None
+        result = analyze(
+            api_name,
+            prompt,
+            None,
+            system_message=_OUTPUTS_SYSTEM_PROMPT,
+            model_override=model_override,
+            input_is_literal_text=True,
+            raise_on_error=True,
+        )
+    except LLMQuotaExceededError:
+        raise
+    except Exception as exc:
+        logger.warning(f"outputs_service: LLM summary failed: {exc}")
+        return ""
+    return result.strip() if isinstance(result, str) else ""
 
 
 def _summarize_single_article(
@@ -670,24 +684,9 @@ def _summarize_single_article(
     model_override: str | None = None,
     custom_prompt: str | None = None,
 ) -> str:
-    """Synchronously call LLM to summarize a single article."""
-    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-
-    truncated = text[:_SUMMARIZE_MAX_CHARS]
-    prompt = (custom_prompt or _SUMMARIZE_DEFAULT_PROMPT).format(text=truncated)
-    try:
-        result = analyze(
-            input_data=truncated,
-            custom_prompt=prompt,
-            api_name=api_name,
-            api_key=None,
-            model=model_override,
-        )
-        if isinstance(result, str) and result.strip():
-            return result.strip()
-    except Exception as exc:
-        logger.warning(f"outputs_service: LLM summarize failed: {exc}")
-    return text[:300]
+    """Synchronously summarize one article; "" when the model gives none. A quota refusal propagates."""
+    prompt = _fill_prompt(custom_prompt or _SUMMARIZE_DEFAULT_PROMPT, text[:_SUMMARIZE_MAX_CHARS])
+    return _llm_reply(prompt, api_name=api_name, model_override=model_override)
 
 
 async def summarize_items_for_output(
@@ -696,11 +695,10 @@ async def summarize_items_for_output(
     api_name: str,
     model_override: str | None = None,
     custom_prompt: str | None = None,
-    db: Any = None,
 ) -> list[dict[str, Any]]:
-    """Enrich items with LLM-generated 'llm_summary' field.
+    """Give each item an ``llm_summary``: the model's summary, or "" when it gives none.
 
-    Uses SHA256-keyed caching when metadata is available.
+    Summaries are not cached: watchlist items have no metadata column to keep them in (TASK-13642).
     """
     loop = asyncio.get_running_loop()
     for item in items:
@@ -708,31 +706,12 @@ async def summarize_items_for_output(
         if not content.strip():
             item["llm_summary"] = ""
             continue
-        content_hash = _content_cache_key(content)
-        cached = _get_cached_summary(item.get("metadata_json"), content_hash)
-        if cached:
-            item["llm_summary"] = cached
-            continue
-        summary = await loop.run_in_executor(
+        item["llm_summary"] = await loop.run_in_executor(
             None,
             lambda text=content: _summarize_single_article(
                 text, api_name=api_name, model_override=model_override, custom_prompt=custom_prompt,
             ),
         )
-        item["llm_summary"] = summary
-        if db and hasattr(db, "update_item_metadata"):
-            try:
-                item_id = item.get("id")
-                if item_id is not None:
-                    existing_meta = {}
-                    raw = item.get("metadata_json")
-                    if raw:
-                        existing_meta = json.loads(raw) if isinstance(raw, str) else dict(raw)
-                    existing_meta["cached_summary"] = summary
-                    existing_meta["cached_summary_hash"] = content_hash
-                    db.update_item_metadata(int(item_id), json.dumps(existing_meta))
-            except Exception as exc:
-                logger.debug(f"outputs_service: cache persist failed: {exc}")
     return items
 
 
@@ -791,7 +770,9 @@ def group_items(
                     values = [str(val)] if val else []
                 for val in values:
                     match = False
-                    if mode == "exact":
+                    if mode == "exact" and field == "tag":
+                        match = normalize_keyword_identity(val) == normalize_keyword_identity(pattern)
+                    elif mode == "exact":
                         match = val == pattern
                     elif mode == "contains":
                         match = pattern.lower() in val.lower()
@@ -874,24 +855,9 @@ def _summarize_text_block(
     custom_prompt: str | None = None,
     max_chars: int = 20_000,
 ) -> str:
-    """Shared helper to summarize a block of text via LLM. Synchronous."""
-    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-
-    truncated = text[:max_chars]
-    prompt = (custom_prompt or _BRIEFING_SUMMARY_DEFAULT_PROMPT).format(text=truncated)
-    try:
-        result = analyze(
-            input_data=truncated,
-            custom_prompt=prompt,
-            api_name=api_name,
-            api_key=None,
-            model=model_override,
-        )
-        if isinstance(result, str) and result.strip():
-            return result.strip()
-    except Exception as exc:
-        logger.warning(f"outputs_service: LLM summarize_text_block failed: {exc}")
-    return ""
+    """Shared helper to summarize a block of text via LLM. Synchronous. A quota refusal propagates."""
+    prompt = _fill_prompt(custom_prompt or _BRIEFING_SUMMARY_DEFAULT_PROMPT, text[:max_chars])
+    return _llm_reply(prompt, api_name=api_name, model_override=model_override)
 
 
 async def generate_group_summaries(
@@ -915,15 +881,19 @@ async def generate_group_summaries(
             if title:
                 texts.append(f"- {title}: {summary}" if summary else f"- {title}")
         combined = "\n".join(texts)
-        prompt = (custom_prompt or _GROUP_SUMMARY_DEFAULT_PROMPT).format(text=combined)
         try:
             result = await loop.run_in_executor(
                 None,
-                lambda t=combined, p=prompt: _summarize_text_block(
-                    t, api_name=api_name, model_override=model_override, custom_prompt=p,
+                lambda t=combined: _summarize_text_block(
+                    t,
+                    api_name=api_name,
+                    model_override=model_override,
+                    custom_prompt=custom_prompt or _GROUP_SUMMARY_DEFAULT_PROMPT,
                 ),
             )
             group["summary"] = result
+        except LLMQuotaExceededError:
+            raise
         except Exception as exc:
             logger.warning(f"outputs_service: group summary failed for '{group.get('name')}': {exc}")
             group["summary"] = ""
@@ -1022,7 +992,7 @@ async def classify_items_by_topic(
         summary = item.get("llm_summary") or item.get("summary", "")
         texts.append(f"[{idx}] {title}: {summary[:200]}" if summary else f"[{idx}] {title}")
     combined = "\n".join(texts)
-    prompt = _TOPIC_CLASSIFY_PROMPT.format(max_groups=max_groups, text=combined)
+    prompt = _TOPIC_CLASSIFY_PROMPT.replace("{max_groups}", str(max_groups))
 
     try:
         result = await loop.run_in_executor(
@@ -1072,6 +1042,8 @@ async def classify_items_by_topic(
                 "summary": None,
             })
         return groups if groups else None
+    except LLMQuotaExceededError:
+        raise
     except Exception as exc:
         logger.warning(f"outputs_service: topic classification failed: {exc}")
         return None

@@ -26,9 +26,9 @@ Evaluations webhook_manager._deliver_webhook set skip_dns = is_test_mode() or PY
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in e156820018: skip_dns = is_explicit_pytest_runtime(). test_delivery_keeps_ssrf_check_under_test_mode_env red on HEAD, green now; Evaluations suite 18 failed before and after (pre-existing).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

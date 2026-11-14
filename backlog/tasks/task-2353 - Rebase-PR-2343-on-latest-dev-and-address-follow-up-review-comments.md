@@ -33,7 +33,6 @@ Rebase PR #2343 onto the latest dev branch, inspect current PR review threads an
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Follow-up findings:
 - Fetched `origin` and ran `git rebase origin/dev`; branch was already up to date with latest `origin/dev`.
@@ -43,7 +42,6 @@ Follow-up findings:
 - No scheduled-task source changes were needed in this follow-up pass.
 - Unrelated untracked watchlist templates remain untouched.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

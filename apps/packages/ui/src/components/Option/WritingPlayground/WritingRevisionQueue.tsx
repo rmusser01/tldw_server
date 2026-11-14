@@ -150,7 +150,7 @@ export function WritingRevisionQueue({
                 <Button
                   size="small"
                   icon={<RefreshCw size={14} />}
-                  disabled={actionsDisabled}
+                  disabled={actionsDisabled || proposal.status !== "pending"}
                   onClick={() => onRegenerate(proposal)}
                 >
                   Regenerate

@@ -1,76 +1,85 @@
-import { watchChatAccountChanges } from '@/services/chat-account-boundary'
-import { useHomeMilestoneScope } from '@/hooks/useHomeMilestoneScope'
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
-import { useConnectionStore } from '@/store/connection'
-import { useLocation, useNavigate } from 'react-router-dom'
-import { getMediaPermalinkIdFromSearch } from './mediaPermalink'
-import { useMediaCapabilities } from '@/hooks/useMediaCapabilities'
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  CheckSquare,
-  Square,
-  Trash2,
-} from 'lucide-react'
-import { useServerOnline } from '@/hooks/useServerOnline'
-import { useServerCapabilities } from '@/hooks/useServerCapabilities'
-import {
-  useConnectionActions,
-  useConnectionUxState
-} from '@/hooks/useConnectionState'
-import { useDemoMode } from '@/context/demo-mode'
-import { useAntdMessage } from '@/hooks/useAntdMessage'
+import { MediaCollectionManager } from './MediaCollectionManager'
+import { MediaKnowledgeActions } from "./MediaKnowledgeActions"
 import FeatureEmptyState from '@/components/Common/FeatureEmptyState'
-import { SearchBar } from '@/components/Media/SearchBar'
-import { FilterPanel } from '@/components/Media/FilterPanel'
-import { ResultsList } from '@/components/Media/ResultsList'
+import FeatureHint from '@/components/Common/FeatureHint'
 import { ContentViewer } from '@/components/Media/ContentViewer'
-import { Pagination } from '@/components/Media/Pagination'
 import { FilterChips } from '@/components/Media/FilterChips'
+import { FilterPanel } from '@/components/Media/FilterPanel'
+import { Pagination } from '@/components/Media/Pagination'
+import { ResultsList } from '@/components/Media/ResultsList'
+import { SearchBar } from '@/components/Media/SearchBar'
+import { mediaResultKey } from '@/components/Media/types'
 import type { MediaResultItem } from '@/components/Media/types'
 import {
-  useMediaNavigation
-} from '@/hooks/useMediaNavigation'
-import { bgRequest } from '@/services/background-proxy'
-import { requestQuickIngestOpen } from '@/utils/quick-ingest-open'
-import { setSetting } from '@/services/settings/registry'
-import {
-  LAST_MEDIA_ID_SETTING,
-} from '@/services/settings/ui-settings'
-import { createMediaChatHandoff, buildMediaChatHandoffRoute, removeMediaChatHandoff } from '@/services/tldw/media-chat-handoff'
-import {
-  hasDefaultMediaSearchFields,
-} from '@/components/Review/mediaSearchRequest'
+  buildMediaFilterSearch,
+  hasMediaFilterParams,
+  parseMediaFilterParams
+} from "@/components/Review/mediaFilterParams"
 import {
   isMediaOnly,
   isNotesOnly,
 } from '@/components/Review/mediaKinds'
 import {
-  parseMediaFilterParams,
-  buildMediaFilterSearch,
-  hasMediaFilterParams
-} from '@/components/Review/mediaFilterParams'
+  hasDefaultMediaSearchFields,
+} from '@/components/Review/mediaSearchRequest'
+import { useDemoMode } from '@/context/demo-mode'
+import { useAntdMessage } from '@/hooks/useAntdMessage'
+import {
+  useConnectionActions,
+  useConnectionUxState
+} from '@/hooks/useConnectionState'
 import { useFlashcardsGenerateTransfer, useStudyPackTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
+import { useHomeMilestoneScope } from '@/hooks/useHomeMilestoneScope'
+import { useMediaCapabilities } from '@/hooks/useMediaCapabilities'
+import {
+  useMediaNavigation
+} from '@/hooks/useMediaNavigation'
+import { useMobile } from '@/hooks/useMediaQuery'
+import { useServerCapabilities } from '@/hooks/useServerCapabilities'
+import { useServerOnline } from '@/hooks/useServerOnline'
+import { bgRequest } from '@/services/background-proxy'
+import { watchChatAccountChanges } from '@/services/chat-account-boundary'
+import {
+  buildMediaChatHandoffRoute,
+  createMediaChatHandoff,
+  removeMediaChatHandoff
+} from "@/services/tldw/media-chat-handoff"
+import { useConnectionStore } from '@/store/connection'
 import {
   getMediaNavigationResumeEntry,
   resolveMediaNavigationResumeSelection,
   saveMediaNavigationResumeSelection
 } from '@/utils/media-navigation-resume'
 import {
-  trackMediaNavigationTelemetry,
   type MediaNavigationFallbackKind,
-} from '@/utils/media-navigation-telemetry'
+  trackMediaNavigationTelemetry
+} from "@/utils/media-navigation-telemetry"
 import { normalizeRequestedMediaRenderMode } from '@/utils/media-render-mode'
+import { stripMediaMetadata } from '@/utils/media-metadata-display'
+import { requestQuickIngestOpen } from '@/utils/quick-ingest-open'
+import {
+  CheckSquare,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Square,
+  Trash2
+} from "lucide-react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useTranslation } from 'react-i18next'
+import { useLocation, useNavigate } from 'react-router-dom'
 
-import { useMediaSearch } from './hooks/useMediaSearch'
-import { useMediaNavigationState } from './hooks/useMediaNavigationState'
-import { useMediaViewPreferences } from './hooks/useMediaViewPreferences'
-import { useMediaSelection } from './hooks/useMediaSelection'
 import { useMediaKeyboardShortcuts } from './hooks/useMediaKeyboardShortcuts'
+import { useMediaNavigationState } from './hooks/useMediaNavigationState'
+import { useMediaSearch } from './hooks/useMediaSearch'
+import { useMediaSelection } from './hooks/useMediaSelection'
+import { useMediaViewPreferences } from './hooks/useMediaViewPreferences'
+import { getMediaPermalinkIdFromSearch } from './mediaPermalink'
 
 export const MEDIA_STALE_CHECK_INTERVAL_MS = 30_000
+
+// Debounce for keyword-suggestion searches triggered by Select onSearch
+// (per-keystroke network calls, TASK-13511).
 
 const LazyJumpToNavigator = React.lazy(() =>
   import('@/components/Media/JumpToNavigator').then((module) => ({
@@ -108,6 +117,12 @@ const LazyMediaSectionNavigator = React.lazy(() =>
   }))
 )
 
+// Module-stable stand-ins for ResultsList props (WP-11 / TASK-13521): inline
+// noops and a fresh `new Set()` re-create row props on every render and defeat
+// the memoized ResultRow, so every parent re-render re-rendered all rows.
+const NOOP_ON_SELECT = () => {}
+const EMPTY_SELECTED_IDS: Set<string> = new Set()
+
 const ViewMediaPage: React.FC = () => {
   const { t } = useTranslation(['review', 'common', 'settings'])
   const navigate = useNavigate()
@@ -132,10 +147,12 @@ const ViewMediaPage: React.FC = () => {
   // Check media support
   const mediaUnsupported = !capsLoading && capabilities && !capabilities.hasMedia
 
-  if (!isOnline && uxState === 'testing') {
-    return <div role="status" className="flex h-full items-center justify-center">
-      {t('review:mediaEmpty.checkingConnection', { defaultValue: 'Checking connection…' })}
-    </div>
+  if (!isOnline && uxState === "testing") {
+    return (
+      <div role="status" className="flex h-full items-center justify-center">
+        {t('review:mediaEmpty.checkingConnection', { defaultValue: 'Checking connection…' })}
+      </div>
+    )
   }
 
   if (!isOnline) {
@@ -313,6 +330,22 @@ const ViewMediaPage: React.FC = () => {
 
 const MediaPageContent: React.FC = () => {
   const ownerScope = useHomeMilestoneScope()
+  const isMobile = useMobile()
+  const [mobileTab, setMobileTab] = useState<1 | 2>(1)
+  const returnFocus = useRef<HTMLElement | null>(null)
+  const backButton = useRef<HTMLButtonElement>(null)
+  // Memoized so the ResultsList onSelect handler below can hold a stable
+  // identity across re-renders (refs and setState are stable, so no deps).
+  const showContent = useCallback(() => {
+    returnFocus.current = document.activeElement as HTMLElement
+    setMobileTab(2)
+    requestAnimationFrame(() => backButton.current?.focus())
+  }, [])
+  const backToResults = () => {
+    setMobileTab(1)
+    requestAnimationFrame(() => returnFocus.current?.focus())
+  }
+  useEffect(() => setMobileTab(1), [ownerScope])
   const handoffOwnerRef = useRef(ownerScope)
   handoffOwnerRef.current = ownerScope
   const transferFlashcards = useFlashcardsGenerateTransfer()
@@ -365,7 +398,7 @@ const MediaPageContent: React.FC = () => {
         return []
       }
       const allowedIdSet = new Set(collection.itemIds.map((id) => String(id)))
-      nextResults = nextResults.filter((item) => allowedIdSet.has(String(item.id)))
+      nextResults = nextResults.filter((item) => allowedIdSet.has(mediaResultKey(item)) || allowedIdSet.has(String(item.id)))
     }
     return nextResults
   }, [
@@ -382,9 +415,11 @@ const MediaPageContent: React.FC = () => {
     Boolean(selection.activeCollectionId)
 
   const activeFilterCount = useMemo(() => {
-    return search.activeFilterCount +
+    return (
+      search.activeFilterCount +
       Number(selection.showFavoritesOnly) +
       Number(Boolean(selection.activeCollectionId))
+    )
   }, [search.activeFilterCount, selection.showFavoritesOnly, selection.activeCollectionId])
 
   const resetAllFilters = useCallback(() => {
@@ -394,8 +429,28 @@ const MediaPageContent: React.FC = () => {
   }, [search, selection])
 
   const handleSelectAllVisibleItems = useCallback(() => {
-    selection.setBulkSelectedIds(displayResults.map((item) => String(item.id)))
+    selection.setBulkSelectedIds(previous => Array.from(new Set([...previous, ...displayResults.map(mediaResultKey)])))
   }, [displayResults, selection])
+
+  // Stable ResultsList row props (WP-11 / TASK-13521): an inline handler here
+  // defeated the memoized ResultRow on every parent re-render (search typing,
+  // loading toggles). Depends only on the stable members of `selection`/`nav`
+  // (the hook return objects themselves get fresh identities each render).
+  const handleResultsSelect = useCallback((id: string | number) => {
+    if (selection.bulkSelectionMode) {
+      selection.toggleBulkItemSelection(id)
+      return
+    }
+    const item = displayResults.find((r) => mediaResultKey(r) === String(id)) || displayResults.find((r) => r.id === id)
+    if (item) { nav.setSelected(item); if (isMobile) showContent() }
+  }, [
+    selection.bulkSelectionMode,
+    selection.toggleBulkItemSelection,
+    displayResults,
+    nav.setSelected,
+    isMobile,
+    showContent
+  ])
 
   const hasJumpTo = displayResults.length > 5
 
@@ -426,7 +481,20 @@ const MediaPageContent: React.FC = () => {
     enabled: navigationEnabled,
     includeGeneratedFallback: viewPrefs.includeGeneratedFallbackValue
   })
-  const navigationNodes = navigationData?.nodes || []
+  const navigationNodes = useMemo(() => {
+    const nodes = navigationData?.nodes || []
+    const readingContent = stripMediaMetadata(nav.selectedContent)
+    if (readingContent === nav.selectedContent) return nodes
+    // API character ranges refer to the stored source, including its envelope.
+    const prefixLength = nav.selectedContent.trimEnd().length - readingContent.length
+    return nodes
+      .filter(node => node.target_type !== 'char_range' || node.target_end == null || node.target_end > prefixLength)
+      .map(node => node.target_type === 'char_range' ? {
+        ...node,
+        target_start: node.target_start == null ? null : Math.max(0, node.target_start - prefixLength),
+        target_end: node.target_end == null ? null : Math.max(0, node.target_end - prefixLength)
+      } : node)
+  }, [nav.selectedContent, navigationData?.nodes])
 
   const [selectedNavigationNodeId, setSelectedNavigationNodeId] =
     useState<string | null>(null)
@@ -899,7 +967,8 @@ const MediaPageContent: React.FC = () => {
   const handoffSelectionRef = useRef(nav.selected)
   handoffSelectionRef.current = nav.selected
   const fullContentReady = Boolean(ownerScope && nav.selected && !nav.detailLoading && !nav.detailFetchError &&
-    String(nav.lastFetchedId) === String(nav.selected.id) && nav.selectedContent.trim())
+    String(nav.lastFetchedId) === String(nav.selected.id) &&
+    (nav.permalinkMediaId == null || nav.permalinkMediaId === String(nav.selected.id)) && nav.selectedContent.trim())
   const chatWithMediaDisabledReason = fullContentReady ? undefined : !ownerScope
     ? t('review:mediaPage.fullContentOwnerLoading', { defaultValue: 'Checking account…' }) : nav.detailLoading
     ? t('review:mediaPage.fullContentLoading', { defaultValue: 'Loading full content…' })
@@ -1083,11 +1152,11 @@ const MediaPageContent: React.FC = () => {
     }
   }, [nav.selected, message, navigate])
 
+  const { handleOpenSelectionInMultiReview } = selection
   const handleOpenInMultiReview = useCallback(() => {
-    if (!nav.selected) return
-    void setSetting(LAST_MEDIA_ID_SETTING, String(nav.selected.id))
-    navigate('/media-multi')
-  }, [nav.selected, navigate])
+    if (!nav.selected || nav.selected.kind !== 'media') return
+    void handleOpenSelectionInMultiReview([nav.selected])
+  }, [nav.selected, handleOpenSelectionInMultiReview])
 
   const handleSendAnalysisToChat = useCallback(async (text: string) => {
     const boundaryRevision = handoffBoundaryRevision.current
@@ -1128,6 +1197,8 @@ const MediaPageContent: React.FC = () => {
   // When the library is truly empty (no results, no search/filters active, not loading),
   // render a single-column centered onboarding view instead of the two-column split.
   const isEmptyLibrary =
+    !selection.bulkSelectionMode &&
+    selection.bulkSelectedItems.length === 0 &&
     search.activeTotalCount === 0 &&
     displayResults.length === 0 &&
     !nav.selected &&
@@ -1160,8 +1231,7 @@ const MediaPageContent: React.FC = () => {
     </div>
   ) : null
 
-  if (isEmptyLibrary) {
-    return (
+  const emptyLibraryView = (
       <div
         className="relative flex min-h-0 flex-1 overflow-auto bg-bg"
       >
@@ -1170,12 +1240,20 @@ const MediaPageContent: React.FC = () => {
             <h1 className="mb-3 px-4 text-center text-base font-semibold text-text">
               {t('review:mediaPage.mediaInspector', { defaultValue: 'Media Inspector' })}
             </h1>
-            <div className="mb-3 flex justify-center">{trashNavigation}</div>
+            <div className="mb-3 flex justify-center gap-2">
+              <button type="button" onClick={() => requestQuickIngestOpen({ source: 'manual' })} className="min-h-[44px] rounded-md border border-border px-3 text-sm">
+                {t('review:mediaPage.addMedia', { defaultValue: 'Add media' })}
+              </button>
+              {trashNavigation}
+            </div>
             {staleSelectionNotice}
+            <React.Suspense fallback={null}>
+              <LazyMediaIngestJobsPanel />
+            </React.Suspense>
             <ResultsList
               results={displayResults}
               selectedId={null}
-              onSelect={() => {}}
+              onSelect={NOOP_ON_SELECT}
               totalCount={search.activeTotalCount}
               loadedCount={displayResults.length}
               isLoading={false}
@@ -1189,8 +1267,8 @@ const MediaPageContent: React.FC = () => {
               favorites={selection.favoritesSet}
               onToggleFavorite={selection.toggleFavorite}
               selectionMode={false}
-              selectedIds={new Set()}
-              onToggleSelected={() => {}}
+              selectedIds={EMPTY_SELECTED_IDS}
+              onToggleSelected={NOOP_ON_SELECT}
               readingProgress={selection.readingProgressMap}
               viewMode="standard"
               onViewModeChange={() => {}}
@@ -1199,37 +1277,76 @@ const MediaPageContent: React.FC = () => {
         </div>
       </div>
     )
-  }
 
   return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <MediaCollectionManager key={ownerScope || 'unverified'} selection={selection} />
+      {isEmptyLibrary && !nav.detailFetchError && !nav.detailLoading ? emptyLibraryView : (
     <div
-      className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"
+      className="relative flex flex-col md:flex-row min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"
     >
+      <div className="md:hidden flex shrink-0 border-b border-border bg-surface">
+        <button type="button" onClick={backToResults} aria-pressed={mobileTab === 1} className="flex-1 min-h-[44px] text-sm">
+          {t('review:mediaPage.resultsView', { defaultValue: 'Results' })}
+        </button>
+        <button type="button" onClick={showContent} aria-pressed={mobileTab === 2} className="flex-1 min-h-[44px] text-sm">
+          {t('review:mediaPage.contentView', { defaultValue: 'Content' })}
+        </button>
+      </div>
       {/* Left Sidebar */}
       <div
-        className={`absolute inset-y-0 left-0 z-10 bg-surface border-r border-border flex h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out md:relative md:inset-auto md:z-auto ${
-          viewPrefs.sidebarCollapsedValue ? 'w-0' : 'w-[calc(100%-1.5rem)] md:w-[22rem] lg:w-[25rem]'
+        data-testid="inspector-results-view"
+        hidden={isMobile && mobileTab !== 1}
+        className={`relative bg-surface border-r border-border flex flex-1 md:flex-none h-full min-h-0 min-w-0 flex-col transition-[width] duration-300 ease-in-out ${
+          !isMobile && viewPrefs.sidebarCollapsedValue ? 'w-0' : 'w-full md:w-[22rem] lg:w-[25rem]'
         }`}
         style={{
+          display: isMobile && mobileTab !== 1 ? 'none' : undefined,
           overflowX: 'hidden',
           overflowY: 'auto'
         }}
       >
         <div
-          className="flex min-h-full flex-col bg-surface"
-          hidden={viewPrefs.sidebarCollapsedValue}
-          aria-hidden={viewPrefs.sidebarCollapsedValue}
-        >
+          className="flex h-auto min-h-full shrink-0 flex-col bg-surface"
+          hidden={!isMobile && viewPrefs.sidebarCollapsedValue}
+          aria-hidden={!isMobile && viewPrefs.sidebarCollapsedValue}>
+          {selection.bulkSelectionMode ? (
+            <>
+              <div className="flex flex-wrap gap-2 border-b border-border p-2">
+                <MediaKnowledgeActions
+                  navigate={navigate}
+                  key={selection.bulkSelectedMediaItems.map((item) => item.id).join(",")}
+                  selection
+                  items={selection.bulkSelectedMediaItems}
+                  isCurrent={isMediaCurrent}
+                />
+              </div>
+              <React.Suspense fallback={null}>
+                <LazyMediaBulkToolbar
+                deleteDisabledReason={selection.bulkSelectedMediaItems.length > 0 ? deleteDisabledReason : undefined}
+                selection={{
+                  ...selection,
+                  handleSelectAllVisibleItems
+                }}
+                t={t}
+                />
+              </React.Suspense>
+            </>
+          ) : null}
+
           {/* Header */}
           <div className="shrink-0 border-b border-border/80 bg-surface px-4 py-3.5">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h1 className="text-text text-base font-semibold">
                 {t('review:mediaPage.mediaInspector', { defaultValue: 'Media Inspector' })}
               </h1>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[11px] font-medium tabular-nums text-text-muted">
                   {displayResults.length} / {search.activeTotalCount}
                 </span>
+                <button type="button" onClick={() => requestQuickIngestOpen({ source: 'manual' })} className="min-h-[44px] md:min-h-8 rounded-md border border-border px-2 text-xs">
+                  {t('review:mediaPage.addMedia', { defaultValue: 'Add media' })}
+                </button>
                 {trashNavigation}
                 <button
                   type="button"
@@ -1264,7 +1381,9 @@ const MediaPageContent: React.FC = () => {
                 aria-pressed={isMediaOnly(search.kinds)}
                 aria-label={t('review:mediaPage.showMediaOnly', { defaultValue: 'Show media only' })}
               >
-                <span>{t('review:mediaPage.media', { defaultValue: 'Media' })}</span>
+                <span>
+                  {t('review:mediaPage.media', { defaultValue: 'Media' })}
+                </span>
                 <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium">
                   {search.mediaTotal}
                 </span>
@@ -1288,7 +1407,9 @@ const MediaPageContent: React.FC = () => {
                 aria-pressed={isNotesOnly(search.kinds)}
                 aria-label={t('review:mediaPage.showNotesOnly', { defaultValue: 'Show notes only' })}
               >
-                <span>{t('review:mediaPage.notes', { defaultValue: 'Notes' })}</span>
+                <span>
+                  {t('review:mediaPage.notes', { defaultValue: 'Notes' })}
+                </span>
                 <span className="rounded-full bg-black/10 px-1.5 py-0.5 text-[10px] font-medium">
                   {search.notesTotal}
                 </span>
@@ -1296,19 +1417,24 @@ const MediaPageContent: React.FC = () => {
             </div>
           </div>
 
+          <div className="max-h-[30dvh] min-h-0 shrink-0 overflow-y-auto">
+            <React.Suspense fallback={null}>
+              <LazyMediaIngestJobsPanel />
+            </React.Suspense>
+          </div>
+
           {/* Controls: Find Media + Jump To + Bulk Toolbar */}
           <div
-            className="min-h-0 shrink overflow-y-auto border-b border-border/80"
-          >
-
-          {/* Find Media */}
-          <div className="bg-surface px-4 py-3.5 space-y-3 border-b border-border/40">
-            <div className="flex items-center justify-between">
-              <span className="px-1 py-1 text-sm font-medium text-text">
-                {t('review:mediaPage.findMedia', { defaultValue: 'Find media' })}
-              </span>
-              <div className="flex items-center gap-1">
-                <button
+            data-testid="inspector-filter-controls"
+            className="min-h-0 max-h-[25dvh] shrink-0 overflow-y-auto border-b border-border/80">
+            {/* Find Media */}
+            <div className="bg-surface px-4 py-3.5 space-y-3 border-b border-border/40">
+              <div className="flex items-center justify-between">
+                <span className="px-1 py-1 text-sm font-medium text-text">
+                  {t('review:mediaPage.findMedia', { defaultValue: 'Find media' })}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
                   type="button"
                   onClick={() => search.setSearchCollapsed((prev) => !prev)}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text"
@@ -1320,26 +1446,26 @@ const MediaPageContent: React.FC = () => {
                       : t('review:mediaPage.collapseFindMediaPanel', { defaultValue: 'Collapse find media panel' })
                   }
                 >
-                <ChevronDown
+                    <ChevronDown
                   className={`w-4 h-4 transition-transform ${search.searchCollapsed ? '' : 'rotate-180'}`}
                 />
-                </button>
+                  </button>
+                </div>
               </div>
-            </div>
-            {!search.searchCollapsed && (
-              <div
+              {!search.searchCollapsed && (
+                <div
                 id="media-search-panel"
                 className="space-y-2.5 pb-1 pr-1"
                 onKeyDown={handleKeyPress}
               >
-                <SearchBar
+                  <SearchBar
                   value={search.query}
                   onChange={search.setQuery}
                   inputRef={search.searchInputRef}
                   hasActiveFilters={hasActiveFilters}
                   onClearAll={resetAllFilters}
                 />
-                <FilterChips
+                  <FilterChips
                   mediaTypes={search.mediaTypes}
                   keywords={search.keywordTokens}
                   excludedKeywords={search.excludeKeywordTokens}
@@ -1363,14 +1489,14 @@ const MediaPageContent: React.FC = () => {
                   }}
                   onClearAll={resetAllFilters}
                 />
-                <button
+                  <button
                   onClick={search.handleSearch}
                   data-testid="media-search-submit"
                   className="w-full rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primaryStrong"
                 >
-                  {t('review:mediaPage.search', { defaultValue: 'Search' })}
-                </button>
-                <FilterPanel
+                    {t('review:mediaPage.search', { defaultValue: 'Search' })}
+                  </button>
+                  <FilterPanel
                   searchMode={search.searchMode}
                   onSearchModeChange={(nextMode) => {
                     if (nextMode === search.searchMode) return
@@ -1436,9 +1562,7 @@ const MediaPageContent: React.FC = () => {
                   }}
                   keywordOptions={search.keywordOptions}
                   keywordSourceMode={search.keywordSourceMode}
-                  onKeywordSearch={(txt) => {
-                    search.loadKeywordSuggestions(txt)
-                  }}
+                  onKeywordSearch={search.loadKeywordSuggestions}
                   showFavoritesOnly={selection.showFavoritesOnly}
                   onShowFavoritesOnlyChange={(show) => {
                     selection.setShowFavoritesOnly(show)
@@ -1448,17 +1572,17 @@ const MediaPageContent: React.FC = () => {
                   activeFilterCount={activeFilterCount}
                   onClearAll={resetAllFilters}
                 />
-                <div className="space-y-2 rounded-md border border-border/80 bg-surface2/60 px-2.5 py-2">
-                  <div className="flex items-center gap-2">
-                    <label
+                  <div className="space-y-2 rounded-md border border-border/80 bg-surface2/60 px-2.5 py-2">
+                    <div className="flex items-center gap-2">
+                      <label
                       htmlFor="media-collection-filter"
                       className="text-[11px] font-medium text-text-muted"
                     >
-                      {t('review:mediaPage.collectionFilterLabel', {
+                        {t('review:mediaPage.collectionFilterLabel', {
                         defaultValue: 'Collection'
                       })}
-                    </label>
-                    <select
+                      </label>
+                      <select
                       id="media-collection-filter"
                       value={selection.activeCollectionId || ''}
                       onChange={(event) => {
@@ -1469,27 +1593,27 @@ const MediaPageContent: React.FC = () => {
                       className="h-7 flex-1 rounded border border-border bg-surface px-2 text-[11px] text-text"
                       data-testid="media-collection-filter"
                     >
-                      <option value="">
-                        {t('review:mediaPage.collectionAll', {
+                        <option value="">
+                          {t('review:mediaPage.collectionAll', {
                           defaultValue: 'All items'
                         })}
-                      </option>
-                      {selection.mediaCollections.map((collection) => (
-                        <option key={collection.id} value={collection.id}>
-                          {collection.name} ({collection.itemIds.length})
                         </option>
-                      ))}
-                    </select>
-                  </div>
-                  {selection.activeCollection ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[11px] text-text-muted">
-                        {t('review:mediaPage.collectionItemsVisible', {
+                        {selection.mediaCollections.map((collection) => (
+                          <option key={collection.id} value={collection.id}>
+                            {collection.name} ({collection.itemIds.length})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {selection.activeCollection ? (
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] text-text-muted">
+                          {t('review:mediaPage.collectionItemsVisible', {
                           defaultValue: '{{count}} item(s) in this collection.',
                           count: selection.activeCollection.itemIds.length
                         })}
-                      </p>
-                      <button
+                        </p>
+                        <button
                         type="button"
                         onClick={() => {
                           void selection.handleOpenCollectionInMultiReview()
@@ -1497,66 +1621,49 @@ const MediaPageContent: React.FC = () => {
                         className="rounded border border-border px-2 py-1 text-[11px] font-medium text-text hover:bg-surface"
                         data-testid="media-collection-open-multi"
                       >
-                        {t('review:mediaPage.collectionOpenMultiReview', {
+                          {t('review:mediaPage.collectionOpenMultiReview', {
                           defaultValue: 'Open in multi-review'
                         })}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-text-muted">
-                      {t('review:mediaPage.collectionHint', {
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-text-muted">
+                        {t('review:mediaPage.collectionHint', {
                         defaultValue:
                           'Create collections from bulk selection to organize related items.'
                       })}
-                    </p>
-                  )}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-
-          {selection.bulkSelectionMode ? (
-            <React.Suspense fallback={null}>
-              <LazyMediaBulkToolbar
-                deleteDisabledReason={selection.bulkSelectedMediaItems.length > 0 ? deleteDisabledReason : undefined}
-                selection={{
-                  ...selection,
-                  handleSelectAllVisibleItems
-                }}
-                t={t}
-              />
-            </React.Suspense>
-          ) : null}
-
+              )}
+            </div>
           </div>
           {/* end Controls wrapper */}
+
+          <FeatureHint featureKey="media-inspector-batch" show={selection.bulkSelectionMode} title={t('review:mediaPage.batchHintTitle', { defaultValue: 'Review a batch' })} description={t('review:mediaPage.batchHintDescription', { defaultValue: 'Add media accepts multiple URLs or files. Select across pages, then open your saved Media selection to review it together.' })} />
 
           {/* Results + pagination flow */}
           <div
             className="flex min-h-0 flex-1 flex-col bg-surface"
             data-sidebar-target-min-height={sidebarDimensions.sidebarResultsPanelMinHeightPx}
             style={{
-              minHeight: `${sidebarDimensions.sidebarResultsPanelMinHeightPx}px`
-            }}
-          >
+              minHeight: isMobile
+                ? "min(24rem, 50dvh)"
+                : `${sidebarDimensions.sidebarResultsPanelMinHeightPx}px`
+            }}>
             <div
               className="min-h-0 flex-1 overflow-y-auto"
               data-sidebar-target-list-height={sidebarDimensions.sidebarResultsListMinHeightPx}
               style={{
-                minHeight: `${sidebarDimensions.sidebarResultsListMinHeightPx}px`
-              }}
-            >
+                minHeight: isMobile
+                  ? "min(12rem, 25dvh)"
+                  : `${sidebarDimensions.sidebarResultsListMinHeightPx}px`
+              }}>
               <ResultsList
                 results={displayResults}
                 selectedId={nav.selected?.id || null}
-                onSelect={(id) => {
-                  if (selection.bulkSelectionMode) {
-                    selection.toggleBulkItemSelection(id)
-                    return
-                  }
-                  const item = displayResults.find((r) => r.id === id)
-                  if (item) nav.setSelected(item)
-                }}
+                onSelect={handleResultsSelect}
                 totalCount={search.activeTotalCount}
                 loadedCount={displayResults.length}
                 isLoading={search.isLoading || search.isFetching}
@@ -1586,7 +1693,7 @@ const MediaPageContent: React.FC = () => {
                 onPageChange={search.setPage}
                 totalItems={search.activeTotalCount}
                 itemsPerPage={search.pageSize}
-                currentItemsCount={search.results.length}
+                currentItemsCount={displayResults.length}
                 pageSizeOptions={[20, 50, 100]}
                 onItemsPerPageChange={(nextPageSize) => {
                   if (nextPageSize === search.pageSize) return
@@ -1605,7 +1712,9 @@ const MediaPageContent: React.FC = () => {
                   <kbd className="inline-flex items-center justify-center min-w-[18px] h-5 px-1 text-[10px] font-mono bg-surface2 border border-border rounded text-text-muted">
                     ?
                   </kbd>
-                  <span>{t('review:shortcuts.forKeyboardShortcuts', { defaultValue: 'for shortcuts' })}</span>
+                  <span>
+                    {t('review:shortcuts.forKeyboardShortcuts', { defaultValue: 'for shortcuts' })}
+                  </span>
                 </button>
               </div>
             </div>
@@ -1620,7 +1729,9 @@ const MediaPageContent: React.FC = () => {
                 aria-expanded={!viewPrefs.jumpToCollapsed}
                 aria-controls="media-jump-bottom-panel"
               >
-                <span>{t('review:mediaPage.jumpTo', { defaultValue: 'Jump to' })}</span>
+                <span>
+                  {t('review:mediaPage.jumpTo', { defaultValue: 'Jump to' })}
+                </span>
                 <ChevronDown
                   className={`w-4 h-4 transition-transform ${viewPrefs.jumpToCollapsed ? '' : 'rotate-180'}`}
                 />
@@ -1672,7 +1783,6 @@ const MediaPageContent: React.FC = () => {
             {!viewPrefs.libraryToolsCollapsedValue && (
               <div id="media-library-tools-panel">
                 <React.Suspense fallback={null}>
-                  <LazyMediaIngestJobsPanel />
                   <LazyMediaLibraryStatsPanel
                     results={displayResults}
                     totalCount={search.activeTotalCount}
@@ -1694,7 +1804,7 @@ const MediaPageContent: React.FC = () => {
       {/* Collapse Button */}
       <button
         onClick={() => viewPrefs.setSidebarCollapsed(!viewPrefs.sidebarCollapsedValue)}
-        className={`absolute inset-y-0 z-20 w-6 shrink-0 self-stretch bg-surface border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors md:relative md:inset-auto md:z-auto ${
+        className={`hidden md:flex absolute inset-y-0 z-20 w-6 shrink-0 self-stretch bg-surface border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors md:relative md:inset-auto md:z-auto ${
           viewPrefs.sidebarCollapsedValue ? 'left-0' : 'left-[calc(100%-1.5rem)]'
         } md:left-auto`}
         aria-label={viewPrefs.sidebarCollapsedValue ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -1709,7 +1819,10 @@ const MediaPageContent: React.FC = () => {
       </button>
 
       {/* Main Content Area */}
-      <div className="ml-6 flex-1 flex min-h-0 min-w-0 flex-col md:ml-0">
+      <div hidden={isMobile && mobileTab !== 2} style={{ display: isMobile && mobileTab !== 2 ? 'none' : undefined }} data-testid="inspector-content-view" className="flex-1 flex min-h-0 min-w-0 flex-col">
+        <button ref={backButton} type="button" onClick={backToResults} className="md:hidden shrink-0 min-h-[44px] border-b border-border text-sm">
+          {t('review:mediaPage.backToResults', { defaultValue: 'Back to results' })}
+        </button>
         {navigationEnabled ? (
           <div className="border-b border-border bg-surface px-3 py-2">
             <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
@@ -1791,17 +1904,17 @@ const MediaPageContent: React.FC = () => {
               </button>
             </div>
             {staleSelectionNotice}
-            {nav.selected &&
-            nav.detailFetchError &&
-            String(nav.detailFetchError.mediaId) === String(nav.selected.id) ? (
+            {nav.detailFetchError ? (
               <div
                 className="mx-3 mt-3 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn"
+                role="alert"
                 data-testid="media-detail-fetch-error"
               >
                 <p className="m-0">{nav.detailFetchError.message}</p>
                 <button
                   type="button"
                   onClick={nav.handleRetryDetailFetch}
+                  disabled={nav.detailLoading}
                   className="mt-2 inline-flex items-center rounded border border-warn/40 bg-surface px-2 py-1 text-xs text-warn hover:bg-surface2"
                   data-testid="media-detail-fetch-retry"
                 >
@@ -1809,6 +1922,22 @@ const MediaPageContent: React.FC = () => {
                 </button>
               </div>
             ) : null}
+            {nav.selected?.kind === "media" && (
+              <div className="flex flex-wrap gap-2 border-b border-border p-2">
+                <MediaKnowledgeActions
+                  navigate={navigate}
+                  key={String(nav.selected.id)}
+                  items={[
+                    {
+                      id: nav.selected.id,
+                      title: nav.selected.title,
+                      type: nav.selected.raw?.type,
+                    },
+                  ]}
+                  isCurrent={isMediaCurrent}
+                />
+              </div>
+            )}
             <ContentViewer
               selectedMedia={nav.selected}
               content={nav.selectedContent}
@@ -1839,9 +1968,7 @@ const MediaPageContent: React.FC = () => {
               onGenerateFlashcardsFromContent={handleGenerateFlashcardsFromMedia}
               onRefreshMedia={handleRefreshMedia}
               onKeywordsUpdated={(mediaId, keywords) => {
-                if (nav.selected && nav.selected.id === mediaId) {
-                  nav.setSelected({ ...nav.selected, keywords })
-                }
+                nav.setSelected(current => current && current.id === mediaId ? { ...current, keywords } : current)
                 search.refetch()
               }}
               onDeleteItem={nav.selected?.kind === 'note' || mediaCapabilities.canDelete ? selection.handleDeleteItem : undefined}
@@ -1866,6 +1993,8 @@ const MediaPageContent: React.FC = () => {
           onClose={() => keyboard.setShortcutsOverlayOpen(false)}
         />
       </React.Suspense>
+    </div>
+      )}
     </div>
   )
 }

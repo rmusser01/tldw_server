@@ -43,11 +43,11 @@ Resolve the PR #1364 review finding that MCP React Query keys are not scoped by 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added the active MCP tool preference scope to the React Query keys for MCP health, tools, tool catalogs, and tool modules. Added a focused hook regression test that switches the mocked connection URL from port 8000 to port 9000, verifies a second tool fetch occurs, and checks that both scopes appear in the query cache keys.
 
 Verification before push: `bunx vitest run src/hooks/__tests__/useMcpTools.gating.test.tsx` passed with 1 file / 6 tests. The broader focused MCP tool filter suite passed with 7 files / 22 tests. Bandit is not applicable because this review fix only changes TypeScript and Backlog task files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

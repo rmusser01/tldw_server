@@ -32,9 +32,9 @@ Create the approved design/spec for the next /knowledge QA-only improvement slic
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec written at Docs/superpowers/specs/2026-05-16-knowledge-source-health-evidence-controls-design.md. First review found scope-hardening issues around ambiguous Add Sources copy, save-to-note scope, nearest-match scope, source-health V1 requirements, and source-id compatibility. Spec was updated to address those issues; second review approved it. Additional self-review fixed implementation risks: pre-query source health is now explicitly separate from existing post-query metadata.source_status, endpoint placement prefers a focused read-only RAG source-health endpoint, embedding_status supports not_applicable for non-vector sources, SourceCard action duplication is discouraged, and the erroneous parent_task_id was removed because TASK-297 is unrelated in this clean dev worktree. Verification: git diff --check passed. Bandit not applicable because this is a docs/backlog-only design slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

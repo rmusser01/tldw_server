@@ -1,4 +1,5 @@
 import { ChatTldw } from "./ChatTldw"
+import type { ChatScope } from "@/types/chat-scope"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import {
@@ -35,6 +36,7 @@ type PageAssistModelOptions = {
   extraBody?: string
   researchContext?: ChatResearchContext
   requestScope?: ServicePromptRequestScope
+  scope?: ChatScope
   retryFailedTurn?: boolean
   refreshImageCapability?: boolean
   clientMessageId?: string
@@ -71,6 +73,7 @@ export const pageAssistModel = async ({
   extraBody,
   researchContext,
   requestScope,
+  scope,
   retryFailedTurn,
   refreshImageCapability,
   clientMessageId,
@@ -104,6 +107,8 @@ export const pageAssistModel = async ({
   })
   let modelSupportsTools = false
   let modelSupportsMultimodal = false
+  // Optional sampling fields the model's provider accepts (#3283).
+  let modelSamplingFields: readonly string[] = []
   try {
     const matchesModel = (info: { id: string; provider?: string }) =>
       info.id === normalizedModelId &&
@@ -123,6 +128,7 @@ export const pageAssistModel = async ({
     modelSupportsMultimodal = Boolean(
       modelInfo?.capabilities?.includes("vision")
     )
+    modelSamplingFields = modelInfo?.samplingFields ?? []
   } catch {
     modelSupportsTools = false
     modelSupportsMultimodal = false
@@ -192,6 +198,8 @@ export const pageAssistModel = async ({
   const {
     keepAlive,
     temperature,
+    frequencyPenalty,
+    presencePenalty,
     topK,
     topP,
     numCtx,
@@ -214,6 +222,12 @@ export const pageAssistModel = async ({
     temperature:
       currentChatModelSettings?.temperature ??
       userDefaultModelSettings?.temperature,
+    frequencyPenalty:
+      currentChatModelSettings?.frequencyPenalty ??
+      userDefaultModelSettings?.frequencyPenalty,
+    presencePenalty:
+      currentChatModelSettings?.presencePenalty ??
+      userDefaultModelSettings?.presencePenalty,
     topK: currentChatModelSettings?.topK ?? userDefaultModelSettings?.topK,
     topP: currentChatModelSettings?.topP ?? userDefaultModelSettings?.topP,
     numCtx:
@@ -277,6 +291,16 @@ export const pageAssistModel = async ({
     model: normalizedModelId,
     temperature: payload.temperature,
     topP: payload.topP,
+    frequencyPenalty: modelSettings?.frequencyPenalty ?? frequencyPenalty,
+    presencePenalty: modelSettings?.presencePenalty ?? presencePenalty,
+    // Providers reject fields they don't support, so these go only where the
+    // server says they are accepted (#3283).
+    // The server takes a whole number for top_k.
+    topK:
+      modelSamplingFields.includes("top_k") && typeof payload.topK === "number"
+        ? Math.round(payload.topK)
+        : undefined,
+    minP: modelSamplingFields.includes("min_p") ? payload.minP : undefined,
     maxTokens: payload.numPredict,
     streaming: true,
     reasoningEffort: isValidReasoningEffort(modelSettings?.reasoningEffort)
@@ -297,6 +321,7 @@ export const pageAssistModel = async ({
     extraBody: resolvedExtraBody,
     researchContext,
     requestScope,
+    scope,
     retryFailedTurn,
     clientMessageId,
     regenerateFromMessageId,

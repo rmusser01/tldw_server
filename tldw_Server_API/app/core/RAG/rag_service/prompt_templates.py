@@ -13,7 +13,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Utils.prompt_loader import load_prompt
+from tldw_Server_API.app.core.Context_Integrity.prompt_loader import load_prompt
 
 
 class TemplateType(Enum):

@@ -10,6 +10,7 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
+    media_owner_identity,
     normalize_media_dedupe_url,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.email_identity import email_identity_url
@@ -29,6 +30,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_m
     record_email_dedupe,
     track_email_persistence,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords
 
 
 def _load_legacy_media_support():
@@ -37,6 +39,32 @@ def _load_legacy_media_support():
         MEDIA_NONCRITICAL_EXCEPTIONS,
         media_dedupe_url_candidates,
         normalize_media_dedupe_url,
+    )
+
+
+def _existing_media_url_query(
+    select_columns: str, dedupe_url_candidates: list[str],
+    backend_type: BackendType, owner_lookup_value: str,
+) -> tuple[str, tuple]:
+    owner_clause = (
+        " AND COALESCE(CAST(owner_user_id AS TEXT),client_id) = ?"
+        if backend_type == BackendType.POSTGRESQL else ""
+    )
+    owner_params = (owner_lookup_value,) if owner_clause else ()
+    if len(dedupe_url_candidates) == 1:
+        return (
+            f"SELECT {select_columns} "  # nosec B608
+            "FROM Media WHERE url = ? AND deleted = 0 "
+            "AND system_operation_id IS NULL" + owner_clause + " LIMIT 1",
+            (dedupe_url_candidates[0], *owner_params),
+        )
+    placeholders = ", ".join(["?"] * len(dedupe_url_candidates))
+    return (
+        f"SELECT {select_columns} "  # nosec B608
+        f"FROM Media WHERE url IN ({placeholders}) AND deleted = 0 "
+        "AND system_operation_id IS NULL " + owner_clause +
+        " ORDER BY last_modified DESC, id DESC LIMIT 1",
+        (*dedupe_url_candidates, *owner_params),
     )
 
 
@@ -71,12 +99,14 @@ class MediaRepository:
         chunks: list[dict[str, Any]] | None = None,
         visibility: str | None = None,
         owner_user_id: int | None = None,
+        deduplicate_content: bool = True,
     ) -> tuple[int | None, str | None, str]:
         """Add or update media while the legacy API migrates behind repository seams.
 
         This intentionally centralizes the transitional compatibility logic in one
         place while callers migrate off the legacy shim and onto repository
-        helpers.
+        helpers. Callers with distinct URL identities can disable content
+        deduplication without disabling URL matching.
         """
         db = self.session
         (
@@ -91,7 +121,7 @@ class MediaRepository:
 
         title = title or "Untitled"
         media_type = media_type or "unknown"
-        keywords_norm = [k.strip().lower() for k in keywords or [] if k and k.strip()]
+        keywords_norm = dedupe_keywords(keywords or [])
 
         valid_visibilities = ("personal", "team", "org")
         requested_visibility = visibility if visibility else None
@@ -116,7 +146,11 @@ class MediaRepository:
         if source_hash is not None:
             source_hash_str = str(source_hash).strip()
             source_hash_norm = source_hash_str if source_hash_str else None
-        owner_lookup_value = str(owner_user_id).strip() if owner_user_id is not None else None
+        owner_lookup_value = (
+            media_owner_identity(client_id, owner_user_id)
+            if db.backend_type == BackendType.POSTGRESQL
+            else str(owner_user_id).strip() if owner_user_id is not None else None
+        )
         raw_url_input = str(url).strip() if url is not None else ""
         if raw_url_input:
             dedupe_url_candidates = media_dedupe_url_candidates(raw_url_input)
@@ -392,27 +426,23 @@ class MediaRepository:
                                 if old_identity == url:
                                     return candidate
                         return None
-                    if len(dedupe_url_candidates) == 1:
-                        return _fetchone(
-                            f"SELECT {select_columns} "  # nosec B608
-                            "FROM Media WHERE url = ? AND deleted = 0 "
-                            "AND system_operation_id IS NULL LIMIT 1",
-                            (dedupe_url_candidates[0],),
-                        )
-                    placeholders = ", ".join(["?"] * len(dedupe_url_candidates))
-                    return _fetchone(
-                        f"SELECT {select_columns} "  # nosec B608
-                        f"FROM Media WHERE url IN ({placeholders}) AND deleted = 0 "
-                        "AND system_operation_id IS NULL "
-                        "ORDER BY last_modified DESC, id DESC LIMIT 1",
-                        tuple(dedupe_url_candidates),
+                    query, params = _existing_media_url_query(
+                        select_columns, dedupe_url_candidates, db.backend_type, owner_lookup_value,
+                    )
+                    return _fetchone(query, params)
+
+                if db.backend_type == BackendType.POSTGRESQL and media_type != "email":
+                    # Serialize the absent-row check across handles until the owning transaction commits.
+                    _exec(
+                        "SELECT pg_advisory_xact_lock(hashtext(?),hashtext(?))",
+                        (f"media-owner:{owner_lookup_value}", url),
                     )
 
                 row = _fetch_existing_by_url(
                     "id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id"
                 )
 
-                if not row and media_type != "email":
+                if not row and media_type != "email" and deduplicate_content:
                     if owner_lookup_value:
                         row = _fetchone(
                             "SELECT id, uuid, version, url, content_hash, source_hash, visibility, owner_user_id, org_id, team_id "
@@ -1038,6 +1068,7 @@ class MediaRepository:
         chunks: list[dict[str, Any]] | None = None,
         visibility: str | None = None,
         owner_user_id: int | None = None,
+        deduplicate_content: bool = True,
     ) -> tuple[int | None, str | None, str]:
         return self.add_media_with_keywords(
             url=url,
@@ -1057,4 +1088,5 @@ class MediaRepository:
             chunks=chunks,
             visibility=visibility,
             owner_user_id=owner_user_id,
+            deduplicate_content=deduplicate_content,
         )

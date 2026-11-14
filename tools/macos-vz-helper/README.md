@@ -307,6 +307,25 @@ receipt's unique runtime/socket/PID paths and any `.payload-cleanup-*` staging
 directory in an owned bundle before manual recovery. Never enable
 these fault fixtures on a production guest or run this in scheduled CI.
 
+### Native Payload Cleanup Test (No VM)
+
+On macOS, explicitly opt in to tiny-file cleanup tests with the real
+`/usr/sbin/lsof` and native filesystem claim/unlink operations:
+
+```sh
+source .venv/bin/activate
+TLDW_TEST_NO_DOCKER=1 TLDW_SANDBOX_VZ_LINUX_NATIVE_CLEANUP=1 python -m pytest \
+  tools/macos-vz-helper/Tests/test_failure_payload_cleanup.py::test_native_payload_cleanup_with_real_lsof \
+  -q --override-ini=addopts=
+```
+
+An open file handle must retain every payload; the closed-handle control must
+remove only the owned payloads while preserving canonical files, hashes and
+provenance. These tests use synthetic source-verification and VM-teardown receipts;
+they do not build images, start a helper, boot VMs or run Docker, and are not live
+VZ/APFS image acceptance. They skip unless opted in on macOS. Once enabled,
+unavailable `lsof` or denied host process access is a failure, not a skip.
+
 The standalone tests below remain useful when operating an already isolated
 helper or investigating one drill independently.
 

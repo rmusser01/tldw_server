@@ -33,7 +33,7 @@ Verify and address validated findings from the current Sandbox module review. Sc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-06-23-sandbox-review-hardening.md
 
 Backlog CLI allocator reused an occupied TASK-2420 in this checkout because several current task files are untracked and not reflected in the allocator state. A manual TASK-2424 Sandbox record then collided with another untracked TASK-2424, so the Sandbox record was renumbered to TASK-9929.
@@ -48,7 +48,11 @@ Verification:
 - Compile: `python -m compileall -q` on touched Sandbox production files -> passed.
 - Diff check: `git diff --check` on touched files -> passed.
 - Bandit: touched Sandbox production scope wrote `/tmp/bandit_sandbox_review_hardening.json`, errors=0, results=95. The new Docker readiness-gate subprocess finding was suppressed with a scoped `# nosec`; remaining results are the existing low-severity Sandbox subprocess baseline.
-<!-- SECTION:NOTES:END -->
+
+PR opened: https://github.com/rmusser01/tldw_server/pull/2509
+Rebased PR branch on latest origin/dev and addressed PR review feedback: Docker create failure messages now redact env values, Docker env redaction preserves --env names without inline values, Firecracker env files export variables to child commands, artifact writes use fd-relative openat-style traversal to close parent symlink race windows, artifact listing resolves root once, new artifact test module has docstrings, modified monkeypatch fixtures are typed, and Docker readiness-gate nosec is narrowed to explicit Bandit IDs. Verification after fixes: focused Sandbox suite 38 passed/1 skipped; compileall passed; git diff --check passed; Ruff passed on touched production files; Bandit JSON errors=0, high=0, medium=0, docker readiness findings=[] with existing low-severity subprocess baseline remaining.
+Second PR review pass addressed newly surfaced CodeRabbit threads: renamed duplicate Backlog heading, cleaned partial fallback egress rules before raising, rejected symlinked artifact and snapshot ancestors, reset Docker ENTRYPOINT for granular allowlist runs, removed raw RunSpec env values from Docker debug logging, and added child-env propagation coverage for Lima plus existing Firecracker coverage. Verification after second pass: focused Sandbox suite 43 passed/1 skipped; compileall passed; git diff --check passed; Ruff passed on touched production files; Bandit JSON errors=0, high=0, medium=0, docker readiness findings=[] with existing low-severity subprocess baseline remaining.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
@@ -67,9 +71,3 @@ Hardened Sandbox snapshot restore, Docker runner, artifact storage, and Lima/Fir
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## PR Reference
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-PR opened: https://github.com/rmusser01/tldw_server/pull/2509
-Rebased PR branch on latest origin/dev and addressed PR review feedback: Docker create failure messages now redact env values, Docker env redaction preserves --env names without inline values, Firecracker env files export variables to child commands, artifact writes use fd-relative openat-style traversal to close parent symlink race windows, artifact listing resolves root once, new artifact test module has docstrings, modified monkeypatch fixtures are typed, and Docker readiness-gate nosec is narrowed to explicit Bandit IDs. Verification after fixes: focused Sandbox suite 38 passed/1 skipped; compileall passed; git diff --check passed; Ruff passed on touched production files; Bandit JSON errors=0, high=0, medium=0, docker readiness findings=[] with existing low-severity subprocess baseline remaining.
-Second PR review pass addressed newly surfaced CodeRabbit threads: renamed duplicate Backlog heading, cleaned partial fallback egress rules before raising, rejected symlinked artifact and snapshot ancestors, reset Docker ENTRYPOINT for granular allowlist runs, removed raw RunSpec env values from Docker debug logging, and added child-env propagation coverage for Lima plus existing Firecracker coverage. Verification after second pass: focused Sandbox suite 43 passed/1 skipped; compileall passed; git diff --check passed; Ruff passed on touched production files; Bandit JSON errors=0, high=0, medium=0, docker readiness findings=[] with existing low-severity subprocess baseline remaining.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->

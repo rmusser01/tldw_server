@@ -2,66 +2,54 @@
 from __future__ import annotations
 
 import json
-
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
+import pytest
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.adapters.mcp_transports.streamable_http import (
     MCPStreamableHTTPTransport,
 )
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.http_client import create_async_client
 
 pytestmark = pytest.mark.unit
 
 
 # ---- Helpers ----
 
-
-def make_json_response(result: dict, request_id: str = "1") -> MagicMock:
-    """Create a fake JSON response object."""
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.headers = {"content-type": "application/json"}
-    resp.json.return_value = {"jsonrpc": "2.0", "id": request_id, "result": result}
-    resp.raise_for_status = MagicMock()
-    return resp
+_PUBLIC_ENDPOINT = "http://93.184.216.34/mcp"
 
 
-def make_sse_response(result: dict, request_id: str = "1") -> MagicMock:
-    """Create a fake SSE response object."""
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.headers = {"content-type": "text/event-stream"}
-    resp.text = (
-        f'data: {json.dumps({"jsonrpc": "2.0", "id": request_id, "result": result})}\n\n'
-    )
-    resp.raise_for_status = MagicMock()
-    return resp
+def _mock_client(handler):
+    """A core.http_client client whose socket layer is an httpx.MockTransport."""
+    return create_async_client(transport=httpx.MockTransport(handler))
 
 
-def make_json_error_response(
-    message: str = "Method not found",
-    request_id: str = "1",
-) -> MagicMock:
-    """Create a fake JSON-RPC error response."""
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.headers = {"content-type": "application/json"}
-    resp.json.return_value = {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "error": {"code": -32601, "message": message},
-    }
-    resp.raise_for_status = MagicMock()
-    return resp
+def _rpc_server(replies: list[dict], *, sse: bool = False, seen: list | None = None):
+    """MockTransport handler answering each JSON-RPC request with the next reply.
 
+    A reply is the ``result`` or ``error`` part of the JSON-RPC message. Notifications
+    get an empty 202. Every request is appended to ``seen``.
+    """
 
-def make_notify_response() -> MagicMock:
-    """Create a fake notification response."""
-    resp = MagicMock()
-    resp.status_code = 200
-    resp.headers = {"content-type": "application/json"}
-    resp.raise_for_status = MagicMock()
-    return resp
+    def handler(request: httpx.Request) -> httpx.Response:
+        if seen is not None:
+            seen.append(request)
+        body = json.loads(request.content)
+        if "id" not in body:
+            return httpx.Response(202, request=request)
+        message = {"jsonrpc": "2.0", "id": body["id"], **replies.pop(0)}
+        if sse:
+            return httpx.Response(
+                200,
+                request=request,
+                headers={"content-type": "text/event-stream"},
+                content=f"data: {json.dumps(message)}\n\n".encode(),
+            )
+        return httpx.Response(200, request=request, json=message)
+
+    return handler
 
 
 # ---- Fixtures ----
@@ -70,10 +58,9 @@ def make_notify_response() -> MagicMock:
 @pytest.fixture
 def transport():
     return MCPStreamableHTTPTransport(
-        endpoint="http://localhost:8080/mcp",
+        endpoint=_PUBLIC_ENDPOINT,
         headers={"Authorization": "Bearer test"},
         timeout_sec=15,
-        allow_private_network=True,
     )
 
 
@@ -86,44 +73,35 @@ def test_streamable_http_not_connected_initially(transport):
 
 
 @pytest.mark.asyncio
-async def test_streamable_http_connect_handshake(transport):
+async def test_streamable_http_connect_handshake(transport, mcp_http_egress):
     """connect() should POST initialize then send initialized notification."""
     init_result = {
         "protocolVersion": "2024-11-05",
         "serverInfo": {"name": "test-server"},
         "capabilities": {},
     }
-    # First call: initialize (JSON-RPC call with id "1")
-    # Second call: initialized notification (no id)
-    mock_post = AsyncMock(
-        side_effect=[
-            make_json_response(init_result, request_id="1"),
-            make_notify_response(),
-        ]
-    )
-
-    instance = MagicMock()
-    instance.post = mock_post
-    instance.aclose = AsyncMock()
-    with patch.object(transport, "_create_http_client", return_value=instance):
+    seen: list[httpx.Request] = []
+    client = _mock_client(_rpc_server([{"result": init_result}], seen=seen))
+    with patch.object(transport, "_create_http_client", return_value=client):
         await transport.connect()
 
     assert transport.is_connected is True
-    assert mock_post.await_count == 2
+    assert len(seen) == 2
+    assert all(str(request.url) == _PUBLIC_ENDPOINT for request in seen)
+    assert all(request.headers["authorization"] == "Bearer test" for request in seen)
 
     # Verify initialize call
-    first_call = mock_post.call_args_list[0]
-    payload = first_call.kwargs.get("json") or first_call[1].get("json")
+    payload = json.loads(seen[0].content)
     assert payload["method"] == "initialize"
     assert payload["params"]["protocolVersion"] == "2024-11-05"
     assert payload["params"]["clientInfo"]["name"] == "tldw_acp_harness"
     assert "id" in payload
 
     # Verify initialized notification
-    second_call = mock_post.call_args_list[1]
-    notify_payload = second_call.kwargs.get("json") or second_call[1].get("json")
+    notify_payload = json.loads(seen[1].content)
     assert notify_payload["method"] == "initialized"
     assert "id" not in notify_payload
+    await transport.close()
 
 
 @pytest.mark.asyncio
@@ -148,33 +126,30 @@ async def test_streamable_http_connect_cleans_up_on_handshake_failure(transport)
 
 
 @pytest.mark.asyncio
-async def test_streamable_http_list_tools_json_mode(transport):
+async def test_streamable_http_list_tools_json_mode(transport, mcp_http_egress):
     """list_tools() should parse tools from a JSON response."""
     tools = [
         {"name": "echo", "description": "echoes input"},
         {"name": "add", "description": "adds numbers"},
     ]
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(return_value=make_json_response({"tools": tools}, request_id="1"))
-    mock_client.aclose = AsyncMock()
-    transport._http_client = mock_client
+    seen: list[httpx.Request] = []
+    transport._http_client = _mock_client(_rpc_server([{"result": {"tools": tools}}], seen=seen))
     transport._connected = True
     transport._next_id = 1
 
     result = await transport.list_tools()
 
     assert result == tools
-    mock_client.post.assert_awaited_once()
+    assert len(seen) == 1
+    await transport.close()
 
 
 @pytest.mark.asyncio
-async def test_streamable_http_call_tool_sse_mode(transport):
+async def test_streamable_http_call_tool_sse_mode(transport, mcp_http_egress):
     """call_tool() should parse result from an SSE response."""
     tool_result = {"content": [{"type": "text", "text": "hello"}]}
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(return_value=make_sse_response(tool_result, request_id="1"))
-    mock_client.aclose = AsyncMock()
-    transport._http_client = mock_client
+    seen: list[httpx.Request] = []
+    transport._http_client = _mock_client(_rpc_server([{"result": tool_result}], sse=True, seen=seen))
     transport._connected = True
     transport._next_id = 1
 
@@ -182,11 +157,11 @@ async def test_streamable_http_call_tool_sse_mode(transport):
 
     assert result == tool_result
     # Verify the POST payload
-    call_args = mock_client.post.call_args
-    payload = call_args.kwargs.get("json") or call_args[1].get("json")
+    payload = json.loads(seen[0].content)
     assert payload["method"] == "tools/call"
     assert payload["params"]["name"] == "echo"
     assert payload["params"]["arguments"] == {"message": "hello"}
+    await transport.close()
 
 
 @pytest.mark.asyncio
@@ -213,19 +188,17 @@ async def test_streamable_http_health_check(transport):
 
 
 @pytest.mark.asyncio
-async def test_streamable_http_error_response(transport):
+async def test_streamable_http_error_response(transport, mcp_http_egress):
     """A JSON-RPC error in the response should raise RuntimeError."""
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(
-        return_value=make_json_error_response("Method not found", request_id="1")
+    transport._http_client = _mock_client(
+        _rpc_server([{"error": {"code": -32601, "message": "Method not found"}}])
     )
-    mock_client.aclose = AsyncMock()
-    transport._http_client = mock_client
     transport._connected = True
     transport._next_id = 1
 
     with pytest.raises(RuntimeError, match="Method not found"):
         await transport.list_tools()
+    await transport.close()
 
 
 @pytest.mark.asyncio
@@ -251,3 +224,89 @@ async def test_streamable_http_rejects_loopback_endpoint_before_client_creation(
             await transport.connect()
 
     create_client.assert_not_called()
+
+
+# ---- Egress: every request goes through core.http_client (TASK-13950.11) ----
+
+
+def _counting_server(requested: list[str]):
+    """A server that records each URL and would complete the handshake if reached."""
+    replies = [{"result": {"protocolVersion": "2024-11-05", "capabilities": {}}}]
+    inner = _rpc_server(replies)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        response: httpx.Response = inner(request)
+        return response
+
+    return handler
+
+
+def test_streamable_http_client_ignores_env_proxies():
+    """The HTTP client comes from core.http_client, which does not read HTTP(S)_PROXY."""
+    transport = MCPStreamableHTTPTransport(endpoint=_PUBLIC_ENDPOINT)
+    client = transport._create_http_client()
+
+    assert client.trust_env is False
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_refuses_dns_rebinding_to_loopback(mcp_dns_rebinding):
+    """validate_mcp_http_url saw a public address; the connect-time answer is loopback."""
+    transport = MCPStreamableHTTPTransport(endpoint="http://mcp.rebind.test/mcp")
+    requested: list[str] = []
+
+    with patch.object(transport, "_create_http_client", return_value=_mock_client(_counting_server(requested))):
+        with pytest.raises(EgressPolicyError):
+            await transport.connect()
+
+    assert requested == []
+    assert transport.is_connected is False
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_private_opt_in_still_refuses_metadata(mcp_http_egress):
+    """allow_private_network admits the configured private origin, never cloud metadata."""
+    transport = MCPStreamableHTTPTransport(
+        endpoint="http://169.254.169.254/latest/mcp",
+        allow_private_network=True,
+    )
+    requested: list[str] = []
+
+    with patch.object(transport, "_create_http_client", return_value=_mock_client(_counting_server(requested))):
+        with pytest.raises(EgressPolicyError):
+            await transport.connect()
+
+    assert requested == []
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_private_opt_in_reaches_loopback_server(mcp_http_egress):
+    """A local MCP server on a non-standard port still works under the opt-in."""
+    endpoint = "http://127.0.0.1:3001/mcp"
+    transport = MCPStreamableHTTPTransport(endpoint=endpoint, allow_private_network=True)
+    requested: list[str] = []
+
+    with patch.object(transport, "_create_http_client", return_value=_mock_client(_counting_server(requested))):
+        await transport.connect()
+
+    assert transport.is_connected is True
+    assert requested == [endpoint, endpoint]
+    await transport.close()
+
+
+@pytest.mark.asyncio
+async def test_streamable_http_does_not_follow_redirect_to_private_address(transport, mcp_http_egress):
+    """A redirect is an HTTP error, as before; the private target is never requested."""
+    requested: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        return httpx.Response(307, request=request, headers={"Location": "http://169.254.169.254/mcp"})
+
+    with patch.object(transport, "_create_http_client", return_value=_mock_client(handler)):
+        with pytest.raises(httpx.HTTPStatusError):
+            await transport.connect()
+
+    assert requested == [_PUBLIC_ENDPOINT]
+    assert transport.is_connected is False

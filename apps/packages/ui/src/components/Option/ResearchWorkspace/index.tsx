@@ -1,3 +1,11 @@
+import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec";
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts";
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence";
+import { hasResearchWorkspaceMigrationTombstone } from "@/store/workspace";
+import { watchChatAccountChanges } from "@/services/chat-account-boundary";
+import { useStartTutorial } from "@/hooks/useStartTutorial"
+import { useResearchWebCapture } from "@/utils/use-research-web-capture"
+import { WebArticleCaptureModal } from "./SourcesPane/WebArticleCaptureModal"
 import React, { Suspense, useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { Drawer, Tabs, Modal, Input, Empty, Skeleton, Button, message } from "antd"
@@ -13,8 +21,11 @@ import {
   Command,
   Loader2
 } from "lucide-react"
-import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
-import { useTutorialStore } from "@/store/tutorials"
+import {
+  createWorkspaceStorage,
+  flushWorkspacePersistence,
+  useWorkspaceStore
+} from "@/store/workspace"
 import {
   WORKSPACE_CONFLICT_NOTICE_THROTTLE_MS,
   WORKSPACE_STORAGE_CHANNEL_NAME,
@@ -28,8 +39,9 @@ import {
 import {
   runResearchWorkspaceMigration,
   type ResearchWorkspaceIndexedDbStoreRef,
-  type ResearchWorkspaceMigrationRunResult
-} from "@/store/workspace-migration"
+  type ResearchWorkspaceMigrationRunResult,
+  type ResearchWorkspaceMigrationRunInput,
+} from "@/store/workspace-migration";
 import {
   RESEARCH_WORKSPACE_INDEXEDDB_ARTIFACT_STORE,
   RESEARCH_WORKSPACE_INDEXEDDB_CHAT_STORE,
@@ -50,10 +62,7 @@ import type {
   WorkspaceSourceStatus,
   WorkspaceSourceStatusDetails
 } from "@/types/workspace"
-import {
-  buildKnowledgeQaSeedNote,
-  consumeResearchWorkspacePrefill
-} from "@/utils/research-workspace-prefill"
+import { useResearchWorkspacePrefill } from "@/utils/use-research-workspace-prefill"
 import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { WorkspaceHeader } from "./WorkspaceHeader"
@@ -129,6 +138,7 @@ import {
 } from "@/services/web-clipper/agent-task-handoff"
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
+import { restoreMigratedResearchWorkspace } from "@/services/workspace-server-restore"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -366,7 +376,7 @@ type WorkspaceNoteKeywordLike =
     }
 
 type WorkspaceNoteSearchItem = {
-  id?: number
+  id?: string | number
   title?: string
   content?: string
   version?: number
@@ -501,8 +511,8 @@ const buildWorkspaceNotesSearchPath = (workspaceTag: string): AllowedPath => {
   return `/api/v1/notes/search/?${params.toString()}` as AllowedPath
 }
 
-const buildWorkspaceNotePath = (noteId: number): AllowedPath =>
-  `/api/v1/notes/${noteId}` as AllowedPath
+const buildWorkspaceNotePath = (noteId: string | number): AllowedPath =>
+  `/api/v1/notes/${encodeURIComponent(String(noteId))}` as AllowedPath
 
 const isDesktopLayout = (): boolean => {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
@@ -1244,10 +1254,6 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   const lastCrossTabSyncWarningRef = React.useRef(0)
   const workspaceMigrationSignatureRef = React.useRef<string | null>(null)
-  const workspaceMigrationInFlightRef = React.useRef<{
-    signature: string
-    promise: Promise<ResearchWorkspaceMigrationRunResult>
-  } | null>(null)
   const initialWorkspaceMigrationLocalStorageKeysRef = React.useRef<
     string[] | null
   >(null)
@@ -1260,7 +1266,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   }
   const retryWorkspaceMigration = React.useCallback(() => {
     workspaceMigrationSignatureRef.current = null
-    workspaceMigrationInFlightRef.current = null
     setWorkspaceMigrationResult(null)
     setWorkspaceMigrationLoading(false)
     setWorkspaceMigrationRetryNonce((value) => value + 1)
@@ -1268,10 +1273,11 @@ const ResearchWorkspaceBody: React.FC = () => {
   const onboardingInitializedRef = React.useRef(false)
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
-  const startTutorial = useTutorialStore((s) => s.startTutorial)
+  const startTutorial = useStartTutorial()
 
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
+  const webCapture = useResearchWebCapture(workspaceId)
   const workspaceName = useWorkspaceStore((s) => s.workspaceName) || ""
   const activeDeepResearchReturnContext =
     isResearchWorkspaceDeepResearchReturnForWorkspace(
@@ -1286,11 +1292,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     image: null
   }
   const initializeWorkspace = useWorkspaceStore((s) => s.initializeWorkspace)
+  const restoreServerWorkspace = useWorkspaceStore((s) => s.restoreServerWorkspace)
+  const [workspaceRestoreError, setWorkspaceRestoreError] = React.useState(false)
+  const [workspaceRestoreAttempt, setWorkspaceRestoreAttempt] = React.useState(0)
   const createNewWorkspace = useWorkspaceStore((s) => s.createNewWorkspace)
-  const addSources = useWorkspaceStore((s) => s.addSources)
   const workspaceTag = useWorkspaceStore((s) => s.workspaceTag)
-  const setSelectedSourceIds = useWorkspaceStore((s) => s.setSelectedSourceIds)
-  const captureToCurrentNote = useWorkspaceStore((s) => s.captureToCurrentNote)
   const clearCurrentNote = useWorkspaceStore((s) => s.clearCurrentNote)
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
   const loadNote = useWorkspaceStore((s) => s.loadNote)
@@ -1397,6 +1403,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     workspaceServerSourcesRef.current = sources
   }, [sources])
 
+  const canReconcileWorkspaceServer =
+    typeof tldwClient.upsertWorkspace === "function" &&
+    typeof tldwClient.getWorkspaceSources === "function" &&
+    typeof tldwClient.addWorkspaceSource === "function"
+
   React.useLayoutEffect(() => {
     workspaceServerReconcileRequestSeqRef.current += 1
     workspaceServerReconcileSignatureRef.current = null
@@ -1406,10 +1417,6 @@ const ResearchWorkspaceBody: React.FC = () => {
   React.useEffect(() => {
     if (!isStoreHydrated || !workspaceId) return
 
-    const canReconcileWorkspaceServer =
-      typeof tldwClient.upsertWorkspace === "function" &&
-      typeof tldwClient.getWorkspaceSources === "function" &&
-      typeof tldwClient.addWorkspaceSource === "function"
     if (!canReconcileWorkspaceServer) {
       if (statusGuardrailsEnabled) {
         setWorkspaceStatusProjectionError("Workspace server sync unavailable")
@@ -1486,6 +1493,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       workspaceServerReconcileRequestSeqRef.current += 1
     }
   }, [
+    canReconcileWorkspaceServer,
     isStoreHydrated,
     selectedSourceIds,
     statusGuardrailsEnabled,
@@ -1661,7 +1669,7 @@ const ResearchWorkspaceBody: React.FC = () => {
       return [
         "Legacy workspace data found",
         "Server receipt saved",
-        "Local data retained until server deletion eligibility is available"
+        "Local data retained until server content and readback are verified"
       ]
     }
 
@@ -1676,10 +1684,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
 
     if (workspaceMigrationResult.status === "failed") {
-      return [
-        "Legacy workspace data found",
-        "Migration failed before local deletion"
-      ]
+      return ["Legacy workspace data found", workspaceMigrationResult.message];
     }
 
     if (workspaceMigrationResult.status === "deleted") {
@@ -1740,20 +1745,23 @@ const ResearchWorkspaceBody: React.FC = () => {
     })
   }, [activeWorkspaceOperations, statusGuardrailsEnabled, workspaceId])
 
+  const workspaceMigrationReady =
+    workspaceProjectedSourceStatusByMediaIdRef.current.workspaceId ===
+      workspaceId &&
+    workspaceProjectedSourceStatusByMediaIdRef.current.fallbackReady;
+
   useEffect(() => {
     if (!statusGuardrailsEnabled) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
     }
-    if (!isStoreHydrated || !workspaceId) return
+    if (!isStoreHydrated || !workspaceId || !workspaceMigrationReady) return
     if (typeof window === "undefined") return
 
     if (wasWorkspaceFreshlyInitializedInRuntime(workspaceId)) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
@@ -1772,7 +1780,6 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     if (!hasLegacyContent) {
       workspaceMigrationSignatureRef.current = null
-      workspaceMigrationInFlightRef.current = null
       setWorkspaceMigrationLoading(false)
       setWorkspaceMigrationResult(null)
       return
@@ -1788,57 +1795,77 @@ const ResearchWorkspaceBody: React.FC = () => {
       indexedDbSignature,
       workspaceMigrationRetryNonce.toString()
     ].join("::")
-    const inFlightMigration = workspaceMigrationInFlightRef.current
-    const canReuseInFlightMigration =
-      inFlightMigration?.signature === signature
-    if (
-      workspaceMigrationSignatureRef.current === signature &&
-      !canReuseInFlightMigration
-    ) {
-      return
-    }
+    if (workspaceMigrationSignatureRef.current === signature) return;
     workspaceMigrationSignatureRef.current = signature
 
-    let cancelled = false
+    let mounted = true;
+    let retired = false;
+    const isCurrent = () =>
+      mounted &&
+      !retired &&
+      useWorkspaceStore.getState().workspaceId === workspaceId;
+    const releaseAccount = watchChatAccountChanges((invalidated) => {
+      if (!invalidated || !mounted) return;
+      retired = true;
+      if (workspaceMigrationSignatureRef.current === signature)
+        workspaceMigrationSignatureRef.current = null;
+      setWorkspaceMigrationLoading(false);
+      setWorkspaceMigrationResult(null);
+    });
     setWorkspaceMigrationLoading(true)
 
-    const migrationPromise =
-      canReuseInFlightMigration && inFlightMigration
-        ? inFlightMigration.promise
-        : runResearchWorkspaceMigration({
-            targetWorkspaceId: workspaceId,
-            targetWorkspaceName: workspaceName || "Research Workspace",
-            discoveredLocalStorageKeys,
-            discoveredIndexedDbStores,
-            readLocalStorageValue: async (key) => window.localStorage.getItem(key),
-            api: {
-              createWorkspaceMigration: tldwClient.createWorkspaceMigration,
-              putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
-              finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
-              getWorkspaceMigration: tldwClient.getWorkspaceMigration,
-              ackWorkspaceMigrationClientDelete:
-                tldwClient.ackWorkspaceMigrationClientDelete
-            },
-            deleteLocalStorageValue: (key) => window.localStorage.removeItem(key),
-            writeLocalStorageValue: (key, value) =>
-              window.localStorage.setItem(key, value),
-            now: () => new Date().toISOString()
-          })
-
-    if (!canReuseInFlightMigration) {
-      workspaceMigrationInFlightRef.current = {
-        signature,
-        promise: migrationPromise
+    const migrationInput: ResearchWorkspaceMigrationRunInput = {
+      targetWorkspaceId: workspaceId,
+      targetWorkspaceName: workspaceName || "Research Workspace",
+      isCurrent,
+      discoveredLocalStorageKeys,
+      discoveredIndexedDbStores,
+      readLocalStorageValue: async (key) => window.localStorage.getItem(key),
+      api: {
+        createWorkspaceMigration: tldwClient.createWorkspaceMigration,
+        putWorkspaceMigrationChunk: tldwClient.putWorkspaceMigrationChunk,
+        finalizeWorkspaceMigration: tldwClient.finalizeWorkspaceMigration,
+        getWorkspaceMigration: tldwClient.getWorkspaceMigration,
+        ackWorkspaceMigrationClientDelete:
+          tldwClient.ackWorkspaceMigrationClientDelete,
+      },
+    };
+    const migrationPromise = (async () => {
+      // Capture after initial source hydration and its queued durable writes settle.
+      await flushWorkspacePersistence();
+      if (!isCurrent()) return null;
+      const currentKeys = [
+        ...new Set([
+          ...discoveredLocalStorageKeys,
+          ...collectResearchWorkspaceLegacyLocalStorageKeys(),
+        ]),
+      ].sort();
+      const currentStores =
+        collectResearchWorkspaceLegacyIndexedDbStores(currentKeys);
+      for (const store of discoveredIndexedDbStores) {
+        if (
+          !currentStores.some(
+            (current) =>
+              current.databaseName === store.databaseName &&
+              current.storeName === store.storeName,
+          )
+        )
+          currentStores.push(store);
       }
-    }
+      return runResearchWorkspaceMigration({
+        ...migrationInput,
+        discoveredLocalStorageKeys: currentKeys,
+        discoveredIndexedDbStores: currentStores,
+      });
+    })();
 
     void migrationPromise
       .then((result) => {
-        if (cancelled) return
+        if (!isCurrent() || !result) return;
         setWorkspaceMigrationResult(result)
       })
       .catch((error) => {
-        if (cancelled) return
+        if (!isCurrent()) return;
         setWorkspaceMigrationResult({
           status: "failed",
           migrationId: null,
@@ -1846,27 +1873,31 @@ const ResearchWorkspaceBody: React.FC = () => {
           serverMigration: null,
           localDeletionEligibility: null,
           deletedSurfaceIds: [],
-          message: "Research Workspace migration failed before local deletion.",
-          error
-        })
+          message:
+            "Research Workspace migration stopped. Review local data before retrying cleanup.",
+          error,
+        });
       })
       .finally(() => {
-        if (workspaceMigrationInFlightRef.current?.signature === signature) {
-          workspaceMigrationInFlightRef.current = null
-        }
-        if (!cancelled) {
-          setWorkspaceMigrationLoading(false)
+        releaseAccount();
+        if (mounted && !retired) {
+          setWorkspaceMigrationLoading(false);
         }
       })
 
     return () => {
-      cancelled = true
+      mounted = false;
+      retired = true;
+      releaseAccount();
+      if (workspaceMigrationSignatureRef.current === signature)
+        workspaceMigrationSignatureRef.current = null;
     }
   }, [
     isStoreHydrated,
     statusGuardrailsEnabled,
     workspaceId,
     workspaceMigrationRetryNonce,
+    workspaceMigrationReady,
     workspaceName
   ])
 
@@ -2151,11 +2182,14 @@ const ResearchWorkspaceBody: React.FC = () => {
     try {
       const response = await tldwClient.getCurrentUserStorageQuota()
       const usedMb = Number(response?.storage_used_mb)
-      const quotaMb = Number(response?.storage_quota_mb)
+      const rawQuota = response?.storage_quota_mb
+      const quotaMb = typeof rawQuota === "number" ? rawQuota : null
       const accountUsedBytes =
         Number.isFinite(usedMb) && usedMb >= 0 ? usedMb * 1024 * 1024 : null
       const accountQuotaBytes =
-        Number.isFinite(quotaMb) && quotaMb > 0 ? quotaMb * 1024 * 1024 : null
+        quotaMb !== null && Number.isFinite(quotaMb) && quotaMb >= 0
+          ? quotaMb * 1024 * 1024
+          : null
       setWorkspaceStorageUsage((previousState) => ({
         ...previousState,
         accountUsedBytes,
@@ -2169,11 +2203,14 @@ const ResearchWorkspaceBody: React.FC = () => {
         })
         const quotas = (profile as { quotas?: Record<string, unknown> } | null)?.quotas
         const usedMb = Number(quotas?.storage_used_mb)
-        const quotaMb = Number(quotas?.storage_quota_mb)
+        const rawQuota = quotas?.storage_quota_mb
+        const quotaMb = typeof rawQuota === "number" ? rawQuota : null
         const accountUsedBytes =
           Number.isFinite(usedMb) && usedMb >= 0 ? usedMb * 1024 * 1024 : null
         const accountQuotaBytes =
-          Number.isFinite(quotaMb) && quotaMb > 0 ? quotaMb * 1024 * 1024 : null
+          quotaMb !== null && Number.isFinite(quotaMb) && quotaMb >= 0
+            ? quotaMb * 1024 * 1024
+            : null
         setWorkspaceStorageUsage((previousState) => ({
           ...previousState,
           accountUsedBytes,
@@ -2253,7 +2290,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [])
 
   const handleStartWorkspaceTour = React.useCallback(() => {
-    startTutorial("research-workspace-basics")
+    if (!startTutorial("research-workspace-basics")) return
     dismissOnboardingOverlay()
     setShowTutorialPrompt(false)
     messageApi.info(
@@ -2283,9 +2320,12 @@ const ResearchWorkspaceBody: React.FC = () => {
         })
         if (cancelled) return
 
-        const noteById = new Map<number, WorkspaceGlobalSearchNoteDocument>()
+        const noteById = new Map<string | number, WorkspaceGlobalSearchNoteDocument>()
         for (const note of pickNotesArray(response)) {
-          if (typeof note.id !== "number" || !Number.isFinite(note.id)) {
+          if (
+            !(typeof note.id === "string" && note.id.trim()) &&
+            !(typeof note.id === "number" && Number.isFinite(note.id))
+          ) {
             continue
           }
           noteById.set(note.id, {
@@ -2316,7 +2356,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     async (result: WorkspaceGlobalSearchResult) => {
       if (
         result.noteId != null &&
-        Number.isFinite(result.noteId) &&
+        (typeof result.noteId === "string" || Number.isFinite(result.noteId)) &&
         currentNote?.id !== result.noteId
       ) {
         try {
@@ -2471,10 +2511,42 @@ const ResearchWorkspaceBody: React.FC = () => {
     const returnContext = activeDeepResearchReturnContext
     const returnContextKey = activeDeepResearchReturnKey
     const originWorkspaceId = returnContext.sourceWorkspaceId
-    const canContinueImport = () =>
-      isMountedRef.current &&
+    const controller = new AbortController()
+    const deadline = performance.now() + 15000
+    let timedOut = false
+    let accountRetired = false
+    let scope: ServicePromptSnapshot | undefined
+    const ownsImport = () => !accountRetired && isMountedRef.current &&
       deepResearchBundleImportRequestSeqRef.current === importRequestId &&
       useWorkspaceStore.getState().workspaceId === originWorkspaceId
+    const timeoutMessage = "Import could not finish within 15 seconds. Retry importing the bundle."
+    const timeout = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+      scope?.release()
+      if (ownsImport()) setDeepResearchBundleImportState({
+        contextKey: returnContextKey, status: "failed", message: timeoutMessage,
+      })
+    }, 15000)
+    const releaseAccount = watchChatAccountChanges((changed) => {
+      if (!changed) return
+      const wasCurrent = ownsImport()
+      accountRetired = true
+      controller.abort()
+      if (wasCurrent) setDeepResearchBundleImportState({
+        contextKey: returnContextKey, status: "failed",
+        message: "The account or server changed. Reopen this bundle in the current account.",
+      })
+    })
+    const canContinueImport = () => {
+      if (!ownsImport()) return false
+      if (timedOut || performance.now() >= deadline) {
+        timedOut = true
+        controller.abort()
+        throw new DOMException(timeoutMessage, "TimeoutError")
+      }
+      return !controller.signal.aborted
+    }
 
     setDeepResearchBundleImportState({
       contextKey: returnContextKey,
@@ -2482,21 +2554,34 @@ const ResearchWorkspaceBody: React.FC = () => {
     })
 
     try {
-      const bundle = await tldwClient.getResearchBundle(
-        returnContext.researchRunId
-      )
+      if ((hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId)))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (!canContinueImport()) return
+      const bundle = scope
+        ? await tldwClient.getResearchBundle(returnContext.researchRunId, {
+          requestScope: scope.requestScope, signal: controller.signal,
+          timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
+        })
+        : await tldwClient.getResearchBundle(returnContext.researchRunId)
       if (!canContinueImport()) return
 
+      if (!scope && (hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId)))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (!canContinueImport()) return
       const currentArtifacts = useWorkspaceStore.getState().generatedArtifacts
       const sourceArtifact = returnContext.sourceArtifactId
         ? (currentArtifacts.find(
             (artifact: GeneratedArtifact) =>
-              artifact.id === returnContext.sourceArtifactId
+              artifact.id === returnContext.sourceArtifactId &&
+              (!scope || hasWorkspaceArtifactOrigin(artifact, scope.scopeKey, originWorkspaceId))
           ) ?? null)
         : null
       const artifactPayload = buildDeepResearchBundleArtifactPayload({
         bundle,
-        returnContext,
+        returnContext: scope && !sourceArtifact
+          ? { sourceWorkspaceId: originWorkspaceId, researchRunId: returnContext.researchRunId,
+              sourceArtifactId: null, sourceArtifactTemplate: null, sourceArtifactTitle: null }
+          : returnContext,
         sourceArtifact
       })
       const importedDeepResearchData = artifactPayload.data?.deepResearch as
@@ -2509,7 +2594,24 @@ const ResearchWorkspaceBody: React.FC = () => {
         : 0
 
       if (!canContinueImport()) return
-      addArtifact(artifactPayload)
+      const retainedDraft = scope ? currentArtifacts.find((artifact) =>
+        hasWorkspaceArtifactOrigin(artifact, scope!.scopeKey, originWorkspaceId) &&
+        artifact.producerMetadata?.producerType === "deep_research_bundle_import" &&
+        artifact.producerMetadata.runId === returnContext.researchRunId) : undefined
+      const draft = retainedDraft ?? addArtifact(artifactPayload)
+      const isCurrentDraft = () => canContinueImport() &&
+        useWorkspaceStore.getState().generatedArtifacts.find((artifact) => artifact.id === draft.id) === draft
+      if (!scope && (draft.workspaceArtifactId || (hasResearchWorkspaceMigrationTombstone(originWorkspaceId) || hasCanonicalArtifactWorkspace(originWorkspaceId))))
+        scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (scope) {
+        if (!retainedDraft) bindWorkspaceArtifactOrigin(draft, scope.scopeKey, originWorkspaceId)
+        const saved = await persistWorkspaceArtifact(draft, {
+          workspaceId: originWorkspaceId, scope, isCurrent: isCurrentDraft, deadline,
+        })
+        if (!isCurrentDraft()) return
+        useWorkspaceStore.getState().updateArtifactStatus(draft.id, draft.status, saved)
+      }
+      await flushWorkspacePersistence()
       if (!canContinueImport()) return
       setDeepResearchBundleImportState({
         contextKey: returnContextKey,
@@ -2528,9 +2630,10 @@ const ResearchWorkspaceBody: React.FC = () => {
       })
       focusWorkspacePane("studio")
     } catch (error) {
-      if (!canContinueImport()) return
-      const message =
-        error instanceof DeepResearchBundleImportError || error instanceof Error
+      if (!ownsImport()) return
+      const message = timedOut
+        ? timeoutMessage
+        : error instanceof DeepResearchBundleImportError || error instanceof Error
           ? error.message
           : t(
               "playground:studio.deepResearchBundleImportFailed",
@@ -2541,6 +2644,11 @@ const ResearchWorkspaceBody: React.FC = () => {
         status: "failed",
         message
       })
+    } finally {
+      clearTimeout(timeout)
+      scope?.release()
+      releaseAccount()
+      controller.abort()
     }
   }, [
     activeDeepResearchReturnContext,
@@ -2746,8 +2854,23 @@ const ResearchWorkspaceBody: React.FC = () => {
     if (workspaceId) return
 
     let cancelled = false
-    void Promise.resolve().then(() => {
+    const restoration = new AbortController()
+    void Promise.resolve().then(async () => {
       if (!cancelled && !currentWorkspaceIdRef.current) {
+        setWorkspaceRestoreError(false)
+        try {
+          const restored = await restoreMigratedResearchWorkspace({
+            signal: restoration.signal,
+            isCurrent: () => !cancelled && !useWorkspaceStore.getState().workspaceId,
+            apply: (snapshot, chatSession) => {
+              if (!cancelled && !useWorkspaceStore.getState().workspaceId) restoreServerWorkspace(snapshot, chatSession)
+            }
+          })
+          if (restored || cancelled || currentWorkspaceIdRef.current) return
+        } catch {
+          if (!cancelled) setWorkspaceRestoreError(true)
+          return
+        }
         const initialStorageKeys =
           initialWorkspaceMigrationLocalStorageKeysRef.current ?? []
         const hadWorkspaceContentBeforeInitialization = initialStorageKeys.some(
@@ -2766,8 +2889,9 @@ const ResearchWorkspaceBody: React.FC = () => {
 
     return () => {
       cancelled = true
+      restoration.abort()
     }
-  }, [isStoreHydrated, workspaceId])
+  }, [isStoreHydrated, workspaceId, restoreServerWorkspace, workspaceRestoreAttempt])
 
   useEffect(() => {
     if (!statusGuardrailsEnabled) return
@@ -2830,60 +2954,12 @@ const ResearchWorkspaceBody: React.FC = () => {
     workspaceId
   ])
 
-  useEffect(() => {
-    if (!workspaceId) return
-
-    let isActive = true
-
-    const applyPrefill = async () => {
-      const payload = await consumeResearchWorkspacePrefill()
-      if (!payload || !isActive) return
-      if (payload.kind !== "knowledge_qa_thread") return
-
-      const sourceCandidates = payload.sources
-        .filter((source) => typeof source.mediaId === "number")
-        .map((source) => ({
-          mediaId: source.mediaId as number,
-          title: source.title,
-          type: source.type
-        }))
-
-      if (sourceCandidates.length > 0) {
-        addSources(sourceCandidates)
-
-        const stateAfterAdd = useWorkspaceStore.getState()
-        const prefillSourceIds = stateAfterAdd.sources
-          .filter((source) =>
-            sourceCandidates.some((candidate) => candidate.mediaId === source.mediaId)
-          )
-          .map((source) => source.id)
-        const mergedSelectedIds = new Set([
-          ...stateAfterAdd.selectedSourceIds,
-          ...prefillSourceIds
-        ])
-        if (mergedSelectedIds.size > 0) {
-          setSelectedSourceIds(Array.from(mergedSelectedIds))
-        }
-      }
-
-      const noteContent = buildKnowledgeQaSeedNote(payload)
-      if (noteContent.trim().length > 0) {
-        const titleBase =
-          payload.query.trim().length > 0 ? payload.query.trim() : "Knowledge QA import"
-        captureToCurrentNote({
-          title: `Knowledge QA: ${titleBase.slice(0, 80)}`,
-          content: noteContent,
-          mode: "append"
-        })
-      }
-    }
-
-    void applyPrefill()
-
-    return () => {
-      isActive = false
-    }
-  }, [addSources, captureToCurrentNote, setSelectedSourceIds, workspaceId])
+  const knowledgeImport = useResearchWorkspacePrefill(
+    workspaceId,
+    isStoreHydrated &&
+      (!canReconcileWorkspaceServer || serverWorkspaceIdentity === workspaceId),
+    workspaceId !== null && serverWorkspaceIdentity === workspaceId,
+  )
 
   useEffect(() => {
     if (!isStoreHydrated) return
@@ -3409,6 +3485,7 @@ const ResearchWorkspaceBody: React.FC = () => {
         fallback={<WorkspacePaneFallback testId="workspace-sources-pane" />}
       >
         <SourcesPane
+          onCaptureArticle={webCapture.open}
           onHide={options?.onHide}
           onOpenTransferSources={openTransferSourcesModal}
           sourceListViewState={sourceListViewState}
@@ -3458,6 +3535,21 @@ const ResearchWorkspaceBody: React.FC = () => {
 
   if (!isStoreHydrated) {
     return <ResearchWorkspaceSkeleton isMobile={isMobile} />
+  }
+
+  if (!workspaceId && workspaceRestoreError) {
+    return <div role="alert" className="m-4 rounded-lg border border-warning/30 p-4">
+      <p>{t("playground:workspace.restoreFailed", "Unable to restore your Research Workspace. Check your connection and retry.")}</p>
+      <Button className="mt-2" onClick={() => setWorkspaceRestoreAttempt(attempt => attempt + 1)}>
+        {t("common:retry", "Retry")}
+      </Button>
+      <Button className="ml-2 mt-2" onClick={() => createNewWorkspace()}>
+        {t("playground:workspace.startNewAfterRestoreFailure", "Start new workspace")}
+      </Button>
+      <p className="mt-2 text-sm text-text-muted">
+        {t("playground:workspace.restoreRecoveryChoices", "You can retry restoring your saved workspace or start a separate workspace.")}
+      </p>
+    </div>
   }
 
   const tutorialPromptBanner = showTutorialPrompt ? (
@@ -3637,6 +3729,43 @@ const ResearchWorkspaceBody: React.FC = () => {
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[radial-gradient(circle_at_top_left,var(--surface-2),var(--bg)_45%)] text-text">
       {messageContextHolder}
+      <WebArticleCaptureModal capture={webCapture} />
+      {(knowledgeImport.attached > 0 ||
+        knowledgeImport.failed > 0 ||
+        knowledgeImport.importing ||
+        knowledgeImport.error) && (
+        <div
+          role="status"
+          className="border-b border-border bg-surface px-3 py-2 text-sm"
+        >
+          <p>
+            {t("playground:workspace.knowledgeImportCounts", {
+              defaultValue:
+                "Knowledge evidence: {{attached}} attached · {{pending}} pending · {{failed}} failed",
+              attached: knowledgeImport.attached,
+              pending: knowledgeImport.pending,
+              failed: knowledgeImport.failed,
+            })}
+          </p>
+          <p>
+            {t("playground:workspace.excerptSnapshotNotice", {
+              defaultValue:
+                "Notes use full versioned snapshots; web results use retrieved excerpts. These copies do not update automatically. Original references, excerpts, and answer qualifications are in the imported note.",
+            })}
+          </p>
+          {knowledgeImport.error && <p role="alert">{knowledgeImport.error}</p>}
+          {(knowledgeImport.failed > 0 || knowledgeImport.error) && (
+            <Button
+              disabled={knowledgeImport.importing}
+              onClick={() => void knowledgeImport.retry()}
+            >
+              {t("playground:workspace.retryKnowledgeImports", {
+                defaultValue: "Retry unfinished imports",
+              })}
+            </Button>
+          )}
+        </div>
+      )}
       <a
         href="#workspace-main-content"
         onClick={(event) => focusSkipTarget(event, "chat")}
@@ -4241,9 +4370,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                 )}
               </dt>
               <dd>
-                {workspaceMigrationResult.serverMigration?.client_delete_eligible
-                  ? t("common:yes", "Yes")
-                  : t("common:no", "No")}
+                {t("common:no", "No")}
               </dd>
             </dl>
 

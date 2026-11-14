@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_organization import (
     NotesOrganizationDomainAdapter,
 )
+from tldw_Server_API.app.core.Sync.v2.domain_adapters.notes_provenance import NotesProvenanceDomainAdapter
 from tldw_Server_API.app.core.Sync.v2.errors import SyncStoreError
 from tldw_Server_API.app.core.Sync.v2.materializers import MaterializationResult
 from tldw_Server_API.app.core.Sync.v2.models import (
@@ -188,6 +189,7 @@ def _registry() -> SyncAdapterRegistry:
             NotesOrganizationDomainAdapter(domain=domain)
             for domain in NOTES_ORGANIZATION_DOMAINS
         ]
+        + [NotesProvenanceDomainAdapter()]
     )
 
 

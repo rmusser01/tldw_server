@@ -9,7 +9,6 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, reset_settings
 from tldw_Server_API.tests.helpers.authnz_seed import ensure_test_user
 
-
 pytestmark = [pytest.mark.unit, pytest.mark.asyncio]
 
 
@@ -69,6 +68,46 @@ async def test_local_secret_backend_resolve_for_use_returns_ephemeral_material(
         assert resolved["material"]["api_key"] == "sk-test"
         assert resolved["material"]["credential_fields"]["base_url"] == "https://api.example.com/v1"
         assert resolved["expires_at"] is not None
+    finally:
+        await pool.close()
+        reset_settings()
+
+
+@pytest.mark.parametrize("scope_type", ("org", "team"))
+@pytest.mark.parametrize("with_audit_id", (False, True))
+async def test_local_shared_secret_mutations_preserve_internal_no_context_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scope_type: str, with_audit_id: bool,
+) -> None:
+    from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import AuthnzOrgProviderSecretsRepo
+    from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
+    from tldw_Server_API.app.core.AuthNZ.secret_backends.local_encrypted import LocalEncryptedSecretBackend
+
+    monkeypatch.setenv("BYOK_ENCRYPTION_KEY", _b64_key(b"k"))
+    reset_settings()
+    pool = DatabasePool(_sqlite_settings(tmp_path / "shared_secret_backend.db"))
+    await pool.initialize()
+    try:
+        user_id = await _insert_test_user(pool, username="audit-only", email="audit-only@example.com")
+        scopes = AuthnzOrgsTeamsRepo(pool)
+        org = await scopes.create_organization(name="Internal secret org", owner_user_id=None)
+        team = await scopes.create_team(org_id=int(org["id"]), name="Internal secret team")
+        scope_id = int((org if scope_type == "org" else team)["id"])
+        audit_id = user_id if with_audit_id else None
+        backend = LocalEncryptedSecretBackend(db_pool=pool)
+        ref = await backend.store_ref(
+            owner_scope_type=scope_type, owner_scope_id=scope_id, provider_key="openai",
+            payload={"api_key": "sk-internal"}, created_by=audit_id, updated_by=audit_id,
+        )
+        repo = AuthnzOrgProviderSecretsRepo(pool)
+        stored = await repo.fetch_secret(scope_type, scope_id, "openai")
+        assert (stored["created_by"], stored["updated_by"]) == (audit_id, audit_id)
+        assert (await backend.resolve_for_use(ref["id"]))["material"]["api_key"] == "sk-internal"
+        await backend.rotate_if_supported(ref["id"], payload={"api_key": "sk-rotated"}, updated_by=audit_id)
+        assert (await backend.resolve_for_use(ref["id"]))["material"]["api_key"] == "sk-rotated"
+        assert await backend.delete_ref(ref["id"], revoked_by=audit_id)
+        revoked = await repo.fetch_secret(scope_type, scope_id, "openai", include_revoked=True)
+        assert revoked["revoked_at"] is not None
+        assert revoked["revoked_by"] == audit_id
     finally:
         await pool.close()
         reset_settings()

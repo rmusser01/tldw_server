@@ -116,6 +116,7 @@ def build_workspace_source_preview(
     max_chars: int,
     chunk_limit: int,
     focus_chunk_index: int | None = None,
+    version_number: int | None = None,
 ) -> dict[str, Any]:
     """Build the existing local preview shape with bounded optional focus."""
     if not 1 <= max_chars <= _MAX_PREVIEW_CHARS:
@@ -125,6 +126,9 @@ def build_workspace_source_preview(
     if focus_chunk_index is not None and focus_chunk_index < 0:
         raise ValueError("focus_chunk_index must be non-negative")
 
+    if version_number is not None and version_number < 1:
+        raise ValueError("version_number must be positive")
+
     media_id_raw = source.get("media_id")
     try:
         media_id = int(media_id_raw) if media_id_raw is not None else None
@@ -132,6 +136,20 @@ def build_workspace_source_preview(
         media_id = None
 
     media = _safe_get_media(media_db, media_id) if media_id is not None else None
+    version_fields: dict[str, Any] = {}
+    if version_number is not None:
+        # Current owner-visible Media must still exist before reading its snapshot.
+        version_fields["document_version_number"] = version_number
+        if media is not None:
+            try:
+                media = media_db_api.get_document_version(
+                    media_db,
+                    media_id,
+                    version_number=version_number,
+                    include_content=True,
+                )
+            except (AttributeError, DatabaseError, RuntimeError, TypeError, ValueError):
+                media = None
     content = str((media or {}).get("content") or "")
     if not content.strip():
         reason = (
@@ -139,7 +157,10 @@ def build_workspace_source_preview(
             if media_db is None
             else str(source_status.get("status_reason") or "content_unavailable")
         )
+        if version_number is not None:
+            reason = "document_version_unavailable"
         return {
+            **version_fields,
             "workspace_id": workspace_id,
             "source_id": source["id"],
             "media_id": media_id,
@@ -150,9 +171,7 @@ def build_workspace_source_preview(
             "status_reason": reason,
             "readiness": source_status.get("readiness") or {},
             "content_available": False,
-            "preview_mode": _preview_mode_for_unavailable(
-                {**source_status, "status_reason": reason}
-            ),
+            "preview_mode": _preview_mode_for_unavailable({**source_status, "status_reason": reason}),
             "unavailable_reason": reason,
             "text_preview": None,
             "text_total_chars": None,
@@ -169,16 +188,18 @@ def build_workspace_source_preview(
             text_preview=text_preview,
         )
     ]
-    snippets.extend(
-        _chunk_preview_snippets(
-            media_db=media_db,
-            source_id=str(source["id"]),
-            media_id=media_id,
-            chunk_limit=chunk_limit,
-            focus_chunk_index=focus_chunk_index,
+    if version_number is None:
+        snippets.extend(
+            _chunk_preview_snippets(
+                media_db=media_db,
+                source_id=str(source["id"]),
+                media_id=media_id,
+                chunk_limit=chunk_limit,
+                focus_chunk_index=focus_chunk_index,
+            )
         )
-    )
     return {
+        **version_fields,
         "workspace_id": workspace_id,
         "source_id": source["id"],
         "media_id": media_id,

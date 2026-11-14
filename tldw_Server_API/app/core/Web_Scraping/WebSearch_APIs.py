@@ -36,6 +36,7 @@ from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from tldw_Server_API.app.core.Security.egress import ConfiguredEndpointScope
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.orchestration import scrape_article
 from tldw_Server_API.app.core.Web_Scraping.outbound_policy import (
@@ -127,14 +128,6 @@ def _redact_websearch_log_text(value: str) -> str:
     return _WEBSEARCH_SENSITIVE_PAIR_RE.sub(lambda match: f"{match.group(1)}=[REDACTED]", value)
 
 
-def _debug_websearch_json(message: str, value: Any) -> None:
-    logging.opt(lazy=True).debug(
-        "{}: {}",
-        message,
-        lambda: json.dumps(_redact_websearch_log_value(value), indent=2),
-    )
-
-
 def _websearch_browser_headers(
     *, accept_lang: str = "en-US,en;q=0.5", referer: str = "https://www.google.com/", restrict_encodings_for_requests: bool = True
 ):
@@ -165,6 +158,7 @@ def _provider_outbound_policy_decision(
     *,
     source: str,
     stage: str = "provider_request",
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> WebOutboundPolicyDecision:
     """Return the shared outbound-policy decision for a websearch provider URL."""
     try:
@@ -173,6 +167,7 @@ def _provider_outbound_policy_decision(
             respect_robots=False,
             source=source,
             stage=stage,
+            **({"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}),
         )
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as exc:
         raise ValueError(f"Outbound policy evaluation failed: {exc}") from exc
@@ -183,8 +178,9 @@ def _enforce_provider_outbound_policy(
     *,
     source: str,
     stage: str = "provider_request",
+    configured_endpoint: ConfiguredEndpointScope | None = None,
 ) -> None:
-    decision = _provider_outbound_policy_decision(url, source=source, stage=stage)
+    decision = _provider_outbound_policy_decision(url, source=source, stage=stage, configured_endpoint=configured_endpoint)
     if not decision.allowed:
         raise ValueError(f"Blocked by outbound policy: {decision.reason}")
 
@@ -694,6 +690,7 @@ def generate_and_search(question: str, search_params: dict) -> dict:
     if not web_search_results_dict["warnings"]:
         web_search_results_dict.pop("warnings", None)
 
+    web_search_results_dict["result_count"] = len(web_search_results_dict["results"])
     return {
         "web_search_results_dict": web_search_results_dict,
         "sub_query_dict": sub_query_dict
@@ -723,11 +720,13 @@ async def analyze_and_aggregate(web_search_results_dict: dict, sub_query_dict: d
         relevant_results = review_and_select_results(relevant_results)
 
     # 6. Summarize/aggregate final answer
-    final_answer = aggregate_results(
+    # Off the event loop: the summaries and the final report are sync LLM calls (LLM usage accounting spec §4b).
+    final_answer = await asyncio.to_thread(
+        aggregate_results,
         relevant_results,
         sub_query_dict["main_goal"],
         sub_questions,
-        search_params.get('final_answer_llm')
+        search_params.get('final_answer_llm'),
     )
 
     # 7. Return the final data
@@ -1648,8 +1647,8 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
 
             # Call the search_web_google function with the prepared arguments
             web_search_results = search_web_google(**google_args)  # raw JSON
-            web_search_results_dict = process_web_search_results(web_search_results, "google")
-            return web_search_results_dict
+            # Keep Google's established normalized name at the shared result boundary.
+            search_engine = "google"
 
         elif search_engine.lower() == "kagi":
             # Limit uses result_count; content_country is not applicable
@@ -1725,6 +1724,11 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
 
         # Process the raw search results
         web_search_results_dict = process_web_search_results(web_search_results, search_engine)
+        results = web_search_results_dict.get("results")
+        if isinstance(results, list):
+            if type(result_count) is int and result_count > 0:
+                web_search_results_dict["results"] = results[:result_count]
+            web_search_results_dict["result_count"] = len(web_search_results_dict["results"])
         # FIXME
         #logging.debug("After process_web_search_results:")
         #logging.debug(json.dumps(web_search_results_dict, indent=2))
@@ -1737,94 +1741,6 @@ def perform_websearch(search_engine, search_query, content_country, search_lang,
         logging.error("Error performing web search")
         return {"processing_error": "Error performing web search"}
 
-
-def test_perform_websearch_google():
-    # Google Searches
-    try:
-        perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("Google websearch smoke test 1 completed")
-        # FIXME - Fails. Need to fix arg formatting
-        perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10, date_range="y", safesearch="active", site_blacklist=["spam-site.com"])
-        logging.info("Google websearch smoke test 2 completed")
-        perform_websearch("google", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("Google websearch smoke test 3 completed")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        logging.exception("Error performing google searches")
-    pass
-
-
-def test_perform_websearch_bing():
-    # Deprecated provider; no-op test placeholder
-    pass
-
-
-def test_perform_websearch_brave():
-    # Brave Searches
-    try:
-        perform_websearch("brave", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("Brave websearch smoke test completed")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        logging.exception("Error performing brave searches")
-
-
-def test_perform_websearch_ddg():
-    # DuckDuckGo Searches
-    try:
-        perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("DuckDuckGo websearch smoke test 1 completed")
-        perform_websearch("duckduckgo", "What is the capital of France?", "US", "en", "en", 10, date_range="y")
-        logging.info("DuckDuckGo websearch smoke test 2 completed")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        logging.exception("Error performing duckduckgo searches")
-
-
-# FIXME
-def test_perform_websearch_kagi():
-    # Kagi Searches
-    try:
-        perform_websearch("kagi", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("Kagi websearch smoke test completed")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        logging.exception("Error performing kagi searches")
-
-# FIXME
-def test_perform_websearch_serper():
-    # Serper Searches
-    try:
-        perform_websearch("serper", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("Serper websearch smoke test completed")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        logging.exception("Error performing serper searches")
-
-# FIXME
-def test_perform_websearch_tavily():
-    # Tavily Searches
-    try:
-        perform_websearch("tavily", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("Tavily websearch smoke test completed")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        logging.exception("Error performing tavily searches")
-
-
-# FIXME
-def test_perform_websearch_searx():
-    # Searx Searches
-    try:
-        perform_websearch("searx", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("Searx websearch smoke test completed")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        logging.exception("Error performing searx searches")
-
-
-# FIXME
-def test_perform_websearch_yandex():
-    #Yandex Searches
-    try:
-        perform_websearch("yandex", "What is the capital of France?", "US", "en", "en", 10)
-        logging.info("Yandex websearch smoke test completed")
-    except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
-        logging.exception("Error performing yandex searches")
-    pass
 
 #
 ######################### Search Result Parsing ##################################################################
@@ -1910,8 +1826,6 @@ def process_web_search_results(search_results: dict, search_engine: str) -> dict
         # Parse results based on the search engine
         if search_engine.lower() == "baidu":
             pass  # Placeholder for Baidu-specific parsing
-        elif search_engine.lower() == "bing":
-            parse_bing_results(search_results, web_search_results_dict)
         elif search_engine.lower() == "brave":
             parse_brave_results(search_results, web_search_results_dict)
         elif search_engine.lower() == "duckduckgo":
@@ -1949,9 +1863,15 @@ def process_web_search_results(search_results: dict, search_engine: str) -> dict
 
 def parse_html_search_results_generic(soup):
     results = []
-    for result in soup.find_all('div', class_='result'):
-        title = result.find('h3').text if result.find('h3') else ''
-        url = result.find('a', class_='url')['href'] if result.find('a', class_='url') else ''
+    for result in soup.select("div.result, article.result"):
+        heading = result.find("h3")
+        link = result.find("a", class_="url")
+        if link is None and heading is not None:
+            link = heading.find("a", href=True)
+        url = link.get("href", "") if link is not None else ""
+        if not url:
+            continue
+        title = heading.text if heading is not None else ""
         content = result.find('p', class_='content').text if result.find('p', class_='content') else ''
         published_date = result.find('span', class_='published_date').text if result.find('span',
                                                                                           class_='published_date') else ''
@@ -1976,35 +1896,6 @@ def search_web_baidu(arg1, arg2, arg3):
         source="websearch_baidu",
     )
     return {"error": "Baidu provider not implemented"}
-
-
-def test_baidu_search(arg1, arg2, arg3):
-    result = search_web_baidu(arg1, arg2, arg3)
-    return result
-
-def search_parse_baidu_results():
-    pass
-
-
-######################### Bing Search #########################
-#
-# https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/overview0
-# https://learn.microsoft.com/en-us/bing/search-apis/bing-news-search/overview
-# https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/quickstarts/rest/python
-# https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/reference/query-parameters
-# Country/Language code: https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/reference/market-codes#country-codes
-# https://github.com/Azure-Samples/cognitive-services-REST-api-samples/tree/master/python/Search
-def search_web_bing(*args, **kwargs):
-    raise NotImplementedError("Bing provider is deprecated and has been removed")
-
-
-def test_search_web_bing():
-    pass
-
-
-def parse_bing_results(raw_results: dict, output_dict: dict) -> None:
-    # Deprecated
-    output_dict.setdefault("processing_error", "Bing provider deprecated")
 
 
 def brave_http_get(url: str, *, headers: dict[str, str], params: dict[str, Any]):
@@ -2082,24 +1973,6 @@ def search_web_brave(
         _close_response(response)
 
 
-def test_search_brave():
-    search_term = "How can I bake a cherry cake"
-    country = "US"
-    search_lang = "en"
-    ui_lang = "en"
-    result_count = 10
-    safesearch = "moderate"
-    date_range = None
-    result_filter = None
-    result = search_web_brave(search_term, country, search_lang, ui_lang, result_count, safesearch, date_range,
-                             result_filter)
-    _debug_websearch_json("Brave search smoke raw results", result)
-
-    output_dict = {"results": []}
-    parse_brave_results(result, output_dict)
-    _debug_websearch_json("Parsed Brave search smoke results", output_dict)
-
-
 def parse_brave_results(raw_results: dict, output_dict: dict) -> None:
     """
     Parse Brave search results and update the output dictionary
@@ -2156,9 +2029,6 @@ def parse_brave_results(raw_results: dict, output_dict: dict) -> None:
 
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         _set_processing_error(output_dict, "Error processing Brave results")
-
-def test_parse_brave_results():
-    pass
 
 
 ######################### DuckDuckGo Search #########################
@@ -2258,28 +2128,6 @@ def search_web_duckduckgo(
     return results
 
 
-def test_search_duckduckgo():
-    try:
-        results = search_web_duckduckgo(
-            keywords="How can I bake a cherry cake?",
-            region="us-en",
-            timelimit="w",
-            max_results=10
-        )
-        logging.info(f"DuckDuckGo search smoke result count: {len(results)}")
-        _debug_websearch_json("DuckDuckGo search smoke raw results", results)
-
-        # Parse the results
-        output_dict = {"results": []}
-        parse_duckduckgo_results({"results": results}, output_dict)
-        _debug_websearch_json("Parsed DuckDuckGo results", output_dict)
-
-    except ValueError as e:
-        logging.warning(f"Invalid DuckDuckGo smoke input: {str(e)}")
-    except (NetworkError, RetryExhaustedError) as e:
-        logging.warning(f"DuckDuckGo smoke request error: {str(e)}")
-
-
 def parse_duckduckgo_results(raw_results: dict, output_dict: dict) -> None:
     """
     Parse DuckDuckGo search results and update the output dictionary
@@ -2352,11 +2200,6 @@ def extract_domain(url: str) -> str:
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
         logging.warning(f"Failed to extract domain from URL {url}: {str(e)}")
         return url
-
-
-def test_parse_duckduckgo_results():
-    pass
-
 
 
 ######################### Google Search #########################
@@ -2445,7 +2288,11 @@ def search_web_google(
             if limit_country_search:
                 results_origin_country = get_loaded_config()['search_engines']['google_search_country']
         if results_origin_country:
-            params["cr"] = results_origin_country
+            # Google CSE expects the cr parameter in `countryXX` form.
+            country_value = str(results_origin_country)
+            if not country_value.lower().startswith("country"):
+                country_value = f"country{country_value.upper()}"
+            params["cr"] = country_value
 
         # Handle google_search_engine_id
         if google_search_engine_id is None:
@@ -2489,7 +2336,19 @@ def search_web_google(
         if siteSearchFilter:
             params["siteSearchFilter"] = siteSearchFilter
         if sort_results_by:
-            params["sort"] = sort_results_by
+            # Google CSE sorts by date expressions ("date", "date:r:YYYYMMDD:YYYYMMDD",
+            # "date:d:s"); other values such as the configured default "relevance" fail
+            # the whole request with HTTP 400, so they are dropped instead of sent.
+            # ponytail: date-only allowlist; structured-data attribute sorts
+            # (e.g. "metatags-pubdate:d") are dropped too -- widen if an engine needs them.
+            sort_expression = str(sort_results_by).strip()
+            if sort_expression == "date" or sort_expression.startswith("date:"):
+                params["sort"] = sort_expression
+            else:
+                logging.debug(
+                    "Ignoring sort_results_by={!r}: not a Google CSE date sort expression",
+                    sort_results_by,
+                )
 
         logging.info(
             f"Prepared parameters for Google Search: {_redact_websearch_log_value(params)}"
@@ -2516,45 +2375,6 @@ def search_web_google(
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS as e:
         logging.error(f"Unexpected error occurred: {str(e)}")
         raise
-
-
-def test_search_google():
-    search_query = "How can I bake a cherry cake?"
-    google_search_api_key = get_loaded_config()['search_engines']['google_search_api_key']
-    google_search_engine_id = get_loaded_config()['search_engines']['google_search_engine_id']
-    result_count = 10
-    c2coff = "1"
-    results_origin_country = "countryUS"
-    date_range = None
-    exactTerms = None
-    excludeTerms = None
-    filter = None
-    geolocation = "us"
-    ui_language = "en"
-    search_result_language = "lang_en"
-    safesearch = "off"
-    site_blacklist = None
-    sort_results_by = None
-    result = search_web_google(
-        search_query=search_query,
-        google_search_api_key=google_search_api_key,
-        google_search_engine_id=google_search_engine_id,
-        result_count=result_count,
-        c2coff=c2coff,
-        results_origin_country=results_origin_country,
-        date_range=date_range,
-        exactTerms=exactTerms,
-        excludeTerms=excludeTerms,
-        filter=filter,
-        geolocation=geolocation,
-        ui_language=ui_language,
-        search_result_language=search_result_language,
-        safesearch=safesearch,
-        site_blacklist=site_blacklist,
-        sort_results_by=sort_results_by,
-    )
-    logging.debug(f"Google search smoke raw results: {_redact_websearch_log_value(result)}")
-    return result
 
 
 def parse_google_results(raw_results: dict, output_dict: dict) -> None:
@@ -2657,16 +2477,6 @@ def parse_google_results(raw_results: dict, output_dict: dict) -> None:
         _set_processing_error(output_dict, "Error processing Google results")
 
 
-def test_parse_google_results():
-    parsed_results = {}
-    raw_results = {}
-    raw_results = test_search_google()
-    parse_google_results(raw_results, parsed_results)
-    logging.debug(f"Parsed Google search smoke results: {parsed_results}")
-    pass
-
-
-
 ######################### Kagi Search #########################
 #
 # https://help.kagi.com/kagi/api/search.html
@@ -2694,13 +2504,6 @@ def search_web_kagi(query: str, limit: int = 10) -> dict:
     data = fetch_json(method="GET", url=endpoint, headers=headers, params=params, timeout=15.0)
     logging.debug(data)
     return data
-
-
-def test_search_kagi():
-    search_term = "How can I bake a cherry cake"
-    result_count = 10
-    result = search_web_kagi(search_term, result_count)
-    logging.debug(f"Kagi search smoke raw results: {_redact_websearch_log_value(result)}")
 
 
 def parse_kagi_results(raw_results: dict, output_dict: dict) -> None:
@@ -2756,11 +2559,6 @@ def parse_kagi_results(raw_results: dict, output_dict: dict) -> None:
         _set_processing_error(output_dict, "Error processing Kagi results")
 
 
-def test_parse_kagi_results():
-    pass
-
-
-
 ######################### SearX Search #########################
 #
 # https://searx.space
@@ -2792,14 +2590,23 @@ def search_web_searx(
     Returns:
         Dict: Dictionary containing the search results or an error message.
     """
-    # Use the provided Searx URL or fall back to the configured one
-    if not searx_url:
-        searx_url = get_loaded_config()['search_engines']['searx_search_api_url']
+    # Only the current server configuration can grant a local-provider origin.
+    configured_url = (load_and_log_configs() or {}).get("search_engines", {}).get("searx_search_api_url")
+    searx_url = searx_url or configured_url
     if not searx_url:
         return {"error": "SearX Search is disabled and no content was found. This functionality is disabled because the user has not set it up yet."}
 
     # Validate and construct URL
     try:
+        configured_endpoint = None
+        if configured_url:
+            try:
+                candidate_scope = ConfiguredEndpointScope.from_url(configured_url)
+            except ValueError:
+                pass  # Invalid server configuration cannot grant request authority.
+            else:
+                if candidate_scope.matches(searx_url):
+                    configured_endpoint = candidate_scope
         parsed_url = urlparse(searx_url)
         params = {
             'q': search_query,
@@ -2819,7 +2626,7 @@ def search_web_searx(
 
     # Perform the search request
     try:
-        _enforce_provider_outbound_policy(search_url, source="websearch_searx")
+        _enforce_provider_outbound_policy(search_url, source="websearch_searx", configured_endpoint=configured_endpoint)
 
         # Mimic browser headers via centralized UA builder
         headers = _websearch_browser_headers(accept_lang="en-US,en;q=0.5", restrict_encodings_for_requests=True)
@@ -2828,7 +2635,13 @@ def search_web_searx(
         delay = random.uniform(2, 5)  # Random delay between 2 and 5 seconds
         time.sleep(delay)
 
-        response = fetch(method="GET", url=search_url, headers=headers, timeout=15.0)
+        response = fetch(
+            method="GET",
+            url=search_url,
+            headers=headers,
+            timeout=15.0,
+            **({"configured_endpoint": configured_endpoint} if configured_endpoint is not None else {}),
+        )
         try:
             # Check if the response is JSON
             content_type = response.headers.get('Content-Type', '')
@@ -2870,11 +2683,6 @@ def search_web_searx(
         logging.error(f"Error searching for content: {str(e)}")
         return {"error": "There was an error searching for content."}
 
-def test_search_searx():
-    # Use a different Searx instance to avoid rate limiting
-    searx_url = "https://searx.be"  # Example of a different Searx instance
-    result = search_web_searx("What goes into making a cherry cake?", searx_url=searx_url)
-    logging.debug(f"Searx search smoke raw results: {_redact_websearch_log_value(result)}")
 
 def parse_searx_results(searx_search_results, web_search_results_dict):
     try:
@@ -2906,11 +2714,6 @@ def parse_searx_results(searx_search_results, web_search_results_dict):
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         _set_processing_error(web_search_results_dict, "Error processing Searx results")
-
-def test_parse_searx_results():
-    pass
-
-
 
 
 ######################### Serper.dev Search #########################
@@ -3040,9 +2843,6 @@ def search_web_serper(
     return fetch_json(method="POST", url=serper_api_url, headers=headers, json=payload, timeout=20.0)
 
 
-def test_search_serper():
-    pass
-
 def parse_serper_results(serper_search_results, web_search_results_dict):
     try:
         if "results" not in web_search_results_dict:
@@ -3093,8 +2893,6 @@ def parse_serper_results(serper_search_results, web_search_results_dict):
         _set_processing_error(web_search_results_dict, "Error processing Serper results")
 
 
-
-
 ######################### Tavily Search #########################
 #
 # https://github.com/YassKhazzan/openperplex_backend_os/blob/main/sources_searcher.py
@@ -3133,11 +2931,6 @@ def search_web_tavily(search_query, result_count=10, site_whitelist=None, site_b
         return {"error": "There was an error searching for content."}
 
 
-def test_search_tavily():
-    result = search_web_tavily("How can I bake a cherry cake?")
-    logging.debug(f"Tavily search smoke raw results: {_redact_websearch_log_value(result)}")
-
-
 def parse_tavily_results(tavily_search_results, web_search_results_dict):
     try:
         if "results" not in web_search_results_dict:
@@ -3169,12 +2962,6 @@ def parse_tavily_results(tavily_search_results, web_search_results_dict):
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         _set_processing_error(web_search_results_dict, "Error processing Tavily results")
-
-
-def test_parse_tavily_results():
-    pass
-
-
 
 
 ######################### Exa Search #########################
@@ -3247,12 +3034,6 @@ def parse_exa_results(exa_search_results, web_search_results_dict):
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         _set_processing_error(web_search_results_dict, "Error processing Exa results")
-
-
-def test_parse_exa_results():
-    pass
-
-
 
 
 ######################### Firecrawl Search #########################
@@ -3331,10 +3112,6 @@ def parse_firecrawl_results(firecrawl_search_results, web_search_results_dict):
         web_search_results_dict["total_results_found"] = len(web_search_results_dict["results"])
     except _WEBSEARCH_NONCRITICAL_EXCEPTIONS:
         _set_processing_error(web_search_results_dict, "Error processing Firecrawl results")
-
-
-def test_parse_firecrawl_results():
-    pass
 
 
 ######################### 4chan Search #########################
@@ -3865,8 +3642,6 @@ def parse_4chan_results(fourchan_search_results, web_search_results_dict):
         _set_processing_error(web_search_results_dict, "Error processing 4chan results")
 
 
-
-
 ######################### Yandex Search #########################
 #
 # https://yandex.cloud/en/docs/search-api/operations/web-search
@@ -3881,9 +3656,6 @@ def search_web_yandex():
     )
     return {"error": "Yandex provider not implemented"}
 
-
-def test_search_yandex():
-    pass
 
 def parse_yandex_results(yandex_search_results, web_search_results_dict):
     pass

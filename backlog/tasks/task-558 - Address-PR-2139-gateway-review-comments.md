@@ -39,9 +39,9 @@ Verify review findings against current code. Add failing regression tests for ma
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR 2139 was already up to date with origin/dev; git rebase origin/dev was a no-op. Verified Qodo/Gemini findings against current code and fixed all still-valid items. Added Pydantic JSON-RPC request/response envelope models, manual raw JSON parsing for JSON-RPC parse errors, strict id validation before echoing ids, non-coercing object validation for params and tools/call arguments, broad standard Exception mapping to JSON-RPC internal errors at the transport boundary, and docstrings for the new gateway helpers. Added regression tests for malformed JSON, missing jsonrpc, invalid id, non-object params, non-object arguments, and custom runtime exceptions. After refreshing GitHub, verified and fixed additional still-valid CodeRabbit comments: notification dispatch errors now suppress responses, runtime exceptions are logged before -32603 mapping, the tools/call flow test asserts arguments and request context, and TASK-557 no longer records a machine-specific venv path. No review findings were skipped.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

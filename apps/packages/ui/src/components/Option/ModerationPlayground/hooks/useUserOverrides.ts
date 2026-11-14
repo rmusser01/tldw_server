@@ -1,5 +1,6 @@
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 import { useServerOnline } from "@/hooks/useServerOnline"
 import {
@@ -46,6 +47,21 @@ export interface UserOverridesState {
 
 export function useUserOverrides(activeUserId: string | null): UserOverridesState {
   const online = useServerOnline()
+  const lifetime = React.useRef({ active: true, revision: 0 })
+  React.useEffect(() => {
+    lifetime.current.active = true
+    const retire = () => {
+      lifetime.current.active = false
+      lifetime.current.revision += 1
+    }
+    const stop = watchChatAccountChanges((invalidated) => {
+      if (invalidated) retire()
+    })
+    return () => {
+      retire()
+      stop()
+    }
+  }, [])
 
   const [draft, setDraft] = React.useState<ModerationUserOverride>({})
   const [baseline, setBaseline] = React.useState<ModerationUserOverride | null>(null)
@@ -172,14 +188,22 @@ export function useUserOverrides(activeUserId: string | null): UserOverridesStat
 
   const bulkDelete = React.useCallback(async (userIds: string[]) => {
     if (!userIds.length) return []
+    const owner = lifetime.current.revision
+    const assertCurrent = () => {
+      if (!lifetime.current.active || owner !== lifetime.current.revision) {
+        throw new DOMException("Moderation workspace retired", "AbortError")
+      }
+    }
     const failed: string[] = []
     for (const userId of userIds) {
+      assertCurrent()
       try {
         await deleteUserOverride(userId)
       } catch {
         failed.push(userId)
       }
     }
+    assertCurrent()
     if (activeUserId && userIds.includes(activeUserId)) {
       setDraft({})
       setLoaded(false)
@@ -187,6 +211,7 @@ export function useUserOverrides(activeUserId: string | null): UserOverridesStat
       setBaseline({})
     }
     await overridesQuery.refetch()
+    assertCurrent()
     return failed
   }, [activeUserId, overridesQuery])
 

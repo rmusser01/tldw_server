@@ -210,19 +210,55 @@ export function useDecksQuery(options?: UseFlashcardQueriesOptions & { scope?: S
 /**
  * Hook for fetching next due card for review
  */
-export function useReviewQuery(deckId: number | null | undefined, options?: UseFlashcardQueriesOptions) {
+export function useReviewQuery(
+  deckId: number | null | undefined,
+  options?: UseFlashcardQueriesOptions & {
+    scope?: ServicePromptSnapshot | null
+  }
+) {
   const { flashcardsEnabled } = useFlashcardsEnabled()
   const visibilityParams = buildWorkspaceVisibilityParams(options)
-
-  return useQuery({
-    queryKey: ["flashcards:review:next", deckId, visibilityParams],
-    queryFn: async (): Promise<Flashcard | null> => {
-      const response = await getNextReviewCard(deckId ?? undefined, visibilityParams)
+  const scoped = options?.scope !== undefined
+  const scope = options?.scope
+  const current = !scoped || Boolean(scope && !scope.scopeSignal.aborted)
+  const query = useQuery({
+    queryKey: scoped
+      ? [
+          "flashcards:review:next:scoped",
+          scope?.scopeKey ?? null,
+          deckId,
+          visibilityParams
+        ]
+      : ["flashcards:review:next", deckId, visibilityParams],
+    queryFn: async ({ signal }): Promise<Flashcard | null> => {
+      if (!scoped)
+        return (
+          (await getNextReviewCard(deckId ?? undefined, visibilityParams))
+            .card ?? null
+        )
+      if (!scope)
+        throw new DOMException(
+          "The review account is unresolved.",
+          "AbortError"
+        )
+      const combinedSignal = AbortSignal.any([signal, scope.scopeSignal])
+      combinedSignal.throwIfAborted()
+      const response = await getNextReviewCard(
+        deckId ?? undefined,
+        visibilityParams,
+        { requestScope: scope.requestScope, signal: combinedSignal }
+      )
+      combinedSignal.throwIfAborted()
       return response.card ?? null
     },
-    enabled: options?.enabled ?? flashcardsEnabled,
+    enabled: current && (options?.enabled ?? flashcardsEnabled),
     refetchOnWindowFocus: options?.refetchOnWindowFocus
   })
+  return {
+    ...query,
+    data: current ? query.data : undefined,
+    isSuccess: current && query.isSuccess
+  }
 }
 
 export function useFlashcardAssistantQuery(
@@ -712,12 +748,17 @@ export function useCreateFlashcardMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:create"],
-    mutationFn: ({ requestOptions, ...payload }: FlashcardCreate & { requestOptions?: FlashcardsRequestOptions }) =>
+    mutationFn: ({
+      requestOptions,
+      ...payload
+    }: FlashcardCreate & { requestOptions?: FlashcardsRequestOptions }) =>
       createFlashcard(payload, requestOptions),
-    onSuccess: () => {
+    onSuccess: (_card, params) => {
+      if (params.requestOptions?.signal?.aborted) return
       invalidateFlashcardsQueries(qc)
     },
-    onError: (error) => {
+    onError: (error, params) => {
+      if (params.requestOptions?.signal?.aborted) return
       reportFlashcardMutationError("Failed to create flashcard:", error)
     }
   })
@@ -797,9 +838,19 @@ export function useUpdateDeckMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:deck:update"],
-    mutationFn: (params: { deckId: number; update: DeckUpdate }) =>
-      updateDeck(params.deckId, params.update),
-    onSuccess: (deck) => {
+    mutationFn: async (params: { deckId: number; update: DeckUpdate; requestOptions?: FlashcardsRequestOptions }) => {
+      params.requestOptions?.signal?.throwIfAborted()
+      const deck = params.requestOptions
+        ? await updateDeck(params.deckId, params.update, params.requestOptions)
+        : await updateDeck(params.deckId, params.update)
+      params.requestOptions?.signal?.throwIfAborted()
+      return deck
+    },
+    onSuccess: (deck, params) => {
+      if (params.requestOptions?.requestScope) {
+        invalidateFlashcardsQueries(qc)
+        return
+      }
       qc.getQueriesData<Deck[]>({ queryKey: ["flashcards:decks"] }).forEach(([queryKey, current]) => {
         if (!current) return
         const params = queryKey[1] as UseFlashcardQueriesOptions | undefined
@@ -817,14 +868,42 @@ export function useUpdateDeckMutation() {
   })
 }
 
-export function useFlashcardTemplatesQuery(options?: UseFlashcardQueriesOptions) {
+export function useFlashcardTemplatesQuery(
+  options?: UseFlashcardQueriesOptions & {
+    scope?: ServicePromptSnapshot | null
+  }
+) {
   const { flashcardsEnabled } = useFlashcardsEnabled()
-
-  return useQuery({
-    queryKey: ["flashcards:templates"],
-    queryFn: () => listFlashcardTemplates({}),
-    enabled: options?.enabled ?? flashcardsEnabled
+  const scoped = options?.scope !== undefined
+  const scope = options?.scope
+  const current = !scoped || Boolean(scope && !scope.scopeSignal.aborted)
+  const query = useQuery({
+    queryKey: scoped
+      ? ["flashcards:templates:scoped", scope?.scopeKey ?? null]
+      : ["flashcards:templates"],
+    queryFn: async ({ signal }) => {
+      if (!scoped) return listFlashcardTemplates({})
+      if (!scope)
+        throw new DOMException(
+          "The template account is unresolved.",
+          "AbortError"
+        )
+      const combinedSignal = AbortSignal.any([signal, scope.scopeSignal])
+      combinedSignal.throwIfAborted()
+      const templates = await listFlashcardTemplates({
+        requestScope: scope.requestScope,
+        signal: combinedSignal
+      })
+      combinedSignal.throwIfAborted()
+      return templates
+    },
+    enabled: current && (options?.enabled ?? flashcardsEnabled)
   })
+  return {
+    ...query,
+    data: current ? query.data : undefined,
+    isSuccess: current && query.isSuccess
+  }
 }
 
 export function useFlashcardTemplateQuery(
@@ -1054,19 +1133,24 @@ export function useGenerateFlashcardsMutation() {
       model?: string
       requestOptions?: FlashcardsRequestOptions
     }) => {
-      const hasCardPlan = Array.isArray(params.cardPlan) && params.cardPlan.length > 0
-      return generateFlashcards({
-        text: params.text,
-        num_cards: params.numCards,
-        card_type: hasCardPlan ? undefined : params.cardType,
-        card_plan: hasCardPlan ? params.cardPlan : undefined,
-        difficulty: params.difficulty,
-        focus_topics: params.focusTopics,
-        provider: params.provider,
-        model: params.model
-      }, params.requestOptions)
+      const hasCardPlan =
+        Array.isArray(params.cardPlan) && params.cardPlan.length > 0
+      return generateFlashcards(
+        {
+          text: params.text,
+          num_cards: params.numCards,
+          card_type: hasCardPlan ? undefined : params.cardType,
+          card_plan: hasCardPlan ? params.cardPlan : undefined,
+          difficulty: params.difficulty,
+          focus_topics: params.focusTopics,
+          provider: params.provider,
+          model: params.model
+        },
+        params.requestOptions
+      )
     },
-    onError: (error) => {
+    onError: (error, params) => {
+      if (params.requestOptions?.signal?.aborted) return
       reportFlashcardMutationError("Failed to generate flashcards:", error)
     }
   })

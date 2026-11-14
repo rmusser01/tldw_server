@@ -6,6 +6,7 @@
  */
 
 import React from "react"
+import { message } from "antd"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { TFunction } from "i18next"
 import {
@@ -619,12 +620,21 @@ export function useWritingTemplateLibrary(deps: UseWritingTemplateLibraryDeps) {
           }
         }
         queryClient.invalidateQueries({ queryKey: ["writing-templates"] })
+      } catch (error) {
+        message.error(
+          t("option:writingPlayground.templateImportError", {
+            defaultValue: "Import failed: {{detail}}",
+            detail: error instanceof Error
+              ? error.message
+              : "Check the JSON file and try again."
+          })
+        )
       } finally {
         setTemplateImporting(false)
         event.target.value = ""
       }
     },
-    [queryClient, templates]
+    [queryClient, templates, t]
   )
 
   const exportTheme = React.useCallback((theme: WritingThemeResponse) => {

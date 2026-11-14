@@ -71,14 +71,33 @@ async def test_verify_api_key_testing_bypass_requires_explicit_pytest_runtime(mo
 
 
 @pytest.mark.asyncio
-async def test_verify_api_key_testing_bypass_allows_under_explicit_pytest_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_verify_api_key_has_no_testing_bypass_under_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TESTING", "true")
     monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
     monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests::evals::test")
     reset_settings()
 
-    value = await eval_auth.verify_api_key(credentials=None, x_api_key=None, request=_request())
-    assert value == "test_user"
+    with pytest.raises(HTTPException) as exc:
+        await eval_auth.verify_api_key(credentials=None, x_api_key=None, request=_request())
+    assert exc.value.status_code == 401
+    assert exc.value.detail["error"]["code"] == "missing_credentials"
+
+
+@pytest.mark.asyncio
+async def test_verify_api_key_rejects_a_wrong_single_user_key_in_test_mode_under_pytest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("SINGLE_USER_API_KEY", "primary-key-123456")
+    monkeypatch.setenv("TEST_MODE", "true")
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests::evals::test")
+    reset_settings()
+
+    with pytest.raises(HTTPException) as exc:
+        await eval_auth.verify_api_key(credentials=None, x_api_key="different-key", request=_request())
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail["error"]["code"] == "invalid_credentials"
 
 
 @pytest.mark.asyncio
@@ -108,6 +127,8 @@ async def test_get_eval_request_user_testing_bypass_requires_explicit_pytest_run
     monkeypatch.setenv("TESTING", "true")
     monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
     monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("TEST_MODE", "false")
+    monkeypatch.setenv("TLDW_TEST_MODE", "false")
     reset_settings()
 
     with pytest.raises(HTTPException) as exc:
@@ -120,31 +141,6 @@ async def test_get_eval_request_user_testing_bypass_requires_explicit_pytest_run
         )
 
     assert exc.value.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_get_eval_request_user_testing_bypass_allows_under_explicit_pytest_runtime(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TESTING", "true")
-    monkeypatch.setenv("EVALS_HEAVY_ADMIN_ONLY", "false")
-    monkeypatch.setenv("PYTEST_CURRENT_TEST", "tests::evals::test")
-    reset_settings()
-
-    async def _stub_get_request_user(**_kwargs):
-        return SimpleNamespace(id=7, username="eval-user")
-
-    monkeypatch.setattr(eval_auth, "get_request_user", _stub_get_request_user)
-
-    user = await eval_auth.get_eval_request_user(
-        request=_request(),
-        _user_ctx="ctx",
-        api_key=None,
-        token=None,
-        legacy_token_header=None,
-    )
-
-    assert getattr(user, "id", None) == 7
 
 
 def test_enforce_heavy_admin_only_treats_on_as_enabled(monkeypatch: pytest.MonkeyPatch) -> None:

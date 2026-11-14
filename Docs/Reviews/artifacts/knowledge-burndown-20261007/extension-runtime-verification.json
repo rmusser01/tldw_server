@@ -1,0 +1,31 @@
+{
+  "runtimeRegressionRed": {
+    "exitCode": 1,
+    "expectedDispatcherFailure": true,
+    "log": "<temporary>/knowledge-burndown-wxt-react-regression-red-final.log"
+  },
+  "boundedGreen": {
+    "exitCode": 0,
+    "fiveTestsPassed": true,
+    "log": "<temporary>/knowledge-burndown-wxt-react-bounded-green-final.log"
+  },
+  "prettierCheck": true,
+  "lint": [
+    {
+      "filePath": "apps/extension/wxt.config.ts",
+      "errorCount": 0,
+      "warningCount": 0
+    },
+    {
+      "filePath": "apps/extension/tests/unit/wxt-react-runtime.test.ts",
+      "errorCount": 0,
+      "warningCount": 0
+    }
+  ],
+  "sourceSHA256": "80dc2aeba20c727a4cd3f0d8fdb925e99857bb1b4e6f9664cc8dfc22e84a2a82",
+  "runtimeVersion": "18.3.1",
+  "compile": {
+    "exitCode": 0,
+    "log": "<temporary>/knowledge-burndown-wxt-react-types-final.log"
+  }
+}

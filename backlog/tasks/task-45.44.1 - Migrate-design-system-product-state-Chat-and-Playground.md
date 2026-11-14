@@ -42,7 +42,7 @@ Mirror the linked GitHub product-area migration issue. Closure requires zero cur
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Continuation after tracker PR #1679 merged. Started first product-area slice for GitHub issue #1658 / TASK-45.44.1 in isolated worktree .worktrees/design-system-chat-playground-migration.
 
 Migrated Chat and Playground target labels. Target guard findings are now zero and target baseline entries are now zero. Focused guard suite passes. Bandit skipped for UI-only changes.
@@ -58,7 +58,7 @@ Closeout 2026-05-23:
 - Follow-up child TASK-45.44.1.1 closed the later unbaselined Playground Ready labels.
 - Current full `bun run verify:design-system-state` was rerun after repairing the local UI dependency symlink and exits 1 on unrelated repo-wide product-state drift outside the Chat/Playground owned paths; this closeout does not claim global verifier cleanliness.
 - Bandit skipped for this closeout because only Backlog markdown is changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

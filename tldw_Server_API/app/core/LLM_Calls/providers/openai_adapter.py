@@ -4,6 +4,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
+from urllib.parse import urlparse
 
 try:
     import httpx
@@ -32,7 +33,11 @@ from tldw_Server_API.app.core.LLM_Calls.capability_registry import (
 from tldw_Server_API.app.core.LLM_Calls.openai_credentials import (
     openai_credential_headers,
 )
-from tldw_Server_API.app.core.LLM_Calls.payload_utils import merge_extra_body, merge_extra_headers
+from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
+    build_openai_chat_payload,
+    merge_extra_body,
+    merge_extra_headers,
+)
 from tldw_Server_API.app.core.LLM_Calls.streaming import (
     iter_sse_lines_raising,
     wrap_sync_stream,
@@ -157,67 +162,7 @@ class OpenAIAdapter(ChatProvider):
         return v not in {"0", "false", "no", "off"}
 
     def _build_openai_payload(self, request: dict[str, Any]) -> dict[str, Any]:
-        messages = request.get("messages") or []
-        system_message = request.get("system_message")
-        payload_messages: list[dict[str, Any]] = []
-        if system_message:
-            payload_messages.append({"role": "system", "content": system_message})
-        # Assume messages are already OpenAI format
-        payload_messages.extend(messages)
-        payload: dict[str, Any] = {
-            "model": request.get("model"),
-            "messages": payload_messages,
-        }
-        temperature = request.get("temperature")
-        if temperature is not None:
-            payload["temperature"] = temperature
-        top_p = request.get("top_p")
-        if top_p is not None:
-            payload["top_p"] = top_p
-        max_completion = request.get("max_completion_tokens")
-        if max_completion is not None:
-            payload["max_completion_tokens"] = max_completion
-        else:
-            max_tokens = request.get("max_tokens")
-            if max_tokens is not None:
-                payload["max_tokens"] = max_tokens
-        n = request.get("n")
-        if n is not None:
-            payload["n"] = n
-        presence_penalty = request.get("presence_penalty")
-        if presence_penalty is not None:
-            payload["presence_penalty"] = presence_penalty
-        frequency_penalty = request.get("frequency_penalty")
-        if frequency_penalty is not None:
-            payload["frequency_penalty"] = frequency_penalty
-        logit_bias = request.get("logit_bias")
-        if logit_bias is not None:
-            payload["logit_bias"] = logit_bias
-        user = request.get("user")
-        if user is not None:
-            payload["user"] = user
-        # Propagate explicit stream flag for testability and parity with legacy path
-        if request.get("stream") is not None:
-            payload["stream"] = bool(request.get("stream"))
-        # Tools and tool_choice gating to mirror legacy behavior
-        tools = request.get("tools")
-        if tools is not None:
-            payload["tools"] = tools
-        tool_choice = request.get("tool_choice")
-        if tool_choice == "none":
-            payload["tool_choice"] = "none"
-        elif tool_choice is not None and tools:
-            payload["tool_choice"] = tool_choice
-        if request.get("response_format") is not None:
-            payload["response_format"] = request.get("response_format")
-        if request.get("seed") is not None:
-            payload["seed"] = request.get("seed")
-        if request.get("stop") is not None:
-            payload["stop"] = request.get("stop")
-        if request.get("logprobs") is not None:
-            payload["logprobs"] = request.get("logprobs")
-        if request.get("top_logprobs") is not None and request.get("logprobs"):
-            payload["top_logprobs"] = request.get("top_logprobs")
+        payload = build_openai_chat_payload(request)
         # gpt-5 models use max_completion_tokens and reject top_p
         model = payload.get("model")
         if isinstance(model, str) and model.lower().startswith("gpt-5"):
@@ -358,6 +303,18 @@ class OpenAIAdapter(ChatProvider):
             payload = merge_extra_body(payload, request)
             headers = merge_extra_headers(self._openai_headers(api_key, request), request)
             try:
+                # Inside the try: a malformed base URL (``http://[::1``) fails as a sanitized provider error.
+                host = urlparse(url).hostname or ""
+                if host == "api.openai.com" or host.endswith(".api.openai.com"):
+                    # OpenAI sends a stream's usage only when asked: a last chunk with empty choices, which the
+                    # usage record reads (TASK-13951). OpenAI's data-residency hosts (eu.api.openai.com, ...) are
+                    # asked too. The caller's own stream_options win. Another server behind this provider is not
+                    # asked, as it may reject the field.
+                    caller_options = payload.get("stream_options")
+                    payload["stream_options"] = {
+                        "include_usage": True,
+                        **(caller_options if isinstance(caller_options, dict) else {}),
+                    }
                 resolved_timeout = self._resolve_timeout(request, timeout)
                 with http_client_factory(timeout=resolved_timeout) as client:
                     with client.stream("POST", url, headers=headers, json=payload) as resp:

@@ -20,9 +20,11 @@ import {
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { usePromptStudioStore } from "@/store/prompt-studio"
 import { useStoreChatModelSettings } from "@/store/model"
+import { capturePromptOwnerScope, PromptOwnershipError } from "@/services/prompt-local-owner"
 import { filterCopilotPrompts } from "../copilot-prompts-utils"
 import type { PromptRowVM } from "../prompt-workspace-types"
 import type { RecipeTarget } from "@/components/Common/PromptAssist/recipes/types"
+import { hasUnresolvedTemplateTokens } from "@/utils/template-guards"
 
 type LocalQuickTestPrompt = {
   id: string
@@ -41,6 +43,7 @@ const normalizePromptSegment = (value: string | undefined): PromptSegment =>
     : "custom"
 
 export interface UsePromptInteractionsDeps {
+  expectedOwnerId?: string | null
   queryClient: QueryClient
   isOnline: boolean
   initialSegment?: string
@@ -251,67 +254,83 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
     setInspectorOpen(true)
   }, [])
 
-  // Insert handlers
-  const handleInsertChoice = React.useCallback(async (choice: "system" | "quick" | "both") => {
-    if (!insertPrompt) return
-    await editorMarkPromptAsUsed(insertPrompt.id)
-    if (choice === "system") {
-      setSelectedSystemPrompt(insertPrompt.id)
-      setSelectedQuickPrompt(undefined)
-      setInsertPrompt(null)
-      navigate("/chat")
-      return
-    }
-    if (choice === "both") {
-      setSelectedSystemPrompt(insertPrompt.id)
-      if (insertPrompt.userText) {
-        setSelectedQuickPrompt(insertPrompt.userText)
-      }
-      setInsertPrompt(null)
-      navigate("/chat")
-      return
-    }
-    const quickContent = insertPrompt.userText ?? insertPrompt.systemText
-    if (quickContent) {
-      setSelectedQuickPrompt(quickContent)
-      setSelectedSystemPrompt(undefined)
-      setInsertPrompt(null)
-      navigate("/chat")
-    }
-  }, [editorMarkPromptAsUsed, insertPrompt, navigate, setSelectedQuickPrompt, setSelectedSystemPrompt])
+  const applicationLifetime = useRef(true)
+  useEffect(() => {
+    applicationLifetime.current = true
+    return () => { applicationLifetime.current = false }
+  }, [])
 
-  const handleUsePromptInChat = React.useCallback(
-    async (record: any) => {
-      const { systemText, userText } = getPromptTexts(record)
-      const hasSystem =
-        typeof systemText === "string" && systemText.trim().length > 0
-      const hasUser =
-        typeof userText === "string" && userText.trim().length > 0
-
-      if (hasSystem) {
-        setInsertPrompt({
-          id: record.id,
-          systemText,
-          userText: hasUser ? userText : undefined
+  const applyOwnedPrompt = React.useCallback(async (promptId: string, apply: () => void, selectedTexts: (string | undefined)[] = []) => {
+    if (!applicationLifetime.current) return
+    let scope: Awaited<ReturnType<typeof capturePromptOwnerScope>> | undefined
+    try {
+      scope = await capturePromptOwnerScope(deps.expectedOwnerId)
+      if (!applicationLifetime.current) return
+      scope.assertCurrent()
+      if (selectedTexts.some(hasUnresolvedTemplateTokens)) {
+        notification.warning({
+          message: t("managePrompts.template.unresolvedTitle", {
+            defaultValue: "Fill template variables before using this prompt"
+          }),
+          description: t("managePrompts.template.unresolvedDescription", {
+            defaultValue: "Replace all template placeholders in the saved prompt before applying it to Chat. Preview values do not change the saved text."
+          })
         })
         return
       }
+      await editorMarkPromptAsUsed(promptId)
+      scope.assertCurrent()
+      if (applicationLifetime.current) apply()
+    } catch (error) {
+      if (!(error instanceof PromptOwnershipError)) throw error
+    } finally {
+      scope?.release()
+    }
+  }, [deps.expectedOwnerId, editorMarkPromptAsUsed, t])
 
-      const quickContent = userText ?? record?.content
-      if (quickContent) {
-        await editorMarkPromptAsUsed(record.id)
+  // Apply only while the captured account and editor are still current.
+  const handleInsertChoice = React.useCallback(async (choice: "system" | "quick" | "both") => {
+    if (!insertPrompt) return
+    await applyOwnedPrompt(insertPrompt.id, () => {
+      if (choice === "system" || choice === "both") {
+        setSystemPrompt(undefined)
+        setSelectedSystemPrompt(insertPrompt.id)
+        setSelectedQuickPrompt(choice === "both" ? insertPrompt.userText : undefined)
+      } else {
+        const quickContent = insertPrompt.userText ?? insertPrompt.systemText
+        if (!quickContent) return
         setSelectedQuickPrompt(quickContent)
         setSelectedSystemPrompt(undefined)
-        navigate("/chat")
+      }
+      setInsertPrompt(null)
+      navigate("/chat")
+    }, choice === "system"
+      ? [insertPrompt.systemText]
+      : choice === "quick"
+        ? [insertPrompt.userText ?? insertPrompt.systemText]
+        : [insertPrompt.systemText, insertPrompt.userText])
+  }, [applyOwnedPrompt, insertPrompt, navigate, setSelectedQuickPrompt, setSelectedSystemPrompt, setSystemPrompt])
+
+  const handleUsePromptInChat = React.useCallback(
+    async (record: any) => {
+      if (!applicationLifetime.current) return
+      const { systemText, userText } = getPromptTexts(record)
+      const hasSystem = typeof systemText === "string" && systemText.trim().length > 0
+      const hasUser = typeof userText === "string" && userText.trim().length > 0
+      if (hasSystem) {
+        setInsertPrompt({ id: record.id, systemText, userText: hasUser ? userText : undefined })
+        return
+      }
+      const quickContent = userText ?? record?.content
+      if (quickContent) {
+        await applyOwnedPrompt(record.id, () => {
+          setSelectedQuickPrompt(quickContent)
+          setSelectedSystemPrompt(undefined)
+          navigate("/chat")
+        }, [quickContent])
       }
     },
-    [
-      getPromptTexts,
-      editorMarkPromptAsUsed,
-      navigate,
-      setSelectedQuickPrompt,
-      setSelectedSystemPrompt
-    ]
+    [getPromptTexts, applyOwnedPrompt, navigate, setSelectedQuickPrompt, setSelectedSystemPrompt]
   )
 
   const handleApplyRecipe = React.useCallback(

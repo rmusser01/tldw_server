@@ -2,6 +2,10 @@ import React from "react"
 import { Link } from "react-router-dom"
 import { AlertTriangle, CheckCircle2, ClipboardList, ShieldCheck, SlidersHorizontal } from "lucide-react"
 
+import { Button } from "@/components/Common/Button"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
 import { useConnectionUxState } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { MODERATION_RULES_PATH } from "@/routes/route-paths"
@@ -47,21 +51,65 @@ const backendStatusCopy = (online: boolean, uxState: string) => {
   }
 }
 
-export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
-  compact = false
+export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = (
+  props,
+) => {
+  const { config, authorityLoading } = useCanonicalConnectionConfig();
+  const authority = usePromptLocalAuthority();
+  const boundary = deriveConnectionAuthorityId(config);
+  if (
+    !config ||
+    authorityLoading ||
+    authority.boundaryKey !== boundary ||
+    (!authority.ready && !authority.unavailable)
+  ) {
+    return (
+      <div>
+        <p role="status">Resolving Moderation Review account…</p>
+        <Link to="/settings/tldw">Open connection settings</Link>
+      </div>
+    );
+  }
+  if (!authority.ready || authority.ownerId === null) {
+    return (
+      <div role="alert">
+        <p>
+          Could not resolve the moderation account. Retry or check connection
+          settings.
+        </p>
+        <Button type="button" onClick={authority.retry}>
+          Retry account
+        </Button>
+        <Link to="/settings/tldw">Open connection settings</Link>
+      </div>
+    );
+  }
+  return (
+    <ModerationReviewWorkspace
+      key={`${boundary}:${authority.ownerId}`}
+      {...props}
+      presetOwnerId={authority.ownerId}
+    />
+  );
+};
+
+
+
+const ModerationReviewWorkspace: React.FC<ModerationReviewShellProps & { presetOwnerId: string }> = ({
+  compact = false, presetOwnerId
 }) => {
   const online = useServerOnline()
   const { uxState } = useConnectionUxState()
   const backendStatus = backendStatusCopy(online, uxState)
   const StatusIcon = backendStatus.tone === "ok" ? CheckCircle2 : AlertTriangle
-  const queue = useModerationReviewQueue()
+  const queue = useModerationReviewQueue(presetOwnerId)
   const searchInputRef = React.useRef<HTMLInputElement | null>(null)
   const visibleTotal = queue.total ?? queue.items.length
   const selectedStatus = queue.selectedItem?.status || "None"
   const reviewComplete =
     !queue.loading &&
     !queue.error &&
-    queue.filters.status === "needs_review" &&
+    queue.loadedFilters.status === "needs_review" &&
     visibleTotal === 0 &&
     queue.items.length === 0
 
@@ -192,6 +240,17 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
         onRetry={queue.refresh}
       />
 
+      {(queue.selectedItemIds.length > 0 || queue.bulkResult || queue.bulkDeciding) && (
+        <BulkDecisionBar
+          selectedCount={queue.selectedItemIds.length}
+          disabled={queue.loading || Boolean(queue.error)}
+          deciding={queue.bulkDeciding}
+          result={queue.bulkResult}
+          onBulkDecision={queue.bulkDecideSelected}
+          onClearSelection={queue.clearSelection}
+        />
+      )}
+
       {reviewComplete && (
         <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm text-green-900 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-100">
           <div className="font-semibold">Review complete</div>
@@ -232,15 +291,6 @@ export const ModerationReviewShell: React.FC<ModerationReviewShellProps> = ({
               <div className="rounded-lg border border-border bg-surface2 p-4 text-sm text-text-muted">
                 The active filters no longer include this selected item.
               </div>
-            )}
-            {queue.selectedItemIds.length > 0 && (
-              <BulkDecisionBar
-                selectedCount={queue.selectedItemIds.length}
-                deciding={queue.bulkDeciding}
-                result={queue.bulkResult}
-                onBulkDecision={queue.bulkDecideSelected}
-                onClearSelection={queue.clearSelection}
-              />
             )}
             {queue.nextCursor && (
               <button

@@ -40,7 +40,7 @@ Docs/superpowers/plans/2026-05-28-mcp-unified-stage3-host-adapter-shim-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added Stage 3 runtime protocols for server auth, lifecycle, permission seeding, module defaults, and policy-context feature flags.
 - Added default tldw_server host adapters and wired MCPServer through injected dependencies for the slice paths.
 - Re-exported new contracts from standalone and compatibility interface packages.
@@ -52,7 +52,7 @@ Docs/superpowers/plans/2026-05-28-mcp-unified-stage3-host-adapter-shim-plan.md
 - Reopened after PR re-check found three actionable Qodo review threads: permission seeder connection shape, silent server helper fallbacks, and a vague compatibility helper docstring.
 - Addressed Qodo review feedback by passing acquired AuthNZ DB connections into permission seeding, warning on host-adapter fallback exceptions, and documenting `_is_authnz_access_token` boolean semantics.
 - Re-ran focused verification after the Qodo fixes: 55 focused MCP tests passed, Ruff passed on touched scope, `git diff --check` passed, and Bandit reported zero findings for touched code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

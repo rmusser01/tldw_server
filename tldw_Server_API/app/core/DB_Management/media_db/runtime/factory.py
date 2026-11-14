@@ -13,7 +13,6 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.media_class import 
     load_media_database_cls,
 )
 
-
 BackendLoader = Callable[[], DatabaseBackend | None]
 ContentBackendResolver = Callable[[], DatabaseBackend | None]
 RUNTIME_FACTORY_EXCEPTIONS = (
@@ -45,14 +44,18 @@ def create_media_database(
     db_path: str | Path | None = None,
     backend: DatabaseBackend | None = None,
     config: configparser.ConfigParser | None = None,
+    existing_only: bool = False,
     runtime: MediaDbRuntimeConfig,
 ) -> Any:
-    """Instantiate a MediaDatabase using runtime-scoped defaults."""
+    """Instantiate a MediaDatabase, optionally bypassing creating/bootstrap behavior."""
 
     media_database_cls = _load_media_database_cls()
     cfg = config or runtime.default_config
     target_path = Path(db_path) if db_path else Path(runtime.default_db_path)
-    backend_to_use = backend if backend is not None else runtime.backend_loader()
+    if existing_only and backend is None and not runtime.postgres_content_mode:
+        backend_to_use = None
+    else:
+        backend_to_use = backend if backend is not None else runtime.backend_loader()
 
     if runtime.postgres_content_mode:
         if (
@@ -68,6 +71,7 @@ def create_media_database(
             client_id=client_id,
             backend=backend_to_use,
             config=cfg,
+            **({"existing_only": True} if existing_only else {}),
         )
 
     return media_database_cls(
@@ -75,6 +79,7 @@ def create_media_database(
         client_id=client_id,
         backend=backend_to_use,
         config=cfg,
+        **({"existing_only": True} if existing_only else {}),
     )
 
 

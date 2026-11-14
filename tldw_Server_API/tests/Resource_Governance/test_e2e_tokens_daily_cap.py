@@ -59,10 +59,8 @@ async def _init_authnz_sqlite(db_path, monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
     monkeypatch.setenv("AUTH_MODE", "multi_user")
     try:
-        from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
         from tldw_Server_API.app.core.AuthNZ.settings import reset_settings
 
-        await reset_db_pool()
         reset_settings()
     except Exception:
         _ = None
@@ -120,7 +118,7 @@ async def _create_user_and_key(*, username: str, email: str) -> str:
 
 
 @pytest.mark.asyncio
-async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_chat_tokens.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     api_key = await _create_user_and_key(username="chat-cap-user", email="chat-cap-user@example.com")
@@ -147,11 +145,10 @@ async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backen
     # reserve heuristic used by the chat endpoint.
     from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
     from tldw_Server_API.app.core.Chat.chat_service import estimate_tokens_from_json
-    from tldw_Server_API.app.api.v1.endpoints.chat import _sanitize_json_for_rate_limit
 
     req_model = ChatCompletionRequest(**body)
     request_json = json.dumps(req_model.model_dump())
-    est = int(estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json)) or 1)
+    est = int(estimate_tokens_from_json(request_json) or 1)
     completion_budget = int(getattr(req_model, "max_tokens", 0) or 0)
     reserve_units = max(1, int(est) + max(0, int(completion_budget)))
 
@@ -225,7 +222,7 @@ async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backen
 
 
 @pytest.mark.asyncio
-async def test_e2e_embeddings_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backend):
+async def test_e2e_embeddings_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backend, fresh_services):
     db_path = tmp_path / "authnz_embeddings_tokens.db"
     await _init_authnz_sqlite(db_path, monkeypatch)
     api_key = await _create_user_and_key(username="emb-cap-user", email="emb-cap-user@example.com")

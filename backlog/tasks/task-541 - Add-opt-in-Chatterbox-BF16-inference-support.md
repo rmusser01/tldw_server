@@ -38,9 +38,9 @@ Add failing adapter tests proving Chatterbox BF16 config prepares a model T3 mod
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Added BF16 mode normalization with off/on/auto values. The adapter keeps default precision unless explicitly enabled; auto currently requires CUDA BF16 support. Enabled TTS generation prepares model.t3 with torch.bfloat16 and uses a best-effort torch.autocast context. Voice conversion remains on the upstream default precision path. The Chatterbox provider alias map now carries generic use_bf16 into chatterbox_use_bf16.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

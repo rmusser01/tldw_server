@@ -45,7 +45,10 @@ describe("Knowledge QA real outbound owner checks", () => {
     client = new TldwApiClient()
     vi.spyOn(tldwClient, "initialize").mockResolvedValue(undefined)
     vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue(config())
-    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     boundary.get.mockImplementation(async (key: string) => key === "tldwConfig" ? config() : null)
     boundary.fetch.mockImplementation(async () => new Response('{"type":"contexts","contexts":[],"id":"owned"}\n', {
       status: 200, headers: { "Content-Type": "application/json" },

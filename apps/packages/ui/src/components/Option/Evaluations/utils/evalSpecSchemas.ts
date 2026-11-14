@@ -42,7 +42,7 @@ export const EVAL_SPEC_SCHEMAS: Record<string, EvalSpecSchema> = {
     builder: "json",
     defaultSpec: {
       sub_type: "response_quality",
-      metrics: ["coherence", "relevance", "groundedness"],
+      metrics: ["relevance", "completeness", "clarity", "accuracy"],
       threshold: 0.7,
       evaluator_model: "openai"
     }
@@ -51,13 +51,7 @@ export const EVAL_SPEC_SCHEMAS: Record<string, EvalSpecSchema> = {
     type: "response_quality",
     label: "response_quality",
     builder: "response_quality",
-    metricOptions: [
-      "coherence",
-      "conciseness",
-      "relevance",
-      "groundedness",
-      "helpfulness"
-    ],
+    metricOptions: ["relevance", "completeness", "clarity", "accuracy"],
     thresholdFields: [
       {
         key: "min_score",
@@ -69,7 +63,7 @@ export const EVAL_SPEC_SCHEMAS: Record<string, EvalSpecSchema> = {
       }
     ],
     defaultSpec: {
-      metrics: ["coherence", "conciseness", "relevance"],
+      metrics: ["relevance", "completeness", "clarity", "accuracy"],
       model: "gpt-3.5-turbo",
       temperature: 0.3,
       thresholds: { min_score: 0.7 }

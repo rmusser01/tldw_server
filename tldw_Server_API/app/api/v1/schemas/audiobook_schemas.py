@@ -10,15 +10,22 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
+# Core-owned since TASK-13950.15; re-exported for the API layer.
+from tldw_Server_API.app.core.Audiobooks.audiobook_schemas import (  # noqa: F401 - re-exported (TASK-13950.15)
+    AlignmentEngine,
+    AlignmentPayload,
+    AlignmentWord,
+    ChapterPreview,
+    SubtitleFormat,
+    SubtitleMode,
+    SubtitleVariant,
+)
+
 SourceInputType = Literal["epub", "pdf", "txt", "md", "srt", "vtt", "ass"]
 AudioFormat = Literal["wav", "mp3", "flac", "opus", "m4b"]
-SubtitleFormat = Literal["srt", "vtt", "ass"]
-SubtitleMode = Literal["line", "sentence", "word_count", "highlight"]
-SubtitleVariant = Literal["wide", "narrow", "centered"]
 AudiobookJobStatus = Literal["queued", "processing", "completed", "failed", "canceled"]
 AudiobookArtifactType = Literal["audio", "subtitle", "package", "alignment"]
 AudiobookArtifactScope = Literal["chapter", "merged"]
-AlignmentEngine = Literal["kokoro"]
 
 
 def _default_offset_pagination_aliases(response):
@@ -162,41 +169,6 @@ class AudiobookJobItem(BaseModel):
     @classmethod
     def _validate_tts_backend(cls, value: str | None) -> str | None:
         return _validate_optional_tts_backend(value)
-
-
-class AlignmentWord(BaseModel):
-    """Alignment data for a single word."""
-
-    word: str = Field(..., description="Word text")
-    start_ms: int = Field(..., ge=0, description="Start time in milliseconds")
-    end_ms: int = Field(..., ge=0, description="End time in milliseconds")
-    char_start: int | None = Field(None, ge=0, description="Character offset start")
-    char_end: int | None = Field(None, ge=0, description="Character offset end")
-
-
-class AlignmentPayload(BaseModel):
-    """Alignment payload used for subtitle rendering."""
-
-    engine: AlignmentEngine = Field(..., description="Alignment engine")
-    sample_rate: int = Field(..., ge=8000, description="Sample rate used by the aligner")
-    words: list[AlignmentWord] = Field(..., description="Word alignment data")
-
-    @field_validator("words")
-    @classmethod
-    def _validate_words(cls, value: list[AlignmentWord]) -> list[AlignmentWord]:
-        if not value:
-            raise ValueError("alignment words must not be empty")
-        return value
-
-
-class ChapterPreview(BaseModel):
-    """Chapter preview from parse output."""
-
-    chapter_id: str = Field(..., description="Chapter identifier")
-    title: str | None = Field(None, description="Chapter title")
-    start_offset: int = Field(..., ge=0, description="Start offset in characters")
-    end_offset: int = Field(..., ge=0, description="End offset in characters")
-    word_count: int = Field(..., ge=0, description="Word count in chapter")
 
 
 class AudiobookParseRequest(BaseModel):

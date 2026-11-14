@@ -14,6 +14,9 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_media_by_hash,
     get_media_repository,
 )
+from tldw_Server_API.app.core.DB_Management.media_db.runtime.safe_metadata_write_ops import (
+    update_version_safe_metadata_in_transaction,
+)
 from tldw_Server_API.app.core.External_Sources.connectors_service import (
     get_reference_item_binding,
     upsert_reference_item_binding,
@@ -26,10 +29,7 @@ from tldw_Server_API.app.core.External_Sources.reference_manager_types import (
     NormalizedReferenceItem,
     ReferenceAttachmentCandidate,
 )
-from tldw_Server_API.app.core.Utils.metadata_utils import (
-    normalize_safe_metadata,
-    update_version_safe_metadata_in_transaction,
-)
+from tldw_Server_API.app.core.Utils.metadata_utils import normalize_safe_metadata
 from tldw_Server_API.app.core.exceptions import ReferenceImportError
 
 _REFERENCE_CANONICAL_FIELDS = (

@@ -48,13 +48,13 @@ Work in /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/persona-visu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification: running `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py -v` in the clean worktree initially failed because `tldw_Server_API.app.core.Persona.visuals` did not exist. A direct import confirmed `ModuleNotFoundError: No module named 'tldw_Server_API.app.core.Persona.visuals'`.
 
 Implementation: added pure `tldw_Server_API/app/core/Persona/visuals.py` and focused tests in `tldw_Server_API/tests/Persona/test_persona_visuals_core.py`. The validator normalizes `asset_ids` to ordered `frames`, validates required state resolution, fallback cycles, frame rates, max frame count, sprite-sheet regions, preview frames, unknown assets, and authored triggers.
 
 Verification: `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m pytest tldw_Server_API/tests/Persona/test_persona_visuals_core.py -q --tb=short` passed with 9 passed and 5 warnings. `git diff --check` passed. Bandit command `source /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/activate && python -m bandit -r tldw_Server_API/app/core/Persona/visuals.py -f json -o /tmp/bandit_persona_visuals_core.json` completed with no errors and no results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -233,7 +233,8 @@ it("preserves an ambiguous send's request identity on retry", async () => {
   })
   fireEvent.click(screen.getByRole("button", { name: "Send" }))
   await screen.findByText("Acceptance response lost")
-  fireEvent.click(screen.getByRole("button", { name: "Send" }))
+  expect(screen.getByLabelText("Reply to Research one")).toHaveValue("Explain this")
+  fireEvent.click(await screen.findByRole("button", { name: "Send" }))
   await waitFor(() => expect(mocks.acceptBuddyTurn).toHaveBeenCalledTimes(2))
   expect(mocks.acceptBuddyTurn.mock.calls[0][0]).toEqual(
     mocks.acceptBuddyTurn.mock.calls[1][0]

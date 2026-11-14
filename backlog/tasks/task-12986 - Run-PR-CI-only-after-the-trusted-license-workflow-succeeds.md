@@ -34,7 +34,7 @@ Make the trusted frontend-license workflow the only workflow started by main/dev
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Requester corrected the objective: the license check must complete successfully before any other PR CI begins. The status-bypass direction was a misunderstanding and will not be implemented; no live ruleset changes were made. Selected credential-free approach: workflow_run chaining from Frontend License Gate Audit.
 
 Corrected workflow_run specification passed independent review on iteration 3. Iteration 1 fixed server-side non-success skipping, unsupported-base PR trigger preservation, exact workflow/PR payload field validation, job-scoped permissions and credentialless checkouts, CodeQL no-upload PR analysis, default-branch rollout, check association canarying, and path-filter edge behavior. Iteration 2 added the normative LICENSE_FIRST_CI_ENABLED cutover guard, !cancelled() semantics, and pre-admission workflow-level concurrency expressions. Iteration 3 approved with no blockers.
@@ -56,7 +56,7 @@ Implementation complete for PR #2758 preparation stage. Added trusted workflow_r
 Final verification: four focused CI contract files -> 144 passed, 2 warnings; actionlint 1.7.12 across all workflows -> exit 0; Bandit on Helper_Scripts/ci/license_first_admission.py -> 0 findings; git diff --check origin/dev...HEAD -> exit 0.
 
 Rollout prerequisite: this PR deliberately preserves direct PR triggers and keeps LICENSE_FIRST_CI_ENABLED inert. After the definitions land on the canonical/default branch and main/dev are synchronized, run the documented canary, then perform the separate trigger-removal/variable cutover. TASK-12986 remains In Progress until that cutover proves strict ordering.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

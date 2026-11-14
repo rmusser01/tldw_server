@@ -38,7 +38,7 @@ Source: synthesis F38
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 DONE. The two 187-line materializers now construct one shared implementation.
 
 NEW: core/Sync/v2/materializers/metadata_only.py - MetadataOnlyMaterializer(domain, code_prefix, label, lower_label, noun). media_metadata.py (33 lines) and source_cache.py (27 lines) are now thin factories. 374 duplicated lines -> one implementation.
@@ -56,7 +56,7 @@ One branch could NOT be characterised and is preserved verbatim: `envelope.serve
 REGRESSION: test_sync_v2_service 165 passed; media_compat + factory + parity 101 passed. test_sync_v2_domain_adapters shows 3 failed / 48 passed BOTH with and without the refactor (stash-isolated) - those are 3 of the 12 pre-existing failures catalogued in TASK-13344, not caused here.
 
 2026-09-23 reconciliation: AC1 met - Sync/v2/materializers/metadata_only.py MetadataOnlyMaterializer(domain, code_prefix, label, lower_label, noun); media_metadata.py (33 lines) and source_cache.py (27 lines) are thin factories (commit 8c1a637a2d). AC2 met - I diffed the pre-refactor files (8c1a637a2d^) against the templates: all 28 differing lines map to {code_prefix}_projection_failed/_tombstoned/_hash_mismatch/_object_id and the label/lower_label/noun message forms, and they reconstruct byte-exactly. AC3 met - tests/Sync/test_metadata_only_materializer_parity.py is parametrised over both domains (CASES media/source_cache) with literal expected strings; together with test_sync_v2_media_compat.py and test_sync_v2_factory.py, 53 passed on 2026-09-23. Bandit on the 3 materializer files: no issues. Known: the envelope.server_cursor is None branch cannot be reached through SyncEnvelope and is not characterised; the 3 test_sync_v2_domain_adapters failures predate this change (TASK-13344).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

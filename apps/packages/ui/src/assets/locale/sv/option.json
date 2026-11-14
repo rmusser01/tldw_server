@@ -404,7 +404,7 @@
     "storageServerDescription": "Lagrade på din tldw-server (rekommenderas för RAG och delade arbetsytor).",
     "storageLocalDescription": "Behålls bara i denna webbläsare; inga data skrivs till servern.",
     "storeAfterReview": "Spara efter granskning",
-    "reviewBeforeStorage": "Granska före sparning",
+    "reviewBeforeStorage": "Granska extraherat innehåll före sparande",
     "reviewBeforeStorageHint": "Bearbeta nu och redigera sedan utkast lokalt innan du sparar till servern.",
     "reviewEnabled": "Granskningsläge",
     "reviewStorageCap": "Lokala utkast är begränsade till {{cap}}.",

@@ -1,13 +1,11 @@
 from pathlib import Path
 
-import pytest
-
 import backlog_py.mcp as mcp
+import pytest
 from backlog_py.mcp.resources import read_resource
 from backlog_py.mcp.server import is_mcp_sdk_available, main
-from backlog_py.mcp.tools import task_edit, task_search, task_view
+from backlog_py.mcp.tools import task_search, task_view
 from backlog_py.storage.project import discover_project
-
 
 FIXTURE_REPO = Path(__file__).parent / "fixtures" / "repos" / "basic"
 
@@ -69,11 +67,6 @@ def test_task_view_returns_fixture_backed_readonly_dict():
     assert "Implement a fixture" in result["description"]
     assert result["path"] == "backlog/tasks/task-1 - Example-task.md"
     assert "Trailing unowned body content" in result["raw_source"]
-
-
-def test_unsupported_mutation_shapes_raise_clear_not_implemented_errors():
-    with pytest.raises(NotImplementedError, match="Task mutation MCP tools are not implemented until Task 7"):
-        task_edit(_project(), task_id="TASK-1", title="Edited task")
 
 
 def test_server_stub_reports_missing_sdk_without_importing_mcp():

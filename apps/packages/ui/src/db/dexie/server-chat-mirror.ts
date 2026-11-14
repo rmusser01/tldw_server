@@ -3,9 +3,11 @@ import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { db } from "./schema"
 import { generateID } from "./helpers"
+import { indexMessagesSearchTokens } from "./search-tokens"
 import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
-import type { HistoryOperationOptions } from "./history-selection"
+import type { ChatScope } from "@/types/chat-scope"
+import { assertNoPendingLocalSettingsWrite, type HistoryOperationOptions } from "./history-selection"
 
 /** Full verified target/owner identity; never stores bearer tokens or API keys. */
 export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "requestScope">): string => {
@@ -18,28 +20,129 @@ export const serverChatMirrorOwnerKey = (snapshot: Pick<ServicePromptSnapshot, "
   ])
 }
 
+type MirrorBinding = { chatId: string; ownerKey: string; scope?: ChatScope }
+const mirrorBindingKey = ({ chatId, ownerKey, scope }: MirrorBinding) => JSON.stringify([ownerKey, chatId, scope?.type ?? "global", scope?.type === "workspace" ? scope.workspaceId : null])
+// Cache provenance only; callers must retain their original server ownership guards.
+const acknowledgedMirrorIds = new Map<string, string>()
+export const hasAcknowledgedServerChatMirror = ({ historyId, ...binding }: MirrorBinding & { historyId: string | null }) => historyId !== null && acknowledgedMirrorIds.get(mirrorBindingKey(binding)) === historyId
+
+/** Read authority without adopting a legacy mirror or changing any local work. */
+export const readWorkspaceServerChatMirror = async ({
+  historyId, chatId, ownerKey, workspaceId,
+}: { historyId: string; chatId: string; ownerKey: string; workspaceId: string }) =>
+  db.transaction("r", [db.chatHistories, db.messages, db.compareStates, db.historySelections, db.sessionFiles], async () => {
+    const header = await db.chatHistories.get(historyId)
+    if (!header || header.server_chat_id !== chatId || header.server_scope_key !== ownerKey ||
+        header.server_scope_type !== "workspace" || header.server_workspace_id !== workspaceId)
+      throw new Error("Workspace Chat mirror ownership unavailable")
+    assertNoPendingLocalSettingsWrite(header)
+    if (header.is_rag || header.doc_id || header.character_id || header.last_used_prompt ||
+        header.root_id || header.parent_conversation_id || header.forked_from_message_id || header.local_owner_key)
+      throw new Error("Workspace Chat mirror has unsupported local context")
+    const rows = await db.messages.where("history_id").equals(historyId).toArray()
+    const compare = await db.compareStates.get(historyId)
+    const selections = await db.historySelections.where("conversation_id").equals(historyId).toArray()
+    const files = await db.sessionFiles.get(historyId)
+    if ((compare && Object.entries(compare).some(([key, value]) =>
+          !["history_id", "updatedAt"].includes(key) && value != null && value !== false &&
+          (typeof value !== "object" || Object.keys(value).length > 0))) ||
+        selections.some(row => Object.keys(row.pending_turns || {}).length || row.pending_confirmation ||
+          row.pending_view_session_id || row.pending_dispatch_started) ||
+        (files && (files.files.length || files.retrievalEnabled)))
+      throw new Error("Workspace Chat mirror has pending local work")
+    const fields = new Set(["id", "history_id", "name", "role", "content", "images", "sources", "createdAt",
+      "reasoning_time_taken", "messageType", "clusterId", "modelId", "generationInfo", "metadataExtra",
+      "modelName", "modelImage", "documents", "discoSkillComment", "serverMessageId", "serverMessageVersion", "parent_message_id"])
+    if (rows.some(row => Object.entries(row).some(([key, value]) => value !== undefined && !fields.has(key)) ||
+        !["user", "assistant", "system"].includes(row.role)))
+      throw new Error("Workspace Chat mirror has unverified message context")
+    return { header, rows, compare, selections, files }
+  })
+
 export const linkServerChatMirror = async ({
-  chatId, title, ownerKey, currentHistoryId, legacyHistoryId, signal, validate_lease
+  chatId, title, ownerKey, currentHistoryId, legacyHistoryId, scope, signal, validate_lease
 }: {
   chatId: string; title: string; ownerKey: string
-  currentHistoryId?: string | null; legacyHistoryId?: string | null
-} & HistoryOperationOptions): Promise<string> => runChatPersistenceTransaction(signal, async () => {
-  const candidates = await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
-  const owned = candidates.find(history => history.server_scope_key === ownerKey)
-  const current = currentHistoryId ? await db.chatHistories.get(currentHistoryId) : undefined
-  const canLinkCurrent = current && (!current.server_chat_id || current.server_chat_id === chatId) &&
-    (current.server_scope_key === ownerKey ||
-      (!current.server_scope_key && current.id === legacyHistoryId))
-  const history = owned || (canLinkCurrent ? current : undefined)
-  if (history) {
-    await db.chatHistories.update(history.id, { title, server_chat_id: chatId, server_scope_key: ownerKey })
-    return history.id
-  }
-  const id = generateID()
-  await db.chatHistories.add({ id, title, createdAt: Date.now(), is_rag: false,
-    message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey })
-  return id
-}, undefined, validate_lease)
+  currentHistoryId?: string | null; legacyHistoryId?: string | null; scope?: ChatScope
+} & HistoryOperationOptions): Promise<string> => {
+  const namespace = { server_scope_type: scope?.type ?? "global" as const,
+    server_workspace_id: scope?.type === "workspace" ? scope.workspaceId : undefined }
+  const receiptKey = mirrorBindingKey({ chatId, ownerKey, scope })
+  const localId = await runChatPersistenceTransaction(signal, async () => {
+    const candidates = await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
+    const sameNamespace = (history: import("./types").HistoryInfo) =>
+      !history.server_scope_type || (history.server_scope_type === namespace.server_scope_type &&
+        (history.server_workspace_id ?? undefined) === namespace.server_workspace_id)
+    const owned = candidates.find(history => history.server_scope_key === ownerKey && sameNamespace(history))
+    const current = currentHistoryId ? await db.chatHistories.get(currentHistoryId) : undefined
+    const canLinkCurrent = current && sameNamespace(current) && (!current.server_chat_id || current.server_chat_id === chatId) &&
+      (current.server_scope_key === ownerKey ||
+        (!current.server_scope_key && current.id === legacyHistoryId))
+    const history = owned || (canLinkCurrent ? current : undefined)
+    if (history) {
+      await db.chatHistories.update(history.id, { title, server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
+      return history.id
+    }
+    const id = generateID()
+    await db.chatHistories.add({ id, title, createdAt: Date.now(), is_rag: false,
+      message_source: "server", server_chat_id: chatId, server_scope_key: ownerKey, ...namespace })
+    return id
+  }, undefined, validate_lease)
+  acknowledgedMirrorIds.set(receiptKey, localId)
+  return localId
+}
+
+/**
+ * Delete this owner's local copies of a server chat once the chat itself is
+ * deleted (moved to Trash), so local history search stops offering it. Another
+ * owner's copy is left alone. Returns the ids of the removed histories.
+ */
+export const removeServerChatMirror = async ({
+  chatId,
+  ownerKey,
+  scope,
+  signal,
+  validate_lease
+}: {
+  chatId: string
+  ownerKey: string
+  scope?: ChatScope
+} & HistoryOperationOptions): Promise<string[]> =>
+  db.transaction(
+    "rw",
+    [db.chatHistories, db.messages, db.compareStates],
+    async () => {
+      const assertCurrent = () => {
+        if (signal?.aborted || validate_lease?.() === false)
+          throw createServicePromptScopeChangedError()
+      }
+      assertCurrent()
+      const owned = (
+        await db.chatHistories.where("server_chat_id").equals(chatId).toArray()
+      ).filter(
+        (history) =>
+          history.server_scope_key === ownerKey &&
+          (scope?.type === "workspace"
+            ? history.server_scope_type === "workspace" &&
+              history.server_workspace_id === scope.workspaceId
+            : (!history.server_scope_type ||
+                history.server_scope_type === "global") &&
+              !history.server_workspace_id)
+      )
+      assertCurrent()
+      owned.forEach(assertNoPendingLocalSettingsWrite)
+      for (const history of owned) {
+        assertCurrent()
+        await db.chatHistories.delete(history.id)
+        assertCurrent()
+        await db.messages.where("history_id").equals(history.id).delete()
+        assertCurrent()
+        await db.compareStates.delete(history.id)
+        assertCurrent()
+      }
+      return owned.map((history) => history.id)
+    }
+  )
 
 /** Persist a receipt only onto the captured source row; edits are never replaced. */
 export const acknowledgePromotedChatMessage = async ({
@@ -81,13 +184,25 @@ const recoverCorrelatedUsers = (current: ChatMessage[], incoming: ChatMessage[])
       typeof clientId !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(clientId)) continue
     claims.set(clientId, [...(claims.get(clientId) || []), remote])
   }
+  // One pass up front instead of a scan per local row: canonical ids and raw
+  // ids are both ownership anchors a server id must not collide with, and a
+  // local id may only claim when it is unambiguous.
+  const knownIds = new Set<string>()
+  const localIdCounts = new Map<string, number>()
+  for (const message of current) {
+    const canonical = canonicalId(message)
+    if (canonical) knownIds.add(canonical)
+    if (message.id) {
+      knownIds.add(message.id)
+      localIdCounts.set(message.id, (localIdCounts.get(message.id) || 0) + 1)
+    }
+  }
   return current.map(local => {
     const matches = local.id ? claims.get(local.id) : undefined
     if (matches?.length !== 1 || local.isBot || (local.role && local.role !== "user") || canonicalId(local)) return local
     const remote = matches[0]
     const serverId = canonicalId(remote)!
-    if (current.some(message => canonicalId(message) === serverId || message.id === serverId) ||
-      current.filter(message => message.id === local.id).length !== 1 || local.message !== remote.message ||
+    if (knownIds.has(serverId) || localIdCounts.get(local.id) !== 1 || local.message !== remote.message ||
       JSON.stringify((local.images || []).filter(Boolean)) !== JSON.stringify((remote.images || []).filter(Boolean))) return local
     return { ...local, serverMessageId: serverId }
   })
@@ -96,19 +211,40 @@ const recoverCorrelatedUsers = (current: ChatMessage[], incoming: ChatMessage[])
 /** Recover only through an acknowledged reply and its explicit canonical remote parent. */
 const recoverAnchoredUsers = (current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] => {
   current = recoverCorrelatedUsers(current, incoming)
+  // Index the post-correlation state once; multiplicity is load-bearing, so
+  // every index keeps all matches in order.
+  const incomingByCanonical = new Map<string, ChatMessage[]>()
+  for (const message of incoming) {
+    const id = canonicalId(message)
+    if (id) incomingByCanonical.set(id, [...(incomingByCanonical.get(id) || []), message])
+  }
+  const knownIds = new Set<string>()
+  const currentById = new Map<string, ChatMessage[]>()
+  const botByCanonical = new Map<string, ChatMessage[]>()
+  for (const message of current) {
+    const canonical = canonicalId(message)
+    if (canonical) {
+      knownIds.add(canonical)
+      if (message.isBot) botByCanonical.set(canonical, [...(botByCanonical.get(canonical) || []), message])
+    }
+    if (message.id) {
+      knownIds.add(message.id)
+      currentById.set(message.id, [...(currentById.get(message.id) || []), message])
+    }
+  }
   const claims = new Map<string, string[]>()
   for (const reply of incoming) {
     const replyId = canonicalId(reply)
     if (!reply.isBot || (reply.role && reply.role !== "assistant") || !replyId || !reply.parentMessageId) continue
-    const parents = incoming.filter(message => canonicalId(message) === reply.parentMessageId)
+    const parents = incomingByCanonical.get(reply.parentMessageId) || []
     if (parents.length !== 1) continue
     const user = parents[0]
     const userId = canonicalId(user)!
     if (user.isBot || (user.role && user.role !== "user")) continue
-    if (current.some(message => canonicalId(message) === userId || message.id === userId)) continue
-    const anchors = current.filter(message => message.isBot && canonicalId(message) === replyId)
+    if (knownIds.has(userId)) continue
+    const anchors = botByCanonical.get(replyId) || []
     if (anchors.length !== 1 || !anchors[0].parentMessageId) continue
-    const candidates = current.filter(message => message.id === anchors[0].parentMessageId)
+    const candidates = currentById.get(anchors[0].parentMessageId) || []
     const local = candidates[0]
     if (candidates.length !== 1 || local.isBot || canonicalId(local) || local.message !== user.message ||
       // Text-only local saves historically retained the empty composer image.
@@ -147,6 +283,7 @@ export const reconcileServerChatMessages = (
     const id = key(message)
     return id ? [[id, message] as const] : []
   }))
+  const hasServerGreeting = incoming.some(message => message.messageType === "character:greeting" || message.messageType === "greeting")
   const merged = incoming.map(remote => {
     const id = key(remote)
     const local = id ? localById.get(id) : undefined
@@ -170,7 +307,7 @@ export const reconcileServerChatMessages = (
     if (local.isBot && isRepresentedVariant(local) && (local.variants || []).every(isRepresentedVariant)) continue
     // A synthetic greeting is superseded only by an acknowledged server greeting.
     if (!canonicalId(local) && (local.messageType === "character:greeting" || local.messageType === "greeting") &&
-      incoming.some(message => message.messageType === "character:greeting" || message.messageType === "greeting")) continue
+      hasServerGreeting) continue
     merged.push(local)
   }
   return merged
@@ -193,13 +330,27 @@ export const reconcileServerChatMirror = async ({
     images: row.images, sources: row.sources || [], parentMessageId: row.parent_message_id
   })), messages)
   const acknowledgedRows = rows.map((row, index) => ({ ...row, serverMessageId: recovered[index].serverMessageId }))
-  const localIds = new Map<string, string>()
-  for (const remote of messages) {
+  // First persisted row per server id — for unacknowledged rows the raw id is
+  // the only alias a server id can match. One index instead of a find() scan
+  // per incoming message; first write wins, like the first find() match.
+  const persistedByKey = new Map<string, Message>()
+  for (const row of acknowledgedRows) {
+    const key = row.serverMessageId || row.id
+    if (!persistedByKey.has(key)) persistedByKey.set(key, row)
+  }
+  // A captured source row must be confirmed by exactly one live message.
+  const confirmedByServerId = new Map<string, ChatMessage[]>()
+  for (const message of localMessages) {
+    const serverId = canonicalId(message)
+    if (!serverId || !message.id) continue
+    confirmedByServerId.set(serverId, [...(confirmedByServerId.get(serverId) || []), message])
+  }
+  // Plan every write synchronously; reads and writes are batched below.
+  const planned = messages.flatMap(remote => {
     const serverMessageId = canonicalId(remote)
-    if (!serverMessageId) continue
-    const persisted = acknowledgedRows.find(row => row.serverMessageId === serverMessageId ||
-      (!row.serverMessageId && row.id === serverMessageId))
-    const confirmed = localMessages.filter(message => canonicalId(message) === serverMessageId && message.id)
+    if (!serverMessageId) return []
+    const persisted = persistedByKey.get(serverMessageId)
+    const confirmed = confirmedByServerId.get(serverMessageId) || []
     const captured = !persisted && confirmed.length === 1 ? confirmed[0] : undefined
     const local = persisted || (captured ? {
       id: captured.id!, history_id: historyId, role: captured.role || (captured.isBot ? "assistant" : "user"),
@@ -208,8 +359,6 @@ export const reconcileServerChatMirror = async ({
       parent_message_id: captured.parentMessageId, serverMessageId, serverMessageVersion: captured.serverMessageVersion
     } as Message : undefined)
     const id = local?.id || `${historyId}:server:${encodeURIComponent(serverMessageId)}`
-    const existing = await db.messages.get(id)
-    if (existing && existing.history_id !== historyId) throw createServicePromptScopeChangedError()
     const localVersion = local?.serverMessageVersion ?? 0
     const remoteVersion = remote.serverMessageVersion ?? 0
     const preserveContent = local && (local.serverMessageVersion == null || localVersion >= remoteVersion) && local.content !== remote.message
@@ -224,31 +373,89 @@ export const reconcileServerChatMirror = async ({
       createdAt: canonicalCreatedAt(remote.createdAt) ?? local?.createdAt ?? Date.now(),
       serverMessageVersion: Math.max(localVersion, remoteVersion) || undefined
     }
-    if (existing) await db.messages.put(next)
-    else await db.messages.add(next)
-    localIds.set(serverMessageId, id)
+    return [{ serverMessageId, id, next }]
+  })
+  // One batched existence read; a qualified id owned by another history must
+  // abort the transaction before any write lands.
+  const existingRows = await db.messages.bulkGet(planned.map(message => message.id))
+  for (const existing of existingRows)
+    if (existing && existing.history_id !== historyId) throw createServicePromptScopeChangedError()
+  const nextRows = planned.map(message => message.next)
+  if (nextRows.length > 0) {
+    await db.messages.bulkPut(nextRows)
+    // Mirror content can change (remote edits); keep the search index fresh.
+    // Stale tokens for previous content are harmless extras that exact
+    // verification rejects.
+    await indexMessagesSearchTokens(nextRows)
   }
-  return { localIds, rows: await db.messages.where("history_id").equals(historyId).toArray() }
+  const localIds = new Map<string, string>(planned.map(message => [message.serverMessageId, message.id] as const))
+  // Return exactly what a fresh index scan would: every row of this history
+  // ordered by primary key (equal index keys order by primary key), with the
+  // planned writes overlaid on the initial read.
+  const rowsById = new Map(rows.map(row => [row.id, row] as const))
+  for (const next of nextRows) rowsById.set(next.id, next)
+  const mirrorRows = [...rowsById.values()].sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
+  return { localIds, rows: mirrorRows }
 }, undefined, validate_lease)
 
 /** Apply a successful canonical delete to only its already-acknowledged local mirror. */
 export const removeAcknowledgedServerMirrorMessage = async ({
-  historyId, chatId, localMessageId, serverMessageId
+  historyId,
+  chatId,
+  localMessageId,
+  serverMessageId,
+  ownerKey,
+  scope,
+  signal,
+  validate_lease
 }: {
-  historyId: string; chatId: string; localMessageId: string; serverMessageId: string
-}): Promise<void> => runChatPersistenceTransaction(undefined, async () => {
-  const history = await db.chatHistories.get(historyId)
-  if (history?.server_chat_id !== chatId || !history.server_scope_key)
-    throw createServicePromptScopeChangedError()
-  const row = await db.messages.get(localMessageId)
-  if (!row) return
-  if (row.history_id !== historyId || row.serverMessageId !== serverMessageId)
-    throw createServicePromptScopeChangedError()
-  const rows = await db.messages.where("history_id").equals(historyId).toArray()
-  if (rows.filter(candidate => candidate.serverMessageId === serverMessageId).length !== 1)
-    throw createServicePromptScopeChangedError()
-  await db.messages.delete(localMessageId)
-})
+  historyId: string
+  chatId: string
+  localMessageId?: string
+  serverMessageId: string
+  ownerKey?: string
+  scope?: ChatScope
+} & HistoryOperationOptions): Promise<void> =>
+  runChatPersistenceTransaction(
+    signal,
+    async () => {
+      const history = await db.chatHistories.get(historyId)
+      if (
+        history?.server_chat_id !== chatId ||
+        !history.server_scope_key ||
+        (ownerKey !== undefined && history.server_scope_key !== ownerKey) ||
+        (scope?.type === "workspace"
+          ? history.server_scope_type !== "workspace" ||
+            history.server_workspace_id !== scope.workspaceId
+          : scope &&
+            ((history.server_scope_type &&
+              history.server_scope_type !== "global") ||
+              history.server_workspace_id))
+      )
+        throw createServicePromptScopeChangedError()
+      const rows = await db.messages
+        .where("history_id")
+        .equals(historyId)
+        .toArray()
+      const matches = rows.filter(
+        (candidate) => candidate.serverMessageId === serverMessageId
+      )
+      if (!matches.length && !localMessageId) return
+      const row = localMessageId
+        ? await db.messages.get(localMessageId)
+        : matches[0]
+      if (!row) return
+      if (
+        row.history_id !== historyId ||
+        row.serverMessageId !== serverMessageId ||
+        matches.length !== 1
+      )
+        throw createServicePromptScopeChangedError()
+      await db.messages.delete(row.id)
+    },
+    undefined,
+    validate_lease
+  )
 
 /** H1 translates a clicked local mirror ID before native capture. No text/position inference. */
 export const resolveServerMirrorCursor = async ({

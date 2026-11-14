@@ -217,17 +217,18 @@ class TestScoreParsingSecurity:
         manager = EvaluationManager()
 
         # Mock the analyze function to return malicious responses
+        # No readable 1-10 score leaves the item unscored (None), never a value outside 0-1
         malicious_responses = [
-            "999999999999999999999999",  # Huge number
-            "-999999",  # Negative number
-            "Score: <script>alert('xss')</script>",  # XSS attempt
-            '{"score": "\'; DROP TABLE evaluations; --"}',  # SQL injection in JSON
-            "Score: NaN",  # Not a number
-            "Score: Infinity",  # Infinity
-            "Score: 1e308",  # Very large number
+            ("999999999999999999999999", None),  # Huge number
+            ("-999999", None),  # Negative number
+            ("Score: <script>alert('xss')</script>", None),  # XSS attempt
+            ('{"score": "\'; DROP TABLE evaluations; --"}', None),  # SQL injection in JSON
+            ("Score: NaN", None),  # Not a number
+            ("Score: Infinity", None),  # Infinity
+            ("Score: 1e308", 0.0),  # Very large number: the pattern reads its leading 1, the worst rating
         ]
 
-        for response in malicious_responses:
+        for response, expected in malicious_responses:
             with patch('tldw_Server_API.app.core.Evaluations.evaluation_manager.analyze') as mock_analyze:
                 mock_analyze.return_value = response
 
@@ -239,9 +240,9 @@ class TestScoreParsingSecurity:
                     scoring_criteria={"test": "criteria"}
                 )
 
-                # Score should be safely bounded between 0 and 1
-                assert 0 <= result["score"] <= 1
-                assert isinstance(result["score"], float)
+                # Unscored (None), or a float in 0-1
+                assert result["score"] == expected, response
+                assert expected is None or isinstance(result["score"], float)
 
     @pytest.mark.asyncio
     async def test_json_parsing_security(self):
@@ -250,13 +251,13 @@ class TestScoreParsingSecurity:
 
         # Test various JSON edge cases
         json_responses = [
-            '{"score": 8, "__proto__": {"isAdmin": true}}',  # Prototype pollution attempt
-            '{"score": 7, "constructor": {"prototype": {"isAdmin": true}}}',  # Constructor attack
-            '{"score": [1,2,3,4,5,6,7,8,9,10]}',  # Array instead of number
-            '{"score": {"value": 8}}',  # Nested object
+            ('{"score": 8, "__proto__": {"isAdmin": true}}', 7 / 9),  # Prototype pollution attempt
+            ('{"score": 7, "constructor": {"prototype": {"isAdmin": true}}}', 6 / 9),  # Constructor attack
+            ('{"score": [1,2,3,4,5,6,7,8,9,10]}', None),  # Array instead of number: unscored
+            ('{"score": {"value": 8}}', None),  # Nested object: unscored
         ]
 
-        for response in json_responses:
+        for response, expected in json_responses:
             with patch('tldw_Server_API.app.core.Evaluations.evaluation_manager.analyze') as mock_analyze:
                 mock_analyze.return_value = response
 
@@ -268,8 +269,8 @@ class TestScoreParsingSecurity:
                     scoring_criteria={"test": "criteria"}
                 )
 
-                # Should handle gracefully
-                assert 0 <= result["score"] <= 1
+                # Should handle gracefully: the 1-10 score, or unscored (None)
+                assert result["score"] == pytest.approx(expected), response
 
 
 class TestConnectionPoolThreadSafety:

@@ -46,7 +46,7 @@ Implement the first bounded Chat/Playground migration slice from the design-syst
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1286 merged into dev at merge commit be9c41fa4f9a54e33ff84790125bb0ee083f7eaf. Work is isolated in .worktrees/tldw-chat-playground-design-system on branch codex/tldw-chat-playground-design-system from origin/dev.
 
 Migrated PlaygroundEmpty to the shared EmptyState primitive while preserving Start chatting, Quick Ingest, Open Settings, mode launcher, and tour actions.
@@ -74,7 +74,7 @@ PR review verification:
 - PASS: git diff --check
 - PASS: full frontend tsc output filtered for this slice's touched files shows no local type errors
 - KNOWN BASELINE: bunx tsc --noEmit --pretty false -p tsconfig.json still exits 2 on unrelated pre-existing frontend type errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

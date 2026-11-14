@@ -38,7 +38,7 @@ Reason: protocol interoperability fix using the existing authenticated stream co
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Persona now selects an offered bearer auth marker after existing authentication succeeds, preserving offered casing and never reflecting the following credential. The existing WebSocketStream helper recognizes the already-accepted connection, so lifecycle metrics and payloads are unchanged. Unrecognized protocol offers and clients without offers preserve existing behavior; all invalid credential variants still close with 4401 before acceptance.
 
 Changed tldw_Server_API/app/api/v1/endpoints/persona.py and tldw_Server_API/tests/Persona/test_persona_ws_auth.py. ADR required: no; existing authentication and streaming contract preserved.
@@ -53,7 +53,7 @@ Coordinated final validation: 265 focused frontend tests, 54 backend tests, prod
 
 Qodo review: added pytest.MonkeyPatch, marker and credential parameter types, None return type, and safe-negotiation docstring to modified WebSocket test. Reverified54 backend tests passing. Production endpoint unchanged by this review repair.
 Rebase provenance: originally TASK-13178. Latest dev69c96ef715 independently allocated13178 to email summarization. Buddy WebSocket record renumbered to13184 during authorized collision closeout; the dev record is preserved.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

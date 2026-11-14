@@ -40,7 +40,6 @@ Execute Task 4 from the sidepanel chat WebUI handoff plan: run focused unit regr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification evidence:
 
@@ -61,9 +60,7 @@ Verification evidence:
   `TLDW_E2E_EXTENSION_HEADLESS=1 TLDW_E2E_EXTENSION_LAUNCH_TIMEOUT_MS=90000 npx playwright test ... --grep "keeps packaged /chat"` skipped with `Could not determine extension id from [no extension targets]`.
   Conclusion: packaged browser smoke is unavailable on this host because Chrome extension launch does not become controllable; no packaged `/chat` product assertion ran or failed.
 - Bandit skipped: touched verification scope is TypeScript/TSX/markdown and generated extension build output only; no Python paths were changed.
-
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
-<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

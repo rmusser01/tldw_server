@@ -107,6 +107,7 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
   const [reconnectInfo, setReconnectInfo] = React.useState<ReconnectInfo | null>(null)
 
   // Refs
+  const stateRef = React.useRef<ACPSessionState>("disconnected")
   const wsRef = React.useRef<WebSocket | null>(null)
   const reconnectTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const reconnectAttemptsRef = React.useRef(0)
@@ -143,6 +144,7 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
 
   // State change handler
   const updateState = React.useCallback((newState: ACPSessionState) => {
+    stateRef.current = newState
     setState(newState)
     callbacksRef.current.onStateChange?.(newState)
   }, [])
@@ -197,8 +199,17 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
           })
           callbacksRef.current.onUpdate?.(message)
 
-          // Update state if running
-          if (state === "connected") {
+          // Session metadata can arrive after a turn retires. Only actual RPC
+          // activity may open Stop; an inactive update never settles a busy turn.
+          const native = message.data?.update as Record<string, unknown> | undefined
+          const toolStatus = native?.status ?? message.data?.status
+          const legacyActivity = ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update"].includes(message.update_type)
+            && !(["tool_call", "tool_call_update"].includes(message.update_type)
+              && ["completed", "failed", "cancelled", "canceled"].includes(String(toolStatus)))
+          const promptActive = message.prompt_active === true
+            || (message.prompt_active === undefined && legacyActivity)
+          if (message.session_id === sessionIdRef.current && message.update_type !== "cancelled"
+            && promptActive && stateRef.current === "connected") {
             updateState("running")
           }
           break
@@ -232,6 +243,15 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
           callbacksRef.current.onPromptComplete?.(message)
           break
 
+        case "prompt_settled":
+          if (message.session_id === sessionIdRef.current) {
+            setPendingPermissions([])
+            if (stateRef.current === "running" || stateRef.current === "waiting_permission") {
+              updateState("connected")
+            }
+          }
+          break
+
         case "error":
           setError(message.message)
           updateState("error")
@@ -245,7 +265,7 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
     } catch (e) {
       console.error("Failed to parse ACP WebSocket message:", e)
     }
-  }, [state, updateState])
+  }, [updateState])
 
   // Connect to WebSocket
   const connect = React.useCallback(async () => {
@@ -416,7 +436,7 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
     setUpdates([])
   }, [])
 
-  // Auto-connect when sessionId changes
+  // Equal config rehydration must not close a socket with an active prompt.
   React.useEffect(() => {
     if (autoConnect && sessionId && connectionConfig) {
       void connect()
@@ -427,7 +447,10 @@ export function useACPSession(options: UseACPSessionOptions = {}): UseACPSession
     // `connect` depends on message handlers and session state; re-running on every
     // callback identity change would thrash the ACP socket.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoConnect, connectionConfig, disconnect, sessionId])
+  }, [autoConnect, Boolean(connectionConfig), connectionConfig?.serverUrl,
+    connectionConfig?.authMode, connectionConfig?.apiKey, connectionConfig?.accessToken,
+    connectionConfig?.refreshToken, connectionConfig?.orgId, connectionConfig?.authSource,
+    disconnect, sessionId])
 
   // Cleanup on unmount
   React.useEffect(() => {

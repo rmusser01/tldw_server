@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-03",
+  "source_commit": "e74d3df255159f088da6e3a4047248348fb26d16",
+  "persona_id": "research_assistant",
+  "session_id": "15266625-65d8-41e7-a0bf-9ece127c5da9",
+  "configured_runtime": {
+    "stt": "parakeet-onnx",
+    "provider": "DeepSeek / deepseek-chat",
+    "tts": "local Kokoro through normal Persona adapter"
+  },
+  "user_transcript": "Say the blue notebook is ready.",
+  "assistant_reply": "The blue notebook is ready. 📘",
+  "transcript_committed_once": true,
+  "tts_audio_chunk_notices": 5,
+  "direct_browser_observations": [
+    {
+      "at": "2026-10-03T14:50:36.936Z",
+      "loaded": true,
+      "renderedState": "thinking",
+      "requestedState": "thinking",
+      "sendNowAvailable": false,
+      "startAvailable": false,
+      "stopAvailable": false
+    },
+    {
+      "at": "2026-10-03T14:50:37.572Z",
+      "loaded": true,
+      "renderedState": "speaking",
+      "requestedState": "speaking",
+      "sendNowAvailable": false,
+      "startAvailable": false,
+      "stopAvailable": false
+    },
+    {
+      "at": "2026-10-03T14:50:39.263Z",
+      "loaded": true,
+      "renderedState": "speaking",
+      "requestedState": "speaking",
+      "sendNowAvailable": false,
+      "startAvailable": true,
+      "stopAvailable": false
+    },
+    {
+      "at": "2026-10-03T14:50:39.839Z",
+      "loaded": true,
+      "renderedState": "idle",
+      "requestedState": "idle",
+      "sendNowAvailable": false,
+      "startAvailable": true,
+      "stopAvailable": false
+    }
+  ],
+  "requester_confirmation": {
+    "question": "Did you also see its listening animation and hear the reply clearly?",
+    "answer": "Yes, both worked"
+  },
+  "listening_evidence": "Requester confirmation; observer started after listening.",
+  "agent_opened_microphone": false,
+  "raw_media_stream_handles_inspected": false,
+  "source_hashes": {
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellHost.tsx": {
+      "sha256": "50b18ab4fb1f3563ef982ba7c1c6cacb3d274730878fab565ee32cb810deb11a",
+      "runtime_identical": true
+    },
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellDock.tsx": {
+      "sha256": "c5b4515588b46a63be8eb5f63c9a44ba9ecd1d37ae92c1efb182d23fff65daaf",
+      "runtime_identical": true
+    },
+    "apps/packages/ui/src/hooks/usePersonaLiveControl.tsx": {
+      "sha256": "e83da081217eed16f20931d8a7f175b43d8cebb803a306b8f7b6ec28e08d75ab",
+      "runtime_identical": true
+    }
+  },
+  "auto_commit_on_at_completion": true,
+  "auto_commit_actor_observed": false
+}

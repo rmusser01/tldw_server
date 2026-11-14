@@ -42,7 +42,15 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventCategory,
     AuditEventType,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
+from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy, afetch as _http_afetch
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
     derive_trusted_credential_scope,
     get_byok_gateway_spec,
     is_byok_enabled,
@@ -53,27 +61,24 @@ from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
     validate_base_url_override,
     validate_credential_fields,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     openai_credential_mutation_lock,
     openai_oauth_refresh_state_generation,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_testing import (
+from tldw_Server_API.app.core.Provider_Credentials.byok_testing import (
     probe_gateway_credentials,
     provider_validation_public_error,
     test_provider_credentials,
 )
-from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
-from tldw_Server_API.app.core.AuthNZ.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
-from tldw_Server_API.app.core.AuthNZ.repos.org_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.byok_oauth_state_repo import AuthnzByokOAuthStateRepo
+from tldw_Server_API.app.core.Provider_Credentials.repos.org_provider_secrets_repo import (
     AuthnzOrgProviderSecretsRepo,
 )
-from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import (
+from tldw_Server_API.app.core.Provider_Credentials.repos.user_provider_secrets_repo import (
     AuthnzUserProviderSecretsRepo,
 )
-from tldw_Server_API.app.core.AuthNZ.settings import get_settings
-from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
+from tldw_Server_API.app.core.Provider_Credentials.user_provider_secrets import (
     ProviderCredentialAliasConflictError,
     build_secret_payload,
     decrypt_byok_payload,
@@ -82,12 +87,6 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
     key_hint_for_api_key,
     loads_envelope,
 )
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
-from tldw_Server_API.app.core.exceptions import raise_detached_error
-from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
-from tldw_Server_API.app.core.http_client import afetch as _http_afetch
-from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.Metrics import increment_counter, observe_histogram
 
 router = APIRouter(prefix="/users", tags=["users"])
 

@@ -33,7 +33,7 @@ Move the remaining content-group OCR router factory onto the shared lazy optiona
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red/green evidence: focused selector tldw_Server_API/tests/Services/test_router_groups_contract.py -k 'content_router_specs and ocr' failed before production changes with 5 expected failures, then passed after moving OCR to ImportedRouterSpec with 5 passed, 141 deselected.
 
 Validation: router group contracts passed with 146 passed; main router contracts passed with 6 passed; OpenAPI contracts passed with 69 passed; Bandit on tldw_Server_API/app/api/v1/router_groups/content.py reported 0 results and 0 errors; git diff --check was clean.
@@ -43,7 +43,7 @@ Docs: no user-facing documentation update was needed for this internal router re
 Review follow-up: Gemini requested explicit coverage for OptionalRouterMissingAttribute skip behavior when the OCR module imports successfully but lacks the router attribute. This is a test-only gap; production behavior already routes missing attrs through ImportedRouterSpec.
 
 Review fix validation: added test_iter_content_router_specs_skips_ocr_missing_attribute_failures for the Gemini review thread. Focused OCR selector passed with 6 passed, 141 deselected; full router group contracts passed with 147 passed; git diff --check remained clean. No production files changed in this follow-up.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

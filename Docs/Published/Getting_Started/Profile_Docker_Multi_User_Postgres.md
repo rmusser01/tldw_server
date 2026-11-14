@@ -13,11 +13,16 @@ Prerequisites:
 - Git
 - Python 3.12+ for the lightweight `tldw-setup` helper used by the Makefile
 
+Choose a unique admin password with at least 10 characters, uppercase and lowercase letters, a number, and a symbol. Avoid your username and three-character repeats or sequences. The prompt below hides your input.
+
 ```bash
 git clone https://github.com/rmusser01/tldw_server.git
 cd tldw_server
 export ADMIN_USERNAME=tldw-admin
-export ADMIN_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+printf 'Admin password: '
+IFS= read -rs ADMIN_PASSWORD
+printf '\n'
+export ADMIN_PASSWORD
 make setup-docker-multi
 ```
 
@@ -25,7 +30,8 @@ PowerShell / no-`make` equivalent:
 
 ```powershell
 $env:ADMIN_USERNAME="tldw-admin"
-$env:ADMIN_PASSWORD = py -3.12 -c "import secrets; print(secrets.token_urlsafe(24))"
+$setupAdminPassword = Read-Host "Admin password" -AsSecureString
+$env:ADMIN_PASSWORD = [System.Net.NetworkCredential]::new("", $setupAdminPassword).Password
 py -3.12 -m venv .setup-venv
 .\.setup-venv\Scripts\python -m pip install --upgrade pip setuptools wheel
 .\.setup-venv\Scripts\python -m pip install "typer>=0.12.0" "loguru>=0.7.0" "httpx>=0.24.0" "python-dotenv>=1.0.0" "cryptography>=41.0.0"

@@ -122,7 +122,7 @@ project_root_allowed_base_paths =
 
 [ACP-WORKSPACE]
 # Optional. If set, workspace root_path must be under one of these paths (comma-separated).
-# Leave empty to allow any absolute path.
+# Empty blocks workspace creation; configure explicit absolute base paths.
 allowed_base_paths =
 # Default max depth for workspace discovery scanning.
 discovery_max_depth = 3
@@ -663,6 +663,23 @@ FVA_FORCE_CLAIM_TYPES =
 FVA_MIN_CONFIDENCE_FOR_SKIP = 0.9
 
 [ClaimsMonitoring]
+CLAIMS_REVIEW_METRICS_SCHEDULER_ENABLED = false
+CLAIMS_REVIEW_METRICS_INTERVAL_SEC = 86400
+CLAIMS_REVIEW_METRICS_LOOKBACK_DAYS = 2
+CLAIMS_REVIEW_METRICS_JOBS_ENABLED = false
+CLAIMS_JOBS_ENABLED = false
+CLAIMS_JOBS_QUEUE = default
+CLAIMS_JOBS_MAX_RETRIES_REVIEW_METRICS = 3
+CLAIMS_CLUSTER_REBUILD_JOBS_ENABLED = false
+CLAIMS_JOBS_MAX_RETRIES_CLUSTER_REBUILD = 3
+# Execution ceilings may be lowered, not raised; positive integers only.
+CLAIMS_CLUSTER_REBUILD_MAX_EXACT_CLAIMS = 50000
+CLAIMS_CLUSTER_REBUILD_MAX_EMBEDDING_CLAIMS = 5000
+CLAIMS_CLUSTER_REBUILD_MAX_TEXT_BYTES = 33554432
+CLAIMS_CLUSTER_REBUILD_MAX_VECTOR_WIDTH = 4096
+CLAIMS_CLUSTER_REBUILD_MAX_EMBEDDING_COMPONENTS = 2000000
+CLAIMS_CLUSTER_REBUILD_MAX_SIMILARITY_COMPONENT_COMPARISONS = 50000000
+CLAIMS_CLUSTER_REBUILD_MAX_CLEANUP_REFERENCES = 50000
 CLAIMS_MONITORING_ENABLED = false
 CLAIMS_ALERT_THRESHOLD_DEFAULT = 0.2
 CLAIMS_REBUILD_MAX_QUEUE_ALERT = 1000
@@ -763,6 +780,11 @@ precomputed_spans_retention_days = 30
 implicit_feedback_enabled = true
 
 [Search-Agent]
+# Set false for Deep Research local FTS without embedding/vector initialization.
+deep_research_local_use_vector = true
+# Optional llama.cpp chat-template control; blank preserves the provider default.
+deep_research_llamacpp_enable_thinking =
+
 # Enable LLM-based query classification before search (routes queries intelligently)
 # Env override: SEARCH_QUERY_CLASSIFICATION=true|false (default false)
 search_query_classification = false
@@ -821,6 +843,13 @@ search_image_search = false
 # Enable video search as a research action
 # Env override: SEARCH_VIDEO_SEARCH=true|false (default false)
 search_video_search = false
+
+[Usage-Quotas]
+# Master switch for usage quotas: audio minutes, storage, chatbooks, media, workflows,
+# and billing-plan limits (env: USAGE_QUOTAS_ENABLED; legacy env:
+# LIMIT_ENFORCEMENT_ENABLED). Off by default: no quota applies until an operator turns
+# this on. Request rate limits are separate ([ResourceGovernor]).
+enabled = false
 
 [ResourceGovernor]
 # Global Resource Governor enable flag (env: RG_ENABLED)

@@ -35,7 +35,7 @@ Create a bounded accepted ADR for INV-027 after TASK-2309 aligned the local prov
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented ADR-025 for the bounded LLM provider adapter routing and override decision. Updated the ADR index, INV-027 inventory row, provider/integration owner-review handoff, and the LLM provider confirmation audit to point to ADR-025.
 
 Verification recorded on 2026-06-07:
@@ -44,7 +44,7 @@ Verification recorded on 2026-06-07:
 - Portability artifact scan: no developer-machine absolute paths or temporary Bandit report artifact names found in touched docs/task files.
 
 Bandit: not run because this branch only touches Markdown ADR, inventory, audit, and Backlog task records; no Python/source files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

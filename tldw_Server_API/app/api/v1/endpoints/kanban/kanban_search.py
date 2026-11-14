@@ -52,7 +52,7 @@ from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     KanbanDB,
     KanbanDBError,
 )
-from tldw_Server_API.app.core.DB_Management.kanban_vector_search import (
+from tldw_Server_API.app.core.Kanban.vector_search import (
     KanbanVectorSearch,
     is_vector_search_available,
 )

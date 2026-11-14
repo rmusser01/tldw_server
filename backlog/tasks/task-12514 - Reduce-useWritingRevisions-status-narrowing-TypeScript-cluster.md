@@ -36,14 +36,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task509-tsc-final.txt`: package `tsc` reported three diagnostics in `src/components/Option/WritingPlayground/hooks/useWritingRevisions.ts` around `ApplyEditorTextResult.reason` narrowing and widened `status` literals in regenerated revision updates.
 - Root cause was TypeScript type narrowing/literal widening only. The apply-result branch now checks `result.applied === false` before reading `reason`, preserving the same applied/conflict behavior while making the discriminant explicit for the compiler.
 - Regenerated revision updates now keep map output typed as `WritingRevisionProposal` and validate the replacement object with `satisfies WritingRevisionProposal` so `status: "rejected"` and `status: "pending"` remain literal proposal statuses.
 - Focused verification attempted with `bunx vitest run src/components/Option/WritingPlayground/__tests__/useWritingRevisions.test.tsx`; it failed before assertions with `SecurityError: localStorage is not available for opaque origins`, and all 11 tests were skipped. This appears to be a pre-existing test-environment issue from the suite's opaque-origin JSDOM setup, not this hook change.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task510-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 82 in `/tmp/task509-tsc-final.txt` to 79 in `/tmp/task510-tsc-final.txt`; `rg -n 'useWritingRevisions\.ts' /tmp/task510-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

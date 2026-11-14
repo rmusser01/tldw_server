@@ -1247,7 +1247,7 @@
     "message": "ذخیره پس از بازبینی"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "بازبینی پیش از ذخیره"
+    "message": "بازبینی محتوای استخراج‌شده پیش از ذخیره"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "اکنون پردازش کنید و سپس پیش‌نویس‌ها را به‌صورت محلی ویرایش کنید قبل از اینکه در سرور ثبت شوند."

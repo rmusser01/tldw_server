@@ -10,6 +10,7 @@ import { type Locator, expect } from "@playwright/test"
 import { BasePage, type InteractiveElement } from "./BasePage"
 import { expectApiCall } from "../api-assertions"
 import { waitForConnection } from "../helpers"
+import { isMenuPointerReady } from "../menu-pointer-readiness"
 
 export interface CreateNoteOptions {
   title: string
@@ -260,11 +261,23 @@ export class NotesPage extends BasePage {
   async triggerPrintExport(): Promise<void> {
     await this.overflowMenuButton.click()
 
-    const exportMenuItem = this.page.getByRole("menuitem", { name: /^export$/i })
+    // The submenu's accessible name includes its expand icon ("Export right").
+    const exportMenuItem = this.page.getByRole("menuitem", { name: /^export\b/i })
     await expect(exportMenuItem).toBeVisible({ timeout: 10_000 })
+    await expect.poll(() => exportMenuItem.evaluate(isMenuPointerReady), {
+      timeout: 10_000, message: "Export menu receives pointer input before opening the flyout"
+    }).toBe(true)
     await exportMenuItem.hover()
+    await expect(exportMenuItem).toHaveAttribute("aria-expanded", "true")
 
     await expect(this.printExportMenuItem).toBeVisible({ timeout: 10_000 })
+    // A closing popup may be motionless and visible while pointer input reaches the editor.
+    await expect.poll(async () =>
+      await exportMenuItem.getAttribute("aria-expanded") === "true" &&
+      await this.printExportMenuItem.evaluate(isMenuPointerReady), {
+      timeout: 10_000, message: "Open Print flyout receives pointer input before export"
+    }).toBe(true)
+    await this.printExportMenuItem.hover()
     await this.printExportMenuItem.click()
   }
 
@@ -325,10 +338,10 @@ export class NotesPage extends BasePage {
     await expect(deleteMenuItem).toBeVisible({ timeout: 5_000 })
     await deleteMenuItem.click()
 
-    // Handle "Please confirm" modal (the component uses confirmDanger with "Delete" button)
+    // Handle the "Move to Trash?" confirm (confirmDanger with a "Move to Trash" button)
     const confirmModal = this.page.locator('.ant-modal-confirm')
     await confirmModal.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    const confirmDeleteBtn = confirmModal.getByRole("button", { name: /^delete$/i })
+    const confirmDeleteBtn = confirmModal.getByRole("button", { name: /^(delete|move to trash)$/i })
     if (await confirmDeleteBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
       await confirmDeleteBtn.click()
     }

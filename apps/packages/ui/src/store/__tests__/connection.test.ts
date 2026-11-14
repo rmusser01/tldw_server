@@ -58,6 +58,7 @@ vi.mock("@/services/tldw/runtime-auth-override", () => ({
   isCookieSessionConfigInvalidated: vi.fn(() => false)
 }))
 
+import { getStoredTldwServerURL } from "@/services/tldw-server-url"
 import { apiSend } from "@/services/api-send"
 import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
 import { getRuntimeSingleUserApiKeyOverride, isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override"
@@ -836,6 +837,18 @@ describe("connection store stability", () => {
     expect(state.phase).toBe(ConnectionPhase.CONNECTED)
     expect(state.isConnected).toBe(true)
     expect(state.hasCompletedFirstRun).toBe(true)
+  })
+
+  it("uses a fresh stored URL hint without creating authentication configuration", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    setConnectionState({ phase: ConnectionPhase.SEARCHING, serverUrl: null, isConnected: false, isChecking: false, lastCheckedAt: null })
+    mockedClient.getConfig.mockResolvedValue(null)
+    await vi.mocked(getStoredTldwServerURL).withImplementation(async () => "https://initial-api.example.test", async () => {
+      await useConnectionStore.getState().checkOnce({ force: true })
+    })
+    expect(mockedClient.updateConfig).not.toHaveBeenCalled()
+    expect(useConnectionStore.getState().state).toMatchObject({ phase: ConnectionPhase.UNCONFIGURED, serverUrl: "https://initial-api.example.test", configStep: "auth", isConnected: false })
+    expect(mockedApiSend).not.toHaveBeenCalled()
   })
 
   it("treats a server URL without single-user credentials as unconfigured auth instead of connected", async () => {

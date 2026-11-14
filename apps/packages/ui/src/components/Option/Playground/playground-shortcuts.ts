@@ -17,7 +17,7 @@ type ShortcutEvent = {
 
 
 /**
- * Whether a keydown should open the playground shortcuts help panel.
+ * Whether a keydown should open the keyboard shortcuts reference.
  *
  * "?" is an ordinary typed character, so this must stay false while the caret
  * sits in the composer or any other editable target — otherwise every question
@@ -32,8 +32,17 @@ export const shouldOpenShortcutsHelp = (event: ShortcutEvent): boolean => {
   return !isEditableTarget(event.target)
 }
 
+export type PlaygroundShortcutOptions = {
+  /**
+   * Compare stays hidden until it is verified (owner decision D4), so
+   * Alt+Shift+C is claimed only when compare is actually available.
+   */
+  compareAvailable?: boolean
+}
+
 export const resolvePlaygroundShortcutAction = (
-  event: ShortcutEvent
+  event: ShortcutEvent,
+  { compareAvailable = false }: PlaygroundShortcutOptions = {}
 ): PlaygroundShortcutAction | null => {
   if (event.repeat) return null
   if (!event.altKey || !event.shiftKey) return null
@@ -42,7 +51,7 @@ export const resolvePlaygroundShortcutAction = (
 
   const key = String(event.key || "").toLowerCase()
   if (key === "a") return "toggle_artifacts"
-  if (key === "c") return "toggle_compare"
+  if (key === "c") return compareAvailable ? "toggle_compare" : null
   if (key === "m") return "toggle_modes"
   return null
 }

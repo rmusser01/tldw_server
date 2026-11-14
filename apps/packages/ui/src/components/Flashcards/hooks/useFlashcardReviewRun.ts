@@ -206,7 +206,17 @@ export function useFlashcardReviewRun({ context, enabled, review, end, onCloseEr
   const submit = useCallback(async (rating: Rating) => {
     if (!enabled) return null
     let run = current.current
-    if (!run || !owns(run) || run.rating || run.closing || run.inactive) return null
+    if (!run || !owns(run) || run.rating || run.inactive) return null
+    if (run.closing) {
+      // A visible re-rate can arrive while automatic session completion is pending.
+      try {
+        await run.ending
+      } catch (error) {
+        if (!owns(run)) return null
+        throw error
+      }
+      if (!owns(run) || run.rating || run.inactive) return null
+    }
     if (run.completed || run.leaseFailed) {
       run.controller.abort()
       release(run)

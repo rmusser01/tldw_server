@@ -50,7 +50,7 @@ Add the next Stage 5 native CodeGraph language slice after the merged context/im
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created focused Stage 5 implementation plan at Docs/superpowers/plans/2026-05-05-native-codegraph-java-kotlin-extractor-implementation-plan.md. Local venv currently has tree_sitter but not tree_sitter_java/tree_sitter_kotlin; dependency install/verification is the first implementation gate.
 
 Task 1 dependency gate complete: installed tree-sitter-java 0.23.5 and tree-sitter-kotlin 1.1.0 into the shared venv, verified both expose language(), added loader mappings and optional dependency bounds, and loader tests pass with 9 passed.
@@ -70,7 +70,7 @@ PR #1277 review-fix pass started. Active actionable items: avoid counting non-ex
 PR #1277 review-fix pass completed. Addressed active review issues: core dependency health no longer fails when optional Java/Kotlin parsers are missing; non-extractable JVM files are skipped before foreground file/byte guards with dependency_missing_language_skipped; Java imports preserve static and wildcard syntax and type declarations record visibility; Kotlin imports preserve alias and wildcard syntax, type declarations record visibility, interface detection no longer depends on source-text prefix, and nested navigation call refs preserve the full expression.
 
 Review-fix verification: focused review regressions passed (4 passed); focused config/indexer/Java/Kotlin extractor suite passed (31 passed); full CodeGraph plus MCP module/dynamic catalog suite passed (110 passed); Ruff passed on touched CodeGraph/MCP/test scope; Bandit on touched production scope reported 0 results and 0 errors in /tmp/bandit_codegraph_java_kotlin_review_fixes.json; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,3 +1,4 @@
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import React from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
@@ -103,6 +104,7 @@ type MoveUndoSnapshot = {
 }
 
 interface ManageTabProps {
+  scope?: ServicePromptSnapshot | null
   onNavigateToImport: () => void
   onNavigateToGenerate?: () => void
   onReviewCard: (card: Flashcard) => void
@@ -172,7 +174,7 @@ const ManageExpertFilters: React.FC<ManageExpertFiltersProps> = ({
         disabled={!selectedDeck}
         data-testid="flashcards-manage-move-scope"
       >
-        {t("option:flashcards.moveScope", { defaultValue: "Move scope" })}
+        {t("option:flashcards.editDeck", { defaultValue: "Edit deck" })}
       </Button>
       <Checkbox
         checked={showWorkspaceDecks}
@@ -320,6 +322,7 @@ const ManageExpertFilters: React.FC<ManageExpertFiltersProps> = ({
  * Includes a FAB for quick card creation via a drawer.
  */
 export const ManageTab: React.FC<ManageTabProps> = ({
+  scope,
   onNavigateToImport,
   onNavigateToGenerate,
   onReviewCard,
@@ -400,13 +403,17 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   const appliedDeckHandoffKeyRef = React.useRef<string | null>(null)
   const [deckScopeOpen, setDeckScopeOpen] = React.useState(false)
   const [deckScopeForm] = Form.useForm()
+  const deckScopeTarget = React.useRef<(Pick<Deck, "id" | "name" | "version" | "client_id"> & { scope?: ServicePromptSnapshot | null }) | null>(null)
+  const currentDeckScope = React.useRef(scope)
+  currentDeckScope.current = scope
+  React.useEffect(() => () => { deckScopeTarget.current = null }, [])
 
   // Shared: decks
   const workspaceVisibilityOptions = React.useMemo(
     () => buildFlashcardsWorkspaceVisibilityOptions(showWorkspaceDecks, selectedWorkspaceId),
     [selectedWorkspaceId, showWorkspaceDecks]
   ) as any
-  const decksQuery = useDecksQuery(workspaceVisibilityOptions)
+  const decksQuery = useDecksQuery({ ...workspaceVisibilityOptions, ...(scope !== undefined ? { scope } : {}) })
   const updateDeckMutation = useUpdateDeckMutation()
 
   // Filter state
@@ -1019,8 +1026,16 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   }
 
   const openDeckScopeEditor = () => {
-    if (!selectedDeck) return
+    if (!selectedDeck || scope === null || scope?.scopeSignal.aborted) return
+    deckScopeTarget.current = {
+      id: selectedDeck.id,
+      name: selectedDeck.name,
+      version: selectedDeck.version,
+      client_id: selectedDeck.client_id,
+      scope
+    }
     deckScopeForm.setFieldsValue({
+      name: selectedDeck.name,
       workspaceId: selectedDeck.workspace_id ?? "",
       parentDeckId: selectedDeck.parent_deck_id ?? undefined
     })
@@ -1028,6 +1043,7 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   }
 
   const closeDeckScopeEditor = () => {
+    deckScopeTarget.current = null
     setDeckScopeOpen(false)
     deckScopeForm.resetFields()
   }
@@ -1040,22 +1056,41 @@ export const ManageTab: React.FC<ManageTabProps> = ({
   }
 
   const submitDeckScopeEdit = async () => {
-    if (!selectedDeck) return
+    const target = deckScopeTarget.current
+    const assertCurrentEditor = () => {
+      if (!target || deckScopeTarget.current !== target || !selectedDeck ||
+          target.id !== selectedDeck.id || target.client_id !== selectedDeck.client_id ||
+          target.scope === null || currentDeckScope.current !== target.scope || target.scope?.scopeSignal.aborted) {
+        throw new Error(t("option:flashcards.deckSelectionChanged", {
+          defaultValue: "Deck selection changed. Reopen the editor."
+        }))
+      }
+    }
     try {
+      assertCurrentEditor()
+      if (!target) return
       const values = await deckScopeForm.validateFields()
+      assertCurrentEditor()
+      const name = values.name.trim()
       const workspaceId = typeof values.workspaceId === "string" ? values.workspaceId.trim() : ""
       const parentDeckId = typeof values.parentDeckId === "number" ? values.parentDeckId : null
       await updateDeckMutation.mutateAsync({
-        deckId: selectedDeck.id,
+        deckId: target.id,
+        ...(target.scope ? { requestOptions: {
+          signal: target.scope.scopeSignal,
+          requestScope: target.scope.requestScope
+        } } : {}),
         update: {
+          ...(name !== target.name ? { name } : {}),
           workspace_id: workspaceId.length > 0 ? workspaceId : null,
           parent_deck_id: parentDeckId,
-          expected_version: selectedDeck.version
+          expected_version: target.version
         }
       })
+      assertCurrentEditor()
       message.success(
-        t("option:flashcards.deckScopeUpdated", {
-          defaultValue: "Deck scope updated."
+        t("option:flashcards.deckUpdated", {
+          defaultValue: "Deck updated."
         })
       )
       closeDeckScopeEditor()
@@ -1063,9 +1098,9 @@ export const ManageTab: React.FC<ManageTabProps> = ({
       if (typeof error === "object" && error && "errorFields" in error) return
       reportUiError(
         error,
-        "updating deck scope",
-        t("option:flashcards.deckScopeUpdateFailed", {
-          defaultValue: "Failed to update deck scope."
+        "updating deck",
+        t("option:flashcards.deckUpdateFailed", {
+          defaultValue: "Failed to update deck."
         })
       )
     }
@@ -2769,8 +2804,8 @@ export const ManageTab: React.FC<ManageTabProps> = ({
 
       <Modal
         open={deckScopeOpen}
-        title={t("option:flashcards.deckScopeTitle", {
-          defaultValue: "Move deck scope"
+        title={t("option:flashcards.editDeck", {
+          defaultValue: "Edit deck"
         })}
         onCancel={closeDeckScopeEditor}
         onOk={() => {
@@ -2781,6 +2816,17 @@ export const ManageTab: React.FC<ManageTabProps> = ({
         confirmLoading={updateDeckMutation.isPending}
       >
         <Form form={deckScopeForm} layout="vertical">
+          <Form.Item
+            name="name"
+            label={t("option:flashcards.deckName", { defaultValue: "Deck name" })}
+            rules={[{
+              required: true,
+              whitespace: true,
+              message: t("option:flashcards.newDeckNameRequired", { defaultValue: "Enter a deck name." })
+            }]}
+          >
+            <Input />
+          </Form.Item>
           <Form.Item
             name="workspaceId"
             label={t("option:flashcards.workspaceId", { defaultValue: "Workspace ID" })}

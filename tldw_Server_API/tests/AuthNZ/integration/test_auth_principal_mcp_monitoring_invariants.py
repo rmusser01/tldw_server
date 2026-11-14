@@ -4,10 +4,10 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
-from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal, AuthContext
-
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.Utils.app_services import app_services
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.integration
 
@@ -73,7 +73,6 @@ def _restore_auth_capture(app: FastAPI, original_get_auth_principal: Any) -> Non
 
 def test_mcp_modules_health_jwt_principal_and_state_alignment(isolated_test_environment, monkeypatch):
 
-
     """
     Multi-user JWT happy path for MCP modules health:
 
@@ -120,7 +119,6 @@ def test_mcp_modules_health_jwt_principal_and_state_alignment(isolated_test_envi
     monkeypatch.setattr(user_db_handling, "get_effective_permissions", _patched_get_effective_permissions)
 
     # 3. Stub MCP server to avoid heavy initialization and to ensure a simple, deterministic response.
-    from tldw_Server_API.app.api.v1.endpoints import mcp_unified_endpoint as mcp_mod
 
     class _DummyServer:
         def __init__(self) -> None:
@@ -136,7 +134,7 @@ def test_mcp_modules_health_jwt_principal_and_state_alignment(isolated_test_envi
 
             return _Resp()
 
-    monkeypatch.setattr(mcp_mod, "get_mcp_server", lambda: _DummyServer())
+    monkeypatch.setattr(app_services(), "mcp_server", _DummyServer())
 
     # 4. Install the auth capture wrapper and call /api/v1/mcp/modules/health.
     from tldw_Server_API.app.main import app as fastapi_app
@@ -177,7 +175,6 @@ def test_mcp_modules_health_jwt_principal_and_state_alignment(isolated_test_envi
 
 
 def test_monitoring_watchlists_jwt_principal_and_state_alignment(isolated_test_environment, monkeypatch):
-
 
     """
     Multi-user JWT happy path for monitoring watchlists:
@@ -241,8 +238,8 @@ def test_monitoring_watchlists_jwt_principal_and_state_alignment(isolated_test_e
     monitoring_mod.get_topic_monitoring_service = _fake_get_topic_monitoring_service  # type: ignore[assignment]
 
     # 4. Ensure monitoring routes are mounted (route gating may disable them in some profiles).
-    from tldw_Server_API.app.main import app as fastapi_app
     from tldw_Server_API.app.main import API_V1_PREFIX
+    from tldw_Server_API.app.main import app as fastapi_app
 
     app = fastapi_app
     monitoring_path = f"{API_V1_PREFIX}/monitoring/watchlists"

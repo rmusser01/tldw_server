@@ -36,13 +36,13 @@ Docs/superpowers/plans/2026-05-28-chat-first-run-screenshot-refresh.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 TASK-537 refreshed first-time /chat evidence after TASK-536. Backend startup was diagnosed as an environment issue: sandboxed bind to 127.0.0.1:18041 failed with [Errno 1] operation not permitted, while the same command succeeded with approved elevated localhost binding and /api/v1/health returned ok in single_user mode.
 
 Captured first-time-unseeded.png from a clean Playwright Chromium context at http://localhost:18042/chat. Assertions: route stayed /chat, first-run-gate-overlay count 0, Build Your Assistant copy count 0, chat input count 1, Start a new chat heading count 1. Screenshot is 1440x960 PNG and shows context/runtime rails on the current first-time chat surface.
 
 Verification: bunx vitest run __tests__/app/app-layout.test.tsx ../packages/ui/src/components/Option/Playground/__tests__/PlaygroundComposerNotices.first-run.test.tsx passed: 2 files, 17 tests. evidence.json parsed. git diff --check passed. Ports 18041 and 18042 were stopped and no longer listen. Bandit skipped because TASK-537 touched Markdown, JSON, and PNG evidence only; no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -1,26 +1,31 @@
+import { KnowledgeNoteHistory } from "./KnowledgeNoteHistory"
 import React from 'react'
 import type { InputRef } from 'antd'
-import { Input, Typography, Select, Button, Tooltip, Spin } from 'antd'
+import { Input, Typography, Select, Button, Dropdown, Tooltip, Spin } from 'antd'
 import {
   Sparkles as SparklesIcon,
   Bold as BoldIcon,
   Italic as ItalicIcon,
   Heading1 as HeadingIcon,
   List as ListIcon,
+  ListOrdered as ListOrderedIcon,
+  ListChecks as ListChecksIcon,
   Link2 as LinkIcon,
   Code2 as CodeIcon,
   Paperclip as PaperclipIcon
 } from 'lucide-react'
-import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from '@/design-system'
 import NotesEditorHeader from '@/components/Notes/NotesEditorHeader'
 import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
-import TaskChecklistPreview from '@/components/Notes/TaskChecklistPreview'
+import TaskChecklistToggle from '@/components/Notes/TaskChecklistToggle'
+import NotesSectionHelpButton from '@/components/Notes/NotesSectionHelpButton'
+import { MetaText } from '@/components/Common/MetaText'
 import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
 import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
+import { MISSING_WIKILINK_PREVIEW_CLASSES } from '@/components/Notes/wikilinks'
 import type {
   NoteTask,
   NoteTaskActivityEvent,
@@ -28,28 +33,40 @@ import type {
 } from '@/services/notes-tasks'
 import type {
   SaveIndicatorState,
-  SaveRecoveryNotice,
   NotesEditorMode,
   NotesInputMode,
   NotesAssistAction,
   NotesTocEntry,
   MonitoringNoticeState,
-  RemoteVersionInfo,
   OfflineDraftEntry,
   MarkdownToolbarAction,
 } from './notes-manager-types'
 import type { SingleNoteCopyMode, SingleNoteExportFormat } from './export-utils'
 import type { NoteStudioState, NotesStudioPaperSize } from './notes-studio-types'
 import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
+import type { NotesSaveIssue } from './hooks/useNotesEditorState'
+import { notesEditorSupportHint } from './notes-editor-hints'
+import { useConnectionsDisclosure, type ConnectionsMemory } from './notes-connections'
 import {
   NOTES_EDITOR_REGION_ID,
+  NOTES_LIST_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
+  NOTES_WYSIWYG_INPUT_ENABLED,
   NOTE_TEMPLATES,
   normalizeNotesTitleStrategy,
+  replaceEditableHtml,
+  notesEditorMaxHeight,
   toSafeTestId,
 } from './notes-manager-utils'
 import { NOTES_TITLE_SUGGEST_STRATEGY_SETTING } from '@/services/settings/ui-settings'
 import { setSetting } from '@/services/settings/registry'
+import NotesServerUnavailableBanner from './NotesServerUnavailableBanner'
+
+// Headings and lists need the typography styles to be visible: Tailwind's
+// preflight resets <h2> to body text and removes list bullets. Matches the
+// Markdown preview (MarkdownPreview size="sm").
+const WYSIWYG_EDITOR_TYPOGRAPHY_CLASS =
+  'prose prose-sm dark:prose-invert max-w-none break-words prose-p:leading-relaxed'
 
 const LazyMarkdownPreview = React.lazy(() =>
   import('@/components/Common/MarkdownPreview').then((module) => ({
@@ -99,15 +116,20 @@ export interface NotesEditorPaneProps {
   // Layout
   isMobileViewport: boolean
   setMobileSidebarOpen: (open: boolean) => void
+  /** Whether the mobile notes list is open, for the Browse notes toggle. */
+  mobileSidebarOpen?: boolean
 
   // Selection / identity
   selectedId: string | number | null
+  /** No note open and nothing typed: the hint says how to start (NO-04). */
   showEmptyState: boolean
   title: string
   content: string
   editorDisabled: boolean
   isDirty: boolean
   isOnline: boolean
+  /** The notes list cannot reach the server; edits fall back to this device (NL-16). */
+  notesServerUnavailable?: boolean
   loadingDetail: boolean
   saving: boolean
 
@@ -124,6 +146,8 @@ export interface NotesEditorPaneProps {
   noteNeighborsState?: 'not_loaded' | 'loading' | 'success' | 'error'
   noteNeighborsRequestKey?: string
   onRequestNeighbors?: () => void
+  /** Page-owned open/closed choice for Connections (NE-10). */
+  connectionsMemory?: ConnectionsMemory
   onRetryNeighbors?: () => void
 
   // Pinning
@@ -136,12 +160,13 @@ export interface NotesEditorPaneProps {
   editorKeywords: string[]
   keywordOptions: string[]
   saveIndicator: SaveIndicatorState
-  saveIndicatorText: string | null
-  saveRecoveryNotice: SaveRecoveryNotice | null
+  /** The one save-problem surface: conflict, error, retrying or a newer server copy. */
+  saveIssue: NotesSaveIssue | null
+  /** Version, last save and server for the status pill's tooltip. */
+  saveStatusDetail: string
   selectedLastSavedAt: string | null
   offlineStatusText: string | null
   currentOfflineDraft: OfflineDraftEntry | null
-  remoteVersionInfo: RemoteVersionInfo | null
   monitoringNotice: MonitoringNoticeState | null
   monitoringNoticeClasses: string
   noteTasks: NoteTask[]
@@ -186,8 +211,10 @@ export interface NotesEditorPaneProps {
   usesLargePreviewGuardrails: boolean
   largePreviewReady: boolean
 
-  // WYSIWYG
+  // WYSIWYG (uncontrolled editor, NE-01): the document is written into the DOM
+  // only when the revision changes or the editor node mounts.
   wysiwygHtml: string
+  wysiwygRevision: number
 
   // Wikilinks
   activeWikilinkQuery: ActiveWikilinkQuery | null
@@ -197,14 +224,15 @@ export interface NotesEditorPaneProps {
 
   // Metrics
   metricSummaryText: string
-  revisionSummaryText: string
+  sourceHistory?: unknown
+  onRestoreSourceHistory?: () => void
   provenanceSummaryText: string
   queuedOfflineDraftCount: number
 
   // Refs
   titleInputRef: React.Ref<InputRef>
-  contentTextareaRef: React.Ref<HTMLTextAreaElement>
-  richEditorRef: React.Ref<HTMLDivElement>
+  contentTextareaRef: React.MutableRefObject<HTMLTextAreaElement | null>
+  richEditorRef: React.RefObject<HTMLDivElement>
   attachmentInputRef: React.Ref<HTMLInputElement>
 
   // Setters used in inline handlers
@@ -235,7 +263,11 @@ export interface NotesEditorPaneProps {
   handleOpenNotesStudio: () => void
   exportSelected: (format: SingleNoteExportFormat) => void
   saveNote: () => Promise<boolean>
-  reloadSelectedNoteAfterConflict: () => Promise<void>
+  retrySave: () => Promise<boolean>
+  keepMyVersion: () => Promise<boolean>
+  takeTheirVersion: () => Promise<boolean>
+  copyMyText: () => Promise<boolean>
+  loadLatestVersion: () => Promise<boolean>
   saveAndStartNew: () => Promise<void>
   deleteNote: () => Promise<void>
   handleSelectNote: (id: string | number) => Promise<void>
@@ -249,6 +281,7 @@ export interface NotesEditorPaneProps {
   ) => React.ReactNode
   handleEditorInputModeChange: (mode: NotesInputMode) => void
   applyMarkdownToolbarAction: (action: MarkdownToolbarAction) => void
+  captureToolbarSelection: () => void
   openAttachmentPicker: () => void
   handleAttachmentInputChange: (event: React.ChangeEvent<HTMLInputElement>) => void
   runAssistAction: (action: NotesAssistAction) => Promise<void>
@@ -257,6 +290,7 @@ export interface NotesEditorPaneProps {
   handleTocJump: (entry: NotesTocEntry) => void
   handlePreviewLinkClick: (event: React.MouseEvent<HTMLDivElement>) => void
   handleWysiwygInput: (event: React.FormEvent<HTMLDivElement>) => void
+  handleWysiwygKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => void
   handleWysiwygPaste: (event: React.ClipboardEvent<HTMLDivElement>) => void
   handleEditorChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void
   handleEditorKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void
@@ -312,12 +346,14 @@ export const NotesEditorEmptyState: React.FC<{
 const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   isMobileViewport,
   setMobileSidebarOpen,
+  mobileSidebarOpen = false,
   selectedId,
   showEmptyState,
   title,
   content,
   editorDisabled,
   isDirty,
+  notesServerUnavailable = false,
   isOnline,
   loadingDetail,
   saving,
@@ -331,6 +367,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   noteNeighborsState,
   noteNeighborsRequestKey,
   onRequestNeighbors,
+  connectionsMemory,
   onRetryNeighbors,
   selectedNotePinned,
   editorMode,
@@ -339,12 +376,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   editorKeywords,
   keywordOptions,
   saveIndicator,
-  saveIndicatorText,
-  saveRecoveryNotice,
+  saveIssue,
+  saveStatusDetail,
   selectedLastSavedAt,
   offlineStatusText,
   currentOfflineDraft,
-  remoteVersionInfo,
   monitoringNotice,
   monitoringNoticeClasses,
   noteTasks,
@@ -377,13 +413,15 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   usesLargePreviewGuardrails,
   largePreviewReady,
   wysiwygHtml,
+  wysiwygRevision,
   activeWikilinkQuery,
   wikilinkSuggestions,
   wikilinkSuggestionDisplayCounts,
   wikilinkSelectionIndex,
   metricSummaryText,
-  revisionSummaryText,
   provenanceSummaryText,
+  onRestoreSourceHistory,
+  sourceHistory,
   queuedOfflineDraftCount,
   titleInputRef,
   contentTextareaRef,
@@ -414,7 +452,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   handleOpenNotesStudio,
   exportSelected,
   saveNote,
-  reloadSelectedNoteAfterConflict,
+  retrySave,
+  keepMyVersion,
+  takeTheirVersion,
+  copyMyText,
+  loadLatestVersion,
   saveAndStartNew,
   deleteNote,
   handleSelectNote,
@@ -425,6 +467,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   renderKeywordLabelWithFrequency,
   handleEditorInputModeChange,
   applyMarkdownToolbarAction,
+  captureToolbarSelection,
   openAttachmentPicker,
   handleAttachmentInputChange,
   runAssistAction,
@@ -433,25 +476,108 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   handleTocJump,
   handlePreviewLinkClick,
   handleWysiwygInput,
+  handleWysiwygKeyDown,
   handleWysiwygPaste,
   handleEditorChange,
   handleEditorKeyDown,
   handleEditorSelectionUpdate,
   applyWikilinkSuggestion,
 }) => {
+  const splitPreviewRef = React.useRef<HTMLDivElement>(null)
+  const mirroredScrollRef = React.useRef<{
+    node: HTMLElement
+    top: number
+  } | null>(null)
+  const [viewportHeight, setViewportHeight] = React.useState(() =>
+    typeof window === "undefined" ? 900 : window.innerHeight
+  )
+  const [pairedHeight, setPairedHeight] = React.useState<number | null>(null)
+  const editorMaxHeight = notesEditorMaxHeight(
+    viewportHeight,
+    editorMode === "split"
+  )
+  React.useEffect(() => {
+    const resize = () => setViewportHeight(window.innerHeight)
+    window.addEventListener("resize", resize)
+    return () => window.removeEventListener("resize", resize)
+  }, [])
+  React.useLayoutEffect(() => {
+    mirroredScrollRef.current = null
+    setPairedHeight(null)
+    if (editorMode !== "split") return
+    const editor =
+      editorInputMode === "wysiwyg"
+        ? richEditorRef.current
+        : contentTextareaRef.current
+    if (!editor) return
+    const measure = () =>
+      setPairedHeight(editor.getBoundingClientRect().height || null)
+    measure()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(measure)
+    observer.observe(editor)
+    return () => observer.disconnect()
+  }, [selectedId, editorMode, editorInputMode, contentTextareaRef, richEditorRef])
+  const syncSplitScroll = (event: React.UIEvent<HTMLElement>) => {
+    if (editorMode !== "split") return
+    const source = event.currentTarget
+    const mirrored = mirroredScrollRef.current
+    mirroredScrollRef.current = null
+    if (
+      mirrored?.node === source &&
+      Math.abs(mirrored.top - source.scrollTop) < 1
+    )
+      return
+    const editor =
+      editorInputMode === "wysiwyg"
+        ? richEditorRef.current
+        : contentTextareaRef.current
+    const target =
+      source === splitPreviewRef.current ? editor : splitPreviewRef.current
+    if (!target) return
+    const sourceRange = source.scrollHeight - source.clientHeight
+    const targetRange = target.scrollHeight - target.clientHeight
+    if (sourceRange <= 0 || targetRange <= 0) return
+    const next =
+      Math.max(0, Math.min(1, source.scrollTop / sourceRange)) * targetRange
+    if (Math.abs(target.scrollTop - next) < 1) return
+    target.scrollTop = next
+    mirroredScrollRef.current = { node: target, top: target.scrollTop }
+  }
+
   const { t } = useTranslation(['option', 'common'])
   const unavailableStateLabel =
     getDesignSystemState('unavailable')?.label ?? UNAVAILABLE_STATE_LABEL
   const unavailableLabel = t('option:notesSearch.linkedNoteUnavailable', {
     defaultValue: unavailableStateLabel
   })
-  const saveStatusRef = React.useRef<HTMLSpanElement | null>(null)
-  const saveStatusDescriptionId = saveIndicatorText ? NOTES_SAVE_STATUS_MESSAGE_ID : null
-  const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
+  const saveIssueRef = React.useRef<HTMLDivElement | null>(null)
+  const saveStatusDescriptionId = saveIssue ? NOTES_SAVE_STATUS_MESSAGE_ID : null
 
+  // NE-01: React never owns the WYSIWYG editor's children (no
+  // dangerouslySetInnerHTML), so re-renders caused by typing leave the DOM and
+  // the caret alone. The document is written only into a newly mounted editor
+  // node or when the hook publishes an external revision. No dependency array:
+  // the editor can mount or remount on any render (mode, layout, loading).
+  const appliedWysiwygRef = React.useRef<{ node: HTMLDivElement; revision: number } | null>(null)
+  React.useLayoutEffect(() => {
+    const node = richEditorRef.current
+    if (!node) return
+    for (const checkbox of node.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) checkbox.disabled = editorDisabled
+    const applied = appliedWysiwygRef.current
+    if (applied && applied.node === node && applied.revision === wysiwygRevision) return
+    replaceEditableHtml(node, wysiwygHtml)
+    for (const checkbox of node.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) checkbox.disabled = editorDisabled
+    appliedWysiwygRef.current = { node, revision: wysiwygRevision }
+  })
+  const contentDescribedBy = joinAriaIds(NOTES_EDITOR_CONTENT_HELP_ID, saveStatusDescriptionId)
+  const saveIssueKind = saveIssue?.kind ?? null
+
+  // A new conflict or error after an explicit Save moves focus to its choices;
+  // focus in the editor is never taken (NS-N2).
   React.useEffect(() => {
-    if (saveIndicator !== 'error' || !saveIndicatorText) return
-    const target = saveStatusRef.current
+    if (saveIssueKind !== 'conflict' && saveIssueKind !== 'error') return
+    const target = saveIssueRef.current
     if (!target) return
     const activeElement = document.activeElement
     const shouldMoveFocus =
@@ -463,17 +589,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
     window.requestAnimationFrame(() => {
       if (target.isConnected) target.focus()
     })
-  }, [saveIndicator, saveIndicatorText])
+  }, [saveIssueKind])
 
   const renderHelpButton = React.useCallback(
     (label: string) => (
-      <button
-        type="button"
-        className="inline-flex items-center rounded-sm text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        aria-label={label}
-      >
-        <QuestionCircleOutlined className="text-[11px]" />
-      </button>
+      <NotesSectionHelpButton label={label} />
     ),
     []
   )
@@ -482,7 +602,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
     testId: string,
   ) => (
     <div
-      className="w-full flex-1 text-sm p-4 rounded-lg border border-border bg-surface2 overflow-auto"
+      className={`w-full flex-1 text-sm p-4 rounded-lg border border-border bg-surface2 ${editorMode === 'split' ? 'overflow-visible' : 'overflow-auto'} ${MISSING_WIKILINK_PREVIEW_CLASSES}`}
       onClick={handlePreviewLinkClick}
       data-testid={testId}
     >
@@ -491,6 +611,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
       </React.Suspense>
     </div>
   )
+
+  // NE-10: Related leaves out manual links (they have their own list), and
+  // Connections stays open across notes.
+  const relatedNotes = noteRelations.related
+  const connectionsDisclosure = useConnectionsDisclosure(noteNeighborsRequestKey, onRequestNeighbors, connectionsMemory)
 
   const renderRelationMeta = (
     relationLabel?: string,
@@ -511,8 +636,14 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   )
 
   const renderTaskAwarePreviewSurface = (testId: string) => (
-    <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <TaskChecklistPreview
+    <div
+      ref={editorMode === 'split' ? splitPreviewRef : undefined}
+      data-testid={editorMode === 'split' ? 'notes-split-preview-viewport' : undefined}
+      onScroll={syncSplitScroll}
+      style={editorMode === 'split' ? { height: pairedHeight || editorMaxHeight, maxHeight: editorMaxHeight } : undefined}
+      className={`flex min-h-0 flex-col gap-3 ${editorMode === 'split' ? 'overflow-auto flex-none' : 'flex-1'}`}
+    >
+      <TaskChecklistToggle
         content={previewContent}
         tasks={noteTasks}
         isDirty={isDirty}
@@ -545,6 +676,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           <Button
             size="large"
             onClick={() => setMobileSidebarOpen(true)}
+            aria-expanded={mobileSidebarOpen}
+            aria-controls={NOTES_LIST_REGION_ID}
             data-testid="notes-mobile-open-list-button"
             className="min-h-[44px]"
           >
@@ -585,6 +718,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         isDirty={isDirty}
         saveIndicator={saveIndicator}
         lastSavedAt={selectedLastSavedAt}
+        saveStatusDetail={saveStatusDetail}
         onOpenLinkedConversation={() => {
           void openLinkedConversation()
         }}
@@ -625,15 +759,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         }}
         studioBadgeLabel={studioBadgeLabel}
       />
-      <div className="flex-1 flex flex-col px-4 py-3 overflow-auto">
-        {showEmptyState && !loadingDetail && (
-          <NotesEditorEmptyState
-            disabled={editorDisabled}
-            onCreateNote={() => {
-              void handleNewNote()
-            }}
-          />
-        )}
+      <div className="flex-1 flex flex-col px-4 py-3 overflow-auto" data-testid="notes-editor-body">
+        {notesServerUnavailable && <NotesServerUnavailableBanner />}
         {showStudioMarkdownOnlyNotice ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
             <span>
@@ -807,58 +934,98 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             }))}
             disabled={editorDisabled}
           />
-          {saveIndicatorText && (
-            <span
-              id={NOTES_SAVE_STATUS_MESSAGE_ID}
-              ref={saveStatusRef}
-              role={saveIndicator === 'error' ? 'alert' : 'status'}
-              tabIndex={saveIndicator === 'error' ? -1 : undefined}
+          {saveIssue && (
+            <div
+              key={saveIssue.kind}
+              ref={saveIssueRef}
+              className={`mt-2 flex flex-wrap items-center gap-2 rounded border px-2 py-2 text-[12px] ${
+                saveIssue.kind === 'error'
+                  ? 'border-danger/50 bg-danger/10 text-danger'
+                  : 'border-warn/50 bg-warn/10 text-warn'
+              }`}
+              role={saveIssue.kind === 'conflict' || saveIssue.kind === 'error' ? 'alert' : 'status'}
               aria-label={t('option:notesSearch.saveStatusAriaLabel', {
                 defaultValue: 'Note save status'
               })}
-              aria-live={saveIndicator === 'error' ? 'assertive' : 'polite'}
-              className={`block text-[11px] mt-1 ${
-                saveIndicator === 'error' ? 'text-danger' : 'text-text-muted'
-              }`}
-              data-testid="notes-save-feedback"
+              tabIndex={-1}
+              data-testid="notes-save-issue"
+              data-kind={saveIssue.kind}
             >
-              {saveIndicatorText}
-            </span>
-          )}
-          {saveRecoveryNotice && (
-            <div
-              className={`mt-2 flex flex-wrap items-center gap-2 rounded border px-2 py-2 text-[12px] ${
-                saveRecoveryNotice.kind === 'conflict'
-                  ? 'border-warn/50 bg-warn/10 text-warn'
-                  : 'border-danger/50 bg-danger/10 text-danger'
-              }`}
-              role="alert"
-              aria-live="assertive"
-              aria-atomic="true"
-              data-testid="notes-save-recovery-notice"
-            >
-              <span>{saveRecoveryNotice.message}</span>
-              <Button
-                size="small"
-                onClick={() => {
-                  void saveNote()
-                }}
-                disabled={saving || editorDisabled}
-                data-testid="notes-save-recovery-retry"
-              >
-                {t('option:notesSearch.saveStatusRetry', { defaultValue: 'Retry' })}
-              </Button>
-              {saveRecoveryNotice.kind === 'conflict' && selectedId != null ? (
+              <span id={NOTES_SAVE_STATUS_MESSAGE_ID} className="min-w-0 flex-1 basis-60">
+                {saveIssue.message}
+              </span>
+              {saveIssue.kind === 'conflict' ? (
+                <>
+                  <Button
+                    size="small"
+                    danger
+                    onClick={() => {
+                      void keepMyVersion()
+                    }}
+                    loading={saveIssue.busy}
+                    disabled={editorDisabled}
+                    data-testid="notes-conflict-keep-mine"
+                  >
+                    {t('option:notesSearch.keepMyVersion', { defaultValue: 'Keep my version' })}
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void takeTheirVersion()
+                    }}
+                    disabled={saveIssue.busy || editorDisabled}
+                    data-testid="notes-conflict-take-theirs"
+                  >
+                    {t('option:notesSearch.useTheirVersion', { defaultValue: 'Use their version' })}
+                  </Button>
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      void copyMyText()
+                    }}
+                    data-testid="notes-conflict-copy-mine"
+                  >
+                    {t('option:notesSearch.copyMyText', { defaultValue: 'Copy my text' })}
+                  </Button>
+                </>
+              ) : null}
+              {saveIssue.kind === 'error' || saveIssue.kind === 'retrying' ? (
                 <Button
                   size="small"
                   onClick={() => {
-                    void reloadSelectedNoteAfterConflict()
+                    void retrySave()
                   }}
-                  disabled={saving || editorDisabled}
-                  data-testid="notes-save-conflict-reload"
+                  loading={saveIssue.busy}
+                  disabled={editorDisabled}
+                  data-testid="notes-save-issue-retry"
                 >
-                  {t('option:notesSearch.reloadConflictAction', {
-                    defaultValue: 'Reload server version'
+                  {saveIssue.kind === 'retrying'
+                    ? t('option:notesSearch.retryNow', { defaultValue: 'Retry now' })
+                    : t('option:notesSearch.saveStatusRetry', { defaultValue: 'Retry' })}
+                </Button>
+              ) : null}
+              {saveIssue.kind === 'error' ? (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    void copyMyText()
+                  }}
+                  data-testid="notes-save-issue-copy"
+                >
+                  {t('option:notesSearch.copyMyText', { defaultValue: 'Copy my text' })}
+                </Button>
+              ) : null}
+              {saveIssue.kind === 'remote-newer' ? (
+                <Button
+                  size="small"
+                  onClick={() => {
+                    void loadLatestVersion()
+                  }}
+                  disabled={editorDisabled}
+                  data-testid="notes-stale-version-reload"
+                >
+                  {t('option:notesSearch.loadLatestVersion', {
+                    defaultValue: 'Load latest version'
                   })}
                 </Button>
               ) : null}
@@ -868,39 +1035,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             <Typography.Text
               type={currentOfflineDraft?.syncState === 'conflict' ? 'danger' : 'secondary'}
               className="block text-[11px] mt-1 text-text-muted"
-              aria-live="polite"
               data-testid="notes-offline-sync-status"
             >
               {offlineStatusText}
             </Typography.Text>
-          )}
-          {remoteVersionInfo && (
-            <div
-              className="mt-2 rounded border border-warn/50 bg-warn/10 px-2 py-1 text-[12px] text-warn"
-              role="status"
-              data-testid="notes-stale-version-warning"
-            >
-              <span>
-                {t('option:notesSearch.staleVersionWarning', {
-                  defaultValue:
-                    'This note was updated elsewhere. Reload to see the latest version.'
-                })}
-              </span>
-              <Button
-                type="link"
-                size="small"
-                className="!px-1"
-                onClick={() => {
-                  if (selectedId == null) return
-                  void handleSelectNote(selectedId)
-                }}
-                data-testid="notes-stale-version-reload"
-              >
-                {t('option:notesSearch.reloadNoteAction', {
-                  defaultValue: 'Reload note'
-                })}
-              </Button>
-            </div>
           )}
           {monitoringNotice && (
             <div
@@ -941,17 +1079,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             onInspect={inspectTaskActivity}
             onDismiss={(eventId) => void dismissTaskActivity(eventId)}
           />
-          {noteTasks.length > 0 && (
-            <Typography.Text
-              type="secondary"
-              className="block text-[11px] mt-2 text-text-muted"
-              data-testid="notes-task-continuity-notice"
-            >
-              {t('option:notesSearch_taskContinuityNotice', {
-                defaultValue: 'Portable markdown with best-effort task continuity'
-              })}
-            </Typography.Text>
-          )}
           {canUndoAssist && (
             <div className="mt-2">
               <Button
@@ -986,9 +1113,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 )}
               </Tooltip>
             }
-            defaultOpen={!onRequestNeighbors}
+            defaultOpen={!onRequestNeighbors || connectionsDisclosure.initiallyOpen}
             storageKey={onRequestNeighbors ? undefined : "connections"}
-            onOpenChange={(open) => { if (open) onRequestNeighbors?.() }}
+            onOpenChange={connectionsDisclosure.onOpenChange}
             testId="notes-section-connections"
           >
           {noteNeighborsUnavailable ? (
@@ -1178,7 +1305,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     </Button>
                   )}
                 </div>
-              ) : noteRelations.related.length === 0 ? (
+              ) : relatedNotes.length === 0 ? (noteRelations.manualLinks.length > 0 ? null : (
                 <Typography.Text
                   type="secondary"
                   className="block mt-2 text-[12px] text-text-muted"
@@ -1188,9 +1315,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     defaultValue: 'No related notes yet.'
                   })}
                 </Typography.Text>
-              ) : (
+              )) : (
                 <div className="mt-2 flex flex-wrap gap-1.5" data-testid="notes-related-list">
-                  {noteRelations.related.map((note) => (
+                  {relatedNotes.map((note) => (
                     <div
                       key={`related-${note.id}`}
                       className="rounded border border-border bg-surface"
@@ -1298,46 +1425,48 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           </CollapsibleSection>
         )}
         {editorMode !== 'preview' && (
-          <div className="mt-3 flex items-center flex-wrap gap-1 rounded-lg border border-border bg-surface2 p-2">
-            <div
-              className="mr-2 inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1 py-0.5"
-              role="group"
-              aria-label={t('option:notesSearch.inputModeGroup', {
-                defaultValue: 'Input mode'
-              })}
-              data-testid="notes-input-mode-toggle"
-            >
-              <Button
-                size="small"
-                type={editorInputMode === 'markdown' ? 'primary' : 'text'}
-                onClick={() => handleEditorInputModeChange('markdown')}
-                disabled={editorDisabled}
-                data-testid="notes-input-mode-markdown"
-              >
-                {t('option:notesSearch.inputModeMarkdown', {
-                  defaultValue: 'Markdown'
+          <div className="mt-3 flex items-center flex-wrap gap-1 rounded-lg border border-border bg-surface2 p-2"
+            onMouseDownCapture={captureToolbarSelection} onFocusCapture={captureToolbarSelection}>
+            {NOTES_WYSIWYG_INPUT_ENABLED && (
+              <div
+                className="mr-2 inline-flex items-center gap-1 rounded-md border border-border bg-surface px-1 py-0.5"
+                role="group"
+                aria-label={t('option:notesSearch.inputModeGroup', {
+                  defaultValue: 'Input mode'
                 })}
-              </Button>
-              <Button
-                size="small"
-                type={editorInputMode === 'wysiwyg' ? 'primary' : 'text'}
-                onClick={() => handleEditorInputModeChange('wysiwyg')}
-                disabled={editorDisabled}
-                data-testid="notes-input-mode-wysiwyg"
+                data-testid="notes-input-mode-toggle"
               >
-                {t('option:notesSearch.inputModeWysiwyg', {
-                  defaultValue: 'WYSIWYG'
-                })}
-              </Button>
-            </div>
-            <Typography.Text
-              type="secondary"
-              className="text-[11px] mr-1 uppercase tracking-[0.08em]"
-            >
+                <Button
+                  size="small"
+                  type={editorInputMode === 'markdown' ? 'primary' : 'text'}
+                  aria-pressed={editorInputMode === 'markdown'}
+                  onClick={() => handleEditorInputModeChange('markdown')}
+                  disabled={editorDisabled}
+                  data-testid="notes-input-mode-markdown"
+                >
+                  {t('option:notesSearch.inputModeMarkdown', {
+                    defaultValue: 'Markdown'
+                  })}
+                </Button>
+                <Button
+                  size="small"
+                  type={editorInputMode === 'wysiwyg' ? 'primary' : 'text'}
+                  aria-pressed={editorInputMode === 'wysiwyg'}
+                  onClick={() => handleEditorInputModeChange('wysiwyg')}
+                  disabled={editorDisabled}
+                  data-testid="notes-input-mode-wysiwyg"
+                >
+                  {t('option:notesSearch.inputModeWysiwyg', {
+                    defaultValue: 'WYSIWYG'
+                  })}
+                </Button>
+              </div>
+            )}
+            <MetaText className="mr-1 uppercase tracking-[0.08em]">
               {t('option:notesSearch.formattingLabel', {
                 defaultValue: 'Formatting'
               })}
-            </Typography.Text>
+            </MetaText>
             <Tooltip title={t('option:notesSearch.toolbarBoldTooltip', { defaultValue: 'Bold' })}>
               <Button
                 size="small"
@@ -1360,17 +1489,21 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 data-testid="notes-toolbar-italic"
               />
             </Tooltip>
-            <Tooltip title={t('option:notesSearch.toolbarHeadingTooltip', { defaultValue: 'Heading' })}>
+            <Dropdown trigger={['click']} disabled={editorDisabled} menu={{
+              items: [1, 2, 3].map((level) => ({ key: `heading${level}`, label: t(`option:notesSearch.toolbarHeading${level}`, { defaultValue: `Heading ${level}` }) })),
+              onClick: ({ key }) => {
+                if (key === 'heading1' || key === 'heading2' || key === 'heading3') applyMarkdownToolbarAction(key)
+              },
+            }}>
               <Button
                 size="small"
                 type="text"
                 icon={(<HeadingIcon className="w-4 h-4" />)}
-                onClick={() => applyMarkdownToolbarAction('heading')}
                 disabled={editorDisabled}
                 aria-label={t('option:notesSearch.toolbarHeadingTooltip', { defaultValue: 'Heading' })}
                 data-testid="notes-toolbar-heading"
               />
-            </Tooltip>
+            </Dropdown>
             <Tooltip title={t('option:notesSearch.toolbarListTooltip', { defaultValue: 'List' })}>
               <Button
                 size="small"
@@ -1381,6 +1514,18 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 aria-label={t('option:notesSearch.toolbarListTooltip', { defaultValue: 'List' })}
                 data-testid="notes-toolbar-list"
               />
+            </Tooltip>
+            <Tooltip title={t('option:notesSearch.toolbarNumberedTooltip', { defaultValue: 'Numbered list' })}>
+              <Button size="small" type="text" icon={<ListOrderedIcon className="w-4 h-4" />}
+                onClick={() => applyMarkdownToolbarAction('numbered')} disabled={editorDisabled}
+                aria-label={t('option:notesSearch.toolbarNumberedTooltip', { defaultValue: 'Numbered list' })}
+                data-testid="notes-toolbar-numbered" />
+            </Tooltip>
+            <Tooltip title={t('option:notesSearch.toolbarChecklistTooltip', { defaultValue: 'Checklist' })}>
+              <Button size="small" type="text" icon={<ListChecksIcon className="w-4 h-4" />}
+                onClick={() => applyMarkdownToolbarAction('checklist')} disabled={editorDisabled}
+                aria-label={t('option:notesSearch.toolbarChecklistTooltip', { defaultValue: 'Checklist' })}
+                data-testid="notes-toolbar-checklist" />
             </Tooltip>
             <Tooltip title={t('option:notesSearch.toolbarLinkTooltip', { defaultValue: 'Link' })}>
               <Button
@@ -1416,14 +1561,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               />
             </Tooltip>
             <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
-            <Typography.Text
-              type="secondary"
-              className="text-[11px] mr-1 uppercase tracking-[0.08em]"
-            >
+            <MetaText className="mr-1 uppercase tracking-[0.08em]">
               {t('option:notesSearch.assistLabel', {
                 defaultValue: 'Assist'
               })}
-            </Typography.Text>
+            </MetaText>
             <Tooltip
               title={t('option:notesSearch.assistSummarizeTooltip', {
                 defaultValue: 'Generate a concise summary draft'
@@ -1498,19 +1640,16 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           </div>
         )}
         {shouldShowToc && (
-          <div
-            className="mt-3 rounded-lg border border-border bg-surface2 p-2"
-            data-testid="notes-toc-panel"
-          >
-            <Typography.Text
-              type="secondary"
-              className="block text-[11px] uppercase tracking-[0.08em] text-text-muted"
+          <div className="mt-3 rounded-lg border border-border bg-surface2 p-2">
+            <CollapsibleSection
+              key={`${selectedId ?? 'draft'}-${tocEntries.length > 6}`}
+              title={t('option:notesSearch.tocHeading', { defaultValue: 'Table of contents' })}
+              badge={tocEntries.length}
+              defaultOpen={tocEntries.length <= 6}
+              storageKey="toc"
+              testId="notes-toc-panel"
             >
-              {t('option:notesSearch.tocHeading', {
-                defaultValue: 'Table of contents'
-              })}
-            </Typography.Text>
-            <div className="mt-2 space-y-1">
+            <div className="mt-2 max-h-48 overflow-auto space-y-1">
               {tocEntries.map((entry) => (
                 <button
                   key={`toc-${entry.id}-${entry.offset}`}
@@ -1524,6 +1663,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 </button>
               ))}
             </div>
+            </CollapsibleSection>
           </div>
         )}
         <div className="mt-2 flex-1 min-h-0">
@@ -1571,7 +1711,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               </Typography.Text>
             )
           ) : editorMode === 'split' ? (
-            <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-2">
+            // Full height only side by side: stacked below lg, the editor and
+            // preview keep their height and the body scrolls (NO-01 frame).
+            <div
+              className="grid min-h-0 grid-cols-1 gap-3 lg:h-full lg:grid-cols-2"
+              data-testid="notes-split-grid"
+            >
               <div className="flex min-h-0 flex-col">
                 <Typography.Text
                   type="secondary"
@@ -1588,8 +1733,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     aria-multiline="true"
                     contentEditable={!editorDisabled}
                     suppressContentEditableWarning
-                    className="w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
+                    className={`w-full min-h-[220px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus ${WYSIWYG_EDITOR_TYPOGRAPHY_CLASS}`}
                     onInput={handleWysiwygInput}
+                    onChange={handleWysiwygInput}
+                    onKeyDown={handleWysiwygKeyDown}
+                    onScroll={syncSplitScroll}
+                    style={{ maxHeight: editorMaxHeight }}
                     onPaste={handleWysiwygPaste}
                     onBlur={() => setEditorCursorIndex(null)}
                     aria-label={t('option:notesSearch.editorAriaLabel', {
@@ -1597,7 +1746,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     })}
                     aria-describedby={contentDescribedBy}
                     data-testid="notes-wysiwyg-editor"
-                    dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                   />
                 ) : (
                   <>
@@ -1607,6 +1755,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                       value={content}
                       onChange={handleEditorChange}
                       onKeyDown={handleEditorKeyDown}
+                      onScroll={syncSplitScroll}
                       onSelect={handleEditorSelectionUpdate}
                       onClick={handleEditorSelectionUpdate}
                       onKeyUp={handleEditorSelectionUpdate}
@@ -1659,19 +1808,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     )}
                   </>
                 )}
-                <Typography.Text
+                <MetaText
                   id={NOTES_EDITOR_CONTENT_HELP_ID}
-                  type="secondary"
-                  className="block text-[11px] mt-1 text-text-muted"
+                  className="block mt-1"
                 >
-                  {editorInputMode === 'wysiwyg'
-                    ? t('option:notesSearch.wysiwygSupportHint', {
-                        defaultValue: 'WYSIWYG mode keeps markdown structure while you edit.'
-                      })
-                    : t('option:notesSearch.editorSupportHint', {
-                        defaultValue: 'Markdown + LaTeX supported'
-                      })}
-                </Typography.Text>
+                  {notesEditorSupportHint(t, editorInputMode, showEmptyState, editorDisabled)}
+                </MetaText>
               </div>
               <div className="flex min-h-0 flex-col">
                 {content.trim().length > 0 ? (
@@ -1727,8 +1869,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   aria-multiline="true"
                   contentEditable={!editorDisabled}
                   suppressContentEditableWarning
-                  className="w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus"
+                  className={`w-full min-h-[280px] text-sm p-4 rounded-lg border border-border bg-surface2 text-text overflow-auto leading-relaxed focus:outline-none focus:ring-2 focus:ring-focus ${WYSIWYG_EDITOR_TYPOGRAPHY_CLASS}`}
                   onInput={handleWysiwygInput}
+                  onChange={handleWysiwygInput}
+                  onKeyDown={handleWysiwygKeyDown}
+                  style={{ maxHeight: editorMaxHeight }}
                   onPaste={handleWysiwygPaste}
                   onBlur={() => setEditorCursorIndex(null)}
                   aria-label={t('option:notesSearch.editorAriaLabel', {
@@ -1736,7 +1881,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   })}
                   aria-describedby={contentDescribedBy}
                   data-testid="notes-wysiwyg-editor"
-                  dangerouslySetInnerHTML={{ __html: wysiwygHtml }}
                 />
               ) : (
                 <>
@@ -1798,19 +1942,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   )}
                 </>
               )}
-              <Typography.Text
+              <MetaText
                 id={NOTES_EDITOR_CONTENT_HELP_ID}
-                type="secondary"
-                className="block text-[11px] mt-1 text-text-muted"
+                className="block mt-1"
               >
-                {editorInputMode === 'wysiwyg'
-                  ? t('option:notesSearch.wysiwygSupportHint', {
-                      defaultValue: 'WYSIWYG mode keeps markdown structure while you edit.'
-                    })
-                  : t('option:notesSearch.editorSupportHint', {
-                      defaultValue: 'Markdown + LaTeX supported'
-                    })}
-              </Typography.Text>
+                {notesEditorSupportHint(t, editorInputMode, showEmptyState, editorDisabled)}
+              </MetaText>
             </div>
           )}
         </div>
@@ -1827,17 +1964,16 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           <Typography.Text
             type="secondary"
             className="block text-[11px] text-text-muted mt-1"
-            data-testid="notes-editor-revision-meta"
-          >
-            {revisionSummaryText}
-          </Typography.Text>
-          <Typography.Text
-            type="secondary"
-            className="block text-[11px] text-text-muted mt-1"
             data-testid="notes-editor-provenance"
           >
             {provenanceSummaryText}
           </Typography.Text>
+          <KnowledgeNoteHistory note={sourceHistory} />
+          {onRestoreSourceHistory && (
+            <Button size="small" onClick={onRestoreSourceHistory} disabled={saving || editorDisabled}>
+              {t('option:notesSearch.restoreSourceHistory', { defaultValue: 'Restore retained source history' })}
+            </Button>
+          )}
           {queuedOfflineDraftCount > 0 && (
             <Typography.Text
               type="secondary"

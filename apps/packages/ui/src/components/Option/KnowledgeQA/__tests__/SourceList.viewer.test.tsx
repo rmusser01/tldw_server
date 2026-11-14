@@ -1,3 +1,5 @@
+import "./dialogTestSetup"
+import userEvent from "@testing-library/user-event"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { SourceList } from "../SourceList"
@@ -36,6 +38,10 @@ vi.mock("../KnowledgeQAProvider", () => ({
     focusSource: state.focusSource,
     setQuery: state.setQuery,
   }),
+}))
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({ t: (key: string, fallback?: string | { defaultValue?: string }) => typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key })
 }))
 
 describe("SourceList full-source viewer", () => {
@@ -80,6 +86,22 @@ describe("SourceList full-source viewer", () => {
     const dialog = await screen.findByRole("dialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "Open in Media" }))
     expect(window.open).toHaveBeenCalledWith("/media?id=1", "_blank", "noopener,noreferrer")
+  })
+
+  it("contains preview keyboard focus and returns to the source card", async () => {
+    const user = userEvent.setup()
+    render(<SourceList />)
+    const trigger = screen.getByRole("button", { name: "View source 1" })
+    await user.click(trigger)
+    const dialog = await screen.findByRole("dialog")
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true))
+    for (let i = 0; i < 8; i++) {
+      await user.tab({ shift: i >= 6 })
+      expect(dialog.contains(document.activeElement)).toBe(true)
+    }
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(trigger).toHaveFocus())
+    expect(screen.queryByRole("dialog")).toBeNull()
   })
 
   it("opens and closes full source preview modal from source actions", async () => {

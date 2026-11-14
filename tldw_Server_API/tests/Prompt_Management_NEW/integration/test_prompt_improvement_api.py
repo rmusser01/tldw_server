@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import threading
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
@@ -32,6 +33,7 @@ from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
 )
 from tldw_Server_API.app.api.v1.endpoints import prompts
 from tldw_Server_API.app.core.AuthNZ.llm_budget_guard import enforce_llm_budget
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.routing import InMemoryRoutingDecisionStore
 from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     MAX_DRAFT_CHARS,
@@ -45,6 +47,7 @@ from tldw_Server_API.app.core.Prompt_Management.prompt_improvement import (
     PROMPT_IMPROVEMENT_LIMITS,
 )
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
 
 pytestmark = pytest.mark.integration
 
@@ -1295,6 +1298,65 @@ def test_prompt_improvement_openapi_uses_canonical_forbidden_contracts():
 
 
 @pytest.mark.asyncio
+async def test_dispatch_provider_snapshot_runs_off_loop_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Offload inventory collection while reusing one snapshot for routing."""
+    dispatch = _dispatch_module()
+    loop_thread = threading.get_ident()
+    getter_threads: list[int] = []
+    listing = _configured_providers()
+
+    def configured_providers_getter() -> dict[str, Any]:
+        """Record the execution thread of the synchronous inventory getter."""
+        getter_threads.append(threading.get_ident())
+        return listing
+
+    async def resolve_route(_request_data: Any, **kwargs: Any) -> SimpleNamespace:
+        """Read the captured listing twice without repeating discovery."""
+        assert kwargs["configured_providers_getter"]() == listing
+        assert kwargs["configured_providers_getter"]() == listing
+        assert kwargs["default_provider"] == "openai"
+        return SimpleNamespace(provider="openai", model="gpt-test", was_auto=True)
+
+    async def touch_last_used() -> None:
+        """Accept the post-call credential touch."""
+
+    async def resolve_credentials(_provider: str, **_kwargs: Any) -> SimpleNamespace:
+        """Serve one BYOK credential without the credential store."""
+        return SimpleNamespace(api_key="test-key", app_config=None, touch_last_used=touch_last_used)
+
+    provider_calls: list[dict[str, Any]] = []
+
+    async def provider_call(**kwargs: Any) -> dict[str, Any]:
+        """Record the generation request the routed snapshot produced."""
+        provider_calls.append(kwargs)
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(dispatch, "resolve_chat_route", resolve_route)
+    monkeypatch.setattr(dispatch, "resolve_byok_credentials", resolve_credentials)
+    monkeypatch.setattr(dispatch, "perform_chat_api_call_async", provider_call)
+
+    result = await dispatch.dispatch_prompt_improvement(
+        request=SimpleNamespace(state=SimpleNamespace()),
+        current_user=_test_user(),
+        routing_decision_store=InMemoryRoutingDecisionStore(),
+        selected_model="auto",
+        provider_hint=None,
+        messages=[{"role": "user", "content": "draft"}],
+        request_id="snapshot-thread-test",
+        configured_providers_getter=configured_providers_getter,
+    )
+
+    assert result.text == "ok"
+    assert len(getter_threads) == 1
+    assert getter_threads[0] != loop_thread
+    assert [(call["api_endpoint"], call["model"], call["api_key"]) for call in provider_calls] == [
+        ("openai", "gpt-test", "test-key")
+    ]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_concrete_route_uses_byok_once_without_tools_or_retry(monkeypatch):
     dispatch = _dispatch_module()
     captured: dict[str, Any] = {}
@@ -1584,3 +1646,23 @@ async def test_dispatch_maps_rate_limit_retry_after_and_provider_refusal(monkeyp
         )
     assert refused.value.code == "model_refusal"
     byok.touch_last_used.assert_awaited_once_with()
+
+
+def test_llm_quota_refusal_answers_402_not_retryable_provider_unavailable(monkeypatch):
+    """The user's LLM limit is let through as the 402, not mapped to a retryable provider outage (TASK-13638)."""
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+    )
+    provider_call = AsyncMock(side_effect=refusal)
+    # A keyless local provider: the real route resolution and credential lookup run. Stubbed: the
+    # provider call, and the model catalog, which depends on the local config.
+    dispatch = _dispatch_module()
+    monkeypatch.setattr(dispatch, "is_model_known_for_provider", lambda *_args: True)
+    monkeypatch.setattr(dispatch, "perform_chat_api_call_async", provider_call)
+    payload = _payload(model_selection={"selected_model": "llama3", "provider_hint": "ollama"})
+
+    with _isolated_prompt_client() as (client, _app, _route):
+        response = client.post("/api/v1/prompts/improve", json=payload)
+
+    assert_llm_quota_402(response)
+    provider_call.assert_awaited_once()

@@ -18,11 +18,13 @@ vi.mock("@/utils/safe-storage", () => ({
     get: async (key: string) =>
       options?.area === "session" ? mocks.sessionStorage.get(key) : undefined,
     set: vi.fn(async () => undefined),
-    remove: vi.fn(async () => undefined)
+    remove: vi.fn(async () => undefined),
+    watch: vi.fn()
   })
 }))
 
-vi.mock("@/services/action", () => ({
+vi.mock("@/services/action", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/action")>(),
   getInitialConfig: (...args: unknown[]) => mocks.getInitialConfig(...args)
 }))
 
@@ -67,8 +69,8 @@ vi.mock("wxt/browser", () => ({
 import { initBackground } from "../background-init"
 
 const flushPromises = async () => {
-  await Promise.resolve()
-  await Promise.resolve()
+  // Let all immediately resolved storage reads settle before restoring globals.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
 }
 
 describe("background clipper rollout guard", () => {
@@ -244,7 +246,12 @@ describe("background clipper rollout guard", () => {
         onActionIconClickChange: vi.fn(),
         onContextMenuClickChange: vi.fn()
       })
-      await flushPromises()
+      await vi.waitFor(() =>
+        expect(storage.set).toHaveBeenCalledWith(
+          "__tldwOpenApiDriftLastCheckV1",
+          { base: window.location.origin, checkedAt: expect.any(Number) }
+        )
+      )
 
       expect(fetchSpy).toHaveBeenCalledWith(
         `${window.location.origin}/openapi.json`,
@@ -310,7 +317,12 @@ describe("background clipper rollout guard", () => {
         onActionIconClickChange: vi.fn(),
         onContextMenuClickChange: vi.fn()
       })
-      await flushPromises()
+      await vi.waitFor(() =>
+        expect(storage.set).toHaveBeenCalledWith(
+          "__tldwOpenApiDriftLastCheckV1",
+          { base: "https://api.example.test", checkedAt: expect.any(Number) }
+        )
+      )
 
       expect(fetchSpy).toHaveBeenCalledWith(
         "https://api.example.test/openapi.json",
@@ -372,6 +384,129 @@ describe("background clipper rollout guard", () => {
 
     resolveCapabilities({ hasWebClipper: true })
     await flushPromises()
+  })
+
+  it("cold start warms models non-forced so fresh-cache wakes are no-ops", async () => {
+    await initBackground({
+      storage: storage as never,
+      contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+      saveToClipperMenuId: "save-to-clipper-pa",
+      saveToCompanionMenuId: "save-to-companion-pa",
+      saveToNotesMenuId: "save-to-notes-pa",
+      narrateSelectionMenuId: "narrate-selection-pa",
+      transcribeMenuId: {
+        transcribe: "transcribe-media-pa",
+        transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+      },
+      warmModels,
+      capabilities: {
+        sendToTldw: false,
+        processLocal: false,
+        transcribe: false,
+        openApiCheck: false
+      },
+      onActionIconClickChange: vi.fn(),
+      onContextMenuClickChange: vi.fn()
+    })
+
+    // WP-61: the cold-start warm must NOT force a refresh_openrouter=true
+    // round trip on every worker wake; warmModels(false) returns the
+    // 15-min TTL catalog without network traffic while fresh.
+    expect(warmModels).toHaveBeenCalledTimes(1)
+    expect(warmModels).toHaveBeenCalledWith(false)
+
+    // The periodic warm alarm stays scheduled (relaxed 6h cadence); the
+    // alarm handler's isCatalogFresh() gate plus the TTL keep idle fires
+    // no-ops.
+    expect(mocks.alarmsCreate).toHaveBeenCalledWith(
+      "tldw:model-warm",
+      expect.objectContaining({ periodInMinutes: 360 })
+    )
+  })
+
+  it("no-ops the clipper context-menu sync when a config write keeps the server URL", async () => {
+    await initBackground({
+      storage: storage as never,
+      contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+      saveToClipperMenuId: "save-to-clipper-pa",
+      saveToCompanionMenuId: "save-to-companion-pa",
+      saveToNotesMenuId: "save-to-notes-pa",
+      narrateSelectionMenuId: "narrate-selection-pa",
+      transcribeMenuId: {
+        transcribe: "transcribe-media-pa",
+        transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+      },
+      warmModels,
+      capabilities: {
+        sendToTldw: false,
+        processLocal: false,
+        transcribe: false,
+        openApiCheck: false
+      },
+      onActionIconClickChange: vi.fn(),
+      onContextMenuClickChange: vi.fn()
+    })
+    await flushPromises()
+
+    expect(mocks.contextMenusCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "save-to-clipper-pa" })
+    )
+
+    mocks.contextMenusCreate.mockClear()
+    mocks.contextMenusRemove.mockClear()
+    mocks.getServerCapabilities.mockClear()
+
+    // WP-62: an unrelated config write (e.g. an API-key refresh) must not
+    // rebuild the clipper context menu or re-resolve server capabilities.
+    watchHandlers.tldwConfig?.({
+      oldValue: { serverUrl: "http://127.0.0.1:8000", apiKey: "old-key" },
+      newValue: { serverUrl: "http://127.0.0.1:8000", apiKey: "new-key" }
+    })
+    await flushPromises()
+
+    expect(mocks.getServerCapabilities).not.toHaveBeenCalled()
+    expect(mocks.contextMenusRemove).not.toHaveBeenCalledWith(
+      "save-to-clipper-pa"
+    )
+    expect(mocks.contextMenusCreate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: "save-to-clipper-pa" })
+    )
+  })
+
+  it("re-syncs the clipper context menu when the server URL changes", async () => {
+    await initBackground({
+      storage: storage as never,
+      contextMenuId: { webui: "open-web-ui-pa", sidePanel: "open-side-panel-pa" },
+      saveToClipperMenuId: "save-to-clipper-pa",
+      saveToCompanionMenuId: "save-to-companion-pa",
+      saveToNotesMenuId: "save-to-notes-pa",
+      narrateSelectionMenuId: "narrate-selection-pa",
+      transcribeMenuId: {
+        transcribe: "transcribe-media-pa",
+        transcribeAndSummarize: "transcribe-and-summarize-media-pa"
+      },
+      warmModels,
+      capabilities: {
+        sendToTldw: false,
+        processLocal: false,
+        transcribe: false,
+        openApiCheck: false
+      },
+      onActionIconClickChange: vi.fn(),
+      onContextMenuClickChange: vi.fn()
+    })
+    await flushPromises()
+
+    mocks.getServerCapabilities.mockClear()
+
+    watchHandlers.tldwConfig?.({
+      oldValue: { serverUrl: "http://127.0.0.1:8000" },
+      newValue: { serverUrl: "http://127.0.0.1:9000" }
+    })
+    await flushPromises()
+
+    expect(mocks.getServerCapabilities).toHaveBeenCalledTimes(1)
+    expect(mocks.contextMenusRemove).toHaveBeenCalledWith("save-to-clipper-pa")
   })
 
   it("removes the clipper menu after config changes to a server without clipper support", async () => {

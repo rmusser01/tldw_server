@@ -35,11 +35,11 @@ Verify each PR #2065 review thread against current code, patch only confirmed is
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified the three PR #2065 Gemini threads against current code. Removed the duplicate scheduler-disabled useEffect while preserving direct scheduler-link clamping through the existing effect plus an effective active tab. Switched import limits to option:flashcards.transferSummaryLimitsValue with formatted cards/bytes interpolation and added the English locale entry. Replaced the AntD-disabled Scheduler tab with a guarded tab-change path and disabled-looking aria-disabled label so the explanatory tooltip remains event-reachable while Scheduler content remains unavailable with no decks. Verification: focused FlashcardsManager/ImportExportTab/ManageTab Vitest passed 26/26; focused Flashcards Playwright route smoke passed 2/2; git diff --check passed. Bandit skipped because this review pass only touched frontend TypeScript/TSX, locale JSON, Playwright-adjacent test coverage, and Backlog task files.
 
 Additional Qodo pass: verified the import-limits schema mismatch against useImportLimitsQuery, getFlashcardsImportLimits, and the backend /api/v1/config/flashcards-import-limits endpoint. The endpoint returns max_lines/max_line_length/max_field_length, so the frontend now normalizes that backend shape for summaries and import-panel copy, treats malformed/legacy-shaped limits as unavailable instead of throwing, and keeps structured-import max-field validation independent because it only needs max_field_length. Updated ImportExportTab.import-results and decomposition tests to use the backend shape and avoid hard-coded locale separators by deriving expectations from toLocaleString() in the test runtime. Expanded verification: targeted ImportExport/FlashcardsManager/ManageTab Vitest passed 49/49; focused Playwright route smoke passed 2/2; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

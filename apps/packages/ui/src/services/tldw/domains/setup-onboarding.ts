@@ -1,4 +1,4 @@
-import { bgRequest } from "@/services/background-proxy";
+import { bgRequest, type BgRequestInit } from "@/services/background-proxy";
 import type {
   AudioDefaultsRequest,
   AudioRecommendationsResponse,
@@ -24,6 +24,8 @@ import type {
   SetupProviderSaveResponse,
   SetupProviderValidationResponse,
 } from "@/types/setup-onboarding";
+
+export type SetupRequestOptions = Pick<BgRequestInit, "configSnapshot" | "abortSignal">;
 
 const jsonHeaders = { "Content-Type": "application/json" };
 
@@ -81,10 +83,11 @@ function extractMcpToolsApplyConflict(error: unknown): McpToolsApplyResponse {
 }
 
 export const setupOnboardingMethods = {
-  async getFirstRunState(): Promise<FirstRunState> {
+  async getFirstRunState(options: SetupRequestOptions = {}): Promise<FirstRunState> {
     try {
       // Preserve authenticated configuration resume when credentials are available.
       return await bgRequest<FirstRunState>({
+        ...options,
         path: "/api/v1/setup/first-run/state",
         method: "GET",
         expectedStatuses: [401],
@@ -93,6 +96,7 @@ export const setupOnboardingMethods = {
       if ((error as { status?: number } | null)?.status !== 401) throw error;
       // First-time setup remains reachable before the client has credentials.
       return await bgRequest<FirstRunState>({
+        ...options,
         path: "/api/v1/setup/first-run/state",
         method: "GET",
         noAuth: true,
@@ -102,8 +106,10 @@ export const setupOnboardingMethods = {
 
   async updateFirstRunState(
     payload: FirstRunStepUpdateRequest,
+    options?: SetupRequestOptions,
   ): Promise<FirstRunState> {
     return await bgRequest<FirstRunState>({
+      ...options,
       path: "/api/v1/setup/first-run/state",
       method: "POST",
       headers: jsonHeaders,
@@ -112,8 +118,9 @@ export const setupOnboardingMethods = {
     });
   },
 
-  async getFirstRunMetadata(): Promise<FirstRunMetadata> {
+  async getFirstRunMetadata(options: SetupRequestOptions = {}): Promise<FirstRunMetadata> {
     return await bgRequest<FirstRunMetadata>({
+      ...options,
       path: "/api/v1/setup/first-run/metadata",
       method: "GET",
       noAuth: true,
@@ -122,8 +129,10 @@ export const setupOnboardingMethods = {
 
   async skipFirstRun(
     payload: FirstRunSkipRequest = {},
+    options?: SetupRequestOptions,
   ): Promise<FirstRunState> {
     return await bgRequest<FirstRunState>({
+      ...options,
       path: "/api/v1/setup/first-run/skip",
       method: "POST",
       headers: jsonHeaders,
@@ -132,8 +141,9 @@ export const setupOnboardingMethods = {
     });
   },
 
-  async getSetupProviderCatalog(): Promise<SetupProviderCatalogResponse> {
+  async getSetupProviderCatalog(options: SetupRequestOptions = {}): Promise<SetupProviderCatalogResponse> {
     return await bgRequest<SetupProviderCatalogResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/providers/catalog",
       method: "GET",
       noAuth: true,
@@ -142,8 +152,10 @@ export const setupOnboardingMethods = {
 
   async saveSetupProvider(
     payload: SetupProviderSaveRequest,
+    options?: SetupRequestOptions,
   ): Promise<SetupProviderSaveResponse> {
     const response = await bgRequest<SetupProviderSaveResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/providers",
       method: "POST",
       headers: jsonHeaders,
@@ -159,8 +171,10 @@ export const setupOnboardingMethods = {
 
   async validateSetupProvider(
     payload: SetupProviderSaveRequest,
+    options?: SetupRequestOptions,
   ): Promise<SetupProviderValidationResponse> {
     return await bgRequest<SetupProviderValidationResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/providers/validate",
       method: "POST",
       headers: jsonHeaders,
@@ -171,8 +185,10 @@ export const setupOnboardingMethods = {
 
   async saveIngestDefaults(
     payload: IngestDefaultsRequest,
+    options?: SetupRequestOptions,
   ): Promise<FirstRunStepSaveResponse> {
     return await bgRequest<FirstRunStepSaveResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/ingest-defaults",
       method: "POST",
       headers: jsonHeaders,
@@ -183,8 +199,10 @@ export const setupOnboardingMethods = {
 
   async saveAudioDefaults(
     payload: AudioDefaultsRequest,
+    options?: SetupRequestOptions,
   ): Promise<FirstRunStepSaveResponse> {
     return await bgRequest<FirstRunStepSaveResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/audio-defaults",
       method: "POST",
       headers: jsonHeaders,
@@ -193,8 +211,9 @@ export const setupOnboardingMethods = {
     });
   },
 
-  async getSetupAudioRecommendations(): Promise<AudioRecommendationsResponse> {
+  async getSetupAudioRecommendations(options: SetupRequestOptions = {}): Promise<AudioRecommendationsResponse> {
     return await bgRequest<AudioRecommendationsResponse>({
+      ...options,
       path: "/api/v1/setup/audio/recommendations",
       method: "GET",
       noAuth: true,
@@ -203,8 +222,10 @@ export const setupOnboardingMethods = {
 
   async saveOptionalAdvanced(
     payload: OptionalAdvancedRequest,
+    options?: SetupRequestOptions,
   ): Promise<FirstRunStepSaveResponse> {
     return await bgRequest<FirstRunStepSaveResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/optional-advanced",
       method: "POST",
       headers: jsonHeaders,
@@ -213,8 +234,9 @@ export const setupOnboardingMethods = {
     });
   },
 
-  async getMcpToolsCatalog(): Promise<McpToolsCatalogResponse> {
+  async getMcpToolsCatalog(options: SetupRequestOptions = {}): Promise<McpToolsCatalogResponse> {
     return await bgRequest<McpToolsCatalogResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/mcp-tools/catalog",
       method: "GET",
       noAuth: true,
@@ -223,9 +245,11 @@ export const setupOnboardingMethods = {
 
   async applyMcpTools(
     payload: McpToolsApplyRequest,
+    options?: SetupRequestOptions,
   ): Promise<McpToolsApplyResponse> {
     try {
       return await bgRequest<McpToolsApplyResponse>({
+        ...options,
         path: "/api/v1/setup/first-run/mcp-tools/apply",
         method: "POST",
         headers: jsonHeaders,
@@ -240,8 +264,10 @@ export const setupOnboardingMethods = {
 
   async validateMcpTools(
     payload: McpToolsValidateRequest = {},
+    options?: SetupRequestOptions,
   ): Promise<McpToolsValidateResponse> {
     return await bgRequest<McpToolsValidateResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/mcp-tools/validate",
       method: "POST",
       headers: jsonHeaders,
@@ -250,8 +276,9 @@ export const setupOnboardingMethods = {
     });
   },
 
-  async getMcpToolsRecoveryStatus(): Promise<McpToolsRecoveryStatusResponse> {
+  async getMcpToolsRecoveryStatus(options: SetupRequestOptions = {}): Promise<McpToolsRecoveryStatusResponse> {
     return await bgRequest<McpToolsRecoveryStatusResponse>({
+      ...options,
       path: "/api/v1/setup/admin/mcp-tools/status",
       method: "GET",
     });
@@ -259,8 +286,10 @@ export const setupOnboardingMethods = {
 
   async validateMcpToolsRecovery(
     payload: McpToolsValidateRequest = {},
+    options?: SetupRequestOptions,
   ): Promise<McpToolsValidateResponse> {
     return await bgRequest<McpToolsValidateResponse>({
+      ...options,
       path: "/api/v1/setup/admin/mcp-tools/validate",
       method: "POST",
       headers: jsonHeaders,
@@ -270,8 +299,10 @@ export const setupOnboardingMethods = {
 
   async verifyFirstRunChat(
     payload: FirstChatVerifyRequest,
+    options?: SetupRequestOptions,
   ): Promise<FirstChatVerifyResponse> {
     return await bgRequest<FirstChatVerifyResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/first-chat",
       method: "POST",
       headers: jsonHeaders,
@@ -283,8 +314,10 @@ export const setupOnboardingMethods = {
 
   async completeFirstRun(
     payload: FirstRunCompleteRequest = {},
+    options?: SetupRequestOptions,
   ): Promise<SetupCompleteResponse> {
     return await bgRequest<SetupCompleteResponse>({
+      ...options,
       path: "/api/v1/setup/first-run/complete",
       method: "POST",
       headers: jsonHeaders,

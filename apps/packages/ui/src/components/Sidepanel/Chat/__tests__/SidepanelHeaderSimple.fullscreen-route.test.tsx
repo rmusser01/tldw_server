@@ -58,19 +58,19 @@ describe("SidepanelHeaderSimple full-screen route", () => {
     )
 
     const openFullChat = screen.getByRole("button", {
-      name: "Open full chat in WebUI"
+      name: "Open full extension chat"
     })
 
     expect(openFullChat).toHaveAccessibleDescription(
-      "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
+      "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy."
     )
     expect(openFullChat).toHaveAttribute(
       "title",
-      "Opens /chat in a new tab. Use Continue in WebUI from the composer tools to carry a draft or page context."
+      "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy."
     )
   })
 
-  it("opens the extension options carrier for the WebUI /chat route", async () => {
+  it("opens the extension full page for the /chat route", async () => {
     const user = userEvent.setup()
 
     render(

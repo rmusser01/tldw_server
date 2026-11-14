@@ -14,6 +14,7 @@ import {
   Settings2
 } from "lucide-react"
 import { Button as TldwButton } from "@/components/Common/Button"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 import type { KnowledgeTab } from "@/components/Knowledge"
 
 // ---------------------------------------------------------------------------
@@ -174,6 +175,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
 
 export type PlaygroundSendBlocker = {
   active: boolean
+  disabled?: boolean
   title: string
   actionLabel: string
   onAction: () => void
@@ -184,6 +186,8 @@ export interface PlaygroundSendControlProps {
   isMobileViewport: boolean
   isSending: boolean
   isPreparingDocuments?: boolean
+  /** A fresh chat's history selection is not idle yet (CS-01, #3106). */
+  isHistorySelectionPending?: boolean
   isConnectionReady: boolean
   sendWhenEnter: boolean
   onSendWhenEnterChange: (checked: boolean) => void
@@ -192,7 +196,12 @@ export interface PlaygroundSendControlProps {
   onStopStreaming: () => void
   onStopListening: () => void
   onSubmitForm: () => void
+  submitDisabledReason?: string | null
   characterChatSendBlocker?: PlaygroundSendBlocker | null
+  /** False while there is nothing to send; Send is dimmed then (CC-07). */
+  hasDraftContent?: boolean
+  /** The first server check is still running and nothing has failed yet (CC-03). */
+  connectionPending?: boolean
 
   // Send menu
   sendMenuOpen: boolean
@@ -212,6 +221,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       isMobileViewport,
       isSending,
       isPreparingDocuments = false,
+      isHistorySelectionPending = false,
       isConnectionReady,
       sendWhenEnter,
       onSendWhenEnterChange,
@@ -221,6 +231,9 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       onStopListening,
       onSubmitForm,
       characterChatSendBlocker,
+      submitDisabledReason,
+      hasDraftContent = true,
+      connectionPending = false,
       sendMenuOpen,
       onSendMenuChange,
       t
@@ -228,7 +241,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
 
     const activeCharacterSendBlocker =
       characterChatSendBlocker?.active === true
-    const shouldQueuePrimaryAction = isSending || !isConnectionReady
+    const shouldQueuePrimaryAction = isSending && isConnectionReady
     const primaryActionLabel = activeCharacterSendBlocker
       ? characterChatSendBlocker.actionLabel
       : isPreparingDocuments
@@ -236,8 +249,6 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             "playground:documentProcessing.preparingForSend",
             "Preparing documents"
           )
-      : shouldQueuePrimaryAction
-      ? t("common:queue", "Queue")
       : sendLabel
     const isMac =
       typeof navigator !== "undefined" &&
@@ -249,21 +260,22 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
         ) as string)
       : activeCharacterSendBlocker
         ? characterChatSendBlocker.title
+        : !isConnectionReady
+          ? (connectionPending
+              ? t("playground:composer.connectionPendingSend", "Still connecting to your tldw server. Your draft has not been sent.")
+              : t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.")) as string
         : isPreparingDocuments
           ? (t(
               "playground:documentProcessing.preparingForSend",
               "Preparing documents"
             ) as string)
+      : isHistorySelectionPending
+        ? (t(
+            "playground:composer.historySelectionPending",
+            "Conversation history isn't ready yet. Wait for it to load, or start a new chat."
+          ) as string)
       : shouldQueuePrimaryAction
-        ? ((isSending
-            ? t(
-                "playground:composer.queue.primaryWhileBusy",
-                "Queue this request to run after the current response."
-              )
-            : t(
-                "playground:composer.queue.primaryWhileOffline",
-                "Queue this request until your tldw server reconnects."
-              )) as string)
+        ? (t("playground:composer.queue.primaryWhileBusy", "Sends your message after the current reply finishes.") as string)
         : sendWhenEnter
           ? (t(
               "playground:composer.submitAriaEnter",
@@ -285,7 +297,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       : shouldQueuePrimaryAction
         ? (t(
             "playground:composer.queue.primaryAria",
-            "Queue request"
+            "Send after this reply"
           ) as string)
         : (t(
             "playground:composer.submitAria",
@@ -293,6 +305,22 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           ) as string)
     const compactMobileBlockerAction =
       isMobileViewport && activeCharacterSendBlocker
+    const primaryDisabled =
+      Boolean(submitDisabledReason) ||
+      compareNeedsMoreModels ||
+      isPreparingDocuments ||
+      isHistorySelectionPending ||
+      (!isConnectionReady && !activeCharacterSendBlocker) ||
+      (activeCharacterSendBlocker && characterChatSendBlocker.disabled === true)
+    // Quiet (but keep) the plain Send action while the draft is empty: a
+    // default button rather than a faded primary one, so its label keeps its
+    // contrast. A disabled button already has its own muted style.
+    const draftEmpty =
+      !hasDraftContent &&
+      !primaryDisabled &&
+      !activeCharacterSendBlocker &&
+      !shouldQueuePrimaryAction
+    const controlSize = isMobileViewport ? "large" : "middle"
     const handlePrimaryButtonClick =
       activeCharacterSendBlocker || shouldQueuePrimaryAction
         ? () => {
@@ -313,26 +341,18 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           }`}
         >
           <Button
-            size={
-              isMobileViewport
-                ? "large"
-                : isProMode
-                  ? "middle"
-                  : "small"
-            }
+            type={draftEmpty ? "default" : "primary"}
+            size={controlSize}
             htmlType={
               activeCharacterSendBlocker || shouldQueuePrimaryAction
                 ? "button"
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={compareNeedsMoreModels || isPreparingDocuments}
-            className={
-              isMobileViewport
-                ? "min-h-[44px] min-w-[44px]"
-                : undefined
-            }
-            title={primaryActionTitle}
+            disabled={primaryDisabled}
+            className={isMobileViewport ? "min-h-[44px] min-w-[44px]" : undefined}
+            data-draft-empty={draftEmpty ? "true" : undefined}
+            title={submitDisabledReason ?? primaryActionTitle}
             aria-label={primaryActionAriaLabel}
           >
             <div
@@ -362,13 +382,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 </svg>
               ) : null}
               {!compactMobileBlockerAction ? (
-                <span
-                  className={
-                    isProMode
-                      ? ""
-                      : "text-[11px] font-semibold uppercase tracking-[0.12em]"
-                  }
-                >
+                <span className={COMPOSER_TOOLBAR_TOKENS.label}>
                   {primaryActionLabel}
                 </span>
               ) : null}
@@ -398,13 +412,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             }}
           >
             <Button
-              size={
-                isMobileViewport
-                  ? "large"
-                  : isProMode
-                    ? "middle"
-                    : "small"
-              }
+              size={controlSize}
               disabled={compareNeedsMoreModels || isPreparingDocuments}
               className={
                 isMobileViewport

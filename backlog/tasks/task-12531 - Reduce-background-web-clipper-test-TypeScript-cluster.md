@@ -32,14 +32,14 @@ Continue reducing the shared UI package-wide TypeScript compiler baseline by fix
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Captured red evidence from `/tmp/task515-tsc-final.txt`: package `tsc` reported two diagnostics in `src/entries/__tests__/background.web-clipper.test.ts` because context-menu click-info fixtures included `pageTitle`, which is not part of `WebClipperContextMenuClickInfo`.
 - Root cause was stale test fixture shape. `launchWebClipperFromContextMenu` now derives `pageTitle` from the tab object, while click info only contains `pageUrl` and optional `selectionText`.
 - Removed the stale `pageTitle` properties from the click-info arguments and left the tab title fixtures intact, preserving the behavior under test.
 - Focused verification: `bunx vitest run src/entries/__tests__/background.web-clipper.test.ts` passed: 4 tests.
 - Package verification: `bunx tsc --noEmit --pretty false > /tmp/task516-tsc-final.txt 2>&1` still exits nonzero from the known baseline, but diagnostics dropped from 67 in `/tmp/task515-tsc-final.txt` to 65 in `/tmp/task516-tsc-final.txt`; `rg -n 'background\.web-clipper\.test\.ts' /tmp/task516-tsc-final.txt` returns no matches.
 - Bandit skipped: this is a TypeScript test-only WebUI change with no Python touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

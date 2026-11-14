@@ -32,7 +32,7 @@ Write the approved design spec for extending the existing Persona Buddy/live ass
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created design spec at Docs/superpowers/specs/2026-05-08-persona-visual-packs-design.md. Scope is documentation only; no implementation files changed.
 
 Bandit skipped for this task because only Markdown documentation and Backlog task metadata were changed.
@@ -42,7 +42,7 @@ Verification: checked the spec for TODO/TBD/FIXME/placeholders with rg; no match
 Commit attempt with message "docs: add persona visual packs design" was blocked by pre-existing unresolved conflicts in unrelated files: Docs/superpowers/plans/2026-05-03-native-codegraph-foundation-implementation-plan.md, Docs/superpowers/plans/2026-05-03-worker-lifecycle-deprecated-code-removal-implementation-plan.md, and backlog/tasks/task-16 - Implement-native-CodeGraph-foundation-slice.md. The new spec and TASK-125 files were left unstaged.
 
 Spec review subagent result: Approved with no blocking issues. Advisory recommendations: resolve implementation-planning open questions for storage adapter, revision model, upload limits, and first generation-provider path; keep first implementation plan staged because the spec spans backend storage/API, frontend rendering/editor, Jobs, and MCP.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

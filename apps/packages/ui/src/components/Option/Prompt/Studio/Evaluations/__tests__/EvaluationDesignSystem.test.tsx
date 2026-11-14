@@ -48,7 +48,8 @@ vi.mock("@/services/prompt-studio", () => ({
   createEvaluation: vi.fn(),
   getEvaluation: vi.fn(),
   listPrompts: vi.fn(),
-  listTestCases: vi.fn()
+  listTestCases: vi.fn(),
+  getLlmProviders: vi.fn()
 }))
 
 vi.mock("@tanstack/react-query", () => ({
@@ -128,6 +129,7 @@ vi.mock("antd", () => {
     <div>{children}</div>
   )
   const Form = Object.assign(passthrough, {
+    useWatch: () => undefined,
     Item: ({
       children,
       label

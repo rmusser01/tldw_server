@@ -43,13 +43,13 @@ Review fix plan:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red verification: focused minimal Kanban router tests failed before production changes because Kanban endpoint modules were imported during spec construction and named lazy specs were absent.
 
 PR #1324 review follow-up: verified Kanban minimal specs used skip_exceptions=(Exception,), which register_router_specs would treat as skippable for any lazy import or attr resolution exception. Added RED coverage proving RuntimeError import defects were swallowed; the focused run failed with DID NOT RAISE RuntimeError.
 
 Green verification: narrowed Kanban skip_exceptions to (ImportError, AttributeError). Focused Kanban tests passed with 3 passed; full router group contract tests passed with 88 passed; main router contract tests passed with 6 passed; Bandit on minimal.py reported 0 results and 0 errors; git diff --check was clean. A broad Ruff check on touched files was not used as a completion gate because it reports unrelated pre-existing style findings across older test sections.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

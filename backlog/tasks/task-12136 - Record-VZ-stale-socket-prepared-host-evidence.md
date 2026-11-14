@@ -28,7 +28,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Worktree: /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/vz-stale-socket-evidence
 Branch: codex/vz-stale-socket-evidence
 Base: origin/dev c20013ecce7e3384ec5faa860434d6bdd76d5407
@@ -41,7 +41,7 @@ First managed-sandbox stale-socket-drill attempt failed with helper_socket_creat
 Cleanup used vz-helperctl.py stop on the same socket/pid paths and returned exit 0. Post-stop status reported socket=helper_socket_absent, pid_file=ok, process=helper_not_running, and ping=helper_not_running. The status command itself exited 1 because of an unrelated default launchd_plist_mismatch on this host, which is documented in the evidence packet. Helper stdout/stderr logs were retained and empty with SHA-256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.
 
 Verification: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Infrastructure/test_vz_linux_host_gated_workflow.py -q passed with 23 tests. git diff --check passed. Bandit skipped because the reviewable changes are Markdown/Backlog only; helper build artifacts are untracked evidence setup, not committed source.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

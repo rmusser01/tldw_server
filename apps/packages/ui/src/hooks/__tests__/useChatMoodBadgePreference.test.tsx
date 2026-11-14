@@ -85,11 +85,11 @@ describe("useChatMoodBadgePreference", () => {
     mocks.storage.remove.mockClear()
   })
 
-  it("forces a legacy enabled mood badge off once without surfacing a hydrated true state", async () => {
+  it("preserves a stored enabled preference during migration without flashing the hydrated value", async () => {
     mocks.values.set(CHAT_MOOD_BADGE_STORAGE_KEY, true)
 
     const seenValues: boolean[] = []
-    const { result } = renderHook(() => {
+    const { result, unmount } = renderHook(() => {
       const state = useChatMoodBadgePreference()
       React.useEffect(() => {
         seenValues.push(state[0])
@@ -100,12 +100,16 @@ describe("useChatMoodBadgePreference", () => {
     expect(result.current[0]).toBe(CHAT_MOOD_BADGE_DEFAULT)
 
     await waitFor(() => {
-      expect(mocks.values.get(CHAT_MOOD_BADGE_STORAGE_KEY)).toBe(false)
+      expect(mocks.values.get(CHAT_MOOD_BADGE_STORAGE_KEY)).toBe(true)
       expect(mocks.values.get(CHAT_MOOD_BADGE_MIGRATION_STORAGE_KEY)).toBe(true)
       expect(result.current[0]).toBe(false)
     })
 
     expect(seenValues).not.toContain(true)
+    unmount()
+    const remounted = renderHook(() => useChatMoodBadgePreference())
+    await waitFor(() => expect(remounted.result.current[0]).toBe(true))
+    expect(mocks.storage.set).not.toHaveBeenCalledWith(CHAT_MOOD_BADGE_STORAGE_KEY, false)
   })
 
   it("defaults to hidden when the preference has never been stored", async () => {

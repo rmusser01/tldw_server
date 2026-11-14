@@ -66,6 +66,29 @@ describe("TldwApiClient notes methods", () => {
     )
   })
 
+  it("returns search results from the requested Notes page and carries cancellation", async () => {
+    const client = new TldwApiClient()
+    const controller = new AbortController()
+    mocks.bgRequest.mockImplementation(
+      async (request: { path: string; abortSignal?: AbortSignal }) =>
+        request.path ===
+          "/api/v1/notes/search/?query=biology&limit=50&offset=200" &&
+        request.abortSignal === controller.signal
+          ? { notes: [{ id: "note-207", title: "Page five note" }], total: 250 }
+          : { notes: [] },
+    )
+    expect(
+      await client.searchNotes(
+        "biology",
+        { limit: 50, offset: 200 },
+        { signal: controller.signal },
+      ),
+    ).toEqual({
+      notes: [{ id: "note-207", title: "Page five note" }],
+      total: 250,
+    })
+  })
+
   it("loads note folders from the public notes folder endpoint", async () => {
     const client = new TldwApiClient()
     await client.listNoteFolders()

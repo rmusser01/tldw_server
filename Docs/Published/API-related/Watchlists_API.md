@@ -77,7 +77,7 @@ Runs:
 - `GET /runs/{run_id}/audio`
 - `GET /runs/{run_id}/tallies.csv`
 - `GET /runs/export.csv`
-- `WS /runs/{run_id}/stream`
+- `WS /runs/{run_id}/stream`: authenticate with `Authorization: Bearer <token>`, `X-API-KEY: <key>` (`read` scope), the `bearer, <token or key>` subprotocol (browsers; the server echoes `bearer`), or the single-user cookie. Deprecated: `?token=` / `?api_key=` still work but log a warning.
 
 Items:
 - `GET /items`
@@ -503,6 +503,7 @@ Stage 5 defensible report fields on `POST /outputs`:
 - `require_reviewed_items`: warn when included Updates have not been reviewed. Default `false`.
 - `allow_weak_evidence`: allow generation when readiness is `warning`. Set `false` to reject weak evidence with `422 report_readiness_warning`.
 - `template_name` and `template_version`: render a stored Watchlists template. Built-in Stage 5 templates include `cti_osint_report_markdown` and `news_briefing_markdown`.
+- `summarize` and `summarize_prompt`: summarize each included item with the LLM before rendering. In `summarize_prompt`, and in `briefing_summary.prompt` and `briefing_summary.per_group_prompt`, the first `{text}` marks where the text goes; without it the text is appended after the prompt. Other braces are literal. With `summarize`, a user over an LLM quota gets a 402 and no output is created. Briefing summaries and topic grouping run after the response, so a refusal there sets the output's `metadata.enrichment_status` to `failed` and `metadata.enrichment_error` to the 402 text (see `Docs/Operations/Usage_Quotas.md`).
 
 Create a CTI/OSINT report from queued Updates:
 ```json

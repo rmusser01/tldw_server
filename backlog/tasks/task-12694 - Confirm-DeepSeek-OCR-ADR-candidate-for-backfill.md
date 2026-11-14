@@ -35,13 +35,13 @@ Confirm whether INV-026 from Docs/ADR/inventory/2026-06-03-decision-inventory.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started in isolated worktree .worktrees/confirm-deepseek-ocr-adr-candidate from origin/dev. Initial plan: inspect INV-026 source and implementation evidence; write bounded confirmation audit; update inventory if disposition changes; create a follow-up ADR backfill task only if ready; verify docs/references and focused tests where applicable.
 
 Confirmation audit created at Docs/ADR/inventory/2026-06-07-deepseek-ocr-confirmation-audit.md. INV-026 is current governing for a bounded DeepSeek OCR ADR backfill, with caveats for manual dependencies, trust_remote_code, CUDA/FlashAttention defaults with env overrides, local Transformers-only mode, temporary output by default, actual registry priority behavior, and gated live-model tests. Follow-up TASK-2276 was created for the accepted ADR backfill.
 
 Verification: git diff --check exited 0. Reference scan across touched docs/task files found no absolute developer-machine paths or temporary Bandit report artifact names. Focused tests passed with 18 passed, 6 warnings: source ../../.venv/bin/activate && python -m pytest -q tldw_Server_API/tests/MediaIngestion_NEW/test_ocr_backend_deepseek.py tldw_Server_API/tests/Media_Ingestion_Modification/test_ocr_runtime_auto_selection.py tldw_Server_API/tests/Media_Ingestion_Modification/test_ocr_runtime_discovery.py. Bandit was not run because this task changed only documentation and Backlog metadata, not Python/code. Known skip: the live DeepSeek OCR PDF integration test remains intentionally gated by DEEPSEEK_OCR_RUN_INTEGRATION=1, CUDA, and local model dependencies.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -43,7 +43,7 @@ First slice: harden the existing virtual CLI shell facade rather than adding raw
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 First slice implemented: expanded governed run aliases to include powershell and pwsh, added token-aware fail-closed detection for unsupported raw shell features before backend MCP preparation, and documented that the aliases remain virtual CLI facades rather than raw host shells. Verification: focused command runtime pytest 91 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_facade_2283.json had results=0 errors=0; git diff --check passed.
 
 Second slice implemented: added optional timeoutSeconds / timeout_seconds support for run, bash, shell, powershell, and pwsh. The timeout wraps the governed command chain including preflight and nested MCP execution, validates positive finite numeric values, rejects conflicting snake/camel timeout aliases, and returns exit code 124 on timeout. Remaining broader TASK-2283 areas include richer output artifact, cwd carry-over, env-file, shell selection, session, and telemetry parity if desired in later slices. Verification: focused command runtime pytest 97 passed; Ruff passed for touched Python files; py_compile passed for touched Python files; Bandit report /tmp/bandit_mcp_shell_timeout_2283.json had results=0 errors=0; git diff --check passed.
@@ -83,7 +83,7 @@ PR #2395 review pass: verified current code against Gemini/Qodo comments and add
 Closure audit cleanup: validated the current governed shell runtime against TASK-2283 acceptance criteria on the latest dev worktree, fixed the remaining focused Ruff findings by organizing command_runtime package imports and removing unused executor locals, and reran the focused MCP verification gates. Verification: focused run-command/parser/registry/execution/presentation/tool-use/protocol-hook pytest 199 passed with 3 existing warnings; py_compile passed for run_command_module.py, command_runtime, and tool_execution scope; Ruff passed for the focused MCP runtime/test scope with --select F,I,UP; Bandit report /tmp/bandit_mcp_shell_task2283_cleanup_final.json had results=0 errors=0 skipped_tests=0; git diff --check passed.
 
 Draft PR created for closure audit: https://github.com/rmusser01/tldw_server/pull/2519. The PR body records that a human-maintainer Change Summary is required before marking the AI-authored PR ready for merge.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -110,7 +110,7 @@ def test_sync_media_add_results_to_collections_writes_expected_payload(monkeypat
     assert payload["canonical_url"] == "media://123"
     assert payload["url"] == "https://Example.COM/path/to/item"
     assert payload["domain"] == "example.com"
-    assert payload["tags"] == ["topic", "fromform", "alpha"]
+    assert payload["tags"] == ["topic", "FromForm", "Alpha"]
     assert payload["status"] == "saved"
     assert payload["favorite"] is False
 

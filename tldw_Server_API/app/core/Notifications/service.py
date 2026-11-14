@@ -7,6 +7,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.email_service import get_email_service
 from tldw_Server_API.app.core.Chat.document_generator import DocumentGeneratorService, DocumentType
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 
@@ -249,6 +250,7 @@ class NotificationsService:
             details={"deliveries": deliveries, "recipient_count": len(recips)},
         )
 
+    @owns_chacha_checkouts
     def deliver_chatbook(
         self,
         *,

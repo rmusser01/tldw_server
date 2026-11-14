@@ -24,15 +24,11 @@ Address PR #2698 review comments after rebasing the fix branch onto latest dev.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Rebased codex/fix-main-guardian-notify-ts onto origin/dev. Scope: PortAudio environment preservation, legacy audio protocol config typing/None guard, sandbox executor Future contract, and brittle review-triggered tests for ChaCha startup and visual identity ZIP import. Unrelated untracked watchlist template files are intentionally untouched.
 
 Verification: pytest targeted suite passed (65 passed, 1 skipped); YAML parse for .github/actions/setup-ffmpeg/action.yml passed; py_compile for touched Python files passed; git diff --check passed; Bandit on touched Python scope with B101 skipped for test asserts wrote /tmp/bandit_task_12941.json with zero results.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

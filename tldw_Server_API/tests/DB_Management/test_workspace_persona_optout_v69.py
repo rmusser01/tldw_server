@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable, Iterator
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -68,8 +69,56 @@ def test_choice_updates_are_atomic_and_survive_restart(db_factory: Callable[[], 
     assert reopened.get_workspace(fresh["id"])[FLAG] is True
     assert reopened.get_workspace(fresh["id"])["version"] == cleared["version"]
     assert reopened.list_workspaces()[0][FLAG] is True
+    if reopened.backend_type.value == "postgresql":
+        assert reopened.get_connection()._connection.info.transaction_status.name == "IDLE"
     reopened.delete_workspace(fresh["id"], expected_version=cleared["version"])
     assert reopened.get_workspace(fresh["id"], include_deleted=True)[FLAG] is True
+
+
+@pytest.mark.parametrize("rollback", [False, True])
+def test_workspace_listing_preserves_managed_caller_transaction(
+    db_factory: Callable[[], CharactersRAGDB], rollback: bool,
+) -> None:
+    """Listing cannot commit caller work or admit a nested staged deletion."""
+    db = db_factory()
+    row = db.upsert_workspace("ws-caller", "Original")
+    completion = pytest.raises(RuntimeError, match="caller rollback") if rollback else nullcontext()
+    with completion, db.transaction() as conn:
+        conn.execute("UPDATE workspaces SET name = ? WHERE id = ?", ("Caller change", row["id"]))
+        assert db.list_workspaces()[0]["name"] == "Caller change"
+        with pytest.raises(ConflictError, match="outermost"):
+            db.delete_workspace(row["id"], expected_version=row["version"])
+        if rollback:
+            raise RuntimeError("caller rollback")
+    saved = db.get_workspace(row["id"])
+    assert saved["name"] == ("Original" if rollback else "Caller change")
+    assert not saved["native_chat_admission_closed"]
+
+
+@pytest.mark.parametrize("rollback", [False, True])
+def test_workspace_listing_preserves_driver_caller_transaction(
+    db_factory: Callable[[], CharactersRAGDB], rollback: bool,
+) -> None:
+    """Driver-open work stays active until its caller chooses commit or rollback."""
+    db = db_factory()
+    row = db.upsert_workspace("ws-caller", "Original")
+    conn = db.get_connection()
+    if db.backend_type.value != "postgresql":
+        conn.execute("BEGIN")
+    try:
+        conn.execute("UPDATE workspaces SET name = ? WHERE id = ?", ("Caller change", row["id"]))
+        assert db.list_workspaces()[0]["name"] == "Caller change"
+        with pytest.raises(ConflictError, match="outermost"):
+            db.delete_workspace(row["id"], expected_version=row["version"])
+        if rollback:
+            conn.rollback()
+        else:
+            conn.commit()
+    finally:
+        conn.rollback()
+    saved = db.get_workspace(row["id"])
+    assert saved["name"] == ("Original" if rollback else "Caller change")
+    assert not saved["native_chat_admission_closed"]
 
 
 def test_pre_optout_upgrade_preserves_storage_and_conservatively_opts_out(

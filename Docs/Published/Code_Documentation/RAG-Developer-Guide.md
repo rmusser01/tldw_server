@@ -9,7 +9,7 @@ Use this guide for architecture and extension decisions. Do not treat it as the 
 Primary ownership areas:
 
 - API surface: `tldw_Server_API/app/api/v1/endpoints/rag_unified.py` and `tldw_Server_API/app/api/v1/endpoints/rag_health.py`.
-- Public schemas: `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py`.
+- Public schemas: defined in `tldw_Server_API/app/core/RAG/rag_schemas_unified.py`, re-exported from `tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py`.
 - Core orchestration: `tldw_Server_API/app/core/RAG/rag_service/unified_pipeline.py`.
 - Retrieval and indexing: `tldw_Server_API/app/core/RAG/rag_service/database_retrievers.py` and `tldw_Server_API/app/core/RAG/rag_service/vector_stores/`.
 - Profiles: `tldw_Server_API/app/core/RAG/rag_service/profiles.py`.

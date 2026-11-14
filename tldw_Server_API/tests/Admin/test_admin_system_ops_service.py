@@ -166,8 +166,11 @@ def test_atomic_save_never_publishes_partial_destination(
     real_fdopen = os.fdopen
     real_fsync = os.fsync
     real_replace = os.replace
+    real_close = os.close
     file_fsynced = False
     temporary_fds: list[int] = []
+    opened_streams: list[Any] = []
+    closed_fds: list[int] = []
 
     class FailingWriteStream(_TrackedBinaryStream):
         def write(self, payload: bytes) -> int:
@@ -184,6 +187,7 @@ def test_atomic_save_never_publishes_partial_destination(
         if failure_point == "fdopen":
             raise OSError("injected descriptor-open failure")
         opened = real_fdopen(fd, *args, **kwargs)
+        opened_streams.append(opened)
         if failure_point == "write":
             return FailingWriteStream(opened, [])
         return opened
@@ -201,7 +205,14 @@ def test_atomic_save_never_publishes_partial_destination(
             raise OSError("injected replace failure")
         real_replace(source, destination)
 
-    monkeypatch.setattr(tempfile, "mkstemp", failing_mkstemp)
+    def tracked_close(fd: int) -> None:
+        real_close(fd)
+        closed_fds.append(fd)
+
+    monkeypatch.setattr(service, "os", SimpleNamespace(**vars(os)))
+    monkeypatch.setattr(service, "tempfile", SimpleNamespace(**vars(tempfile)))
+    monkeypatch.setattr(service.tempfile, "mkstemp", failing_mkstemp)
+    monkeypatch.setattr(service.os, "close", tracked_close)
     monkeypatch.setattr(service.os, "fdopen", maybe_failing_fdopen)
     monkeypatch.setattr(service.os, "fsync", tracked_fsync)
     monkeypatch.setattr(service.os, "replace", maybe_failing_replace)
@@ -211,10 +222,8 @@ def test_atomic_save_never_publishes_partial_destination(
 
     assert json.loads(path.read_text(encoding="utf-8")) == original
     assert list(tmp_path.glob(".system_ops.json.*")) == []
-    for fd in temporary_fds:
-        with pytest.raises(OSError) as exc_info:
-            os.fstat(fd)
-        assert exc_info.value.errno == errno.EBADF
+    assert all(stream.closed for stream in opened_streams)
+    assert closed_fds == (temporary_fds if failure_point == "fdopen" else [])
 
 
 @pytest.mark.unit

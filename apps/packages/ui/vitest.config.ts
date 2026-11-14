@@ -11,6 +11,7 @@ export default defineConfig({
       "~": path.resolve(__dirname, "./src"),
       // Legacy route copies use these packages through Next's runtime shims.
       // Resolve the shared UI instances when exercising both routes in Vitest.
+      "react-router-dom": require.resolve("react-router-dom"),
       "@plasmohq/storage/hook": require.resolve("@plasmohq/storage/hook"),
       "@plasmohq/storage": require.resolve("@plasmohq/storage"),
       "wxt/browser": require.resolve("wxt/browser"),
@@ -20,6 +21,8 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     maxWorkers: 2,
+    // Match the required package shards for real AntD interaction suites.
+    testTimeout: 15_000,
     restoreMocks: true,
     setupFiles: ["./vitest.setup.ts"],
     include: [

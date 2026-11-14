@@ -50,6 +50,7 @@ from tldw_Server_API.app.core.http_client import fetch as http_fetch
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
+from tldw_Server_API.app.core.Usage.llm_call_context import capture_llm_call_state, run_with_llm_call_state
 from tldw_Server_API.app.core.Utils.Utils import logging
 from tldw_Server_API.app.core.Web_Scraping.browser_transport import (
     browser_transport_failure_result,
@@ -412,13 +413,14 @@ async def scrape_and_summarize_multiple(
                             article_custom_prompt = summary_prompt_overrides.get("user", article_custom_prompt)
 
                         # Summarize the content using the summarize function
-                        summary = analyze(
+                        summary = await asyncio.to_thread(
+                            analyze,
                             input_data=content,
                             custom_prompt_arg=article_custom_prompt,
                             api_name=api_name,
                             api_key=api_key,
                             temp=temperature,
-                            system_message=system_message_final
+                            system_message=system_message_final,
                         )
                         article['summary'] = summary
                         log_counter("article_summarized", labels={"success": "true", "url": url})
@@ -1202,7 +1204,8 @@ def sync_recursive_scrape(
         )
 
     with ThreadPoolExecutor(max_workers=_extractor_max_workers()) as executor:
-        future = executor.submit(run_async_scrape)
+        _llm_state = capture_llm_call_state()
+        future = executor.submit(lambda: run_with_llm_call_state(_llm_state, run_async_scrape))
         return future.result()
 
 async def recursive_scrape(

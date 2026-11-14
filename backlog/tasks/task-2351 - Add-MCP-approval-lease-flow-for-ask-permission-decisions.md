@@ -33,7 +33,7 @@ Implement the top deferred item from TASK-2349: an approval lease flow so matche
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 New `mcp_unified/policy_grants/` package modeled on `filesystem_locks/`: frozen `PolicyGrant` dataclass (grant_id, profile_id, grant_type approval|path, subject_type, value, actions, effect, session_id, user_id, granted_by, reason, expires_at, ttl_seconds, safe_payload), `InMemoryPolicyGrantStore` (RLock + periodic sweep), `SQLitePolicyGrantStore` (SQLAlchemy, epoch_us expiry, batched cleanup, secrets.token_urlsafe ids), and `create_policy_grant_store()` factory (grant_store_backend memory|sqlite). The schema includes `actions`/`effect` now so TASK-2301 path grants need no migration. Subject values are normalized at grant and lookup time via the new public `normalize_permission_subject_value()` wrapper in `profiles/permission_rules.py`, so a grant for `https://Example.com/x` and a runtime subject `example.com` agree. Session semantics: grant with session_id=None applies profile-wide; a session-scoped grant matches only its session and wins over a global grant when both match.
 
 Runtime hookup in `gateway/profile_runtime.py`: `ProfileAwareGatewayRuntime` accepts optional `policy_grant_store` (absent preserves the previous hard-block behavior). On a matched ask decision, `_active_approval_lease_marker()` consults `find_active_grant`; store failures fail closed to denial (noqa BLE001 documented inline). Approved subjects contribute a redacted SHA256[:16] marker of the grant id, attached to the delegated context metadata under `mcp_policy_approval_grants` so tool-use reporting can record it without leaking the revocation token. Ask denials gain `provenance.approval = {available, grant_type, subject_type}`.
@@ -54,7 +54,7 @@ Verification:
 - `git diff --check` passed.
 
 Deferred: pattern-valued approval grants (exact normalized match only); REST admin endpoints for grants (CLI only); CLI audit events currently use the profile storage bundle's audit store; consuming/limiting lease use counts.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

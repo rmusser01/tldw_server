@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class {} }))
 import { formatToChatHistory, formatToMessage } from "../helpers"
 import type { Message } from "../types"
+import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 const rows: Message[] = [
   {
     id: "a",
@@ -81,4 +82,93 @@ it("renders selected content while retaining unloaded stable alternatives and ca
   expect(display.messages[1].variants?.map((row) => row.id)).toEqual(["a", "b"])
   expect(display.messages[1].message).toBe("Full first")
   expect(capture.rows[2].role).toBe("tool")
+})
+
+const ownedCapture = (ownerKey: string): HistorySelectionCaptureV1 => {
+  const rows = [
+    { id: "u", revision: "digest-u", parent_id: null, role: "user", settled: true },
+    { id: "a", revision: "digest-a", parent_id: "u", role: "assistant", settled: true }
+  ]
+  return {
+    status: "captured",
+    snapshot: {
+      version: 1,
+      owner_key: ownerKey,
+      conversation_id: "h",
+      fences: { conversation: "c", history: "h", settings: "s" },
+      nodes: rows,
+      source_digest: "source",
+      interpretation_status: { kind: "parent_graph_v1" },
+      storage_context_digest: "storage"
+    },
+    rows,
+    selected_content: [
+      { id: "u", revision: "digest-u", message: "Question", images: [], extra_metadata: { local_history: {} } },
+      { id: "a", revision: "digest-a", message: "Answer", images: [], extra_metadata: { local_history: { modelId: "m" } } }
+    ],
+    view: {
+      view_session_id: "view",
+      owner_key: ownerKey,
+      conversation_id: "h",
+      interpretation: { kind: "parent_graph_v1" },
+      cursor: { kind: "after_message", message_id: "a" },
+      selection_revision: 1
+    },
+    purpose: "send",
+    storage_context_digest: "storage"
+  }
+}
+
+it("leaves serverMessageId unset on a locally owned capture, whose ids are local rows", () => {
+  const display = formatSelectedHistory(ownedCapture("local-history-v1:profile"))
+
+  expect(display.messages.map((row) => row.serverMessageId)).toEqual([undefined, undefined])
+})
+
+it("does not read a server message version from the node revision digest", () => {
+  const display = formatSelectedHistory(ownedCapture(`native-history-v1:sha256:${"c".repeat(64)}`))
+
+  expect(display.messages.map((row) => row.serverMessageId)).toEqual(["u", "a"])
+  expect(display.messages.map((row) => row.serverMessageVersion)).toEqual([undefined, undefined])
+})
+
+
+it.each([`native-history-v1:sha256:${"c".repeat(64)}`, ""])(
+  "does not accept private local replay hints under owner %s",
+  (ownerKey) => {
+    const capture = ownedCapture(ownerKey)
+    capture.selected_content[1].extra_metadata = {
+      generation_status: "interrupted",
+      model_id: "recorded-model",
+      local_history: {
+        generationInfo: { interrupted: true, stopped: true },
+        messageType: "image-generation:assistant",
+        modelId: "private-local-model"
+      }
+    }
+    const before = structuredClone(capture)
+    const message = formatSelectedHistory(capture).messages[1]
+    expect(message.generationInfo).toEqual(ownerKey ? { interrupted: true, stopped: false } : undefined)
+    expect(message.messageType).toBeUndefined()
+    expect(message.modelId).toBeUndefined()
+    expect(message.metadataExtra).toEqual(
+      capture.selected_content[1].extra_metadata
+    )
+    expect(message.message).toBe("Answer")
+    expect(capture).toEqual(before)
+  }
+)
+
+it("preserves genuine locally owned recovery and presentation hints", () => {
+  const capture = ownedCapture("local-history-v1:profile")
+  capture.selected_content[1].extra_metadata = {
+    local_history: {
+      generationInfo: { interrupted: true, stopped: true },
+      modelId: "local-model"
+    }
+  }
+  expect(formatSelectedHistory(capture).messages[1]).toMatchObject({
+    modelId: "local-model",
+    generationInfo: { interrupted: true, stopped: true }
+  })
 })

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -734,3 +735,254 @@ def test_save_clip_rejects_oversized_attachment_payloads_as_warnings(clipper_db,
     assert result.status == "saved_with_warnings"
     assert status.status == "saved_with_warnings"
     assert status.attachments == []
+
+
+def _capture_request(*, text: str = "  accepted café article  ", clip_id: str = "11111111-1111-4111-8111-111111111111"):
+    payload = _save_request(clip_id=clip_id, destination_mode="workspace", full_extract=text).model_dump()
+    payload["capture_metadata"] = {
+        "web_capture_v1": {
+            "mode": "server_article",
+            "requested_url": "https://example.com/story",
+            "captured_at": "2026-10-07T18:00:00Z",
+            "content_sha256": hashlib.sha256(text.strip().encode("utf-8")).hexdigest(),
+            "refresh_of": None,
+        }
+    }
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("mode", "browser_article"),
+        ("requested_url", "file:///etc/passwd"),
+        ("requested_url", "https://user:secret@example.com/story"),
+        ("requested_url", "https://@example.com/story"),
+        ("requested_url", "https://localhost/story"),
+        ("requested_url", "http://127.0.0.1/story"),
+        ("requested_url", "http://[::1]/story"),
+        ("requested_url", "https://example.com/" + "x" * 4096),
+        ("requested_url", "https://example.com:invalid/story"),
+        ("captured_at", "2026-10-07T18:00:00"),
+        ("captured_at", "2026-10-07T18:00:00+01:00"),
+        ("captured_at", "not-a-time"),
+        ("captured_at", 1791396000),
+        ("content_sha256", "A" * 64),
+        ("content_sha256", "0" * 63),
+        ("refresh_of", "previous-clip"),
+        ("raw_headers", {"Authorization": "secret"}),
+    ],
+)
+def test_capture_descriptor_rejects_invalid_reserved_field(field, value):
+    payload = _capture_request()
+    payload["capture_metadata"]["web_capture_v1"][field] = value
+    if field == "requested_url":
+        payload["source_url"] = value
+    with pytest.raises(ValueError):
+        WebClipperSaveRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize("descriptor", [None, [], "capture", {}])
+def test_capture_descriptor_requires_complete_object(descriptor):
+    payload = _capture_request()
+    payload["capture_metadata"]["web_capture_v1"] = descriptor
+    with pytest.raises(ValueError):
+        WebClipperSaveRequest.model_validate(payload)
+
+
+@pytest.mark.parametrize("text", [None, "   ", "different text"])
+def test_capture_digest_rejected_before_note_save(clipper_db, media_db, text):
+    payload = _capture_request()
+    payload["content"]["full_extract"] = text
+    request = WebClipperSaveRequest.model_validate(payload)
+    service = WebClipperService(db=clipper_db, media_db=media_db, user_id=1, promote_workspace_sources=True)
+    with pytest.raises(InputError, match="full_extract|SHA-256"):
+        service.save_clip(request)
+    assert clipper_db.get_note_clipper_document_by_clip_id(request.clip_id) is None
+    assert clipper_db.get_note_by_id(stable_note_id("web-clipper", f"1\0{request.clip_id}")) is None
+    assert clipper_db.list_workspace_sources("ws-1") == []
+
+
+def test_capture_full_text_retry_and_refresh_preserve_exact_versions(clipper_db, media_db):
+    text = "  " + ("café paragraph.\n\n" * 1800) + "  "
+    payload = _capture_request(text=text)
+    request = WebClipperSaveRequest.model_validate(payload)
+    service = WebClipperService(db=clipper_db, media_db=media_db, user_id=1, promote_workspace_sources=True)
+    first = service.save_clip(request)
+    retry = service.save_clip(request)
+    assert first.note.id == retry.note.id
+    sources = clipper_db.list_workspace_sources("ws-1")
+    assert len(sources) == 1
+    media_id = int(sources[0]["media_id"])
+    versions = media_db_api.list_document_versions(media_db, media_id, include_content=True)
+    assert len(versions) == 1
+    assert versions[0]["content"] == text.strip()
+    descriptor = json.loads(versions[0]["safe_metadata"])["capture_metadata"]["web_capture_v1"]
+    assert descriptor == payload["capture_metadata"]["web_capture_v1"]
+    assert len(_canonical_note(clipper_db, request.clip_id)["content"]) < len(text.strip())
+    refresh_payload = _capture_request(text="new article", clip_id="22222222-2222-4222-8222-222222222222")
+    refresh_payload["capture_metadata"]["web_capture_v1"]["refresh_of"] = request.clip_id
+    refresh = service.save_clip(WebClipperSaveRequest.model_validate(refresh_payload))
+    assert refresh.note.id != first.note.id
+    assert len(clipper_db.list_workspace_sources("ws-1")) == 2
+    assert (
+        media_db_api.get_document_version(media_db, media_id, versions[0]["version_number"])["content"] == text.strip()
+    )
+
+
+def test_capture_identical_refresh_keeps_distinct_media_and_prior_snapshots(clipper_db, media_db):
+    service = WebClipperService(db=clipper_db, media_db=media_db, user_id=1, promote_workspace_sources=True)
+    requests = []
+    snapshots = {}
+    note_ids = set()
+    for index, text in enumerate(["accepted café article", "accepted café article", "changed café article"], 1):
+        payload = _capture_request(text=text, clip_id=f"{index:08d}-1111-4111-8111-111111111111")
+        payload["capture_metadata"]["web_capture_v1"]["refresh_of"] = requests[-1].clip_id if requests else None
+        payload["capture_metadata"]["web_capture_v1"]["captured_at"] = f"2026-10-07T18:00:0{index}Z"
+        request = WebClipperSaveRequest.model_validate(payload)
+        result = service.save_clip(request)
+        assert result.status == "saved"
+        note_ids.add(result.note.id)
+        source = next(
+            row for row in clipper_db.list_workspace_sources("ws-1") if row["id"] == f"web-clipper:{request.clip_id}"
+        )
+        media_id = int(source["media_id"])
+        assert media_id not in snapshots
+        media = media_db_api.get_media_by_id(media_db, media_id)
+        assert media["uuid"] not in {snapshot[1]["uuid"] for snapshot in snapshots.values()}
+        for old_media_id, (old_source, old_media, old_version, old_chunk) in snapshots.items():
+            assert old_source in clipper_db.list_workspace_sources("ws-1")
+            assert media_db_api.get_media_by_id(media_db, old_media_id) == old_media
+            assert media_db_api.get_document_version(media_db, old_media_id, 1) == old_version
+            assert media_db_api.get_unvectorized_chunks_in_range(media_db, old_media_id, 0, 0) == old_chunk
+        requests.append(request)
+        retry = service.save_clip(request)
+        assert retry.status == "saved"
+        assert retry.note.id == result.note.id
+        version = media_db_api.get_document_version(media_db, media_id, 1)
+        assert version["content"] == text
+        assert (
+            json.loads(version["safe_metadata"])["capture_metadata"]["web_capture_v1"]
+            == payload["capture_metadata"]["web_capture_v1"]
+        )
+        assert len(media_db_api.list_document_versions(media_db, media_id)) == 1
+        snapshots[media_id] = (
+            source,
+            media_db_api.get_media_by_id(media_db, media_id),
+            version,
+            media_db_api.get_unvectorized_chunks_in_range(media_db, media_id, 0, 0),
+        )
+    assert len(note_ids) == 3
+    for request, (media_id, snapshot) in zip(requests, snapshots.items(), strict=True):
+        retry = service.save_clip(request)
+        assert retry.note.id in note_ids
+        source, _media, version, chunk = snapshot
+        assert source in clipper_db.list_workspace_sources("ws-1")
+        current = media_db_api.get_document_version(media_db, media_id, 1)
+        assert (current["uuid"], current["content"], current["safe_metadata"]) == (
+            version["uuid"],
+            version["content"],
+            version["safe_metadata"],
+        )
+        current_chunk = media_db_api.get_unvectorized_chunks_in_range(media_db, media_id, 0, 0)
+        assert [{k: v for k, v in row.items() if k != "uuid"} for row in current_chunk] == [
+            {k: v for k, v in row.items() if k != "uuid"} for row in chunk
+        ]
+        for other_media_id, other_snapshot in snapshots.items():
+            if other_media_id != media_id:
+                assert media_db_api.get_document_version(media_db, other_media_id, 1) == other_snapshot[2]
+                assert (
+                    media_db_api.get_unvectorized_chunks_in_range(media_db, other_media_id, 0, 0) == other_snapshot[3]
+                )
+        snapshots[media_id] = (source, _media, current, current_chunk)
+    assert len(clipper_db.list_workspace_sources("ws-1")) == 3
+
+
+def test_capture_descriptor_url_must_match_source_without_rewriting():
+    payload = _capture_request()
+    payload["source_url"] = "https://example.com/other"
+    with pytest.raises(ValueError, match="requested_url"):
+        WebClipperSaveRequest.model_validate(payload)
+
+
+def test_capture_descriptor_preserves_exact_url_timestamp_and_parent():
+    payload = _capture_request()
+    url = "https://EXAMPLE.com:443/story?x=%2F"
+    payload["source_url"] = url
+    descriptor = payload["capture_metadata"]["web_capture_v1"]
+    descriptor["requested_url"] = url
+    descriptor["captured_at"] = "2026-10-07T18:00:00.123+00:00"
+    descriptor["refresh_of"] = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+    request = WebClipperSaveRequest.model_validate(payload)
+    assert request.capture_metadata["web_capture_v1"] == descriptor
+
+
+def test_capture_partial_promotion_retries_same_note_and_source(clipper_db, media_db):
+    request = WebClipperSaveRequest.model_validate(_capture_request())
+    service = WebClipperService(db=clipper_db, user_id=1, promote_workspace_sources=True)
+    partial = service.save_clip(request)
+    assert partial.note is not None
+    assert any("promotion" in warning for warning in partial.warnings)
+    assert clipper_db.list_workspace_sources("ws-1") == []
+    service.media_db = media_db
+    recovered = service.save_clip(request)
+    assert recovered.status == "saved"
+    assert recovered.note.id == partial.note.id
+    assert len(clipper_db.list_workspace_sources("ws-1")) == 1
+
+
+def test_capture_removed_workspace_retains_note_without_source(clipper_db, media_db):
+    request = WebClipperSaveRequest.model_validate(_capture_request())
+    clipper_db.delete_workspace("ws-1", clipper_db.get_workspace("ws-1")["version"])
+    service = WebClipperService(db=clipper_db, media_db=media_db, user_id=1, promote_workspace_sources=True)
+    result = service.save_clip(request)
+    assert result.status == "partially_saved"
+    assert _canonical_note(clipper_db, request.clip_id) is not None
+    assert clipper_db.list_workspace_sources("ws-1") == []
+
+
+@pytest.mark.parametrize("stage", ["add_workspace_note", "add_workspace_source"])
+def test_capture_backend_workspace_failure_keeps_note_and_recovers_exact_retry(
+    clipper_db, media_db, monkeypatch, stage
+):
+    from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError
+
+    request = WebClipperSaveRequest.model_validate(_capture_request())
+    service = WebClipperService(db=clipper_db, media_db=media_db, user_id=1, promote_workspace_sources=True)
+    original = WebClipperSaveRequest.model_validate(_capture_request(clip_id="33333333-3333-4333-8333-333333333333"))
+    assert service.save_clip(original).status == "saved"
+    original_source = clipper_db.list_workspace_sources("ws-1")[0]
+    original_media_id = int(original_source["media_id"])
+    original_version = media_db_api.get_document_version(media_db, original_media_id, 1)
+    original_chunk = media_db_api.get_unvectorized_chunk_by_index(media_db, original_media_id, 0)
+
+    def fail(*_args, **_kwargs):
+        raise DatabaseError("workspace database temporarily unavailable")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(clipper_db, stage, fail)
+        partial = service.save_clip(request)
+    assert partial.note is not None
+    assert partial.status in {"partially_saved", "saved_with_warnings"}
+    assert partial.warnings
+    assert _canonical_note(clipper_db, request.clip_id)["id"] == partial.note.id
+    assert clipper_db.list_workspace_sources("ws-1") == [original_source]
+    recovered = service.save_clip(request)
+    assert recovered.status == "saved"
+    assert recovered.note.id == partial.note.id
+    sources = clipper_db.list_workspace_sources("ws-1")
+    assert len(sources) == 2
+    recovered_source = next(row for row in sources if row["id"] == f"web-clipper:{request.clip_id}")
+    assert recovered_source["media_id"] != original_media_id
+    assert media_db_api.get_document_version(media_db, original_media_id, 1) == original_version
+    assert media_db_api.get_unvectorized_chunk_by_index(media_db, original_media_id, 0) == original_chunk
+
+
+def test_ordinary_clips_keep_same_content_deduplication(clipper_db, media_db):
+    service = WebClipperService(db=clipper_db, media_db=media_db, user_id=1, promote_workspace_sources=True)
+    first = service.save_clip(_save_request(clip_id="ordinary-first"))
+    second = service.save_clip(_save_request(clip_id="ordinary-second"))
+    assert first.status == second.status == "saved"
+    sources = clipper_db.list_workspace_sources("ws-1")
+    assert len(sources) == 2
+    assert sources[0]["media_id"] == sources[1]["media_id"]

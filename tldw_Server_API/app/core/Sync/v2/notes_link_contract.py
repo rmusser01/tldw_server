@@ -1,17 +1,8 @@
-"""Dependency-free public limits for the ``notes.link`` Sync contract."""
+"""Moved to tldw_Server_API.app.core.Sync_Contracts.notes_link_contract (TASK-13950.16); this path is the same module."""
 
-NOTES_LINK_WEIGHT_MAX = 1_000_000.0
-NOTES_LINK_LABEL_MAX_CHARS = 256
-NOTES_LINK_PROPERTIES_MAX_KEYS = 64
-NOTES_LINK_PROPERTIES_MAX_DEPTH = 4
-NOTES_LINK_PROPERTIES_MAX_BYTES = 16 * 1024
-NOTES_LINK_REASON_MAX_CHARS = 256
+import sys
 
-__all__ = [
-    "NOTES_LINK_LABEL_MAX_CHARS",
-    "NOTES_LINK_PROPERTIES_MAX_BYTES",
-    "NOTES_LINK_PROPERTIES_MAX_DEPTH",
-    "NOTES_LINK_PROPERTIES_MAX_KEYS",
-    "NOTES_LINK_REASON_MAX_CHARS",
-    "NOTES_LINK_WEIGHT_MAX",
-]
+from tldw_Server_API.app.core.Sync_Contracts import notes_link_contract as _moved
+from tldw_Server_API.app.core.Sync_Contracts.notes_link_contract import *  # noqa: F403 - names for type checkers; runtime is the alias below
+
+sys.modules[__name__] = _moved

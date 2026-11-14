@@ -54,6 +54,7 @@ import asyncpg
 from fastapi import HTTPException, Request, Response
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.initialize import setup_database
+from tldw_Server_API.app.core.AuthNZ.profile_user_write_guard import _execute_membership_scope_sql
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import AuthnzStorageQuotasRepo
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
 from tldw_Server_API.app.core.testing import is_test_mode, is_explicit_pytest_runtime
@@ -132,7 +133,9 @@ async def run():
                         raise AssertionError('Missing storage quota constraint')
                 # Preserve the existing SQLite schema's both-null compatibility.
                 await conn.execute('INSERT INTO storage_quotas DEFAULT VALUES')
-                await conn.execute('DELETE FROM organizations WHERE id=$1', org)
+                await _execute_membership_scope_sql(
+                    conn, 'DELETE FROM public.organizations WHERE id=$1', org,
+                    backend='postgres')
                 assert await conn.fetchval('SELECT count(*) FROM storage_quotas WHERE org_id=$1 OR team_id=$2', org,team) == 0
                 assert await conn.fetchval('SELECT count(*) FROM storage_quotas WHERE org_id IS NULL AND team_id IS NULL') == 1
             return {'ok': True, 'scenario': 'constraints', 'version': version}
@@ -207,6 +210,9 @@ def test_normal_fresh_and_repeated_bootstrap_creates_storage_quotas(restricted_d
 def test_restricted_storage_quota_crud_constraints_and_admission(restricted_database, tmp_path, scenario):
     """Actual restricted login/repository/guard, with no mocked quota responses."""
     env = _runtime_env(tmp_path, restricted_database, backend='postgresql', mode='multi_user')
+    # This test exercises storage-quota enforcement (guard_storage_quota) directly;
+    # the private runtime env has no inherited test flags, so opt back in explicitly.
+    env['USAGE_QUOTAS_ENABLED'] = '1'
     env['QUOTA_SCENARIO'] = scenario
     result = _run_runtime(tmp_path, env, RUNTIME_SCRIPT)
     assert result.get('ok') is True, result

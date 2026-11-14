@@ -1,12 +1,13 @@
 """Ingress charges the validated principal; invalid credentials fall back to the IP bucket."""
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.AuthNZ import auth_principal_resolver, jwt_service
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
 from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
 
@@ -93,9 +94,46 @@ def test_rotating_fake_tokens_share_the_ip_bucket(client):
     assert client.get("/api/v1/thing", headers={"X-API-KEY": "fake-b"}).status_code == 429
 
 
-def test_invalid_credentials_reach_the_route(client):
-    # The middleware never answers 401 itself; the route's auth decides.
-    assert client.get("/api/v1/thing", headers={"X-API-KEY": "fake"}).status_code == 200
+def test_invalid_credentials_reach_the_route(monkeypatch):
+    # The middleware never answers 401 itself; the route's own auth dependency
+    # (get_request_user, same as real app routes) decides. RG's own identity
+    # resolution (for bucket charging) stays faked, as in the other tests here;
+    # only the route's auth is real, and it must be the thing returning 401.
+    monkeypatch.delenv("RG_POLICY_PATH", raising=False)
+    monkeypatch.delenv("SINGLE_USER_TEST_API_KEY", raising=False)
+
+    async def no_rg_identity(request):
+        """Stand in for RG's own (unrelated) identity resolution: always miss, so RG
+        charges the IP bucket and never blocks the request before it reaches the route."""
+        return None
+
+    monkeypatch.setattr(auth_principal_resolver, "get_auth_principal", no_rg_identity)
+    settings = get_settings()
+    monkeypatch.setattr(settings, "AUTH_MODE", "single_user")
+    monkeypatch.setattr(settings, "SINGLE_USER_API_KEY", "the-configured-real-key")
+
+    class _GenerousLoader(_Loader):
+        def get_policy(self, pid):
+            """Return a high-rpm/burst policy so RG itself never denies here; this test is
+            about the route's own auth dependency, not RG's rate limiting."""
+            return {"requests": {"rpm": 1000, "burst": 10.0}, "scopes": ["user", "api_key", "ip"]}
+
+    app = FastAPI()
+
+    @app.get("/api/v1/thing")
+    def thing(user=Depends(get_request_user)) -> dict:
+        """Real route guarded by the same get_request_user dependency production routes
+        use, so an invalid credential is rejected by real auth, not a hand-rolled stub."""
+        return {"ok": True}
+
+    app.add_middleware(RGSimpleMiddleware)
+    app.state.rg_policy_loader = _GenerousLoader()
+    app.state.rg_governor = MemoryResourceGovernor(policy_loader=_GenerousLoader())
+    tc = TestClient(app)
+
+    assert tc.get("/api/v1/thing", headers={"X-API-KEY": "fake"}).status_code == 401
+    # Sanity: the real dependency isn't a blanket 401; a matching key reaches 200.
+    assert tc.get("/api/v1/thing", headers={"X-API-KEY": "the-configured-real-key"}).status_code == 200
 
 
 def test_non_session_cookie_charges_ip_and_reaches_route(client):
@@ -273,20 +311,26 @@ class _TenantLoader:
         return {"requests": {"rpm": 1, "burst": 1.0}, "scopes": ["tenant"]}
 
 
-def test_tenant_scope_outranks_principal_resolution(monkeypatch):
-    """Spec Sec2: tenant scoping keeps precedence over principal charging.
-
-    A tenant-wide `scopes: [tenant]` cap must not become a per-user cap just
-    because ingress can now validate the caller's credential.
-    """
+def _tenant_client(monkeypatch, principals=None, jwt_payload=None, tenant=True):
+    """Ingress over a tenant-scoped (rpm=1) policy; principals maps X-API-KEY -> AuthPrincipal."""
     monkeypatch.delenv("RG_POLICY_PATH", raising=False)
+    calls = []
 
     async def fake_principal(request):
-        user = request.headers.get("X-API-KEY")
-        return AuthPrincipal(kind="user", user_id=int(user))
+        key = request.headers.get("X-API-KEY")
+        calls.append(key)
+        if key not in (principals or {}):
+            raise HTTPException(status_code=401, detail="bad credentials")
+        return principals[key]
+
+    class _Jwt:
+        def decode_access_token(self, token):
+            return dict(jwt_payload or {})
 
     monkeypatch.setattr(auth_principal_resolver, "get_auth_principal", fake_principal)
+    monkeypatch.setattr(jwt_service, "get_jwt_service", lambda: _Jwt())
     monkeypatch.setattr(get_settings(), "AUTH_MODE", "multi_user")
+    loader = _TenantLoader() if tenant else _Loader()
     app = FastAPI()
 
     @app.get("/api/v1/thing")
@@ -294,15 +338,84 @@ def test_tenant_scope_outranks_principal_resolution(monkeypatch):
         return {"ok": True}
 
     app.add_middleware(RGSimpleMiddleware)
-    app.state.rg_policy_loader = _TenantLoader()
-    app.state.rg_governor = MemoryResourceGovernor(policy_loader=_TenantLoader())
-    tc = TestClient(app)
+    app.state.rg_policy_loader = loader
+    app.state.rg_governor = MemoryResourceGovernor(policy_loader=loader)
+    tc = TestClient(app, client=("10.0.0.1", 50000))
+    tc.principal_calls = calls
+    return tc
 
-    # Two different, individually-valid users in the same tenant.
-    headers_a = {"X-API-KEY": "1", "X-TLDW-Tenant": "acme"}
-    headers_b = {"X-API-KEY": "2", "X-TLDW-Tenant": "acme"}
-    assert tc.get("/api/v1/thing", headers=headers_a).status_code == 200
+
+def _member(user_id, *org_ids, active=None):
+    return AuthPrincipal(kind="user", user_id=user_id, org_ids=list(org_ids), active_org_id=active)
+
+
+def test_tenant_scope_outranks_principal_resolution(monkeypatch):
+    """Spec Sec2: tenant scoping keeps precedence over principal charging.
+
+    A tenant-wide `scopes: [tenant]` cap must not become a per-user cap just
+    because ingress can now validate the caller's credential.
+    """
+    tc = _tenant_client(monkeypatch, {"1": _member(1, 7), "2": _member(2, 7)})
+
+    # Two different, individually-valid users in the same tenant (org 7).
+    assert tc.get("/api/v1/thing", headers={"X-API-KEY": "1", "X-TLDW-Tenant": "7"}).status_code == 200
     # If credential validation outranked tenant scoping, this would charge a
     # separate user:2 bucket and also return 200. It must instead share the
-    # already-exhausted tenant:acme bucket (rpm=1).
-    assert tc.get("/api/v1/thing", headers=headers_b).status_code == 429
+    # already-exhausted tenant:7 bucket (rpm=1).
+    assert tc.get("/api/v1/thing", headers={"X-API-KEY": "2", "X-TLDW-Tenant": "7"}).status_code == 429
+
+
+def test_rotating_tenant_header_on_one_ip_shares_one_bucket(monkeypatch):
+    # TASK-13402: an unvalidated header never names a bucket; anonymous callers pay their IP.
+    tc = _tenant_client(monkeypatch)
+    assert tc.get("/api/v1/thing", headers={"X-TLDW-Tenant": "acme"}).status_code == 200
+    assert tc.get("/api/v1/thing", headers={"X-TLDW-Tenant": "globex"}).status_code == 429
+    assert tc.get("/api/v1/thing", headers={"X-TLDW-Tenant": "initech"}).status_code == 429
+    assert _charged_entities(tc) == {"ip:10.0.0.1"}
+
+
+def test_invalid_credential_with_tenant_header_charges_ip(monkeypatch):
+    tc = _tenant_client(monkeypatch)
+    tc.get("/api/v1/thing", headers={"X-API-KEY": "fake", "X-TLDW-Tenant": "acme"})
+    assert _charged_entities(tc) == {"ip:10.0.0.1"}
+
+
+def test_header_for_a_foreign_tenant_charges_the_principals_own_tenant(monkeypatch):
+    tc = _tenant_client(monkeypatch, {"1": _member(1, 7, active=7)})
+    tc.get("/api/v1/thing", headers={"X-API-KEY": "1", "X-TLDW-Tenant": "99"})
+    assert _charged_entities(tc) == {"tenant:7"}
+
+
+def test_header_for_a_foreign_tenant_charges_a_principal_without_tenant(monkeypatch):
+    tc = _tenant_client(monkeypatch, {"1": _member(1)})
+    tc.get("/api/v1/thing", headers={"X-API-KEY": "1", "X-TLDW-Tenant": "99"})
+    assert _charged_entities(tc) == {"user:1"}
+
+
+def test_header_for_a_member_tenant_selects_it(monkeypatch):
+    tc = _tenant_client(monkeypatch, {"1": _member(1, 7, 8)})
+    tc.get("/api/v1/thing", headers={"X-API-KEY": "1", "X-TLDW-Tenant": "8"})
+    assert _charged_entities(tc) == {"tenant:8"}
+
+
+def test_cached_identity_still_validates_each_tenant_header(monkeypatch):
+    # The header is not part of the identity cache key, so the cache must keep the orgs.
+    tc = _tenant_client(monkeypatch, {"1": _member(1, 7, 8)})
+    for tenant_header in ("7", "8", "99"):
+        tc.get("/api/v1/thing", headers={"X-API-KEY": "1", "X-TLDW-Tenant": tenant_header})
+    assert tc.principal_calls == ["1"]
+    assert _charged_entities(tc) == {"tenant:7", "tenant:8", "user:1"}
+
+
+def test_jwt_tenant_comes_from_verified_org_claims(monkeypatch):
+    tc = _tenant_client(monkeypatch, jwt_payload={"sub": "42", "org_ids": [7], "active_org_id": 7})
+    auth = {"Authorization": "Bearer a.valid.jwt"}
+    tc.get("/api/v1/thing", headers={**auth, "X-TLDW-Tenant": "99"})
+    assert _charged_entities(tc) == {"tenant:7"}
+    assert tc.principal_calls == []
+
+
+def test_tenant_header_is_ignored_when_tenant_scoping_is_disabled(monkeypatch):
+    tc = _tenant_client(monkeypatch, {"1": _member(1, 7, active=7)}, tenant=False)
+    tc.get("/api/v1/thing", headers={"X-API-KEY": "1", "X-TLDW-Tenant": "7"})
+    assert _charged_entities(tc) == {"user:1"}

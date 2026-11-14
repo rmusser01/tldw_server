@@ -171,13 +171,13 @@
     "message": "Enable temporary mode?"
   },
   "composer_tempChatConfirmContent": {
-    "message": "This will clear your current conversation. Messages won't be saved."
+    "message": "This will clear your current conversation. New Temporary messages can remain on this device across reloads until you close or clear the chat. They will not be added to server history."
   },
   "composer_tempChatDisableConfirmTitle": {
     "message": "Disable temporary mode?"
   },
   "composer_tempChatDisableConfirmContent": {
-    "message": "This will clear your current conversation. Messages will start saving again."
+    "message": "This will clear your current Temporary conversation. New messages can be stored in chat history."
   },
   "composer_tempChatDisabledClearedMessages": {
     "message": "Temporary chat disabled. Previous messages cleared."
@@ -1979,5 +1979,143 @@
     "resetPosition": "Reset position",
     "manage": "Manage Buddy & Persona",
     "detach": "Detach Buddy"
+  },
+  "multiSelect_organizationLoadError": {
+    "message": "Unable to load folders and tags for this account."
+  },
+  "multiSelect_organizationRefreshRequired": {
+    "message": "Refresh folders and tags for this account."
+  },
+  "multiSelect_tagsApplyPartialError": {
+    "message": "Some tags could not be created or applied. Your selection is kept so you can try again."
+  },
+  "multiSelect_folderApplyPartialError": {
+    "message": "Some chats could not be added to folders. Your selection is kept so you can try again."
+  },
+  "folderPicker_createError": {
+    "message": "Unable to create the folder. Try again."
+  },
+  "greetingPicker_opening": {
+    "message": "{{name}} opening"
+  },
+  "greetingPicker_character": {
+    "message": "AI character"
+  },
+  "greetingPicker_previewHelp": {
+    "message": "Choose who begins. Previewing an opening does not add a message."
+  },
+  "greetingPicker_start": {
+    "message": "Start with this greeting"
+  },
+  "greetingPicker_starting": {
+    "message": "Saving opening…"
+  },
+  "greetingPicker_ownMessage": {
+    "message": "Start with your message"
+  },
+  "greetingPicker_firstMessage": {
+    "message": "Write the first message"
+  },
+  "greetingPicker_loading": {
+    "message": "Loading character opening…"
+  },
+  "greetingPicker_retry": {
+    "message": "Retry loading opening"
+  },
+  "greetingPicker_unavailable": {
+    "message": "Could not refresh this card. Review the connection before saving an opening."
+  },
+  "greetingPicker_unsupported": {
+    "message": "This opening cannot be saved with the server’s greeting options. Write your message or review the character card."
+  },
+  "greetingPicker_alternates": {
+    "message": "Alternate greetings"
+  },
+  "greetingPicker_choose": {
+    "message": "Choose greeting"
+  },
+  "greetingPicker_reroll": {
+    "message": "Reroll"
+  },
+  "greetingPicker_startingHelp": {
+    "message": "Saving the character’s opening. Your message has not been sent."
+  },
+  "greetingPicker_startFailed": {
+    "message": "Could not save the opening. Your draft is still here. Review the connection and retained drafts before starting again."
+  },
+  "greetingPicker_changed": {
+    "message": "The character opening changed"
+  },
+  "greetingPicker_changedHelp": {
+    "message": "The saved opening differs from the preview. Review the opening shown in this chat before sending your message."
+  },
+  "greetingPicker_reviewCreation": {
+    "message": "Review the previous save in Recover drafts before saving another opening."
+  },
+  "header_openFullChatExtension": {
+    "message": "Open full extension chat"
+  },
+  "header_openFullChatExtensionDescription": {
+    "message": "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy."
+  },
+  "header_openFullChatWebuiHandoffDescription": {
+    "message": "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there."
+  },
+  "controlRow_openCharacterChatInFullExtension": {
+    "message": "Open Character Chat in full extension"
+  },
+  "controlRow_openCharacterChatExtensionDescription": {
+    "message": "Opens the character route in the extension full page. Use Copy draft & page references to carry a bounded copy; history and chat settings are not included."
+  },
+  "controlRow_copyDraftContext": {
+    "message": "Copy draft & page references"
+  },
+  "controlRow_copyDraftContextExtensionDescription": {
+    "message": "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination."
+  },
+  "controlRow_copyDraftContextWebuiDescription": {
+    "message": "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination."
+  },
+  "controlRow_copyDraftNothingToSend": {
+    "message": "No draft or page references to copy"
+  },
+  "controlRow_copyDraftFailed": {
+    "message": "Could not open the full chat page. Your source draft remains here."
+  },
+  "controlRow_copyDraftOpened": {
+    "message": "Full chat page opened. Review the copy there. Your source draft remains here."
+  },
+  "controlRow_copyDraftOpenedPartial": {
+    "message": "Opened with a partial copy: some draft or page references were shortened or unavailable. Review the copy there. Your source draft remains here."
+  },
+  "controlRow_copyDraftPageReferencesUnavailable": {
+    "message": "Page references could not be read. Try again. Your source draft remains here."
+  },
+  "multiSelect_deleteAndCloseConfirmBody": {
+    "message": "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages."
+  },
+  "notification_webClipAnalyzeNewChatRequired": {
+    "message": "Start a new chat to analyze this clip. Your current conversation and saved clip are kept."
+  },
+  "characterSelect_charactersLoadFailed": {
+    "message": "Characters could not be loaded. Check your connection, then retry."
+  },
+  "characterSelect_personasLoadFailed": {
+    "message": "Personas could not be loaded. Check your connection, then retry."
+  },
+  "firstRun_headline": {
+    "message": "Finish setup to start chatting"
+  },
+  "firstRun_description": {
+    "message": "Finish setup in Options to connect to your tldw server, then return here to chat."
+  },
+  "chatWithPage_on": {
+    "message": "Chat with current page is on"
+  },
+  "chatWithPage_off": {
+    "message": "Chat with current page is off"
+  },
+  "chatWithPage_onDescription": {
+    "message": "Your next messages are answered using the page open in this tab."
   }
 }

@@ -64,7 +64,7 @@ Found by the comprehensive core-module review; the five definitions, the sandbox
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Duplicate of TASK-13338, fixed in c49b56c281 before this task was picked up. Verified on ea1cbc6941: one predicate, protocol_types.metadata_has_admin_claims, reached via BaseModule.caller_is_admin; media/notes/kanban/sandbox call it, mcp_discovery._is_admin calls it then falls back to user_roles. Decision recorded in Docs/ADR/048-mcp-admin-claims.md: platform admin roles (admin/owner/super_admin, imported from AuthNZ _PLATFORM_ADMIN_ROLES) or the '*' permission; system.configure deliberately NOT admin in MCP (narrower than AuthNZ's frozenset({'*','system.configure'}) named in AC#1). Dead context.is_admin probes removed (test_dead_is_admin_attribute_is_not_consulted). Bare-string roles: matrix row {'roles': 'owner'} -> True for the shared predicate. Red-before: restoring the pre-c49b56c281 sandbox_module fails 3 tests in test_sandbox_module_auth_binding.py incl. test_sandbox_run_denies_system_configure_cross_user_override. Added 4c45412ab9: behavioural parity test for mcp_discovery's claims half (the one module not covered by the structural 'no re-declared _is_admin' test); fails on the pre-c49b56c281 discovery module ([owner] case), 32/32 pass now; admin matrix + sandbox binding 37 -> 42 pass. Bandit -ll clean on the test file. Breaking change carried from 13338: an API key whose only admin-ish claim is system.configure lost cross-user sandbox session access and needs a platform admin role.
 
 
@@ -91,7 +91,7 @@ No code changed. Every permission name in the doc's D2 table needs approval befo
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

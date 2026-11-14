@@ -391,6 +391,7 @@ class TestChatCompletionsEndpoint:
 
             assert response.status_code == status.HTTP_200_OK, response.text
             assert response.headers["content-type"].startswith("text/event-stream")
+            assert "no-transform" in response.headers["cache-control"]  # nosec B101: SSE must not be buffered by proxy compression.
             frames = [line[6:] for line in response.text.splitlines() if line.startswith("data: ")]
             assert frames[-1] == "[DONE]"
             import json

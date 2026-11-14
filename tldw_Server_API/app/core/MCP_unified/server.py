@@ -11,6 +11,7 @@ import math
 import os
 import re
 import secrets
+import threading
 from collections import deque
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -26,8 +27,10 @@ from tldw_Server_API.app.core.AuthNZ.settings import get_settings, is_single_use
 from tldw_Server_API.app.core.Slides.standalone_html_validation_pool import (
     STANDALONE_HTML_VALIDATION_POOL_METADATA_KEY,
 )
+from tldw_Server_API.app.core.Utils.app_services import app_services
 
 from .auth.rate_limiter import RateLimitExceeded
+from .auth_scope import project_authenticated_execution_scope
 from .config import get_config, get_config_warnings, validate_config
 from .interfaces.runtime import MCPRuntimeDependencies, WebSocketStream
 from .jsonrpc_transport import (
@@ -40,6 +43,7 @@ from .jsonrpc_transport import (
 )
 from .module_surface import describe_module_surface
 from .protocol import MCPError, MCPProtocol, MCPRequest, MCPResponse, RequestContext, _trusted_compat_claims_metadata
+from .protocol_types import AuthenticatedExecutionScope
 from .security.ip_filter import get_ip_access_controller
 from .security.request_guards import enforce_client_certificate_headers
 from .transport.guarded_slides_websocket import guarded_slides_websocket_metadata
@@ -244,7 +248,13 @@ class WebSocketConnection:
         session_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
         cwd: Optional[str] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ):
+        if server_auth_scope is not None and not isinstance(
+            server_auth_scope,
+            AuthenticatedExecutionScope,
+        ):
+            raise TypeError("server_auth_scope must be an AuthenticatedExecutionScope or None")
         self.websocket = websocket
         self.connection_id = connection_id
         self.client_id = client_id
@@ -253,6 +263,7 @@ class WebSocketConnection:
         self.session_id = session_id or connection_id
         self.workspace_id = workspace_id
         self.cwd = cwd
+        self.server_auth_scope = server_auth_scope
         self.connected_at = datetime.now(timezone.utc)
         self.last_activity = self.connected_at
         self.message_count = 0
@@ -424,20 +435,6 @@ class MCPServer:
             )
             return False
 
-    def _is_test_mode(self) -> bool:
-        """Return whether the host reports test mode for MCP behavior gates."""
-        try:
-            return bool(self.environment_flags_provider.is_test_mode())
-        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-            return False
-
-    def _is_explicit_pytest_runtime(self) -> bool:
-        """Return whether the host reports an explicit pytest runtime."""
-        try:
-            return bool(self.environment_flags_provider.is_explicit_pytest_runtime())
-        except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-            return False
-
     def _should_use_single_user_api_key_compat(self) -> bool:
         """Return whether mounted WS should accept single-user API-key compatibility."""
         flag = os.getenv("MCP_SINGLE_USER_COMPAT_SHIM", "").strip().lower()
@@ -449,31 +446,6 @@ class MCPServer:
             logger.debug("MCP WS single-user profile detection failed closed", exc_info=True)
             return False
 
-    def _single_user_test_key_compat_allowed(self) -> bool:
-        """Return True when SINGLE_USER_TEST_API_KEY may be accepted by mounted WS."""
-        if not self._is_test_mode():
-            return False
-        env = (os.getenv("ENVIRONMENT") or os.getenv("APP_ENV") or os.getenv("ENV") or "").lower()
-        prod_flag = self._env_flag_enabled("tldw_production")
-        is_dev_ctx = bool(getattr(self.config, "debug_mode", False))
-        if self._is_explicit_pytest_runtime():
-            is_dev_ctx = True
-        if env in {"dev", "development", "test", "ci"}:
-            is_dev_ctx = True
-        if prod_flag:
-            is_dev_ctx = False
-        if not is_dev_ctx:
-            logger.error(
-                "TEST_MODE enabled outside dev/test context; refusing SINGLE_USER_TEST_API_KEY",
-                extra={
-                    "audit": True,
-                    "env": env,
-                    "debug_mode": bool(getattr(self.config, "debug_mode", False)),
-                },
-            )
-            return False
-        return True
-
     def _single_user_compat_auth_via(self, api_key: Optional[str], *, client_ip: Optional[str]) -> Optional[str]:
         """Return mounted WS single-user compatibility auth source for an API key."""
         if not api_key or not self._should_use_single_user_api_key_compat():
@@ -481,12 +453,9 @@ class MCPServer:
         try:
             settings = get_settings()
             primary_key = getattr(settings, "SINGLE_USER_API_KEY", None)
-            test_key = os.getenv("SINGLE_USER_TEST_API_KEY")
             auth_via: Optional[str] = None
             if primary_key and secrets.compare_digest(api_key, str(primary_key)):
                 auth_via = "single_user_api_key"
-            elif test_key and self._single_user_test_key_compat_allowed() and secrets.compare_digest(api_key, test_key):
-                auth_via = "single_user_test_api_key"
             if auth_via is None:
                 return None
             if not is_single_user_ip_allowed(client_ip, settings):
@@ -718,7 +687,8 @@ class MCPServer:
 
             try:
                 # Fail fast on insecure production configurations
-                _test_mode = self._is_test_mode() or self._is_explicit_pytest_runtime()
+                flags = self.environment_flags_provider
+                _test_mode = flags.is_test_mode() or flags.is_explicit_pytest_runtime()
                 if not self.config.debug_mode and not _test_mode:
                     ok = validate_config()
                     if not ok:
@@ -984,7 +954,7 @@ class MCPServer:
             try:
                 import yaml  # type: ignore
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
-                yaml = None  # type: ignore
+                yaml = None
 
             modules_to_load = []
 
@@ -1025,7 +995,7 @@ class MCPServer:
 
             # 3) Optional default: enable media module if flag is set and nothing else specified
             enable_media_flag = self._env_flag_enabled("MCP_ENABLE_MEDIA_MODULE")
-            test_mode = self._is_test_mode()
+            test_mode = self.environment_flags_provider.is_test_mode()
             if enable_media_flag and not modules_to_load:
                 default_media_path = self._default_media_db_path()
                 modules_to_load.append(
@@ -1461,6 +1431,7 @@ class MCPServer:
             if cookie_session_id is not None
             else None
         ) or None
+        server_auth_scope: AuthenticatedExecutionScope | None = None
         stable_session_id = _normalize_optional_text(mcp_session_id)
         workspace_key = _normalize_optional_text(workspace_id)
         cwd_key = _normalize_optional_text(cwd)
@@ -1480,6 +1451,16 @@ class MCPServer:
                 ] = validation_pool
         if user_id is not None:
             principal = getattr(websocket_state, "auth_principal", None)
+            try:
+                server_auth_scope = project_authenticated_execution_scope(
+                    authenticated_user_id=user_id,
+                    principal_user_id=getattr(principal, "user_id", None),
+                    principal_active_org_id=getattr(principal, "active_org_id", None),
+                    principal_active_team_id=getattr(principal, "active_team_id", None),
+                )
+            except ValueError:
+                await websocket.close(code=1008, reason="Authentication failed")
+                return
             metadata["auth_via"] = "single_user_session"
             metadata["single_user_session_id"] = cookie_session_id
             metadata["roles"] = list(getattr(principal, "roles", []) or [])
@@ -1497,7 +1478,8 @@ class MCPServer:
         resolved_ip = controller.resolve_client_ip(raw_remote_ip, forwarded_for, real_ip)
         # Test harness mapping and bypass: allow WS in pytest/TEST_MODE and map 'testclient' to loopback
         try:
-            _is_test_env = bool(self._is_explicit_pytest_runtime() or self._is_test_mode())
+            flags = self.environment_flags_provider
+            _is_test_env = bool(flags.is_explicit_pytest_runtime() or flags.is_test_mode())
         except _MCP_SERVER_NONCRITICAL_EXCEPTIONS:
             _is_test_env = False
         if resolved_ip == "testclient" or resolved_ip is None and _is_test_env:
@@ -1577,14 +1559,25 @@ class MCPServer:
         if auth_token:
             ok = False
             authnz_token_failed = False
+            identity = None
             try:
                 # Try AuthNZ JWT first for consistency with HTTP endpoints
                 identity = await self.auth_provider.authenticate_authnz_websocket_token(
                     auth_token,
                     websocket=websocket,
                 )
-                if identity is not None and identity.user_id:
-                    user_id = identity.user_id
+                if identity is not None:
+                    if not identity.user_id:
+                        raise ValueError("Authenticated identity is missing a user ID")
+                    authenticated_user_id = identity.user_id
+                    authenticated_scope = project_authenticated_execution_scope(
+                        authenticated_user_id=authenticated_user_id,
+                        principal_user_id=authenticated_user_id,
+                        principal_active_org_id=identity.active_org_id,
+                        principal_active_team_id=identity.active_team_id,
+                    )
+                    user_id = authenticated_user_id
+                    server_auth_scope = authenticated_scope
                     ok = True
                     logger.info(f"WebSocket authenticated for user (AuthNZ JWT): {user_id}")
                     if identity.roles:
@@ -1598,6 +1591,9 @@ class MCPServer:
                         return
             except _MCP_SERVER_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"AuthNZ JWT auth failed: {self._mask_secrets(str(e))}")
+                if identity is not None:
+                    await websocket.close(code=1008, reason="Authentication failed")
+                    return
                 if self._is_authnz_access_token(auth_token):
                     authnz_token_failed = True
                     if not api_key:
@@ -1608,6 +1604,7 @@ class MCPServer:
                 try:
                     token_data = self.jwt_manager.verify_token(auth_token)
                     user_id = token_data.sub
+                    server_auth_scope = None
                     ok = True
                     logger.info(f"WebSocket authenticated for user (MCP JWT): {user_id}")
                     if token_data.roles:
@@ -1626,6 +1623,7 @@ class MCPServer:
             if compat_auth_via is not None:
                 settings = get_settings()
                 user_id = str(getattr(settings, "SINGLE_USER_FIXED_ID", "1"))
+                server_auth_scope = None
                 metadata.update(
                     _trusted_compat_claims_metadata(
                         auth_via=compat_auth_via,
@@ -1635,10 +1633,6 @@ class MCPServer:
                 roles = metadata.setdefault("roles", [])
                 if "admin" not in roles:
                     roles.append("admin")
-                if compat_auth_via == "single_user_test_api_key":
-                    perms = metadata.setdefault("permissions", [])
-                    if "*" not in perms:
-                        perms.append("*")
                 logger.info("WebSocket authenticated via mounted single-user compatibility key")
             else:
                 try:
@@ -1648,7 +1642,13 @@ class MCPServer:
                         ip_address=client_ip,
                     )
                     if info and info.get("user_id"):
-                        user_id = str(info["user_id"])
+                        authenticated_user_id = str(info["user_id"])
+                        authenticated_scope = project_authenticated_execution_scope(
+                            authenticated_user_id=authenticated_user_id,
+                            api_key_info=info,
+                        )
+                        user_id = authenticated_user_id
+                        server_auth_scope = authenticated_scope
                         # Attach org/team context
                         if info.get("org_id") is not None:
                             metadata["org_id"] = info.get("org_id")
@@ -1750,6 +1750,7 @@ class MCPServer:
                 session_id=stable_session_id or connection_id,
                 workspace_id=workspace_key,
                 cwd=cwd_key,
+                server_auth_scope=server_auth_scope,
             )
 
             self.connections[connection_id] = connection
@@ -1955,6 +1956,7 @@ class MCPServer:
                 session_id=connection.session_id,
                 metadata=context_metadata,
                 db_paths=self._resolve_user_db_paths(connection.user_id),
+                server_auth_scope=connection.server_auth_scope,
             )
 
             # Process MCP request (supports single, notification, and batch)
@@ -2024,6 +2026,7 @@ class MCPServer:
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ) -> MCPResponse:
         """
         Handle an HTTP MCP request.
@@ -2094,6 +2097,7 @@ class MCPServer:
             session_id=session_id,
             metadata=metadata_map,
             db_paths=self._resolve_user_db_paths(user_id),
+            server_auth_scope=server_auth_scope,
         )
 
         # Process request
@@ -2128,6 +2132,7 @@ class MCPServer:
         client_id: Optional[str] = None,
         user_id: Optional[str] = None,
         metadata: Optional[dict[str, Any]] = None,
+        server_auth_scope: AuthenticatedExecutionScope | None = None,
     ) -> Optional[list[MCPResponse]]:
         """
         Handle a batch of HTTP MCP requests with consistent session semantics.
@@ -2194,6 +2199,7 @@ class MCPServer:
             session_id=session_id,
             metadata=metadata_map,
             db_paths=self._resolve_user_db_paths(user_id),
+            server_auth_scope=server_auth_scope,
         )
 
         # Process batch request
@@ -2310,25 +2316,31 @@ class MCPServer:
         }
 
 
-# Singleton instance management
-_server: Optional[MCPServer] = None
+# Serializes first-time creation of the container's ``mcp_server`` slot.
+_server_lock = threading.Lock()
 
 
 def get_mcp_server() -> MCPServer:
-    """Get or create MCP server singleton"""
-    global _server
-    if _server is None:
-        _server = MCPServer()
-    return _server
+    """Get the MCP server from the app-service container, creating it on first use.
+
+    Fallback for code with no request or constructor argument; request handlers take it via
+    ``Depends(get_mcp_server_dep)``.
+    """
+    services = app_services()
+    if services.mcp_server is None:
+        with _server_lock:
+            if services.mcp_server is None:
+                services.mcp_server = MCPServer()
+    return services.mcp_server
 
 
 async def reset_mcp_server() -> None:
-    """Reset MCP server singleton for test environments."""
-    global _server
-    if _server is not None:
+    """Shut down the container's MCP server, empty the slot, and reset the module registry."""
+    services = app_services()
+    taken, services.mcp_server = services.mcp_server, None
+    if taken is not None:
         with suppress(_MCP_SERVER_NONCRITICAL_EXCEPTIONS):
-            await _server.shutdown()
-    _server = None
+            await taken.shutdown()
     try:
         from .modules.registry import reset_module_registry
 

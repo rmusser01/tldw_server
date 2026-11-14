@@ -29,15 +29,11 @@ Fix the issues found during the WP3 requested code-review pass for PR 2662: rout
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 RED: added regression coverage for cross-workspace web clipper agent-task handoff and bounded Deep Research metadata persistence. The new ResearchWorkspace test failed because switchWorkspace was never called. The Deep Research tests failed because source trust/source inventory were still raw snake_case records, source inventory content showed the capped count, and retained metadata included raw nested fields.
 
 GREEN: route-matching pending handoffs now call the existing switchWorkspace action before consumption; Deep Research retained metadata is normalized to whitelisted/capped fields; capped source inventory content reports raw count plus shown count. Focused tests for the two changed files now pass.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

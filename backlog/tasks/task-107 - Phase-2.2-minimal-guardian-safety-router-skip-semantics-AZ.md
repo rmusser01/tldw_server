@@ -39,7 +39,7 @@ Narrow minimal guardian/safety router optional skip behavior after PR #1355 merg
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline focused selector before edits passed: minimal guardian/safety tests 2 passed, confirming current broad skip behavior was covered.
 
 TDD RED after test update failed as intended: guardian/safety specs still reported Exception and runtime import failures were skipped. GREEN focused selector passed after removing guardian/safety broad skip overrides: 5 passed.
@@ -49,7 +49,7 @@ Broader validation passed: router groups 130 passed, lifecycle 54 passed, OpenAP
 Scope note: no skip_exceptions=(Exception,) occurrences remain in minimal.py after this slice.
 
 Opened PR https://github.com/rmusser01/tldw_server/pull/1358 against dev for this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

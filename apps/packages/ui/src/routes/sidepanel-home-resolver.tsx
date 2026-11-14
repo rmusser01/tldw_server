@@ -2,7 +2,7 @@ import React from "react"
 import { useLocation } from "react-router-dom"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
-import { hasResumableSidepanelChat } from "./sidepanel-chat-resume"
+import { resolveSidepanelHomeTarget } from "./sidepanel-home-target"
 
 const LazySidepanelChat = React.lazy(() => import("./sidepanel-chat"))
 const LazySidepanelCompanion = React.lazy(() => import("./sidepanel-companion"))
@@ -31,15 +31,9 @@ export default function SidepanelHomeResolver() {
     let cancelled = false
 
     const resolveTarget = async () => {
-      try {
-        const hasResume = await hasResumableSidepanelChat()
-        if (!cancelled) {
-          setTarget(hasResume ? "chat" : "companion")
-        }
-      } catch {
-        if (!cancelled) {
-          setTarget("companion")
-        }
+      const nextTarget = await resolveSidepanelHomeTarget()
+      if (!cancelled) {
+        setTarget(nextTarget)
       }
     }
 

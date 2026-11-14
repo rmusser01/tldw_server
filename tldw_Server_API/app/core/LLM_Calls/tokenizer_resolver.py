@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     iter_custom_openai_provider_numbers,
 )
 from tldw_Server_API.app.core.exceptions import TokenizerUnavailable
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import encode_provider_model_path
 
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -370,7 +371,7 @@ class AnthropicCountOnlyHTTPAdapter(_HTTPJSONAdapterBase):
 
     def count_tokens(self, text: str) -> int:
         payload = {
-            "model": self.model,
+            "model": canonical_anthropic_model_id(self.model),
             "messages": [
                 {
                     "role": "user",

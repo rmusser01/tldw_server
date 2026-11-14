@@ -36,11 +36,11 @@ Implement #1539 PR 1: document the ACP downstream-agent compatibility matrix con
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented docs-only #1539 PR 1 contract in isolated worktree .worktrees/acp-compatibility-matrix-contract on branch codex/acp-compatibility-matrix-contract. Added Docs/Development/ACP_Compatibility_Matrix.md and linked it from Agent_Client_Protocol.md and ACP_Production_Readiness.md.
 
 Verification: git diff --check passed. Targeted rg confirmed compatibility doc links, support-state language, current matrix, caveat taxonomy, and status surface plan. Bandit not run because this slice changes docs and Backlog metadata only; no Python code was touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

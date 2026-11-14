@@ -43,13 +43,13 @@ Create the design/spec for an explicit operator-owned launchd validation drill f
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Design scope approved by the user before writing the spec.
 - This is a docs-only brainstorming/spec slice. No runtime code changes are included.
 - Design review tightened the spec around launchd label collisions, drill-owned bootout cleanup, helperctl pid-file absence under launchd, and the external-helper smoke seam.
 - Verification: `git diff --check` passed.
 - Bandit: skipped because the slice only adds docs and a Backlog task record.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

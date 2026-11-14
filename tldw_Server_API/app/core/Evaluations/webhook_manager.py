@@ -575,21 +575,12 @@ class WebhookManager:
         url = webhook["url"]
         secret = webhook["secret"]
 
-        # Under an active pytest run, skip DNS validation to keep runs deterministic.
-        # TEST_MODE alone must not do this: it is a server env var a deployment can
-        # carry, and skipping here disables the SSRF / DNS-rebinding check.
-        from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
-
-        skip_dns = is_explicit_pytest_runtime()
-        delivery_url = url
-        host_headers: dict[str, str] = {}
-        if not skip_dns:
-            try:
-                delivery_url, host_headers = await webhook_validator.resolve_safe_delivery_target_async(url)
-            except _WEBHOOK_MANAGER_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"URL validation failed: {e}")
-                self._update_webhook_stats(webhook_id, success=False, error=f"URL validation failed: {str(e)}")
-                return
+        try:
+            delivery_url, host_headers = await webhook_validator.resolve_safe_delivery_target_async(url)
+        except _WEBHOOK_MANAGER_NONCRITICAL_EXCEPTIONS as e:
+            logger.error(f"URL validation failed: {e}")
+            self._update_webhook_stats(webhook_id, success=False, error=f"URL validation failed: {str(e)}")
+            return
 
         # Generate signature
         payload_json = payload.to_json()

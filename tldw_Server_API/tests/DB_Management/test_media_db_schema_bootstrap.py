@@ -166,7 +166,7 @@ def test_real_sqlite_schema_bootstrap_creates_core_objects(tmp_path) -> None:
 
     The dispatch tests above verify routing with the initializers stubbed;
     this one closes the gap flagged in
-    audits/2026-07-04-test-suite-audit-round2.md (RA2): nothing here ever
+    Docs/Audit/2026-07-04-test-suite-audit-round2.md (RA2): nothing here ever
     executed the actual schema DDL, so a broken bootstrap kept the suite
     green.
     """
@@ -198,66 +198,6 @@ def test_real_sqlite_schema_bootstrap_creates_core_objects(tmp_path) -> None:
     finally:
         db.close_connection()
 
-
-@pytest.mark.unit
-def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch) -> None:
-    from tldw_Server_API.app.core.DB_Management.media_db.schema.backends import (
-        postgres_helpers as postgres_helpers_module,
-    )
-
-    conn = object()
-    calls: list[object] = []
-    backend = SimpleNamespace(
-        execute=lambda statement, *, connection: calls.append(("safe_transcript_extractor", statement, connection))
-    )
-    db = SimpleNamespace(
-        backend=backend,
-        _ensure_postgres_collections_tables=lambda value: calls.append(("collections", value)),
-        _ensure_postgres_tts_history=lambda value: calls.append(("tts_history", value)),
-        _ensure_postgres_audio_presets=lambda value: calls.append(("audio_presets", value)),
-        _ensure_postgres_data_tables=lambda value: calls.append(("data_tables", value)),
-        _ensure_postgres_source_hash_column=lambda value: calls.append(("source_hash", value)),
-        _ensure_postgres_claims_extensions=lambda value: calls.append(("claims_extensions", value)),
-        _ensure_postgres_email_schema=lambda value: calls.append(("email_schema", value)),
-        _sync_postgres_sequences=lambda value: pytest.fail("routine bootstrap must not rewind RLS-scoped sequences"),
-    )
-
-    monkeypatch.setattr(
-        postgres_helpers_module,
-        "ensure_postgres_policies",
-        lambda value, connection: calls.append(("policies", value, connection)),
-    )
-    monkeypatch.setattr(
-        postgres_helpers_module,
-        "ensure_postgres_document_workspace_schema",
-        lambda connection: calls.append(("document_workspace", connection)),
-        raising=False,
-    )
-
-    monkeypatch.setattr(
-        postgres_helpers_module,
-        "ensure_postgres_sync_log_contract",
-        lambda value, connection: calls.append(("sync_contract", value, connection)),
-    )
-    postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
-
-    assert calls == [
-        ("sync_contract", db, conn),
-        ("collections", conn),
-        ("tts_history", conn),
-        ("audio_presets", conn),
-        ("data_tables", conn),
-        (
-            "safe_transcript_extractor",
-            postgres_helpers_module._SAFE_TRANSCRIPT_TEXT_FUNCTION_SQL,
-            conn,
-        ),
-        ("document_workspace", conn),
-        ("source_hash", conn),
-        ("claims_extensions", conn),
-        ("email_schema", conn),
-        ("policies", db, conn),
-    ]
 
 
 @pytest.mark.unit
@@ -873,6 +813,47 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
 
 
 @pytest.mark.unit
+def test_sync_postgres_sequences_raises_a_failing_table() -> None:
+    """Media keeps raising a table's error; only ChaCha skips it (TASK-13901)."""
+    from tldw_Server_API.app.core.DB_Management.media_db.schema import (
+        postgres_sequence_maintenance as postgres_sequence_maintenance_module,
+    )
+
+    conn = SimpleNamespace(transaction=lambda **_kwargs: nullcontext())
+    queries: list[str] = []
+
+    class FakeBackend:
+        @staticmethod
+        def escape_identifier(value: str) -> str:
+            return f'"{value}"'
+
+        def execute(
+            self,
+            query: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            connection: object,
+        ) -> SimpleNamespace:
+            queries.append(query.strip())
+            if len(queries) == 1:
+                return SimpleNamespace(
+                    rows=[
+                        {"sequence_schema": "public", "sequence_name": f"{table}_id_seq", "table_name": table, "column_name": "id"}
+                        for table in ("keywords", "media")
+                    ]
+                )
+            if query.startswith("SELECT last_value"):
+                return SimpleNamespace(rows=[{"last_value": 1, "is_called": False}])
+            if query.startswith("SELECT COALESCE(MAX"):
+                raise BackendDatabaseError("PostgreSQL query execution failed")
+            return SimpleNamespace()
+
+    with pytest.raises(BackendDatabaseError):
+        postgres_sequence_maintenance_module.sync_postgres_sequences(SimpleNamespace(backend=FakeBackend()), conn)
+    assert not any("media_id_seq" in query for query in queries)
+
+
+@pytest.mark.unit
 def test_run_postgres_migrate_to_v17_invokes_claims_helpers_in_order() -> None:
     from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies import (
         postgres_claims as postgres_claims_module,
@@ -1070,11 +1051,13 @@ def test_postgres_data_tables_structures_ensure_postgres_data_tables_runs_create
 
     postgres_data_table_structures_module.ensure_postgres_data_tables(db, conn)
 
-    assert calls == [
+    assert calls == [  # nosec B101 -- Pytest asserts the updated real contract.
         ("CREATE TABLE data_tables (...)", conn),
         ("CREATE TABLE data_table_columns (...)", conn),
         ("ensure_columns", conn),
         ("CREATE INDEX idx_data_tables_workspace_tag ON data_tables(workspace_tag)", conn),
+        ("DROP INDEX IF EXISTS ux_data_table_columns_table_position_active", conn),
+        ("DROP INDEX IF EXISTS ux_data_table_rows_table_index_active", conn),
     ]
 
 
@@ -1606,6 +1589,8 @@ def test_ensure_sqlite_document_workspace_schema_migrates_old_tables_idempotentl
                 updated_at TEXT NOT NULL,
                 deleted INTEGER NOT NULL DEFAULT 0
             );
+            INSERT INTO document_annotations (id, media_id, user_id, location, text, created_at, updated_at)
+            VALUES ('ann_old_1', 1, '1', 'p1', 'a', 't', 't'), ('ann_old_2', 1, '1', 'p2', 'b', 't', 't');
             """
         )
 
@@ -1619,6 +1604,14 @@ def test_ensure_sqlite_document_workspace_schema_migrates_old_tables_idempotentl
         assert progress_columns.count("percentage") == 1
         assert annotation_columns.count("chapter_title") == 1
         assert annotation_columns.count("percentage") == 1
+        assert annotation_columns.count("client_id") == 1
+
+        # Existing rows keep a NULL client_id; the unique index still admits them.
+        unique_indexes = {
+            row["name"] for row in conn.execute("PRAGMA index_list(document_annotations)") if row["unique"]
+        }
+        assert "idx_annotations_client_id" in unique_indexes
+        assert [row["client_id"] for row in conn.execute("SELECT client_id FROM document_annotations")] == [None, None]
     finally:
         conn.close()
 
@@ -1649,6 +1642,12 @@ def test_ensure_postgres_document_workspace_schema_executes_expected_ddl() -> No
     assert "alter table document_reading_progress add column if not exists percentage double precision" in joined
     assert "alter table document_annotations add column if not exists chapter_title text" in joined
     assert "alter table document_annotations add column if not exists percentage double precision" in joined
+    add_client_id = "alter table document_annotations add column if not exists client_id text"
+    client_id_index = (
+        "create unique index if not exists idx_annotations_client_id "
+        "on document_annotations(user_id, media_id, client_id)"
+    )
+    assert joined.index(add_client_id) < joined.index(client_id_index)
 
 
 @pytest.mark.unit
@@ -2095,9 +2094,14 @@ def test_sqlite_post_core_structures_ensure_sqlite_data_tables_executes_sql_and_
     class RecordingConn:
         def __init__(self) -> None:
             self.scripts: list[str] = []
+            self.queries: list[str] = []
 
         def executescript(self, script: str) -> None:
             self.scripts.append(script)
+
+        def execute(self, query: str):
+            self.queries.append(query)
+            return []
 
     class FailingConn:
         def executescript(self, _script: str) -> None:
@@ -2110,6 +2114,13 @@ def test_sqlite_post_core_structures_ensure_sqlite_data_tables_executes_sql_and_
     sqlite_post_core_structures_module.ensure_sqlite_data_tables(db, FailingConn())
 
     assert ok_conn.scripts == ["data tables sql"]
+
+    assert ok_conn.queries == [  # nosec B101 -- Preserve column ensure before obsolete-index removal.
+        "PRAGMA table_info(data_tables)",
+        "ALTER TABLE data_tables ADD COLUMN generation_job_json TEXT",
+        "DROP INDEX IF EXISTS ux_data_table_columns_table_position_active",
+        "DROP INDEX IF EXISTS ux_data_table_rows_table_index_active",
+    ]
 
 
 @pytest.mark.unit
@@ -2295,7 +2306,7 @@ def test_fresh_sqlite_bootstrap_includes_transcript_run_history_columns_and_inde
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='Transcripts'"
         ).fetchone()[0]
 
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert {
             "latest_transcription_run_id",
             "next_transcription_run_id",
@@ -2699,7 +2710,7 @@ def test_on_disk_sqlite_migration_to_v23_backfills_transcript_run_history(tmp_pa
                     "PRAGMA index_list(claims_monitoring_events)"
                 ).fetchall()
             }
-            assert version_row["version"] == 26
+            assert version_row["version"] == 27
             assert event_index_columns["idx_claims_monitoring_events_user_created_id"] == [
                 "user_id",
                 "created_at",
@@ -2941,8 +2952,8 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
             "SELECT version FROM schema_version LIMIT 1"
         ).fetchone()[0]
 
-        assert version == 26
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert version == 27
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -2957,11 +2968,7 @@ def test_fresh_sqlite_bootstrap_includes_claims_analytics_export_job_fields() ->
         db.close_connection()
 
 
-@pytest.mark.integration
-def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_preserves_rows(
-    tmp_path,
-) -> None:
-    db_path = tmp_path / "media_v23_claims_exports.sqlite"
+def _create_media_v23_claims_exports_database(db_path: Path) -> MediaDatabase:
     db = MediaDatabase(str(db_path), client_id="claims-export-jobs-migration")
     db.close_connection()
 
@@ -3008,6 +3015,15 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
             UPDATE schema_version SET version = 23;
             """
         )
+    return db
+
+
+@pytest.mark.integration
+def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_preserves_rows(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "media_v23_claims_exports.sqlite"
+    db = _create_media_v23_claims_exports_database(db_path)
 
     try:
         db._initialize_schema()
@@ -3036,7 +3052,7 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
                 "SELECT version FROM schema_version LIMIT 1"
             ).fetchone()["version"]
 
-        assert version == 26
+        assert version == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3073,6 +3089,71 @@ def test_on_disk_sqlite_migration_to_v24_adds_claims_export_job_fields_and_prese
         }
     finally:
         db.close_connection()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("consumer", ["pool-borrow", "same-path-constructor"])
+def test_supported_sqlite_upgrade_preserves_pool_connection(tmp_path, consumer) -> None:
+    db_path = tmp_path / "media_v23_pool_upgrade.sqlite"
+    db = _create_media_v23_claims_exports_database(db_path)
+    previous_connection = db.get_connection()
+    try:
+        db._initialize_schema()
+
+        if consumer == "same-path-constructor":
+            reopened = MediaDatabase(str(db_path), client_id="same-path-upgrade")
+            assert reopened.backend is db.backend
+            connection = reopened.get_connection()
+        else:
+            connection = db.backend.get_pool().get_connection()
+
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 27
+        assert connection is not previous_connection
+        assert connection.row_factory is sqlite3.Row
+        assert connection.execute(
+            "SELECT payload_json FROM claims_analytics_exports WHERE export_id = 'export-existing'"
+        ).fetchone()[0] == '{"claim_count": 1}'
+        assert db.get_connection() is connection
+    finally:
+        db.backend.get_pool().clear_thread_local_connection()
+
+
+@pytest.mark.integration
+def test_failed_sqlite_upgrade_preserves_pool_reborrow_and_retry(tmp_path) -> None:
+    from tldw_Server_API.app.core.DB_Management.media_db.errors import DatabaseError
+
+    db_path = tmp_path / "media_v23_pool_failed_upgrade.sqlite"
+    db = _create_media_v23_claims_exports_database(db_path)
+    previous_connection = db.get_connection()
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TRIGGER reject_v24_upgrade
+            BEFORE UPDATE ON schema_version
+            WHEN NEW.version = 24
+            BEGIN
+                SELECT RAISE(ABORT, 'synthetic migration failure');
+            END;
+            """
+        )
+
+    try:
+        with pytest.raises(DatabaseError, match="Database migration failed"):
+            db._initialize_schema()
+
+        connection = db.backend.get_pool().get_connection()
+        assert connection.execute("SELECT version FROM schema_version").fetchone()[0] == 23
+        assert connection is not previous_connection
+        connection.execute("DROP TRIGGER reject_v24_upgrade")
+        connection.commit()
+
+        reopened = MediaDatabase(str(db_path), client_id="failed-upgrade-retry")
+        assert reopened.backend is db.backend
+        assert reopened.get_connection().execute(
+            "SELECT version FROM schema_version"
+        ).fetchone()[0] == 27
+    finally:
+        db.backend.get_pool().clear_thread_local_connection()
 
 
 @pytest.mark.integration
@@ -3362,7 +3443,7 @@ def test_on_disk_sqlite_migration_to_v24_recovers_idempotently_from_present_ddl(
                 ).fetchone()
             )
 
-        assert version == 26
+        assert version == 27
         assert columns["job_id"] == {"type": "INTEGER", "notnull": 0}
         assert columns["error_code"] == {"type": "TEXT", "notnull": 0}
         assert columns["snapshot_at"] == {"type": "TEXT", "notnull": 0}
@@ -3447,8 +3528,8 @@ def test_fresh_sqlite_bootstrap_includes_operation_owned_media_schema_v26() -> N
         }
         version = conn.execute("SELECT version FROM schema_version LIMIT 1").fetchone()[0]
 
-        assert version == 26
-        assert db._CURRENT_SCHEMA_VERSION == 26
+        assert version == 27
+        assert db._CURRENT_SCHEMA_VERSION == 27
         assert {
             "system_operation_id",
             "system_operation_kind",
@@ -4519,7 +4600,7 @@ def test_postgres_v26_migration_clears_weak_v25_partial_null_markers(
                 }
                 for row in rows
             )
-            assert version == 26
+            assert version == 27
             assert constraint_validated is True
     finally:
         db.close_connection()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Literal
 from uuid import UUID
 
@@ -19,10 +20,15 @@ from tldw_Server_API.app.core.Sync.v2.notes_organization_coordinator import (
     NotesOrganizationCoordinator,
     PlannedNotesMutation,
 )
+from tldw_Server_API.app.core.Sync.v2.notes_provenance import (
+    ensure_notes_provenance_ready,
+    provenance_step,
+)
 from tldw_Server_API.app.core.Sync.v2.server_origin import server_origin_stable_key
 from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
     ServerOriginMutationStep,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 _MAX_SERVER_ROUTING_METADATA_BYTES = 1_024
 
@@ -68,9 +74,19 @@ def compound_note_request_fingerprint(
     keywords: Sequence[str] | None,
     folder_paths: Sequence[str] | None,
     expected_version: int | None = None,
+    provenance: Mapping[str, object] | None = None,
+    expected_provenance_version: int | None = None,
 ) -> str:
     """Hash the immutable inputs for one compound Notes API request."""
 
+    provenance_fields = (
+        {}
+        if provenance is None
+        else {
+            "knowledge_provenance": dict(provenance),
+            "expected_provenance_version": expected_provenance_version,
+        }
+    )
     return coordinator.request_fingerprint(
         operation,
         {
@@ -79,6 +95,7 @@ def compound_note_request_fingerprint(
             "keywords": list(keywords) if keywords is not None else None,
             "folder_paths": list(folder_paths) if folder_paths is not None else None,
             "expected_version": expected_version,
+            **provenance_fields,
         },
     )
 
@@ -93,15 +110,50 @@ def plan_compound_note(
     request_key: str,
     request_fingerprint: str,
     response_status: int | None = None,
+    provenance: Mapping[str, object] | None = None,
+    expected_provenance_version: int | None = None,
+    expected_note_version: int = 0,
+    restore: bool = False,
 ) -> PlannedNotesMutation:
     """Build one request-bound note-and-organization mutation plan."""
 
+    if keywords is not None or folder_paths is not None:
+        coordinator.require_ready()
+    parent_base = {}
+    child_step = None
+    if provenance is not None:
+        dataset = ensure_notes_provenance_ready(
+            service=coordinator.service,
+            note_db=coordinator.note_db,
+            user_id=coordinator.user_id,
+            required_note_id=note_id,
+        )
+        parent = coordinator.service.store.get_current_head(dataset.dataset_id, "notes.note", note_id)
+        if (parent.object_revision if parent else 0) != expected_note_version:
+            raise ConflictError("Note version mismatch")
+        parent_base = {
+            "object_revision": expected_note_version + 1,
+            "base_object_revision": expected_note_version or None,
+            "base_object_hash": parent.payload_hash if parent else None,
+        }
+        child_head = coordinator.service.store.get_current_head(dataset.dataset_id, "notes.provenance", note_id)
+        if child_head is not None and child_head.operation == "tombstone" and not restore:
+            raise ConflictError("Explicit Knowledge provenance restore required")
+        child_step = provenance_step(
+            service=coordinator.service,
+            dataset=dataset,
+            note_id=note_id,
+            payload=provenance,
+            expected_version=expected_provenance_version,
+            restore=restore,
+        )
     plan = coordinator.plan_note_with_organization(
         note_step=ServerOriginMutationStep(
             domain="notes.note",
             operation="upsert",
             object_id=note_id,
             payload=dict(note_payload),
+            **parent_base,
             stable_key=server_origin_stable_key(
                 source="notes-api",
                 domain="notes.note",
@@ -112,6 +164,8 @@ def plan_compound_note(
         keywords=keywords,
         folder_paths=folder_paths,
     )
+    if child_step is not None:
+        plan = replace(plan, steps=(plan.steps[0], child_step, *plan.steps[1:]))
     plan = coordinator.bind_request(plan, request_fingerprint)
     if response_status is not None:
         plan = coordinator.bind_response_status(plan, response_status)
@@ -237,7 +291,7 @@ def replace_keywords(
     seen: set[str] = set()
     for value in keywords:
         normalized = str(value or "").strip()
-        folded = normalized.casefold()
+        folded = normalize_keyword_identity(normalized)
         if normalized and folded not in seen:
             seen.add(folded)
             desired.append((folded, normalized))
@@ -263,7 +317,7 @@ def replace_keywords(
         if subject_type == "note"
         else coordinator.note_db.get_keywords_for_conversation(subject_id)
     )
-    current = {str(row["keyword"]).casefold(): str(row["sync_id"]) for row in current_rows}
+    current = {normalize_keyword_identity(str(row["keyword"])): str(row["sync_id"]) for row in current_rows}
     desired_ids: dict[str, str] = {}
     steps: list[ServerOriginMutationStep] = []
     for folded, value in desired:

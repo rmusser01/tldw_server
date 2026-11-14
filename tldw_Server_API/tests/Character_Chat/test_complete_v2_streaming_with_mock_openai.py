@@ -5,7 +5,7 @@ Deterministic in-process streaming coverage lives in
 ``test_complete_v2_streaming_e2e_mock.py`` — this variant exercises the real
 HTTP path to ``mock_openai_server`` when one is available.
 
-Rewritten per audits/2026-07-04-test-suite-audit-round2.md (RA3): the old
+Rewritten per Docs/Audit/2026-07-04-test-suite-audit-round2.md (RA3): the old
 version accepted ``status_code in (200, 502)`` — passing on server error —
 and only checked that one line started with ``data: ``. With the env gate
 satisfied, a 502 is a real failure and the stream content is asserted.

@@ -28,7 +28,7 @@ from ..tts_exceptions import (
     TTSValidationError,
     TTSVoiceCloningError,
 )
-from ..utils import parse_bool
+from ..utils import hold_tts_engine, parse_bool, tts_model_load_lock
 
 #
 # Local Imports
@@ -130,7 +130,8 @@ class IndexTTS2Adapter(TTSAdapter):
 
         try:
             self._status = ProviderStatus.INITIALIZING
-            engine = await asyncio.to_thread(self._create_engine)
+            async with hold_tts_engine(tts_model_load_lock(self.provider_key, str(self.model_dir))) as run:
+                engine = await run(self._create_engine)
             self._engine = engine
             try:
                 from ..tts_resource_manager import get_resource_manager

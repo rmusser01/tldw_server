@@ -25,7 +25,13 @@ import {
   deriveAdminGuardFromError,
   sanitizeAdminErrorMessage
 } from "./admin-error-utils"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
+
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import { useAdminRequestScope, useAdminMutation } from "./admin-request-scope"
+
+type WorkspaceProps = { config: TldwConfig; onGuardError: (error: unknown) => void }
 
 // ── Types ──
 
@@ -57,68 +63,97 @@ interface TeamMember {
   role: string
 }
 
+// ── Server-side paging helpers ──
+
+// The orgs/teams endpoints return either a plain array (today's backend for
+// members/teams) or an {items, total} envelope. Normalize the rows...
+const extractRows = (result: any, ...keys: string[]): any[] => {
+  if (Array.isArray(result)) return result
+  for (const key of keys) {
+    if (Array.isArray(result?.[key])) return result[key]
+  }
+  return []
+}
+
+// ...and derive a usable antd total. When the server reports no total, keep a
+// phantom next page while the current page is full (offset + rows + 1) so
+// operators can keep paging through plain-array responses.
+const pageTotal = (result: any, rows: any[], pageSize: number, offset: number): number => {
+  if (typeof result?.total === "number") return result.total
+  return offset + rows.length + (rows.length >= pageSize ? 1 : 0)
+}
+
 // ── Org Members Sub-Table ──
 
-const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
+const OrgMembersTable: React.FC<{ orgId: number } & WorkspaceProps> = ({ orgId, config, onGuardError }) => {
   const { t } = useTranslation(["settings", "common"])
   const [members, setMembers] = useState<OrgMember[]>([])
   const [loading, setLoading] = useState(false)
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [addForm] = Form.useForm()
-  const [adding, setAdding] = useState(false)
+  // Server-side paging: the roster no longer needs to arrive in one response.
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+
+
+  const captureScope = useAdminRequestScope(config)
+  const { runMutation, mutating } = useAdminMutation(captureScope, onGuardError)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const readRequest = useRef(0)
 
   const loadMembers = useCallback(async () => {
+    const scope = captureScope()
+    if (!scope) return
+    const request = ++readRequest.current
+    const current = () => !scope.abortSignal.aborted && request === readRequest.current
     setLoading(true)
+    setLoadError(null)
     try {
-      const result = await tldwClient.listOrgMembers(orgId)
-      setMembers(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.members ?? [])
-    } catch {
-      // silently handled by parent guard
+      const offset = (page - 1) * pageSize
+      const result = await tldwClient.listOrgMembers(orgId, { limit: pageSize, offset }, scope)
+      if (!current()) return
+      const rows = extractRows(result, "items", "data", "members")
+      setMembers(rows)
+      setTotal(pageTotal(result, rows, pageSize, offset))
+    } catch (error) {
+      if (!current()) return
+      onGuardError(error)
+      setMembers([])
+      setLoadError(sanitizeAdminErrorMessage(error, "Organization members unavailable"))
     } finally {
-      setLoading(false)
+      if (current()) setLoading(false)
     }
-  }, [orgId])
+  }, [captureScope, orgId, onGuardError, page, pageSize])
 
-  useEffect(() => {
-    void loadMembers()
-  }, [loadMembers])
+  useEffect(() => { void loadMembers() }, [loadMembers])
 
-  const handleAddMember = async () => {
-    try {
+  const handleAddMember = () => runMutation(
+    t("settings:adminOrgs.addMemberFailed", "Failed to save membership"), async (scope) => {
       const values = await addForm.validateFields()
-      setAdding(true)
-      await tldwClient.addOrgMember(orgId, { user_id: values.user_id, role: values.role })
+      if (scope.abortSignal.aborted) return
+      await tldwClient.addOrgMember(orgId, { user_id: values.user_id, role: values.role }, scope)
+      if (scope.abortSignal.aborted) return
       message.success(t("settings:adminOrgs.memberAdded", "Member added"))
       setAddModalOpen(false)
       addForm.resetFields()
-      void loadMembers()
-    } catch (err: any) {
-      if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.addMemberFailed", "Failed to add member")))
-    } finally {
-      setAdding(false)
+      await loadMembers()
     }
-  }
+  )
 
-  const handleRemove = async (userId: number) => {
-    try {
-      await tldwClient.removeOrgMember(orgId, userId)
-      message.success(t("settings:adminOrgs.memberRemoved", "Member removed"))
-      void loadMembers()
-    } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.removeMemberFailed", "Failed to remove member")))
-    }
-  }
+  const handleRemove = (userId: number) => runMutation(t("settings:adminOrgs.removeMemberFailed", "Failed to remove member"), async (scope) => {
+    await tldwClient.removeOrgMember(orgId, userId, scope)
+    if (scope.abortSignal.aborted) return
+    message.success(t("settings:adminOrgs.memberRemoved", "Member removed"))
+    await loadMembers()
+  })
 
-  const handleRoleChange = async (userId: number, role: string) => {
-    try {
-      await tldwClient.updateOrgMemberRole(orgId, userId, { role })
-      message.success(t("settings:adminOrgs.roleUpdated", "Role updated"))
-      void loadMembers()
-    } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.updateRoleFailed", "Failed to update role")))
-    }
-  }
+  const handleRoleChange = (userId: number, role: string) => runMutation(t("settings:adminOrgs.updateRoleFailed", "Failed to update role"), async (scope) => {
+    await tldwClient.updateOrgMemberRole(orgId, userId, { role }, scope)
+    if (scope.abortSignal.aborted) return
+    message.success(t("settings:adminOrgs.roleUpdated", "Role updated"))
+    await loadMembers()
+  })
 
   const columns = [
     {
@@ -143,6 +178,7 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
           value={role}
           size="small"
           style={{ width: 130 }}
+          disabled={mutating || loading || Boolean(loadError)}
           onChange={(val) => handleRoleChange(record.user_id, val)}
           options={[
             { value: "owner", label: t("settings:adminOrgs.roleOwner", "Owner") },
@@ -170,7 +206,7 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
           okText={t("settings:adminOrgs.remove", "Remove")}
           okButtonProps={{ danger: true }}
         >
-          <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+          <Button type="text" size="small" danger disabled={mutating || loading || Boolean(loadError)} icon={<DeleteOutlined />} />
         </Popconfirm>
       )
     }
@@ -184,25 +220,41 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
           <Button size="small" icon={<ReloadOutlined />} onClick={() => loadMembers()}>
             {t("common:refresh", "Refresh")}
           </Button>
-          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
+          <Button size="small" type="primary" disabled={mutating || loading || Boolean(loadError)} icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
             {t("settings:adminOrgs.addMember", "Add Member")}
           </Button>
         </Space>
       </div>
+      {loadError && <Alert variant="error" title={t("settings:adminOrgs.OrgMembersTableUnavailable", "Organization members unavailable")}>
+        <Space orientation="vertical"><span>{loadError}</span><Button onClick={() => void loadMembers()}>{t("common:retry", "Retry")}</Button></Space>
+      </Alert>}
       <Table
         dataSource={members}
         columns={columns}
         rowKey="user_id"
         loading={loading}
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          hideOnSinglePage: true,
+          showTotal: (tot) => t("settings:adminOrgs.paginationTotal", "Total {{total}} items", { total: tot }),
+          onChange: (p, ps) => {
+            setPage(p)
+            setPageSize(ps)
+          }
+        }}
         size="small"
       />
       <Modal
         title={t("settings:adminOrgs.addOrgMemberTitle", "Add Organization Member")}
         open={addModalOpen}
-        onCancel={() => { setAddModalOpen(false); addForm.resetFields() }}
+        onCancel={() => { if (!mutating) { setAddModalOpen(false); addForm.resetFields() } }}
         onOk={handleAddMember}
-        confirmLoading={adding}
+        confirmLoading={mutating}
+        closable={!mutating}
+        maskClosable={!mutating}
+        cancelButtonProps={{ disabled: mutating }}
       >
         <Form form={addForm} layout="vertical">
           <Form.Item name="user_id" label={t("settings:adminOrgs.colUserId", "User ID")} rules={[{ required: true, message: t("settings:adminOrgs.userIdRequired", "User ID is required") }]}>
@@ -226,66 +278,76 @@ const OrgMembersTable: React.FC<{ orgId: number }> = ({ orgId }) => {
 
 // ── Team Members Sub-Table ──
 
-const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
+const TeamMembersTable: React.FC<{ teamId: number } & WorkspaceProps> = ({ teamId, config, onGuardError }) => {
   const { t } = useTranslation(["settings", "common"])
   const [members, setMembers] = useState<TeamMember[]>([])
   const [loading, setLoading] = useState(false)
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [addForm] = Form.useForm()
-  const [adding, setAdding] = useState(false)
+  // Server-side paging (the backend honors these once the endpoint adopts
+  // limit/offset like its siblings; phantom totals bridge plain arrays).
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+
+
+  const captureScope = useAdminRequestScope(config)
+  const { runMutation, mutating } = useAdminMutation(captureScope, onGuardError)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const readRequest = useRef(0)
 
   const loadMembers = useCallback(async () => {
+    const scope = captureScope()
+    if (!scope) return
+    const request = ++readRequest.current
+    const current = () => !scope.abortSignal.aborted && request === readRequest.current
     setLoading(true)
+    setLoadError(null)
     try {
-      const result = await tldwClient.listTeamMembers(teamId)
-      setMembers(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.members ?? [])
-    } catch {
-      // silently handled
+      const offset = (page - 1) * pageSize
+      const result = await tldwClient.listTeamMembers(teamId, { limit: pageSize, offset }, scope)
+      if (!current()) return
+      const rows = extractRows(result, "items", "data", "members")
+      setMembers(rows)
+      setTotal(pageTotal(result, rows, pageSize, offset))
+    } catch (error) {
+      if (!current()) return
+      onGuardError(error)
+      setMembers([])
+      setLoadError(sanitizeAdminErrorMessage(error, "Team members unavailable"))
     } finally {
-      setLoading(false)
+      if (current()) setLoading(false)
     }
-  }, [teamId])
+  }, [captureScope, teamId, onGuardError, page, pageSize])
 
-  useEffect(() => {
-    void loadMembers()
-  }, [loadMembers])
+  useEffect(() => { void loadMembers() }, [loadMembers])
 
-  const handleAddMember = async () => {
-    try {
+  const handleAddMember = () => runMutation(
+    t("settings:adminOrgs.addMemberFailed", "Failed to save membership"), async (scope) => {
       const values = await addForm.validateFields()
-      setAdding(true)
-      await tldwClient.addTeamMember(teamId, { user_id: values.user_id, role: values.role })
-      message.success(t("settings:adminOrgs.teamMemberAdded", "Team member added"))
+      if (scope.abortSignal.aborted) return
+      await tldwClient.addTeamMember(teamId, { user_id: values.user_id, role: values.role }, scope)
+      if (scope.abortSignal.aborted) return
+      message.success(t("settings:adminOrgs.memberAdded", "Team member added"))
       setAddModalOpen(false)
       addForm.resetFields()
-      void loadMembers()
-    } catch (err: any) {
-      if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.addTeamMemberFailed", "Failed to add team member")))
-    } finally {
-      setAdding(false)
+      await loadMembers()
     }
-  }
+  )
 
-  const handleRemove = async (userId: number) => {
-    try {
-      await tldwClient.removeTeamMember(teamId, userId)
-      message.success(t("settings:adminOrgs.teamMemberRemoved", "Team member removed"))
-      void loadMembers()
-    } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.removeTeamMemberFailed", "Failed to remove team member")))
-    }
-  }
+  const handleRemove = (userId: number) => runMutation(t("settings:adminOrgs.removeMemberFailed", "Failed to remove member"), async (scope) => {
+    await tldwClient.removeTeamMember(teamId, userId, scope)
+    if (scope.abortSignal.aborted) return
+    message.success(t("settings:adminOrgs.memberRemoved", "Member removed"))
+    await loadMembers()
+  })
 
-  const handleRoleChange = async (userId: number, role: string) => {
-    try {
-      await tldwClient.updateTeamMemberRole(teamId, userId, { role })
-      message.success(t("settings:adminOrgs.roleUpdated", "Role updated"))
-      void loadMembers()
-    } catch (err: any) {
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.updateRoleFailed", "Failed to update role")))
-    }
-  }
+  const handleRoleChange = (userId: number, role: string) => runMutation(t("settings:adminOrgs.updateRoleFailed", "Failed to update role"), async (scope) => {
+    await tldwClient.updateTeamMemberRole(teamId, userId, { role }, scope)
+    if (scope.abortSignal.aborted) return
+    message.success(t("settings:adminOrgs.roleUpdated", "Role updated"))
+    await loadMembers()
+  })
 
   const columns = [
     {
@@ -310,6 +372,7 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
           value={role}
           size="small"
           style={{ width: 130 }}
+          disabled={mutating || loading || Boolean(loadError)}
           onChange={(val) => handleRoleChange(record.user_id, val)}
           options={[
             { value: "lead", label: t("settings:adminOrgs.roleLead", "Lead") },
@@ -330,7 +393,7 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
           okText={t("settings:adminOrgs.remove", "Remove")}
           okButtonProps={{ danger: true }}
         >
-          <Button type="text" size="small" danger icon={<DeleteOutlined />} />
+          <Button type="text" size="small" danger disabled={mutating || loading || Boolean(loadError)} icon={<DeleteOutlined />} />
         </Popconfirm>
       )
     }
@@ -344,25 +407,41 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
           <Button size="small" icon={<ReloadOutlined />} onClick={() => loadMembers()}>
             {t("common:refresh", "Refresh")}
           </Button>
-          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
+          <Button size="small" type="primary" disabled={mutating || loading || Boolean(loadError)} icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
             {t("settings:adminOrgs.addMember", "Add Member")}
           </Button>
         </Space>
       </div>
+      {loadError && <Alert variant="error" title={t("settings:adminOrgs.TeamMembersTableUnavailable", "Team members unavailable")}>
+        <Space orientation="vertical"><span>{loadError}</span><Button onClick={() => void loadMembers()}>{t("common:retry", "Retry")}</Button></Space>
+      </Alert>}
       <Table
         dataSource={members}
         columns={columns}
         rowKey="user_id"
         loading={loading}
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          hideOnSinglePage: true,
+          showTotal: (tot) => t("settings:adminOrgs.paginationTotal", "Total {{total}} items", { total: tot }),
+          onChange: (p, ps) => {
+            setPage(p)
+            setPageSize(ps)
+          }
+        }}
         size="small"
       />
       <Modal
         title={t("settings:adminOrgs.addTeamMemberTitle", "Add Team Member")}
         open={addModalOpen}
-        onCancel={() => { setAddModalOpen(false); addForm.resetFields() }}
+        onCancel={() => { if (!mutating) { setAddModalOpen(false); addForm.resetFields() } }}
         onOk={handleAddMember}
-        confirmLoading={adding}
+        confirmLoading={mutating}
+        closable={!mutating}
+        maskClosable={!mutating}
+        cancelButtonProps={{ disabled: mutating }}
       >
         <Form form={addForm} layout="vertical">
           <Form.Item name="user_id" label={t("settings:adminOrgs.colUserId", "User ID")} rules={[{ required: true, message: t("settings:adminOrgs.userIdRequired", "User ID is required") }]}>
@@ -385,46 +464,61 @@ const TeamMembersTable: React.FC<{ teamId: number }> = ({ teamId }) => {
 
 // ── Teams Sub-Table (inside org expanded row) ──
 
-const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
+const TeamsTable: React.FC<{ orgId: number } & WorkspaceProps> = ({ orgId, config, onGuardError }) => {
   const { t } = useTranslation(["settings", "common"])
   const [teams, setTeams] = useState<Team[]>([])
   const [loading, setLoading] = useState(false)
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [createForm] = Form.useForm()
-  const [creating, setCreating] = useState(false)
+  // Server-side paging, mirroring OrgMembersTable.
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
+
+
+  const captureScope = useAdminRequestScope(config)
+  const { runMutation, mutating } = useAdminMutation(captureScope, onGuardError)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const readRequest = useRef(0)
 
   const loadTeams = useCallback(async () => {
+    const scope = captureScope()
+    if (!scope) return
+    const request = ++readRequest.current
+    const current = () => !scope.abortSignal.aborted && request === readRequest.current
     setLoading(true)
+    setLoadError(null)
     try {
-      const result = await tldwClient.listTeams(orgId)
-      setTeams(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.teams ?? [])
-    } catch {
-      // silently handled
+      const offset = (page - 1) * pageSize
+      const result = await tldwClient.listTeams(orgId, { limit: pageSize, offset }, scope)
+      if (!current()) return
+      const rows = extractRows(result, "items", "data", "teams")
+      setTeams(rows)
+      setTotal(pageTotal(result, rows, pageSize, offset))
+    } catch (error) {
+      if (!current()) return
+      onGuardError(error)
+      setTeams([])
+      setLoadError(sanitizeAdminErrorMessage(error, "Teams unavailable"))
     } finally {
-      setLoading(false)
+      if (current()) setLoading(false)
     }
-  }, [orgId])
+  }, [captureScope, orgId, onGuardError, page, pageSize])
 
-  useEffect(() => {
-    void loadTeams()
-  }, [loadTeams])
+  useEffect(() => { void loadTeams() }, [loadTeams])
 
-  const handleCreateTeam = async () => {
-    try {
+  const handleCreateTeam = () => runMutation(
+    t("settings:adminOrgs.createTeamFailed", "Failed to save membership"), async (scope) => {
       const values = await createForm.validateFields()
-      setCreating(true)
-      await tldwClient.createTeam(orgId, { name: values.name })
+      if (scope.abortSignal.aborted) return
+      await tldwClient.createTeam(orgId, { name: values.name }, scope)
+      if (scope.abortSignal.aborted) return
       message.success(t("settings:adminOrgs.teamCreated", "Team created"))
       setCreateModalOpen(false)
       createForm.resetFields()
-      void loadTeams()
-    } catch (err: any) {
-      if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.createTeamFailed", "Failed to create team")))
-    } finally {
-      setCreating(false)
+      await loadTeams()
     }
-  }
+  )
 
   const teamColumns = [
     {
@@ -449,28 +543,44 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
           <Button size="small" icon={<ReloadOutlined />} onClick={() => loadTeams()}>
             {t("common:refresh", "Refresh")}
           </Button>
-          <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+          <Button size="small" type="primary" disabled={mutating || loading || Boolean(loadError)} icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
             {t("settings:adminOrgs.createTeam", "Create Team")}
           </Button>
         </Space>
       </div>
+      {loadError && <Alert variant="error" title={t("settings:adminOrgs.TeamsTableUnavailable", "Teams unavailable")}>
+        <Space orientation="vertical"><span>{loadError}</span><Button onClick={() => void loadTeams()}>{t("common:retry", "Retry")}</Button></Space>
+      </Alert>}
       <Table
         dataSource={teams}
         columns={teamColumns}
         rowKey="id"
         loading={loading}
-        pagination={false}
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          hideOnSinglePage: true,
+          showTotal: (tot) => t("settings:adminOrgs.paginationTotal", "Total {{total}} items", { total: tot }),
+          onChange: (p, ps) => {
+            setPage(p)
+            setPageSize(ps)
+          }
+        }}
         size="small"
         expandable={{
-          expandedRowRender: (team: Team) => <TeamMembersTable teamId={team.id} />
+          expandedRowRender: (team: Team) => <TeamMembersTable key={team.id} teamId={team.id} config={config} onGuardError={onGuardError} />
         }}
       />
       <Modal
         title={t("settings:adminOrgs.createTeamTitle", "Create Team")}
         open={createModalOpen}
-        onCancel={() => { setCreateModalOpen(false); createForm.resetFields() }}
+        onCancel={() => { if (!mutating) { setCreateModalOpen(false); createForm.resetFields() } }}
         onOk={handleCreateTeam}
-        confirmLoading={creating}
+        confirmLoading={mutating}
+        closable={!mutating}
+        maskClosable={!mutating}
+        cancelButtonProps={{ disabled: mutating }}
       >
         <Form form={createForm} layout="vertical">
           <Form.Item name="name" label={t("settings:adminOrgs.teamNameLabel", "Team Name")} rules={[{ required: true, message: t("settings:adminOrgs.teamNameRequired", "Team name is required") }]}>
@@ -485,66 +595,76 @@ const TeamsTable: React.FC<{ orgId: number }> = ({ orgId }) => {
 // ── Main Page ──
 
 const OrgsTeamsPage: React.FC = () => {
+  const { config, authorityLoading } = useCanonicalConnectionConfig()
+  const { t } = useTranslation("settings")
+  if (!config || authorityLoading) return <p role="status">{t("admin.resolvingConnection", "Resolving admin connection…")}</p>
+  return <OrgsTeamsWorkspace key={deriveConnectionAuthorityId(config)} config={config} />
+}
+
+const OrgsTeamsWorkspace = ({ config }: { config: TldwConfig }) => {
   const { t } = useTranslation(["settings", "common"])
   const [adminGuard, setAdminGuard] = useState<"forbidden" | "notFound" | null>(null)
 
   const [orgs, setOrgs] = useState<Org[]>([])
   const [orgsLoading, setOrgsLoading] = useState(false)
   const [searchText, setSearchText] = useState("")
+  const [orgsTotal, setOrgsTotal] = useState<number | null>(null)
 
   const [createOrgModalOpen, setCreateOrgModalOpen] = useState(false)
   const [createOrgForm] = Form.useForm()
-  const [creatingOrg, setCreatingOrg] = useState(false)
 
-  const initialLoadRef = useRef(false)
+
+  const captureScope = useAdminRequestScope(config)
+  const orgsRequest = useRef(0)
+  const [orgsError, setOrgsError] = useState<string | null>(null)
 
   const markAdminGuardFromError = useCallback((err: any) => {
     const guardState = deriveAdminGuardFromError(err)
     if (guardState) setAdminGuard(guardState)
   }, [])
 
+  const { runMutation, mutating } = useAdminMutation(captureScope, markAdminGuardFromError)
+
   const loadOrgs = useCallback(async (search?: string) => {
+    const scope = captureScope()
+    if (!scope) return
+    const request = ++orgsRequest.current
+    const current = () => !scope.abortSignal.aborted && request === orgsRequest.current
     setOrgsLoading(true)
+    setOrgsError(null)
     try {
       const params: { search?: string; limit?: number; offset?: number } = { limit: 100 }
       if (search) params.search = search
-      const result = await tldwClient.listOrgs(params)
+      const result = await tldwClient.listOrgs(params, scope)
+      if (!current()) return
       setOrgs(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.organizations ?? [])
-    } catch (err) {
-      markAdminGuardFromError(err)
+      setOrgsTotal(typeof result?.total === "number" ? result.total : null)
+    } catch (error) {
+      if (!current()) return
+      markAdminGuardFromError(error)
+      setOrgs([])
+      setOrgsError(sanitizeAdminErrorMessage(error, "Organizations unavailable"))
     } finally {
-      setOrgsLoading(false)
+      if (current()) setOrgsLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [captureScope, markAdminGuardFromError])
 
-  useEffect(() => {
-    if (initialLoadRef.current) return
-    initialLoadRef.current = true
-    void loadOrgs()
-  }, [loadOrgs])
+  useEffect(() => { void loadOrgs() }, [loadOrgs])
 
-  const handleSearch = () => {
-    void loadOrgs(searchText || undefined)
-  }
+  const handleSearch = () => { void loadOrgs(searchText || undefined) }
 
-  const handleCreateOrg = async () => {
-    try {
-      const values = await createOrgForm.validateFields()
-      setCreatingOrg(true)
-      const payload: { name: string; slug?: string } = { name: values.name }
-      if (values.slug) payload.slug = values.slug
-      await tldwClient.createOrg(payload)
-      message.success(t("settings:adminOrgs.orgCreated", "Organization created"))
-      setCreateOrgModalOpen(false)
-      createOrgForm.resetFields()
-      void loadOrgs()
-    } catch (err: any) {
-      if (err?.errorFields) return
-      message.error(sanitizeAdminErrorMessage(err, t("settings:adminOrgs.createOrgFailed", "Failed to create organization")))
-    } finally {
-      setCreatingOrg(false)
-    }
-  }
+  const handleCreateOrg = () => runMutation(t("settings:adminOrgs.createOrgFailed", "Failed to create organization"), async (scope) => {
+    const values = await createOrgForm.validateFields()
+    if (scope.abortSignal.aborted) return
+    const payload: { name: string; slug?: string } = { name: values.name }
+    if (values.slug) payload.slug = values.slug
+    await tldwClient.createOrg(payload, scope)
+    if (scope.abortSignal.aborted) return
+    message.success(t("settings:adminOrgs.orgCreated", "Organization created"))
+    setCreateOrgModalOpen(false)
+    createOrgForm.resetFields()
+    await loadOrgs()
+  })
 
   const orgColumns = [
     {
@@ -598,6 +718,9 @@ const OrgsTeamsPage: React.FC = () => {
         <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 600 }}>{t("settings:adminOrgs.title", "Organizations & Teams")}</h1>
       </div>
 
+      {orgsError && <Alert variant="error" title={t("settings:adminOrgs.orgsUnavailable", "Organizations unavailable")}>
+        <span>{orgsError}</span><Button onClick={() => void loadOrgs(searchText || undefined)}>{t("common:retry", "Retry")}</Button>
+      </Alert>}
       <Card
         title={t("settings:adminOrgs.orgsCardTitle", "Organizations")}
         extra={
@@ -620,6 +743,26 @@ const OrgsTeamsPage: React.FC = () => {
           </Space>
         }
       >
+        {/* Bounded snapshot disclosure (oversight-page pattern): the orgs list
+            stays at limit:100 until full server pagination lands; say so when
+            the server holds more instead of implying completeness. */}
+        {(orgsTotal != null && orgsTotal > orgs.length) || orgs.length >= 100 ? (
+          <span
+            style={{
+              display: "inline-block",
+              marginBottom: 8,
+              color: "var(--color-text-secondary, #888)",
+              fontSize: "0.85rem"
+            }}
+          >
+            {orgsTotal != null && orgsTotal > orgs.length
+              ? t("settings:adminOrgs.showingOf", "Showing {{shown}} of {{total}}", {
+                  shown: orgs.length,
+                  total: orgsTotal
+                })
+              : t("settings:adminOrgs.showingFirst100", "Showing first 100")}
+          </span>
+        ) : null}
         <Table
           dataSource={orgs}
           columns={orgColumns}
@@ -630,8 +773,8 @@ const OrgsTeamsPage: React.FC = () => {
           expandable={{
             expandedRowRender: (org: Org) => (
               <div style={{ paddingLeft: 16 }}>
-                <OrgMembersTable orgId={org.id} />
-                <TeamsTable orgId={org.id} />
+                <OrgMembersTable key={org.id} orgId={org.id} config={config} onGuardError={markAdminGuardFromError} />
+                <TeamsTable key={org.id} orgId={org.id} config={config} onGuardError={markAdminGuardFromError} />
               </div>
             )
           }}
@@ -642,9 +785,12 @@ const OrgsTeamsPage: React.FC = () => {
       <Modal
         title={t("settings:adminOrgs.createOrgTitle", "Create Organization")}
         open={createOrgModalOpen}
-        onCancel={() => { setCreateOrgModalOpen(false); createOrgForm.resetFields() }}
+        onCancel={() => { if (!mutating) { setCreateOrgModalOpen(false); createOrgForm.resetFields() } }}
         onOk={handleCreateOrg}
-        confirmLoading={creatingOrg}
+        confirmLoading={mutating}
+        closable={!mutating}
+        maskClosable={!mutating}
+        cancelButtonProps={{ disabled: mutating }}
       >
         <Form form={createOrgForm} layout="vertical">
           <Form.Item name="name" label={t("settings:adminOrgs.orgNameLabel", "Organization Name")} rules={[{ required: true, message: t("settings:adminOrgs.orgNameRequired", "Name is required") }]}>

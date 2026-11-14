@@ -39,7 +39,7 @@ Source: synthesis F22
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 HELPERS LANDED, three sites migrated, 20 remain.
 
 NEW: core/Utils/base64url.py with TWO decode entry points, deliberately not one:
@@ -92,7 +92,7 @@ OUT OF SCOPE (not pagination cursors / different token formats), left as is:
 - AuthNZ/session_manager.py: Fernet ciphertext, not base64 segments.
 - MCP filesystem_receipts.py, services/connectors_worker.py (Gmail API bodies), Character_Chat character_io.py (card import), Visual_Identities/source_context.py (heuristic), Slides/standalone_html_registry.py (keyring secret config): not cursors or signed tokens.
 - Core cursors already strict (validate=True + altchars): Workspaces membership_models / file_inventory_models, Notes_Graph graph_service x2, media_db email_search_cursor. Their HTTP status mapping was not re-audited in this pass; follow-up if a full-API cursor sweep is wanted.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

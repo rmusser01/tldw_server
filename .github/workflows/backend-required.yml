@@ -6,6 +6,11 @@ on:
       - main
       - dev
   workflow_dispatch:
+    inputs:
+      base_sha:
+        description: Exact base commit for change detection (manual diagnostic dispatches)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -15,20 +20,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  admission:
-    if: >-
-      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success'
-    uses: ./.github/workflows/license-first-admission.yml
-    with:
-      workflow_file: backend-required.yml
-    permissions:
-      actions: read
-      contents: read
-      pull-requests: read
-      statuses: read
-
   # The pull_request path reports to the PR, so it is the one branch protection
   # sees -- but it used to start every gate immediately, in parallel with the
   # license audit it is supposed to follow. This makes it wait for the verdict.
@@ -41,116 +32,59 @@ jobs:
 
   changes:
     name: Detect Gate Changes
-    needs: [admission, await_license]
+    needs: [await_license]
     if: >-
       always() && !cancelled() &&
       (
-        (
-          github.event_name == 'workflow_run' &&
-          needs.admission.result == 'success' &&
-          needs.admission.outputs.should_run == 'true'
-        ) ||
-        (
-          github.event_name != 'workflow_run' &&
-          (
-            needs.await_license.result == 'skipped' ||
-            needs.await_license.outputs.license_passed == 'true'
-          )
-        )
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
       )
     runs-on: ubuntu-latest
     outputs:
-      backend_changed: ${{ steps.detect.outputs.backend_changed || steps.detect_admitted.outputs.backend_changed }}
-      frontend_changed: ${{ steps.detect.outputs.frontend_changed || steps.detect_admitted.outputs.frontend_changed }}
-      e2e_changed: ${{ steps.detect.outputs.e2e_changed || steps.detect_admitted.outputs.e2e_changed }}
-      security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed || steps.detect_admitted.outputs.security_relevant_changed }}
-      coverage_required: ${{ steps.detect.outputs.coverage_required || steps.detect_admitted.outputs.coverage_required }}
+      backend_changed: ${{ steps.detect.outputs.backend_changed }}
+      frontend_changed: ${{ steps.detect.outputs.frontend_changed }}
+      e2e_changed: ${{ steps.detect.outputs.e2e_changed }}
+      security_relevant_changed: ${{ steps.detect.outputs.security_relevant_changed }}
+      coverage_required: ${{ steps.detect.outputs.coverage_required }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - id: detect
         name: Classify changed files
-        if: github.event_name != 'workflow_run'
         uses: ./.github/actions/detect-required-gate-changes
-      - id: detect_admitted
-        name: Classify admitted changed files
-        if: github.event_name == 'workflow_run'
-        shell: bash
-        env:
-          BASE_SHA: ${{ needs.admission.outputs.base_sha }}
-          HEAD_SHA: ${{ needs.admission.outputs.head_sha }}
-        run: |
-          set -euo pipefail
-          CHANGED_FILES_PATH="${RUNNER_TEMP}/required-gate-changed-files.txt"
-          if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          fi
-          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
-            git fetch --no-tags --depth=1 origin "$HEAD_SHA"
-          fi
-          git cat-file -e "${BASE_SHA}^{commit}"
-          git cat-file -e "${HEAD_SHA}^{commit}"
-          git diff --name-only "$BASE_SHA" "$HEAD_SHA" > "$CHANGED_FILES_PATH"
-          mapfile -t CHANGED_FILES < "$CHANGED_FILES_PATH"
-          python -m Helper_Scripts.ci.emit_ci_gate_flags "${CHANGED_FILES[@]}"
+      # Every PR runs this job, backlog-only ones included, while backend-required's own
+      # steps skip when no backend path changed; so the task id check lives here (TASK-13960).
+      - name: Check backlog task ids are unique
+        run: python3 Helper_Scripts/ci/check_backlog_task_ids.py .
 
-  backend-required:
-    name: backend-required
+  # The complete timezone axis has its own budget; backend-required still rejects
+  # any missing or unsuccessful result before its other gates (TASK-13260.278.18.83.45).
+  non-utc-tests:
+    name: Backend timestamps (non-UTC)
     runs-on: ubuntu-latest
-    needs: [changes, admission, await_license]
-    # This job's name is the required status check, so it must REPORT rather
-    # than skip. A skipped job leaves the check unreported, and a run whose
-    # jobs all skip concludes "success" -- so a failed licence audit used to
-    # show green while running nothing. The last arm exists purely so a
-    # negative verdict reaches the assertion step below and goes red.
+    needs: [changes, await_license]
     if: >-
       always() && !cancelled() &&
       (
-        (
-          github.event_name == 'workflow_run' &&
-          needs.admission.result == 'success' &&
-          needs.admission.outputs.should_run == 'true' &&
-          needs.changes.result == 'success'
-        ) ||
-        (
-          github.event_name != 'workflow_run' &&
-          (
-            needs.await_license.result == 'skipped' ||
-            needs.await_license.outputs.license_passed == 'true'
-          ) &&
-          needs.changes.result == 'success'
-        ) ||
-        (
-          github.event_name != 'workflow_run' &&
-          needs.await_license.result != 'skipped' &&
-          needs.await_license.outputs.license_passed != 'true'
-        )
+        github.event_name == 'workflow_dispatch' ||
+        (github.event_name == 'pull_request' && needs.await_license.outputs.license_passed == 'true')
+      ) &&
+      (
+        needs.changes.result == 'success' &&
+        needs.changes.outputs.backend_changed == 'true'
       )
     timeout-minutes: 30
     steps:
-      - name: Require the license audit to have passed
-        if: >-
-          github.event_name != 'workflow_run' &&
-          needs.await_license.result != 'skipped' &&
-          needs.await_license.outputs.license_passed != 'true'
-        run: |
-          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
-          exit 1
-
-      - name: No-op pass (backend unchanged)
-        if: needs.changes.outputs.backend_changed != 'true'
-        run: echo "No backend paths changed; backend-required passed by policy."
-
       - name: Checkout
         if: needs.changes.outputs.backend_changed == 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
           fetch-depth: 0
-          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Install FFmpeg and PortAudio (Linux)
@@ -166,104 +100,11 @@ jobs:
         with:
           python-version: "3.12"
           use-uv: "true"
-          enable-pip-cache: ${{ github.event_name != 'workflow_run' }}
+          enable-pip-cache: "true"
           cache-dependency-path: |
             pyproject.toml
             uv.lock
           extras: dev
-
-      - name: Compile backend modules
-        if: needs.changes.outputs.backend_changed == 'true'
-        shell: bash
-        run: |
-          python - <<'PY'
-          import compileall, sys
-          ok = compileall.compile_dir("tldw_Server_API/app", force=True, quiet=1)
-          sys.exit(0 if ok else 1)
-          PY
-
-      - name: Type check changed backend modules
-        if: needs.changes.outputs.backend_changed == 'true'
-        id: mypy_changed
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          BASE_SHA="${{ needs.admission.outputs.base_sha || github.event.pull_request.base.sha || github.event.before }}"
-          HEAD_SHA="${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}"
-          if [[ -z "${BASE_SHA:-}" || "${BASE_SHA:-}" == "0000000000000000000000000000000000000000" ]]; then
-            BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
-          fi
-
-          if [[ -n "${BASE_SHA:-}" ]]; then
-            if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "$BASE_SHA"
-            fi
-            if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
-              git fetch --no-tags --depth=1 origin "$HEAD_SHA"
-            fi
-            git cat-file -e "${BASE_SHA}^{commit}"
-            git cat-file -e "${HEAD_SHA}^{commit}"
-            # --diff-filter=d: a file the PR deletes cannot be type-checked.
-            git diff --name-only --diff-filter=d "$BASE_SHA" "$HEAD_SHA" > "${RUNNER_TEMP}/backend-required-changed-files.txt"
-            mapfile -t CHANGED_PY < <(grep -E '^tldw_Server_API/.*\.py$' "${RUNNER_TEMP}/backend-required-changed-files.txt" || true)
-          else
-            mapfile -t CHANGED_PY < <(git ls-files | grep -E '^tldw_Server_API/.*\.py$' || true)
-          fi
-
-          if [[ "${#CHANGED_PY[@]}" -eq 0 ]]; then
-            echo "No backend Python files changed; skipping mypy."
-            exit 0
-          fi
-
-          python -m pip install --upgrade pip
-          pip install mypy
-          mypy --follow-imports=silent --ignore-missing-imports "${CHANGED_PY[@]}"
-
-      - name: Enforce tenant isolation ratchets
-        if: needs.changes.outputs.backend_changed == 'true'
-        env:
-          PYTHONPATH: .
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-          TEST_MODE: "true"
-          DISABLE_HEAVY_STARTUP: "1"
-        run: |
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
-            tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py \
-            tldw_Server_API/tests/lint/test_route_auth_ratchet.py \
-            tldw_Server_API/tests/lint/test_rg_route_map_lint.py \
-            tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py
-
-      # Contracts and ratchets that used to run only in ci.yml's full-suite shards,
-      # which are not required and are skipped on most PRs -- how #3013 merged with
-      # the license-first contracts red (TASK-13386). A ratchet nothing enforces is
-      # decoration: the private-coercer ratchet (TASK-13342) and the first-party
-      # source pinning (TASK-13380) need a required gate for the same reason.
-      - name: Enforce CI contracts and code ratchets
-        if: needs.changes.outputs.backend_changed == 'true'
-        env:
-          PYTHONPATH: .
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-          TEST_MODE: "true"
-          DISABLE_HEAVY_STARTUP: "1"
-        run: |
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
-            tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
-            tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py \
-            tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
-            tldw_Server_API/tests/lint/test_first_party_source_pinning.py
-
-      - name: Backend unit smoke
-        if: needs.changes.outputs.backend_changed == 'true'
-        env:
-          PYTHONPATH: .
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-          TEST_MODE: "true"
-          DISABLE_HEAVY_STARTUP: "1"
-        run: |
-          pytest -q --disable-warnings -p pytest_asyncio.plugin \
-            -m "unit and not e2e and not jobs" \
-            tldw_Server_API/tests/unit
 
       # Timezone axis. Every other job and step runs on UTC, where a naive-vs-aware
       # datetime bug has a delta of exactly zero and is therefore invisible. TASK-13299
@@ -358,6 +199,275 @@ jobs:
             tldw_Server_API/tests/Sharing/test_shared_workspace_clone_operations.py \
             tldw_Server_API/tests/Sharing/test_shared_workspace_recipient_security_matrix.py
 
+  backend-required:
+    name: backend-required
+    runs-on: ubuntu-latest
+    needs: [changes, await_license, non-utc-tests]
+    # Report failures for licensing or change detection instead of skipping the required check.
+    if: >-
+      always() && !cancelled() &&
+      (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch')
+    # A passing run took 28 minutes on 2026-11-03, and #3412 hit 30 twice at the non-UTC step.
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: ${{ needs.changes.result == 'success' && needs.changes.outputs.backend_changed == 'true' && 'mirror.gcr.io/library/postgres:18-bookworm' || '' }}
+        env:
+          POSTGRES_USER: tldw_user
+          POSTGRES_PASSWORD: TestPassword123!
+          POSTGRES_DB: tldw_test
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U tldw_user -d tldw_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 8
+    steps:
+      - name: Require the license audit to have passed
+        if: >-
+          github.event_name == 'pull_request' &&
+          needs.await_license.outputs.license_passed != 'true'
+        run: |
+          echo "::error::License audit did not pass for this PR head, so the gates were not run. Fix the licence policy failure and re-run."
+          exit 1
+
+      # Stays directly after the license refusal and before every other step:
+      # no later step uses a status function, so none runs once this has failed.
+      - name: Require change detection to have succeeded
+        if: needs.changes.result != 'success'
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+        run: |
+          echo "::error::Change detection (the 'changes' job) ended as '${CHANGES_RESULT}', not 'success', so this gate cannot tell what the head changed and ran nothing. If its 'Check backlog task ids are unique' step failed, renumber the file it names; otherwise re-run the workflow."
+          exit 1
+
+      - name: Require non-UTC timestamp tests to have passed
+        env:
+          BACKEND_CHANGED: ${{ needs.changes.outputs.backend_changed }}
+          TIMEZONE_RESULT: ${{ needs.non-utc-tests.result }}
+        shell: bash
+        run: |
+          case "$BACKEND_CHANGED:$TIMEZONE_RESULT" in
+            true:success|false:skipped) ;;
+            *)
+              echo "::error::Non-UTC timestamp tests ended as '$TIMEZONE_RESULT' for backend_changed='$BACKEND_CHANGED'."
+              exit 1
+              ;;
+          esac
+
+      - name: No-op pass (backend unchanged)
+        if: needs.changes.outputs.backend_changed != 'true'
+        run: echo "No backend paths changed; backend-required passed by policy."
+
+      - name: Checkout
+        if: needs.changes.outputs.backend_changed == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Install FFmpeg and PortAudio (Linux)
+        if: needs.changes.outputs.backend_changed == 'true'
+        uses: ./.github/actions/setup-ffmpeg
+        with:
+          install-ffmpeg: 'false'
+          install-portaudio: 'true'
+
+      - name: Setup Python and dependencies
+        if: needs.changes.outputs.backend_changed == 'true'
+        uses: ./.github/actions/setup-python-deps
+        with:
+          python-version: "3.12"
+          use-uv: "true"
+          enable-pip-cache: "true"
+          cache-dependency-path: |
+            pyproject.toml
+            uv.lock
+          extras: dev
+
+      - name: Test Auth PostgreSQL fixture teardown
+        if: needs.changes.outputs.backend_changed == 'true'
+        timeout-minutes: 3
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
+          TEST_MODE: 'true'
+          DISABLE_HEAVY_STARTUP: '1'
+          MINIMAL_TEST_APP: '1'
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+          TLDW_TEST_POSTGRES_REQUIRED: '1'
+          TLDW_TEST_NO_DOCKER: '1'
+          TEST_DATABASE_URL: "postgresql://tldw_user:TestPassword123!@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/tldw_test"
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/auth-postgres-teardown.xml"
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout --timeout=90 --junitxml="$report" \
+            tldw_Server_API/tests/AuthNZ/integration/test_isolated_database_teardown.py::test_isolated_auth_database_drops_after_a_late_connection
+          python - "$report" <<'PY'
+          import sys
+          from defusedxml import ElementTree
+
+          cases = ElementTree.parse(sys.argv[1]).findall(".//testcase")
+          if len(cases) != 1 or any(cases[0].find(tag) is not None for tag in ("skipped", "failure", "error")):
+              sys.exit("Expected one passing Auth PostgreSQL teardown case")
+          PY
+
+      - name: Compile backend modules
+        if: needs.changes.outputs.backend_changed == 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import compileall, sys
+          ok = compileall.compile_dir("tldw_Server_API/app", force=True, quiet=1)
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Type check changed backend modules
+        if: needs.changes.outputs.backend_changed == 'true'
+        id: mypy_changed
+        continue-on-error: true
+        shell: bash
+        env:
+          DISPATCH_BASE_SHA: ${{ inputs.base_sha }}
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha || github.event.before }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha || github.sha }}"
+          # A dispatch carries no pull_request payload, so without this the base
+          # would be HEAD^ and only the last commit would be type-checked. The
+          # merge queue passes dev's tip. Empty on every other event, and already
+          # checked to be a 40-character SHA by the `changes` job.
+          if [[ -n "${DISPATCH_BASE_SHA:-}" ]]; then
+            BASE_SHA="$DISPATCH_BASE_SHA"
+          fi
+          if [[ -z "${BASE_SHA:-}" || "${BASE_SHA:-}" == "0000000000000000000000000000000000000000" ]]; then
+            BASE_SHA="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+
+          if [[ -n "${BASE_SHA:-}" ]]; then
+            if ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$BASE_SHA"
+            fi
+            if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+            fi
+            git cat-file -e "${BASE_SHA}^{commit}"
+            git cat-file -e "${HEAD_SHA}^{commit}"
+            # --diff-filter=d: a file the PR deletes cannot be type-checked.
+            git diff --name-only --diff-filter=d "$BASE_SHA" "$HEAD_SHA" > "${RUNNER_TEMP}/backend-required-changed-files.txt"
+            mapfile -t CHANGED_PY < <(grep -E '^tldw_Server_API/.*\.py$' "${RUNNER_TEMP}/backend-required-changed-files.txt" || true)
+          else
+            mapfile -t CHANGED_PY < <(git ls-files | grep -E '^tldw_Server_API/.*\.py$' || true)
+          fi
+
+          if [[ "${#CHANGED_PY[@]}" -eq 0 ]]; then
+            echo "No backend Python files changed; skipping mypy."
+            exit 0
+          fi
+
+          python -m pip install --upgrade pip
+          pip install mypy
+          mypy --follow-imports=silent --ignore-missing-imports "${CHANGED_PY[@]}"
+
+      - name: Enforce tenant isolation ratchets
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          TEST_MODE: "true"
+          DISABLE_HEAVY_STARTUP: "1"
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/CI/test_rls_coverage_ratchet.py \
+            tldw_Server_API/tests/CI/test_test_quality_ratchet.py \
+            tldw_Server_API/tests/lint/test_route_auth_ratchet.py \
+            tldw_Server_API/tests/lint/test_rg_route_map_lint.py \
+            tldw_Server_API/tests/lint/test_scope_predicate_ratchet.py
+
+      # Contracts and ratchets that used to run only in ci.yml's full-suite shards,
+      # which are not required and are skipped on most PRs -- how #3013 merged with
+      # the license-first contracts red (TASK-13386). A ratchet nothing enforces is
+      # decoration: the private-coercer ratchet (TASK-13342) and the first-party
+      # source pinning (TASK-13380) need a required gate for the same reason, as do
+      # the backlog task-format ratchet and backlog-py's own tests (TASK-13440,
+      # ADR-059): backlog-py is the task editor, and its normalizer defines the ratchet.
+      # The task-format ratchet checks only the task files this PR changed since its
+      # merge base with BACKLOG_TASK_FORMAT_BASE, so it never fails a PR for a file
+      # that reached dev through a backlog-only PR this gate did not run on.
+      # The size ratchets (TASK-13950.8) compare their baselines with the same base, so a
+      # raised ceiling must carry a new reason in the PR diff.
+      # The layering contract (TASK-13950.9) does the same for a raised import count.
+      # The DB_Management logic-import ratchet (TASK-13950.16) does the same for its import counts.
+      # The test-mode branch ratchet (TASK-13950.19) does the same for its two ceilings.
+      # inputs.base_sha is set only on a dispatch (the merge queue passes dev's tip).
+      - name: Enforce CI contracts and code ratchets
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          BACKLOG_TASK_FORMAT_BASE: ${{ inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          TEST_MODE: "true"
+          DISABLE_HEAVY_STARTUP: "1"
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/CI/test_license_first_workflow_contracts.py \
+            tldw_Server_API/tests/CI/test_frontend_license_gate_workflow.py \
+            tldw_Server_API/tests/CI/test_merge_queue_rules.py \
+            tldw_Server_API/tests/CI/test_merge_queue_actions.py \
+            tldw_Server_API/tests/CI/test_merge_queue_workflow.py \
+            tldw_Server_API/tests/CI/test_merge_queue_gate_workflows.py \
+            tldw_Server_API/tests/CI/test_merge_queue_frontend_required.py \
+            tldw_Server_API/tests/CI/test_merge_queue_license_dispatch.py \
+            tldw_Server_API/tests/lint/test_function_size_ratchet.py \
+            tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py \
+            tldw_Server_API/tests/lint/test_http_usage_guard.py \
+            tldw_Server_API/tests/lint/test_layering_contract.py \
+            tldw_Server_API/tests/lint/test_db_management_logic_imports.py \
+            tldw_Server_API/tests/lint/test_core_to_api_import_boundary.py \
+            tldw_Server_API/tests/lint/test_authnz_alias_imports.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_backend_detection_guardrail.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_guardrail_sql_audit.py \
+            tldw_Server_API/tests/lint/test_schemas_config_boundary.py \
+            tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py \
+            tldw_Server_API/tests/lint/test_service_singleton_ratchet.py \
+            tldw_Server_API/tests/lint/test_llm_calls_import_isolation.py \
+            tldw_Server_API/tests/lint/test_no_inline_sse_frames.py \
+            tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
+            tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
+            tldw_Server_API/tests/lint/test_production_detector_single_source.py \
+            tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py \
+            tldw_Server_API/tests/lint/test_test_mode_branch_ratchet.py \
+            tldw_Server_API/tests/lint/test_keyword_identity_ratchet.py \
+            tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
+            tldw_Server_API/tests/CI/test_check_backlog_task_ids.py \
+            tldw_Server_API/tests/Helper_Scripts/test_renumber_duplicate_task_ids.py \
+            tools/backlog-py/tests \
+            tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py \
+            tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py
+          # TASK-13950.7: WebSocket auth guards. Their own run: the auth matrix reloads the app module.
+          # pytest_timeout, as in ci.yml's shards: a route that neither accepts nor closes fails the
+          # test in minutes instead of holding the step until the job times out.
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -p pytest_timeout -o timeout_method=signal \
+            tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py \
+            tldw_Server_API/tests/AuthNZ/test_websocket_route_auth_matrix.py
+
+      - name: Backend unit smoke
+        if: needs.changes.outputs.backend_changed == 'true'
+        env:
+          PYTHONPATH: .
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          TEST_MODE: "true"
+          DISABLE_HEAVY_STARTUP: "1"
+        run: |
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            -m "unit and not e2e and not jobs" \
+            tldw_Server_API/tests/unit
+
       # Boots the app in a DEPLOYMENT-SHAPED (scrubbed) environment — no
       # TEST_MODE, no conftest env forcing — and probes /health. Catches the
       # "passes in CI with env vars, fails in a real deployment" class (#2590/
@@ -369,7 +479,7 @@ jobs:
           python Helper_Scripts/ci/minimal_env_smoke.py --timeout 150
 
       # OpenAPI contract drift gate (RF1 / #2590 class): recompute the schema
-      # fingerprint and fail if it drifts from the checked-in snapshot. A
+      # fingerprint and committed path union against the checked-in artifacts. A
       # backend Pydantic model change that alters the API without updating the
       # snapshot (and regenerating the frontend types) fails here. Runs in the
       # backend workflow because it is guaranteed to run on drift-causing PRs
@@ -380,4 +490,32 @@ jobs:
           PYTHONPATH: .
         run: |
           python Helper_Scripts/export_openapi_schema.py \
-            --check apps/tldw-frontend/lib/api/openapi.fingerprint.json
+            --check apps/packages/api-types/openapi.fingerprint.json \
+            --check-paths apps/packages/api-types/paths.d.ts
+
+  # Wakes the merge queue when the gate above fails (spec 4.6 of
+  # Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md). A red gate causes
+  # none of the events merge-queue.yml listens for, and GitHub only re-runs a completed run, so
+  # this job cannot retry its own run: it dispatches a queue kick on dev that waits for this run
+  # to complete, then runs the queue. Not required and in no job's `needs`, so it cannot turn the
+  # required check red. Skipped while MERGE_QUEUE is unset or off, for forks, and on dispatches.
+  queue-tick:
+    name: Merge queue tick
+    needs: [backend-required]
+    if: >-
+      always() && !cancelled() &&
+      needs.backend-required.result == 'failure' &&
+      (vars.MERGE_QUEUE == 'dry' || vars.MERGE_QUEUE == 'on') &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Wake the merge queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: gh api -X POST "repos/${REPOSITORY}/actions/workflows/security-required.yml/dispatches" -f ref=dev -f "inputs[queue_kick]=true" -f "inputs[wait_run]=${RUN_ID}"

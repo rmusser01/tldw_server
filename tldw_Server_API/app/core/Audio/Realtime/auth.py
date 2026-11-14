@@ -27,7 +27,6 @@ async def authenticate_realtime_websocket(
 
     return await _audio_ws_authenticate(
         websocket,
-        None,
         endpoint_id="audio.realtime",
         ws_path=_route_path(route_kind),
         allow_initial_auth_message=False,

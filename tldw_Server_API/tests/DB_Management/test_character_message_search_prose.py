@@ -406,3 +406,25 @@ async def test_legacy_character_evidence_keeps_authored_text_and_omits_blank_sec
         assert db.get_character_card_by_id(character) == before
     finally:
         db.close_all_connections()
+
+
+@pytest.mark.asyncio
+async def test_legacy_character_chat_evidence_excludes_trashed_conversations(tmp_path, monkeypatch):
+    """Trash hides a chat through its conversation row, so legacy SQL must check it (CS-N2)."""
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import CharacterCardsRetriever
+
+    monkeypatch.setenv("tldw_production", "false")
+    db = CharactersRAGDB(tmp_path / "legacy-character-chats.db", client_id="1")
+    try:
+        active = db.add_conversation({"title": "Active tour"})
+        active_message = db.add_message({"conversation_id": active, "sender": "user", "content": "Rowan Observatory"})
+        trashed = db.add_conversation({"title": "Trashed tour"})
+        db.add_message({"conversation_id": trashed, "sender": "user", "content": "Rowan Observatory"})
+        db.soft_delete_conversation(trashed, db.get_conversation_by_id(trashed)["version"])
+        retriever = CharacterCardsRetriever(db.db_path_str)
+
+        documents = await retriever.retrieve("Rowan", include_chats=True)
+
+        assert [doc.id for doc in documents if doc.id.startswith("chat_")] == [f"chat_{active_message}"]
+    finally:
+        db.close_all_connections()

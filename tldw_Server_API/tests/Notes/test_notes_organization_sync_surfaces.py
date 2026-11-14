@@ -374,6 +374,25 @@ async def test_mcp_note_create_and_tag_set_use_active_sync_authority(tmp_path, m
 
 
 @pytest.mark.asyncio
+async def test_mcp_note_create_retry_with_case_variant_tags_is_stable(tmp_path, monkeypatch) -> None:
+    """Tags keep display casing, but the create key uses their identities (TASK-13950.5)."""
+    db, _sync_store, service = build_ready_notes_sync_stack(tmp_path)
+    _patch_active_service(monkeypatch, service)
+    module = NotesModule(ModuleConfig(name="notes"))
+    monkeypatch.setattr(module, "_open_db", lambda _context: db)
+    monkeypatch.setattr(db, "close_all_connections", lambda: None)
+    context = SimpleNamespace(metadata={"roles": []}, user_id="user-1")
+    request = {"title": "MCP retry", "content": "Body"}
+
+    first = await module.execute_tool("notes.create", {**request, "tags": ["Alpha", "Straße"]}, context=context)
+    retry = await module.execute_tool("notes.create", {**request, "tags": ["STRASSE", "alpha"]}, context=context)
+
+    assert retry["note_id"] == first["note_id"]
+    assert [row["id"] for row in db.search_notes(search_term="MCP retry")] == [first["note_id"]]
+    assert sorted(row["keyword"] for row in db.get_keywords_for_note(first["note_id"])) == ["Alpha", "Straße"]
+
+
+@pytest.mark.asyncio
 async def test_mcp_note_write_without_authenticated_owner_fails_closed(tmp_path, monkeypatch) -> None:
     db, _sync_store, service = build_ready_notes_sync_stack(tmp_path)
     _patch_active_service(monkeypatch, service)

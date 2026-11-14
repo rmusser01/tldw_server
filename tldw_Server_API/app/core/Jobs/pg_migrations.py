@@ -10,6 +10,7 @@ import contextlib
 import os
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import ensure_retry_admission_index
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 
 from .migrations import (
@@ -523,6 +524,20 @@ CREATE TABLE IF NOT EXISTS slides_standalone_reconciliation (
     CHECK (unexpired_reference_count >= 0)
 );
 INSERT INTO slides_standalone_reconciliation(singleton_id) VALUES (1)
+ON CONFLICT (singleton_id) DO NOTHING;
+
+-- Durable, content-free cursor and partial totals for the bounded Notes
+-- semantic health sweep. Metrics are emitted only after a complete sweep.
+CREATE TABLE IF NOT EXISTS notes_semantic_health_sweep (
+  singleton_id SMALLINT PRIMARY KEY CHECK (singleton_id = 1),
+  revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  after_owner_id BIGINT CHECK (after_owner_id IS NULL OR after_owner_id > 0),
+  after_dataset_id TEXT,
+  totals_json TEXT NOT NULL DEFAULT '[]' CHECK (LENGTH(totals_json) <= 65536),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_completed_at TIMESTAMPTZ
+);
+INSERT INTO notes_semantic_health_sweep(singleton_id) VALUES (1)
 ON CONFLICT (singleton_id) DO NOTHING;
 
 -- Job dependencies (DAG edges)
@@ -1475,6 +1490,21 @@ def _record_slides_audit_failure_pg(dsn: str) -> None:
         _mark_slides_audit_failure_pg(cur)
 
 
+def _ensure_pg_job_attachments_schema(cur: Any) -> None:
+    """Create attachment storage and its lookup index in the caller's transaction."""
+    cur.execute("""
+                    CREATE TABLE IF NOT EXISTS job_attachments (
+                      id SERIAL PRIMARY KEY,
+                      job_id INTEGER NOT NULL,
+                      kind TEXT NOT NULL,
+                      content_text TEXT,
+                      url TEXT,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    );
+                    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_job_attachments_job ON job_attachments(job_id)")
+
+
 def ensure_jobs_tables_pg(db_url: str) -> str:
     """Ensure the jobs table exists in the given PostgreSQL database.
 
@@ -1504,19 +1534,7 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                     );
                     """
             )
-            cur.execute(
-                """
-                    CREATE TABLE IF NOT EXISTS job_attachments (
-                      id SERIAL PRIMARY KEY,
-                      job_id INTEGER NOT NULL,
-                      kind TEXT NOT NULL,
-                      content_text TEXT,
-                      url TEXT,
-                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                    );
-                    """
-            )
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_job_attachments_job ON job_attachments(job_id)")
+            _ensure_pg_job_attachments_schema(cur)
             cur.execute(
                 """
                     CREATE TABLE IF NOT EXISTS job_sla_policies (
@@ -1543,6 +1561,9 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
             with psycopg.connect(_dsn) as required_conn, required_conn.cursor() as required_cur:
                 _configure_pg_archive_migration_session(required_cur)
                 _ensure_pg_execution_control_columns(required_cur)
+                from .operations.postgres.resource import ensure_resource_schema
+
+                ensure_resource_schema(required_cur)
         except required_migration_exceptions as exc:
             raise RuntimeError(
                 "PostgreSQL Jobs required schema migration failed"
@@ -1625,12 +1646,15 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 audit_cur.execute("RELEASE SAVEPOINT slides_generation_audit")
         # Create hot-path indexes concurrently (outside transaction) when possible
         archive_batch_read_indexes_verified = False
+        retry_admission_index_verified = False
         try:
             with psycopg.connect(_dsn, autocommit=True) as c2:
                 with c2.cursor() as k:
                     _configure_pg_archive_migration_session(k, local=False)
                     _ensure_pg_archive_batch_read_indexes(k)
                     archive_batch_read_indexes_verified = True
+                    ensure_retry_admission_index(k, backend="postgres")
+                    retry_admission_index_verified = True
                     for index_name, (unique, columns, predicate) in _SLIDES_ARCHIVE_INDEXES_PG.items():
                         if _pg_archive_index_matches(
                             k,
@@ -1701,6 +1725,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                 raise RuntimeError(
                     "PostgreSQL Jobs archive batch-read index migration failed"
                 ) from exc
+            if not retry_admission_index_verified:
+                raise RuntimeError(
+                    "PostgreSQL Jobs retry-admission index migration failed"
+                ) from exc
             if isinstance(exc, psycopg.Error):
                 # Optional standalone index/readiness setup must not break
                 # generic Jobs after the required archive indexes are ready.
@@ -1747,6 +1775,10 @@ def ensure_jobs_tables_pg(db_url: str) -> str:
                         "ALTER TABLE jobs_archive FORCE ROW LEVEL SECURITY",
                         "ALTER TABLE job_idempotency_receipts ENABLE ROW LEVEL SECURITY",
                         "ALTER TABLE job_idempotency_receipts FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_resource_heads ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_resource_heads FORCE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_resource_request_receipts ENABLE ROW LEVEL SECURITY",
+                        "ALTER TABLE job_resource_request_receipts FORCE ROW LEVEL SECURITY",
                     ):
                         with contextlib.suppress(_JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS):
                             _p.execute(_rls_ddl)
@@ -1845,6 +1877,38 @@ def build_jobs_rls_predicates() -> tuple[str, str, str]:
     return admin_expr, domain_filter, owner_filter
 
 
+def _ensure_pg_idempotency_receipt_rls(cur: Any, *, admin_expr: str, domain_filter: str, owner_filter: str) -> None:
+    """Install receipt read and write policies with the Jobs tenant predicates."""
+    cur.execute("DROP POLICY IF EXISTS job_idempotency_receipts_select " "ON job_idempotency_receipts")
+    cur.execute(f"""
+                    CREATE POLICY job_idempotency_receipts_select
+                    ON job_idempotency_receipts FOR SELECT
+                    USING (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    """)
+    cur.execute("DROP POLICY IF EXISTS job_idempotency_receipts_modify " "ON job_idempotency_receipts")
+    cur.execute(f"""
+                    CREATE POLICY job_idempotency_receipts_modify
+                    ON job_idempotency_receipts FOR ALL
+                    USING (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    WITH CHECK (
+                      {admin_expr} OR (
+                        {domain_filter}
+                        AND {owner_filter}
+                      )
+                    )
+                    """)
+
+
 def ensure_jobs_rls_policies_pg(db_url: str) -> None:
     """Enable Postgres Row Level Security (RLS) for domain scoping.
 
@@ -1910,6 +1974,20 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             _sql.Identifier(role),
                         )
                     )
+                    # Owner-facing resource admission inserts under this restricted
+                    # role; INSERT remains subject to the Jobs WITH CHECK policy.
+                    cur.execute(
+                        _sql.SQL("GRANT INSERT ON TABLE {}.jobs TO {}").format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
+                    cur.execute(
+                        _sql.SQL("GRANT USAGE, SELECT ON SEQUENCE {}.jobs_id_seq TO {}").format(
+                            _sql.Identifier(schema_name),
+                            _sql.Identifier(role),
+                        )
+                    )
                     cur.execute(
                         _sql.SQL(
                             "GRANT INSERT ON TABLE "
@@ -1951,6 +2029,14 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                             _sql.Identifier(role),
                         )
                     )
+                    for resource_table in ("job_resource_heads", "job_resource_request_receipts"):
+                        cur.execute(
+                            _sql.SQL("GRANT INSERT ON TABLE {}.{} TO {}").format(
+                                _sql.Identifier(schema_name),
+                                _sql.Identifier(resource_table),
+                                _sql.Identifier(role),
+                            )
+                        )
                 except _JOBS_PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS:
                     pass
 
@@ -1970,9 +2056,16 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                 "job_attachments",
                 "job_dependencies",
                 "job_idempotency_receipts",
+                "job_resource_heads",
+                "job_resource_request_receipts",
             ):
                 _enable_rls(_table)
             admin_expr, domain_filter, owner_filter = build_jobs_rls_predicates()
+            from .operations.postgres.resource import ensure_resource_rls
+
+            ensure_resource_rls(
+                cur, admin_expr=admin_expr, domain_filter=domain_filter, owner_filter=owner_filter
+            )
 
             cur.execute("DROP POLICY IF EXISTS jobs_domain_select ON jobs")
             cur.execute(
@@ -1998,43 +2091,8 @@ def ensure_jobs_rls_policies_pg(db_url: str) -> None:
                     )
                     """
             )
-            cur.execute(
-                "DROP POLICY IF EXISTS job_idempotency_receipts_select "
-                "ON job_idempotency_receipts"
-            )
-            cur.execute(
-                f"""
-                    CREATE POLICY job_idempotency_receipts_select
-                    ON job_idempotency_receipts FOR SELECT
-                    USING (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    """
-            )
-            cur.execute(
-                "DROP POLICY IF EXISTS job_idempotency_receipts_modify "
-                "ON job_idempotency_receipts"
-            )
-            cur.execute(
-                f"""
-                    CREATE POLICY job_idempotency_receipts_modify
-                    ON job_idempotency_receipts FOR ALL
-                    USING (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    WITH CHECK (
-                      {admin_expr} OR (
-                        {domain_filter}
-                        AND {owner_filter}
-                      )
-                    )
-                    """
+            _ensure_pg_idempotency_receipt_rls(
+                cur, admin_expr=admin_expr, domain_filter=domain_filter, owner_filter=owner_filter
             )
             # job_events policies (domain + owner, with admin bypass)
             try:

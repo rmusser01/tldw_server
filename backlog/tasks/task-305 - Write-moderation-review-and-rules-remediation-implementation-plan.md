@@ -35,11 +35,11 @@ Create the detailed implementation plan for the approved moderation design. The 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan at Docs/superpowers/plans/2026-05-12-moderation-review-rules-remediation-implementation-plan.md. Local self-review found and fixed a Stage 1 dependency issue: the plan now creates the ModerationReview index export before route wrappers import it, and explicitly updates the existing rules shell visible copy to Content Rules. Plan-document-reviewer subagent dispatch is documented as blocked by current collaboration/tool rules because the user has not explicitly requested delegated agent work.
 
 Verification for planning slice: staged set was limited to Docs/superpowers/plans/2026-05-12-moderation-review-rules-remediation-implementation-plan.md and backlog/tasks/task-305 - Write-moderation-review-and-rules-remediation-implementation-plan.md. `git diff --cached --check` passed with no whitespace errors. Bandit was not run because this slice changes only Markdown planning/task files, not backend code.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

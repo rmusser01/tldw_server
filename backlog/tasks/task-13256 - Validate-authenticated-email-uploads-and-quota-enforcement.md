@@ -33,9 +33,9 @@ Staged validation plan executed; final evidence is in Docs/Operations/Email_Auth
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Synthetic offline ASGI/SQLite validation: 124 affected tests passed with zero outbound attempts (combined_final3 log); 27 child/persistence tests passed; two-org team assertion passed. Ruff clean on touched modules except 24 pre-existing persistence diagnostics versus 25 at base. Bandit zero findings on touched production and test code. Independent reviewer found no remaining actionable issues. PostgreSQL, deployed startup, JWT login, PST/OST, million-message scale and live Gmail remain outside this local validation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -9,6 +9,13 @@ import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator
 
 const useSettingMock = vi.hoisted(() => vi.fn())
 const optionState = vi.hoisted(() => ({ temporaryChat: false }))
+const verifiedOwner = vi.hoisted(() => ({
+  ownerKey: "verified-lazy-owner", verificationState: "ready", isCurrent: () => true,
+  requestScope: {config: {serverUrl: "https://chat.test", authMode: "multi-user" as const}, userId: 7},
+  retryVerification: vi.fn()
+}))
+const folderListProps = vi.hoisted(() => vi.fn())
+vi.mock("@/hooks/useChatDraftOwner", () => ({ useChatDraftOwner: () => verifiedOwner }))
 const serverListProps = vi.hoisted(() => vi.fn())
 const activeTab = vi.hoisted(() => ({ value: "server" }))
 const useServerChatHistoryMock = vi.hoisted(() =>
@@ -25,7 +32,16 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/hooks/useSetting", () => ({
-  useSetting: (...args: unknown[]) => useSettingMock(...args)
+  useSetting: (...args: unknown[]) => {
+    const result = useSettingMock(...args)
+    const [value, setValue] = React.useState(result[0])
+    const setting = args[0] as { key?: string }
+    return setting?.key === "tldw:sidebar:recentCollapsed"
+      ? [value, setValue]
+      : setting?.key === "tldw:sidebar:activeTab"
+        ? [value, (next: string) => { result[1](next); setValue(next) }, result[2]]
+        : result
+  }
 }))
 
 vi.mock("@/hooks/useDebounce", () => ({
@@ -69,7 +85,10 @@ vi.mock("../ServerChatList", () => ({
 }))
 
 vi.mock("../FolderChatList", () => ({
-  FolderChatList: () => <div data-testid="folder-chat-list" />
+  FolderChatList: (props: Record<string, unknown>) => {
+    folderListProps(props)
+    return <div data-testid="folder-chat-list" />
+  }
 }))
 
 vi.mock("../../QuickChatHelper", () => ({
@@ -87,6 +106,8 @@ vi.mock("@/components/Sidepanel/Chat/ModeToggle", () => ({
 describe("ChatSidebar lazy history loading", () => {
   beforeEach(() => {
     optionState.temporaryChat = false
+    verifiedOwner.verificationState = "ready"
+    folderListProps.mockClear()
     activeTab.value = "server"
     serverListProps.mockClear()
     useSettingMock.mockReset()
@@ -96,6 +117,7 @@ describe("ChatSidebar lazy history loading", () => {
     const setShortcutSelection = vi.fn()
     useSettingMock.mockImplementation((setting: { key?: string } | string) => {
       const key = typeof setting === "string" ? setting : setting?.key
+      if (key === "tldw:sidebar:recentCollapsed") return [true, vi.fn()]
       if (key === "tldw:sidebar:activeTab") {
         return [activeTab.value, setCurrentTab]
       }
@@ -124,6 +146,23 @@ describe("ChatSidebar lazy history loading", () => {
         "model-catalog": false
       }
     })
+  })
+
+  it.each(["server", "folders"])("opens Folders with history collapsed from saved %s view", async (savedView) => {
+    activeTab.value = savedView
+    render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+    const history = screen.getByRole("button", { name: /Recent conversations/i })
+    expect(history).toHaveAttribute("aria-expanded", "false")
+    const folders = screen.getByRole("radio", { name: "Folders", exact: true })
+    expect(folders.closest("label")).toBeVisible()
+    fireEvent.click(folders)
+    await waitFor(() => expect(folders).toBeChecked())
+    expect(history).toHaveAttribute("aria-expanded", "true")
+    const [, saveTab] = useSettingMock.mock.results.find((result, index) =>
+      useSettingMock.mock.calls[index][0]?.key === "tldw:sidebar:activeTab"
+    )!.value
+    if (savedView !== "folders") expect(saveTab).toHaveBeenCalledWith("folders")
+    expect(useServerChatHistoryMock).toHaveBeenLastCalledWith("", expect.objectContaining({ enabled: false }))
   })
 
   it("keeps server history overview disabled while recent conversations are collapsed", async () => {
@@ -184,7 +223,8 @@ describe("ChatSidebar lazy history loading", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
 
-    expect(screen.getByTestId("folder-chat-list").closest(".pointer-events-none")).not.toBeNull()
+    expect(screen.getByTestId("folder-chat-list").closest(".pointer-events-none")).toBeNull()
+    expect(folderListProps).toHaveBeenLastCalledWith(expect.objectContaining({readOnly: true}))
   })
 
   it("enables server history overview after the user expands recent conversations", async () => {
@@ -236,6 +276,13 @@ describe("ChatSidebar lazy history loading", () => {
     })
   })
 
+  it("does not authorize server history from expansion before account verification", () => {
+    verifiedOwner.verificationState = "pending"
+    render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole("button", {name: /Recent conversations/i}))
+    expect(useServerChatHistoryMock).toHaveBeenLastCalledWith("", expect.objectContaining({enabled: false, owner: undefined}))
+  })
+
   it("does not fetch a server count badge on first expanded mount", () => {
     useChatSurfaceCoordinatorStore.setState({
       engagedPanels: {
@@ -258,4 +305,19 @@ describe("ChatSidebar lazy history loading", () => {
       expect.objectContaining({ enabled: false })
     )
   })
+it("lazily mounts On this device while leaving the server coordinator disabled", async () => {
+  activeTab.value = "local"
+  const view = render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+  expect(screen.queryByTestId("local-chat-list")).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /Recent conversations/i }))
+  expect(screen.getByTestId("local-chat-list")).toBeInTheDocument()
+  expect(screen.getByText("On this device")).toBeInTheDocument()
+  expect(useServerChatHistoryMock).toHaveBeenLastCalledWith("", expect.objectContaining({ enabled: false }))
+  expect(useChatSurfaceCoordinatorStore.getState().visiblePanels["server-history"]).toBe(false)
+  view.rerender(<MemoryRouter><ChatSidebar collapsed /></MemoryRouter>)
+  expect(screen.queryByTestId("local-chat-list")).toBeNull()
 })
+
+})
+
+vi.mock("../LocalChatList", () => ({ LocalChatList: () => <div data-testid="local-chat-list" /> }))

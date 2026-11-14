@@ -13,9 +13,13 @@ const mocks = vi.hoisted(() => ({
   getFullChatData: vi.fn(),
   getPromptById: vi.fn(),
   setSystemPrompt: vi.fn(),
-  setSelectedAssistant: vi.fn()
+  setSelectedAssistant: vi.fn(),
+  resolveOwner: vi.fn(),
+  readAssistant: vi.fn()
 }))
-vi.mock("@/services/service-prompts", () => ({
+vi.mock("@/services/service-prompts", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/service-prompts")>(),
+  resolveServicePromptScope: () => mocks.resolveOwner(),
   loadServicePromptSnapshot: (...args: unknown[]) => mocks.loadSnapshot(...args)
 }))
 
@@ -53,13 +57,14 @@ vi.mock("@/hooks/useConnectionState", () => ({
 }))
 
 vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, mocks.setSelectedAssistant, { isLoading: mocks.assistantLoading }]
+  useSelectedAssistant: () => [null, mocks.setSelectedAssistant, { isLoading: mocks.assistantLoading, readSelection: mocks.readAssistant }]
 }))
 
 import { usePlaygroundSessionPersistence } from "../usePlaygroundSessionPersistence"
 import { useSelectServerChat } from "../chat/useSelectServerChat"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import { buildQueuedRequest } from "@/utils/chat-request-queue"
 
@@ -67,6 +72,8 @@ describe("usePlaygroundSessionPersistence", () => {
   beforeEach(() => {
     mocks.scopeSignal = new AbortController()
     mocks.assistantLoading = false
+    mocks.resolveOwner.mockReset().mockResolvedValue({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "bob", clientPrincipalVerified: true, scopeKey: "global" })
+    mocks.readAssistant.mockReset().mockResolvedValue(null)
     localStorage.clear()
     mocks.selection = null
     mocks.getSessionFiles.mockResolvedValue([])
@@ -80,6 +87,9 @@ describe("usePlaygroundSessionPersistence", () => {
     mocks.getFullChatData.mockResolvedValue(null)
     mocks.setSelectedAssistant.mockReset()
     useStoreMessageOption.setState({
+      chatDraftAddress: null,
+      chatDraftRevision: 0,
+      chatDraftTransition: null,
       history: [],
       messages: [],
       historyId: null,
@@ -105,6 +115,147 @@ describe("usePlaygroundSessionPersistence", () => {
     })
     usePlaygroundSessionStore.getState().clearSession()
   })
+
+  it.each(["immediate", "debounced", "departure"])("does not repin A when its held %s save completes after a new draft", async path => {
+    const ownerHash = chatDraftOwnerKey(await mocks.resolveOwner())
+    useStoreMessageOption.setState({ serverChatId: "A", ...(path === "immediate" ? {
+      serverChatAssistantKind: "character", serverChatAssistantId: "7", serverChatCharacterId: "7"
+    } : {}) })
+    let release!: (value: unknown) => void
+    if (path === "immediate") mocks.readAssistant.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    if (path === "immediate") await waitFor(() => expect(mocks.readAssistant).toHaveBeenCalled())
+    else {
+      await waitFor(() => expect(usePlaygroundSessionStore.getState().serverChatId).toBe("A"))
+      mocks.getConfig.mockImplementation(() => new Promise(resolve => { release = resolve }))
+      if (path === "departure") view.unmount()
+      await waitFor(() => expect(release).toBeTypeOf("function"), { timeout: 2500 })
+    }
+    let address = useStoreMessageOption.getState().chatDraftAddress
+    act(() => {
+      const state = useStoreMessageOption.getState()
+      state.setServerChatId(null)
+      state.setHistoryId(null)
+      state.startNewChatDraft()
+      address = useStoreMessageOption.getState().chatDraftAddress
+      // A later mounted view publishes its validated locator without cancelling this old save.
+      usePlaygroundSessionStore.getState().saveSession({ historyId: null, serverChatId: null,
+        chatDraftHandle: { address: address!, ownerHash }, scopeKey: "global" })
+    })
+    await act(async () => { release(path === "immediate" ? { kind: "character", id: "7", name: "A character", metadata: { selectionMode: "tracked" } } : null); await Promise.resolve() })
+    expect(usePlaygroundSessionStore.getState().serverChatId).toBeNull()
+    expect(useStoreMessageOption.getState().chatDraftAddress).toBe(address)
+    if (path !== "departure") view.unmount()
+  })
+
+  it.each(["immediate", "debounced"])("does not resurrect consumed queued work in the same chat after held %s save", async path => {
+    useStoreMessageOption.setState({ serverChatId: "A", serverChatAssistantKind: "character", serverChatAssistantId: "7", serverChatCharacterId: "7" })
+    useStoreMessageOption.getState().setQueuedMessages([buildQueuedRequest({ id: "old-queue", clientRequestId: "old-request", message: "Already consumed" })])
+    let release!: (value: unknown) => void
+    if (path === "immediate") mocks.readAssistant.mockImplementation(() => new Promise(resolve => { release = resolve }))
+    const view = renderHook(() => usePlaygroundSessionPersistence())
+    await waitFor(() => expect(view.result.current.sessionScopeReady).toBe(true))
+    if (path === "immediate") await waitFor(() => expect(release).toBeTypeOf("function"))
+    else {
+      await waitFor(() => expect(usePlaygroundSessionStore.getState().serverChatId).toBe("A"))
+      mocks.getConfig.mockImplementation(() => new Promise(resolve => { release = resolve }))
+      await waitFor(() => expect(release).toBeTypeOf("function"), { timeout: 2500 })
+    }
+    act(() => {
+      useStoreMessageOption.getState().setQueuedMessages([])
+      useStoreMessageOption.getState().setWebSearch(true)
+      usePlaygroundSessionStore.getState().saveSession({ serverChatId: "A", queuedMessages: [], webSearch: true })
+    })
+    await act(async () => { release(null); await Promise.resolve() })
+    expect(usePlaygroundSessionStore.getState().queuedMessages).toEqual([])
+    expect(usePlaygroundSessionStore.getState().webSearch).toBe(true)
+    view.unmount()
+  })
+
+  it.each(["transcript", "New", "account"])(
+    "does not resurrect a held Temporary save after %s",
+    async (boundary) => {
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        state.setTemporaryChat(true)
+        state.startNewChatDraft(true)
+        state.setHistoryId("temp")
+        state.setHistory([{ role: "assistant", content: "INITIAL TEMP" }])
+        state.setMessages([
+          { isBot: true, name: "Assistant", message: "INITIAL TEMP", sources: [] }
+        ])
+      })
+      const view = renderHook(() => usePlaygroundSessionPersistence())
+      await waitFor(() =>
+        expect(
+          usePlaygroundSessionStore.getState().temporaryTranscript?.messages[0]
+            ?.message
+        ).toBe("INITIAL TEMP")
+      )
+      let release!: (value: null) => void
+      mocks.getConfig.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve
+          })
+      )
+      act(() => {
+        useStoreMessageOption
+          .getState()
+          .setHistory([{ role: "assistant", content: "OLD HELD TEMP" }])
+        useStoreMessageOption.getState().setMessages([
+          {
+            isBot: true,
+            name: "Assistant",
+            message: "OLD HELD TEMP",
+            sources: []
+          }
+        ])
+      })
+      await waitFor(() => expect(release).toBeTypeOf("function"), {
+        timeout: 2500
+      })
+      act(() => {
+        const state = useStoreMessageOption.getState()
+        if (boundary === "transcript") {
+          state.setHistory([{ role: "assistant", content: "LATEST TEMP" }])
+          state.setMessages([
+            {
+              isBot: true,
+              name: "Assistant",
+              message: "LATEST TEMP",
+              sources: []
+            }
+          ])
+        } else if (boundary === "New") {
+          state.setTemporaryChat(false)
+          state.startNewChatDraft(false)
+          state.setHistoryId(null)
+          state.setHistory([])
+          state.setMessages([])
+          usePlaygroundSessionStore.getState().clearSession()
+        } else {
+          mocks.scopeSignal.abort()
+          window.dispatchEvent(
+            new CustomEvent("tldw:auth-principal-changed", {
+              detail: { kind: "logout" }
+            })
+          )
+        }
+      })
+      act(() => window.dispatchEvent(new Event("pagehide")))
+      await act(async () => {
+        release(null)
+        await Promise.resolve()
+      })
+      expect(
+        usePlaygroundSessionStore.getState().temporaryTranscript?.messages[0]
+          ?.message ?? null
+      ).toBe(boundary === "transcript" ? "LATEST TEMP" : null)
+      view.unmount()
+    }
+  )
 
   it("preserves a saved selection and queue when identity verification is unavailable, then retries", async () => {
     const saved = { historyId: "bob-history", serverChatId: "bob-chat", scopeKey: "global",
@@ -159,10 +310,11 @@ describe("usePlaygroundSessionPersistence", () => {
 
   it("waits for the assistant account before restoring a saved conversation", async () => {
     mocks.assistantLoading = true
-    usePlaygroundSessionStore.getState().saveSession({
+    const legacySession = {
       historyId: null, serverChatId: "saved-chat", serverChatTitle: "Saved",
-      chatMode: "normal", scopeKey: "global"
-    })
+      chatMode: "normal" as const, scopeKey: "global"
+    }
+    usePlaygroundSessionStore.getState().saveSession(legacySession)
     const view = renderHook(() => usePlaygroundSessionPersistence())
     await act(async () => { await Promise.resolve() })
     expect(view.result.current.sessionScopeReady).toBe(false)

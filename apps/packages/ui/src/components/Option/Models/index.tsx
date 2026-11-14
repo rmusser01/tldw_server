@@ -1,3 +1,4 @@
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { Select, Spin } from "antd"
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -14,7 +15,6 @@ import {
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import { tldwClient, tldwModels } from "@/services/tldw"
 import { useStorage } from "@plasmohq/storage/hook"
-import { fetchChatModels } from "@/services/tldw-server"
 import {
   getProviderDisplayName,
   normalizeProviderKey
@@ -112,15 +112,12 @@ export const ModelsBody = () => {
   >("defaultApiProvider", null)
 
   const {
-    data: availableModels = [],
-    isLoading: modelsLoading
-  } = useQuery({
-    queryKey: ["tldw-chat-models"],
-    queryFn: async () => fetchChatModels({ returnEmpty: true }),
-    staleTime: 5 * 60 * 1000
-  })
-  // Chat-model discovery can return an empty cached fallback after a failed request.
-  // Use the existing catalog request to distinguish that failure from readiness.
+    data: availableModels = EMPTY_CHAT_MODELS,
+    isLoading: modelsLoading,
+    isError: modelsDiscoveryFailed,
+    refetch: refetchAvailableModels
+  } = useChatModelCatalog()
+  // The complete provider catalog also includes models that are not ready for chat.
   const catalog = useQuery(modelsCatalogQueryOptions)
 
   const {
@@ -358,11 +355,12 @@ export const ModelsBody = () => {
         // Fallback to local warm-up if background message failed
         await tldwModels.warmCache(true)
       }
-      await Promise.all([
+      const [, , chatDiscovery] = await Promise.all([
         queryClient.refetchQueries({ queryKey: ["tldw-providers-models"] }),
         queryClient.refetchQueries({ queryKey: ["tldw-models"] }),
-        queryClient.refetchQueries({ queryKey: ["tldw-chat-models"] })
+        refetchAvailableModels()
       ])
+      if (chatDiscovery.isError) throw chatDiscovery.error
       const catalogError = queryClient.getQueryState(["tldw-providers-models"])?.error
       if (catalogError) throw catalogError
       setLastRefreshedAt(Date.now())
@@ -554,6 +552,13 @@ export const ModelsBody = () => {
                 <Spin size="small" />
                 {t("settings:onboarding.defaults.loading", "Loading models...")}
               </div>
+            ) : modelsDiscoveryFailed ? (
+              <div role="alert" className="text-sm text-text">
+                <p>{t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}</p>
+                <button type="button" className="underline" onClick={() => { void handleRefresh() }}>
+                  {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+                </button>
+              </div>
             ) : catalog.isError ? (
               <ModelsCatalog catalog={catalog} />
             ) : availableModels.length === 0 ? (
@@ -721,7 +726,7 @@ export const ModelsBody = () => {
                 </div>
               </div>
             </div>
-            {availableModels.length === 0 && !modelsLoading && (
+            {availableModels.length === 0 && !modelsLoading && !modelsDiscoveryFailed && (
               <div className="mt-4 flex flex-wrap gap-2 text-xs">
                 <Link className="text-primary hover:underline" to="/settings/tldw">
                   {t("settings:models.readiness.configureServer", "Configure server")}

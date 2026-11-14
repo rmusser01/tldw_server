@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-CLAIMS_MAX_OWNER_USER_ID = 9_223_372_036_854_775_807
-_CLAIMS_MAX_OWNER_USER_ID_TEXT = str(CLAIMS_MAX_OWNER_USER_ID)
+from tldw_Server_API.app.core.Utils.claims_owner_identity import (
+    _CLAIMS_MAX_OWNER_USER_ID_TEXT,
+)
+from tldw_Server_API.app.core.Utils.claims_owner_identity import (
+    CLAIMS_MAX_OWNER_USER_ID as CLAIMS_MAX_OWNER_USER_ID,
+)
+from tldw_Server_API.app.core.Utils.claims_owner_identity import (
+    is_routable_claims_owner_id_text as is_routable_claims_owner_id_text,
+)
 
 CLAIMS_ANALYTICS_EXPORT_WORKSPACE_ID_MAX_CHARS = len(
     _CLAIMS_MAX_OWNER_USER_ID_TEXT
@@ -31,24 +38,6 @@ _CLAIMS_ANALYTICS_EXPORT_FILTER_MAX_CHARS = {
     "start_time": CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS,
     "end_time": CLAIMS_ANALYTICS_EXPORT_TIMESTAMP_MAX_CHARS,
 }
-
-
-def is_routable_claims_owner_id_text(value: Any) -> bool:
-    """Return whether value is a canonical positive signed-BIGINT owner id."""
-    if (
-        not isinstance(value, str)
-        or not value
-        or value != value.strip()
-        or not value.isascii()
-        or not value.isdigit()
-        or value == "0"
-        or (len(value) > 1 and value.startswith("0"))
-    ):
-        return False
-    maximum = _CLAIMS_MAX_OWNER_USER_ID_TEXT
-    return len(value) < len(maximum) or (
-        len(value) == len(maximum) and value <= maximum
-    )
 
 
 def is_valid_persisted_claims_analytics_export_filters(value: Any) -> bool:

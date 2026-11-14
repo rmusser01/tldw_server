@@ -11,16 +11,23 @@ import stat
 import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
+from types import ModuleType
 from typing import Optional, Union
 
 #
 # 3rd-party Libraries
+puremagic: Optional[ModuleType]
 try:
-    import puremagic  # type: ignore
+    import puremagic as _puremagic_module
+
+    puremagic = _puremagic_module
 except ImportError:  # puremagic is optional; fall back to alternate MIME detection
     puremagic = None
+yara: Optional[ModuleType]
 try:
-    import yara  # type: ignore
+    import yara as _yara_module
+
+    yara = _yara_module
 except ImportError:  # yara rules are optional; disable malware scanning if missing
     yara = None
 import contextlib
@@ -38,7 +45,7 @@ from tldw_Server_API.app.core.Utils.Utils import logging
 # import logging
 # logging.basicConfig(level=logging.INFO)
 
-_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS = (
+_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS: tuple[type[Exception], ...] = (
     OSError,
     ValueError,
     TypeError,
@@ -96,10 +103,15 @@ def _is_epub_archive(file_path: Path) -> bool:
     """Return True when a ZIP-shaped file has the required EPUB marker."""
     try:
         with zipfile.ZipFile(file_path, "r") as archive:
-            marker = archive.read("mimetype", pwd=None)
+            expected = b"application/epub+zip"
+            entry = archive.getinfo("mimetype")
+            if entry.file_size != len(expected):
+                return False
+            with archive.open(entry, "r", pwd=None) as handle:
+                marker = handle.read(len(expected) + 1)
     except (OSError, KeyError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
         return False
-    return marker.strip() == b"application/epub+zip"
+    return marker == expected
 
 
 class FileValidationError(Exception):
@@ -116,11 +128,13 @@ class ValidationResult:
     def __init__(self, is_valid: bool, issues: Optional[list[str]] = None,
                  file_path: Optional[Path] = None,
                  detected_mime_type: Optional[str] = None,
-                 detected_extension: Optional[str] = None):
+                 detected_extension: Optional[str] = None,
+                 mime_detection_source: str = "unavailable"):
         self.is_valid = is_valid
         self.issues = issues or []
         self.file_path = file_path
         self.detected_mime_type = detected_mime_type
+        self.mime_detection_source = mime_detection_source
         self.detected_extension = detected_extension  # Extension of the file on disk
 
     def __bool__(self):
@@ -478,7 +492,8 @@ class FileValidator:
             if not os.path.exists(rules_path):
                 logging.warning("Yara scanning disabled: rules file missing")
                 return None
-            rules = yara.compile(filepath=rules_path)
+            # Constant getattr retains AttributeError fallback if cached availability outlives the module.
+            rules = getattr(yara, "compile")(filepath=rules_path)  # noqa: B009
             logging.info("Yara rules compiled")
             return rules
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
@@ -652,10 +667,21 @@ class FileValidator:
             fallback_mime_type, _ = mimetypes.guess_type(str(current_file_path))
         if self.magic_available:
             try:
-                detected_mime_type = puremagic.from_file(str(current_file_path), mime=True)
+                # Constant getattr retains AttributeError fallback if cached availability outlives the module.
+                detected_mime_type = getattr(puremagic, "from_file")(str(current_file_path), mime=True)  # noqa: B009
                 if detected_mime_type:
                     detected_mime_type = detected_mime_type.strip()
                     mime_detection_source = "magic"
+                    if media_type_key == "html" and detected_mime_type == "text/plain":
+                        # HTML magic is offset-zero; legal leading whitespace can
+                        # otherwise become generic text in the file deep scan.
+                        with contextlib.suppress(*_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
+                            with current_file_path.open("rb") as source:
+                                prefix = source.read(4096).lstrip(b" \t\r\n\f")
+                            if prefix.startswith(b"\xef\xbb\xbf"):
+                                prefix = prefix[3:].lstrip(b" \t\r\n\f")
+                            if getattr(puremagic, "from_string")(prefix, mime=True) == "text/html":  # noqa: B009
+                                detected_mime_type = "text/html"
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:  # Catch other errors during MIME detection
                 logging.warning("MIME magic detection failed; using extension fallback (error_type={})", exception_type_for_log(e))
                 detected_mime_type = None
@@ -748,11 +774,13 @@ class FileValidator:
 
         if issues:
             logging.warning("File validation rejected upload (issue_count={})", len(issues))
-            return ValidationResult(False, issues, current_file_path, detected_mime_type, disk_file_ext)
+            return ValidationResult(False, issues, current_file_path, detected_mime_type, disk_file_ext,
+                                    mime_detection_source=mime_detection_source)
 
         logging.info("File validation succeeded")
         return ValidationResult(True, file_path=current_file_path,
-                                detected_mime_type=detected_mime_type, detected_extension=disk_file_ext)
+                                detected_mime_type=detected_mime_type, detected_extension=disk_file_ext,
+                                mime_detection_source=mime_detection_source)
 
     def validate_archive_contents(
         self,
@@ -963,29 +991,29 @@ class FileValidator:
                                     f"exceeds limit ({max_uncompressed_size / (1024 * 1024):.2f}MB).")
                                 return ValidationResult(False, issues, archive_path_obj)
 
-                            for member in members:
-                                if member.isdir():
+                            for tar_member in members:
+                                if tar_member.isdir():
                                     continue
-                                if member.issym() or member.islnk():
+                                if tar_member.issym() or tar_member.islnk():
                                     logging.warning("Archive member rejected: symbolic or hard link")
-                                    issues.append(f"Archive contains unsupported link entry: {member.name}")
+                                    issues.append(f"Archive contains unsupported link entry: {tar_member.name}")
                                     continue
-                                if not member.isfile():
+                                if not tar_member.isfile():
                                     logging.warning("Archive member rejected: non-file entry")
                                     issues.append(
-                                        f"Archive contains unsupported member type ({member.type}): {member.name}")
+                                        f"Archive contains unsupported member type ({tar_member.type!s}): {tar_member.name}")
                                     continue
                                 # Normalize member path to POSIX-like separators for consistent checks
-                                member_filename = str(PurePosixPath(member.name))
+                                member_filename = str(PurePosixPath(tar_member.name))
                                 if '..' in member_filename or member_filename.startswith('/') or ':' in member_filename:
                                     logging.warning("Archive member rejected: malicious path")
                                     issues.append(f"Archive contains potentially malicious path: {member_filename}")
                                     continue
                                 # Per-member uncompressed size cap
                                 try:
-                                    if max_member_uncompressed_size is not None and member.size > max_member_uncompressed_size:
+                                    if max_member_uncompressed_size is not None and tar_member.size > max_member_uncompressed_size:
                                         issues.append(
-                                            f"Archive member exceeds per-file size cap: {member.name} ({member.size} bytes)"
+                                            f"Archive member exceeds per-file size cap: {tar_member.name} ({tar_member.size} bytes)"
                                         )
                                         continue
                                 except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
@@ -1002,7 +1030,7 @@ class FileValidator:
                                         f"Exceeded max internal file limit ({max_internal_files}) during extraction.")
                                     break
 
-                                total_extracted_size += member.size
+                                total_extracted_size += tar_member.size
                                 if total_extracted_size > max_uncompressed_size:
                                     issues.append(
                                         f"Exceeded max total uncompressed size ({max_uncompressed_size / (1024 * 1024)}MB) during extraction.")
@@ -1011,22 +1039,22 @@ class FileValidator:
                                 try:
                                     try:
                                         # Use safe extraction filter when available (Python >= 3.12)
-                                        tar.extract(member, path=extract_dir, filter='data')
+                                        tar.extract(tar_member, path=extract_dir, filter='data')
                                     except TypeError:
                                         # Older Python versions without 'filter' support: we validated member type
                                         # and path above; continue extracting with the safer prerequisites enforced.
-                                        tar.extract(member, path=extract_dir)
+                                        tar.extract(tar_member, path=extract_dir)
                                     internal_file_path = intended_path
                                     internal_media_type_key = _resolve_media_type_key(internal_file_path)
 
                                     if not internal_media_type_key:
                                         issues.append(
-                                            f"Archive contains file with unsupported type: {member.name}"
+                                            f"Archive contains file with unsupported type: {tar_member.name}"
                                         )
                                         continue
 
                                     logging.debug(
-                                        f"Validating internal file: {member.name} (as {internal_media_type_key or 'generic'})")
+                                        f"Validating internal file: {tar_member.name} (as {internal_media_type_key or 'generic'})")
                                     internal_validation_result = self.validate_file(
                                         internal_file_path,
                                         original_filename=internal_file_path.name,
@@ -1034,7 +1062,7 @@ class FileValidator:
                                     )
                                     if not internal_validation_result:
                                         issues.append(
-                                            f"Invalid file in archive '{archive_path_obj.name}': '{member.name}'")
+                                            f"Invalid file in archive '{archive_path_obj.name}': '{tar_member.name}'")
                                         issues.extend([f"    - {issue}" for issue in internal_validation_result.issues])
                                     elif (
                                         internal_media_type_key == "archive"
@@ -1046,12 +1074,12 @@ class FileValidator:
                                         )
                                         if not nested_validation:
                                             issues.append(
-                                                f"Invalid nested archive in '{archive_path_obj.name}': '{member.name}'"
+                                                f"Invalid nested archive in '{archive_path_obj.name}': '{tar_member.name}'"
                                             )
                                             issues.extend([f"    - {issue}" for issue in nested_validation.issues])
                                 except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as extract_err:
                                     issues.append(
-                                        f"Error extracting/validating internal file '{member.name}': {extract_err}")
+                                        f"Error extracting/validating internal file '{tar_member.name}': {extract_err}")
                                     logging.error("TAR member extraction failed (error_type={})", exception_type_for_log(extract_err))
                                     break
                     except tarfile.ReadError:
@@ -1080,7 +1108,7 @@ class FileValidator:
         try:
             preprocessed = html_content
             try:
-                from bs4 import BeautifulSoup, Comment  # type: ignore
+                from bs4 import BeautifulSoup, Comment
                 soup = BeautifulSoup(html_content, 'html.parser')
                 # Remove script/style/noscript tags entirely (including their contents)
                 for tag_name in ('script', 'style', 'noscript'):
@@ -1088,11 +1116,11 @@ class FileValidator:
                         try:
                             t.decompose()
                         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
-                            with contextlib.suppress(_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
+                            with contextlib.suppress(*_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
                                 t.extract()
                 # Remove HTML comments which may contain scripts
                 for c in soup.find_all(string=lambda s: isinstance(s, Comment)):
-                    with contextlib.suppress(_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
                         c.extract()
                 preprocessed = str(soup)
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
@@ -1101,7 +1129,7 @@ class FileValidator:
                 except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
                     preprocessed = html_content
 
-            import bleach  # type: ignore
+            import bleach
             allowed_tags = (config or {}).get("allowed_tags") or [
                 'p', 'br', 'ul', 'ol', 'li', 'strong', 'em', 'b', 'i', 'u', 'a',
                 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre'
@@ -1112,16 +1140,15 @@ class FileValidator:
             strip = bool((config or {}).get("strip", True))
             allowed_protocols = (config or {}).get("allowed_protocols") or ['http', 'https', 'mailto']
             cleaner = bleach.Cleaner(tags=allowed_tags, attributes=allowed_attrs, protocols=allowed_protocols, strip=strip)
-            cleaned_html = cleaner.clean(preprocessed)
+            cleaned_html: str = cleaner.clean(preprocessed)
             # Enforce rel="noopener noreferrer" on anchors with target attribute to prevent tab-nabbing
             try:
-                from bs4 import BeautifulSoup  # type: ignore
+                from bs4 import BeautifulSoup
                 soup2 = BeautifulSoup(cleaned_html, 'html.parser')
                 for a in soup2.find_all('a'):
                     if a.has_attr('target'):
-                        rel_vals = a.get('rel') or []
-                        if isinstance(rel_vals, str):
-                            rel_vals = rel_vals.split()
+                        raw_rel: str | list[str] | None = a.get("rel")
+                        rel_vals: list[str] = raw_rel.split() if isinstance(raw_rel, str) else list(raw_rel or [])
                         rel_set = set(rel_vals)
                         rel_set.update({'noopener', 'noreferrer'})
                         a['rel'] = ' '.join(sorted(rel_set))
@@ -1136,7 +1163,7 @@ class FileValidator:
             try:
                 # Prefer the preprocessed (script/style/comments removed) content if available
                 try:
-                    _pre = preprocessed  # type: ignore[name-defined]
+                    _pre = preprocessed
                 except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
                     _pre = html_content
                 return _strip_html_tags(_pre, HTML_DANGEROUS_TAGS)
@@ -1147,7 +1174,7 @@ class FileValidator:
     def sanitize_xml_content(self, xml_content: str, config: Optional[dict] = None) -> str:
         # Guarded XML parse using defusedxml; optionally strip comments/PIs.
         try:
-            from defusedxml import ElementTree as DET  # type: ignore
+            from defusedxml import ElementTree as DET
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:
             logging.warning("XML sanitizer unavailable; returning original content")
             return xml_content
@@ -1161,7 +1188,7 @@ class FileValidator:
         # instructions, so no stdlib XML comment handling is needed here.
 
         try:
-            cleaned = DET.tostring(root, encoding='unicode')
+            cleaned: str = DET.tostring(root, encoding='unicode')
             logging.info("XML content sanitized")
             return cleaned
         except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS:

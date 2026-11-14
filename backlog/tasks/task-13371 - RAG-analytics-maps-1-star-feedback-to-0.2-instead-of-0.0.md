@@ -26,9 +26,9 @@ core/RAG/rag_service/analytics_system.py:959,968 normalises user feedback stars 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Decision: keep stars/5 (documented exception), no migration. The stored analytics events (record_search_quality -> AnalyticsEvent.metrics.quality_score, record_document_performance.relevance_score) are unversioned JSON with no scale marker, so switching to scoring.py's linear min->0 map would silently shift every stored trend with no way to tell old rows from new. Evaluations needed min->0 because judge scores feed pass/fail thresholds; analytics never thresholds this value and only compares trends, and stars/5 has a coherent meaning (share of the top rating). AC2 is N/A (not migrated). Comment added at analytics_system.py above the search-quality record; test_submit_feedback_keeps_stars_over_five_for_stored_trends pins 1->0.2 and 5->1.0 so a future consistency refactor fails loudly. tests/RAG/test_analytics_backend.py: 11 passed. Bandit on analytics_system.py: 0 issues (pre-existing file, comment-only change). Side observation, not changed: rating = 1 if helpful else 0 records a thumbs-up as rating 1 in the same field as 1-5 stars.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

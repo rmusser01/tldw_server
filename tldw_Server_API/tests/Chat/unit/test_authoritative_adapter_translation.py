@@ -18,8 +18,8 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCredentialRuntime,
 )
-from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary_lib
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
     resolve_provider_section,
@@ -99,7 +99,7 @@ def test_chat_translation_and_validation_preserve_resolved_credentials_marker(
 ) -> None:
     resolved = _resolved_fields(provider)
     translated_provider, request, _internal = (
-        chat_service._build_adapter_request_from_chat_args(
+        gateway._build_adapter_request_from_chat_args(
             {
                 "api_provider": provider,
                 "model": "test-model",

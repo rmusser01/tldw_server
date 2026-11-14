@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import PurePath, PureWindowsPath
 from typing import Any
 
 from tldw_Server_API.app.core.Workspaces.models import (
+    AllowedAction,
     allowed_action,
     fail_closed_action,
     normalize_project_root_state,
@@ -29,7 +30,7 @@ def build_workspace_core_context(
     source_summary: Mapping[str, Any] | None,
     service_capabilities: Mapping[str, Any] | None,
     partial_errors: list[Mapping[str, Any]] | None,
-    active_operations: list[Mapping[str, Any]] | None = None,
+    active_operations: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Resolve the read-only Workspace Core context for status surfaces."""
     workspace_dict = dict(workspace or {})
@@ -314,7 +315,7 @@ def _allowed_actions(
     resolution: Mapping[str, Any],
     workspace_services: Mapping[str, Mapping[str, Any]],
     base_allowed_actions: Mapping[str, Mapping[str, Any]],
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, AllowedAction]:
     actions = {
         str(name): _normalize_action(value)
         for name, value in base_allowed_actions.items()
@@ -409,7 +410,7 @@ def _allowed_actions(
     return actions
 
 
-def _normalize_action(value: Mapping[str, Any] | None) -> dict[str, Any]:
+def _normalize_action(value: Mapping[str, Any] | None) -> AllowedAction:
     if not isinstance(value, Mapping):
         return fail_closed_action("action_not_configured")
     allowed = bool(value.get("allowed"))
@@ -464,7 +465,7 @@ def _root_action(
     root_reason: str,
     resolution_status: str,
     partial_reason_by_scope: Mapping[str, str],
-) -> dict[str, Any]:
+) -> AllowedAction:
     if resolution_status == "failed":
         return fail_closed_action("workspace_identity_unresolved")
     if resolution_status != "complete":
@@ -481,7 +482,7 @@ def _preview_action(
     resolution_status: str,
     partial_reason_by_scope: Mapping[str, str],
     workspace_services: Mapping[str, Mapping[str, Any]],
-) -> dict[str, Any]:
+) -> AllowedAction:
     if resolution_status == "failed":
         return fail_closed_action("workspace_identity_unresolved")
     if resolution_status != "complete":
@@ -501,7 +502,7 @@ def _file_indexing_action(
     resolution_status: str,
     partial_reason_by_scope: Mapping[str, str],
     project_root: Mapping[str, Any],
-) -> dict[str, Any]:
+) -> AllowedAction:
     if resolution_status == "failed":
         return fail_closed_action("workspace_identity_unresolved")
     if resolution_status != "complete":
@@ -523,7 +524,7 @@ def _file_inventory_scan_action(
     resolution_status: str,
     partial_reason_by_scope: Mapping[str, str],
     project_root: Mapping[str, Any],
-) -> dict[str, Any]:
+) -> AllowedAction:
     if resolution_status == "failed":
         return fail_closed_action("workspace_identity_unresolved")
     if resolution_status != "complete":
@@ -542,7 +543,7 @@ def _file_inventory_view_action(
     project_root: Mapping[str, Any],
     resolution_status: str,
     partial_reason_by_scope: Mapping[str, str],
-) -> dict[str, Any]:
+) -> AllowedAction:
     if resolution_status == "failed":
         return fail_closed_action("workspace_identity_unresolved")
     if resolution_status != "complete":
@@ -563,7 +564,7 @@ def _service_project_action(
     resolution_status: str,
     partial_reason_by_scope: Mapping[str, str],
     blocked_reason: str,
-) -> dict[str, Any]:
+) -> AllowedAction:
     if resolution_status == "failed":
         return fail_closed_action("workspace_identity_unresolved")
     if resolution_status != "complete":
@@ -588,7 +589,7 @@ def _preserved_service_action(
     resolution_status: str,
     partial_reason_by_scope: Mapping[str, str],
     default_reason: str,
-) -> dict[str, Any]:
+) -> AllowedAction:
     if resolution_status == "failed":
         return fail_closed_action("workspace_identity_unresolved")
     if resolution_status != "complete":

@@ -47,7 +47,7 @@ Implement Task 3 from the Backlog.md Python compatibility clone implementation p
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - 2026-05-10: Red-first project discovery test run captured the expected missing package failure: `ModuleNotFoundError: No module named 'backlog_py.storage'`.
 - 2026-05-10: Added `BacklogConfig` and `BacklogProject` dataclasses plus read-only YAML config loading with snake_case and camelCase key aliases.
 - 2026-05-10: Added project discovery for root `backlog.config.yml`, `backlog/config.yml`, `.backlog/config.yml`, `BACKLOG_CWD`, and explicit cwd precedence.
@@ -69,7 +69,7 @@ Controller verification 2026-05-10:
 Review closeout 2026-05-10:
 - Spec-compliance review approved with no missing Task 3 requirements or extra scope.
 - Code-quality review approved with no blockers. Deferred non-blocking hardening: reject non-string list items instead of coercing, consider tuple fields for deeper immutability, and add nested-cwd discovery regression later when CLI/MCP entrypoints depend on discovery.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

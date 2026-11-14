@@ -40,7 +40,7 @@ Continue the shared product-state design-system migration by adapting the dedica
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline before implementation: after installing apps/packages/ui dependencies in the new worktree, bunx vitest run src/components/Option/WorldBooks/__tests__/WorldBookEmptyState.test.tsx src/components/Common/__tests__/FeatureEmptyState.test.tsx src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1 --reporter=dot passed 47/47. bun run verify:design-system-state exited 0 with 523 allowed legacy exceptions and WorldBookEmptyState still present as local-empty-state debt.
 
 TDD red/green: added a canonical EmptyState marker assertion to WorldBookEmptyState.test.tsx, then verified it failed against the local wrapper with received null for data-ds-component=EmptyState. Adapted WorldBookEmptyState to render components/ui/feedback/EmptyState and shared Button actions while preserving current title, description, steps, example copy, template quick starts, create callback, import callback, and translation fallbacks.
@@ -48,7 +48,7 @@ TDD red/green: added a canonical EmptyState marker assertion to WorldBookEmptySt
 Verification after implementation: focused bunx vitest run src/components/Option/WorldBooks/__tests__/WorldBookEmptyState.test.tsx passed 6/6; combined focused run for WorldBookEmptyState, FeatureEmptyState, and product-state-guard passed 47/47; bun run verify:design-system-state exited 0 with baseline exceptions reduced from 523 to 522 and local-empty-state reduced from 3 to 2; git diff --check exited 0 before task-finalization edits. Broader bun run test:worldbooks passed 62 test files, 192 tests passed, 6 skipped, with existing jsdom CSS parse warnings. Bandit is not applicable to this frontend-only TypeScript/JSON slice.
 
 PR opened: https://github.com/rmusser01/tldw_server/pull/1349
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

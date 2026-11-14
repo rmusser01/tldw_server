@@ -30,7 +30,6 @@ from tldw_Server_API.app.core.Evaluations.identity import (
     EvaluationIdentity,
     evaluations_identity_from_user,
 )
-from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 
 security = HTTPBearer(auto_error=False)
@@ -44,14 +43,6 @@ def _env_truthy(name: str, default: str = "") -> bool:
 
 def _evals_heavy_admin_only_enabled() -> bool:
     return _env_truthy("EVALS_HEAVY_ADMIN_ONLY", "true")
-
-
-def _evals_testing_bypass_enabled() -> bool:
-    return is_explicit_pytest_runtime() and _env_truthy("TESTING") and not _evals_heavy_admin_only_enabled()
-
-
-def _evals_test_mode_bypass_enabled() -> bool:
-    return is_explicit_pytest_runtime() and _env_truthy("TEST_MODE")
 
 
 def sanitize_error_message(error: Exception, context: str = "") -> str:
@@ -105,17 +96,19 @@ async def verify_api_key(
     """Verify API key or JWT token based on auth mode (single_user|multi_user)."""
     settings = get_settings()
 
-    # Test-only bypass: must run under explicit pytest runtime.
-    if _evals_testing_bypass_enabled():
-        return "test_user"
-
     token = None
     if settings.AUTH_MODE == "single_user" and x_api_key and isinstance(x_api_key, str):
         token = x_api_key
     elif credentials:
         token = credentials.credentials
 
-    if not token:
+    cookie_candidate = (
+        settings.AUTH_MODE == "single_user"
+        and request.headers.get("Authorization") is None
+        and request.headers.get("X-API-KEY") is None
+        and bool(request.cookies.get(settings.SINGLE_USER_SESSION_COOKIE_NAME))
+    )
+    if not token and not cookie_candidate:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"error": {
@@ -140,9 +133,14 @@ async def verify_api_key(
             }},
         )
 
-    # Test-mode convenience (single-user): must run under explicit pytest runtime.
-    if _evals_test_mode_bypass_enabled() and settings.AUTH_MODE == "single_user":
-        return token
+    if cookie_candidate:
+        user = await get_request_user(
+            request=request,
+            api_key=None,
+            token=None,
+            legacy_token_header=None,
+        )
+        return f"user_{user.id_str}"
 
     if settings.AUTH_MODE == "single_user":
         expected_token = (
@@ -163,11 +161,6 @@ async def verify_api_key(
         if token == expected_token:
             return token
     elif settings.AUTH_MODE == "multi_user":
-        # In TEST_MODE, allow SINGLE_USER_API_KEY bearer only under explicit pytest runtime.
-        if _evals_test_mode_bypass_enabled():
-            env_key = os.getenv("SINGLE_USER_API_KEY") or getattr(settings, "SINGLE_USER_API_KEY", None)
-            if env_key and token == env_key:
-                return "test_user"
         try:
             jwt_service = get_jwt_service()
             # Decode early to surface token-specific errors before user lookup.
@@ -251,24 +244,6 @@ async def get_eval_request_user(
     legacy_token_header: Optional[str] = Header(None, alias="Token"),
 ) -> User:
     """Resolve the authenticated User after evaluations auth validation."""
-    if not api_key and not token and not legacy_token_header:
-        if _evals_testing_bypass_enabled():
-            return await get_request_user(
-                request=request,
-                api_key=api_key,
-                token=token,
-                legacy_token_header=legacy_token_header,
-            )
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "error": {
-                    "message": "Missing API key or token",
-                    "type": "authentication_error",
-                    "code": "missing_credentials",
-                }
-            },
-        )
     return await get_request_user(
         request=request,
         api_key=api_key,
@@ -360,11 +335,14 @@ async def _apply_rate_limit_headers(limiter, user_id: str, response: Response, m
         except Exception:
             response.headers["X-RateLimit-PerMinute-Remaining"] = "0"
         daily = limits.get("daily", {})
-        response.headers["X-RateLimit-Daily-Limit"] = str(daily.get("evaluations", 0))
-        response.headers["X-RateLimit-Daily-Remaining"] = str(remaining.get("daily_evaluations", 0))
-        response.headers["X-RateLimit-Tokens-Remaining"] = str(remaining.get("daily_tokens", 0))
-        response.headers["X-RateLimit-Daily-Cost-Remaining"] = f"{remaining.get('daily_cost', 0):.2f}"
-        response.headers["X-RateLimit-Monthly-Cost-Remaining"] = f"{remaining.get('monthly_cost', 0):.2f}"
+        # An unlimited daily cap is None: leave the header out rather than invent a number.
+        for header, value in (
+            ("X-RateLimit-Daily-Limit", daily.get("evaluations")),
+            ("X-RateLimit-Daily-Remaining", remaining.get("daily_evaluations")),
+            ("X-RateLimit-Tokens-Remaining", remaining.get("daily_tokens")),
+        ):
+            if value is not None:
+                response.headers[header] = str(value)
         response.headers["RateLimit-Limit"] = str(per_min_limit)
         if isinstance(meta, dict) and "requests_remaining" in meta:
             response.headers["RateLimit-Remaining"] = str(int(meta.get("requests_remaining") or 0))

@@ -52,7 +52,7 @@ Add a narrow Persona/Buddy visual-pack hardening slice for GitHub #1657. Current
 <!-- DOD:END -->
 
 ## Implementation Notes
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented shared import preview commit eligibility guards for API enqueue and worker revalidation paths.
 
 Verification: red tests first confirmed stale blocked revalidation still created packs and commit-ineligible completed preview still queued a job before the fix.
@@ -84,7 +84,7 @@ Verification after review fix: `git diff --check` passed.
 Verification after review fix: `python -m bandit tldw_Server_API/app/core/Persona/visual_portability/commit_eligibility.py tldw_Server_API/app/core/Persona/visual_portability/importer.py tldw_Server_API/app/api/v1/endpoints/persona.py` reported no issues.
 
 Closeout 2026-05-23: PR #1678 is merged into `dev` at `7f426d80f155b900b999884d829065ee9a27f47e`; no active PR or review blocker remains for this task. The implementation and review-fix verification above satisfy the acceptance criteria. No additional code changes were made in this closeout.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

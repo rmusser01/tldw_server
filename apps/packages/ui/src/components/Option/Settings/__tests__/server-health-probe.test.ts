@@ -77,6 +77,35 @@ describe("probeServerHealth", () => {
     })
   })
 
+  it.each([false, true])("releases status-only successful response bodies (single-user: %s)", async (singleUser) => {
+    let released = 0
+    const responses = Array.from({ length: singleUser ? 2 : 1 }, () =>
+      new Response(new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"status":"ok"}'))
+        },
+        cancel() { released++ }
+      }), { status: 200, headers: { "content-type": "application/json" } })
+    )
+    const fetchFn = async (input: RequestInfo | URL) => {
+      if (String(input) === "http://127.0.0.1:8000/api/v1/health") return responses[0]
+      if (singleUser && String(input) === "http://127.0.0.1:8000/api/v1/users/storage") return responses[1]
+      throw new Error("Unexpected probe endpoint")
+    }
+    try {
+      const result = await probeServerHealth({
+        serverUrl: "http://127.0.0.1:8000",
+        authMode: singleUser ? "single-user" : undefined,
+        apiKey: singleUser ? "test-key" : undefined,
+        fetchFn
+      })
+      expect(result.ok).toBe(true)
+      expect(released).toBe(singleUser ? 2 : 1)
+    } finally {
+      await Promise.all(responses.map(response => response.body?.cancel()))
+    }
+  })
+
   it("returns backend error text for non-2xx responses", async () => {
     const fetchFn = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>

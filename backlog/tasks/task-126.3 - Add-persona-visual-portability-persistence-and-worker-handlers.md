@@ -36,7 +36,7 @@ Add persistent persona visual export/import-preview bookkeeping and worker handl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented PersonaVisualPortabilityRepository with SQLite tables for persona visual portability jobs and import-preview records.
 
 Implemented PersonaVisualPortabilityWorker to handle persona visual pack export and import-preview Jobs payloads while keeping generation worker concerns separate.
@@ -46,7 +46,7 @@ Verification passed: pytest tldw_Server_API/tests/Persona/test_persona_visual_po
 Regression sweep passed: pytest test_persona_visual_service.py test_persona_visual_portability.py test_persona_visual_jobs.py test_persona_visual_portability_worker.py -q => 19 passed, 5 warnings.
 
 Bandit passed with no findings for touched implementation/test scope using -s B101 for test assertions: /tmp/bandit_persona_visual_portability_worker.json.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

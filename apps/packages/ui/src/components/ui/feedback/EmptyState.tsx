@@ -48,6 +48,8 @@ export interface EmptyStateProps {
   icon?: LucideIcon;
   /** Icon color class */
   iconClassName?: string;
+  /** Decorative icon wrapper spacing; overrides the size default. */
+  iconWrapperClassName?: string;
   /** Example items to display as bullets */
   examples?: React.ReactNode[];
   /** Steps to display */
@@ -136,6 +138,7 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
       description,
       icon: Icon,
       iconClassName,
+      iconWrapperClassName,
       examples,
       steps,
       suggestions,
@@ -180,7 +183,7 @@ export const EmptyState = React.forwardRef<HTMLDivElement, EmptyStateProps>(
               <div
                 className={cn(
                   "rounded-full bg-surface2/80",
-                  sizeStyles.iconWrapper,
+                  iconWrapperClassName ?? sizeStyles.iconWrapper,
                 )}
               >
                 <Icon

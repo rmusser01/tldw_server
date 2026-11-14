@@ -365,6 +365,7 @@ def test_analyzer_and_public_entry_point_signatures_match_current_inventory() ->
         custom_cookies: list[dict[str, Any]] | None = None,
         *,
         allow_llm_extraction: bool = True,
+        credential_free: bool = False,
     ) -> dict[str, Any]: ...
 
     def enhanced_scrape_article(

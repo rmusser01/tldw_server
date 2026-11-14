@@ -30,7 +30,7 @@ Re-check PR #2091 after the rebased review-fix push, make any remaining minimal 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fetched and rebased codex/workspaces-next; first rebase was already up to date, then origin/dev advanced while resolving threads so this follow-up will be rebased again before push.
 
 Verified the live PR review inventory. The substantive comments were already addressed in 0c54ad8a7: i18n strings, malformed bundle guard, Redis precedence and close logging, sandbox diagnostics async/threading/source_label/cancellation/schema docs, migration tombstone sequencing, Agent Tasks stale request guard, ACP mcpServers fallback, portable TASK-478 command, and dependency override cleanup.
@@ -38,16 +38,12 @@ Verified the live PR review inventory. The substantive comments were already add
 Made one minimal follow-up edit for the remaining still-current test-title comment: renamed the local tombstone preflight failure test to `fails safely when tombstone preflight write throws before local deletion`.
 
 Resolved all 31 unresolved PR review threads after verifying current code against each category.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Rechecked PR #2091 after rebasing on latest origin/dev. Verified all 31 unresolved review threads against current code, made the remaining test-title clarity edit, and resolved the threads on GitHub. Follow-up verification: `bunx vitest run src/store/__tests__/workspace-migration.test.ts --reporter=dot` -> 1 file and 12 tests passed; `git diff --check` -> passed. Bandit skipped for this follow-up because only a frontend test title and Backlog task file changed. Known unrelated files left untouched: the two untracked watchlist template files under tldw_Server_API/Config_Files/templates/watchlists/.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

@@ -1,9 +1,12 @@
 import React from "react"
+import type { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
 import { useDictionaryEntriesPanel } from "./useDictionaryEntriesPanel"
 import { useDictionaryListData } from "./useDictionaryListData"
 import { useDictionaryManagerWorkflows } from "./useDictionaryManagerWorkflows"
 
 type UseDictionaryManagerDataFlowsParams = {
+  owner: ReturnType<typeof useChatDraftOwner>
+  onOpenChat: (chat: unknown, isCurrent: () => boolean) => Promise<boolean>
   isOnline: boolean
   dictionarySearch: string
   dictionaryCategoryFilter: string
@@ -30,6 +33,8 @@ type UseDictionaryManagerDataFlowsParams = {
 }
 
 export function useDictionaryManagerDataFlows({
+  owner,
+  onOpenChat,
   isOnline,
   dictionarySearch,
   dictionaryCategoryFilter,
@@ -57,8 +62,10 @@ export function useDictionaryManagerDataFlows({
     tagFilterOptions,
     activeEntriesDictionary,
     dictionariesById,
+    isDictionaryCurrent,
     duplicateDictionary,
   } = useDictionaryListData({
+    owner,
     isOnline,
     dictionarySearch,
     dictionaryCategoryFilter,
@@ -70,8 +77,11 @@ export function useDictionaryManagerDataFlows({
 
   const dictionaries = Array.isArray(data) ? data : []
   const workflows = useDictionaryManagerWorkflows({
+    owner,
+    onOpenChat,
     isOnline,
     dictionaries,
+    isDictionaryCurrent,
     queryClient,
     notification,
     confirmDanger,
@@ -80,7 +90,16 @@ export function useDictionaryManagerDataFlows({
     importDialogFocusReturnRef,
   })
 
+  const openLinkedDictionaryChat = async (chat: unknown, dictionary: unknown) => {
+    const isCurrent = () => isDictionaryCurrent(dictionary) && Boolean(dictionary && typeof dictionary === "object" &&
+      Array.isArray((dictionary as { used_by_chat_refs?: unknown[] }).used_by_chat_refs) &&
+      (dictionary as { used_by_chat_refs: unknown[] }).used_by_chat_refs.includes(chat))
+    if (!isCurrent()) return false
+    return await onOpenChat(chat, isCurrent)
+  }
+
   return {
+    openLinkedDictionaryChat,
     openEntries,
     openDictionaryEntriesPanel,
     closeDictionaryEntriesPanel,
@@ -93,6 +112,7 @@ export function useDictionaryManagerDataFlows({
     tagFilterOptions,
     activeEntriesDictionary,
     dictionariesById,
+    isDictionaryCurrent,
     duplicateDictionary,
     ...workflows,
   }

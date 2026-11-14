@@ -68,7 +68,7 @@ status.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 BETTER PRIMARY FIX FOUND -- remove the cause, not just the mislabelling.
 
 The audit job checks out at fetch-depth: 0 (:45), a FULL-history clone. Measured locally:
@@ -117,7 +117,7 @@ Follow-up from Qodo on #3032, declined there with reasons: a run superseded by c
 CORRECTION 2 (2026-09-27): both live tests above were invalid. pull_request_target runs the workflow file from the DEFAULT branch (main), not the PR base (dev). A runner debug log of rerun 36345134991 attempt 2 shows the Publish step evaluated plain always(), which is main's version. So neither #3029 (!cancelled()) nor #3032 (verdict-gated condition) has run, and the earlier claim that cancelled() stayed false after a cancelled step is unproven: the runs never evaluated it. #3032's condition stays as the fix. It also covers a cancel before evaluation, whatever cancelled() does. It takes effect only when dev is released to main. AC #1 and AC #4 must be verified live after that release. The same applies to any change to a pull_request_target workflow: it is inert until it reaches main.
 
 VERIFIED LIVE 2026-09-27, after v0.1.45 put the fix on main: license-gate run 36353925069 on PR #3035 was cancelled during Checkout after posting pending. Evaluate was skipped, Publish trusted policy result was skipped, and frontend-license-policy/trusted/dev stayed pending. Before v0.1.45 the same cancellation posted failure (runs 36342617339, 36345134991). All ACs are met.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

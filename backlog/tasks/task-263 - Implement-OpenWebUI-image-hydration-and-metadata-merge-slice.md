@@ -40,13 +40,13 @@ Follow Stage 3 of the implementation plan locally because subagent execution is 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented Stage 3 image hydration locally after subagent quota blocked delegation: added append_message_image with commit=False support, deep OpenWebUI hydration metadata merge, byte-sniffed image hydration, idempotent source-key handling, and rollback on metadata update failure.
 
 Verification: pytest focused image/metadata slice passed 6 selected tests; full OpenWebUI Chatbooks regression set passed 35 tests; git diff --check passed; Bandit JSON at /tmp/bandit_openwebui_image_hydration.json had 0 results and 0 errors.
 
 Documentation for this slice is the implementation plan/task tracking update; user-facing hydration docs remain in the later docs stage of the plan.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -32,7 +32,7 @@ Create a design spec for a read-only MCP policy explain and profile tool-preview
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created a design-only spec for the MCP effective permission explain and profile tool-preview surface. This task intentionally does not implement runtime code; implementation planning should wait for user approval of the reviewed spec.
 
 Local spec review incorporated fixes: corrected the subject extraction module path, changed profile preview to POST to avoid leaking session data in URL logs, clarified static-policy-only is not inherently degraded, added evaluated_at/skipped_contributors response fields, added argument payload size caps, added CLI --args-json-file/--args-stdin guidance, removed an unrelated FastAPI initialize test note, and required audit failures to prevent successful policy-detail responses.
@@ -40,7 +40,7 @@ Local spec review incorporated fixes: corrected the subject extraction module pa
 Second design-review pass incorporated fixes: documented the admin identity gap in the current API-key auth dependency, required a strict audit helper rather than existing best-effort audit helpers, required a public unfiltered admin catalog provider instead of private discovery internals, replaced subject-level boolean redaction with redaction_state, added a stable error envelope, and documented profile-id conflict validation for preview requests.
 
 Verification after second review: git diff --check passed; placeholder-marker scan passed; non-ASCII scan passed. Bandit remains skipped because this is documentation and Backlog metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -16,6 +16,23 @@ class ToolExecutionError(Exception):
     pass
 
 
+class ToolApprovalRequiredError(ToolExecutionError):
+    """Execution refusal carrying a structured MCP approval demand.
+
+    The MCP protocol converts ``ApprovalRequiredError`` (raised by
+    tool_execution/security.py and hooks.py) into an AUTHORIZATION_ERROR
+    response whose ``data`` holds the approval request payload
+    (``{"approval": {...}}``). Plain ``ToolExecutionError`` drops that
+    payload; this subclass preserves it (``.approval``) so unattended
+    callers — the scheduled read-only envelope — can classify the refusal
+    as an approval demand instead of an ordinary execution failure.
+    """
+
+    def __init__(self, message: str, approval: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.approval = approval if isinstance(approval, dict) else {}
+
+
 class ToolExecutor:
     """Thin wrapper around MCP Unified protocol for server-side tool execution.
 
@@ -102,5 +119,13 @@ class ToolExecutor:
         resp = await self.server.protocol.process_request(req, ctx)
         if getattr(resp, "error", None):
             err = getattr(resp.error, "message", str(resp.error))  # type: ignore[attr-defined]
+            data = getattr(resp.error, "data", None)  # type: ignore[attr-defined]
+            # Approval-demand signal: the protocol maps ApprovalRequiredError
+            # to AUTHORIZATION_ERROR with data={"approval": {...}} — that
+            # mapping (not the bare code, which plain permission denials
+            # share) is what distinguishes an interactive-approval demand
+            # from an ordinary authorization failure. Preserve it.
+            if isinstance(data, dict) and isinstance(data.get("approval"), dict):
+                raise ToolApprovalRequiredError(err, approval=data["approval"])
             raise ToolExecutionError(err)
         return getattr(resp, "result", {}) or {}

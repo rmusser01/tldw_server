@@ -44,13 +44,13 @@ Address actionable PR #1253 review feedback from CodeRabbit. The review covered 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed PR #1253 review threads: renamed duplicate TASK-27 section markers; kept Python attribute calls unresolved instead of resolving by bare attribute name; added atomic file plus graph repository persistence; persisted extraction_failed file status and run error summaries; normalized MCP search and selector inputs; rejected node_id plus symbol ambiguity; added focused docstrings for changed production code.
 
 Verification: focused CodeGraph/MCP pytest suite passed with 47 passed and 5 warnings; AST docstring inspection reported 111 definitions with 0 missing docstrings; Bandit touched scope reported 0 results and 0 errors; git diff --check origin/dev...HEAD passed.
 
 Known non-code blocker: PR description Change summary still requires a human-written summary per repository policy.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

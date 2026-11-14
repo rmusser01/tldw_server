@@ -42,11 +42,7 @@ Implement the WP5 settings and model/provider UX remediation slice for WebUI/ext
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Started implementation in clean worktree codex/webui-settings-models from origin/dev at e61681e99a04b655d14404d96f90f8f3b54b12aa after PR #1839 merged. Main checkout remains dirty and unrelated. Following Docs/superpowers/plans/2026-05-17-webui-settings-models-implementation-plan.md with TDD: add failing settings label/grouping tests before product code changes.
 
 Completed first remediation slice: regrouped Settings navigation around user tasks (Connect, AI & Models, Experience, Knowledge & Workspace, Safety & Admin, About); fixed Provider Keys nav token; added locale guards for nav labels across source locales; regenerated public settings locale mirrors with the existing sync script.
@@ -76,7 +72,7 @@ PR #1845 review follow-up verification 2026-05-18: added a regression test provi
 PR #1845 second review sweep 2026-05-18: CodeRabbit/Qodo added actionable comments after commit c229a70aa. Current items to verify/fix: locale directory filtering in settings nav guardian, provider-key error handling in model readiness UI, keyboard-accessible import trigger, exact prompt settings URL assertion, duplicate FINAL_SUMMARY markers in TASK-418.14 and TASK-418.2, raw syncFirefoxData error logging, and model usability/configuration derived from server catalog fields.
 
 PR #1845 second review sweep verification 2026-05-18: fixed the new CodeRabbit/Qodo comments by filtering locale guard iteration to directories, showing provider-key load failures separately from configured counts, deriving model configured/usable state from provider keys plus server model flags, replacing the import label with a disabled-aware button that clicks the hidden file input, removing raw syncFirefoxData error logging, tightening the prompt settings URL assertion, and removing duplicate FINAL_SUMMARY markers from TASK-418.14 and TASK-418.2. Verification: affected Vitest tests passed 3 files / 21 tests; broader focused settings/model Vitest suite passed 11 files / 45 tests; git diff --check passed. Focused Playwright prompt-route command was rerun outside the sandbox after a port-bind EPERM, but skipped 3 tests because the E2E fixture marked the backend server unavailable. bunx tsc --noEmit --pretty false still fails on existing repo-wide UI baseline diagnostics outside this touched slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

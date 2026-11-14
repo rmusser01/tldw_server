@@ -1,3 +1,4 @@
+import { dictionaryOwnerFixture, dictionarySnapshotFixture, scopedDictionaryQueryFixture, scopedDictionaryQueryClientFixture, selectDictionaryChatFixture } from "./dictionary-owner.fixture"
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
@@ -82,10 +83,14 @@ const {
   }
 }))
 
+vi.mock("@/hooks/useChatDraftOwner", () => ({ useChatDraftOwner: () => dictionaryOwnerFixture }))
+vi.mock("@/hooks/chat/useSelectServerChat", () => ({ useSelectServerChat: () => selectDictionaryChatFixture }))
+vi.mock("@/services/service-prompts", () => ({ loadServicePromptSnapshot: (...args: Parameters<typeof dictionarySnapshotFixture>) => dictionarySnapshotFixture(...args) }))
+
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: useQueryMock,
+  useQuery: (options: { queryKey?: readonly unknown[] }) => scopedDictionaryQueryFixture(options, useQueryMock(options)),
   useMutation: useMutationMock,
-  useQueryClient: useQueryClientMock
+  useQueryClient: () => scopedDictionaryQueryClientFixture(useQueryClientMock())
 }))
 
 vi.mock("react-i18next", () => ({
@@ -142,14 +147,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: tldwClientMock
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: () => ({
-    setHistoryId: vi.fn(),
-    setServerChatId: vi.fn(),
-    setServerChatState: vi.fn(),
-    setServerChatTitle: vi.fn()
-  })
-}))
+
 
 const makeUseQueryResult = (value: Record<string, any>) => ({
   data: undefined,

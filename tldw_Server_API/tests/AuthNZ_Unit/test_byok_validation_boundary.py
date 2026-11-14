@@ -17,6 +17,10 @@ from tldw_Server_API.app.api.v1.schemas.user_keys import (
     UserProviderKeyUpsertRequest,
 )
 from tldw_Server_API.app.core.AuthNZ import byok_testing
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+)
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
@@ -36,9 +40,11 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatRateLimitError,
     SanitizedProviderStreamError,
 )
+from tldw_Server_API.app.core.LLM_Calls import gateway
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
 from tldw_Server_API.app.services import admin_byok_service as shared_service
 from tldw_Server_API.tests.provider_credential_test_helpers import (
     resolved_request_fields_async,
@@ -249,8 +255,13 @@ class _StaticValidationResultAdapter:
 class _CredentialBoundaryAdapter:
     """Exercise the real credential binder at the validation adapter boundary."""
 
-    def __init__(self, observed: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        observed: list[dict[str, Any]],
+        exempt_seen: list[bool] | None = None,
+    ) -> None:
         self.observed = observed
+        self.exempt_seen = exempt_seen
 
     def chat(
         self,
@@ -259,6 +270,8 @@ class _CredentialBoundaryAdapter:
         timeout: float | None = None,
     ) -> dict[str, Any]:
         del timeout
+        if self.exempt_seen is not None:
+            self.exempt_seen.append(current_llm_call_context().exempt)
         tampered = {
             **request,
             "api_key": "attacker-loose-key",
@@ -399,7 +412,7 @@ async def _allow_scope(*_args: Any, **_kwargs: Any) -> None:
 
 def _install_boundary(monkeypatch: pytest.MonkeyPatch, adapter: Any, pool: _ObservedPool) -> None:
     registry = SimpleNamespace(get_adapter=lambda _provider: adapter)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: registry)
     monkeypatch.setattr(byok_testing, "build_app_config_for_provider", lambda *_args: {})
     monkeypatch.setattr(
@@ -421,6 +434,21 @@ def _install_boundary(monkeypatch: pytest.MonkeyPatch, adapter: Any, pool: _Obse
     monkeypatch.setattr(shared_service, "require_byok_enabled", lambda: None)
     monkeypatch.setattr(shared_service, "is_provider_allowlisted", lambda _provider: True)
     monkeypatch.setattr(shared_service, "normalize_credential_fields", lambda *_args, **_kwargs: {})
+
+    async def authorize_scope_write(
+        *, scope_type: str, scope_id: int,
+        authorization_context: ActorMembershipWriteContext,
+    ) -> None:
+        assert (scope_type, scope_id) == ("org", 42)
+        assert authorization_context == ActorMembershipWriteContext(
+            actor_user_id=7,
+            required_authority=MembershipAuthority.PLATFORM_ADMIN,
+        )
+
+    async def shared_repo() -> SimpleNamespace:
+        return SimpleNamespace(authorize_scope_write=authorize_scope_write)
+
+    monkeypatch.setattr(shared_service, "get_shared_byok_repo", shared_repo)
     monkeypatch.setattr(scoped_routes, "_require_byok_enabled", lambda: None)
     monkeypatch.setattr(scoped_routes, "_require_org_manager", _allow_scope)
     monkeypatch.setattr(scoped_routes, "is_provider_allowlisted", lambda _provider: True)
@@ -438,7 +466,7 @@ def _install_legacy_boundary(
     pool: _ObservedPool,
 ) -> None:
     registry = SimpleNamespace(get_adapter=lambda _provider: None)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: registry)
     monkeypatch.setattr(byok_testing, "list_registered_providers", lambda: ["openai"])
     monkeypatch.setattr(byok_testing, "chat_api_call", call)
@@ -459,11 +487,13 @@ async def test_provider_validation_dispatch_binds_authentic_candidate_credential
     """Validation dispatch authenticates one capability before trusting loose fields."""
 
     observed: list[dict[str, Any]] = []
+    exempt_seen: list[bool] = []
     pool = _ObservedPool(1)
     if branch == "adapter":
-        _install_boundary(monkeypatch, _CredentialBoundaryAdapter(observed), pool)
+        _install_boundary(monkeypatch, _CredentialBoundaryAdapter(observed, exempt_seen), pool)
     else:
         def call_legacy(**kwargs: Any) -> dict[str, Any]:
+            exempt_seen.append(current_llm_call_context().exempt)
             credentials = kwargs.get(PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY)
             assert is_runtime_issued_provider_call_credentials(
                 credentials,
@@ -498,6 +528,7 @@ async def test_provider_validation_dispatch_binds_authentic_candidate_credential
     )
 
     assert model == "candidate-model"
+    assert exempt_seen == [True]
     assert len(observed) == 1
     assert observed[0]["api_key"] == "sk-candidate-runtime"
     assert observed[0]["app_config"]["openai_api"]["tenant"] == "runtime-tenant"
@@ -598,7 +629,7 @@ def _install_shared_admin_chat_boundary(
     """Install real Admin and Chat adapter boundaries over one process pool."""
     admin_registry = SimpleNamespace(get_adapter=lambda _provider: admin_adapter)
     chat_registry = SimpleNamespace(get_adapter=lambda _provider: chat_adapter)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: admin_registry)
     monkeypatch.setattr(byok_testing, "build_app_config_for_provider", lambda *_args: {})
     monkeypatch.setattr(
@@ -612,8 +643,9 @@ def _install_shared_admin_chat_boundary(
         pool,
         raising=False,
     )
-    monkeypatch.setattr(chat_service, "_get_llm_registry", lambda: chat_registry)
+    monkeypatch.setattr(gateway, "_get_llm_registry", lambda: chat_registry)
     monkeypatch.setattr(chat_service, "SYNC_ADAPTER_CALL_POOL", pool)
+    monkeypatch.setattr(gateway, "SYNC_ADAPTER_CALL_POOL", pool)
 
 
 async def _run_shared_admin_validation(
@@ -1076,7 +1108,7 @@ async def test_default_validation_deadline_reaches_ollama_http_timeout_without_m
     adapter = local_adapters.OllamaAdapter()
     registry = SimpleNamespace(get_adapter=lambda _provider: adapter)
     pool = _ObservedPool(1)
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(byok_testing, "get_registry", lambda: registry)
     monkeypatch.setattr(byok_testing, "SYNC_ADAPTER_CALL_POOL", pool)
     monkeypatch.setattr(
@@ -1584,7 +1616,7 @@ async def test_provider_specific_health_admission_tracks_real_worker_lifetime(
         "PROVIDER_CREDENTIAL_VALIDATION_PER_PROVIDER_CONCURRENCY",
         "1",
     )
-    monkeypatch.setattr(byok_testing, "_is_test_mode", lambda: False)
+    monkeypatch.setattr(byok_testing, "is_test_context", lambda: False)
     monkeypatch.setattr(
         byok_testing,
         "get_registry",

@@ -1,9 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from tldw_Server_API.app.core import testing
 from tldw_Server_API.app.core.testing import (
-    is_test_mode,
     is_production_like_env,
+    is_test_mode,
     validate_test_runtime_flags,
 )
 
@@ -56,7 +57,7 @@ def test_validate_test_runtime_flags_rejects_even_with_override_without_pytest_r
     monkeypatch.setenv("TEST_MODE", "1")
     monkeypatch.setenv("ALLOW_TEST_MODE_IN_PRODUCTION", "1")
 
-    with pytest.raises(RuntimeError, match="missing PYTEST_CURRENT_TEST"):
+    with pytest.raises(RuntimeError, match="production-like runtime"):
         validate_test_runtime_flags()
 
 
@@ -113,7 +114,6 @@ def test_app_startup_fails_fast_when_lazy_evaluations_warmup_fails(
     from tldw_Server_API.app import main as main_mod
     from tldw_Server_API.app.core.Evaluations import connection_pool as eval_pool
 
-    monkeypatch.setattr(main_mod, "_TEST_MODE", False, raising=True)
     monkeypatch.setattr(main_mod, "route_enabled", lambda key, **_kwargs: key == "evaluations")
 
     def _boom():
@@ -135,3 +135,23 @@ def test_main_loguru_reconfig_override_accepts_single_letter_y(
     from tldw_Server_API.app import main as main_mod
 
     assert main_mod._caller_allowed_for_loguru_config() is True
+
+
+@pytest.mark.parametrize(
+    ("env", "expected"),
+    [
+        ({}, False),
+        ({"TEST_MODE": "1"}, True),
+        ({"TLDW_TEST_MODE": "y"}, True),
+        ({"TESTING": "true"}, True),
+        ({"PYTEST_CURRENT_TEST": "t.py::t (call)"}, True),
+        ({"TEST_MODE": "0", "TESTING": "0"}, False),
+        ({"PYTEST_CURRENT_TEST": ""}, False),
+    ],
+)
+def test_is_test_context_is_the_union_of_the_test_signals(monkeypatch, env, expected):
+    for key in ("TEST_MODE", "TLDW_TEST_MODE", "TESTING", "PYTEST_CURRENT_TEST"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert testing.is_test_context() is expected

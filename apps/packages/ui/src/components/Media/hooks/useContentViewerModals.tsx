@@ -953,6 +953,16 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
   )
 
   const mediaPlayerRef = useRef<HTMLMediaElement | null>(null)
+  const releaseMediaPlayer = useCallback((player: HTMLMediaElement | null) => {
+    if (!player?.hasAttribute('src')) return
+    player.pause()
+    player.removeAttribute('src')
+    player.load()
+  }, [])
+  const setMediaPlayerRef = useCallback((player: HTMLMediaElement | null) => {
+    if (mediaPlayerRef.current !== player) releaseMediaPlayer(mediaPlayerRef.current)
+    mediaPlayerRef.current = player
+  }, [releaseMediaPlayer])
 
   // Load embedded media file
   useEffect(() => {
@@ -967,7 +977,7 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
       }
     }
 
-    mediaPlayerRef.current = null
+    releaseMediaPlayer(mediaPlayerRef.current)
     setEmbeddedMediaError(null)
     setEmbeddedMediaLoading(false)
     setEmbeddedMediaUrl(null)
@@ -979,7 +989,7 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
       }
     }
 
-    let cancelled = false
+    const controller = new AbortController()
     setEmbeddedMediaLoading(true)
 
     ;(async () => {
@@ -987,9 +997,13 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
         const fileBuffer = await bgRequest<ArrayBuffer>({
           path: `/api/v1/media/${selectedMediaId}/file` as any,
           method: 'GET' as any,
-          responseType: 'arrayBuffer'
+          responseType: 'arrayBuffer',
+          abortSignal: controller.signal,
+          // ponytail: authenticated Blob preview capped at 64 MiB; use a secure
+          // streaming URL when that transport exists (TASK-13450).
+          maxResponseBytes: 64 * 1024 * 1024
         })
-        if (cancelled) return
+        if (controller.signal.aborted) return
 
         const asArrayBuffer =
           fileBuffer instanceof ArrayBuffer
@@ -1009,21 +1023,24 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
         embeddedMediaObjectUrlRef.current = objectUrl
         setEmbeddedMediaUrl(objectUrl)
       } catch (error) {
-        if (cancelled) return
+        if (controller.signal.aborted) return
         console.debug('Failed to load embedded media file', error)
-        setEmbeddedMediaError('Unable to load media preview.')
+        setEmbeddedMediaError((error as { code?: string })?.code === 'RESPONSE_TOO_LARGE'
+          ? 'This file exceeds the 64 MiB embedded preview limit.'
+          : 'Unable to load media preview.')
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setEmbeddedMediaLoading(false)
         }
       }
     })()
 
     return () => {
-      cancelled = true
+      controller.abort()
+      releaseMediaPlayer(mediaPlayerRef.current)
       revokeObjectUrl()
     }
-  }, [embeddedMediaMimeType, selectedMediaId, shouldShowEmbeddedPlayer])
+  }, [embeddedMediaMimeType, selectedMediaId, shouldShowEmbeddedPlayer, releaseMediaPlayer])
 
   // Show diff handler
   const handleShowDiff = useCallback(
@@ -1115,6 +1132,7 @@ export function useContentViewerModals(deps: UseContentViewerModalsDeps) {
     embeddedMediaError,
     embeddedMediaMimeType,
     mediaPlayerRef,
+    setMediaPlayerRef,
     // Developer tools
     REINGEST_CRON_BY_PRESET: REINGEST_CRON_BY_PRESET as Record<string, string>
   }

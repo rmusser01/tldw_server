@@ -21,6 +21,10 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import (
     apply_postgres_sharing_schema,
     postgres_sharing_schema_issues,
 )
+from tldw_Server_API.app.core.exceptions import (
+    PGUsageSchemaError,
+    raise_detached_error,
+)
 
 from .database import DatabasePool, get_db_pool
 from .exceptions import DatabaseError as AuthNZDatabaseError
@@ -46,6 +50,7 @@ _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS = (
     TimeoutError,
     json.JSONDecodeError,
 )
+
 
 _BUDGET_FIELD_KEYS = {
     "budget_day_usd",
@@ -154,6 +159,18 @@ _CREATE_MCP_HUB_TABLES = [
     (
         "ALTER TABLE mcp_external_servers "
         "ADD COLUMN IF NOT EXISTS superseded_by_server_id TEXT",
+        (),
+    ),
+    (
+        "ALTER TABLE mcp_external_servers ADD COLUMN IF NOT EXISTS last_discovery_at TIMESTAMPTZ",
+        (),
+    ),
+    (
+        "ALTER TABLE mcp_external_servers ADD COLUMN IF NOT EXISTS last_successful_discovery_at TIMESTAMPTZ",
+        (),
+    ),
+    (
+        "ALTER TABLE mcp_external_servers ADD COLUMN IF NOT EXISTS last_error_category TEXT",
         (),
     ),
     (
@@ -1093,6 +1110,9 @@ _CREATE_AUTHNZ_CORE_TABLES = [
     ("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_sessions_access_jti ON sessions(access_jti)", ()),
+    # Admin activity summaries filter sessions by a created_at time window
+    # (admin perf plan A, stage 3); keep it an index range scan.
+    ("CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)", ()),
     # password_history
     (
         """
@@ -1249,6 +1269,13 @@ _CREATE_AUTHNZ_CORE_TABLES = [
         (),
     ),
     ("CREATE INDEX IF NOT EXISTS idx_org_members_user ON public.org_members(user_id)", ()),
+    # Org-scoped admin joins filter org_members by org_id and join on user_id
+    # (admin perf plan A, stage 3); the composite index covers both.
+    (
+        "CREATE INDEX IF NOT EXISTS idx_org_members_org_user "
+        "ON public.org_members(org_id, user_id)",
+        (),
+    ),
     (
         """
         CREATE TABLE IF NOT EXISTS public.teams (
@@ -1948,7 +1975,8 @@ _CREATE_USAGE_TABLES = [
             prompt_fingerprint TEXT,
             prompt_fingerprint_version TEXT,
             world_book_fingerprint TEXT,
-            raw_usage_metadata_json TEXT
+            raw_usage_metadata_json TEXT,
+            credential_source TEXT
         )
         """,
         (),
@@ -1968,8 +1996,90 @@ _CREATE_USAGE_TABLES = [
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS prompt_fingerprint_version TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS world_book_fingerprint TEXT", ()),
     ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS raw_usage_metadata_json TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS credential_source TEXT", ()),
+    ("ALTER TABLE llm_usage_log ADD COLUMN IF NOT EXISTS billing_org_id BIGINT", ()),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_usage_mcp_execution "
+        "ON llm_usage_log(request_id) "
+        "WHERE operation = 'mcp_model_completion' AND request_id IS NOT NULL",
+        (),
+    ),
+    (
+        """
+        CREATE TABLE IF NOT EXISTS provider_usage_scope_locks (
+            billing_scope_type TEXT NOT NULL CHECK (billing_scope_type IN ('user', 'team', 'org')),
+            billing_scope_id BIGINT NOT NULL CHECK (billing_scope_id > 0),
+            PRIMARY KEY (billing_scope_type, billing_scope_id)
+        )
+        """,
+        (),
+    ),
+    (
+        """
+        CREATE TABLE IF NOT EXISTS provider_usage_reservations (
+            execution_id TEXT PRIMARY KEY CHECK (execution_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'),
+            insertion_owner TEXT,
+            user_id BIGINT NOT NULL CHECK (user_id > 0),
+            active_team_id BIGINT CHECK (active_team_id IS NULL OR active_team_id > 0),
+            active_organization_id BIGINT CHECK (active_organization_id IS NULL OR active_organization_id > 0),
+            billing_scope_type TEXT NOT NULL CHECK (billing_scope_type IN ('user', 'team', 'org')),
+            billing_scope_id BIGINT NOT NULL CHECK (billing_scope_id > 0),
+            provider TEXT NOT NULL CHECK (length(trim(provider)) > 0),
+            model TEXT NOT NULL CHECK (length(trim(model)) > 0),
+            credential_source TEXT CHECK (
+                credential_source IS NULL
+                OR credential_source IN ('user', 'team', 'org', 'server_default', 'user_unmetered')
+            ),
+            reserved_input_tokens BIGINT NOT NULL CHECK (reserved_input_tokens >= 0),
+            reserved_output_tokens BIGINT NOT NULL CHECK (reserved_output_tokens >= 0),
+            reserved_cost_units BIGINT NOT NULL CHECK (reserved_cost_units >= 0),
+            actual_input_tokens BIGINT CHECK (actual_input_tokens IS NULL OR actual_input_tokens BETWEEN 0 AND reserved_input_tokens),
+            actual_output_tokens BIGINT CHECK (actual_output_tokens IS NULL OR actual_output_tokens BETWEEN 0 AND reserved_output_tokens),
+            actual_cost_units BIGINT CHECK (actual_cost_units IS NULL OR actual_cost_units BETWEEN 0 AND reserved_cost_units),
+            state TEXT NOT NULL CHECK (state IN ('reserved', 'dispatched', 'ambiguous', 'reconciled', 'released')),
+            created_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            dispatched_at TIMESTAMPTZ,
+            resolved_at TIMESTAMPTZ,
+            CHECK (reserved_input_tokens <= 9223372036854775807 - reserved_output_tokens),
+            CHECK (
+                (active_organization_id IS NOT NULL AND billing_scope_type = 'org' AND billing_scope_id = active_organization_id)
+                OR (active_organization_id IS NULL AND active_team_id IS NOT NULL AND billing_scope_type = 'team' AND billing_scope_id = active_team_id)
+                OR (active_organization_id IS NULL AND active_team_id IS NULL AND billing_scope_type = 'user' AND billing_scope_id = user_id)
+            ),
+            CHECK (
+                (state = 'reconciled' AND actual_input_tokens IS NOT NULL AND actual_output_tokens IS NOT NULL AND actual_cost_units IS NOT NULL)
+                OR (state != 'reconciled' AND actual_input_tokens IS NULL AND actual_output_tokens IS NULL AND actual_cost_units IS NULL)
+            ),
+            CHECK ((state IN ('released', 'reconciled') AND resolved_at IS NOT NULL) OR (state NOT IN ('released', 'reconciled') AND resolved_at IS NULL)),
+            CHECK ((state IN ('reserved', 'released') AND dispatched_at IS NULL) OR (state NOT IN ('reserved', 'released') AND dispatched_at IS NOT NULL))
+        )
+        """,
+        (),
+    ),
+    (
+        "ALTER TABLE provider_usage_reservations ADD COLUMN IF NOT EXISTS insertion_owner TEXT",
+        (),
+    ),
+    (
+        "ALTER TABLE provider_usage_reservations ADD COLUMN IF NOT EXISTS credential_source TEXT "
+        "CHECK (credential_source IS NULL "
+        "OR credential_source IN ('user', 'team', 'org', 'server_default', 'user_unmetered'))",
+        (),
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_scope "
+        "ON provider_usage_reservations(billing_scope_type, billing_scope_id, state)",
+        (),
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_user_state "
+        "ON provider_usage_reservations(user_id, state)",
+        (),
+    ),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)", ()),
+    ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_provider_model ON llm_usage_log(provider, model)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_op_ts ON llm_usage_log(operation, ts)", ()),
     ("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_key_ts ON llm_usage_log(key_id, ts)", ()),
@@ -3575,6 +3685,11 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
         async with db_pool.transaction() as conn:
             for sql, params in _CREATE_AUTHNZ_CORE_TABLES:
                 await conn.execute(sql, *params)
+            from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                native_quota_schema_statements,
+            )
+            for statement in native_quota_schema_statements(postgres=True):
+                await conn.execute(statement)
             await ensure_postgres_session_last_activity(conn)
             has_legacy_uses = await conn.fetchval(
                 "SELECT EXISTS ("
@@ -4113,6 +4228,53 @@ async def ensure_llm_provider_overrides_pg(pool: DatabasePool | None = None) -> 
         logger.warning(f"Failed to ensure PostgreSQL llm_provider_overrides table: {exc}")
         return False
 
+async def ensure_storage_quota_overrides_backfill_pg(pool: DatabasePool) -> bool:
+    """Copy users.storage_quota_mb into limits.storage_quota_mb overrides once (spec 2 §8).
+
+    A marker row claimed in the same transaction makes it run once, so an override an
+    admin later deletes is never re-created from the stale column.
+    """
+    from tldw_Server_API.app.core.AuthNZ.storage_quota_backfill import (
+        PG_BACKFILL_MARKER,
+        STORAGE_QUOTA_KEY,
+        skip_values,
+    )
+
+    try:
+        async with pool.transaction() as conn:
+            await conn.execute(
+                "CREATE TABLE IF NOT EXISTS authnz_data_backfills ("
+                "name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW())"
+            )
+            claimed = await conn.fetchval(
+                "INSERT INTO authnz_data_backfills (name) VALUES ($1) "
+                "ON CONFLICT (name) DO NOTHING RETURNING name",
+                PG_BACKFILL_MARKER,
+            )
+            if claimed is None:
+                return True
+            status = await conn.execute(
+                """
+                INSERT INTO user_config_overrides (user_id, key, value_json, created_at, updated_at)
+                SELECT id, $1, storage_quota_mb::text, NOW(), NOW()
+                FROM users
+                WHERE storage_quota_mb IS NOT NULL AND NOT (storage_quota_mb = ANY($2::int[]))
+                ON CONFLICT (user_id, key) DO NOTHING
+                """,
+                STORAGE_QUOTA_KEY,
+                skip_values(),
+            )
+        logger.info("Postgres storage quota backfill copied rows ({})", status)
+        return True
+    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
+        logger.error(
+            "Postgres storage quota backfill failed ({}): {}; it will retry at the next start",
+            type(exc).__name__,
+            exc,
+        )
+        return False
+
+
 async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure usage and LLM usage tables exist for PostgreSQL backends.
 
@@ -4120,20 +4282,43 @@ async def ensure_usage_tables_pg(pool: DatabasePool | None = None) -> bool:
     but uses Postgres types and indexes. Intended as bootstrap guardrails when running
     against Postgres without having executed dedicated migrations.
     """
+
+    transient_failure = False
     try:
         db_pool = pool or await get_db_pool()
         if getattr(db_pool, "pool", None) is None:
             return False
-        for sql, params in _CREATE_USAGE_TABLES:
+        async with db_pool.transaction() as conn:
+            body_failure: BaseException | None = None
             try:
-                await db_pool.execute(sql, *params)
-            except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-                logger.debug(f"PG ensure usage tables DDL failed: {exc}")
-        logger.info("Ensured PostgreSQL usage tables (usage_log, usage_daily, llm_usage_log, llm_usage_daily)")
-        return True
-    except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
-        logger.warning(f"Failed to ensure PostgreSQL usage tables: {exc}")
-        return False
+                # A savepoint rolls back transient DDL before the outer lifecycle
+                # must positively finish. Opaque cleanup failures remain fatal.
+                async with conn.transaction():
+                    try:
+                        for sql, params in _CREATE_USAGE_TABLES:
+                            await conn.execute(sql, *params)
+                    except (TimeoutError, OSError) as exc:
+                        body_failure = exc
+                        raise
+            except (TimeoutError, OSError) as exc:
+                if exc is not body_failure:
+                    raise_detached_error(PGUsageSchemaError())
+                transient_failure = True
+            except Exception:  # noqa: BLE001 - no unknown schema failure may become nonfatal
+                raise_detached_error(PGUsageSchemaError())
+            finally:
+                body_failure = None
+    except PGUsageSchemaError:
+        raise
+    except Exception:  # noqa: BLE001 - acquisition, entry, commit and release are readiness boundaries
+        raise_detached_error(PGUsageSchemaError())
+    if transient_failure:
+        logger.bind(exception_type="TransactionError").warning(
+            "PG ensure usage tables DDL failed; usage schema is unavailable"
+        )
+        raise_detached_error(TransactionError("PostgreSQL usage schema"))
+    logger.info("Ensured PostgreSQL usage tables and durable provider reservations")
+    return True
 
 
 async def ensure_generated_files_table_pg(pool: DatabasePool | None = None) -> bool:
@@ -4156,6 +4341,7 @@ async def ensure_generated_files_table_pg(pool: DatabasePool | None = None) -> b
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL generated_files table: {exc}")
         return False
+
 
 async def ensure_data_subject_requests_table_pg(pool: DatabasePool | None = None) -> bool:
     """Ensure data_subject_requests table exists for PostgreSQL backends."""
@@ -4222,3 +4408,27 @@ async def ensure_virtual_key_counters_pg(pool: DatabasePool | None = None) -> bo
     except _PG_MIGRATIONS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"Failed to ensure PostgreSQL virtual-key counters tables: {exc}")
         return False
+
+
+async def ensure_authnz_lockout_tables_pg(db_pool: DatabasePool) -> bool:
+    """Provision login protection as owner or validate it read-only when serving."""
+    from .repos.rate_limits_repo import AuthnzRateLimitsRepo
+
+    await AuthnzRateLimitsRepo(db_pool).ensure_schema()
+    return True
+
+
+async def ensure_authnz_token_blacklist_pg(db_pool: DatabasePool) -> bool:
+    """Provision revocation storage as owner or validate it read-only when serving."""
+    from .repos.token_blacklist_repo import AuthnzTokenBlacklistRepo
+
+    await AuthnzTokenBlacklistRepo(db_pool).ensure_schema()
+    return True
+
+
+async def ensure_resource_daily_ledger_pg(db_pool: DatabasePool) -> bool:
+    """Provision accounting as owner or validate its runtime schema read-only."""
+    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger
+
+    await ResourceDailyLedger(db_pool=db_pool).initialize()
+    return True

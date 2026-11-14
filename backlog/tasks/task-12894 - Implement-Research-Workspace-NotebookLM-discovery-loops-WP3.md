@@ -30,13 +30,11 @@ Implement the approved WP3 slice from the Research Workspace NotebookLM Pro/Ultr
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started WP3 in isolated worktree `.worktrees/research-workspace-notebooklm-wp3` on branch `codex/research-workspace-notebooklm-wp3` from `origin/dev` at merge commit 242297a2b8. Initial code scan found existing web search import, Deep Research return/import, and clipper save/open/analyze flows; plan should connect and clarify those paths rather than adding new providers or a sidepanel clone.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 WP3 implementation plan created: `Docs/superpowers/plans/2026-07-05-research-workspace-notebooklm-discovery-loops-wp3-plan.md`. Plan review and agent-task handoff exploration dispatched to subagents before implementation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
@@ -65,9 +63,6 @@ Verification:
 - PASS `git diff --check`
 - INFO `NODE_OPTIONS=--max-old-space-size=8192 bun run --cwd ../packages/ui tsc --noEmit` reports existing unrelated UI package type errors in ChatGreetingPicker, MCPHub, background session store, setup onboarding, TldwChat abort, and character-export SSRF tests; no reported diagnostics were in touched WP3 files.
 - SKIP Bandit: touched scope is frontend TypeScript/tests, Docs plan, and Backlog task only; no Python/backend touched paths.
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

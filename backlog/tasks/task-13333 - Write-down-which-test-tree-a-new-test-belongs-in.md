@@ -39,9 +39,9 @@ Source: synthesis F33
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Commit 09a591d369. AC1: tldw_Server_API/tests/README.md has a new section, 'Where Does a New Test Go?', with a per-module table: Chat vs Chat_NEW, RAG vs RAG_NEW, TTS vs TTS_NEW, the five AuthNZ trees, and Ingestion/Media. Ingestion has no axis, so the rule there is to add to the tree that already imports the module under test. The section also states that _NEW is not 'preferred', that no tree is legacy, and that CI shard names balance wall-clock time and do not name domains. AC2: in .github/workflows/ci.yml, chat-legacy-{integration,unit-a-l,unit-m-z} are renamed to chat-{integration,unit-a-l,unit-m-z} in all 5 matrices (15 lines). The YAML parses. No condition or ruleset refers to the old names; the dev ruleset requires only the aggregate *-required checks, per Docs/Development/CI_REQUIRED_GATES.md and gh api rulesets. rag-legacy is kept: RAG/ is not documented as legacy, and the rule now says what it holds. AC3: RAG_NEW/conftest.py re-exports dual_backend_env (and DualBackendEnv) from tests/RAG/conftest.py. Verified with 'pytest --fixtures tldw_Server_API/tests/RAG_NEW/unit/...', which lists dual_backend_env from tests/RAG/conftest.py:142, and with --co over RAG+RAG_NEW (2071 collected, no errors). Before/after runs of RAG, RAG_NEW and the rest are recorded under TASK-13327 (same run). Bandit: not applicable, since only docs, CI YAML and a test conftest changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

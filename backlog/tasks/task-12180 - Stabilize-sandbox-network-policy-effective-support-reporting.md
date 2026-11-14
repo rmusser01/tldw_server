@@ -43,7 +43,7 @@ Make sandbox runtime discovery and admission report effective network policy sup
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented network policy effective support gating. RED: Docker allowlist admission with allowlist readiness false did not raise, and discovery tests failed because runtime_network_policy_effective_support() did not exist. GREEN: added the helper, Docker/Firecracker readiness facts, policy admission wiring, and discovery wiring. Docker allowlist is now effectively supported only with Docker available plus egress enforcement plus granular enforcement; Docker network=none fallback is treated as deny_all, not allowlist. Firecracker allowlist remains scaffold and is never advertised as effective support. Verification: focused sandbox admission/discovery/Lima tests passed (33 tests), py_compile passed for touched production modules, Bandit reported 0 findings for touched production modules, and git diff --check passed.
 
 PR review follow-up: verifying and fixing Qodo findings for _settings_flag() observability and missing-preflight SandboxPolicy admission compatibility.
@@ -53,7 +53,7 @@ PR review fixes completed. Added regression coverage for missing-preflight Docke
 Additional PR review follow-up: verifying Gemini cleanup suggestions for shared noncritical exceptions, _settings_flag() signature redundancy, and redundant service effective-support calculations.
 
 Additional Gemini review fixes completed. Centralized the shared config noncritical exception tuple for policy/runtime capability config parsing, simplified _settings_flag() to a single setting name, and reused _preflight_fields() results for Docker/Firecracker/Lima effective support in feature discovery. Verification rerun: 44 sandbox policy/discovery tests passed, py_compile passed, Bandit reported 0 findings for touched Sandbox modules, and git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

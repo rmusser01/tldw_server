@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_utils import (
     persist_claims_if_applicable,
 )
 from tldw_Server_API.app.core.config import loaded_config_data, settings
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
@@ -36,6 +37,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
+    media_owner_identity,
     normalize_media_dedupe_url,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -51,6 +53,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_con
     read_persisted_email_content,
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, scoped_context
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     prepare_chunking_options_dict,
@@ -60,6 +63,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
     record_email_native_persist,
 )
+from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import first_saved_filename
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import (
     exception_frames_for_log,
     exception_type_for_log,
@@ -80,14 +84,11 @@ from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime,
     is_test_mode,
 )
+from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
-
-try:
-    from tldw_Server_API.app.core.Resource_Governance import RGRequest
-except (ImportError, ModuleNotFoundError):  # pragma: no cover - optional in minimal profiles
-    RGRequest = None  # type: ignore[assignment]
 
 try:  # Align HTTP 413 compatibility across FastAPI/Starlette versions
     HTTP_413_TOO_LARGE = status.HTTP_413_CONTENT_TOO_LARGE
@@ -117,7 +118,6 @@ _PERSISTENCE_NONCRITICAL_EXCEPTIONS = (
     InputError,
 )
 
-_MEDIA_INGESTION_POLICY_ID = "media.default"
 _MEDIA_INGESTION_BYTES_CATEGORY = "ingestion_bytes"
 
 _media_ingestion_daily_ledger = None
@@ -131,13 +131,6 @@ _SHARED_TRANSCRIPT_REUSABLE_HOSTS = frozenset(
         "youtu.be",
     }
 )
-
-
-def _safe_int(value: Any, default: int = 0) -> int:
-    try:
-        return int(value)
-    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-        return int(default)
 
 
 def _resolve_media_writer(db_instance: Any) -> Any:
@@ -220,56 +213,6 @@ async def _archive_media_db_worker(
             raise asyncio.CancelledError
 
 
-def _build_ingestion_budget_headers(
-    *,
-    category_details: dict[str, Any] | None,
-    retry_after: int | None,
-) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    if retry_after is not None and int(retry_after) > 0:
-        headers["Retry-After"] = str(int(retry_after))
-    cat = category_details or {}
-    limit_raw = cat.get("daily_cap")
-    if limit_raw is None:
-        limit_raw = cat.get("limit")
-    remaining_raw = cat.get("daily_remaining")
-    if remaining_raw is None:
-        remaining_raw = cat.get("remaining")
-    if limit_raw is not None:
-        headers["X-RateLimit-Limit"] = str(max(0, _safe_int(limit_raw, 0)))
-    if remaining_raw is not None:
-        headers["X-RateLimit-Remaining"] = str(max(0, _safe_int(remaining_raw, 0)))
-    return headers
-
-
-def _resolve_media_budget_context(
-    *,
-    request: Request | None,
-    current_user: Any,
-) -> tuple[Any | None, str, dict[str, Any], str]:
-    """Return (governor, policy_id, policy, entity) for media budget checks."""
-    if request is None:
-        return None, _MEDIA_INGESTION_POLICY_ID, {}, ""
-    try:
-        app_state = getattr(request.app, "state", None)
-        gov = getattr(app_state, "rg_governor", None)
-        loader = getattr(app_state, "rg_policy_loader", None)
-        policy_id = str(getattr(request.state, "rg_policy_id", None) or _MEDIA_INGESTION_POLICY_ID)
-        policy: dict[str, Any] = {}
-        if loader is not None:
-            try:
-                policy = dict(loader.get_policy(policy_id) or {})
-            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                policy = {}
-        if hasattr(current_user, "id") and current_user.id is not None:
-            entity = f"user:{int(current_user.id)}"
-        else:
-            entity = ""
-        return gov, policy_id, policy, entity
-    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-        return None, _MEDIA_INGESTION_POLICY_ID, {}, ""
-
-
 async def _get_media_ingestion_daily_ledger():
     global _media_ingestion_daily_ledger
     if _media_ingestion_daily_ledger is not None:
@@ -335,6 +278,75 @@ async def _record_media_ingestion_bytes_ledger_entry(
             exc,
         )
         return False
+
+
+MEDIA_CONCURRENT_KEY = "limits.media_concurrent_jobs"
+
+
+async def _enforce_and_record_media_bytes(
+    user_id: Any, total_uploaded_bytes: int, *, op_id: str | None = None,
+) -> None:
+    """Refuse an upload past the user's daily MB (429); otherwise count it (spec 2 §4).
+
+    A non-numeric ``user_id`` skips the check and records nothing per-user
+    (matching the other quota_checks sites, e.g. rag_queries_decision).
+
+    When the user has a limit, the admission check and the ledger write are
+    one atomic operation (``ResourceDailyLedger.add_if_within_daily_cap``), so
+    two concurrent uploads cannot both pass against the same remaining daily
+    allowance. A supplied durable job operation ID makes worker retries idempotent.
+    """
+    if total_uploaded_bytes <= 0:
+        return
+    quota_uid = quota_checks.as_quota_user_id(user_id)
+    if quota_uid is None:
+        return
+    uid = str(quota_uid)
+    op_id = op_id or f"media-ingestion-bytes:user:{uid}:{uuid4().hex}"
+
+    limit_mb = await quota_checks.user_quota(quota_uid, "limits.media_ingest_mb_per_day")
+    if limit_mb is None:
+        # Gate the check, never the record: still count unlimited uploads.
+        await _record_media_ingestion_bytes_ledger_entry(
+            entity_scope="user",
+            entity_value=uid,
+            units=int(total_uploaded_bytes),
+            op_id=op_id,
+        )
+        return
+
+    daily_cap_bytes = max(0, int(round(float(limit_mb) * 1024 * 1024)))
+    ledger = await _get_media_ingestion_daily_ledger()
+    if ledger is None:
+        # Ledger unavailable: fail open on the check, matching check_usage's
+        # own fail-open on counter errors; there is nothing to write.
+        return
+
+    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import LedgerEntry
+
+    entry = LedgerEntry(
+        entity_scope="user",
+        entity_value=uid,
+        category=_MEDIA_INGESTION_BYTES_CATEGORY,
+        units=int(total_uploaded_bytes),
+        op_id=op_id,
+        occurred_at=datetime.now(timezone.utc),
+    )
+    try:
+        allowed, remaining_bytes = await ledger.add_if_within_daily_cap(entry, daily_cap_bytes)
+    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
+        logger.debug("Media ingestion budget: atomic ledger check failed; failing open: {}", exc)
+        return
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Daily ingestion size budget exceeded.",
+            headers=quota_checks.rate_limit_headers(
+                limit=int(round(float(limit_mb))),
+                remaining=int(max(0, remaining_bytes or 0) // (1024 * 1024)),
+                reset_seconds=quota_checks.seconds_until_utc_midnight(),
+            ),
+        )
 
 
 def _ensure_warnings_list(result: dict[str, Any]) -> list[str]:
@@ -1323,6 +1335,8 @@ def _merge_video_lite_summary_safe_metadata(
 
     if summary_status == "failed":
         video_lite_meta["summary_status"] = "failed"
+        if process_result.get("video_lite_summary_error"):
+            video_lite_meta["summary_error"] = process_result["video_lite_summary_error"]
         merged["video_lite"] = video_lite_meta
         return merged
 
@@ -1704,6 +1718,8 @@ def _synthesize_reused_transcript_analysis_sync(
                 None,
                 system_message=system_prompt,
             )
+        except LLMQuotaExceededError:
+            raise  # stop at the first refusal; the caller records it and keeps the transcript
         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
             warnings.append(f"Chunk summarization failed during dedupe reuse for chunk {index}: {exc}")
             continue
@@ -1735,14 +1751,26 @@ def _synthesize_reused_transcript_analysis_sync(
     return "\n\n---\n\n".join(chunk_summaries), warnings, chunked_texts_list
 
 
+def _record_reused_summary_refusal(process_result: dict[str, Any], refusal: LLMQuotaExceededError) -> None:
+    """Keep the reused transcript; record why there is no summary (TASK-13638 Decision 3)."""
+    _ensure_warnings_list(process_result).append(f"Summary generation failed during dedupe reuse: {refusal}")
+    process_result["video_lite_summary_status"] = "failed"
+    process_result["video_lite_summary_error"] = refusal.failure_code
+
+
 async def _populate_reused_transcript_summary(
     *,
     process_result: dict[str, Any],
     form_data: Any,
     chunk_options: dict[str, Any] | None,
     loop: asyncio.AbstractEventLoop,
+    analysis_refusal: LLMQuotaExceededError | None = None,
 ) -> None:
     if process_result.get("analysis") or process_result.get("summary"):
+        return
+    if analysis_refusal is not None:
+        # The job was refused when it started (TASK-13864): record it without an LLM call.
+        _record_reused_summary_refusal(process_result, analysis_refusal)
         return
     if not getattr(form_data, "perform_analysis", False):
         return
@@ -1777,6 +1805,8 @@ async def _populate_reused_transcript_summary(
             process_result["video_lite_summary_status"] = "ready"
         else:
             process_result["video_lite_summary_status"] = "failed"
+    except LLMQuotaExceededError as refusal:
+        _record_reused_summary_refusal(process_result, refusal)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
         _ensure_warnings_list(process_result).append(f"Summary generation failed during dedupe reuse: {exc}")
         process_result["video_lite_summary_status"] = "failed"
@@ -1791,6 +1821,7 @@ async def _maybe_build_reused_transcript_process_result(
     form_data: Any,
     chunk_options: dict[str, Any] | None,
     loop: asyncio.AbstractEventLoop,
+    analysis_refusal: LLMQuotaExceededError | None = None,
 ) -> dict[str, Any] | None:
     if str(media_type) != "video":
         return None
@@ -1889,6 +1920,7 @@ async def _maybe_build_reused_transcript_process_result(
         form_data=form_data,
         chunk_options=chunk_options,
         loop=loop,
+        analysis_refusal=analysis_refusal,
     )
     return reused_result
 
@@ -2172,20 +2204,15 @@ def sync_media_add_results_to_collections(
             word_count = len(content_text.split()) if content_text else None
             published_at = metadata_map.get("published_at") or metadata_map.get("publish_date")
 
-            tags: list[str] = []
-            seen: set[str] = set()
-            for keyword in getattr(form_data, "keywords", []) or []:
-                if isinstance(keyword, str):
-                    normalized = keyword.strip().lower()
-                    if normalized and normalized not in seen:
-                        seen.add(normalized)
-                        tags.append(normalized)
-            for keyword in metadata_map.get("keywords", []) if isinstance(metadata_map.get("keywords"), list) else []:
-                if isinstance(keyword, str):
-                    normalized = keyword.strip().lower()
-                    if normalized and normalized not in seen:
-                        seen.add(normalized)
-                        tags.append(normalized)
+            metadata_keywords = metadata_map.get("keywords")
+            tags = dedupe_keywords(
+                keyword
+                for keyword in [
+                    *(getattr(form_data, "keywords", []) or []),
+                    *(metadata_keywords if isinstance(metadata_keywords, list) else []),
+                ]
+                if isinstance(keyword, str)
+            )
 
             provenance_payload = {
                 "entrypoint": "/api/v1/media/add",
@@ -2787,16 +2814,6 @@ async def add_media_orchestrate(
     request_started_at = time.monotonic()
     request_outcome = "error"
     total_uploaded_bytes = 0
-    rg_media_handle_id: str | None = None
-    rg_governor, rg_policy_id, rg_policy, rg_entity = _resolve_media_budget_context(
-        request=request,
-        current_user=current_user,
-    )
-    rg_jobs_limit = _safe_int((rg_policy.get("jobs") or {}).get("max_concurrent"), 0)
-    rg_daily_bytes_cap = _safe_int(
-        (rg_policy.get(_MEDIA_INGESTION_BYTES_CATEGORY) or {}).get("daily_cap"),
-        0,
-    )
 
     # --- 1. Validation (form parsing handled by get_add_media_form) ---
     _validate_inputs(form_data.media_type, form_data.urls, files)
@@ -2831,48 +2848,6 @@ async def add_media_orchestrate(
         # Usage logging must never break the endpoint path.
         pass
 
-    # --- 1b. Resource Governor per-user concurrency budget ---
-    if rg_governor is not None and RGRequest is not None and rg_entity and rg_jobs_limit > 0:
-        try:
-            rg_decision, rg_handle = await rg_governor.reserve(
-                RGRequest(
-                    entity=rg_entity,
-                    categories={"jobs": {"units": 1}},
-                    tags={
-                        "policy_id": rg_policy_id,
-                        "endpoint": request.url.path if request is not None else "/api/v1/media/add",
-                    },
-                ),
-                op_id=f"media-add-jobs:{rg_entity}:{time.time_ns()}",
-            )
-            if not bool(getattr(rg_decision, "allowed", False)) or not rg_handle:
-                cat_details = ((getattr(rg_decision, "details", {}) or {}).get("categories", {}) or {}).get(
-                    "jobs"
-                ) or {}
-                retry_after = _safe_int(
-                    getattr(rg_decision, "retry_after", None) or cat_details.get("retry_after"),
-                    1,
-                )
-                headers = _build_ingestion_budget_headers(
-                    category_details=cat_details,
-                    retry_after=retry_after,
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Media ingestion concurrency limit reached.",
-                    headers=headers or None,
-                )
-            rg_media_handle_id = str(rg_handle)
-        except HTTPException:
-            raise
-        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as rg_exc:
-            logger.debug(
-                "Media ingestion RG concurrency reserve skipped for entity={} policy_id={}: {}",
-                rg_entity,
-                rg_policy_id,
-                rg_exc,
-            )
-
     # --- 2. Database dependency / client_id guard ---
     if not hasattr(db, "client_id") or not db.client_id:
         logger.error("CRITICAL: Database instance dependency missing client_id.")
@@ -2889,6 +2864,19 @@ async def add_media_orchestrate(
     )
     temp_dir_path: FilePath | None = None
     loop = asyncio.get_running_loop()
+
+    # One of the user's media-ingest slots, held until the finally below (TASK-13435).
+    try:
+        ingest_slot = await concurrency_quota.acquire_slot(
+            getattr(current_user, "id", None), MEDIA_CONCURRENT_KEY, "jobs"
+        )
+    except concurrency_quota.ConcurrencyQuotaExceeded as exc:
+        _emit_ingestion_request_metric(media_type=getattr(form_data, "media_type", None), outcome="error")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Media ingestion concurrency limit reached.",
+            headers=quota_checks.rate_limit_headers(exc.limit, 0, exc.retry_after) if exc.retry_after else None,
+        ) from exc
 
     try:
         # --- 3. Setup Temporary Directory ---
@@ -3037,73 +3025,11 @@ async def add_media_orchestrate(
                 else:
                     logger.warning("Quota check failed (non-fatal): {}", quota_err)
 
-            # --- Resource Governor per-user upload-bytes budget ---
-            if (
-                rg_governor is not None
-                and RGRequest is not None
-                and rg_entity
-                and rg_daily_bytes_cap > 0
-                and total_uploaded_bytes > 0
-            ):
-                try:
-                    rg_decision = await rg_governor.check(
-                        RGRequest(
-                            entity=rg_entity,
-                            categories={
-                                _MEDIA_INGESTION_BYTES_CATEGORY: {
-                                    "units": int(total_uploaded_bytes),
-                                }
-                            },
-                            tags={
-                                "policy_id": rg_policy_id,
-                                "endpoint": request.url.path if request is not None else "/api/v1/media/add",
-                            },
-                        )
-                    )
-                    if not bool(getattr(rg_decision, "allowed", False)):
-                        cat_details = (
-                            (getattr(rg_decision, "details", {}) or {}).get(
-                                "categories",
-                                {},
-                            )
-                            or {}
-                        ).get(_MEDIA_INGESTION_BYTES_CATEGORY) or {}
-                        retry_after = _safe_int(
-                            getattr(rg_decision, "retry_after", None) or cat_details.get("retry_after"),
-                            1,
-                        )
-                        headers = _build_ingestion_budget_headers(
-                            category_details=cat_details,
-                            retry_after=retry_after,
-                        )
-                        raise HTTPException(
-                            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                            detail="Daily ingestion size budget exceeded.",
-                            headers=headers or None,
-                        )
-
-                    if ":" in rg_entity:
-                        entity_scope, entity_value = rg_entity.split(":", 1)
-                    else:
-                        entity_scope, entity_value = "entity", rg_entity
-                    # Server-generated: a client X-Request-ID is repeatable, so the ledger
-                    # would dedupe away every later upload's bytes.
-                    await _record_media_ingestion_bytes_ledger_entry(
-                        entity_scope=entity_scope,
-                        entity_value=entity_value,
-                        units=int(total_uploaded_bytes),
-                        op_id=f"media-ingestion-bytes:{entity_scope}:{entity_value}:{uuid4().hex}",
-                    )
-                except HTTPException:
-                    raise
-                except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as rg_exc:
-                    logger.debug(
-                        "Media ingestion RG bytes check skipped for entity={} policy_id={} bytes={}: {}",
-                        rg_entity,
-                        rg_policy_id,
-                        total_uploaded_bytes,
-                        rg_exc,
-                    )
+            # --- Usage quota: per-user upload bytes per day (spec 2 §4) ---
+            await _enforce_and_record_media_bytes(
+                getattr(current_user, "id", None) if current_user is not None else None,
+                total_uploaded_bytes,
+            )
 
             # --- 5. Prepare Inputs and Options ---
             uploaded_file_paths = [str(pf["path"]) for pf in saved_files_info]
@@ -3160,10 +3086,8 @@ async def add_media_orchestrate(
                     )
 
             first_url = (form_data.urls or [None])[0]
-            first_filename = None
             try:
-                if saved_files_info:
-                    first_filename = saved_files_info[0]["original_filename"]
+                first_filename = first_saved_filename(saved_files_info)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 first_filename = None
             first_source = all_valid_input_sources[0] if all_valid_input_sources else first_url or first_filename
@@ -3187,6 +3111,7 @@ async def add_media_orchestrate(
                         form_data=form_data,
                         db=db,
                         chunking_options_dict=chunking_options_dict,
+                        owner_user_id=getattr(current_user, "id", None),
                         TemplateClassifier=TemplateClassifier,
                         first_url=first_url,
                         first_filename=first_filename,
@@ -3649,15 +3574,6 @@ async def add_media_orchestrate(
             detail=f"Unexpected internal error: {type(unexpected).__name__}",
         ) from unexpected
     finally:
-        if rg_media_handle_id and rg_governor is not None:
-            try:
-                await rg_governor.release(rg_media_handle_id)
-            except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as rg_release_err:
-                logger.debug(
-                    "Media ingestion RG release failed for handle_id={}: {}",
-                    rg_media_handle_id,
-                    rg_release_err,
-                )
         _emit_ingestion_request_metric(
             media_type=getattr(form_data, "media_type", None),
             outcome=request_outcome,
@@ -3667,6 +3583,8 @@ async def add_media_orchestrate(
             processor="media_add_orchestrate",
             duration_seconds=time.monotonic() - request_started_at,
         )
+        # Last, so the metrics above are recorded whatever the release does (TASK-13435).
+        await ingest_slot.release()
 
 
 async def add_media_persist(
@@ -3776,12 +3694,12 @@ async def persist_primary_av_item(
     )
     extracted_keywords = metadata_for_db.get("keywords", [])
 
-    combined_keywords = set(getattr(form_data, "keywords", []) or [])
+    combined_keywords = list(getattr(form_data, "keywords", []) or [])
     if isinstance(extracted_keywords, list):
-        combined_keywords.update(
-            k.strip().lower() for k in extracted_keywords if k and isinstance(k, str) and k.strip()
+        combined_keywords.extend(
+            k.strip() for k in extracted_keywords if k and isinstance(k, str) and k.strip()
         )
-    final_keywords_list = sorted(combined_keywords)
+    final_keywords_list = sorted(dedupe_keywords(combined_keywords), key=normalize_keyword_identity)
 
     # Use original input ref for default title to match previous endpoint behavior.
     default_title = FilePath(str(original_input_ref)).stem if original_input_ref else "Untitled"
@@ -3862,7 +3780,9 @@ async def persist_primary_av_item(
                 )
 
         # Build plaintext chunks for chunk-level FTS if chunking is requested.
-        chunks_for_sql: list[dict[str, Any]] | None = None
+        chunks_for_sql: list[dict[str, Any]] | None = (
+            [] if getattr(form_data, "perform_chunking", True) is False else None
+        )
         try:
             _opts = effective_chunk_options or {}
             if _opts:
@@ -3935,16 +3855,11 @@ async def persist_primary_av_item(
                     seen_extra_keys.add(dedupe_key)
                     raw_chunk_type = ec.get("chunk_type") or "vlm"
                     try:
-                        normalized_chunk_type = _ck.normalize_chunk_type(raw_chunk_type)  # type: ignore[name-defined]
-                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                        try:
-                            from tldw_Server_API.app.core.Chunking.chunker import (  # type: ignore
-                                Chunker as _Chunker,
-                            )
+                        from tldw_Server_API.app.core.Chunking.chunker import Chunker as _Chunker
 
-                            normalized_chunk_type = _Chunker.normalize_chunk_type(raw_chunk_type)
-                        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-                            normalized_chunk_type = raw_chunk_type
+                        normalized_chunk_type = _Chunker.normalize_chunk_type(raw_chunk_type)
+                    except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
+                        normalized_chunk_type = raw_chunk_type
                     chunks_for_sql.append(
                         {
                             "text": ec.get("text", ""),
@@ -4189,9 +4104,13 @@ async def process_batch_media(
     temp_dir: FilePath,
     user_id: int | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    analysis_refusal: LLMQuotaExceededError | None = None,
 ) -> list[dict[str, Any]]:
     """
     Core implementation of the audio/video batch processing helper used by `/media/add`.
+
+    ``analysis_refusal``: a media ingest job refused at its start passes its refusal, so
+    a reused transcript records it as an LLM call refused here would (TASK-13864).
 
     This function mirrors the previous endpoint-local `_process_batch_media`
     behavior while living in the core ingestion module for shared reuse.
@@ -4330,50 +4249,42 @@ async def process_batch_media(
                 if source_hash and not is_url:
 
                     def _source_hash_precheck(
-                        db: MediaDatabase, *, source_hash=source_hash, url_clause=url_clause,
-                        url_clause_alias=url_clause_alias, url_params=url_params, url_params_alias=url_params_alias,
+                        db: MediaDatabase,
+                        *,
+                        source_hash=source_hash,
+                        url_clause=url_clause,
+                        url_clause_alias=url_clause_alias,
+                        url_params=url_params,
+                        url_params_alias=url_params_alias,
                     ) -> Any:
                         nonlocal source_hash_column_available
+                        owner_clause = (
+                            "AND COALESCE(CAST(m.owner_user_id AS TEXT),m.client_id) = ? AND m.system_operation_id IS NULL"
+                            if getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+                            else ""
+                        )
+                        owner_params = (media_owner_identity(db.client_id),) if owner_clause else ()
                         if source_hash_column_available is None:
                             source_hash_column_available = _media_has_source_hash_column(db)
+                        existing_record = None
                         if source_hash_column_available:
                             pre_check_query_template = """
-                                SELECT id
-                                FROM Media
+                                SELECT m.id
+                                FROM Media m
                                 WHERE {url_clause}
                                   AND source_hash = ?
                                   AND is_trash = 0
                                   AND deleted = 0
+                                {owner_clause}
                                 LIMIT 1
                             """
-                            pre_check_query = pre_check_query_template.format(url_clause=url_clause)  # nosec B608
+                            pre_check_query = pre_check_query_template.format(url_clause=url_clause, owner_clause=owner_clause)  # nosec B608
                             cursor = db.execute_query(
                                 pre_check_query,
-                                (*url_params, source_hash),
+                                (*url_params, source_hash, *owner_params),
                             )
                             existing_record = cursor.fetchone()
-                            if not existing_record:
-                                pre_check_query_template = """
-                                    SELECT m.id
-                                    FROM Media m
-                                    JOIN DocumentVersions dv ON dv.media_id = m.id
-                                    WHERE {url_clause_alias}
-                                      AND m.is_trash = 0
-                                      AND m.deleted = 0
-                                      AND dv.deleted = 0
-                                      AND dv.safe_metadata LIKE ?
-                                    LIMIT 1
-                                """
-                                pre_check_query = pre_check_query_template.format(
-                                    url_clause_alias=url_clause_alias
-                                )  # nosec B608
-                                hash_fragment = f'%"source_hash":"{source_hash}"%'
-                                cursor = db.execute_query(
-                                    pre_check_query,
-                                    (*url_params_alias, hash_fragment),
-                                )
-                                existing_record = cursor.fetchone()
-                        else:
+                        if not existing_record:
                             pre_check_query_template = """
                                 SELECT m.id
                                 FROM Media m
@@ -4383,15 +4294,14 @@ async def process_batch_media(
                                   AND m.deleted = 0
                                   AND dv.deleted = 0
                                   AND dv.safe_metadata LIKE ?
+                                {owner_clause}
                                 LIMIT 1
                             """
-                            pre_check_query = pre_check_query_template.format(
-                                url_clause_alias=url_clause_alias
-                            )  # nosec B608
+                            pre_check_query = pre_check_query_template.format(url_clause_alias=url_clause_alias, owner_clause=owner_clause)  # nosec B608
                             hash_fragment = f'%"source_hash":"{source_hash}"%'
                             cursor = db.execute_query(
                                 pre_check_query,
-                                (*url_params_alias, hash_fragment),
+                                (*url_params_alias, hash_fragment, *owner_params),
                             )
                             existing_record = cursor.fetchone()
                         return existing_record
@@ -4419,18 +4329,25 @@ async def process_batch_media(
                 else:
 
                     def _url_precheck(db: MediaDatabase, *, url_clause=url_clause, url_params=url_params) -> Any:
+                        owner_clause = (
+                            "AND COALESCE(CAST(m.owner_user_id AS TEXT),m.client_id) = ? AND m.system_operation_id IS NULL"
+                            if getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+                            else ""
+                        )
+                        owner_params = (media_owner_identity(db.client_id),) if owner_clause else ()
                         pre_check_query_template = """
-                                          SELECT id
-                                          FROM Media
+                                          SELECT m.id
+                                          FROM Media m
                                           WHERE {url_clause}
                                             AND is_trash = 0
                                             AND deleted = 0
+                                          {owner_clause}
                                           LIMIT 1
                                           """
-                        pre_check_query = pre_check_query_template.format(url_clause=url_clause)  # nosec B608
+                        pre_check_query = pre_check_query_template.format(url_clause=url_clause, owner_clause=owner_clause)  # nosec B608
                         cursor = db.execute_query(
                             pre_check_query,
-                            url_params,
+                            (*url_params, *owner_params),
                         )
                         return cursor.fetchone()
 
@@ -4489,6 +4406,7 @@ async def process_batch_media(
                 form_data=form_data,
                 chunk_options=chunk_options,
                 loop=loop,
+                analysis_refusal=analysis_refusal,
             )
             if reused_process_result is not None:
                 if pre_check_warning:
@@ -5538,14 +5456,13 @@ async def process_document_like_item(
                             )
                             if isinstance(keywords_from_form, list):
                                 base_keywords = [
-                                    str(keyword).strip().lower() for keyword in keywords_from_form if keyword
+                                    str(keyword).strip() for keyword in keywords_from_form if keyword
                                 ]
                         except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                             base_keywords = []
                         merged = sorted(
-                            set(
-                                (final_result.get("keywords") or []) + base_keywords + [archive_keyword],
-                            ),
+                            dedupe_keywords((final_result.get("keywords") or []) + base_keywords + [archive_keyword]),
+                            key=normalize_keyword_identity,
                         )
                         final_result["keywords"] = merged
                 except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
@@ -5714,6 +5631,21 @@ async def process_document_like_item(
     return final_result
 
 
+def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
+    """Recognize successful parsed mail; synthetic envelopes lack email fields."""
+    metadata = result.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("parser_used") != "builtin-email":
+        return False
+    email_metadata = metadata.get("email")
+    return (
+        result.get("status") in ("Success", "Warning")
+        and isinstance(email_metadata, dict)
+        and isinstance(email_metadata.get("format"), str)
+        and bool(email_metadata["format"])
+        and isinstance(email_metadata.get("headers_map"), dict)
+    )
+
+
 async def persist_doc_item_and_children(
     *,
     final_result: dict[str, Any],
@@ -5733,19 +5665,6 @@ async def persist_doc_item_and_children(
     Persist a single document/email item (and any children) produced by the /add
     orchestration, mirroring the previous post-processing DB logic.
     """
-    def is_bodyless_parsed_email(result: dict[str, Any]) -> bool:
-        """Recognize successful parsed mail; synthetic envelopes lack email fields."""
-        metadata = result.get("metadata")
-        if not isinstance(metadata, dict) or metadata.get("parser_used") != "builtin-email":
-            return False
-        email_metadata = metadata.get("email")
-        return (
-            result.get("status") in ("Success", "Warning")
-            and isinstance(email_metadata, dict)
-            and isinstance(email_metadata.get("format"), str)
-            and bool(email_metadata["format"])
-            and isinstance(email_metadata.get("headers_map"), dict)
-        )
 
     resolved_email_tenant_id = email_tenant_id or str(client_id)
     email_scope = get_scope() if media_type == "email" else None
@@ -5770,9 +5689,9 @@ async def persist_doc_item_and_children(
             final_result["metadata"] = metadata_for_db
 
     extracted_keywords = final_result.get("keywords", [])
-    combined_keywords = set(getattr(form_data, "keywords", None) or [])
+    combined_keywords = list(getattr(form_data, "keywords", None) or [])
     if isinstance(extracted_keywords, list):
-        combined_keywords.update(k.strip().lower() for k in extracted_keywords if isinstance(k, str) and k.strip())
+        combined_keywords.extend(k.strip() for k in extracted_keywords if isinstance(k, str) and k.strip())
 
     try:
         if media_type == "email":
@@ -5783,7 +5702,7 @@ async def persist_doc_item_and_children(
                         child_keywords = child.get("keywords") or []
                         for kw in child_keywords:
                             if isinstance(kw, str) and kw.strip():
-                                combined_keywords.add(kw.strip())
+                                combined_keywords.append(kw.strip())
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         pass
 
@@ -5799,7 +5718,7 @@ async def persist_doc_item_and_children(
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 parent_msg_id = None
             if parent_msg_id:
-                combined_keywords.add(f"email_group:{str(parent_msg_id)}")
+                combined_keywords.append(f"email_group:{str(parent_msg_id)}")
         if media_type == "email" and (
             getattr(form_data, "accept_archives", False)
             or getattr(form_data, "accept_mbox", False)
@@ -5811,19 +5730,19 @@ async def persist_doc_item_and_children(
                     lower = str(arch_name).lower()
                     if lower.endswith(".zip"):
                         arch_tag = f"email_archive:{FilePath(arch_name).stem}"
-                        combined_keywords.add(arch_tag)
+                        combined_keywords.append(arch_tag)
                     elif lower.endswith(".mbox"):
                         arch_tag = f"email_mbox:{FilePath(arch_name).stem}"
-                        combined_keywords.add(arch_tag)
+                        combined_keywords.append(arch_tag)
                     elif lower.endswith(".pst") or lower.endswith(".ost"):
                         pst_tag = f"email_pst:{FilePath(arch_name).stem}"
-                        combined_keywords.add(pst_tag)
+                        combined_keywords.append(pst_tag)
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 pass
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         pass
 
-    final_keywords_list = sorted(combined_keywords)
+    final_keywords_list = sorted(dedupe_keywords(combined_keywords), key=normalize_keyword_identity)
     try:
         final_result["keywords"] = final_keywords_list
         if media_type == "email":
@@ -5894,7 +5813,9 @@ async def persist_doc_item_and_children(
             except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                 source_hash_for_db = None
 
-            chunks_for_sql: list[dict[str, Any]] | None = None
+            chunks_for_sql: list[dict[str, Any]] | None = (
+                [] if getattr(form_data, "perform_chunking", True) is False else None
+            )
             try:
                 opts = resolved_chunk_options or {}
                 if opts:
@@ -6096,7 +6017,9 @@ async def persist_doc_item_and_children(
                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                                         safe_child_meta_json = None
 
-                                    child_chunks_for_sql: list[dict[str, Any]] | None = None
+                                    child_chunks_for_sql: list[dict[str, Any]] | None = (
+                                        [] if getattr(form_data, "perform_chunking", True) is False else None
+                                    )
                                     try:
                                         opts_child = resolved_chunk_options or {}
                                         if opts_child:
@@ -6377,7 +6300,9 @@ async def persist_doc_item_and_children(
                                     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
                                         pass
 
-                                    child_chunks_for_sql: list[dict[str, Any]] | None = None
+                                    child_chunks_for_sql: list[dict[str, Any]] | None = (
+                                        [] if getattr(form_data, "perform_chunking", True) is False else None
+                                    )
                                     try:
                                         opts_child = resolved_chunk_options or {}
                                         if opts_child:

@@ -32,9 +32,9 @@ Clarify the Persona Buddy visual-pack documentation after PR 1619 so atlas regio
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified backend behavior in tldw_Server_API/app/core/Persona/visuals.py: region x/y reject only negative values while width/height reject zero or negative values. Updated Persona_Visual_Packs.md wording and searched for the stale atlas-region phrasing. Verification: git diff --check passed; rg found no stale 'non-positive regions' wording. Tests and Bandit skipped because this is docs-only plus Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

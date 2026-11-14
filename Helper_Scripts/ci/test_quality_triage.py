@@ -3,7 +3,7 @@
 
 The suite (~4k test files) cannot be hand-audited. This scanner parses every
 test module's AST and flags the anti-patterns documented in
-``audits/2026-07-04-test-suite-audit-round2.md`` (RA1-RA3, RA7):
+``Docs/Audit/2026-07-04-test-suite-audit-round2.md`` (RA1-RA3, RA7):
 
 * ``mock_density``     — an integration-marked file where a single test
                          function stacks >= 4 mock/patch/monkeypatch calls
@@ -25,10 +25,9 @@ test module's AST and flags the anti-patterns documented in
                          gate (informational only; round-1 F9 already
                          enforces that reasons exist).
 
-Known noise (from the 10-file precision validation): the
-``dependency_overrides`` arm of ``stub_injection`` fires on the standard
-FastAPI TestClient wiring idiom (auth + DB overrides), so treat that flag as
-a ranking input for over-mocked endpoint tests, not a per-instance verdict.
+Dependency overrides count as fake injection only when their returned value
+comes from a class defined by the test. Ordinary authentication and real DB
+fixture wiring are not fabricated application behavior.
 
 Modes (mirrors ``check_shard_coverage.py`` ratchet mechanics):
 
@@ -119,16 +118,21 @@ class FileReport:
         self.details.append(f"{flag}: {detail}")
 
 
-def _call_name(node: ast.Call) -> str:
-    """Best-effort dotted name of a call target ('mocker.patch.object', ...)."""
+def _expression_name(node: ast.expr) -> str:
+    """Return a best-effort dotted name for an expression."""
     parts: list[str] = []
-    cur: ast.expr = node.func
+    cur = node
     while isinstance(cur, ast.Attribute):
         parts.append(cur.attr)
         cur = cur.value
     if isinstance(cur, ast.Name):
         parts.append(cur.id)
     return ".".join(reversed(parts))
+
+
+def _call_name(node: ast.Call) -> str:
+    """Best-effort dotted name of a call target ('mocker.patch.object', ...)."""
+    return _expression_name(node.func)
 
 
 def _is_mockish_call(node: ast.Call) -> bool:
@@ -144,9 +148,7 @@ def _is_mockish_call(node: ast.Call) -> bool:
     tail = segments[-1]
     if tail in _MOCK_CALL_NAMES:
         return True
-    if any(seg in _PATCH_ROOTS for seg in segments) and (
-        tail in _PATCH_ATTRS or tail in _PATCH_ROOTS
-    ):
+    if any(seg in _PATCH_ROOTS for seg in segments[:-1]) and (tail in _PATCH_ATTRS or tail in _PATCH_ROOTS):
         return True
     return name in {"patch", "patch.object", "patch.dict", "patch.multiple"}
 
@@ -157,23 +159,60 @@ def _is_test_function(node: ast.AST) -> bool:
     )
 
 
+def _pytest_class_names(tree: ast.Module) -> set[str]:
+    """Recognize local contract mixins actually inherited by pytest classes."""
+    classes = {node.name: node for node in tree.body if isinstance(node, ast.ClassDef)}
+    reachable = {name for name in classes if name.startswith("Test")}
+    pending = list(reachable)
+    while pending:
+        for base in classes[pending.pop()].bases:
+            if isinstance(base, ast.Name) and base.id in classes and base.id not in reachable:
+                reachable.add(base.id)
+                pending.append(base.id)
+    return {
+        name
+        for name in reachable
+        if name.startswith("Test") or any(_is_test_function(node) for node in classes[name].body)
+    }
+
+
 def _iter_test_functions(tree: ast.Module):
-    """Yield test functions at module level and inside Test* classes."""
+    """Yield tests at module level and in pytest classes or their contract mixins."""
+    pytest_classes = _pytest_class_names(tree)
     for node in tree.body:
         if _is_test_function(node):
             yield node
-        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+        elif isinstance(node, ast.ClassDef) and node.name in pytest_classes:
             for sub in node.body:
                 if _is_test_function(sub):
                     yield sub
 
 
 def _module_fake_classes(tree: ast.Module) -> set[str]:
-    """Names of module-level classes that are not pytest Test* classes."""
+    """Exclude pytest classes and explicitly imported Hypothesis test machines."""
+    pytest_classes = _pytest_class_names(tree)
+    hypothesis_bases: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "hypothesis.stateful":
+            for imported in node.names:
+                if imported.name == "RuleBasedStateMachine":
+                    hypothesis_bases.add(imported.asname or imported.name)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "hypothesis":
+            for imported in node.names:
+                if imported.name == "stateful":
+                    hypothesis_bases.add(f"{imported.asname or imported.name}.RuleBasedStateMachine")
+        elif isinstance(node, ast.Import):
+            for imported in node.names:
+                if imported.name == "hypothesis.stateful":
+                    hypothesis_bases.add(f"{imported.asname or imported.name}.RuleBasedStateMachine")
+                elif imported.name == "hypothesis":
+                    hypothesis_bases.add(f"{imported.asname or imported.name}.stateful.RuleBasedStateMachine")
     return {
         node.name
         for node in tree.body
-        if isinstance(node, ast.ClassDef) and not node.name.startswith("Test")
+        if isinstance(node, ast.ClassDef)
+        and node.name not in pytest_classes
+        and not any(_expression_name(base) in hypothesis_bases for base in node.bases)
     }
 
 
@@ -256,35 +295,83 @@ def _check_mock_density(fn: ast.AST, report: FileReport, integration_marked: boo
         report.add("mock_density", f"{getattr(fn, 'name', '?')} has {count} mock/patch calls")
 
 
-def _check_stub_injection(
-    fn: ast.AST, report: FileReport, fake_classes: set[str]
-) -> None:
+def _check_stub_injection(fn: ast.AST, report: FileReport, fake_classes: set[str], module: ast.Module) -> None:
     """Module/local fake classes injected into the object under test."""
     local_fakes = fake_classes | _nested_fake_classes(fn)
+
+    def scope_nodes(scope: ast.AST):
+        pending = list(reversed(list(ast.iter_child_nodes(scope))))
+        while pending:
+            node = pending.pop()
+            yield node
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                pending.extend(reversed(list(ast.iter_child_nodes(node))))
+
+    def scope_bindings(scope: ast.AST, outer: dict) -> dict:
+        bindings = dict(outer)
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            positional = [*scope.args.posonlyargs, *scope.args.args]
+            for argument in (*positional, *scope.args.kwonlyargs):
+                bindings[argument.arg] = (argument, bindings)
+            for argument, default in zip(positional[len(positional) - len(scope.args.defaults) :], scope.args.defaults):
+                bindings[argument.arg] = (default, outer)
+            for argument, default in zip(scope.args.kwonlyargs, scope.args.kw_defaults):
+                if default is not None:
+                    bindings[argument.arg] = (default, outer)
+        for node in scope_nodes(scope):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                bindings[node.name] = (node, bindings)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        bindings[target.id] = (node.value, bindings)
+        return bindings
+
+    def returns_local_fake(value: ast.AST, bindings: dict, seen: frozenset[int] = frozenset()) -> bool:
+        if id(value) in seen:
+            return False
+        seen = seen | {id(value)}
+        if isinstance(value, ast.Name):
+            if value.id in bindings:
+                bound, defining_scope = bindings[value.id]
+                return returns_local_fake(bound, defining_scope, seen)
+            return value.id in local_fakes
+        if isinstance(value, ast.Call):
+            return returns_local_fake(value.func, bindings, seen)
+        if isinstance(value, ast.Lambda):
+            return returns_local_fake(value.body, scope_bindings(value, bindings), seen)
+        if isinstance(value, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            nested = scope_bindings(value, bindings)
+            return any(
+                returns_local_fake(node.value, nested, seen)
+                for node in scope_nodes(value)
+                if isinstance(node, ast.Return) and node.value is not None
+            )
+        return False
+
+    bindings = scope_bindings(fn, scope_bindings(module, {}))
     class_injections = 0
     override_injections = 0
     samples: list[str] = []
     for node in ast.walk(fn):
         if isinstance(node, ast.Assign):
-            value_is_fake = (
-                isinstance(node.value, ast.Call)
-                and isinstance(node.value.func, ast.Name)
-                and node.value.func.id in local_fakes
-            )
+            value_is_fake = returns_local_fake(node.value, bindings)
             for target in node.targets:
                 # obj.attr = _Stub(...): a test-defined fake wired into the
                 # object under test — one occurrence is already the smell.
-                if isinstance(target, ast.Attribute) and value_is_fake:
+                if (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(node.value, ast.Call)
+                    and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id in local_fakes
+                ):
                     class_injections += 1
                     samples.append(f"line {node.lineno}")
                 # app.dependency_overrides[dep] = anything
-                if isinstance(target, ast.Subscript):
-                    sub_attrs = {
-                        n.attr for n in ast.walk(target.value) if isinstance(n, ast.Attribute)
-                    }
+                if isinstance(target, ast.Subscript) and value_is_fake:
+                    sub_attrs = {n.attr for n in ast.walk(target.value) if isinstance(n, ast.Attribute)}
                     if "dependency_overrides" in sub_attrs or (
-                        isinstance(target.value, ast.Attribute)
-                        and target.value.attr == "dependency_overrides"
+                        isinstance(target.value, ast.Attribute) and target.value.attr == "dependency_overrides"
                     ):
                         override_injections += 1
                         samples.append(f"line {node.lineno} (dependency_overrides)")
@@ -409,7 +496,7 @@ def analyze_file(path: Path, repo_root: Path) -> FileReport | None:
         _check_ambiguous_accept(fn, report)
         _check_status_only(fn, report)
         _check_mock_density(fn, report, integration_marked)
-        _check_stub_injection(fn, report, fake_classes)
+        _check_stub_injection(fn, report, fake_classes, tree)
     _check_tautology(tree, report, fake_classes)
     _check_skip_stale(tree, report)
 

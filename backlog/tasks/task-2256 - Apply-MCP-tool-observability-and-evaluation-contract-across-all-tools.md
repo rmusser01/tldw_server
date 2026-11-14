@@ -27,7 +27,7 @@ Define and apply the shared MCP tool observability/evaluation metadata and execu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented shared MCP tool observability/eval metadata helpers; create_tool_definition now fills sanitized metadata.eval defaults while preserving safe explicit eval blocks.
 
 Protocol tools/list enriches copied descriptors, prepare_tool_call normalizes resolved definitions, and tools/call responses now include safe execution eval metadata with structured results receiving embedded eval when absent.
@@ -39,7 +39,7 @@ Docs updated in tldw_Server_API/app/core/MCP_unified/README.md; plan recorded in
 Verification: 126 targeted MCP tests passed; Bandit on touched production files exited 0 with zero findings.
 
 PR review fixes: addressed valid Gemini/CodeRabbit/Qodo feedback by allowlisting eval profile IDs, merging safe partial explicit eval metadata over inferred defaults, rejecting non-string explicit eval scalar fields, guarding list cleanup for null/scalar strings, logging non-critical eval enrichment failures, keeping top-level execution eval canonical, and documenting the profile-id constraint. Review-fix verification: 131 targeted MCP tests passed; Bandit on touched production MCP files exited 0 with zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

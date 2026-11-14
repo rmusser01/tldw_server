@@ -875,7 +875,7 @@ describe("workspace API domain contract", () => {
   })
 
   it("creates and updates source saved views with exact canonical bodies", async () => {
-    const state = {
+    const state: import("@/types/workspace-source-saved-view").WorkspaceSourceSavedViewStateV1 = {
       type_filters: ["pdf"],
       status_filters: [],
       review_state_filters: ["needs_review"],
@@ -894,7 +894,7 @@ describe("workspace API domain contract", () => {
       page_count_min: null,
       page_count_max: null,
       sort: "name_asc"
-    } as const
+    }
     const response = {
       id: "view with spaces",
       workspace_id: "workspace with spaces",

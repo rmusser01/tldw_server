@@ -9,7 +9,7 @@ def test_get_db_path_rejects_path_like_user_ids_outside_tests(monkeypatch, tmp_p
     monkeypatch.setenv("AUTH_MODE", "single_user")
     monkeypatch.setenv("TLDW_USER_DB_DIR", str(tmp_path / "user_dbs"))
     monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.db_path_utils._is_test_context",
+        "tldw_Server_API.app.core.DB_Management.db_path_utils.is_test_context",
         lambda: False,
     )
 

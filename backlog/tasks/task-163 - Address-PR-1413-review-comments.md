@@ -38,11 +38,11 @@ Resolve the actionable PR #1413 review threads on the backend-first VN Play setu
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed PR #1413 review threads: added setup helper docstrings; added lightweight character setup selector queries that compute has_image without image BLOB materialization; skipped planned_output_count slot scans for setup pack listing; replaced missing-required warning substring matching with structured readiness error-code detection; fixed preview truncation to keep the final string within max_length.
 
 Verification: pytest tldw_Server_API/tests/VN_Play/test_vn_play_api.py tldw_Server_API/tests/VN_Assets/test_vn_asset_packs_db.py -q passed with 28 tests; Bandit production touched scope wrote /tmp/bandit_vn_setup_options_review_prod.json with exit 0; Bandit touched test scope with B101 skipped wrote /tmp/bandit_vn_setup_options_review_tests.json with exit 0; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

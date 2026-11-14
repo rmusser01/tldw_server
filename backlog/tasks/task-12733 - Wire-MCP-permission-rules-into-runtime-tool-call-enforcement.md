@@ -30,7 +30,7 @@ Add the first runtime enforcement slice for compiled MCP profile permission_rule
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented the first standalone gateway runtime enforcement slice in mcp_unified.gateway.profile_runtime. The gateway still runs existing legacy allowed_tools/denied_tools and capability checks first. Once a backend tool is allowed, it compiles profile permission_rules and evaluates extracted tool, path, domain, command, and mcp subjects from the call arguments. Matched deny rules raise GatewayPolicyDenied with status=denied. Matched ask rules raise GatewayPolicyDenied with status=approval_required until approval prompts are wired. Unmatched default-deny decisions from permission-rule evaluation are ignored so path/domain/command rules do not grant tool execution. Denial provenance is redacted to profile_id, tool_name, subject_type, and matched rule metadata; raw path, URL, command, and argument values are not included.
 
 TDD evidence:
@@ -46,7 +46,7 @@ Verification:
 - Whitespace: `git diff --check` passed.
 
 Deferred: approval prompt/lease flow for ask decisions, hook integration, richer shell alias parsing, deeper tool-specific argument extraction, and wiring similar enforcement into the older in-process tldw_Server_API MCP protocol path.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

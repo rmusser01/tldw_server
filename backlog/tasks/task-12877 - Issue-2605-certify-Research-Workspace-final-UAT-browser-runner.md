@@ -29,11 +29,11 @@ Address GitHub issue #2605 by rerunning the Research Workspace final UAT browser
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started the live FastAPI app on http://127.0.0.1:8000 and the live Next.js quickstart WebUI proxy on http://127.0.0.1:8080. The first full-app UAT exposed a product-side auth assumption in the ACP handoff path: the spec and ACP helpers still expected the single-user key to remain directly in tldwConfig even though runtime bootstrap can scrub it into a session override. Added ACP runtime single-user key fallback coverage and updated the UAT assertions to accept the supported runtime auth storage. Hardened ACP/Sandbox menu activation in the real-backend spec to use the stable workspace settings test id and keyboard fallback. Re-ran the full final UAT against the full app; standalone Chromium launched and executed all 25 tests with 19 expected passes, 6 skips, 0 flaky, and 0 unexpected product failures. The wrapper status remains environment_blocked because this local backend does not expose POST /api/v1/sandbox/runs and does not advertise a runnable chat model for live-generation paths.
 
 Follow-up llama.cpp UAT: confirmed http://127.0.0.1:9099/v1 exposes gemma-4-26B-A4B-it-ultra-uncensored-heretic-Q4_K_M.gguf. Started the full backend with the temp config pointing llama_api_IP at that endpoint plus WORKFLOWS_EGRESS_ALLOWED_PORTS=80,443,9099 and WORKFLOWS_EGRESS_BLOCK_PRIVATE=false so backend provider discovery enabled llama. The first llama-backed full-app run exposed one product-side E2E assertion race in the Flashcards scope-move check; the backend and manual full-app probe showed the moved card/deck were visible, so the spec now reopens the moved general deck directly before asserting the preserved flashcard UUID. Focused rerun of that real-backend case passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

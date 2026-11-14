@@ -37,13 +37,9 @@ Review INV-027 source docs and current LLM provider code paths, provider schemas
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 2026-06-04: Confirmed INV-027 evidence. Registry routing, OpenAI-compatible response/SSE normalization, strict local payload filtering, and trusted allowlisted base_url behavior are current. Found code/doc mismatch for request-level local api_url handling: ChatCompletionRequest allows extras, build_call_params_from_request and _build_adapter_request_from_chat_args do not strip api_url, and several local adapters pass request api_url to provider helpers. No accepted ADR or follow-up backfill task was created because INV-027 remains Needs owner review. Verification: git diff --check passed. Bandit: not applicable; docs-only changes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

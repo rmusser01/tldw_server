@@ -20,10 +20,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from tldw_Server_API.app.core.Ingestion_Media_Processing.Email.email_ingestion_metrics import (
-    iter_email_metric_definitions,
-)
-
+from .email_metrics import iter_email_metric_definitions
 from .stt_metrics import iter_stt_metric_definitions
 from .telemetry import OTEL_AVAILABLE, get_telemetry_manager
 
@@ -446,6 +443,14 @@ class MetricsRegistry:
                 description="Cumulative LLM API cost in dollars",
                 unit="$",
                 labels=["provider", "model"]
+            )
+        )
+        self.register_metric(
+            MetricDefinition(
+                name="llm_quota_refusals_total",
+                type=MetricType.COUNTER,
+                description="LLM work refused because a user was over an LLM quota",
+                labels=["category"],
             )
         )
         # Detailed LLM usage variants for dashboards
@@ -2042,7 +2047,7 @@ class MetricsRegistry:
                 return
 
             definition = self.metrics[metric_name]
-            label_key = self._normalize_label_key(labels)
+            label_key = tuple(sorted((labels or {}).items()))
             store_sample = True
 
             if definition.type == MetricType.COUNTER and value < 0:

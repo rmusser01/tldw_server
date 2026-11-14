@@ -49,7 +49,7 @@ Track GitHub issue #1563: run or explicitly block live ACP certification for the
 
 ## Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Created `Docs/Development/ACP_OSS_Custom_Certification_2026_05_11.md` with explicit blocker evidence for Aider, Goose, Continue, OpenCode, and the default custom ACP template.
 - Added missing compatibility-matrix rows for Aider, Goose, and Continue so the matrix agrees with `agents.yaml`.
 - Kept all OSS/custom profiles at `documented_unverified` / `documented_only`; no live support claim was made.
@@ -59,7 +59,7 @@ Track GitHub issue #1563: run or explicitly block live ACP certification for the
 - Validation: `python Helper_Scripts/Testing-related/acp_certification_smoke.py --profile live-e2e --run` refused without required live env, exit 2.
 - Validation: `git diff --check` passed.
 - Bandit: skipped because this task touched only Markdown, YAML, and Backlog task metadata; no Python scope changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

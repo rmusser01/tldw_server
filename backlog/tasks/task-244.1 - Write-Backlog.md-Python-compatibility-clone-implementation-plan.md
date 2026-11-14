@@ -50,11 +50,11 @@ Write a detailed implementation plan for the approved Backlog.md Python compatib
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote implementation plan at Docs/superpowers/plans/2026-05-10-backlog-md-python-compatibility-clone-implementation-plan.md using the writing-plans workflow. Local plan review found and fixed buildability gaps before handoff: missing subpackage __init__.py files, an importable CLI entrypoint before Task 5, incomplete early oracle fixture coverage, live read-only smoke checks that would falsely fail in a dirty backlog worktree, and missing document/milestone/Definition of Done implementation coverage before agent cutover validation. Subagent plan review was not dispatched because current tool policy requires explicit user authorization for subagents; the local review used the plan-document-reviewer criteria and resolved the blocking issues found.
 
 Final verification for planning artifact: marker scan over the plan and TASK-244.1 passed. git diff --check over the plan and TASK-244.1 passed. Bandit was skipped because this task changed only Markdown/backlog files and no Python source.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

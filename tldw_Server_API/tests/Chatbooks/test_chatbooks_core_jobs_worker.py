@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import zipfile
 from pathlib import Path
@@ -250,3 +251,48 @@ async def test_completed_export_persists_progress_counts_size_and_redacted_metad
     }
     assert "must-not-leak" not in json.dumps(export_job.metadata)
     assert public_job_status == "completed"
+
+
+@pytest.fixture
+def first_job_cleanup_fails(monkeypatch):
+    """Each job's ChaCha operation, where the first job's fails to return its checkout."""
+    closes = []
+
+    @contextlib.contextmanager
+    def operation(**_kwargs):
+        yield
+        if not closes:
+            closes.append("failed")
+            raise RuntimeError("ChaCha operation cleanup failed")
+        closes.append("ok")
+
+    monkeypatch.setattr(core_jobs_worker, "chacha_operation", operation)
+    return closes
+
+
+@pytest.mark.asyncio
+async def test_a_failed_operation_cleanup_does_not_stop_the_worker(first_job_cleanup_fails, monkeypatch):
+    stop_event = asyncio.Event()
+    queued = [
+        {"id": job_id, "owner_user_id": "1", "payload": {"action": "noop"}, "lease_id": f"lease-{job_id}"}
+        for job_id in (1, 2)
+    ]
+    failed = []
+
+    class FakeJobManager:
+        def acquire_next_job(self, **_kwargs):
+            return queued.pop(0) if queued else None
+
+        def fail_job(self, job_id, **_kwargs):  # the unknown action ends each job
+            failed.append(job_id)
+            if len(failed) == 2:
+                stop_event.set()
+
+    monkeypatch.setattr(core_jobs_worker, "JobManager", FakeJobManager)
+    monkeypatch.setattr(core_jobs_worker, "_build_chacha_db_for_user", lambda _owner: object())
+    monkeypatch.setattr(core_jobs_worker, "ChatbookService", lambda *_args, **_kwargs: object())
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.01")
+
+    await asyncio.wait_for(core_jobs_worker.run_chatbooks_core_jobs_worker(stop_event), timeout=5)
+
+    assert (failed, first_job_cleanup_fails) == ([1, 2], ["failed", "ok"])

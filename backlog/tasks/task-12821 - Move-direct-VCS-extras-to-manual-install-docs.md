@@ -34,7 +34,7 @@ Remove direct VCS dependencies from published package metadata so tldw-server ca
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Removed direct VCS dependency entries from pyproject optional metadata for ocr_dots, ocr_points_transformers, and TTS_chatterbox while preserving normal PyPI-installable dependencies. Updated OCR and Chatterbox setup docs to direct users to manual source installs for dots.ocr, WePOINTS, and Perth. Verification: pyproject TOML parse passed; optional dependency scan reported zero direct URL deps; python -m build --no-isolation built wheel and sdist to /tmp/tldw_pypi_manual_ocr_dots_dist; twine check passed for both artifacts; wheel and sdist metadata inspection reported direct_url_requires=0. Isolated build without --no-isolation was skipped because sandboxed pip could not reach package indexes to install build-system packages.
 
 PR review follow-up: PointsReaderBackend.available() now requires the manual WePOINTS module for transformers mode, logs a specific WePOINTS-missing warning, and import errors from optional/manual dependencies are caught as runtime failures instead of escaping OCR flow. Added focused unit coverage for missing WePOINTS availability and ModuleNotFoundError handling. Verification: pytest tldw_Server_API/tests/MediaIngestion_NEW/test_ocr_backend_points.py -q passed (4 passed); optional dependency scan still reports direct-url-deps 0; git diff --check passed.
@@ -42,7 +42,7 @@ PR review follow-up: PointsReaderBackend.available() now requires the manual WeP
 Final review-fix verification: Bandit on points_reader.py passed with zero findings after the WePOINTS logging refinement.
 
 Additional PR review follow-up: removed the backend-named extras ocr_dots, ocr_points_transformers, and TTS_chatterbox from published package metadata and from the aggregate all extra so manual-only backends no longer look like successful extras installs. Updated OCR/POINTS/Chatterbox docs, including published WebUI docs, to use explicit manual install steps. Pinned the Perth manual install to the previously used commit ce86c49d029f42272c1902eccb675556b9ed2330. Scoped ImportError/ModuleNotFoundError handling to the POINTS transformers path with _POINTS_TRANSFORMERS_EXCEPTIONS and added a regression test ensuring explicit SGLang import errors do not fall through to transformers. Verification: POINTS backend tests passed (5 passed); pyproject parse/direct URL scan passed; package build --no-isolation succeeded; twine check passed; wheel metadata has direct_url_requires=0 and extras_removed_present=[]; Bandit on points_reader.py passed with zero findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

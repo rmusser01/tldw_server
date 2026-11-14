@@ -60,7 +60,7 @@ Plan file: Docs/superpowers/plans/2026-05-09-vn-play-visual-directives-runtime-i
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 - Added approved-manifest alias support for singular/plural VN Play visual directive asset types.
 - Added turn-time directive resolution that records requested/applied/rejected events and keeps accepted narrative turns completed when visual resolution fails.
 - Added scene replay and API enrichment so frontends can render `background`, `depth`, and `active_sprites` from VN Play responses.
@@ -68,7 +68,7 @@ Plan file: Docs/superpowers/plans/2026-05-09-vn-play-visual-directives-runtime-i
 - Enriched `active_sprites` is derived from the current approved manifest and does not fall back to stale sprite payloads when an item is no longer approved.
 - Reopened for PR #1432 review fixes covering annotation cleanup, safe warning payloads, approved-only sprite enrichment, and manifest build reuse.
 - Addressed PR #1432 review comments by adding type hints to new test adapters/helpers, simplifying manifest alias key de-duping, logging full visual-resolution exceptions server-side while returning only `error_type`, making enriched sprite payloads approved-manifest-only, and reusing the manifest within a service request lifecycle.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Verification
 

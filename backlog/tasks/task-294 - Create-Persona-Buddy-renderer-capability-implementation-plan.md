@@ -43,7 +43,7 @@ Create the implementation plan for the approved Persona Buddy renderer capabilit
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Worktree: <local_worktree_path_redacted>
 
 Branch: codex/persona-buddy-renderer-capability-spec
@@ -51,7 +51,7 @@ Branch: codex/persona-buddy-renderer-capability-spec
 Plan review approved with no blocking issues. Incorporated advisory notes to remove SUPPORTED_RENDERER_TYPES from visuals.py exports and to include SpriteFrameRenderer.tsx if the frontend helper split is needed to avoid a registry/diagnostics import cycle.
 
 Verification: git diff --check passed. ASCII scan found no non-ASCII characters. Bandit skipped because this task changed only markdown documentation and Backlog task metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

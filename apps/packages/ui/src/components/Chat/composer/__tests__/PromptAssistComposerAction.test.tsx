@@ -1,3 +1,4 @@
+import type { Prompt } from "@/db/dexie/types"
 import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import * as serverOnline from "@/hooks/useServerOnline"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
@@ -102,9 +103,13 @@ vi.mock("@/services/prompts-api", async (importOriginal) => {
 
 vi.mock("@/db/dexie/helpers", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/db/dexie/helpers")>()
+  const { isPromptOwnedBy } = await import("@/services/prompt-local-owner")
   return {
     ...original,
     getAllPrompts: (...args: unknown[]) => mocks.getAllPrompts(...args),
+    getSharedLocalPrompts: async (deleted = false) =>
+      (await mocks.getAllPrompts()).filter((prompt: Prompt) =>
+        prompt.ownerId == null && isPromptOwnedBy(prompt, null) && !!prompt.deletedAt === deleted),
     updatePrompt: (...args: unknown[]) => mocks.updatePrompt(...args),
     markPromptSyncError: (...args: unknown[]) =>
       mocks.markPromptSyncError(...args)
@@ -2119,6 +2124,44 @@ describe("PromptAssistComposerAction owner surface", () => {
       expect(candidate).toHaveFocus()
     }
   )
+
+  it("keeps a reopened Prompt Assist menu focused when an earlier drawer close completes", async () => {
+    drawerLifecycleMocks.deferClose = true
+    const deferred = createDeferred<ReturnType<typeof improvementResponse>>()
+    mocks.improvePrompt.mockReturnValueOnce(deferred.promise)
+    const user = userEvent.setup()
+    renderHarness()
+
+    await openActions(user)
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Improve now/ })).toBeEnabled()
+    )
+    await user.click(screen.getByRole("button", { name: /Improve now/ }))
+    await screen.findByRole("dialog", { name: "Prompt improvement" })
+    await resolveDeferred(deferred, improvementResponse(requestedOperationId()))
+    expect(screen.getByRole("textbox", { name: "User draft" })).toHaveValue(
+      "Improved user draft"
+    )
+
+    await openActions(user)
+    const trigger = screen.getByRole("button", { name: "Improve prompt" })
+    expect(trigger).toHaveFocus()
+    expect(drawerLifecycleMocks.completeClose).not.toBeNull()
+    act(() => {
+      const completeClose = drawerLifecycleMocks.completeClose
+      drawerLifecycleMocks.completeClose = null
+      completeClose?.()
+    })
+
+    expect(trigger).toHaveFocus()
+    expect(
+      screen.getByRole("group", { name: "Prompt improvement actions" })
+    ).toBeVisible()
+    await user.click(screen.getByRole("button", { name: /Review changes/ }))
+    expect(
+      await screen.findByRole("dialog", { name: "Prompt improvement" })
+    ).toBeVisible()
+  })
 
   it("closes applied inspection without clearing Undo and restores desktop focus", async () => {
     const user = userEvent.setup()

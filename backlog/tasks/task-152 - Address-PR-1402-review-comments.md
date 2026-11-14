@@ -34,9 +34,9 @@ Evaluate and address all actionable PR #1402 review feedback and current check s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented review fixes: added shared VN Play runtime helper for idempotency keys and structured turn error extraction; refactored DialoguePanel ChoicePanel and VNPlayWorkspace to use it; reused sceneVersion for checkpoint creation and retry-last-turn; changed checkpoint restore to update the restored session then refresh only events/checkpoints/branches. Added helper tests and restore no-extra-session-GET assertion. Verification: bunx vitest run __tests__/vn-play/vnPlayRuntime.test.ts __tests__/vn-play/VNPlayWorkspace.test.tsx __tests__/vn-play/SceneStage.test.tsx __tests__/vn-play/vnPlayApi.test.ts passed with 17 tests. git diff --check origin/dev..HEAD passed. Full tldw-frontend TypeScript check still fails only on pre-existing ../packages/ui/src/services/persona-visuals.ts BlobPart typing. Bandit skipped because touched files are frontend TypeScript/React and Backlog metadata.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

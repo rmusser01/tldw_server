@@ -18,6 +18,8 @@ from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
 )
 from tldw_Server_API.app.core.Security.egress import URLPolicyResult
 
+pytestmark = pytest.mark.usefixtures("healthy_no_override_tts_credential_snapshot")
+
 
 class _EmptyProviderManager:
     """Provider manager stub that reports no provider health state."""
@@ -45,7 +47,7 @@ def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) ->
     monkeypatch.setattr(llm_providers, "load_comprehensive_config", lambda: parser)
     monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
     monkeypatch.setattr(llm_providers, "get_provider_manager", lambda: _EmptyProviderManager())
-    monkeypatch.setattr(llm_providers, "list_provider_models", lambda _provider: [])
+    monkeypatch.setattr(llm_providers, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready"))
     monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
@@ -97,6 +99,91 @@ def test_external_llamacpp_vision_reaches_only_its_reported_model(
     assert request["retry"].attempts == 1
     assert request["configured_endpoint"].matches(request["url"])
     response.close.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("route", ["providers", "models/metadata"])
+def test_external_llamacpp_models_vision_when_native_props_is_unsupported(monkeypatch, route):
+    """Compatible servers may declare exact-model vision in their standard model list."""
+    parser = _config(
+        {
+            "Local-API": {
+                "llama_api_IP": "http://127.0.0.1:9099/prefix/v1/chat/completions",
+                "llama_model": "vision.gguf, unrelated.gguf",
+                "llama_api_key": "test-secret",
+            }
+        }
+    )
+    props = httpx.Response(404)
+    models = httpx.Response(200, json={"data": [{"id": "vision.gguf", "vision": True}]})
+    props.close = Mock(wraps=props.close)
+    models.close = Mock(wraps=models.close)
+    probe = Mock(side_effect=[props, models])
+    with _client_for_config(monkeypatch, parser) as client:
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
+        monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {"llama.cpp": "test-secret"})
+        result = client.get(f"/api/v1/llm/{route}")
+    entries = (
+        result.json()["models"] if route == "models/metadata" else _provider(result.json(), "llama")["models_info"]
+    )
+    vision = next(m for m in entries if m["name"] == "vision.gguf")
+    unrelated = next(m for m in entries if m["name"] == "unrelated.gguf")
+    assert vision["capabilities"]["vision"] is True  # nosec B101 - pytest capability-boundary expectation.
+    assert vision["vision_support"] is True  # nosec B101 - pytest capability-boundary expectation.
+    assert vision["modalities"]["input"] == ["text", "image"]  # nosec B101 - pytest capability-boundary expectation.
+    assert unrelated["capabilities"]["vision"] is False  # nosec B101 - pytest capability-boundary expectation.
+    assert probe.call_count == 2  # nosec B101 - pytest capability-boundary expectation.
+    assert probe.call_args.kwargs["url"] == "http://127.0.0.1:9099/prefix/v1/models"  # nosec B101 - pytest capability-boundary expectation.
+    for call in probe.call_args_list:
+        request = call.kwargs
+        assert request["headers"]["Authorization"] == "Bearer test-secret"  # nosec B101 - pytest capability-boundary expectation.
+        assert request["configured_endpoint"].matches(request["url"])  # nosec B101 - pytest capability-boundary expectation.
+        assert request["allow_redirects"] is False  # nosec B101 - pytest capability-boundary expectation.
+        assert request["timeout"] <= 1.5  # nosec B101 - pytest capability-boundary expectation.
+        assert request["retry"].attempts == 1  # nosec B101 - pytest capability-boundary expectation.
+    props.close.assert_called_once()
+    models.close.assert_called_once()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "status,payload",
+    [
+        (401, {"data": [{"id": "vision.gguf", "vision": True}]}),
+        (302, {"data": [{"id": "vision.gguf", "vision": True}]}),
+        (500, {}),
+        (200, []),
+        (200, {"data": "invalid"}),
+        (200, {"data": [{"id": "other.gguf", "vision": True}]}),
+        (200, {"data": [{"id": "vision.gguf", "vision": False}]}),
+        (200, {"data": [{"id": "vision.gguf", "vision": "true"}]}),
+        (200, {"data": [{"id": "vision.gguf", "vision": 1}]}),
+        (200, {"data": [{"vision": True}]}),
+        (200, {"data": [{"id": "vision.gguf", "input_modalities": ["image"]}]}),
+        (200, {"data": [{"id": "vision.gguf", "vision": True}, {"id": "vision.gguf", "vision": False}]}),
+    ],
+)
+def test_external_llamacpp_models_fallback_does_not_infer_vision(monkeypatch, status, payload):
+    """Only an explicit successful boolean claim for this identity can enable images."""
+    parser = _config(
+        {
+            "Local-API": {
+                "llama_api_IP": "http://127.0.0.1:9099/v1",
+                "llama_model": "vision.gguf",
+            }
+        }
+    )
+    fallback = httpx.Response(status, json=payload)
+    fallback.close = Mock(wraps=fallback.close)
+    probe = Mock(side_effect=[httpx.Response(404), fallback])
+    with _client_for_config(monkeypatch, parser) as client:
+        monkeypatch.setattr(llm_providers, "_http_fetch", probe)
+        result = client.get("/api/v1/llm/models/metadata")
+    model = _model(result.json(), "llama", "vision.gguf")
+    assert model["capabilities"]["vision"] is False  # nosec B101 - pytest capability-boundary expectation.
+    assert model["modalities"]["input"] == ["text"]  # nosec B101 - pytest capability-boundary expectation.
+    assert probe.call_count == 2  # nosec B101 - pytest capability-boundary expectation.
+    fallback.close.assert_called_once()
 
 
 @pytest.mark.unit
@@ -187,7 +274,7 @@ def test_external_llamacpp_cache_rechecks_credentials_endpoint_and_expiry(monkey
     clock = [0.0]
     probe = Mock(side_effect=[
         httpx.Response(200, json={"model_path": "vision.gguf", "modalities": {"vision": True}}),
-        httpx.Response(401), httpx.Response(404), httpx.Response(404),
+        httpx.Response(401), httpx.Response(404), httpx.Response(404), httpx.Response(404), httpx.Response(404),
     ])
     with _client_for_config(monkeypatch, parser) as client:
         monkeypatch.setattr(llm_providers, "_http_fetch", probe)
@@ -203,10 +290,10 @@ def test_external_llamacpp_cache_rechecks_credentials_endpoint_and_expiry(monkey
         assert probe.call_count == 2
         parser.set("Local-API", "llama_api_IP", "http://127.0.0.1:19099/v1")
         client.get("/api/v1/llm/providers")
-        assert probe.call_count == 3
+        assert probe.call_count == 4
         clock[0] += 31
         client.get("/api/v1/llm/providers")
-        assert probe.call_count == 4
+        assert probe.call_count == 6  # nosec B101 - Pytest provider-readiness regression assertion.
 
 
 def _provider(data: dict[str, object], name: str) -> dict[str, object]:
@@ -683,10 +770,10 @@ def test_external_custom_openai_env_placeholder_key_is_missing_credentials(
 
 
 @pytest.mark.unit
-def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
+def test_llm_provider_readiness_marks_mlx_chat_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Catalog providers unsupported by chat completions are unavailable."""
+    """mlx is a supported chat completions provider (TASK-13950.1)."""
     parser = _config(
         {
             "API": {},
@@ -702,7 +789,5 @@ def test_llm_provider_readiness_marks_unsupported_catalog_alias_unavailable(
 
     assert response.status_code == 200, response.text
     mlx = _provider(response.json(), "mlx")
-    assert mlx["availability"] == "unavailable"
-    assert mlx["provider_enabled"] is False
-    assert mlx["readiness_reason_code"] == "unsupported_chat_provider"
-    assert "is not supported by chat completions" in mlx["readiness_message"]
+    assert mlx["readiness_reason_code"] != "unsupported_chat_provider"
+    assert mlx["availability"] == "enabled"

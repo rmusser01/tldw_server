@@ -59,23 +59,6 @@ from tldw_Server_API.app.api.v1.schemas.chunking_schema import (
     build_chunking_options_schema,
 )
 from tldw_Server_API.app.api.v1.schemas.media_request_models import PdfEngine
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    load_server_config_snapshot as load_server_configs,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-    record_byok_missing_credentials,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    ProviderCallCredentials,
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     SYNC_ADAPTER_CALL_POOL,
     DaemonCapacityError,
@@ -91,6 +74,21 @@ from tldw_Server_API.app.core.Chunking.strategies.rolling_summarize import (
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze as general_llm_analyzer
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+    load_server_config_snapshot as load_server_configs,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+    record_byok_missing_credentials,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    ProviderCallCredentials,
+    ProviderCredentialRuntime,
+)
 
 #
 #######################################################################################################################
@@ -215,6 +213,19 @@ def _raise_missing_chunking_key(provider: str) -> None:
     )
 
 
+def _get_owned_chunking_template(media_db: Any, current_user: User, name: str) -> Any:
+    """Read a named template only with the authenticated owner and an available DB."""
+    if not media_db:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Chunking template requested but user database is unavailable.",
+        )
+    owner_user_id = str(getattr(current_user, "id", "") or "").strip()
+    if not owner_user_id:
+        raise HTTPException(status_code=401, detail="Authenticated template owner required.")
+    return media_db.get_chunking_template(name=name, owner_user_id=owner_user_id)
+
+
 # --- FastAPI Router ---
 chunking_router = APIRouter()
 
@@ -268,10 +279,7 @@ async def process_text_for_chunking_json(
         try:
             # Use the injected user-specific database instance
             # Get template from database
-            if not media_db:
-                raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                                    detail="Chunking template requested but user database is unavailable.")
-            template_data = media_db.get_chunking_template(name=request_data.options.template_name)
+            template_data = _get_owned_chunking_template(media_db, current_user, request_data.options.template_name)
             if template_data:
                 logger.info(f"Using chunking template: {request_data.options.template_name}")
                 template_used = True

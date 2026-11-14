@@ -41,9 +41,9 @@ Spec drafted and reviewed through the brainstorming spec-document-reviewer loop.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 PRD/design spec was drafted through the brainstorming flow and then used to drive the implementation plan and child implementation tasks. No executable code changed for this task; Bandit is not applicable.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

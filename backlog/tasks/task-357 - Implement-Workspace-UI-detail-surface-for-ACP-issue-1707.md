@@ -50,7 +50,7 @@ Implement the Workspace UI detail surface for traceable work-product artifacts. 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented traceable artifact response typing and store hydration for review_state, lineage, ACP producer metadata, version metadata, export refs, redaction posture, owner placement, and content envelope fields. Added a Workspace Studio artifact summary/detail surface with review-state display, ACP session/diagnostics drill-through links, source lineage, version details, redaction posture, and export refs. Focused tests cover API mapping, rendering, unavailable metadata states, and review-state controls. Verification: vitest workspace-api-first + TraceableArtifactDetail passed; StudioPane.stage2 passed; git diff --check passed; design-system verifier passed with existing allowed baseline exceptions. Full UI tsc was attempted and failed on pre-existing unrelated repo-wide type errors outside touched files. Bandit not applicable because no Python code was changed.
 
 PR #1714 review follow-up reopened this task to address Qodo and Gemini feedback on redaction-aware rendering, stable list keys, schema-version metadata detection, router-aware ACP session links, i18n-ready labels, and missing contract ticket references.
@@ -58,7 +58,7 @@ PR #1714 review follow-up reopened this task to address Qodo and Gemini feedback
 Review follow-up verification: `bunx vitest run src/components/Option/WorkspacePlayground/StudioPane/__tests__/TraceableArtifactDetail.test.tsx` passed with 11 tests; `bunx vitest run src/components/Option/WorkspacePlayground/StudioPane/__tests__/TraceableArtifactDetail.test.tsx src/store/__tests__/workspace-api-first.test.ts` passed with 27 tests; `bunx vitest run src/components/Option/WorkspacePlayground/__tests__/StudioPane.stage2.test.tsx` passed with 26 tests; `git diff --check` passed; `bun run verify:design-system-state` passed with existing allowed baseline exceptions. Bandit remains not applicable because this review follow-up only changed TypeScript/React and Backlog metadata.
 
 Fresh PR #1714 closeout rerun on 2026-05-15: focused traceable artifact/store tests passed again (27 tests), git diff hygiene passed, and design-system verifier passed with the existing 486 allowed product-state baseline exceptions. Full UI TypeScript remains blocked by unrelated repo-wide baseline errors; grep over redirected output found no touched traceable-artifact file errors. A fresh local rerun of StudioPane.stage2 timed out in broad pre-existing StudioPane workflows (22/26 failed by timeout), so current closeout relies on the focused review-fix regression tests plus GitHub CI for the wider StudioPane gate.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

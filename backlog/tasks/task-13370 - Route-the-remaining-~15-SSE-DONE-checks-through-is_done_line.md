@@ -25,9 +25,9 @@ TASK-13332 made streaming.is_done_line the single, case/spacing/BOM-tolerant DON
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-23 (79ea543818): DONE checks in audio_streaming, character_chat_sessions, chat, chat_documents, Audio/Realtime default_pipeline, anthropic_messages, google_adapter, LlamaCpp_Handler, RAG generation, Workflows llm adapter route through is_done_line; messages.py keeps its parsed-event comparison (already case-insensitive, compares joined data not a raw line). Tests: 10 new/changed cases fail on the pre-fix source, 133 pass now. Chat, LLM_Calls, Local_LLM, Workflows, Audio: identical failure sets before/after (54), +27 passes. Adapter-loop migration split to TASK-13373 (the agent's commit originally mis-cited TASK-13371, corrected on cherry-pick).
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

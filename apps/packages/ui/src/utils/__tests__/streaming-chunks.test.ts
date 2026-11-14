@@ -53,3 +53,36 @@ describe("streaming chunk error handling", () => {
     expect(state.token).toBe("Hello")
   })
 })
+
+
+describe("reasoning and answer stream boundaries", () => {
+  const empty = { fullText: "", contentToSave: "", apiReasoning: false }
+
+  it("keeps reasoning open through empty metadata until an actual answer arrives", () => {
+    let state = consumeStreamingChunk(empty, { choices: [{ delta: { reasoning_content: "First thought" } }] })
+    for (const chunk of [{ choices: [{ delta: {} }] }, { choices: [] }, ""]) {
+      state = consumeStreamingChunk(state, chunk)
+      expect(state.fullText).toBe("<think>First thought")
+      expect(state.apiReasoning).toBe(true)
+    }
+    state = consumeStreamingChunk(state, { choices: [{ delta: { reasoning_content: " then more", content: "Answer" } }] })
+    expect(state.fullText).toBe("<think>First thought then more</think>Answer")
+    expect(state.contentToSave).toBe(state.fullText)
+    expect(state.apiReasoning).toBe(false)
+  })
+
+  it("starts a later reasoning segment without moving an earlier answer into it", () => {
+    let state = consumeStreamingChunk(empty, { choices: [{ delta: { reasoning_content: "First" } }] })
+    state = consumeStreamingChunk(state, "Answer one")
+    state = consumeStreamingChunk(state, { additional_kwargs: { reasoning_content: "Second" } })
+    state = consumeStreamingChunk(state, { choices: [{ delta: { content: "Answer two" } }] })
+    expect(state.fullText).toBe("<think>First</think>Answer one<think>Second</think>Answer two")
+    expect(state.contentToSave).toBe(state.fullText)
+  })
+
+  it("keeps ordinary strings exact and creates no empty reasoning segment", () => {
+    let state = consumeStreamingChunk(empty, " Answer ")
+    state = consumeStreamingChunk(state, { choices: [{ delta: { reasoning_content: "", content: " text\n" } }] })
+    expect(state).toEqual({ fullText: " Answer  text\n", contentToSave: " Answer  text\n", apiReasoning: false, token: " text\n" })
+  })
+})

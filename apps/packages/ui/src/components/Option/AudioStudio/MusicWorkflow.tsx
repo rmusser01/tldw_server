@@ -1,43 +1,73 @@
-import React from "react"
-import { Button, Input, Slider, Typography } from "antd"
-import { useAudioStudioGenerationActions } from "./useAudioStudioGenerationActions"
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useAudioStudioStore } from '@/store/audio-studio';
+import { getAudioStudioProviders } from '@/services/audio-studio';
+import { useAudioStudioSession } from './AudioStudioSession';
+import { Button, Input, Slider, Typography } from 'antd';
+import { useAudioStudioGenerationActions } from './useAudioStudioGenerationActions';
 
-const { TextArea } = Input
-const { Text } = Typography
+const { TextArea } = Input;
+const { Text } = Typography;
 
 export const MusicWorkflow: React.FC = () => {
-  const {
-    isPending,
-    musicDisabledReason,
-    queueMusicGeneration
-  } = useAudioStudioGenerationActions()
-  const [prompt, setPrompt] = React.useState("")
-  const [lyrics, setLyrics] = React.useState("")
-  const [style, setStyle] = React.useState("")
-  const [provider, setProvider] = React.useState("ace_step")
-  const [duration, setDuration] = React.useState(45)
-  const trimmedPrompt = prompt.trim()
+  const { isPending, hasPendingIntent, error, musicDisabledReason, queueMusicGeneration } =
+    useAudioStudioGenerationActions();
+  const project = useAudioStudioStore((state) => state.activeProject);
+  const update = useAudioStudioStore((state) => state.updateProjectLocal);
+  const session = useAudioStudioSession();
+  const catalog = useQuery({
+    queryKey: ['audio-studio', 'providers', session?.ownerKey],
+    queryFn: () => getAudioStudioProviders(session?.options),
+  });
+  const music = (project?.settings.music ?? {}) as Record<string, unknown>;
+  const prompt = typeof music.prompt === 'string' ? music.prompt : '';
+  const lyrics = typeof music.lyrics === 'string' ? music.lyrics : '';
+  const style = typeof music.style === 'string' ? music.style : '';
+  const provider = typeof music.provider === 'string' ? music.provider : 'ace_step';
+  const duration =
+    typeof music.duration === 'number' && Number.isFinite(music.duration)
+      ? Math.max(15, Math.min(180, music.duration))
+      : 45;
+  const change = (values: Record<string, unknown>) => {
+    if (project)
+      update(project.project_id, {
+        settings: { ...project.settings, music: { ...music, ...values } },
+      });
+  };
+  const available = catalog.data?.providers.some(
+    (item) => item.provider_id === provider && item.supported_kinds.includes('music'),
+  );
+  const trimmedPrompt = prompt.trim();
   const disabledReason =
+    session?.readOnlyReason ??
     musicDisabledReason ??
-    (!trimmedPrompt ? "Enter a prompt before generating music." : undefined)
+    (catalog.isLoading
+      ? 'Checking music providers…'
+      : !available
+        ? 'Configure a music service before generating Music.'
+        : undefined) ??
+    (!trimmedPrompt ? 'Enter a prompt before generating music.' : undefined);
 
   const submitMusicGeneration = () => {
-    if (disabledReason) return
+    if (disabledReason) return;
 
-    queueMusicGeneration(
+    void queueMusicGeneration(
       {
         prompt: trimmedPrompt,
         lyrics,
         style,
-        duration
+        duration,
       },
-      provider
-    )
-  }
+      provider,
+    )?.catch(() => {});
+  };
 
   return (
     <section className="min-w-0 rounded-md border border-border bg-surface p-4">
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_240px]">
+      <fieldset
+        disabled={!project || Boolean(session?.readOnlyReason) || isPending || hasPendingIntent}
+        className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_240px]"
+      >
         <div className="space-y-3">
           <label className="block">
             <Text strong className="mb-1 block">
@@ -48,7 +78,7 @@ export const MusicWorkflow: React.FC = () => {
               placeholder="Warm documentary intro with restrained percussion"
               autoSize={{ minRows: 5, maxRows: 10 }}
               value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
+              onChange={(event) => change({ prompt: event.target.value })}
             />
           </label>
           <label className="block">
@@ -60,7 +90,7 @@ export const MusicWorkflow: React.FC = () => {
               placeholder="Optional lyrics or vocal direction"
               autoSize={{ minRows: 5, maxRows: 10 }}
               value={lyrics}
-              onChange={(event) => setLyrics(event.target.value)}
+              onChange={(event) => change({ lyrics: event.target.value })}
             />
           </label>
         </div>
@@ -73,7 +103,7 @@ export const MusicWorkflow: React.FC = () => {
               aria-label="Style"
               placeholder="cinematic, ambient"
               value={style}
-              onChange={(event) => setStyle(event.target.value)}
+              onChange={(event) => change({ style: event.target.value })}
             />
           </label>
           <label className="block">
@@ -84,7 +114,7 @@ export const MusicWorkflow: React.FC = () => {
               aria-label="Provider"
               className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
               value={provider}
-              onChange={(event) => setProvider(event.target.value)}
+              onChange={(event) => change({ provider: event.target.value })}
             >
               <option value="ace_step">ACE-Step</option>
             </select>
@@ -98,7 +128,7 @@ export const MusicWorkflow: React.FC = () => {
               max={180}
               value={duration}
               onChange={(value) => {
-                if (typeof value === "number") setDuration(value)
+                if (typeof value === 'number') change({ duration: value });
               }}
             />
           </div>
@@ -113,7 +143,20 @@ export const MusicWorkflow: React.FC = () => {
             Generate music
           </Button>
         </div>
-      </div>
+      </fieldset>
+      {!catalog.isLoading && !available ? (
+        <p role="status">
+          Configure a music service before generating Music. A speech provider cannot produce a
+          music cue.
+        </p>
+      ) : null}
+      {catalog.isError ? (
+        <p role="alert">
+          Music provider discovery failed.{' '}
+          <Button onClick={() => void catalog.refetch()}>Reload music providers</Button>
+        </p>
+      ) : null}
+      {error ? <p role="alert">{error.message}</p> : null}
     </section>
-  )
-}
+  );
+};

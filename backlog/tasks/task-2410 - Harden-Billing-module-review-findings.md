@@ -38,7 +38,7 @@ See IMPLEMENTATION_PLAN_billing_module_hardening_2410.md. Stages: tracking/scope
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created implementation plan IMPLEMENTATION_PLAN_billing_module_hardening_2410.md after verifying TASK-2410 file path.
 
 Implemented Billing hardening fixes: fail-closed usage source failures now propagate in closed mode instead of returning zero; checkout and portal redirects are allowlist-validated before Stripe side effects; checkout validates public active plan/price before customer creation; injected compatibility subscription reads now use the same repository contract as writes; webhook compatibility can claim Stripe event IDs before mutating payment history; overage env parsing falls back to safe defaults for invalid modes/percentages; raw exception details were replaced with exception-class logging in touched Billing paths; duplicate BillingAuditLogger helper and stale active references were removed.
@@ -48,7 +48,7 @@ Verification recorded: focused touched Billing tests passed with 83 passed, 174 
 Moved fixes into worktree .worktrees/billing-module-hardening on branch codex/billing-module-hardening from dev. Worktree verification: focused touched Billing tests passed with 83 passed, 179 warnings; Bandit JSON scan for touched Billing core files wrote /tmp/bandit_billing_worktree_2410.json; git diff --check on touched paths passed; stale active Billing audit-helper reference search returned no matches.
 
 PR review follow-up: rebased codex/billing-module-hardening-origin-dev onto latest origin/dev and addressed review comments by rejecting non-finite overage percentages, normalizing default HTTP/HTTPS ports during redirect origin comparison, and logging settings lookup failures with sanitized exception labels. Added regressions for all three cases.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

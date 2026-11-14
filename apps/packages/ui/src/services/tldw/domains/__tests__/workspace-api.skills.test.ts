@@ -324,27 +324,38 @@ describe("workspace API skill methods", () => {
     expect(result.filename).toBe("encoded-lang-skill.zip")
   })
 
-  it("falls back to a safe export filename when response metadata is unsafe", async () => {
-    vi.mocked(bgRequest).mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      data: new Uint8Array([4, 5, 6]).buffer,
-      headers: {
-        "content-disposition": 'attachment; filename="../secret.zip"'
-      }
-    })
-    const clientCore = {
-      ensureConfigForRequest: vi.fn().mockResolvedValue(undefined)
-    }
+  it.each([
+    "../secret.zip",
+    "folder\\secret.zip",
+    "bad\x7f.zip",
+    ...Array.from(
+      { length: 32 },
+      (_, code) => `bad${String.fromCharCode(code)}.zip`,
+    ),
+  ])(
+    "falls back to a safe export filename for unsafe metadata %j",
+    async (filename) => {
+      vi.mocked(bgRequest).mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        data: new Uint8Array([4, 5, 6]).buffer,
+        headers: {
+          "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`,
+        },
+      });
+      const clientCore = {
+        ensureConfigForRequest: vi.fn().mockResolvedValue(undefined),
+      };
 
-    const result = await workspaceApiMethods.exportSkill.call(
-      clientCore as any,
-      "safe-skill"
-    )
+      const result = await workspaceApiMethods.exportSkill.call(
+        clientCore as any,
+        "safe-skill",
+      );
 
-    expect(result.filename).toBe("safe-skill.zip")
-    expect(result.blob).toBeInstanceOf(Blob)
-  })
+      expect(result.filename).toBe("safe-skill.zip");
+      expect(result.blob).toBeInstanceOf(Blob);
+    },
+  );
 
   it("preserves safe fallback filename characters from user-provided skill names", async () => {
     vi.mocked(bgRequest).mockResolvedValueOnce({

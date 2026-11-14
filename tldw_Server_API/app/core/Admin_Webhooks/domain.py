@@ -727,6 +727,27 @@ def parse_registration_etag(
     return int(match.group(2))
 
 
+def registration_work_lifecycle_reason(
+    delivery: WebhookDelivery,
+    registration: WebhookRegistration,
+) -> DeliveryReasonCode | None:
+    """Select the specific no-I/O reason for stale registration work."""
+    if not isinstance(delivery, WebhookDelivery) or not isinstance(
+        registration,
+        WebhookRegistration,
+    ):
+        raise TypeError("delivery lifecycle inputs are invalid")
+    if registration.deleted_at is not None:
+        return DeliveryReasonCode.CANCELED_DELETED
+    if not registration.active:
+        return DeliveryReasonCode.CANCELED_DISABLED
+    if delivery.secret_version != registration.secret_version:
+        return DeliveryReasonCode.CANCELED_SECRET_ROTATION
+    if delivery.delivery_config_version != registration.delivery_config_version:
+        return DeliveryReasonCode.SUPERSEDED_CONFIG
+    return None
+
+
 def validate_idempotency_key(value: str) -> str:
     """Validate an opaque idempotency key without normalizing it."""
     if not isinstance(value, str) or _IDEMPOTENCY_KEY_PATTERN.fullmatch(value) is None:

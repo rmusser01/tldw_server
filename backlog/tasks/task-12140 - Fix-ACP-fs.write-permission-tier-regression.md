@@ -32,11 +32,11 @@ Fix the next broad pytest blocker after MCP startup validation was repaired: ACP
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: test_acp_websocket.py still expected fs.write and modify_file to be batch operations, but shared ACP permission tier logic intentionally classifies write/modify tokens as individual after the runner hardening work. The fix updates websocket expectations to keep fs.write and modify_file individual, while batch coverage now uses policy-neutral examples: artifact.save, git.commit, and workspace.plan. Also annotated the test-only token literal with nosec B106 so touched-scope Bandit remains clean.
 
 Verification: focused pytest for stream-start cleanup, websocket permission-tier individual/batch checks, and sandbox standard-runner tier comparison passed: 4 passed, 16 warnings. Bandit on test_acp_websocket.py with B101 skipped exited 0. git diff --check exited 0. Broad pytest -q -x --tb=short passed the prior ACP websocket blocker, completed test_acp_websocket.py, continued through Audio and Audit into AuthNZ integration tests, then was manually stopped to avoid a long full-suite run.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -9,6 +9,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
     PersonaVisualPortabilityRepository,
@@ -598,6 +599,7 @@ async def run_persona_visual_generation_worker(stop_event: asyncio.Event | None 
 
         stop_watcher = asyncio.create_task(_watch_stop())
 
+    @owns_chacha_checkouts
     async def _handler(job: dict[str, Any]) -> dict[str, Any]:
         payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
         user_id = str(payload.get("user_id") or "").strip()
@@ -657,6 +659,7 @@ async def run_persona_visual_portability_worker(stop_event: asyncio.Event | None
 
         stop_watcher = asyncio.create_task(_watch_stop())
 
+    @owns_chacha_checkouts
     async def _handler(job: dict[str, Any]) -> dict[str, Any]:
         payload = job.get("payload") if isinstance(job.get("payload"), dict) else {}
         user_id = str(payload.get("user_id") or "").strip()

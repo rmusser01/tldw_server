@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.46"
+version = "0.1.47"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
 requires-python = ">=3.12"
 readme = "README.md"
@@ -47,6 +47,8 @@ dependencies = [
   "argon2-cffi>=23.0.0",
   "asyncpg",
   "psycopg[binary]>=3.1",
+  # The PostgreSQL backend's only pool: it resets tenant session state on check-in.
+  "psycopg-pool>=3.3",
   "cachetools>=5.0.0",
   "click>=8.0.0",
   "click-completion>=0.5.2",
@@ -208,7 +210,8 @@ multiplayer = [
 
 # Development tools
 dev = [
-  "pytest>=9.0.3",
+  # shortcut: avoid pytest 9.1 live logger-registry capture race; remove when upstream capture is safe.
+  "pytest>=9.0.3,<9.1",
   "pytest-asyncio>=1.3.0",
   "pytest-cov>=7.1.0",
   "pytest-xdist>=3.8.0",
@@ -456,7 +459,7 @@ backend_vllm = [
 # Database backends
 db_postgres = [
   "psycopg[binary]>=3.1",
-  "psycopg-pool>=3.1",
+  "psycopg-pool>=3.3",
   "psycopg2-binary>=2.9.9"
 ]
 
@@ -465,18 +468,13 @@ db_opensearch = [
   "elasticsearch>=8.0.0"
 ]
 
-# Gradio tooling
-gradio = [
-  "gradio>=4.0.0"
-]
-
 gpu_monitoring = [
   "pynvml>=11.5.0; platform_system == \"Linux\""
 ]
 
 # All optional dependencies
 all = [
-  "tldw-server[dev,evaluation,data-tools,chunking_multilingual,gradio,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
+  "tldw-server[dev,evaluation,data-tools,chunking_multilingual,ingestion_email,media_wiki,web_research,STT_All,TTS_All,TTS_higgs,TTS_vibevoice,backend_onnx,db_postgres,ocr_points_sglang,gpu_monitoring]"
 ]
 
 ###########################
@@ -562,7 +560,7 @@ tldw_Server_API = [
 # Tools - Tests
 ###########################
 [tool.pytest.ini_options]
-pythonpath = ["apps/mcp-unified/src", "packages/tldw_profile_core/src"]
+pythonpath = ["apps/mcp-unified/src", "packages/tldw_profile_core/src", "tools/backlog-py/src"]
 filterwarnings = [
     "ignore::DeprecationWarning:pkg_resources:",
     "ignore::DeprecationWarning:speechbrain.pretrained:",
@@ -584,8 +582,10 @@ filterwarnings = [
 markers = [
     "asyncio: mark test as async",
     "unit: marks tests as unit tests",
+    "ambient_llm_provider_override_store: the test sees the import-time (unloaded, unhealthy) LLM provider override store, not the root conftest's healthy empty one",
     "packaging: marks tests that build distribution artifacts and shell out",
     "integration: marks tests as integration tests",
+    "provider_inventory: runs the live provider model check (TASK-13460) instead of the offline test default",
     "postgres: marks tests that require PostgreSQL",
     "e2e: marks end-to-end UI tests",
     "external_api: marks tests that require external API access",
@@ -865,6 +865,7 @@ exclude = []
 "tldw_Server_API/app/api/v1/schemas/evaluation_schemas_unified.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/schemas/flashcards.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/schemas/rag_schemas_unified.py" = ["BLE001"]
+"tldw_Server_API/app/core/RAG/rag_schemas_unified.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/schemas/websearch_schemas.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/utils/datetime_utils.py" = ["BLE001"]
 "tldw_Server_API/app/core/Agent_Client_Protocol/adapters/mcp_runners.py" = ["BLE001"]
@@ -892,9 +893,9 @@ exclude = []
 "tldw_Server_API/app/core/AuthNZ/User_DB_Handling.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/api_key_crypto.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/api_key_manager.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/byok_helpers.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/byok_rotation.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/byok_testing.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/byok_helpers.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/byok_rotation.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/byok_testing.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/create_admin.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/db_config.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/email_service.py" = ["BLE001"]
@@ -902,7 +903,7 @@ exclude = []
 "tldw_Server_API/app/core/AuthNZ/federation/provisioning_service.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/input_validation.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/key_resolution.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/llm_provider_overrides.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/llm_provider_overrides.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/lockout_tracker.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/mfa_service.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/migrate_to_multiuser.py" = ["BLE001"]
@@ -915,20 +916,20 @@ exclude = []
 "tldw_Server_API/app/core/AuthNZ/rbac.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/rbac_seed.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/backup_schedules_repo.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/repos/byok_oauth_state_repo.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/repos/byok_validation_runs_repo.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/repos/byok_oauth_state_repo.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/repos/byok_validation_runs_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/data_subject_requests_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/federated_identity_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/federated_managed_grant_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/generated_files_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/identity_provider_repo.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/repos/llm_provider_overrides_repo.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/repos/llm_provider_overrides_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/maintenance_rotation_runs_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/managed_secret_refs_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/mcp_hub_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/media_ingest_dedupe_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/mfa_repo.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/repos/org_provider_secrets_repo.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/repos/org_provider_secrets_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/org_stt_settings_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/orgs_teams_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/quotas_repo.py" = ["BLE001"]
@@ -940,7 +941,7 @@ exclude = []
 "tldw_Server_API/app/core/AuthNZ/repos/telegram_runtime_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/token_blacklist_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/usage_repo.py" = ["BLE001"]
-"tldw_Server_API/app/core/AuthNZ/repos/user_provider_secrets_repo.py" = ["BLE001"]
+"tldw_Server_API/app/core/Provider_Credentials/repos/user_provider_secrets_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/repos/workspace_provider_installations_repo.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/reset_admin_password.py" = ["BLE001"]
 "tldw_Server_API/app/core/AuthNZ/retention_policies.py" = ["BLE001"]
@@ -956,6 +957,7 @@ exclude = []
 "tldw_Server_API/app/core/Character_Chat/modules/character_templates.py" = ["BLE001"]
 "tldw_Server_API/app/core/Character_Chat/modules/character_utils.py" = ["BLE001"]
 "tldw_Server_API/app/core/Character_Chat/modules/character_validation.py" = ["BLE001"]
+"tldw_Server_API/app/core/Chat/anthropic_messages.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_characters.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_helpers.py" = ["BLE001"]
 "tldw_Server_API/app/core/Chat/chat_history.py" = ["BLE001"]
@@ -1007,12 +1009,12 @@ exclude = []
 "tldw_Server_API/app/core/DB_Management/content_migrate.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/db_migration.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/db_path_utils.py" = ["BLE001"]
-"tldw_Server_API/app/core/DB_Management/kanban_vector_search.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/api.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/repositories/document_versions_repository.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/repositories/keywords_repository.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/repositories/media_search_repository.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/runtime/defaults.py" = ["BLE001"]
+"tldw_Server_API/app/core/DB_Management/media_db/runtime/safe_metadata_write_ops.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/media_db/runtime/visual_document_ops.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/migrations.py" = ["BLE001"]
 "tldw_Server_API/app/core/DB_Management/migrations_v5_unified_evaluations.py" = ["BLE001"]
@@ -1091,9 +1093,9 @@ exclude = []
 "tldw_Server_API/app/core/Jobs/metrics.py" = ["BLE001"]
 "tldw_Server_API/app/core/Jobs/pg_util.py" = ["BLE001"]
 "tldw_Server_API/app/core/Jobs/worker_sdk.py" = ["BLE001"]
+"tldw_Server_API/app/core/Kanban/vector_search.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/adapter_registry.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/adapter_utils.py" = ["BLE001"]
-"tldw_Server_API/app/core/LLM_Calls/anthropic_messages.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/capability_registry.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/chat_calls.py" = ["BLE001"]
 "tldw_Server_API/app/core/LLM_Calls/embeddings_adapter_registry.py" = ["BLE001"]
@@ -1311,7 +1313,6 @@ exclude = []
 "tldw_Server_API/app/core/Utils/chunked_image_processor.py" = ["BLE001"]
 "tldw_Server_API/app/core/Utils/cpu_bound_handler.py" = ["BLE001"]
 "tldw_Server_API/app/core/Utils/executor_registry.py" = ["BLE001"]
-"tldw_Server_API/app/core/Utils/metadata_utils.py" = ["BLE001"]
 "tldw_Server_API/app/core/Utils/pydantic_compat.py" = ["BLE001"]
 "tldw_Server_API/app/core/Utils/tokenizer.py" = ["BLE001"]
 "tldw_Server_API/app/core/VoiceAssistant/intent_parser.py" = ["BLE001"]

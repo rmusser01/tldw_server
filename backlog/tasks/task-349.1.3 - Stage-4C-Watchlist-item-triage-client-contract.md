@@ -41,7 +41,7 @@ Add the frontend TypeScript and service contract for Stage 4 item triage after t
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after Stage 4B commit 550f5ab6b. Scope: frontend TypeScript types, watchlists service methods/query serialization, and ItemsTab saved-view migration helpers only; no visible ItemsTab behavior changes.
 
 Implemented Stage 4C frontend client contract: item alert summary/sort/filter/batch/saved-view types, watchlists service serialization and routes, and ItemsTab local saved-view migration helpers. No visible ItemsTab behavior changes were made.
@@ -49,7 +49,7 @@ Implemented Stage 4C frontend client contract: item alert summary/sort/filter/ba
 Verification: ./node_modules/.bin/vitest run src/services/__tests__/watchlists-items-triage.test.ts src/services/__tests__/watchlists-first-class.test.ts src/components/Option/Watchlists/ItemsTab/__tests__/items-utils.test.ts --maxWorkers=1 --no-file-parallelism passed 3 files / 45 tests. git diff --check passed.
 
 Known skip: frontend TypeScript-only task, so Bandit is not applicable. Earlier tsc --noEmit still fails on unrelated repo-wide baseline TypeScript errors outside this touched scope.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

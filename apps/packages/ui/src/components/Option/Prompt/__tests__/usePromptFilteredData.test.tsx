@@ -14,9 +14,7 @@ it("keeps missing creation dates unknown instead of inventing a render timestamp
   const client = new QueryClient()
   const deps: UsePromptFilteredDataDeps = {
     data: [{ id: "legacy", name: "Legacy prompt", content: "Hello" }],
-    isOnline: false,
     normalizedSearchText: "",
-    shouldUseServerSearch: false,
     projectFilter: null,
     typeFilter: "all",
     syncFilter: "all",

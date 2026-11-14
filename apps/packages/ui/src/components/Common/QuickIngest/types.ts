@@ -263,6 +263,8 @@ export type WizardQueueItem = {
   fileSize: number
   /** MIME type if known. */
   mimeType?: string
+  /** Explicit permission to repeat a duplicate source in this queue. */
+  processAgain?: boolean
   /** Validation state for this item. */
   validation: QueueItemValidation
   /** Metadata carried from a playlist preflight response. */

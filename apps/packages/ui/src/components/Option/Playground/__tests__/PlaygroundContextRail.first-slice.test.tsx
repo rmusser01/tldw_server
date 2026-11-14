@@ -130,6 +130,30 @@ const noPromptCompositionSummary = (): PlaygroundCompositionPreviewSummary => ({
 });
 
 describe("PlaygroundContextRail first-slice controls", () => {
+  it("labels selected context and prompts without claiming request activation", () => {
+    renderRail({
+      hasContext: true,
+      contextSources: [
+        {
+          id: "prompt",
+          kind: "prompt",
+          label: "Prompt",
+          title: "Selected behavior",
+          state: "active",
+        },
+      ],
+      promptSummary: {
+        state: "custom",
+        label: "Selected behavior",
+        detail: "System prompt selected",
+      },
+    });
+    expect(screen.getByText("1 selected source")).toBeInTheDocument();
+    expect(screen.getAllByText("Selected behavior")).toHaveLength(2);
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+    expect(screen.queryByText("Armed")).not.toBeInTheDocument();
+  });
+
   it("keeps left rail groups in cockpit comprehension order", () => {
     renderRail({
       compositionPreviewSummary: compositionSummary(),
@@ -169,13 +193,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
       screen
         .getAllByRole("heading", { level: 2 })
         .map((heading) => heading.textContent),
-    ).toEqual([
-      "Composition",
-      "Context stack",
-      "Prompt",
-      "Search & sources",
-      "Session",
-    ]);
+    ).toEqual(["Instructions", "Sources", "Conversation", "Request preview"]);
   });
 
   it("places the optional character sessions panel before the generic session controls", () => {
@@ -194,12 +212,11 @@ describe("PlaygroundContextRail first-slice controls", () => {
         .getAllByRole("heading", { level: 2 })
         .map((heading) => heading.textContent),
     ).toEqual([
-      "Composition",
-      "Context stack",
-      "Prompt",
-      "Search & sources",
+      "Instructions",
+      "Sources",
       "Character sessions",
-      "Session",
+      "Conversation",
+      "Request preview",
     ]);
   });
 
@@ -223,12 +240,14 @@ describe("PlaygroundContextRail first-slice controls", () => {
     expect(
       screen.getByRole("region", { name: "Next message composition" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Instructions" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Select a prompt" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Search & sources" }),
+      screen.getByRole("heading", { name: "Sources" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Open Search & Context" }),
@@ -237,7 +256,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
       screen.getByRole("button", { name: "Web search" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Session" }),
+      screen.getByRole("heading", { name: "Conversation" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Use temporary chat" }),
@@ -245,69 +264,27 @@ describe("PlaygroundContextRail first-slice controls", () => {
   });
 
   it("lets each left rail section collapse without removing the rail", () => {
-    renderRail({
-      compositionPreviewSummary: compositionSummary(),
-      hasContext: false,
-      contextSummary: [],
-      promptSelectControl: (
-        <button type="button" aria-label="Select a prompt">
-          Select prompt
-        </button>
-      ),
-    });
-
+    renderRail({ compositionPreviewSummary: compositionSummary() });
     const rail = screen.getByTestId("playground-context-rail");
-    const collapseContext = within(rail).getByRole("button", {
-      name: "Collapse Context stack",
+    for (const title of ["Instructions", "Sources", "Conversation"]) {
+      const toggle = within(rail).getByRole("button", {
+        name: `Collapse ${title}`,
+      });
+      const panel = document.getElementById(
+        toggle.getAttribute("aria-controls")!,
+      );
+      fireEvent.click(toggle);
+      expect(panel).toHaveAttribute("aria-hidden", "true");
+      expect(
+        within(rail).getByRole("button", { name: `Expand ${title}` }),
+      ).toBeVisible();
+    }
+    const request = within(rail).getByRole("button", {
+      name: "Expand Request preview",
     });
-    const contextPanelId = collapseContext.getAttribute("aria-controls");
-    const contextPanel = contextPanelId
-      ? document.getElementById(contextPanelId)
-      : null;
-
-    expect(collapseContext).toHaveAttribute("aria-expanded", "true");
-    expect(contextPanel).not.toBeNull();
-    expect(contextPanel).toHaveAttribute("aria-hidden", "false");
-    expect(contextPanel).not.toHaveClass("hidden");
-
-    fireEvent.click(collapseContext);
-
-    expect(rail).toBeInTheDocument();
-    expect(collapseContext).toHaveAttribute("aria-expanded", "false");
-    expect(contextPanel).toHaveAttribute("aria-hidden", "true");
-    expect(contextPanel).toHaveClass("hidden");
-    expect(
-      within(rail).getByRole("button", { name: "Expand Context stack" }),
-    ).toBeInTheDocument();
-
-    fireEvent.click(
-      within(rail).getByRole("button", { name: "Collapse Composition" }),
-    );
-    fireEvent.click(
-      within(rail).getByRole("button", { name: "Collapse Prompt" }),
-    );
-    fireEvent.click(
-      within(rail).getByRole("button", {
-        name: "Collapse Search & sources",
-      }),
-    );
-    fireEvent.click(
-      within(rail).getByRole("button", { name: "Collapse Session" }),
-    );
-
-    expect(
-      screen.getByRole("heading", { name: "Composition" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Context stack" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Search & sources" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Session" }),
-    ).toBeInTheDocument();
+    expect(request).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(request);
+    expect(request).toHaveAttribute("aria-expanded", "true");
   });
 
   it("starts secondary context sections collapsed in setup recovery mode", () => {
@@ -323,22 +300,21 @@ describe("PlaygroundContextRail first-slice controls", () => {
 
     const rail = screen.getByTestId("playground-context-rail");
     expect(
-      within(rail).getByRole("button", { name: "Collapse Context stack" }),
+      within(rail).getByRole("button", { name: "Collapse Sources" }),
     ).toHaveAttribute("aria-expanded", "true");
     expect(
-      within(rail).getByRole("button", { name: "Expand Prompt" }),
+      within(rail).getByRole("button", { name: "Expand Instructions" }),
     ).toHaveAttribute("aria-expanded", "false");
     expect(
-      within(rail).getByRole("button", { name: "Expand Search & sources" }),
-    ).toHaveAttribute("aria-expanded", "false");
-    expect(
-      within(rail).getByRole("button", { name: "Expand Session" }),
+      within(rail).getByRole("button", { name: "Expand Conversation" }),
     ).toHaveAttribute("aria-expanded", "false");
     expect(
       within(rail).queryByRole("button", { name: "Select a prompt" }),
     ).toBeNull();
 
-    fireEvent.click(within(rail).getByRole("button", { name: "Expand Prompt" }));
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Expand Instructions" }),
+    );
 
     expect(
       within(rail).getByRole("button", { name: "Select a prompt" }),
@@ -423,7 +399,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
     ).toHaveTextContent("No prompt selected");
 
     const promptManagement = screen.getByRole("region", {
-      name: "Prompt management",
+      name: "Instructions",
     });
     expect(
       within(promptManagement).queryByText("No prompt selected"),
@@ -432,9 +408,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
       within(promptManagement).getByText("Ready to add prompt"),
     ).toBeInTheDocument();
     expect(
-      within(promptManagement).getByText(
-        "Select a prompt to add system instructions.",
-      ),
+      within(promptManagement).getByRole("button", { name: "Select a prompt" }),
     ).toBeInTheDocument();
   });
 
@@ -489,7 +463,9 @@ describe("PlaygroundContextRail first-slice controls", () => {
       },
     });
 
-    expect(screen.getByRole("heading", { name: "Prompt" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Instructions" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Socratic tutor")).toBeInTheDocument();
     expect(screen.getByText("System prompt selected")).toBeInTheDocument();
     expect(
@@ -558,7 +534,9 @@ describe("PlaygroundContextRail first-slice controls", () => {
     expect(
       screen.getByText("Conversation no longer exists"),
     ).toBeInTheDocument();
-    expect(screen.getByText("No saved history yet")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Use temporary chat" }),
+    ).toBeEnabled();
   });
 
   it("shows explicit context counts even when no summary strings are supplied", () => {
@@ -605,7 +583,7 @@ describe("PlaygroundContextRail first-slice controls", () => {
   it("keeps Search & Context available in the empty state", () => {
     renderRail({ hasContext: false, contextSummary: [] });
 
-    expect(screen.getByText("No extra context")).toBeInTheDocument();
+    expect(screen.getByText("No sources attached.")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Open Search & Context" }),
     ).toBeInTheDocument();

@@ -32,9 +32,9 @@ Continue issue #1116 Phase 2.2 by converting the next remaining minimal-test opt
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Addressed PR #1301 review feedback by introducing data_resource_skip_context for the shared data/resource ImportedRouterSpec skip context.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

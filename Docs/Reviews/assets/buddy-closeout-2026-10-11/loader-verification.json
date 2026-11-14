@@ -1,0 +1,37 @@
+{
+  "base": "39b53a876f2cfefcede02c92ae7dacf88f7a98ec",
+  "task": "TASK-13211",
+  "requester_approved_scope_revision": true,
+  "tests": {
+    "total": 103,
+    "passed": 103,
+    "failed": 0,
+    "pending": 0,
+    "files": [
+      "apps/packages/ui/src/hooks/__tests__/usePersonaLiveControl.test.tsx",
+      "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx",
+      "apps/packages/ui/src/routes/__tests__/sidepanel-persona.buddy-lifecycle.test.tsx"
+    ]
+  },
+  "test_source_sha256": {
+    "apps/packages/ui/src/hooks/__tests__/usePersonaLiveControl.test.tsx": "ffde6eab0a9d2156329e03899ed99fa92ae0d3296d32c20b8e997f7bb30b8dfc",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx": "d9ae8587a14728ef5826d6e23b293b96ede92255f05c13aa87fe61d633e1049e",
+    "apps/packages/ui/src/routes/__tests__/sidepanel-persona.buddy-lifecycle.test.tsx": "c5d0e4debe4a904d9cb341194a8e2015bf6aaf02fdfdd7d7b9c2f50d4ec6758d"
+  },
+  "runtime_source_sha256": {
+    "apps/packages/ui/src/hooks/usePersonaLiveControl.tsx": "e83da081217eed16f20931d8a7f175b43d8cebb803a306b8f7b6ec28e08d75ab",
+    "apps/packages/ui/src/components/Common/PersonaBuddy/BuddyShellHost.tsx": "50b18ab4fb1f3563ef982ba7c1c6cacb3d274730878fab565ee32cb810deb11a",
+    "apps/packages/ui/src/routes/sidepanel-persona.tsx": "93b105d68b2833843ff3af472fd0c6983af3787aacb09f0b2599d1a2defbc5f0"
+  },
+  "incident_sha256": "b2bc2eff441d7bd4e6df1d2d8bd498bebe7cfe3c1730ef75185358c33ab5f3ea",
+  "command_cwd": "apps/packages/ui",
+  "command": "./node_modules/.bin/vitest run src/hooks/__tests__/usePersonaLiveControl.test.tsx src/components/Common/PersonaBuddy/__tests__/BuddyShellHost.test.tsx src/routes/__tests__/sidepanel-persona.buddy-lifecycle.test.tsx --maxWorkers=1 --no-file-parallelism --reporter=json --outputFile=/private/tmp/buddy-loader-closeout-20261011.json",
+  "result_sha256": "1e1090191d209df5b5296fc9daacefa1bdf4e3f7d208d3c2ed71bbf6c4a4c369",
+  "log_sha256": "c0ba6168ee33fb2293fb06ce91015e3d85f32776e93c6b34c17f560360529d91",
+  "warnings": [
+    "Node experimental localStorage warning"
+  ],
+  "provider_audio_calls": 0,
+  "accepted_UAT_repeated": false,
+  "historical_trigger": "Unproven; incident receipt omits initiating browser/effect metadata."
+}

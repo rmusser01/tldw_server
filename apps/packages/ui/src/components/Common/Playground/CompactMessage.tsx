@@ -51,7 +51,7 @@ interface CompactMessageProps {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate?: () => void
-  onEditFormSubmit?: (value: string, isSend: boolean) => void
+  onEditFormSubmit?: (value: string, isSend: boolean) => void | Promise<void>
   isProcessing?: boolean
   isStreaming?: boolean
   sources?: Source[]

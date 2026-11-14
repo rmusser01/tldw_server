@@ -947,7 +947,7 @@ describe("SingleFieldRecipeEditor", () => {
     const first = savedRecipe();
     const second = savedRecipe({ id: "saved-second", name: "Saved second" });
     const pending = deferred<void>();
-    const onUpdate = vi.fn(() => pending.promise);
+    const onUpdate = vi.fn<NonNullable<React.ComponentProps<typeof SingleFieldRecipeEditor>["onUpdate"]>>(() => pending.promise);
     renderEditor({
       initialSource: first,
       savedRecipes: [first, second],

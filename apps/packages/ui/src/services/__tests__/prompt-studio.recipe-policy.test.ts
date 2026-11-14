@@ -1,7 +1,7 @@
 import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import { beforeEach, expect, it, vi } from "vitest"
 
-import { createPrompt, updatePrompt } from "../prompt-studio"
+import { createPrompt, getProject, updatePrompt } from "../prompt-studio"
 
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/services/api-send", () => ({ apiSend: api }))
@@ -86,7 +86,8 @@ it("preserves create idempotency overload with explicit required owner policy", 
         expectedOwnerId: owner,
         localId: "exact"
       }
-    })
+    }),
+    { coalesce: false }
   )
 })
 it.each(["create", "update"])(
@@ -120,3 +121,9 @@ it.each(["create", "update"])(
     expect(api).toHaveBeenCalledTimes(1)
   }
 )
+
+it("reads the canonical project envelope with the captured owner policy", async () => {
+  api.mockResolvedValue({ ok: true, status: 200, data: { data: { id: 42 } } })
+  await getProject(42, { recipePersistence: { mode: "owner", expectedOwnerId: owner } })
+  expect(api).toHaveBeenCalledWith({ path: "/api/v1/prompt-studio/projects/get/42", method: "GET", recipePersistence: { mode: "owner", expectedOwnerId: owner } }, { coalesce: false })
+})

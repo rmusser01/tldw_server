@@ -3,6 +3,7 @@ import type { MediaDateRange, MediaSortBy } from "@/components/Review/mediaSearc
 import type { ContentFilterProgress } from "@/components/Review/content-filtering-progress"
 import type { MediaMultiBatchExportFormat } from "@/components/Review/media-multi-batch-actions"
 import { extractMediaDetailContent } from "@/utils/media-detail-content"
+import { stripMediaMetadata } from "@/utils/media-metadata-display"
 
 // ── Domain types ────────────────────────────────────────────────
 export type MediaItem = {
@@ -15,6 +16,7 @@ export type MediaItem = {
 
 export type MediaDetail = {
   id: string | number
+  source?: { title?: string; type?: string; url?: string }
   title?: string
   type?: string
   created_at?: string
@@ -29,6 +31,9 @@ export type MediaDetail = {
 export const getContent = (d: MediaDetail): string => {
   return extractMediaDetailContent(d)
 }
+
+export const getReadingContent = (d: MediaDetail): string =>
+  stripMediaMetadata(getContent(d))
 
 export const idsEqual = (a: string | number, b: string | number): boolean =>
   String(a) === String(b)
@@ -104,11 +109,24 @@ export interface MediaReviewState {
   availableTypes: string[]
   setAvailableTypes: React.Dispatch<React.SetStateAction<string[]>>
 
+  authorityKey: string | null
+  readingActive: boolean
+  setReadingActive: React.Dispatch<React.SetStateAction<boolean>>
+  readingWindowStart: number
+  setReadingWindowStart: React.Dispatch<React.SetStateAction<number>>
+  readingIds: Array<string | number>
+  selectedMetadata: Record<string, MediaItem>
+  mobileTab: 0 | 1 | 2
+  setMobileTab: React.Dispatch<React.SetStateAction<0 | 1 | 2>>
+  navigationTotal: number
+
   // Selection & focus
   selectedIds: Array<string | number>
   setSelectedIds: React.Dispatch<React.SetStateAction<Array<string | number>>>
   focusedId: string | number | null
   setFocusedId: React.Dispatch<React.SetStateAction<string | number | null>>
+  previewNavigationIds: Array<string | number>
+  setPreviewNavigationIds: React.Dispatch<React.SetStateAction<Array<string | number>>>
   previewedId: string | number | null
   setPreviewedId: React.Dispatch<React.SetStateAction<string | number | null>>
   selectionRestored: boolean
@@ -251,7 +269,10 @@ export interface MediaReviewState {
 
 // ── Actions shape returned by useMediaReviewActions ─────────────
 export interface MediaReviewActions {
-  previewItem: (id: string | number) => void
+  startSelectedReview: (id?: string | number) => void
+  returnToPreview: () => void
+  changeReadingWindow: (delta: number) => void
+  previewItem: (id: string | number, preserveContext?: boolean) => void
   toggleSelect: (id: string | number, event?: React.MouseEvent) => Promise<void>
   ensureDetail: (id: string | number, isRetry?: boolean) => Promise<void>
   retryFetch: (id: string | number) => void

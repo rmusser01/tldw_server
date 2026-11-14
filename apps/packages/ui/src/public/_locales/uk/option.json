@@ -534,7 +534,7 @@
     "message": "Зберігати після перевірки"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Перевірити перед збереженням"
+    "message": "Переглянути витягнутий вміст перед збереженням"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Створювати чернетки та перевіряти їх перед збереженням"
@@ -2737,5 +2737,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "Автономне збереження недоступне, доки не підтверджено ваш обліковий запис і локальне сховище. Ваші зміни залишаються незбереженими."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

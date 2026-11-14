@@ -196,7 +196,7 @@ Docs/superpowers/plans/2026-07-13-provider-credential-runtime-production-hardeni
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-12: Brainstorming completed and the approved design was written at Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md.
 2026-07-12: Independent spec review approved the complete design with no remaining issues or recommendations.
 
@@ -248,27 +248,7 @@ Docs/superpowers/plans/2026-07-13-provider-credential-runtime-production-hardeni
 2026-07-13: Post-rebase production-safety review found and fixed three runtime risks: explicit/BYOK embedding requests could share a provider-global cache across credentials, their auth failures could open the provider-global circuit breaker across tenants, and invalid non-stream provider objects could be generator-wrapped into a 200 stream instead of failing before headers. Explicit credentials now bypass shared embedding cache/breaker while retaining pooled HTTP/retry/stats behavior; server-configured traffic retains existing cache/breaker behavior; invalid stream objects fail with 502. Stale Chat/embedding fixtures were aligned with fail-closed sanitized contracts. Verification before the next dev refresh: full Chat 837 passed/31 skipped; full Embeddings 444 passed/36 skipped with pinned random/Hypothesis seeds; RAG_NEW+AuthNZ_Unit+http_client 1794 passed/7 skipped plus one known order-polluted prompt-loader assertion that passed isolated with the same seed; loopback Chat integrations 2 passed outside sandbox; py_compile and git diff checks passed; Bandit 0 findings/0 errors across 7421 production LOC; fatal Ruff findings match HEAD baseline exactly. origin/dev advanced to db0cfb6611 with backlog-only commits, so final rebase and focused post-rebase verification remain pending.
 
 2026-07-13: Final rebase completed onto origin/dev db0cfb6611. The two incoming commits were backlog-only and had no runtime/test overlap. Range-diff confirmed all 75 feature patches replayed exactly; origin/dev is an ancestor and the branch is 0 commits behind. Final post-rebase high-risk matrix: 192 passed, 17 expected skips across provider runtime/BYOK, Chat error and streaming behavior, loopback Chat integration, explicit embedding cache/breaker isolation, and RAG credential convenience paths. Final committed-tree py_compile passed; full-range git diff check passed; Bandit reported 0 findings and 0 scan errors across 7421 production LOC. Only the two unrelated untracked watchlist templates remain untouched.
-<!-- SECTION:NOTES:END -->
 
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Consolidated Chat, Knowledge QA/RAG, embeddings, secondary provider surfaces, Prompt Studio, and durable Jobs onto server-owned execution-scoped provider credentials with user/team/org/server precedence and explicit fail-closed behavior. Credentials remain non-serializable and server-side; semantic caching is retrieval-only; streaming errors are bounded, ordered, and non-replayed; provider/model/endpoint provenance is authoritative; and credential/runtime cleanup is cancellation- and concurrency-safe across SQLite/PostgreSQL operations. Final high-risk backend/frontend, adapter-boundary, concurrency, static, compatibility, and security gates pass. PR #2727 remains draft solely for the mandatory requester-authored Change summary.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
-- [x] #2 Tests or verification recorded
-- [x] #3 Documentation updated when relevant
-- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
-- [x] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-07-12: Brainstorming completed and the approved design was written at Docs/superpowers/specs/2026-07-12-shared-provider-credential-runtime-design.md.
 2026-07-12: Independent spec review approved the complete design with no remaining issues or recommendations.
 
@@ -379,3 +359,19 @@ TASK-12963 remains In Progress and PR #2727 remains draft pending exact-new-head
 2026-07-21: Merged origin/dev 8ed612c7e0335ab922b6abd5f5c11ba1407d552d locally without conflicts in merge commit 0e8eadc55f48ff50f55525b8996140cbad43630c after the prior remote-head CI became fully terminal. Incoming dev did not alter Jobs or the reviewed follow-up production paths; the backend runtime delta was limited to OpenAPI metadata in main.py. Post-merge high-risk evidence: sandbox state/store 263 passed/6 skipped (including real isolated PostgreSQL); RAG integration core 74 passed; Chat_NEW integration/property 102 passed/11 skipped; legacy Chat 450 passed/30 skipped; streaming plus real OpenAI OAuth retry 88 passed/1 skipped; RAG_NEW unit 1,062 passed/3 skipped; OpenAPI contracts 72 passed. Frontend targeted Vitest passed 42/42 and targeted ESLint was clean; full typecheck reports only unchanged skills-certification test diagnostics on paths/config identical to origin/dev, recorded as inherited baseline. Python 3.10-3.13 py_compile passed; Bandit reported 0 findings/0 errors over 8,898 LOC; the four fatal-Ruff main.py findings reproduce exactly on origin/dev. After a fresh fetch, origin/dev remains an ancestor and the branch is 105 ahead/0 behind. No push has occurred; the PR remains draft pending fresh exact-head CI after push and the requester-authored Change summary required by policy. The unrelated PID and two watchlist templates remain untouched and must not be staged.
 2026-07-22: After prerequisite PR #2756 merged as dev commit 84efd93455, merged current origin/dev into the PR #2727 branch. Four overlaps were resolved semantically: both active admin guides use dev complete-tree/configured-path SQLite backup guidance and remain byte-identical; release.py remains byte-identical to the already-portable PR #2727 parent; the OpenAPI fingerprint was regenerated from the merged API under the retained Python 3.12 environment and remains 9a07fa34479c at 1999 paths/2909 schemas. Independent conflict reviews approved each resolution. Focused merge verification passed: 114 docs/release tests, 17 workflow prerequisite tests, OpenAPI drift, frontend API type regeneration, Python compilation, Bandit with zero findings, and diff hygiene. Whole-file Black/Ruff findings were verified as byte-identical parent-branch baseline debt rather than merge-introduced findings. Unrelated PID/watchlist-template artifacts remain untouched. PR remains draft pending the requester-authored Change summary.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Consolidated Chat, Knowledge QA/RAG, embeddings, secondary provider surfaces, Prompt Studio, and durable Jobs onto server-owned execution-scoped provider credentials with user/team/org/server precedence and explicit fail-closed behavior. Credentials remain non-serializable and server-side; semantic caching is retrieval-only; streaming errors are bounded, ordered, and non-replayed; provider/model/endpoint provenance is authoritative; and credential/runtime cleanup is cancellation- and concurrency-safe across SQLite/PostgreSQL operations. Final high-risk backend/frontend, adapter-boundary, concurrency, static, compatibility, and security gates pass. PR #2727 remains draft solely for the mandatory requester-authored Change summary.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

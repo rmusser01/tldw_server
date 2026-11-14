@@ -32,6 +32,12 @@ export interface TutorialStep {
   spotlightClicks?: boolean
   /** Whether the step target is fixed positioned */
   isFixed?: boolean
+  /**
+   * The target only exists in some page states (for example, when a note is
+   * selected). An optional step whose target is missing when the tour starts
+   * is left out, so "Step x of N" counts only steps the user will see.
+   */
+  optional?: boolean
 }
 
 /**

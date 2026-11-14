@@ -32,9 +32,9 @@ Map existing integration seams; create three dependent implementation tasks; wri
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created three dependency-ordered implementation tasks and an execution plan with concrete integration files, shared interfaces, red-green examples, failure cases and live reuse release gate. Self-reviewed spec coverage and interface consistency; placeholder scan and diff whitespace checks clean. Documentation-only: runtime tests and Bandit not applicable. No implementation begun. Initial approval-service usage rejection resolved on user-requested continuation.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -48,7 +48,7 @@ Expected impact estimate for this narrow replacement: reduce active shared UI da
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verified PR #1427 merged into dev at a443c105a41431b8dea56074f1e9cf3418f948af on 2026-05-09T18:45:52Z.
 
 Corrected the expected import-line impact from 5->3 to 5->4 because ReadingList and Items each retain separate runtime and type dayjs imports after the Media slice.
@@ -68,7 +68,7 @@ Bandit skipped because this slice changed TypeScript, documentation, and Backlog
 Correction after rerunning the TypeScript check post-test-harness tweak: `node_modules/.bin/tsc --noEmit --project tsconfig.json --pretty false` exits 1, not 2, on the existing EmbeddingsModelSelectionConfig.tsx and lib/api/vnPlay.ts baseline errors; the task-specific filter still returns no matches.
 
 Opened PR #1436 against dev: https://github.com/rmusser01/tldw_server/pull/1436
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

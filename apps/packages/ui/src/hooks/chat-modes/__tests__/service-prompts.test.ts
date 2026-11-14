@@ -925,7 +925,7 @@ describe("Service Prompt mode definitions", () => {
   it("keeps the packaged Tab image provider message byte-identical", async () => {
     useDefinitionPipeline()
     const question = "Describe this image {question} $&"
-    const image = "data:image/png;base64,dGVzdA=="
+    const image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMDAAAANHQEDasKb6QAAAABJRU5ErkJggg=="
     const resolved = snapshot(["chat.rag.answer"], {
       "chat.rag.answer":
         LEGACY_SERVICE_PROMPT_DEFAULTS["chat.rag.answer"].template

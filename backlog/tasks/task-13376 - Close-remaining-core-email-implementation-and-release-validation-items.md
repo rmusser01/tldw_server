@@ -25,9 +25,9 @@ User explicitly requested handling all remaining items: ingestion metrics, sensi
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 All six child tasks are Done. Reviewed working commits: b880be1b53 implementation; 76f5b5caba SQLite certificates/tuning; aac02e68e8 PostgreSQL graph/query/RLS/schema; 1fee95629a serial full fixture inspection; 455fad64fb transaction-local custom planning; ae46f643ab PostgreSQL HTTP and legacy compatibility; 880d690a93 isolated probe resource/source guards. Final docs/evidence commit closes this task without push, PR, merge or production rollout. The root-owned four-stage implementation plan is complete and removed under AGENTS.md; retained design notes, report, evidence and Git history preserve the record. All 36 retained JSON files passed credential-field/DSN checks. Independent code/evidence reviews resolved; no Python changes after the final passing source snapshot.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -38,6 +38,7 @@ export type TldwConnectionSettingsProps = {
   setAuthMode: (mode: "single-user" | "multi-user") => void
   signInTargetSaved?: boolean
   isLoggedIn: boolean
+  loggedInUsername?: string | null
   setIsLoggedIn: (loggedIn: boolean) => void
   refreshLoginStatus: () => Promise<void>
   loginMethod: LoginMethod
@@ -98,6 +99,7 @@ export const TldwConnectionSettings = ({
   setAuthMode,
   signInTargetSaved = false,
   isLoggedIn,
+  loggedInUsername,
   setIsLoggedIn,
   refreshLoginStatus,
   loginMethod,
@@ -383,6 +385,7 @@ export const TldwConnectionSettings = ({
           className="mb-4"
         >
           {t('settings:tldw.loggedIn.description', 'You are currently logged in to tldw_server')}
+          {loggedInUsername && <p>{t('settings:tldw.loggedIn.account', 'Account')}: {loggedInUsername}</p>}
         </Alert>
       )}
 

@@ -14,8 +14,10 @@ const {
   mockConfirmDanger,
   mockGetSetting,
   mockSetSetting,
-  mockClearSetting
+  mockClearSetting,
+  canonicalConfig
 } = vi.hoisted(() => ({
+  canonicalConfig: { serverUrl: "https://notes.test", authMode: "single-user", authSource: "manual", apiKey: "synthetic-notes-key" },
   mockBgRequest: vi.fn(),
   mockMessageSuccess: vi.fn(),
   mockMessageError: vi.fn(),
@@ -115,10 +117,22 @@ vi.mock("@/services/settings/registry", async (importOriginal) => {
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
+    getConfig: vi.fn(async () => canonicalConfig),
     getChat: vi.fn(async () => null),
     listChatMessages: vi.fn(async () => []),
     getCharacter: vi.fn(async () => null)
   }
+}))
+
+// Hold I/O while keeping the real canonical config and verified Notes owner hooks.
+vi.mock("@plasmohq/storage/hook", () => ({
+  useStorage: (key: string, fallback: unknown) => [
+    key === "tldwConfig" ? canonicalConfig : canonicalConfig[key] ?? fallback,
+    vi.fn()
+  ]
+}))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 7, is_active: true })) }
 }))
 
 vi.mock("@/components/Notes/NotesListPanel", () => ({
@@ -189,15 +203,16 @@ describe("NotesManagerPage stage 35 export preflight", () => {
         }
       }
       if (!path.startsWith("/api/v1/notes/?")) return {}
+      // list_notes pages with limit/offset and reports pagination.total.
       const params = new URL(`https://example.local${path}`).searchParams
-      const pageSize = Number(params.get("results_per_page") || "20")
-      if (pageSize === 20) {
+      const limit = Number(params.get("limit") || "100")
+      if (limit === 20) {
         return {
           items: makeNotes(20, 0),
-          pagination: { total_items: 100_001, total_pages: 5001 }
+          pagination: { limit, offset: 0, total: 100_001 }
         }
       }
-      return { items: [], pagination: { total_items: 100_001, total_pages: 5001 } }
+      return { items: [], pagination: { limit, offset: 0, total: 100_001 } }
     })
 
     renderPage()
@@ -216,7 +231,7 @@ describe("NotesManagerPage stage 35 export preflight", () => {
 
     expect(
       mockBgRequest.mock.calls.some(([request]) =>
-        String(request?.path || "").includes("results_per_page=100")
+        String(request?.path || "").includes("limit=100")
       )
     ).toBe(false)
     expect(mockMessageSuccess).not.toHaveBeenCalled()
@@ -237,21 +252,21 @@ describe("NotesManagerPage stage 35 export preflight", () => {
       }
       if (!path.startsWith("/api/v1/notes/?")) return {}
       const params = new URL(`https://example.local${path}`).searchParams
-      const page = Number(params.get("page") || "1")
-      const pageSize = Number(params.get("results_per_page") || "20")
-      if (pageSize === 20) {
+      const limit = Number(params.get("limit") || "100")
+      const offset = Number(params.get("offset") || "0")
+      if (limit === 20) {
         return {
           items: makeNotes(20, 0),
-          pagination: { total_items: 100_001, total_pages: 5001 }
+          pagination: { limit, offset, total: 100_001 }
         }
       }
-      if (pageSize === 100 && page === 1) {
+      if (limit === 100 && offset === 0) {
         return {
           items: makeNotes(5, 0),
-          pagination: { total_items: 100_001, total_pages: 1001 }
+          pagination: { limit, offset, total: 100_001 }
         }
       }
-      return { items: [], pagination: { total_items: 100_001, total_pages: 5001 } }
+      return { items: [], pagination: { limit, offset, total: 100_001 } }
     })
 
     renderPage()
@@ -264,7 +279,7 @@ describe("NotesManagerPage stage 35 export preflight", () => {
     await waitFor(() => {
       expect(
         mockBgRequest.mock.calls.some(([request]) =>
-          String(request?.path || "").includes("results_per_page=100")
+          String(request?.path || "").includes("limit=100")
         )
       ).toBe(true)
     })

@@ -10,7 +10,8 @@ const memory: Record<string, any> = vi.hoisted(() => {
     "compareStates",
     "historySelections",
     "historyProjections",
-    "forkOperations"
+    "forkOperations",
+    "searchTokens"
   ]) {
     const rows = new Map<string, any>()
     const key = (v: any) =>
@@ -21,6 +22,8 @@ const memory: Record<string, any> = vi.hoisted(() => {
             ? [v.owner_key, v.operation_id]
           : name === "historyProjections"
             ? [v.owner_key, v.conversation_id, v.projection_id]
+          : name === "searchTokens"
+            ? [v.token, v.history_id]
             : v.id ?? v.sessionId ?? v.history_id
       )
     tables[name] = {
@@ -47,6 +50,11 @@ const memory: Record<string, any> = vi.hoisted(() => {
         rows.set(k, { ...rows.get(k), ...structuredClone(patch) })
       },
       delete: async (id: any) => rows.delete(JSON.stringify(id)),
+      filter: (predicate: (row: any) => boolean) => ({
+        delete: async () => {
+          for (const [k, row] of rows) if (predicate(row)) rows.delete(k)
+        }
+      }),
       where: (field: string) => ({
         equals: (v: any) => ({
           delete: async () => {
@@ -1132,11 +1140,19 @@ it("clean deletion and same-owner undo retain the settled local baseline and row
   const snapshot = await getFullChatData("source")
   await deleteByHistoryId("source")
   expect(memory.messages.rows.size).toBe(0)
+  expect(memory.searchTokens.rows.size).toBe(0)
   await restoreChat(snapshot!)
   expect(
     (await memory.chatHistories.get("source")).local_settings_guard
   ).toEqual(snapshot!.historyInfo.local_settings_guard)
   expect(memory.messages.rows.size).toBe(3)
+  // WP-23: undo is a message write path, so restored rows re-enter the
+  // content-search token index.
+  expect(
+    [...memory.searchTokens.rows.values()].some(
+      (row) => row.history_id === "source"
+    )
+  ).toBe(true)
 })
 it("grouped deletion uses the atomic pending guard before removing any target messages", async () => {
   const { deleteHistoriesByDateRange } = await import("../helpers")
@@ -1154,4 +1170,52 @@ it("grouped deletion uses the atomic pending guard before removing any target me
     "history_settings_write_pending"
   )
   expect(memory.messages.rows.size).toBe(3)
+})
+
+it.each(["edit", "delete"])(
+  "a retired message-mutation lease refuses %s before any write",
+  async (operation) => {
+    const captured = { ...owner, validate_lease: () => false }
+    const database = new PageAssistDatabase()
+    const mutation =
+      operation === "edit"
+        ? database.updateMessage("source", "u2", "replaced", captured)
+        : database.removeMessage("source", "u2", captured)
+    await expect(mutation).rejects.toThrow("request_config_scope_changed")
+    expect((await memory.messages.get("u2")).content).toBe("u2")
+  }
+)
+it("retiring an owned Delete during its mutation rolls back the tombstone", async () => {
+  let current = true
+  let release!: () => void
+  const original = memory.messages.delete
+  const held = vi
+    .spyOn(memory.messages, "delete")
+    .mockImplementation(async (id) => {
+      await original(id)
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+    })
+  try {
+    const pending = new PageAssistDatabase().removeMessage("source", "u2", {
+      ...owner,
+      validate_lease: () => current
+    })
+    await vi.waitFor(() => expect(held).toHaveBeenCalled())
+    current = false
+    release()
+    await expect(pending).rejects.toThrow("request_config_scope_changed")
+    expect(await memory.messages.get("u2")).toBeDefined()
+  } finally {
+    held.mockRestore()
+  }
+})
+it("an idle local Delete retains its supplied rendered lease inside the transaction", async () => {
+  await expect(
+    new PageAssistDatabase().removeMessage("source", "u2", undefined, {
+      validate_lease: () => false
+    })
+  ).rejects.toThrow("request_config_scope_changed")
+  expect(await memory.messages.get("u2")).toBeDefined()
 })

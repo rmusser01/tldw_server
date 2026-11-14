@@ -149,6 +149,15 @@ def provide_content_jobs_worker_specs(
             enabled=route_enabled_predicate("AUDIO_JOBS_WORKER_ENABLED", "audio-jobs"),
         ),
         stop_event_worker_spec(
+            name="tts_jobs_task",
+            worker_service=_run_tts_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            # Long-form TTS (POST /audio/speech/jobs) has no other worker in a default deployment,
+            # so it runs wherever the audio routes do, unless TTS_JOBS_WORKER_ENABLED turns it off.
+            enabled=media_ingest_worker_predicate("TTS_JOBS_WORKER_ENABLED", "audio", default_stable=True),
+        ),
+        stop_event_worker_spec(
             name="audiobook_jobs_task",
             worker_service=_run_audiobook_jobs_worker_service,
             category="jobs",
@@ -156,6 +165,19 @@ def provide_content_jobs_worker_specs(
             enabled=route_enabled_predicate(
                 "AUDIOBOOK_JOBS_WORKER_ENABLED",
                 "audiobooks",
+            ),
+        ),
+        stop_event_worker_spec(
+            name="audio_studio_jobs_task",
+            worker_service=_run_audio_studio_jobs_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: should_start_inprocess_worker(
+                "AUDIO_STUDIO_JOBS_WORKER_ENABLED",
+                "audio-studio",
+                sidecar_mode=context.sidecar_mode,
+                test_mode=context.test_mode,
+                route_enabled=context.route_enabled,
             ),
         ),
         stop_event_worker_spec(
@@ -187,6 +209,16 @@ def provide_content_jobs_worker_specs(
                 "research-workspace-output-jobs",
                 default_stable=True,
             ),
+        ),
+        stop_event_worker_spec(
+            name="ingestion_sources_task",
+            worker_service=_run_ingestion_sources_worker_service,
+            category="jobs",
+            phase=ShutdownPhase.JOB_POLLER_QUIESCE,
+            enabled=lambda context: not context.sidecar_mode
+            and route_enabled_predicate(
+                "INGESTION_SOURCES_WORKER_ENABLED", "ingestion-sources"
+            )(context),
         ),
         stop_event_worker_spec(
             name="media_ingest_jobs_task",
@@ -1100,6 +1132,14 @@ def _run_audio_jobs_worker_service(stop_event: Any) -> Any:
     return _run_audio_jobs_worker(stop_event)
 
 
+def _run_tts_jobs_worker_service(stop_event: Any) -> Any:
+    # The server's startup already loads and refreshes LLM provider overrides, which the standalone
+    # entry point (python -m ...tts_jobs_worker) has to do itself.
+    from tldw_Server_API.app.core.TTS.tts_jobs_worker import run_tts_jobs_worker
+
+    return run_tts_jobs_worker(stop_event)
+
+
 def _run_audiobook_jobs_worker_service(stop_event: Any) -> Any:
     from tldw_Server_API.app.services.audiobook_jobs_worker import (
         run_audiobook_jobs_worker as _run_audiobook_jobs_worker,
@@ -1130,6 +1170,14 @@ def _run_research_workspace_output_jobs_worker_service(stop_event: Any) -> Any:
     )
 
     return _run_research_workspace_output_jobs_worker(stop_event)
+
+
+def _run_ingestion_sources_worker_service(stop_event: Any) -> Any:
+    from tldw_Server_API.app.services.ingestion_sources_worker import (
+        run_ingestion_sources_worker,
+    )
+
+    return run_ingestion_sources_worker(stop_event)
 
 
 def _run_media_ingest_jobs_worker_service(stop_event: Any) -> Any:

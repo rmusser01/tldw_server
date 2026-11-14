@@ -38,6 +38,7 @@ import {
 const { TextArea } = Input
 
 type PromptFullPageEditorProps = {
+  draftScopeKey?: string
   open: boolean
   onClose: () => void
   mode: "create" | "edit"
@@ -95,6 +96,7 @@ const normalizePromptDraftSnapshot = (
 
 export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   open,
+  draftScopeKey = "local",
   onClose,
   mode,
   initialValues,
@@ -120,7 +122,7 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
     useState<StructuredPromptPreviewResponse | null>(null)
   const [structuredPreviewLoading, setStructuredPreviewLoading] = useState(false)
 
-  const draftKey = `${DRAFT_KEY_PREFIX}${mode === "edit" ? initialValues?.id || "new" : "new"}`
+  const draftKey = `${DRAFT_KEY_PREFIX}${JSON.stringify([draftScopeKey, mode, mode === "edit" ? initialValues?.id || "new" : "new"])}`
   const { hasDraft, draftData, clearDraft, saveDraft, applyDraft, lastSaved } = useFormDraft({
     storageKey: draftKey,
     formType: mode,
@@ -163,23 +165,6 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
   useEffect(() => {
     if (!open) return
 
-    if (hasDraft && draftData) {
-      const recovered = applyDraft()
-      if (recovered) {
-        form.setFieldsValue(recovered)
-        setPromptFormat(
-          recovered.promptFormat === "structured" ? "structured" : "legacy"
-        )
-        setStructuredPromptDefinition(
-          recovered.structuredPromptDefinition ||
-            createDefaultStructuredPromptDefinition()
-        )
-        setStructuredPreviewResult(null)
-        setDirty(false)
-        return
-      }
-    }
-
     if (initialValues) {
       form.setFieldsValue({
         name: initialValues.name || "",
@@ -213,7 +198,28 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
 
     setStructuredPreviewResult(null)
     setDirty(false)
-  }, [open, initialValues, hasDraft, draftData, applyDraft, form])
+  }, [open, initialValues, form])
+
+  useEffect(() => {
+    if (!open) return
+    if (hasDraft && draftData) {
+      const recovered = applyDraft()
+      if (recovered) {
+        form.setFieldsValue(recovered)
+        setPromptFormat(
+          recovered.promptFormat === "structured" ? "structured" : "legacy"
+        )
+        setStructuredPromptDefinition(
+          recovered.structuredPromptDefinition ||
+            createDefaultStructuredPromptDefinition()
+        )
+        setStructuredPreviewResult(null)
+        setDirty(true)
+        return
+      }
+    }
+
+  }, [open, hasDraft, draftData, applyDraft, form])
 
   useEffect(() => {
     if (!open) return
@@ -538,7 +544,10 @@ export const PromptFullPageEditor: React.FC<PromptFullPageEditorProps> = ({
             disabled={isLoading}
             layout="vertical"
             onFinish={handleFinish}
-            onValuesChange={() => setDirty(true)}
+            onValuesChange={(_changed, values) => {
+              setDirty(true)
+              saveDraft(values)
+            }}
             className="mx-auto max-w-2xl space-y-6"
           >
             <div>

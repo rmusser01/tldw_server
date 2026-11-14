@@ -24,7 +24,7 @@ Add a runtime discovery implementation_state field using the sandbox roadmap sta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented runtime implementation_state labels for /api/v1/sandbox/runtimes using the roadmap state vocabulary. Added centralized state mapping in runtime_capabilities.py, surfaced it through SandboxService.feature_discovery(), extended the response schema, and documented the available vs implementation_state split in sandbox docs.
 
 Verification:
@@ -38,7 +38,7 @@ Verification:
 
 Known skip/blocker:
 - Full test_feature_discovery_flags.py timed out in existing TestClient teardown/job-worker startup path at test_egress_allowlist_supported_when_enforced, not in the new implementation_state test.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

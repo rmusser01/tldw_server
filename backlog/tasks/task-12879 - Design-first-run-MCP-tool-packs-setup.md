@@ -28,7 +28,7 @@ Write the approved design spec for adding an optional first-run MCP Tool Packs s
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Spec authored and reviewed for first-run MCP tool packs setup.
 
 Spec path: Docs/superpowers/specs/2026-07-04-first-run-mcp-tool-packs-design.md
@@ -47,7 +47,7 @@ Follow-up review patch before implementation planning:
 Touched files:
 - Docs/superpowers/specs/2026-07-04-first-run-mcp-tool-packs-design.md
 - backlog/tasks/task-12131 - Design-first-run-MCP-tool-packs-setup.md
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

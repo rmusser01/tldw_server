@@ -128,6 +128,9 @@ def migration_002_create_sessions_table(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_access_jti ON sessions(access_jti)")
+    # Admin activity summaries filter sessions by a created_at time window
+    # (admin perf plan A, stage 3); keep it an index range scan.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)")
 
     conn.commit()
     logger.info("Migration 002: Created sessions table")
@@ -2191,6 +2194,45 @@ def migration_096_add_admin_webhook_delivery_recovery(
     logger.info("Migration 096: Added admin webhook delivery recovery schema")
 
 
+def migration_103_seed_notes_graph_semantic_manage_permission(
+    conn: sqlite3.Connection,
+) -> None:
+    """Seed semantic management for approved existing Notes-writing roles."""
+
+    logger.info("Migration 103: START seed Notes graph semantic management permission")
+    required = ("roles", "permissions", "role_permissions")
+    if not all(_sqlite_table_exists(conn, table_name) for table_name in required):
+        logger.info("Migration 103: RBAC tables missing; skipping Notes semantic permission seed")
+        return
+    permission_insert = conn.execute(
+        "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)",
+        (
+            "notes.graph.semantic.manage",
+            "Manage Notes semantic indexing",
+            "notes",
+        ),
+    )
+    if permission_insert.rowcount == 0:
+        conn.commit()
+        logger.info(
+            "Migration 103: Permission already exists; preserving role mappings"
+        )
+        return
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+        SELECT r.id, p.id
+        FROM roles r
+        CROSS JOIN permissions p
+        WHERE r.name IN (?, ?, ?)
+          AND p.name = ?
+        """,
+        ("admin", "user", "moderator", "notes.graph.semantic.manage"),
+    )
+    conn.commit()
+    logger.info("Migration 103: Seeded Notes graph semantic management permission")
+
+
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
     """Rollback migration 086 by dropping prototype workspace metadata tables."""
     conn.execute("DROP TABLE IF EXISTS prototype_promotion_requests")
@@ -2624,6 +2666,7 @@ def migration_015_create_llm_usage_tables(conn: sqlite3.Connection) -> None:
     # Helpful indexes for common queries
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_ts ON llm_usage_log(ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user ON llm_usage_log(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_provider_model ON llm_usage_log(provider, model)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_op_ts ON llm_usage_log(operation, ts)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_log_remote_ip_ts ON llm_usage_log(remote_ip, ts)")
@@ -2714,6 +2757,9 @@ def migration_016_create_orgs_teams(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_org_members_user ON org_members(user_id)")
+    # Org-scoped admin joins filter org_members by org_id and join on user_id
+    # (admin perf plan A, stage 3); the composite index covers both.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_org_members_org_user ON org_members(org_id, user_id)")
 
     # teams
     conn.execute(
@@ -6080,6 +6126,22 @@ def rollback_077_drop_sharing_tables(conn: sqlite3.Connection) -> None:
 # Migration Registry
 #
 
+def _mcp_hub_initial_migrations() -> list[Migration]:
+    """Create the initial Hub schema registrations without sharing mutable migration objects."""
+    return [
+        Migration(
+            55,
+            "Create MCP Hub tables",
+            migration_055_create_mcp_hub_tables,
+        ),
+        Migration(
+            56,
+            "Create MCP Hub policy tables",
+            migration_056_create_mcp_hub_policy_tables,
+        ),
+    ]
+
+
 def get_authnz_migrations() -> list[Migration]:
     """Get all AuthNZ migrations in order"""
     return [
@@ -6268,16 +6330,7 @@ def get_authnz_migrations() -> list[Migration]:
             "Add llm_usage_log router analytics columns and indexes",
             migration_054_add_llm_usage_log_router_analytics_columns,
         ),
-        Migration(
-            55,
-            "Create MCP Hub tables",
-            migration_055_create_mcp_hub_tables,
-        ),
-        Migration(
-            56,
-            "Create MCP Hub policy tables",
-            migration_056_create_mcp_hub_policy_tables,
-        ),
+        *_mcp_hub_initial_migrations(),
         Migration(
             57,
             "Add consumable MCP approval decision columns",
@@ -6503,7 +6556,47 @@ def get_authnz_migrations() -> list[Migration]:
             "Add and backfill sessions.last_activity",
             migration_098_add_session_last_activity,
         ),
+        Migration(
+            99,
+            "Add llm_usage_log user_id + ts index",
+            migration_099_add_llm_usage_log_user_ts_index,
+        ),
+        Migration(
+            100,
+            "Copy users.storage_quota_mb into limits.storage_quota_mb overrides",
+            migration_100_copy_storage_quotas_to_user_overrides,
+        ),
+        Migration(
+            101,
+            "Add sessions.created_at and org_members(org_id, user_id) admin indexes",
+            migration_101_add_admin_perf_indexes,
+        ),
+        Migration(102, "Add native retained chat quota reservations", migration_102_native_chat_quota_reservations),
+        Migration(103, "Seed Notes graph semantic management permission", migration_103_seed_notes_graph_semantic_manage_permission),
+        Migration(104, "Add llm_usage_log.credential_source", migration_104_add_llm_usage_log_credential_source),
+        Migration(105, "Create durable provider usage reservations", migration_105_create_provider_usage_reservations),
+        Migration(
+            106,
+            "Persist external MCP discovery outcomes",
+            migration_106_add_mcp_external_discovery_state,
+        ),
     ]
+
+
+def migration_106_add_mcp_external_discovery_state(conn: sqlite3.Connection) -> None:
+    """Retain discovery outcomes independently of the server configuration revision."""
+    # Earlier accepted candidates recorded discovery as 104 before upstream usage attribution 104.
+    migration_104_add_llm_usage_log_credential_source(conn)
+    if not _sqlite_table_exists(conn, "mcp_external_servers"):
+        return
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(mcp_external_servers)")}
+    for column, declaration in (
+        ("last_discovery_at", "TIMESTAMP"),
+        ("last_successful_discovery_at", "TIMESTAMP"),
+        ("last_error_category", "TEXT"),
+    ):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE mcp_external_servers ADD COLUMN {column} {declaration}")
 
 
 def migration_097_backfill_user_uuid(conn: sqlite3.Connection) -> None:
@@ -6550,6 +6643,198 @@ def migration_098_add_session_last_activity(conn: sqlite3.Connection) -> None:
         the migration runner owns the transaction and its commit or rollback.
     """
     ensure_sqlite_session_last_activity(conn)
+
+
+def migration_100_copy_storage_quotas_to_user_overrides(conn: sqlite3.Connection) -> None:
+    """Copy users.storage_quota_mb into limits.storage_quota_mb user overrides (spec 2 §8).
+
+    Values equal to 5120 or to the configured DEFAULT_STORAGE_QUOTA_MB can't be told
+    apart from "never set", so they are dropped. An existing override is never replaced.
+    """
+    from tldw_Server_API.app.core.AuthNZ.storage_quota_backfill import STORAGE_QUOTA_KEY, skip_values
+
+    if not _sqlite_table_exists(conn, "users"):
+        logger.info("Migration 100: users table not present; skipping storage quota copy")
+        return
+    if "storage_quota_mb" not in {row[1] for row in conn.execute("PRAGMA table_info(users)")}:
+        logger.info("Migration 100: users.storage_quota_mb not present; skipping storage quota copy")
+        return
+    # Ensure the table without calling migration 047, which commits inside the runner's transaction.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS user_config_overrides (
+            user_id INTEGER NOT NULL,
+            key TEXT NOT NULL,
+            value_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by INTEGER,
+            updated_by INTEGER,
+            PRIMARY KEY (user_id, key),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    skip = skip_values()
+    placeholders = ",".join("?" for _ in skip)
+    cur = conn.execute(
+        f"""
+        INSERT INTO user_config_overrides (user_id, key, value_json, created_at, updated_at, created_by, updated_by)
+        SELECT id, ?, CAST(storage_quota_mb AS TEXT), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, NULL
+        FROM users
+        WHERE storage_quota_mb IS NOT NULL AND storage_quota_mb NOT IN ({placeholders})
+        ON CONFLICT(user_id, key) DO NOTHING
+        """,  # nosec B608 - only "?" placeholders are interpolated
+        (STORAGE_QUOTA_KEY, *skip),
+    )
+    logger.info("Migration 100: copied {} storage quota(s) to limits.storage_quota_mb", cur.rowcount)
+
+
+def migration_099_add_llm_usage_log_user_ts_index(conn: sqlite3.Connection) -> None:
+    """Add the (user_id, ts) composite index on llm_usage_log (spec 2 §4) for legacy databases.
+
+    Migration 015 (already applied on existing databases) only indexed
+    user_id and ts separately; per-user monthly token lookups need the
+    composite index too.
+
+    Some synthetic/legacy databases reach this migration without ever having
+    run migration 015 (fixtures that seed ``schema_migrations`` starting at a
+    later version carry no llm_usage_log table at all); skip rather than
+    error for those, instead of suppressing a real failure.
+    """
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='llm_usage_log'"
+    ).fetchone()
+    if table_exists is None:
+        logger.info("Migration 099: llm_usage_log table not present; skipping index")
+        return
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_llm_usage_log_user_ts ON llm_usage_log(user_id, ts)"
+    )
+    logger.info("Migration 099: Added llm_usage_log user_id + ts index")
+
+
+def migration_101_add_admin_perf_indexes(conn: sqlite3.Connection) -> None:
+    """Add the admin perf indexes on sessions and org_members for legacy databases.
+
+    Migrations 002 and 016 (already applied on existing databases) did not
+    index ``sessions(created_at)`` or ``org_members(org_id, user_id)``; admin
+    activity summaries and org-scoped joins need them (admin perf plan A,
+    stage 3). The statements are also present in migrations 002/016 so fresh
+    databases gain the indexes at table creation; this versioned step
+    delivers them to databases upgraded from an earlier version.
+
+    Synthetic/legacy fixtures may reach this migration without the tables
+    (cf. migration 099); skip rather than error for those, instead of
+    suppressing a real failure.
+    """
+    for table, index_sql in (
+        ("sessions", "CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)"),
+        ("org_members", "CREATE INDEX IF NOT EXISTS idx_org_members_org_user ON org_members(org_id, user_id)"),
+    ):
+        if not _sqlite_table_exists(conn, table):
+            logger.info(f"Migration 101: {table} table not present; skipping index")
+            continue
+        conn.execute(index_sql)
+    logger.info("Migration 101: Added admin perf indexes (sessions.created_at, org_members org_id+user_id)")
+
+
+def migration_104_add_llm_usage_log_credential_source(conn: sqlite3.Connection) -> None:
+    """Add ``llm_usage_log.credential_source``: whose key paid for the call (TASK-13955).
+
+    ``user`` marks a call made with the user's own provider key; the LLM quota
+    counters leave those rows out. Fixtures without the table skip (cf. 099).
+    """
+    if not _sqlite_table_exists(conn, "llm_usage_log"):
+        logger.info("Migration 104: llm_usage_log table not present; skipping")
+        return
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(llm_usage_log)").fetchall()}
+    if "credential_source" not in columns:
+        conn.execute("ALTER TABLE llm_usage_log ADD COLUMN credential_source TEXT")
+    logger.info("Migration 104: Added llm_usage_log.credential_source")
+def migration_105_create_provider_usage_reservations(conn: sqlite3.Connection) -> None:
+    """Add conservative MCP accounting anchors; any DDL failure aborts migration."""
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS provider_usage_scope_locks (
+            billing_scope_type TEXT NOT NULL CHECK (billing_scope_type IN ('user', 'team', 'org')),
+            billing_scope_id INTEGER NOT NULL CHECK (typeof(billing_scope_id) = 'integer' AND billing_scope_id > 0),
+            PRIMARY KEY (billing_scope_type, billing_scope_id)
+        )
+        """
+    )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS provider_usage_reservations (
+            execution_id TEXT PRIMARY KEY NOT NULL CHECK (
+                length(execution_id) = 36 AND execution_id = lower(execution_id)
+                AND execution_id NOT GLOB '*[^0-9a-f-]*'
+                AND length(replace(execution_id, '-', '')) = 32
+                AND substr(execution_id, 9, 1) = '-' AND substr(execution_id, 14, 1) = '-'
+                AND substr(execution_id, 19, 1) = '-' AND substr(execution_id, 24, 1) = '-'
+                AND substr(execution_id, 15, 1) = '4' AND substr(execution_id, 20, 1) IN ('8', '9', 'a', 'b')
+            ),
+            insertion_owner TEXT,
+            user_id INTEGER NOT NULL CHECK (typeof(user_id) = 'integer' AND user_id > 0),
+            active_team_id INTEGER CHECK (active_team_id IS NULL OR (typeof(active_team_id) = 'integer' AND active_team_id > 0)),
+            active_organization_id INTEGER CHECK (active_organization_id IS NULL OR (typeof(active_organization_id) = 'integer' AND active_organization_id > 0)),
+            billing_scope_type TEXT NOT NULL CHECK (billing_scope_type IN ('user', 'team', 'org')),
+            billing_scope_id INTEGER NOT NULL CHECK (typeof(billing_scope_id) = 'integer' AND billing_scope_id > 0),
+            provider TEXT NOT NULL CHECK (length(trim(provider)) > 0),
+            model TEXT NOT NULL CHECK (length(trim(model)) > 0),
+            reserved_input_tokens INTEGER NOT NULL CHECK (typeof(reserved_input_tokens) = 'integer' AND reserved_input_tokens >= 0),
+            reserved_output_tokens INTEGER NOT NULL CHECK (typeof(reserved_output_tokens) = 'integer' AND reserved_output_tokens >= 0),
+            reserved_cost_units INTEGER NOT NULL CHECK (typeof(reserved_cost_units) = 'integer' AND reserved_cost_units >= 0),
+            credential_source TEXT CHECK (credential_source IS NULL OR credential_source IN ('user', 'team', 'org', 'server_default', 'user_unmetered')),
+            actual_input_tokens INTEGER CHECK (actual_input_tokens IS NULL OR (typeof(actual_input_tokens) = 'integer' AND actual_input_tokens BETWEEN 0 AND reserved_input_tokens)),
+            actual_output_tokens INTEGER CHECK (actual_output_tokens IS NULL OR (typeof(actual_output_tokens) = 'integer' AND actual_output_tokens BETWEEN 0 AND reserved_output_tokens)),
+            actual_cost_units INTEGER CHECK (actual_cost_units IS NULL OR (typeof(actual_cost_units) = 'integer' AND actual_cost_units BETWEEN 0 AND reserved_cost_units)),
+            state TEXT NOT NULL CHECK (state IN ('reserved', 'dispatched', 'ambiguous', 'reconciled', 'released')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            dispatched_at TEXT,
+            resolved_at TEXT,
+            CHECK (reserved_input_tokens <= 9223372036854775807 - reserved_output_tokens),
+            CHECK (
+                (active_organization_id IS NOT NULL AND billing_scope_type = 'org' AND billing_scope_id = active_organization_id)
+                OR (active_organization_id IS NULL AND active_team_id IS NOT NULL AND billing_scope_type = 'team' AND billing_scope_id = active_team_id)
+                OR (active_organization_id IS NULL AND active_team_id IS NULL AND billing_scope_type = 'user' AND billing_scope_id = user_id)
+            ),
+            CHECK (
+                (state = 'reconciled' AND actual_input_tokens IS NOT NULL AND actual_output_tokens IS NOT NULL AND actual_cost_units IS NOT NULL)
+                OR (state != 'reconciled' AND actual_input_tokens IS NULL AND actual_output_tokens IS NULL AND actual_cost_units IS NULL)
+            ),
+            CHECK ((state IN ('released', 'reconciled') AND resolved_at IS NOT NULL) OR (state NOT IN ('released', 'reconciled') AND resolved_at IS NULL)),
+            CHECK ((state IN ('reserved', 'released') AND dispatched_at IS NULL) OR (state NOT IN ('reserved', 'released') AND dispatched_at IS NOT NULL))
+        )
+        """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_scope "
+        "ON provider_usage_reservations(billing_scope_type, billing_scope_id, state)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_provider_usage_reservations_user_state "
+        "ON provider_usage_reservations(user_id, state)"
+    )
+    reservation_columns = {row[1] for row in conn.execute("PRAGMA table_info(provider_usage_reservations)")}
+    if "insertion_owner" not in reservation_columns:
+        conn.execute("ALTER TABLE provider_usage_reservations ADD COLUMN insertion_owner TEXT")
+    if "credential_source" not in reservation_columns:
+        conn.execute(
+            "ALTER TABLE provider_usage_reservations ADD COLUMN credential_source TEXT "
+            "CHECK (credential_source IS NULL OR credential_source IN "
+            "('user', 'team', 'org', 'server_default', 'user_unmetered'))"
+        )
+    if not _sqlite_table_exists(conn, "llm_usage_log"):
+        logger.info("Migration 105: optional llm_usage_log is absent; accounting remains unavailable")
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(llm_usage_log)")}
+    if "billing_org_id" not in columns:
+        conn.execute("ALTER TABLE llm_usage_log ADD COLUMN billing_org_id INTEGER")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_usage_mcp_execution "
+        "ON llm_usage_log(request_id) "
+        "WHERE operation = 'mcp_model_completion' AND request_id IS NOT NULL"
+    )
 
 
 def apply_authnz_migrations(db_path: Path, target_version: int = None) -> None:
@@ -6677,3 +6962,12 @@ def ensure_authnz_tables(db_path: Path) -> None:
 #
 # End of migrations.py
 #######################################################################################################################
+
+
+def migration_102_native_chat_quota_reservations(conn: sqlite3.Connection) -> None:
+    """Retain same-key native accounting separately from legacy storage counters."""
+    # Earlier PR previews recorded native quota as 101 before admin 101 was released.
+    migration_101_add_admin_perf_indexes(conn)
+    from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import native_quota_schema_statements
+    for statement in native_quota_schema_statements(postgres=False):
+        conn.execute(statement)

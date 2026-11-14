@@ -43,7 +43,7 @@ Source: synthesis F35
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in 22b80424f1.
 
 AC1: notes.py:4882 now releases the session in its except clause before surfacing the error. Compensation failure is logged and never masks the original exception. (This path is under app/api/v1/**, which CONTRIBUTING.md:13-18 pauses for third-party PRs; these commits are authored by the repository owner, so the boundary does not apply here.)
@@ -67,7 +67,7 @@ Scope note on the task description: it states "Retries without an Idempotency-Ke
 Verification: Sync blob/attachment/retention/store suites (10 files) 2 failed / 510 passed with the change vs 4 / 508 without (stash-isolated); the difference is exactly these two tests and the other two are pre-existing. Notes attachment tests 91 passed. Bandit clean over Sync_DB.py, service.py, store.py and notes.py (run via uvx; bandit is CI-only, not a declared local dependency).
 
 Known skip: the full tests/Sync suite runs about 3 hours in this environment (recorded in synthesis F8) and was not run end to end. The targeted subset covers every file touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

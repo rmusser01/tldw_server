@@ -12,6 +12,7 @@ safety-net rule is that no configuration can produce a permanent 429.
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -37,6 +38,27 @@ def log_lookup_failure(policy_id: str, exc: BaseException) -> None:
     if key not in _warned_lookup_errors:
         _warned_lookup_errors.add(key)
         logger.error("Resource Governor policy store lookup for {!r} failed: {!r}; treating it as undefined", policy_id, exc)
+
+
+_REDIS_WARNING_INTERVAL_SEC = 60.0
+_last_redis_warning: dict[str, float] = {}
+
+
+def log_redis_failure(ns: str, exc: BaseException) -> None:
+    """Warn that the Redis backend ``ns`` is failing, at most once a minute per worker process and namespace.
+
+    Called where a Redis error leaves this worker enforcing limits on its own: Redis unreachable, or
+    answering reads but rejecting writes (READONLY, OOM). The Redis governor's own logger is off unless
+    RG_DEBUG is set, so the warning is logged here.
+    """
+    now = time.monotonic()
+    if now - _last_redis_warning.get(ns, -math.inf) >= _REDIS_WARNING_INTERVAL_SEC:
+        _last_redis_warning[ns] = now
+        logger.warning(
+            "Resource Governor Redis backend {!r} is failing ({}); this worker enforces its limits on its own until it recovers",
+            ns,
+            type(exc).__name__,
+        )
 
 
 def _lookup(get_policy: Callable[[str], Mapping[str, Any] | None], policy_id: str) -> dict[str, Any]:
@@ -82,6 +104,27 @@ def effective_policy(get_policy: Callable[[str], Mapping[str, Any] | None], poli
     return policy
 
 
+def requests_window(policy: Mapping[str, Any]) -> tuple[int, int]:
+    """Return the requests category's ``(limit, window_seconds)``.
+
+    This is the Redis sliding window, and ``limit`` is what rate-limit headers report
+    on both backends. From 1 rpm up it is ``max(1, ceil(rpm))`` per 60 s; Redis does
+    not apply ``burst`` there. Below 1 rpm it is ``floor(rpm * burst)`` per
+    ``60 * limit / rpm`` s: the whole requests the memory bucket admits up front, and
+    its long-run average. Pass ``effective_policy`` output, whose ``burst`` keeps
+    ``rpm * burst >= 1``.
+    """
+    cfg = policy.get("requests") or {}
+    rpm = float(cfg.get("rpm") or 0)
+    if 0 < rpm < 1:
+        burst = max(1.0, float(cfg.get("burst") or 1.0))
+        # The raw float product, as the memory bucket holds it: 1.9999996 admits 1 there too.
+        limit = max(1, math.floor(rpm * burst))
+        # round(): float noise in 60 * limit / rpm must not add a second to the window.
+        return limit, math.ceil(round(60 * limit / rpm, 6))
+    return max(1, math.ceil(rpm)), 60
+
+
 def scope_pairs(policy: Mapping[str, Any], entity_scope: str, entity_value: str) -> list[tuple[str, str]]:
     """Return the (scope, value) buckets a request charges.
 
@@ -95,6 +138,27 @@ def scope_pairs(policy: Mapping[str, Any], entity_scope: str, entity_value: str)
     pairs: list[tuple[str, str]] = [("global", "*")] if "global" in scopes else []
     pairs.append((entity_scope, entity_value))
     return pairs
+
+
+def lease_limits(
+    policy: Mapping[str, Any],
+    category: str,
+    request_cfg: Mapping[str, Any],
+    entity_scope: str,
+    entity_value: str,
+) -> tuple[int, int, list[tuple[str, str]]]:
+    """Return ``(limit, ttl_sec, buckets)`` for a streams/jobs reservation.
+
+    A request that carries its own ``max_concurrent`` (a per-user usage quota,
+    TASK-13435) uses that limit and its own ``ttl_sec``, and charges only the
+    caller's bucket: the limit is that caller's, not the policy's. Otherwise the
+    policy's category block decides, as before. A limit of 0 is unbounded.
+    """
+    own = request_cfg.get("max_concurrent")
+    if own is not None:
+        return int(own), int(request_cfg.get("ttl_sec") or 60), [(entity_scope, entity_value)]
+    cfg = policy.get(category) or {}
+    return int(cfg.get("max_concurrent") or 0), int(cfg.get("ttl_sec") or 60), scope_pairs(policy, entity_scope, entity_value)
 
 
 def clamp_token_units(

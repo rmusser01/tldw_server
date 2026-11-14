@@ -38,7 +38,7 @@ Define the ACP workspace integration design gate for #1540 using the existing ca
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/Design/ACP_Workspace_Integration_Decision_2026_05.md to define the canonical workspace to ACP execution workspace bridge for issue #1540.
 
 Linked the decision from the canonical workspace decision doc, ACP PRD, and ACP development documentation.
@@ -50,7 +50,7 @@ Opened PR #1614 for the ACP workspace integration design gate and commented on i
 PR #1614 review pass: Qodo flagged missing trusted-roots flow and missing explicit verification/testing slice; Gemini flagged possible tldw_Server_API casing ambiguity. Reopening TASK-300 for review-fix documentation updates.
 
 Review fixes applied: clarified repository casing for tldw_Server_API, added trusted-root selection/inheritance/enforcement flow, and made verification/testing an explicit implementation slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

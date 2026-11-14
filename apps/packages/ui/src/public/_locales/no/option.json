@@ -537,7 +537,7 @@
     "message": "Lagre etter gjennomgang"
   },
   "quickIngest_reviewBeforeStorage": {
-    "message": "Gjennomgå før lagring"
+    "message": "Se gjennom uthentet innhold før lagring"
   },
   "quickIngest_reviewBeforeStorageHint": {
     "message": "Behandle nå, og rediger deretter kladder lokalt før du lagrer på serveren."
@@ -2725,5 +2725,8 @@
   },
   "notesSearch_offlineSaveUnavailable": {
     "message": "Lagring uten nett er ikke tilgjengelig før kontoen din og lokal lagring er bekreftet. Endringene dine forblir ulagret."
+  },
+  "quickIngest_wizard_addPurpose": {
+    "message": "Add URLs or files. Saved items appear in Media. Knowledge readiness requires confirmed indexing; analysis and chunking settings alone do not confirm it."
   }
 }

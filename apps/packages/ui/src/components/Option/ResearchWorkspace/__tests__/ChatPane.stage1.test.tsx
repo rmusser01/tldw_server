@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import { MemoryRouter } from "react-router-dom"
@@ -6,6 +6,7 @@ import { getDesignSystemState } from "@/design-system"
 import { ConnectionPhase } from "@/types/connection"
 import { CHAT_PATH, LOREBOOK_DEBUG_FOCUS } from "@/routes/route-paths"
 import { ChatPane } from "../ChatPane"
+import { fetchChatModels } from "@/services/tldw-server"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 
 const mockCheckConnectionOnce = vi.fn()
@@ -129,6 +130,9 @@ const workspaceStoreState = {
 }
 
 const messageOptionState = {
+  selectedModel: undefined as string | null | undefined,
+  setSelectedModel: mockSetSelectedModel,
+  selectedModelIsLoading: false,
   messages: [] as Array<{
     id: string
     isBot: boolean
@@ -232,10 +236,25 @@ vi.mock("@/store/model", () => ({
   ) => selector({ apiProvider: undefined })
 }))
 
+// Component-only owner seam; connected Scene suites exercise authenticated account ownership.
+vi.mock("../ChatPane/useResearchActorScene", async () => {
+  const React = await vi.importActual<typeof import("react")>("react")
+  return {
+    useResearchActorScene: (workspaceId: string, referenceId: string) => ({
+      capturePrivateScene: React.useCallback(() => null, []),
+      captureChatReferenceOwner: React.useCallback(() => ({
+        scopeKey: "component-owner",
+        isCurrent: () => workspaceStoreState.workspaceId === workspaceId &&
+          workspaceStoreState.workspaceChatReferenceId === referenceId
+      }), [workspaceId, referenceId])
+    })
+  }
+})
+
 vi.mock("@/hooks/useMessageOption", () => ({
   useMessageOption: (...args: unknown[]) => {
     mockUseMessageOption(...args)
-    return messageOptionState
+    return { ...messageOptionState, selectedModel: messageOptionState.selectedModel !== undefined ? messageOptionState.selectedModel : messageOptionStoreState.selectedModel }
   }
 }))
 
@@ -363,10 +382,58 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     mockSetChatMode.mockReset()
     mockSetFileRetrievalEnabled.mockReset()
     mockSetSelectedModel.mockReset()
+    messageOptionState.selectedModel = undefined
+    messageOptionState.selectedModelIsLoading = false
+    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
+    vi.mocked(fetchChatModels).mockResolvedValue([{ api_provider: "ollama", id: "ollama:gemma3:1b", label: "gemma3:1b", value: "ollama:gemma3:1b" }])
 
     mockGetWorkspaceChatSession.mockImplementation((workspaceId: string) => {
       return workspaceSessions.get(workspaceId) ?? null
     })
+  })
+
+  it("waits for stored model hydration instead of claiming the catalog default", async () => {
+    messageOptionStoreState.selectedModel = null
+    messageOptionState.selectedModelIsLoading = true
+    vi.mocked(fetchChatModels).mockResolvedValue([
+      {
+        model: "tldw:default",
+        provider: "openai",
+        nickname: "Default model",
+        is_server_default: true
+      }
+    ])
+    const view = renderChatPane()
+    fireEvent.click(screen.getByTestId("model-selector"))
+    await screen.findByText("Default model")
+    expect(mockSetSelectedModel).not.toHaveBeenCalled()
+
+    messageOptionState.selectedModelIsLoading = false
+    messageOptionStoreState.selectedModel = "ollama:gemma3:1b"
+    view.rerender(
+      <MemoryRouter>
+        <ChatPane />
+      </MemoryRouter>
+    )
+    expect(mockSetSelectedModel).not.toHaveBeenCalled()
+  })
+
+  it("preserves a derived stored choice before the raw store's hydration effect publishes it", async () => {
+    messageOptionStoreState.selectedModel = null
+    messageOptionState.selectedModel = "ollama:gemma3:1b"
+    messageOptionState.selectedModelIsLoading = false
+    vi.mocked(fetchChatModels).mockResolvedValue([
+      {
+        model: "tldw:default",
+        provider: "openai",
+        nickname: "Default model",
+        is_server_default: true
+      }
+    ])
+    renderChatPane()
+    fireEvent.click(screen.getByTestId("model-selector"))
+    await screen.findByText("Default model")
+    expect(mockSetSelectedModel).not.toHaveBeenCalled()
   })
 
   it("shows stop button while streaming and triggers stopStreamingRequest", () => {
@@ -380,12 +447,13 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(mockStopStreamingRequest).toHaveBeenCalledTimes(1)
   })
 
-  it("uses the design-system registry label for connected provider status", () => {
+  it("names only the server connection when selected-model readiness is unknown", () => {
     renderChatPane()
 
     const selector = screen.getByTestId("model-selector")
-    expect(selector).toHaveTextContent(registryLabels.ready)
-    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("ready")
+    expect(selector).toHaveTextContent("Server connected")
+    expect(selector).not.toHaveTextContent(registryLabels.ready)
+    expect(selector).not.toHaveTextContent("Healthy")
   })
 
   it("uses the design-system registry label for degraded provider status", () => {
@@ -866,7 +934,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     renderChatPane()
 
     expect(mockUseMessageOption).toHaveBeenCalledWith({
-      scope: { type: "workspace", workspaceId: "workspace-a" }
+      scope: { type: "workspace", workspaceId: "workspace-a" },
+      hydrateServerChat: true,
+      capturePrivateScene: expect.any(Function)
     })
   })
 
@@ -893,6 +963,12 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       historyId: "history-imported",
       serverChatId: null
     })
+
+    // The real chat hook publishes hydration to its next render.
+    mockSetMessages.mockImplementationOnce((messages) => { messageOptionState.messages = messages })
+    mockSetHistory.mockImplementationOnce((history) => { messageOptionState.history = history })
+    mockSetHistoryId.mockImplementationOnce((historyId) => { messageOptionState.historyId = historyId })
+    mockSetServerChatId.mockImplementationOnce((serverChatId) => { messageOptionState.serverChatId = serverChatId })
 
     renderChatPane()
 
@@ -923,7 +999,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       history: [],
       historyId: null,
       serverChatId: null
-    })
+    }, expect.anything())
   })
 
   it("keeps transcript as a scrollable flex region anchored above the composer", () => {
@@ -980,7 +1056,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       history: [],
       historyId: null,
       serverChatId: null
-    })
+    }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: true}))
   })
 
   it("restores previous chat session when clear-chat undo runs", () => {
@@ -1047,10 +1123,10 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       history: [{ role: "user", content: "hello" }],
       historyId: "history-a",
       serverChatId: "server-chat-a"
-    })
+    }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: false}))
   })
 
-  it("routes message deletion through undo-managed restore flow", async () => {
+  it("retains the local conversation Undo restore flow", async () => {
     messageOptionState.messages = [
       {
         id: "m1",
@@ -1072,7 +1148,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       { role: "assistant", content: "Second" }
     ]
     messageOptionState.historyId = "history-a"
-    messageOptionState.serverChatId = "server-chat-a"
+    messageOptionState.serverChatId = null
     mockDeleteMessage.mockResolvedValue(undefined)
 
     renderChatPane()
@@ -1093,8 +1169,8 @@ describe("ChatPane Stage 1 reliability and controls", () => {
         ],
         history: [{ role: "assistant", content: "Second" }],
         historyId: "history-a",
-        serverChatId: "server-chat-a"
-      })
+        serverChatId: null
+      }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: false}))
     })
 
     const scheduledConfig = mockScheduleWorkspaceUndoAction.mock.calls[0]?.[0] as
@@ -1126,7 +1202,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(mockSetHistoryId).toHaveBeenLastCalledWith("history-a", {
       preserveServerChatId: true
     })
-    expect(mockSetServerChatId).toHaveBeenLastCalledWith("server-chat-a")
+    expect(mockSetServerChatId).toHaveBeenLastCalledWith(null)
   })
 
   it("shows connection banner and retries connection check", () => {
@@ -1135,7 +1211,9 @@ describe("ChatPane Stage 1 reliability and controls", () => {
 
     renderChatPane()
 
-    expect(screen.getByText(/Unable to reach server/)).toBeInTheDocument()
+    expect(screen.getByText(/Unable to reach server/).textContent).toBe(
+      "Unable to reach server: server-unreachable",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Retry" }))
     expect(mockCheckConnectionOnce).toHaveBeenCalledTimes(1)
   })
@@ -1399,7 +1477,7 @@ describe("ChatPane Stage 1 reliability and controls", () => {
       history: [{ role: "user", content: "Workspace A message" }],
       historyId: "history-a",
       serverChatId: "server-chat-a"
-    })
+    }, expect.objectContaining({scopeKey: "component-owner", isCurrent: expect.any(Function), clear: false}))
     expect(mockSetMessages).toHaveBeenCalledWith([
       {
         isBot: true,
@@ -1441,4 +1519,47 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(parsed.searchParams.get("focus")).toBe(LOREBOOK_DEBUG_FOCUS)
     expect(parsed.searchParams.get("from")).toBe("research-workspace")
   })
+
+  it.each([true, false])(
+    "server message Delete does not offer a browser-only Undo after accepted=%s",
+    async (accepted) => {
+      messageOptionState.messages = [
+        {
+          id: "m1",
+          isBot: true,
+          name: "Assistant",
+          message: "Saved reply",
+          sources: []
+        }
+      ]
+      messageOptionState.history = [{ role: "assistant", content: "Saved reply" }]
+      messageOptionState.historyId = "owned-mirror"
+      messageOptionState.serverChatId = "saved-chat"
+      let release!: (value: boolean) => void
+      mockDeleteMessage.mockImplementationOnce(
+        () =>
+          new Promise<boolean>((resolve) => {
+            release = resolve
+          })
+      )
+      renderChatPane()
+      fireEvent.click(screen.getByRole("button", { name: "delete-message-0" }))
+      await waitFor(() => expect(mockDeleteMessage).toHaveBeenCalledWith(0))
+      expect(mockScheduleWorkspaceUndoAction).not.toHaveBeenCalled()
+      await act(async () => {
+        release(accepted)
+      })
+      expect(mockScheduleWorkspaceUndoAction).not.toHaveBeenCalled()
+      for (const [key, saved, owner] of mockSaveWorkspaceChatSession.mock.calls) {
+        expect(key).toBe("workspace-a")
+        expect(saved).toEqual({
+          messages: messageOptionState.messages, history: messageOptionState.history,
+          historyId: "owned-mirror", serverChatId: "saved-chat"
+        })
+        expect(owner).toMatchObject({scopeKey: "component-owner", clear: false})
+      }
+    }
+  )
+
+
 })

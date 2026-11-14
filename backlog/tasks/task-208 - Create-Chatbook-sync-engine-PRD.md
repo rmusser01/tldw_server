@@ -43,7 +43,7 @@ Create a repo-grounded PRD/design spec for a unified Sync v2 engine that can sup
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/specs/2026-05-10-chatbook-sync-engine-prd-design.md with the approved Chatbook Sync v2 PRD scope, product modes, data model, API shape, privacy/key posture, conflict policy, rollout milestones, success metrics, and open questions.
 
 Ran an independent spec-document-reviewer pass; result: APPROVED.
@@ -51,7 +51,7 @@ Ran an independent spec-document-reviewer pass; result: APPROVED.
 Verification: docs-only change. git diff --check will be run on the staged files before commit. Bandit is not applicable because no Python/code files were changed.
 
 Staged verification: git diff --cached --check passed for Docs/superpowers/specs/2026-05-10-chatbook-sync-engine-prd-design.md and the TASK-208 Backlog record.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

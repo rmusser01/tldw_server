@@ -1,4 +1,5 @@
 import type { StoreSlice } from "@/store/option/slices/types"
+import { chatDraftAddressKey, freshChatDraftAddress } from "@/utils/chat-draft-address"
 import {
   buildQueuedRequest,
   normalizeQueuedRequests
@@ -8,11 +9,17 @@ import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 export const createCoreSlice: StoreSlice<
   Pick<
     import("@/store/option/types").State,
+    | "chatDraftAddress"
+    | "chatDraftRevision"
+    | "chatDraftTransition"
+    | "startNewChatDraft"
+    | "setChatDraftAddress"
     | "messages"
     | "setMessages"
     | "history"
     | "setHistory"
     | "streaming"
+    | "detachedHistoryResponse"
     | "setStreaming"
     | "isFirstMessage"
     | "setIsFirstMessage"
@@ -23,6 +30,8 @@ export const createCoreSlice: StoreSlice<
     | "isProcessing"
     | "setIsProcessing"
     | "selectedModel"
+    | "selectedModelStorageHandled"
+    | "selectedModelRevision"
     | "setSelectedModel"
     | "chatMode"
     | "setChatMode"
@@ -37,7 +46,9 @@ export const createCoreSlice: StoreSlice<
     | "selectedSystemPrompt"
     | "setSelectedSystemPrompt"
     | "selectedQuickPrompt"
+    | "quickPromptRevision"
     | "setSelectedQuickPrompt"
+    | "messageSteeringRevision"
     | "messageSteeringMode"
     | "setMessageSteeringMode"
     | "messageSteeringForceNarrate"
@@ -67,6 +78,65 @@ export const createCoreSlice: StoreSlice<
     | "setFileRetrievalEnabled"
   >
 > = (set, get) => ({
+  chatDraftAddress: null,
+  chatDraftRevision: 0,
+  chatDraftTransition: null,
+  startNewChatDraft: (temporary = get().temporaryChat) => {
+    get().setChatDraftAddress(freshChatDraftAddress(temporary))
+  },
+  setChatDraftAddress: (address, options = {}) => {
+    let accepted = false
+    let acceptedAddress = address
+    let acceptedRevision = -1
+    set((state) => {
+      if (
+        options.expectedRevision !== undefined &&
+        options.expectedRevision !== state.chatDraftRevision
+      )
+        return state
+      if (
+        options.sourceAddress !== undefined &&
+        options.sourceAddress !== state.chatDraftAddress
+      )
+        return state
+      accepted = true
+      acceptedRevision = state.chatDraftRevision
+      const destinationKey = chatDraftAddressKey(address)
+      if (
+        state.chatDraftAddress &&
+        chatDraftAddressKey(state.chatDraftAddress) === destinationKey
+      ) {
+        acceptedAddress = state.chatDraftAddress
+        return state
+      }
+      const revision = state.chatDraftRevision + 1
+      acceptedRevision = revision
+      return {
+        chatDraftAddress: address,
+        chatDraftRevision: revision,
+        ...(state.chatDraftAddress && options.kind !== "bind"
+          ? {
+              selectedQuickPrompt: null,
+              quickPromptRevision: state.quickPromptRevision + 1
+            }
+          : {}),
+        temporaryChat: address.kind === "fresh" && address.temporary,
+        chatDraftTransition: {
+          kind: options.kind ?? "switch",
+          sourceAddress: state.chatDraftAddress,
+          destinationKey,
+          revision
+        }
+      }
+    })
+    const current = get()
+    return (
+      accepted &&
+      current.chatDraftAddress === acceptedAddress &&
+      current.chatDraftRevision === acceptedRevision
+    )
+
+  },
   messages: [],
   setMessages: (messagesOrUpdater) =>
     set({
@@ -84,6 +154,7 @@ export const createCoreSlice: StoreSlice<
           : historyOrUpdater
     }),
   streaming: false,
+  detachedHistoryResponse: null,
   setStreaming: (streaming) => set({ streaming }),
   isFirstMessage: true,
   setIsFirstMessage: (isFirstMessage) => set({ isFirstMessage }),
@@ -100,6 +171,7 @@ export const createCoreSlice: StoreSlice<
         serverChatState: historyId ? null : state.serverChatState,
         serverChatVersion: historyId ? null : state.serverChatVersion,
         serverChatTitle: historyId ? null : state.serverChatTitle,
+        serverChatRoleplaySetup: historyId ? null : state.serverChatRoleplaySetup,
         serverChatCharacterId: historyId ? null : state.serverChatCharacterId,
         serverChatMetaLoaded: historyId ? false : state.serverChatMetaLoaded,
         serverChatLoadState: historyId ? "idle" : state.serverChatLoadState,
@@ -118,7 +190,14 @@ export const createCoreSlice: StoreSlice<
   setSpeechToTextLanguage: (language) =>
     set({ speechToTextLanguage: language }),
   selectedModel: null,
-  setSelectedModel: (selectedModel) => set({ selectedModel }),
+  selectedModelStorageHandled: false,
+  selectedModelRevision: 0,
+  setSelectedModel: (selectedModel, options) =>
+    set((state) => ({
+      selectedModel,
+      selectedModelStorageHandled: options?.storageHandled === true,
+      selectedModelRevision: state.selectedModelRevision + 1
+    })),
   chatMode: "normal",
   setChatMode: (chatMode) => set({ chatMode }),
   isEmbedding: false,
@@ -133,17 +212,36 @@ export const createCoreSlice: StoreSlice<
   setSelectedSystemPrompt: (selectedSystemPrompt) =>
     set({ selectedSystemPrompt }),
   selectedQuickPrompt: null,
-  setSelectedQuickPrompt: (selectedQuickPrompt) => set({ selectedQuickPrompt }),
+  quickPromptRevision: 0,
+  setSelectedQuickPrompt: (selectedQuickPrompt, options) => {
+    let accepted = false
+    set((state) => {
+      if (options?.expectedRevision !== undefined && options.expectedRevision !== state.quickPromptRevision) return state
+      accepted = true
+      return { selectedQuickPrompt: selectedQuickPrompt || null, quickPromptRevision: state.quickPromptRevision + 1 }
+    })
+    return accepted
+  },
+  messageSteeringRevision: 0,
   messageSteeringMode: "none",
-  setMessageSteeringMode: (mode) => set({ messageSteeringMode: mode }),
+  setMessageSteeringMode: (mode) => set((state) => ({
+    messageSteeringMode: mode,
+    messageSteeringRevision: state.messageSteeringRevision + 1
+  })),
   messageSteeringForceNarrate: false,
-  setMessageSteeringForceNarrate: (enabled) =>
-    set({ messageSteeringForceNarrate: enabled }),
-  clearMessageSteering: () =>
-    set({
+  setMessageSteeringForceNarrate: (enabled) => set((state) => ({
+    messageSteeringForceNarrate: enabled,
+    messageSteeringRevision: state.messageSteeringRevision + 1
+  })),
+  clearMessageSteering: (options) => set((state) => {
+    if (options?.expectedRevision !== undefined &&
+      options.expectedRevision !== state.messageSteeringRevision) return state
+    return {
       messageSteeringMode: "none",
-      messageSteeringForceNarrate: false
-    }),
+      messageSteeringForceNarrate: false,
+      messageSteeringRevision: state.messageSteeringRevision + 1
+    }
+  }),
   queuedMessages: [],
   addQueuedMessage: (payload) =>
     set((state) => ({
@@ -161,7 +259,13 @@ export const createCoreSlice: StoreSlice<
   selectedKnowledge: null,
   setSelectedKnowledge: (selectedKnowledge) => set({ selectedKnowledge }),
   temporaryChat: isFireFoxPrivateMode,
-  setTemporaryChat: (temporaryChat) => set({ temporaryChat }),
+  setTemporaryChat: (temporaryChat) => set((state) => ({ temporaryChat,
+    ...(state.temporaryChat !== temporaryChat ? {
+      chatDraftRevision: state.chatDraftRevision + 1,
+      chatDraftTransition: null,
+      chatDraftAddress: state.chatDraftAddress?.kind === "fresh" ? { ...state.chatDraftAddress, temporary: temporaryChat } : state.chatDraftAddress
+    } : {})
+  })),
   useOCR: false,
   setUseOCR: (useOCR) => set({ useOCR }),
   documentContext: null,

@@ -9,6 +9,125 @@ import tldw_Server_API.app.core.http_client as hc
 URL = "https://example.com/article"
 
 
+@pytest.mark.asyncio
+async def test_bounded_async_json_consumes_limit_plus_one_before_rejecting_large_chunks(monkeypatch):
+    observed = []
+    closed = []
+
+    class Adapter:
+        async def stream_bytes(self, **kwargs):
+            await kwargs["on_response"](200, {"content-type": "application/json"})
+            try:
+                yield b"{" * 65536
+                yield b"x" * 65536
+                raise AssertionError("Reader must stop at the overflow boundary")
+            finally:
+                closed.append(True)
+
+    stream_bytes = hc.astream_bytes
+
+    async def observed_stream(**kwargs):
+        stream = stream_bytes(**kwargs)
+        try:
+            async for chunk in stream:
+                observed.append(len(chunk))
+                yield chunk
+        finally:
+            await stream.aclose()
+
+    def forbidden_decode(_body):
+        raise AssertionError("Oversized envelopes must not reach JSON decoding")
+
+    monkeypatch.setattr(hc, "_get_transport_adapter", lambda _name: Adapter())
+    monkeypatch.setattr(hc, "astream_bytes", observed_stream)
+    monkeypatch.setattr(hc, "json", SimpleNamespace(loads=forbidden_decode))
+    with pytest.raises(hc.JSONDecodeError, match="max_bytes"):
+        await hc.afetch_json(method="GET", url=URL, max_bytes=65538)
+
+    assert sum(observed) == 65539
+    assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_bounded_async_json_caps_decoded_gzip_and_closes_without_reading_next_chunk(monkeypatch):
+    import gzip
+
+    import httpx
+
+    state = {"reads": 0, "closes": 0, "requests": 0}
+    payload = gzip.compress(b'{"text":"' + b"x" * 8192 + b'"}')
+    assert len(payload) < 64
+
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            state["reads"] += 1
+            yield payload
+            raise AssertionError("Overflow must close before another wire chunk")
+
+        async def aclose(self):
+            state["closes"] += 1
+
+    def handler(request):
+        state["requests"] += 1
+        return httpx.Response(
+            200,
+            request=request,
+            stream=Body(),
+            headers={
+                "content-type": "application/json",
+                "content-encoding": "gzip",
+                "content-length": str(len(payload)),
+            },
+        )
+
+    async def validate(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(hc, "_avalidate_egress_or_raise", validate)
+    client = hc.create_async_client(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(hc.JSONDecodeError, match="max_bytes"):
+            await hc.afetch_json(
+                method="GET",
+                url=URL,
+                client=client,
+                max_bytes=64,
+                retry=hc.RetryPolicy(attempts=1),
+                allow_redirects=False,
+            )
+    finally:
+        await client.aclose()
+
+    assert state == {"reads": 1, "closes": 1, "requests": 1}
+
+
+@pytest.mark.asyncio
+async def test_bounded_async_json_cancellation_closes_owned_stream_and_propagates(monkeypatch):
+    import asyncio
+
+    entered = asyncio.Event()
+    closed = []
+
+    class Adapter:
+        async def stream_bytes(self, **kwargs):
+            await kwargs["on_response"](200, {"content-type": "application/json"})
+            try:
+                entered.set()
+                await asyncio.Event().wait()
+                yield b"unreachable"
+            finally:
+                closed.append(True)
+
+    monkeypatch.setattr(hc, "_get_transport_adapter", lambda _name: Adapter())
+    task = asyncio.create_task(hc.afetch_json(method="GET", url=URL, max_bytes=64))
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert task.cancelled()
+    assert closed == [True]
+
+
 class _StreamingResponse:
     def __init__(
         self,
@@ -283,3 +402,84 @@ def test_simple_httpx_fetch_streams_final_response_after_redirect(
     assert [call["url"] for call in client.stream_calls] == [URL, "https://example.com/final"]
     assert redirect.closed is True
     assert final.closed is True
+
+
+@pytest.mark.parametrize("redirect", [False, True])
+def test_public_bounded_transport_uses_approved_ips_and_original_identity(monkeypatch, redirect):
+    import httpx
+
+    from tldw_Server_API.app.core.Security import egress
+
+    calls = []
+    transport_peers = []
+    monkeypatch.setattr(
+        egress, "_resolve_host_ips", lambda host, **kwargs: ["93.184.216.34"] if host == "example.com" else ["8.8.8.8"]
+    )
+    monkeypatch.setenv("HTTP_ALLOW_CROSS_HOST_REDIRECTS", "true")
+
+    def send(request):
+        calls.append(request)
+        # A transport resolving the original hostname again would get a private peer.
+        peer = "127.0.0.1" if request.url.host in {"example.com", "redirect.example"} else request.url.host
+        transport_peers.append(peer)
+        if redirect and len(calls) == 1:
+            return httpx.Response(302, headers={"Location": "https://redirect.example/final"})
+        return httpx.Response(200, stream=httpx.ByteStream(b"article"))
+
+    clients = []
+
+    def client_factory(**kwargs):
+        clients.append(kwargs)
+        return httpx.Client(transport=httpx.MockTransport(send), **kwargs)
+
+    monkeypatch.setattr(hc, "_resolve_httpx", lambda: SimpleNamespace(Client=client_factory))
+    with egress.public_url_policy_scope():
+        result = hc.fetch(URL, backend="httpx", trust_env=True, max_response_bytes=50)
+    assert transport_peers == (["93.184.216.34", "8.8.8.8"] if redirect else ["93.184.216.34"])
+    assert calls[0].headers["Host"] == "example.com"
+    assert calls[0].extensions["sni_hostname"] == "example.com"
+    if redirect:
+        assert calls[1].headers["Host"] == "redirect.example"
+        assert calls[1].extensions["sni_hostname"] == "redirect.example"
+    assert clients == [{"trust_env": False}]
+    assert result["url"] == ("https://redirect.example/final" if redirect else URL)
+    assert result["text"] == "article"
+
+
+def test_public_bounded_transport_denies_rebinding_before_dispatch(monkeypatch, httpx_streaming_backend):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Security import egress
+
+    addresses = iter([["93.184.216.34"], ["127.0.0.1"]])
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: next(addresses))
+    with egress.public_url_policy_scope(), pytest.raises(EgressPolicyError):
+        hc.fetch(URL, backend="httpx", max_response_bytes=50)
+    assert all(client.stream_calls == [] for client in httpx_streaming_backend.instances)
+
+
+@pytest.mark.parametrize("kwargs", [{"max_response_bytes": None}, {"proxies": "http://proxy.example"}])
+def test_public_bounded_transport_declines_unpinnable_backend(monkeypatch, httpx_streaming_backend, kwargs):
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Security import egress
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
+    with egress.public_url_policy_scope(), pytest.raises(EgressPolicyError):
+        hc.fetch(URL, **{"max_response_bytes": 50, **kwargs})
+    assert httpx_streaming_backend.instances == []
+
+
+def test_public_bounded_transport_keeps_environment_disabled_with_incompatible_client(monkeypatch):
+    from tldw_Server_API.app.core.Security import egress
+
+    calls = []
+
+    def client_factory():
+        calls.append(True)
+        return object()
+
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
+    monkeypatch.setattr(hc, "_resolve_httpx", lambda: SimpleNamespace(Client=client_factory))
+    with egress.public_url_policy_scope(), pytest.raises(TypeError, match="trust_env") as error:
+        hc.fetch(URL, backend="httpx", max_response_bytes=50)
+    assert "unexpected keyword argument" in str(error.value)
+    assert calls == []

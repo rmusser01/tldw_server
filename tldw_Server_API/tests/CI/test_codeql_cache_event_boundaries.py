@@ -25,6 +25,17 @@ PR_FIELDS = {
 }
 
 
+def test_backend_required_only_uses_direct_event_sources() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/backend-required.yml").read_text())
+    assert set(workflow.get("on", workflow.get(True))) == {"pull_request", "workflow_dispatch"}
+    assert "admission" not in workflow["jobs"]
+    # The shared group is checked separately and does not select a checkout ref.
+    del workflow["concurrency"]["group"]
+    event_sources = yaml.safe_dump(workflow)
+    assert "needs.admission" not in event_sources
+    assert "github.event.workflow_run" not in event_sources
+
+
 def non_pr_checkout_ref(expression: str, jobs: dict[str, Any], job: dict[str, Any]) -> str:
     """Evaluate only the audited OR-chain form; reject unknown sources/operators.
 

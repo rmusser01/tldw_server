@@ -36,7 +36,7 @@ Source: found while fixing TASK-13338 / synthesis F37.
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Done in d8b16dff72.
 
 AC1: the role set now has one definition, core/AuthNZ/platform_admin.PLATFORM_ADMIN_ROLES, aliased by every former copy under its existing local name.
@@ -52,7 +52,7 @@ A ratchet, tests/lint/test_platform_admin_roles_single_definition.py, fails if a
 FOUND AND FILED SEPARATELY: the companion _ADMIN_CLAIM_PERMISSIONS copies disagree and always have -- the resolver accepts the 'admin' permission, BYOK and Claims do not, all three introduced in the same commit d0654d0cfb. That is a policy decision about authorisation, not a deduplication, so it was documented in the platform_admin docstring and filed rather than resolved by keeping whichever copy I happened to touch first.
 
 Verification: AuthNZ_Unit + lint + MCP admin-claims matrix, 15 failed / 1207 passed with the change vs 15 failed / 1204 passed without (baseline taken by restoring every file from HEAD), identical failure sets; the +3 is the new ratchet. All six sites confirmed to share one object at runtime. app.main still builds its 164 routes.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

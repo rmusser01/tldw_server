@@ -28,7 +28,6 @@ Implement the approved active-workspace Git read-only MCP tools with shared tool
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete. Added shared MCP tool observability/evaluation metadata helpers and tests in commit cb5568787d. RED: targeted pytest failed with missing module before implementation. GREEN: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py -q` -> 8 passed. `git diff --check` passed. Spec compliance review approved; code quality review approved with no findings.
 
@@ -42,12 +41,11 @@ Task 7 complete. Documented optional Git read-only inspection tools in commit 3b
 Final review fix complete. Addressed whole-branch review findings in commit 9b97b0bdb9eba29d17e09504ee8c92896e763f5b by neutralizing repo-local `core.fsmonitor` through runner `GIT_CONFIG_*` environment overrides and adding `--no-textconv` to `git.blame`. RED: targeted tests failed for missing fsmonitor override and blame textconv guard. GREEN: `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_git_module.py -q -k "runner or status or blame"` -> 46 passed; full `test_git_module.py` -> 111 passed. Focused review approved and live probes on Apple Git 2.39.5 confirmed fsmonitor/textconv helpers are neutralized.
 
 Final verification at head 9b97b0bdb9eba29d17e09504ee8c92896e763f5b: focused suite `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_tool_observability.py tldw_Server_API/app/core/MCP_unified/tests/test_git_module.py tldw_Server_API/app/core/MCP_unified/tests/test_git_module_registration.py tldw_Server_API/app/core/MCP_unified/tests/test_profile_presets.py -q` -> 148 passed, 4 warnings. Adjacent MCP regressions `python -m pytest tldw_Server_API/app/core/MCP_unified/tests/test_filesystem_module.py tldw_Server_API/app/core/MCP_unified/tests/test_browser_cdp_server_registration.py tldw_Server_API/app/core/MCP_unified/tests/test_runtime_package_boundary.py -q` -> 63 passed, 5 warnings. Bandit source scan `python -m bandit -r tldw_Server_API/app/core/MCP_unified/tool_observability.py tldw_Server_API/app/core/MCP_unified/modules/implementations/git_module.py tldw_Server_API/app/core/MCP_unified/server.py mcp_unified/profiles/presets.py -f json -o /tmp/bandit_mcp_git_read_tools.json` -> 0 findings. `git diff --check` passed. `git status --short --branch` clean, branch ahead of origin/dev.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 PR #2266 review pass complete after rebasing onto latest origin/dev. Verified and fixed three still-valid review threads: Git runner no longer silently suppresses broad cleanup exceptions and logs unexpected process-wait failures; Git read commands now use separate git_command_timeout_seconds instead of repository discovery timeout; blame parsing caches author metadata by commit hash for repeated --line-porcelain commits. Also fixed the failing onboarding docs gate by restoring required user-guide index discoverability entries for benchmark, OpenWebUI import/hydration, and flashcards in source and published indexes. Validation: new RED tests failed for all three review findings before implementation; after fixes test_git_module.py -> 114 passed, related MCP/profile tests -> 37 passed, docs discoverability tests -> 9 passed, Bandit touched source -> 0 findings, git diff --check passed.
 
 Second PR #2266 review pass: CodeRabbit reported that the profile preset direct-tool budget test could undercount unmapped enabled-tool prefixes. Verified as still valid: the RED test exposed kanban, memory, and test_cases prefixes. Fixed by adding explicit mappings and changing direct-tool counting to index the mapping so future unmapped prefixes fail loudly. Targeted validation: profile preset prefix coverage/direct-category tests -> 2 passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

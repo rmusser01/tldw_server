@@ -29,7 +29,7 @@ Address /chat UX rebaseline F7 by tightening the real-server/runtime-rail contra
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Starting focused /chat F7 assistant-clear/plain-chat continuity slice. Existing unit coverage cleared selected assistant and server metadata, but investigation found the cockpit clear path did not clear persisted assistantOverlay chat settings, which can rehydrate assistant behavior after the UI appears plain.
 
 RED: added Playground.cockpit-controls coverage expecting Clear assistant to call applyChatSettingsPatch with assistantOverlay: null. It failed with zero calls before implementation.
@@ -39,7 +39,7 @@ Implementation: clearAssistantFromCockpit now best-effort clears assistantOverla
 Real-server contract update: chat-cockpit.real-server now uses No runtime assistant selected for cleared runtime state and extends the disposable character clear journey to assert the next create-chat request is plain webui-chat without character_id, assistant_kind, or assistant_id.
 
 Verification: focused RED failed as expected before implementation; GREEN focused run passed 78 tests across Playground.cockpit-controls, PlaygroundRuntimeInspector.first-slice, Playground.cockpit-a11y, PlaygroundCompositionPreview, playground-composition-preview, and playground-cockpit-summaries. git diff --check passed. Playwright --list parsed/listed the touched real-server character/persona clear tests. UI tsc remains blocked by the known unrelated CharacterListContent.design-system.test.tsx GalleryCardDensity baseline. Live real-server execution was not run because no backend was listening on 127.0.0.1:8000 in this turn. Bandit skipped because touched code is TS/TSX/Playwright only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

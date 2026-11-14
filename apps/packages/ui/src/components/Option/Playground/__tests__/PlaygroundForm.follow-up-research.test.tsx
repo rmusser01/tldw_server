@@ -163,7 +163,7 @@ vi.mock("@/components/Chat/composer/PromptAssistComposerAction", () => ({
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryState: vi.fn(() => undefined) }),
   useMutation: ({
     mutationFn,
     onSuccess,
@@ -381,14 +381,6 @@ vi.mock("~/hooks/useDynamicTextareaSize", () => ({
 
 vi.mock("~/hooks/useMessageOption", () => ({
   useMessageOption: () => playgroundFormMessageOptionState.value
-}))
-
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: any) => unknown) =>
-    selector({
-      setRagMediaIds: vi.fn(),
-      setRagPinnedResults: vi.fn()
-    })
 }))
 
 vi.mock("@/store/model", () => ({
@@ -722,41 +714,6 @@ vi.mock("@/components/Common/Button", () => ({
   )
 }))
 
-vi.mock("@/hooks/useSimpleForm", () => ({
-  useSimpleForm: ({ initialValues }: { initialValues: Record<string, string> }) => {
-    const [values, setValues] = React.useState(initialValues)
-    const [errors, setErrors] = React.useState<Record<string, string>>({})
-    const setFieldValue = (field: string, value: string) =>
-      setValues((prev) => ({ ...prev, [field]: value }))
-    const reset = () => setValues(initialValues)
-    return {
-      values,
-      errors,
-      setFieldValue,
-      setFieldError: (field: string, value: string) =>
-        setErrors((prev) => ({ ...prev, [field]: value })),
-      clearFieldError: (field: string) =>
-        setErrors((prev) => {
-          const next = { ...prev }
-          delete next[field]
-          return next
-        }),
-      reset,
-      onSubmit:
-        (handler: (values: Record<string, string>) => void | Promise<void>) =>
-        async (event?: React.FormEvent) => {
-          event?.preventDefault?.()
-          await handler(values)
-        },
-      getInputProps: (field: string) => ({
-        value: values[field] ?? "",
-        onChange: (event: React.ChangeEvent<HTMLTextAreaElement | HTMLInputElement>) =>
-          setFieldValue(field, event.target.value)
-      })
-    }
-  }
-}))
-
 vi.mock("@/hooks/useAntdNotification", () => ({
   useAntdNotification: () => ({
     success: vi.fn(),
@@ -770,7 +727,8 @@ vi.mock("@/utils/onboarding-ingestion-telemetry", () => ({
   trackOnboardingChatSubmitSuccess: vi.fn(async () => undefined)
 }))
 
-vi.mock("@/utils/resolve-api-provider", () => ({
+vi.mock("@/utils/resolve-api-provider", async () => ({
+  ...await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider"),
   resolveApiProviderForModel: vi.fn(async () => "custom")
 }))
 
@@ -817,6 +775,7 @@ vi.mock("@/hooks/playground", () => ({
     imageBackendBadgeLabel: "Mock Backend"
   }),
   useActionBarVisibility: () => ({
+    composerTextareaExpanded: false,
     actionBarVisible: true,
     actionBarVisibilityClass: "",
     handlers: {

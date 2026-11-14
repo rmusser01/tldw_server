@@ -398,7 +398,13 @@ Server preparation progresses independently:
    `covered_by_activation`; and advances the content-free
    `activation_covered_through_sequence` ledger. Only after that commit may the
    covered encrypted source-row bodies be compacted. The baseline stays pinned
-   until applicable devices acknowledge or expire.
+   until applicable devices acknowledge or expire. Activation first refuses,
+   retryably, while Sync holds a staged home-authority row of the profile that
+   relay has not finalized: no relay revisits a covered batch, so that hidden
+   pending row would block every later projection in the dataset. It checks
+   under the profile lease immediately before preparing, so no relay can stage
+   in between, and a refusal leaves no prepared baseline fencing the relay that
+   must finish the row.
 3. `active_for_device`: Sync holds the ordinary device's activation
    acknowledgment, and the server journal has verified that exact receipt.
 

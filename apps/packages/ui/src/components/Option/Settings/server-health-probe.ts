@@ -65,6 +65,7 @@ export const probeServerHealth = async (
       signal: controller?.signal
     })
     if (response.ok) {
+      await response.body?.cancel()
       if (params.authMode === "single-user" && key.length > 0) {
         const authResponse = await (params.fetchFn || fetch)(
           `${baseUrl}${AUTHENTICATED_READINESS_PATH}`,
@@ -81,6 +82,7 @@ export const probeServerHealth = async (
             error: await parseErrorBody(authResponse)
           }
         }
+        await authResponse.body?.cancel()
       }
       return { ok: true, status: response.status }
     }

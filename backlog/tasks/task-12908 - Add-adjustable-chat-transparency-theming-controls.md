@@ -28,11 +28,7 @@ Add user-adjustable transparency controls for chat text/windows and character im
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Implemented adjustable chat transparency controls in the existing Chat Appearance settings. Added clamped percent settings for chatWindowOpacity, chatMessageOpacity, and chatCharacterImageOpacity.
 
 Wired chatWindowOpacity into the full Playground background wash and cockpit shell plus both sidepanel chat routes. Wired chatMessageOpacity into shared assistant/user message cards and compact user bubbles using background-color alpha so text itself remains opaque. Wired chatCharacterImageOpacity into character portrait images and assistant avatars.
@@ -62,7 +58,7 @@ Code review follow-up for PR #2685: removed themedBackdropOpacity from Playgroun
 PR #2685 review follow-up completed after rebasing on origin/dev: fixed the invalid --color-surface-2 CSS variable, added opacity alpha fallbacks, moved message/character opacity setting subscriptions to the chat roots via CSS variables, kept message text opaque, and changed the guard test to async source reads with a clear monorepo-checkout error.
 
 Review follow-up verification: bunx vitest run src/components/Common/VisualIdentity/__tests__/VisualIdentityImage.test.tsx src/routes/__tests__/chat-background-translucency.guard.test.ts src/components/Option/Settings/__tests__/ChatSettings.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-a11y.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-rail-restore.test.tsx src/components/Option/Playground/__tests__/Playground.coordinator.integration.test.tsx src/components/Option/Playground/__tests__/Playground.sticky-composer-layout.integration.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-controls.test.tsx src/components/Option/Playground/__tests__/Playground.cockpit-shell.test.tsx src/components/Option/Playground/__tests__/Playground.search.integration.test.tsx --reporter=dot passed from apps/packages/ui with 10 files and 112 tests. git diff --check passed. NODE_OPTIONS=--max-old-space-size=8192 ./node_modules/.bin/tsc -p tsconfig.json --noEmit still fails on existing baseline type errors outside the touched transparency files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

@@ -50,13 +50,13 @@ Review remediation pass: update the committed design spec to resolve four accept
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote design spec at Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md. Verification: rg confirmed requested language scope, optional .[codegraph] dependency model, workspace safety, SQLite/FTS storage, MCP tools, indexing/sync, and TASK-14 references are present; git diff --check passed for the design doc and task file. Bandit is not applicable because this task only created documentation and Backlog task metadata.
 
 No implementation code was changed. Automated test suites were not run because the touched files are a design spec and Backlog task metadata only. No known blockers. Follow-up implementation should start from this spec and create separate Backlog tasks for reviewable implementation slices.
 
 Applied review remediation to Docs/superpowers/specs/2026-05-03-native-codegraph-mcp-module-design.md. Changes: v1 indexing/sync now use bounded foreground mode with Jobs deferred; JS/TS scope now includes trusted-workspace tsconfig/jsconfig path aliases; schema and lifecycle now specify deterministic node/edge IDs plus stale-edge cleanup; dependency section now requires a tested Tree-sitter parser matrix and bounded compatible ranges rather than broad lower bounds. Verification: git diff --check passed for the spec and task file; rg confirmed no remaining Jobs-vs-foreground open question and confirmed the new path-alias, deterministic identity, and parser-matrix requirements. Bandit remains not applicable because this is documentation/task metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

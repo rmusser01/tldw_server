@@ -28,11 +28,11 @@ Walk through the WebUI Characters page in dark mode, check menus/options for lig
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Extended the existing dark-theme visual-fidelity Playwright smoke to cover /characters, including the filters panel, Display dropdown, and New character drawer. Fixed confirmed shared Ant theme leaks in dropdown item text, popover wrappers, and drawer wrapper surfaces through apps/packages/ui/src/assets/tailwind-shared.css. Tightened the visual scan to ignore hidden, aria-hidden, and sr-only subtrees so non-visible helper markup does not produce false positives.
 
 PR review follow-up: added dark coverage for selected table rows, active dropdown items, and clipped Ant select wrappers to prevent rounded-corner leaks.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

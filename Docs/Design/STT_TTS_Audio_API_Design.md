@@ -48,18 +48,16 @@ Auth dependency: `get_request_user` (`tldw_Server_API/app/core/AuthNZ/User_DB_Ha
 
 ### WebSocket endpoint (`/audio/stream/transcribe`)
 
-Auth helper: `_audio_ws_authenticate` (`tldw_Server_API/app/core/Audio/streaming_service.py`).
+Auth helper: `_audio_ws_authenticate` (`tldw_Server_API/app/core/Audio/streaming_service.py`), an adapter over the
+core WebSocket resolver (`core/AuthNZ/websocket_principal.py`, TASK-13950.7), so both modes follow HTTP's rules:
 
-- Multi-user supports:
-  - `X-API-KEY` header
-  - `Authorization: Bearer <JWT>`
-  - `?token=` query parameter (API key or JWT path)
-  - first-frame auth fallback (`{"type":"auth","token":"..."}`) for JWT
-- Single-user supports:
-  - `X-API-KEY` header
-  - Bearer token matching single-user API key
-  - `?token=` query parameter
-  - first-frame auth message (`{"type":"auth","token":"<single_user_key>"}`)
+- On the upgrade request, verified before accept: `Authorization: Bearer <JWT or API key>`, `X-API-KEY`, or the
+  `bearer, <JWT or key>` subprotocol.
+- Otherwise `resolve_ws_principal_first_frame` accepts the socket and reads one first frame
+  (`{"type":"auth","token":"<JWT or API key>"}`, 5 s); any other first frame closes `4400`, a missing, refused or
+  revoked token `4401`. The single-user cookie also authenticates, and its clients may send `config` first.
+- The adapter then applies a scoped JWT's or multi-user key's endpoint and path allowlists (`4403`) and call quota.
+- `?token=` (JWT or API key) only with `AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH=1`, deprecated.
 
 ## Provider selection and adapter retry behavior
 

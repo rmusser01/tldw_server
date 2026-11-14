@@ -725,7 +725,9 @@ class _PauseAfterValidationCursor:
     def execute(self, sql: Any, params: Any = ()) -> Any:
         result = self._inner.execute(sql, params)
         normalized = " ".join(str(sql).lower().split())
-        if "from jobs where id = %s for update" in normalized:
+        if normalized.startswith(
+            "select id, domain, queue, job_type, status, worker_id, lease_id from jobs where id = %s"
+        ) and normalized.endswith("for update"):
             self._selected.set()
             if not self._writer_attempt_finished.wait(timeout=5):
                 raise TimeoutError("competing writer did not finish its first attempt")

@@ -46,7 +46,6 @@ from tldw_Server_API.app.core.AuthNZ.repos.rbac_repo import AuthnzRbacRepo
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import InputError, KanbanDB, KanbanDBError
 from tldw_Server_API.app.core.exceptions import ResourceNotFoundError
-from tldw_Server_API.app.core.testing import is_test_mode as _shared_is_test_mode
 from tldw_Server_API.app.services.admin_roles_permissions_service import (
     create_role as svc_create_role,
 )
@@ -130,11 +129,6 @@ def _get_is_postgres_backend_fn() -> Callable[[], Awaitable[bool]]:
 def _get_kanban_db_for_user_id(user_id: int) -> KanbanDB:
     db_path = DatabasePaths.get_kanban_db_path(user_id)
     return KanbanDB(db_path=str(db_path), user_id=str(user_id))
-
-
-def is_test_mode() -> bool:
-    """Return the shared test-mode flag for legacy admin RBAC patch points."""
-    return _shared_is_test_mode()
 
 
 @router.post(
@@ -587,10 +581,15 @@ async def add_role_to_user(
 ) -> dict:
     try:
         await _enforce_admin_user_scope(principal, user_id, require_hierarchy=True)
+        is_postgres = await _get_is_postgres_backend_fn()()
+        if await rbac_admin_repo.get_role(db, is_postgres=is_postgres, role_id=role_id) is None:
+            raise HTTPException(status_code=404, detail="Role not found")
         await rbac_admin_repo.add_user_role(
-            db, is_postgres=await _get_is_postgres_backend_fn()(), user_id=user_id, role_id=role_id
+            db, is_postgres=is_postgres, user_id=user_id, role_id=role_id
         )
         return {"message": "Role added to user"}
+    except HTTPException:
+        raise
     except _RBAC_NONCRITICAL_EXCEPTIONS as e:
         logger.error("Failed to add role to user")
         raise HTTPException(status_code=500, detail="Failed to add role to user") from e

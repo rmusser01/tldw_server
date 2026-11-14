@@ -23,6 +23,7 @@ from ..tts_exceptions import (
     TTSVoiceNotFoundError,
 )
 from ..tts_validation import validate_tts_request
+from ..utils import hold_tts_engine, tts_model_load_lock
 
 #
 # Local Imports
@@ -139,9 +140,8 @@ class Supertonic2OnnxAdapter(TTSAdapter):
             ) from exc
 
         try:
-            engine = await asyncio.to_thread(
-                vendor.load_text_to_speech, str(self.onnx_dir), self.use_gpu
-            )
+            async with hold_tts_engine(tts_model_load_lock(self.provider_key, str(self.onnx_dir))) as run:
+                engine = await run(vendor.load_text_to_speech, str(self.onnx_dir), self.use_gpu)
         except FileNotFoundError as exc:
             raise TTSModelNotFoundError(
                 f"Supertonic2 model assets missing under {self.onnx_dir}",
@@ -319,8 +319,8 @@ class Supertonic2OnnxAdapter(TTSAdapter):
             ) from exc
 
         try:
-            async with self._engine_lock:
-                wav, duration = await asyncio.to_thread(
+            async with hold_tts_engine(self._engine_lock) as run:
+                wav, duration = await run(
                     self._engine, request.text, language, style, total_step, speed
                 )
         except Exception as exc:

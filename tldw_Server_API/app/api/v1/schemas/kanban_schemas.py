@@ -641,7 +641,7 @@ class BoardExportResponse(BaseModel):
 
 class BoardImportRequest(BaseModel):
     """Schema for board import request."""
-    data: dict[str, Any] = Field(..., description="Board data to import (tldw_kanban_v1 or Trello format)")
+    data: dict[str, Any] = Field(..., description="Board data to import (tldw_kanban_v1, tldw_kanban_draft_v1 or Trello format)")
     board_name: Optional[str] = Field(None, description="Override name for imported board")
 
 

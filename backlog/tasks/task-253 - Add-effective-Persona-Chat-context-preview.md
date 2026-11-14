@@ -42,7 +42,7 @@ priority: high
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline note: focused pure prompt assembly tests passed before edits; the selected prompt-preview integration run hung during the second TestClient case after the first integration case passed, so subsequent verification will use narrower red/green tests and record any lifecycle limitation.
 
 Red/green coverage: new helper-level tests first failed with AttributeError for missing _build_persona_preview_context, then passed after adding the bounded persona_context helper and wiring the endpoint response.
@@ -58,7 +58,7 @@ Updated verification: prompt assembly suite now passes with 9 tests after the bo
 Review-fix pass opened for PR #1561. Actionable items: add selected exemplar reasons, ignore whitespace-only append_user_message for current-turn source/text, and add a Pydantic response model for prompt-preview.
 
 PR #1561 review fixes: added selected_exemplars with bounded reasons while preserving selected_exemplar_ids compatibility, ignored whitespace-only append_user_message for persona current-turn classification, and declared PromptPreviewResponse for prompt-preview response validation. Verification: persona prompt assembly suite passed (10 tests); focused prompt-preview integration regressions passed individually; py_compile, Bandit on touched backend/schema files, and git diff --check passed. GitHub Frontend Lint job 75272179483 was cancelled during dependency install while the run remains queued; no frontend code changed in this review-fix pass.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

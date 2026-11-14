@@ -9,7 +9,7 @@ import secrets
 import shutil
 import stat
 import string
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
@@ -28,15 +28,30 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
     RegistrationDisabledError,
     RegistrationError,
 )
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    AnchorOwnership,
+    TrustedMembershipReason,
+    TrustedMembershipWriteContext,
+)
 from tldw_Server_API.app.core.AuthNZ.password_service import PasswordService, get_password_service
 from tldw_Server_API.app.core.AuthNZ.profile_version import VersionedUserWriteGateway
+from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import (
+    AuthnzOrgsTeamsRepo,
+)
 
 #
 # Local imports
 from tldw_Server_API.app.core.AuthNZ.settings import Settings, get_settings
+from tldw_Server_API.app.core.AuthNZ.transaction_policy import (
+    get_authnz_transaction_policy,
+)
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.UserProfiles.overrides_repo import UserProfileOverridesRepo
 
 _OWNER_ONLY_DIR_MODE = stat.S_IRWXU
+_REGISTRATION_MEMBERSHIP_CONTEXT = TrustedMembershipWriteContext(
+    trusted_reason=TrustedMembershipReason.REGISTRATION,
+)
 
 #######################################################################################################################
 #
@@ -205,58 +220,21 @@ class RegistrationService:
         org_role_value = (org_role or "member").lower()
         if org_role_value not in {"owner", "admin", "lead", "member"}:
             org_role_value = "member"
-
-        was_already_member = False
-        if self._is_postgres_backend():
-            existing = await conn.fetchrow(
-                "SELECT 1 FROM org_members WHERE org_id = $1 AND user_id = $2",
-                org_id,
-                user_id,
-            )
-            if existing:
-                was_already_member = True
-            else:
-                await conn.execute(
-                    """
-                    INSERT INTO org_members (org_id, user_id, role)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (org_id, user_id) DO NOTHING
-                    """,
-                    org_id,
-                    user_id,
-                    org_role_value,
-                )
-            if team_id is not None:
-                await conn.execute(
-                    """
-                    INSERT INTO team_members (team_id, user_id, role)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (team_id, user_id) DO NOTHING
-                    """,
-                    team_id,
-                    user_id,
-                    "member",
-                )
-        else:
-            cursor = await conn.execute(
-                "SELECT 1 FROM org_members WHERE org_id = ? AND user_id = ?",
-                (org_id, user_id),
-            )
-            existing = await cursor.fetchone()
-            if existing:
-                was_already_member = True
-            else:
-                await conn.execute(
-                    "INSERT OR IGNORE INTO org_members (org_id, user_id, role) VALUES (?, ?, ?)",
-                    (org_id, user_id, org_role_value),
-                )
-            if team_id is not None:
-                await conn.execute(
-                    "INSERT OR IGNORE INTO team_members (team_id, user_id, role) VALUES (?, ?, ?)",
-                    (team_id, user_id, "member"),
-                )
-
-        return was_already_member
+        result = await AuthnzOrgsTeamsRepo(
+            self.db_pool
+        ).provision_org_membership_on_connection(
+            conn=conn,
+            org_id=org_id,
+            user_id=user_id,
+            org_role=org_role_value,
+            team_id=team_id,
+            team_role="member" if team_id is not None else None,
+            team_failure_is_best_effort=False,
+            context=_REGISTRATION_MEMBERSHIP_CONTEXT,
+            anchor_ownership=AnchorOwnership.WRITER_OWNS_ANCHOR,
+            operation_time=datetime.now(timezone.utc),
+        )
+        return not result.org_membership.changed
 
     async def _insert_role_membership(self, conn, *, user_id: int, role_name: str) -> None:
         """Resolve a role by name and persist the user's canonical membership."""
@@ -338,7 +316,11 @@ class RegistrationService:
         code_info: Optional[dict[str, Any]] = None
 
         try:
-            async with self.db_pool.transaction() as conn:
+            async with self.db_pool.transaction(
+                acquire_timeout_seconds=(
+                    get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+                ),
+            ) as conn:
                 # Check for duplicate username/email
                 if self._is_postgres_backend():
                     # PostgreSQL
@@ -375,10 +357,8 @@ class RegistrationService:
                 if privileged_creation:
                     if role_override:
                         role = role_override
-                    if storage_quota_override is not None:
-                        if int(storage_quota_override) < 0:
-                            raise ValueError("storage_quota_override must be non-negative")
-                        storage_quota = storage_quota_override
+                    if storage_quota_override is not None and int(storage_quota_override) < 0:
+                        raise ValueError("storage_quota_override must be non-negative")
 
                 if registration_code and not privileged_creation:
                     # Validate and use registration code (optional when not required)
@@ -388,15 +368,13 @@ class RegistrationService:
                         user_email=email,
                     )
                     role = code_info.get('role_to_grant', role)
-
-                    # Check if code specifies storage quota
-                    if 'storage_quota_mb' in code_info:
-                        storage_quota = code_info['storage_quota_mb']
                 elif self.require_code and not privileged_creation:
                     raise InvalidRegistrationCodeError("Registration code required")
 
                 # Hash the password
-                password_hash = self.password_service.hash_password(password)
+                password_hash = await asyncio.to_thread(
+                    self.password_service.hash_password, password
+                )
 
                 # Generate UUID
                 user_uuid = str(uuid4())
@@ -430,6 +408,15 @@ class RegistrationService:
                     },
                 )
                 user_id = insert_result.affected_user_ids[0]
+
+                if privileged_creation and storage_quota_override is not None:
+                    await UserProfileOverridesRepo(self.db_pool).upsert_override(
+                        user_id=int(user_id),
+                        key="limits.storage_quota_mb",
+                        value=int(storage_quota_override),
+                        updated_by=created_by,
+                        db_conn=conn,
+                    )
 
                 await self._insert_role_membership(
                     conn,
@@ -498,7 +485,11 @@ class RegistrationService:
                     "role": role,
                     "is_active": is_active,
                     "is_verified": is_verified,
-                    "storage_quota_mb": storage_quota,
+                    "storage_quota_mb": (
+                        int(storage_quota_override)
+                        if privileged_creation and storage_quota_override is not None
+                        else None
+                    ),
                     "registration_code_id": code_info.get("id") if code_info else None,
                     "registration_code_org_id": code_info.get("org_id") if code_info else None,
                     "registration_code_org_role": code_info.get("org_role") if code_info else None,
@@ -510,15 +501,7 @@ class RegistrationService:
             if user_id and directories_created:
                 await asyncio.to_thread(self._cleanup_user_directories, user_id)
 
-            # Log the error
-            try:
-                _s = get_settings()
-                if getattr(_s, 'PII_REDACT_LOGS', False):
-                    logger.error(f"Registration failed [redacted]: {e}")
-                else:
-                    logger.error(f"Registration failed for {username}: {e}")
-            except Exception:
-                logger.error(f"Registration failed for {username}: {e}")
+            logger.bind(error_type=type(e).__name__).error("Registration failed")
 
             # Re-raise the exception
             raise
@@ -595,7 +578,7 @@ class RegistrationService:
             )
             return True
         except Exception as exc:
-            logger.opt(exception=exc).error(
+            logger.bind(error_type=type(exc).__name__).error(
                 "Failed to roll back partially registered user {}",
                 user_id,
             )
@@ -614,7 +597,11 @@ class RegistrationService:
         if not self.db_pool:
             await self.initialize()
 
-        async with self.db_pool.transaction() as conn:
+        async with self.db_pool.transaction(
+            acquire_timeout_seconds=(
+                get_authnz_transaction_policy().db_pool_acquire_timeout_seconds
+            ),
+        ) as conn:
             user_email = None
             if self._is_postgres_backend():
                 user_row = await conn.fetchrow("SELECT email FROM users WHERE id = $1", user_id)

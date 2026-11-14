@@ -65,7 +65,17 @@ def batch_cancel(jm: JobManager, *, domain: str, queue: str | None, job_type: st
             counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
             affected = 0
             with conn:  # noqa: SIM117
-                with jm._pg_cursor(conn) as cur:
+                with jm._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
+                    mutation = lifecycle.enter_context(
+                        jm._resource_mutation(
+                            cur,
+                            postgres=True,
+                            where="(" + " AND ".join(where) + ") AND status IN ('queued','processing')",
+                            params=tuple(params),
+                            reactivating=False,
+                        )
+                    )
+                    where, params = [mutation.where], list(mutation.params)
                     cur.execute(
                         (
                             "WITH candidates AS (SELECT id,domain,queue,job_type,status,available_at "
@@ -127,8 +137,17 @@ def batch_cancel(jm: JobManager, *, domain: str, queue: str | None, job_type: st
                 return int(r[0] if r else 0)
             counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
             affected = 0
-            with conn:
+            with conn, contextlib.ExitStack() as lifecycle:
                 conn.execute("BEGIN IMMEDIATE")
+                mutation = lifecycle.enter_context(
+                    jm._resource_mutation(
+                        conn,
+                        where="(" + " AND ".join(where) + ") AND status IN ('queued','processing')",
+                        params=tuple(params),
+                        reactivating=False,
+                    )
+                )
+                where, params = [mutation.where], list(mutation.params)
                 groups = []
                 if counters_enabled:
                     groups = list(
@@ -227,7 +246,17 @@ def batch_reschedule(jm: JobManager, *, domain: str, queue: str | None, job_type
             counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
             affected = 0
             with conn:  # noqa: SIM117
-                with jm._pg_cursor(conn) as cur:
+                with jm._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
+                    mutation = lifecycle.enter_context(
+                        jm._resource_mutation(
+                            cur,
+                            postgres=True,
+                            where=" AND ".join(where),
+                            params=tuple(params),
+                            reactivating=False,
+                        )
+                    )
+                    where, params = [mutation.where], list(mutation.params)
                     target_available_at = (
                         "NULL"
                         if delay_seconds == 0
@@ -307,8 +336,17 @@ def batch_reschedule(jm: JobManager, *, domain: str, queue: str | None, job_type
                 return int(r[0] if r else 0)
             counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
             affected = 0
-            with conn:
+            with conn, contextlib.ExitStack() as lifecycle:
                 conn.execute("BEGIN IMMEDIATE")
+                mutation = lifecycle.enter_context(
+                    jm._resource_mutation(
+                        conn,
+                        where=" AND ".join(where),
+                        params=tuple(params),
+                        reactivating=False,
+                    )
+                )
+                where, params = [mutation.where], list(mutation.params)
                 groups = []
                 if counters_enabled:
                     groups = list(
@@ -415,7 +453,17 @@ def batch_requeue_quarantined(jm: JobManager, *, domain: str, queue: str | None,
             counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
             affected = 0
             with conn:  # noqa: SIM117
-                with jm._pg_cursor(conn) as cur:
+                with jm._pg_cursor(conn) as cur, contextlib.ExitStack() as lifecycle:
+                    mutation = lifecycle.enter_context(
+                        jm._resource_mutation(
+                            cur,
+                            postgres=True,
+                            where=" AND ".join(where),
+                            params=tuple(params),
+                            reactivating=True,
+                        )
+                    )
+                    where, params = [mutation.where], list(mutation.params)
                     cur.execute(
                         (
                             "WITH changed AS (UPDATE jobs SET status='queued', "
@@ -476,8 +524,17 @@ def batch_requeue_quarantined(jm: JobManager, *, domain: str, queue: str | None,
                 return int(r[0] if r else 0)
             counters_enabled = env_flag_enabled("JOBS_COUNTERS_ENABLED")
             affected = 0
-            with conn:
+            with conn, contextlib.ExitStack() as lifecycle:
                 conn.execute("BEGIN IMMEDIATE")
+                mutation = lifecycle.enter_context(
+                    jm._resource_mutation(
+                        conn,
+                        where=" AND ".join(where),
+                        params=tuple(params2),
+                        reactivating=True,
+                    )
+                )
+                where, params2 = [mutation.where], list(mutation.params)
                 groups = []
                 if counters_enabled:
                     groups = list(

@@ -1021,3 +1021,57 @@ async def test_processing_task_restarts_when_queue_has_pending_items(monkeypatch
 
     keepalive.set()
     await asyncio.wait_for(batcher.shutdown(), timeout=1.0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure_type", [OSError, RuntimeError], ids=["offline-model-oserror", "existing-runtime-error"]
+)
+async def test_provider_failure_settles_all_submitters_and_keeps_queue_usable(monkeypatch, failure_type):
+    """External provider failure must not orphan the real batch's request futures."""
+    config = EmbeddingsConfig(
+        providers=[ProviderConfig(name="huggingface", models=["test-model"])],
+        batching=BatchingConfig(enabled=True, max_batch_size=2, batch_timeout_ms=10, adaptive_batching=False),
+        security=SecurityConfig(enable_rate_limiting=False),
+        default_provider="huggingface",
+        default_model="test-model",
+    )
+    batcher = RequestBatcher(config=config)
+    failed = asyncio.Event()
+    owners = []
+    failure = failure_type("controlled offline provider failure")
+    calls = 0
+
+    async def provider(texts, user_app_config, model_id_override=None):
+        nonlocal calls
+        calls += 1
+        owners.append(asyncio.current_task())
+        if calls == 1:
+            failed.set()
+            raise failure
+        return [[0.25, 0.5] for _ in texts]
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Embeddings.Embeddings_Server.Embeddings_Create.create_embeddings_batch_async",
+        provider,
+    )
+    submitters = [
+        asyncio.create_task(batcher.submit_request(text, "test-model", "huggingface")) for text in ("first", "second")
+    ]
+    try:
+        await asyncio.wait_for(failed.wait(), timeout=2)
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert all(task.done() for task in submitters)  # nosec B101 # Pytest behavior assertion; no runtime security boundary.
+        outcomes = await asyncio.gather(*submitters, return_exceptions=True)
+        assert all(outcome is failure for outcome in outcomes)  # nosec B101 # Pytest behavior assertion; no runtime security boundary.
+        recovered = await asyncio.wait_for(batcher.submit_request("recovered", "test-model", "huggingface"), timeout=2)
+        assert recovered == [0.25, 0.5]  # nosec B101 # Pytest behavior assertion; no runtime security boundary.
+        assert calls == 2  # nosec B101 # Pytest behavior assertion; no runtime security boundary.
+    finally:
+        for task in submitters:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*submitters, return_exceptions=True)
+        await batcher.shutdown()
+        await asyncio.gather(*owners, return_exceptions=True)

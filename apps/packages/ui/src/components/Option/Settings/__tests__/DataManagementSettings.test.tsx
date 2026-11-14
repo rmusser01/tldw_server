@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DataManagementSettings } from "../system-settings"
@@ -37,10 +37,8 @@ vi.mock("@tanstack/react-query", () => ({
   })
 }))
 
-vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => ({
-    clearChat: mocks.clearChat
-  })
+vi.mock("@/hooks/chat/useClearChat", () => ({
+  useClearChat: () => mocks.clearChat
 }))
 
 vi.mock("@/hooks/useAntdNotification", () => ({
@@ -68,6 +66,7 @@ vi.mock("@/utils/is-private-mode", () => ({
 describe("DataManagementSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.clearChat.mockReset().mockReturnValue(true)
     mocks.clearDB.mockResolvedValue(undefined)
     mocks.storageClear.mockResolvedValue(undefined)
     vi.stubGlobal("browser", {
@@ -80,6 +79,7 @@ describe("DataManagementSettings", () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
@@ -139,4 +139,50 @@ describe("DataManagementSettings", () => {
 
     expect(clearTimeoutSpy).toHaveBeenCalledWith(reloadTimer)
   })
+  it("admits the confirmed reset before deleting data and stops when navigation is refused", async () => {
+    mocks.clearChat.mockReturnValue(false)
+    render(<DataManagementSettings />)
+    fireEvent.click(screen.getByRole("button", { name: /reset all/i }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "RESET" } })
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(mocks.clearChat).toHaveBeenCalledWith({ discardTemporaryConfirmed: true }))
+    expect(mocks.clearDB).not.toHaveBeenCalled()
+    expect(mocks.storageClear).not.toHaveBeenCalled()
+    expect(mocks.notificationSuccess).not.toHaveBeenCalled()
+  })
+
+  it.each(["local", "sync"])("waits for migration before reset and reports a Chrome %s clear failure", async (area) => {
+    let unlock!: () => void
+    const pendingMigration = new Promise<void>((resolve) => { unlock = resolve })
+    const request = vi.fn(async (_name: string, operation: () => Promise<void>) => {
+      await pendingMigration
+      return operation()
+    })
+    const localClear = vi.fn((done?: () => void) => {
+      if (area === "local") Object.assign(chrome.runtime, { lastError: { message: "Storage inaccessible" } })
+      done?.()
+      Reflect.deleteProperty(chrome.runtime, "lastError")
+    })
+    vi.stubGlobal("navigator", Object.create(navigator, { locks: { value: { request } } }))
+    vi.stubGlobal("chrome", { runtime: { id: "reset-test-extension" }, storage: { local: { clear: localClear } } })
+    vi.stubGlobal("browser", { runtime: chrome.runtime, storage: {
+      local: { clear: localClear },
+      session: { clear: mocks.storageClear },
+      sync: { clear: area === "sync" ? vi.fn().mockRejectedValue(new Error("Sync inaccessible")) : mocks.storageClear }
+    } })
+    render(<DataManagementSettings />)
+
+    fireEvent.click(screen.getByRole("button", { name: /reset all/i }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "RESET" } })
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(request).toHaveBeenCalledWith("tldw:legacy-chat-storage", expect.any(Function)))
+    expect(mocks.clearDB).not.toHaveBeenCalled()
+    expect(localClear).not.toHaveBeenCalled()
+
+    unlock()
+    await waitFor(() => expect(mocks.notificationError).toHaveBeenCalledWith({ message: "Reset failed" }))
+    expect(mocks.notificationSuccess).not.toHaveBeenCalled()
+    expect(mocks.clearDB).not.toHaveBeenCalled()
+  })
+
 })

@@ -47,7 +47,7 @@ Stages:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Working in /Users/macbook-dev/Documents/GitHub/tldw_server2/.worktrees/vz-helper-create-vm-contract on branch codex/vz-helper-create-vm-contract from origin/dev. Main checkout is dirty/diverged and intentionally untouched.
 
 Verification:
@@ -59,7 +59,7 @@ Verification:
 
 Known notes:
 - SwiftPM still warns that `tools/macos-vz-helper/Tests/test_vz_helperctl.py` is an unhandled package resource; this is pre-existing because the package directory also hosts pytest tests.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->

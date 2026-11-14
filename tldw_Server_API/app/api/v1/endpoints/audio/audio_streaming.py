@@ -44,7 +44,6 @@ from tldw_Server_API.app.api.v1.schemas.audio_schemas import (
     StreamingStatusResponse,
     StreamingTestResponse,
 )
-from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import DEFAULT_LLM_PROVIDER, get_api_keys
 from tldw_Server_API.app.core.Audio.error_payloads import _maybe_debug_details
 from tldw_Server_API.app.core.Audio.quota_helpers import EXPECTED_DB_EXC, EXPECTED_REDIS_EXC, _get_failopen_cap_minutes
 from tldw_Server_API.app.core.Audio.streaming_exceptions import QuotaExceeded
@@ -58,27 +57,10 @@ from tldw_Server_API.app.core.Audio.transcription_service import _map_openai_aud
 from tldw_Server_API.app.core.Audio.tts_service import (
     tts_provider_credential_scope,
 )
-from tldw_Server_API.app.core.AuthNZ.byok_helpers import (
-    derive_trusted_credential_scope,
-)
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import (
-    ByokResolutionError,
-)
-from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
-    capture_provider_override_call_snapshot,
-)
-from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
-    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
-    ProviderCredentialRuntime,
-)
 from tldw_Server_API.app.core.AuthNZ.settings import is_multi_user_mode
-from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
-    cookie_websocket_rejection_code,
-    resolve_single_user_cookie_websocket,
-)
 from tldw_Server_API.app.core.Billing.enforcement import (
     LimitCategory,
-    enforcement_enabled,
+    billing_checks_active,
     get_billing_enforcer,
 )
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
@@ -106,6 +88,8 @@ from tldw_Server_API.app.core.config import (
     load_comprehensive_config,
     resolve_default_transcription_model_setting,
 )
+from tldw_Server_API.app.core.config_llm_providers import get_api_keys, get_default_provider
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     ConflictError,
@@ -149,6 +133,19 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
     emit_stt_session_start_total,
     observe_stt_final_latency_seconds,
 )
+from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import (
+    derive_trusted_credential_scope,
+)
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
+    ByokResolutionError,
+)
+from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+    capture_provider_override_call_snapshot,
+)
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    ProviderCredentialRuntime,
+)
 from tldw_Server_API.app.core.Resource_Governance import cost_units
 from tldw_Server_API.app.core.Streaming import speech_chat_service
 from tldw_Server_API.app.core.Streaming.phrase_chunker import PhraseChunker
@@ -159,7 +156,6 @@ from tldw_Server_API.app.core.TTS.tts_request_resolution import (
 )
 from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 from tldw_Server_API.app.core.Usage.audio_quota import (
-    active_streams_count,
     add_daily_minutes,
     bytes_to_seconds,
     can_start_stream,
@@ -170,9 +166,11 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_stream,
     get_daily_minutes_used,
     get_limits_for_user,
+    get_monthly_minutes_used,
     get_user_tier,
     heartbeat_stream,
     increment_jobs_started,
+    monthly_minutes_exhausted,
 )
 from tldw_Server_API.app.services.app_lifecycle import assert_may_start_work
 
@@ -331,8 +329,9 @@ def _audio_shim_attr(name: str):
         "consume_daily_minutes": consume_daily_minutes,
         "bytes_to_seconds": bytes_to_seconds,
         "heartbeat_stream": heartbeat_stream,
-        "active_streams_count": active_streams_count,
         "get_daily_minutes_used": get_daily_minutes_used,
+        "get_monthly_minutes_used": get_monthly_minutes_used,
+        "monthly_minutes_exhausted": monthly_minutes_exhausted,
         "get_user_tier": get_user_tier,
         "get_limits_for_user": get_limits_for_user,
         "increment_jobs_started": increment_jobs_started,
@@ -341,21 +340,6 @@ def _audio_shim_attr(name: str):
     default_value = defaults.get(name)
     package_candidate: Any = None
     module_candidate: Any = None
-
-    def _is_test_override(value: Any) -> bool:
-        try:
-            module_name = str(getattr(value, "__module__", "") or "")
-        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-            module_name = ""
-        if module_name.startswith("tldw_Server_API.tests") or module_name.startswith("tests."):
-            return True
-        if module_name == "__main__":
-            return True
-        try:
-            class_module = str(getattr(getattr(value, "__class__", object), "__module__", "") or "")
-        except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS:
-            class_module = ""
-        return class_module.startswith("tldw_Server_API.tests") or class_module.startswith("tests.")
 
     try:
         from tldw_Server_API.app.api.v1.endpoints import audio as audio_pkg_shim
@@ -379,10 +363,6 @@ def _audio_shim_attr(name: str):
     if package_candidate is not None and module_candidate is not None:
         if package_candidate is module_candidate:
             return package_candidate
-        package_is_test_override = _is_test_override(package_candidate)
-        module_is_test_override = _is_test_override(module_candidate)
-        if package_is_test_override != module_is_test_override:
-            return package_candidate if package_is_test_override else module_candidate
         if default_value is not None:
             package_changed = package_candidate is not default_value
             module_changed = module_candidate is not default_value
@@ -1125,16 +1105,22 @@ async def _heartbeat_stream(user_id: int):
     return await _audio_shim_attr("heartbeat_stream")(user_id)
 
 
-async def _active_streams_count(user_id: int):
-    return await _audio_shim_attr("active_streams_count")(user_id)
-
-
 async def _get_daily_minutes_used(user_id: int):
     return await _audio_shim_attr("get_daily_minutes_used")(user_id)
 
 
+async def _get_monthly_minutes_used(user_id: int):
+    return await _audio_shim_attr("get_monthly_minutes_used")(user_id)
+
+
 async def _get_user_tier(user_id: int):
     return await _audio_shim_attr("get_user_tier")(user_id)
+
+
+async def _minutes_quota_name(user_id: int, minutes_requested: float) -> str:
+    """Quota name for a refused minutes request: monthly when the month limit is what it would pass."""
+    monthly = await _audio_shim_attr("monthly_minutes_exhausted")(user_id, minutes_requested)
+    return "monthly_minutes" if monthly else "daily_minutes"
 
 
 async def _get_limits_for_user(user_id: int):
@@ -1239,15 +1225,6 @@ async def audio_chat_turn(
 ws_router = APIRouter()
 
 
-async def _preflight_audio_cookie_websocket(websocket: WebSocket) -> bool:
-    await resolve_single_user_cookie_websocket(websocket)
-    close_code = cookie_websocket_rejection_code(websocket)
-    if close_code is None:
-        return True
-    await websocket.close(code=close_code)
-    return False
-
-
 @ws_router.websocket("/stream/transcribe")
 async def websocket_transcribe(
     websocket: WebSocket, token: Optional[str] = Query(None)  # Legacy query-token auth; disabled by default.
@@ -1266,7 +1243,13 @@ async def websocket_transcribe(
         websocket (WebSocket): The active WebSocket connection.
         token (Optional[str]): Legacy API key or JWT query-string token, ignored unless AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.transcribe",
+        ws_path="/api/v1/audio/stream/transcribe",
+    )
+    if not auth_ok:
         return
     # Create a lightweight WebSocketStream for uniform metrics on outer error paths
     _outer_stream = None
@@ -1346,15 +1329,6 @@ async def websocket_transcribe(
         flag = str(_os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (shared helper; parity with other audio WS endpoints)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.transcribe",
-        ws_path="/api/v1/audio/stream/transcribe",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.transcribe",
@@ -1365,7 +1339,7 @@ async def websocket_transcribe(
 
     # Billing: check transcription minutes quota before streaming begins
     _ws_billing_org_id: int | None = None
-    if enforcement_enabled():
+    if await billing_checks_active():
         try:
             _ws_principal = get_websocket_auth_principal(websocket)
             if _ws_principal is not None:
@@ -1469,14 +1443,6 @@ async def websocket_transcribe(
                 return
             emit_stt_session_start_total(provider=stt_metrics_provider)
             stt_session_started = True
-
-        ok_stream, msg_stream = await _can_start_stream(user_id_for_usage)
-        if not ok_stream:
-            if _outer_stream:
-                await _outer_stream.send_json({"type": "error", "message": msg_stream})
-            await websocket.close()
-            return
-        acquired_stream = True
 
         query_params = getattr(websocket, "query_params", {}) or {}
         persistence_enabled = _coerce_bool(
@@ -1739,10 +1705,10 @@ async def websocket_transcribe(
                         increment_counter("audio_failopen_cap_exhausted_total", labels={"reason": "db_check"})
                     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as m_err:
                         logger.debug(f"metrics increment failed (audio_failopen_cap_db_check): error={m_err}")
-                    raise _QuotaExceeded("daily_minutes") from None
+                    raise _QuotaExceeded(await _minutes_quota_name(user_id_for_usage, minutes_chunk)) from None
             if not allow:
                 # Raise structured signal to outer scope
-                raise _QuotaExceeded("daily_minutes")
+                raise _QuotaExceeded(await _minutes_quota_name(user_id_for_usage, minutes_chunk))
             used_minutes += minutes_chunk
             # Billing: accumulate fractional minutes; flush to cache when >= 1
             nonlocal _billing_minutes_accumulator
@@ -1782,6 +1748,14 @@ async def websocket_transcribe(
             except EXPECTED_REDIS_EXC as _hb_e:
                 logger.debug(f"Heartbeat failed for user_id={user_id_for_usage}: {_hb_e}")
 
+        # Take the stream slot only here: the finally below is what gives it back (TASK-13435).
+        ok_stream, msg_stream = await _can_start_stream(user_id_for_usage)
+        if not ok_stream:
+            if _outer_stream:
+                await _outer_stream.send_json({"type": "error", "message": msg_stream})
+            await websocket.close()
+            return
+        acquired_stream = True
         try:
             await handle_unified_websocket(
                 policy_websocket,
@@ -1803,10 +1777,11 @@ async def websocket_transcribe(
             )
             try:
                 if _outer_stream:
+                    _period = qe.quota.removesuffix("_minutes")
                     await _outer_stream.send_json(
                         _audio_ws_quota_error_payload(
                             quota=qe.quota,
-                            message="Streaming transcription quota exceeded (daily minutes)",
+                            message=f"Streaming transcription quota exceeded ({_period} minutes)",
                             request_id=request_id,
                         )
                     )
@@ -1951,9 +1926,14 @@ async def websocket_audio_chat_stream(
       - Single-user: API key via header or an initial auth message; optional IP allowlist.
       - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.chat.stream",
+        ws_path="/api/v1/audio/chat/stream",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -2009,15 +1989,6 @@ async def websocket_audio_chat_stream(
         flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (parity with STT/WS TTS)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.chat.stream",
-        ws_path="/api/v1/audio/chat/stream",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.chat.stream",
@@ -2254,7 +2225,7 @@ async def websocket_audio_chat_stream(
         emit_stt_session_start_total(provider=stt_metrics_provider)
         stt_session_started = True
 
-        llm_provider = (llm_cfg.get("provider") or llm_cfg.get("api_provider") or DEFAULT_LLM_PROVIDER).lower()
+        llm_provider = (llm_cfg.get("provider") or llm_cfg.get("api_provider") or get_default_provider()).lower()
         llm_model = llm_cfg.get("model") or os.getenv("AUDIO_CHAT_DEFAULT_LLM_MODEL") or "gpt-3.5-turbo"
         llm_temperature = llm_cfg.get("temperature")
         llm_max_tokens = llm_cfg.get("max_tokens")
@@ -2402,61 +2373,64 @@ async def websocket_audio_chat_stream(
             if persistence_ready and persistence_db is not None and persistence_session_id:
                 return persistence_db, persistence_session_id
             try:
-                if persistence_db is None:
-                    persistence_db = await _shim_get_chacha_db_for_user_id(
-                        int(user_id_for_usage),
-                        client_id=str(user_id_for_usage),
-                    )
-                loop = asyncio.get_running_loop()
-                character_card, character_db_id = await _shim_get_or_create_character_context(
-                    persistence_db,
-                    None,
-                    loop,
-                )
-                if not character_db_id:
-                    raise ValueError("Unable to resolve character context for WS persistence")
-                character_name = "Helpful AI Assistant"
-                if isinstance(character_card, dict) and character_card.get("name"):
-                    character_name = str(character_card.get("name"))
-
-                persistence_session_id, conversation_created = await _shim_get_or_create_conversation(
-                    persistence_db,
-                    persistence_session_id,
-                    int(character_db_id),
-                    character_name,
-                    str(user_id_for_usage),
-                    loop,
-                )
-                session_id = persistence_session_id
-
-                if session_id and not any(
-                    msg.get("role") == "system" and msg.get("content") == f"session:{session_id}"
-                    for msg in chat_history
-                ):
-                    chat_history.insert(0, {"role": "system", "content": f"session:{session_id}"})
-
-                action_hint = _action_hint()
-                settings_payload = {
-                    "audio_chat_ws": {
-                        "session_id": persistence_session_id,
-                        "action_hint": action_hint,
-                        "metadata": metadata or {},
-                    }
-                }
-                try:
-                    await loop.run_in_executor(
+                # A WebSocket runs outside the HTTP operation middleware. Own this step's
+                # checkouts so they go back to the pool when it ends.
+                with chacha_operation(independent=True):
+                    if persistence_db is None:
+                        persistence_db = await _shim_get_chacha_db_for_user_id(
+                            int(user_id_for_usage),
+                            client_id=str(user_id_for_usage),
+                        )
+                    loop = asyncio.get_running_loop()
+                    character_card, character_db_id = await _shim_get_or_create_character_context(
+                        persistence_db,
                         None,
-                        partial(
-                            _persist_audio_chat_settings,
-                            persistence_db,
-                            persistence_session_id,
-                            settings_payload,
-                            conversation_created=conversation_created,
-                        ),
+                        loop,
                     )
-                except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
-                    logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")
+                    if not character_db_id:
+                        raise ValueError("Unable to resolve character context for WS persistence")
+                    character_name = "Helpful AI Assistant"
+                    if isinstance(character_card, dict) and character_card.get("name"):
+                        character_name = str(character_card.get("name"))
 
+                    persistence_session_id, conversation_created = await _shim_get_or_create_conversation(
+                        persistence_db,
+                        persistence_session_id,
+                        int(character_db_id),
+                        character_name,
+                        str(user_id_for_usage),
+                        loop,
+                    )
+                    session_id = persistence_session_id
+
+                    if session_id and not any(
+                        msg.get("role") == "system" and msg.get("content") == f"session:{session_id}"
+                        for msg in chat_history
+                    ):
+                        chat_history.insert(0, {"role": "system", "content": f"session:{session_id}"})
+
+                    action_hint = _action_hint()
+                    settings_payload = {
+                        "audio_chat_ws": {
+                            "session_id": persistence_session_id,
+                            "action_hint": action_hint,
+                            "metadata": metadata or {},
+                        }
+                    }
+                    try:
+                        await asyncio.to_thread(
+                            partial(
+                                _persist_audio_chat_settings,
+                                persistence_db,
+                                persistence_session_id,
+                                settings_payload,
+                                conversation_created=conversation_created,
+                            ),
+                        )
+                    except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
+                        logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")
+
+                # The step's checkouts are back: a slow client cannot hold one through the send.
                 if _outer_stream and not persistence_announced:
                     await _outer_stream.send_json({"type": "session", "session_id": persistence_session_id})
                     persistence_announced = True
@@ -2482,6 +2456,7 @@ async def websocket_audio_chat_stream(
                 return
             chat_db, conversation_id = context
 
+            @chacha_operation(independent=True)
             def _persist_sync() -> None:
                 chat_db.add_message(
                     {
@@ -3308,7 +3283,9 @@ async def websocket_audio_chat_stream(
                 if overlap_session is None:
                     await _stream_tts(assistant_text, eos_detected_at)
             finally:
-                cleanup_cancelled = False
+                # Re-raise the caught cancellation itself: a new bare CancelledError is not the host's
+                # (anyio's cancel scope does not recognise it) and escapes it (TASK-13950.7).
+                cleanup_cancelled: Optional[asyncio.CancelledError] = None
 
                 async def _close_overlap_tts_resources() -> None:
                     finish_failed = False
@@ -3331,8 +3308,8 @@ async def websocket_audio_chat_stream(
 
                 try:
                     await await_owned_worker(_close_overlap_tts_resources())
-                except asyncio.CancelledError:
-                    cleanup_cancelled = True
+                except asyncio.CancelledError as cancelled:
+                    cleanup_cancelled = cancelled
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
                     logger.debug(
                         "audio.chat.stream TTS cleanup failed error_type={}",
@@ -3343,8 +3320,8 @@ async def websocket_audio_chat_stream(
                 except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                     logger.debug(f"audio.chat.stream transcriber.reset() failed in finalize_turn: {exc}")
                 processing_turn = False
-                if cleanup_cancelled:
-                    raise asyncio.CancelledError
+                if cleanup_cancelled is not None:
+                    raise cleanup_cancelled
 
         async def _start_turn(
             commit_at: Optional[float],
@@ -3708,9 +3685,14 @@ async def websocket_tts(
     - Single-user: fixed API key via header or initial auth message; optional IP allowlist.
     - Legacy `token` query-string auth is accepted only when AUDIO_WS_ALLOW_QUERY_TOKEN_AUTH is enabled.
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.tts",
+        ws_path="/api/v1/audio/stream/tts",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -3758,15 +3740,6 @@ async def websocket_tts(
         flag = str(os.getenv("AUDIO_WS_QUOTA_CLOSE_1008", "0")).strip().lower()
         return 1008 if is_truthy(flag) else 4003
 
-    # Authenticate (parity with STT WS)
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.tts",
-        ws_path="/api/v1/audio/stream/tts",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.tts",
@@ -3970,9 +3943,14 @@ async def websocket_tts_realtime(
       - JSON status/warning/error frames
       - Binary audio frames for synthesized audio
     """
-    if not await _preflight_audio_cookie_websocket(websocket):
+    # Authenticated before anything else runs: the socket is accepted only to read an auth frame.
+    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
+        websocket,
+        endpoint_id="audio.stream.tts.realtime",
+        ws_path="/api/v1/audio/stream/tts/realtime",
+    )
+    if not auth_ok:
         return
-    await websocket.accept()
 
     try:
         _raw_idle = os.getenv("AUDIO_WS_IDLE_TIMEOUT_S") or os.getenv("STREAM_IDLE_TIMEOUT_S")
@@ -4063,14 +4041,6 @@ async def websocket_tts_realtime(
         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
             await websocket.close(code=close_code)
 
-    auth_ok, jwt_user_id = await _shim_audio_ws_authenticate(
-        websocket,
-        _outer_stream,
-        endpoint_id="audio.stream.tts.realtime",
-        ws_path="/api/v1/audio/stream/tts/realtime",
-    )
-    if not auth_ok:
-        return
     if not await _guard_audio_ws_work_start(
         websocket,
         kind="audio.stream.tts.realtime",
@@ -4390,7 +4360,9 @@ async def websocket_tts_realtime(
         with contextlib.suppress(_AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS):
             await _send_error("internal_error", "Internal error", close=True)
     finally:
-        cleanup_cancelled = False
+        # Re-raise the caught cancellation itself: a new bare CancelledError is not the host's
+        # (anyio's cancel scope does not recognise it) and escapes it (TASK-13950.7).
+        cleanup_cancelled: Optional[asyncio.CancelledError] = None
 
         async def _close_realtime_tts_resources() -> None:
             try:
@@ -4408,8 +4380,8 @@ async def websocket_tts_realtime(
 
         try:
             await await_owned_worker(_close_realtime_tts_resources())
-        except asyncio.CancelledError:
-            cleanup_cancelled = True
+        except asyncio.CancelledError as cancelled:
+            cleanup_cancelled = cancelled
         except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as cleanup_exc:
             logger.debug(
                 "audio.stream.tts.realtime cleanup failed error_type={}",
@@ -4434,8 +4406,8 @@ async def websocket_tts_realtime(
                     "audio.stream.tts.realtime websocket close failed after _outer_stream.done error: "
                     f"outer_error={outer_exc}, close_error={close_exc}"
                 )
-        if cleanup_cancelled:
-            raise asyncio.CancelledError
+        if cleanup_cancelled is not None:
+            raise cleanup_cancelled
 
 
 @router.get(
@@ -4521,9 +4493,11 @@ async def streaming_limits(
             - tier (str): The user's tier name (e.g., "free").
             - limits (dict): The resolved limit values (e.g., daily_minutes, concurrent_streams, concurrent_jobs, max_file_size_mb).
             - used_today_minutes (float): Minutes already used today (0.0 if unavailable).
-            - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` if unknown/unbounded).
-            - active_streams (int): Number of currently active streams (0 if unavailable).
-            - _can_start_stream (bool): Whether the user may start another stream given current active streams and concurrent_streams limit.
+            - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` when there is no daily limit).
+            - used_month_minutes / remaining_month_minutes (float|None): Monthly usage and remainder (`None` remainder when no monthly limit).
+            - active_streams (None): The count of the user's open streams is not reported.
+            - _can_start_stream (bool): Always True. It is not a live check: this endpoint does not
+              report open streams, so a stream over `limits.audio_concurrent_streams` is refused when it starts.
     """
     # Correlate logs with request_id if available
     rid = ensure_request_id(request) if request is not None else None
@@ -4533,12 +4507,13 @@ async def streaming_limits(
         get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
             "Failed to get limits for user %s, falling back to defaults: %s", current_user.id, e
         )
-        # Fallback to default free limits
+        # Lookups fail open: report every limit as unlimited.
         limits = {
-            "daily_minutes": 30.0,
-            "concurrent_streams": 1,
-            "concurrent_jobs": 1,
-            "max_file_size_mb": 25,
+            "daily_minutes": None,
+            "monthly_minutes": None,
+            "concurrent_streams": None,
+            "concurrent_jobs": None,
+            "max_file_size_mb": None,
         }
     try:
         used_minutes = await _get_daily_minutes_used(current_user.id)
@@ -4559,12 +4534,23 @@ async def streaming_limits(
             )
             remaining_minutes = None
     try:
-        active_streams = await _active_streams_count(current_user.id)
-    except EXPECTED_REDIS_EXC as e:
+        used_month = await _get_monthly_minutes_used(current_user.id)
+    except EXPECTED_DB_EXC as e:
         get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
-            "Failed to get active streams for user %s, falling back to 0: %s", current_user.id, e
+            "Failed to get monthly minutes for user %s, falling back to 0: %s", current_user.id, e
         )
-        active_streams = 0
+        used_month = 0.0
+    monthly_limit = limits.get("monthly_minutes")
+    if monthly_limit is None:
+        remaining_month = None
+    else:
+        try:
+            remaining_month = max(0.0, float(monthly_limit) - float(used_month))
+        except (ValueError, TypeError) as e:
+            get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
+                "Could not calculate remaining monthly minutes for user %s: %s", current_user.id, e
+            )
+            remaining_month = None
     try:
         tier = await _get_user_tier(current_user.id)
     except EXPECTED_DB_EXC as e:
@@ -4572,21 +4558,17 @@ async def streaming_limits(
             "Failed to get tier for user %s, falling back to 'free': %s", current_user.id, e
         )
         tier = "free"
-    try:
-        max_streams = int(limits.get("concurrent_streams") or 0)
-    except (ValueError, TypeError) as e:
-        get_ps_logger(request_id=rid, ps_component="endpoint", ps_job_kind="audio").warning(
-            "Could not parse concurrent_streams limit for user %s: %s", current_user.id, e
-        )
-        max_streams = 0
-    can_start = (max_streams == 0) or (active_streams < max_streams)
+    # Not a live check: this endpoint does not report open streams; a stream over the limit is refused when it starts.
+    can_start = True
     return {
         "user_id": current_user.id,
         "tier": tier,
         "limits": limits,
         "used_today_minutes": used_minutes,
         "remaining_minutes": remaining_minutes,
-        "active_streams": active_streams,
+        "used_month_minutes": used_month,
+        "remaining_month_minutes": remaining_month,
+        "active_streams": None,
         "can_start_stream": can_start,
         "_can_start_stream": can_start,
     }

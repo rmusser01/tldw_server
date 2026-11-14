@@ -40,7 +40,7 @@ Source: Docs/superpowers/reviews/2026-09-21-core-module-duplication-synthesis.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 FIXED. Both pull paths now derive their watermark from one helper, _safe_pull_boundary, at module level in core/Sync/v2/service.py.
 
 ROOT CAUSE was narrower than "the v1 branch takes max() over raw": _scan_pull_page ALREADY COMPUTED blocker_cursor and then DISCARDED it, returning only (raw, visible). Its sibling _scan_versioned_pull_page returns it. So the v1 caller had no way to know where the blocker was. It now returns (raw, visible, blocker_cursor) - it had exactly one caller.
@@ -57,7 +57,7 @@ Regression: test_sync_v2_service.py back to 165 passed (the HEAD baseline). stor
 2026-09-23 reconciliation: AC1 met - commit 0e0f57a97d; service.py legacy pull (~:5344) derives next_sequence from _safe_pull_boundary with blocker_cursor now returned by _scan_pull_page. Behaviourally verified with a scratch (not committed) mirror of test_versioned_pull_does_not_advance_past_unresolved_conflict using an adapter-v1-only device: first pull envelopes=[], next_cursor=0, has_more=False; after clearing the blocker the second pull delivers 'later'. AC2 met - both pull() (:5344) and _pull_versioned (:10356) call module-level _safe_pull_boundary (:1308). AC3 NOT met - tests/Sync/test_pull_watermark_boundary.py (8 passed) unit-tests the helper only; no service-level pull() test with an adapter_version=1 device exists in the repo mirroring test_sync_v2_service.py::test_versioned_pull_does_not_advance_past_unresolved_conflict. Remaining: add that test to test_sync_v2_service.py. v2 test + test_conflict_resolution_rebases_later_dependency_and_paginates_without_queued_history: 2 passed. Bandit on service.py: no findings.
 
 2026-09-23: AC3 done. test_sync_v2_service.py::test_legacy_pull_does_not_advance_past_unresolved_conflict (adapter-v1-only registry, device with no supported_adapter_versions). Red on service.py from 0e0f57a97d~1 with the exact finding symptom (envelopes=[], next_cursor='2', has_more=False); green now; whole file 166 passed. Docs: none needed. No known skips.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

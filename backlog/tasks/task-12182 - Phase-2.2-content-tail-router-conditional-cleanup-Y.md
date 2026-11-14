@@ -34,9 +34,9 @@ Continue #1116 Phase 2.2 by deferring the adjacent tail content router imports f
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Red test: pytest test_router_groups_contract.py -k tail_router_attr_lookup failed because tail fake modules had router attr access during iter_content_router_specs. Green verification: focused tail laziness test passed; full router group contract passed; main router contract passed; OpenAPI contracts passed; Bandit content.py results=0 errors=0; git diff --check clean. Documentation update not needed for this internal router import refactor.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

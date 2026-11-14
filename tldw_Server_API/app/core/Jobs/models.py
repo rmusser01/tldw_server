@@ -45,3 +45,8 @@ class JobRecord:
     created_at: datetime | None
     updated_at: datetime | None
     completed_at: datetime | None
+    resource: str | None = None
+    resource_authority_uuid: str | None = None
+    resource_generation: int | None = None
+    resource_settings_json: str | None = None
+    resource_settings_fingerprint: str | None = None

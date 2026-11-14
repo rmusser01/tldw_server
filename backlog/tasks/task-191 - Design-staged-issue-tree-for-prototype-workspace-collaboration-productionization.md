@@ -40,7 +40,7 @@ Create a reviewed design/spec for the post-MVP prototype workspace collaboration
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created spec Docs/superpowers/specs/2026-05-09-prototype-workspace-productionization-issue-tree-design.md with risk-gated issue tree for GitHub issue #1440.
 
 Ran two review passes. First pass found gaps around Jobs/Scheduler routing, frontend preparatory work, token/session security, operational status timing, release smoke scope, and open process questions. Revised the spec to address those gaps. Second pass approved the spec as source material for proposed GitHub sub-issues.
@@ -50,7 +50,7 @@ Commit is blocked in the current checkout by unrelated pre-existing unmerged pat
 Applied the follow-up self-review refinements: Risk Gate 1 is now split ownership with explicit Frontend/Product prep responsibilities; tracker guidance consistently requires title prefixes; the contract matrix default path is Docs/API-related/Prototype_Workspaces_Contract_Matrix.md; token/session requirements require explicit dispositions; Risk Gate 8 includes a negative security smoke path for expired/revoked links failing without enumeration. Verified the spec with git diff --check.
 
 User approved the written spec by responding `continue`; this satisfied the user review gate before implementation planning.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

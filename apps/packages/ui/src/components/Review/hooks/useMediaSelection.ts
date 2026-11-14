@@ -1,4 +1,7 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { quickIngestAuthority, useQuickIngestAuthority } from '@/services/tldw/quick-ingest-authority'
+import { requestScopeFields } from '@/services/tldw/domains/service-prompts'
+import { mediaResultKey } from '@/components/Media/types'
 import { useNavigate } from 'react-router-dom'
 import { useStorage } from '@plasmohq/storage/hook'
 import { tldwClient } from '@/services/tldw/TldwApiClient'
@@ -6,6 +9,7 @@ import { clearSetting, setSetting } from '@/services/settings/registry'
 import { bgRequest } from '@/services/background-proxy'
 import {
   LAST_MEDIA_ID_SETTING,
+  MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING,
   MEDIA_REVIEW_SELECTION_SETTING
 } from '@/services/settings/ui-settings'
 import { downloadBlob } from '@/utils/download-blob'
@@ -75,9 +79,10 @@ const areReadingProgressMapsEqual = (
   return true
 }
 
-type MediaCollectionRecord = {
+export type MediaCollectionRecord = {
   id: string
   name: string
+  description?: string
   itemIds: string[]
   createdAt: string
   updatedAt: string
@@ -90,18 +95,40 @@ function useOwnedMediaValues<T>(key: string, ownerScope: string | null, isCurren
   const [record, setRecord, meta] = useStorage<OwnedMediaValues<T> | null>(
     `${key}:owner:${ownerScope ?? 'unresolved'}`, null
   )
+  const loading = meta?.isLoading
+  const setRenderValue = meta?.setRenderValue
   const current = isCurrent()
   const values = useMemo(() => current && record?.ownerScope === ownerScope && Array.isArray(record.values) ? record.values : [],
     [current, record, ownerScope])
-  const setValues = useCallback((next: React.SetStateAction<T[]>) => {
-    if (!ownerScope || !isCurrent() || meta?.isLoading) return
-    return setRecord(previous => {
-      const values = previous?.ownerScope === ownerScope && Array.isArray(previous.values) ? previous.values : []
-      return { ownerScope, values: typeof next === 'function' ? next(values) : next }
-    })
-  }, [ownerScope, isCurrent, meta?.isLoading, setRecord])
-  return [values, setValues] as const
+  const setValues = useCallback(async (next: React.SetStateAction<T[]>) => {
+    if (!ownerScope || !isCurrent() || loading) return
+    let previousRecord: OwnedMediaValues<T> | null = null
+    let attempted: OwnedMediaValues<T> | null = null
+    try {
+      await setRecord(previous => {
+        previousRecord = previous ?? null
+        const values = previous?.ownerScope === ownerScope && Array.isArray(previous.values) ? previous.values : []
+        attempted = { ownerScope, values: typeof next === 'function' ? next(values) : next }
+        return attempted
+      })
+    } catch (error) {
+      // Roll back only this failed optimistic write, never a newer write or owner.
+      if (isCurrent()) setRenderValue?.(value => value === attempted ? previousRecord : value)
+      throw error
+    }
+  }, [ownerScope, isCurrent, loading, setRenderValue, setRecord])
+  return [values, setValues, loading !== true] as const
 }
+
+export interface MediaBulkTrashRecovery {
+  mediaCount: number
+  noteCount: number
+  restoreNotes: () => Promise<number>
+}
+
+// Both recovery paths use the delete operation's captured request and deleted version.
+const restoreDeletedNote = (request: (init: Parameters<typeof bgRequest>[0]) => Promise<unknown>, id: string, version: number) =>
+  request({ path: `/api/v1/notes/${encodeURIComponent(id)}/restore?expected_version=${version}` as any, method: 'POST' as any })
 
 export interface UseMediaSelectionDeps {
   ownerScope: string | null
@@ -127,12 +154,19 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     refetch
   } = deps
   const navigate = useNavigate()
+  const authorityKey = useQuickIngestAuthority()
+  const selectedMetadata = useRef(new Map<string, MediaResultItem>())
+  const [, setMetadataRevision] = useState(0)
+  const lastDisplayResults = useRef(displayResults)
+  const authorityRef = useRef(authorityKey)
+  authorityRef.current = authorityKey
   const { showUndoNotification } = useUndoNotification()
 
   const ownerRef = useRef(ownerScope)
   ownerRef.current = ownerScope
   const lifetime = useMediaRequestLifetime(() => {
-    setBulkSelectedIds([])
+    updateBulkSelectedIds([])
+    selectedMetadata.current.clear()
     setBulkKeywordsDraft('')
     setCollectionDraftName('')
     setActiveCollectionId(null)
@@ -141,16 +175,20 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     setLibraryStorageUsage({ ...DEFAULT_MEDIA_LIBRARY_STORAGE_USAGE, loading: false })
   })
   const captureOperation = useCallback(() => {
-    const signal = lifetime.current.signal
-    const isCurrent = () => Boolean(ownerScope && ownerRef.current === ownerScope && !signal.aborted)
+    const localSignal = lifetime.current.signal
+    let verified: ReturnType<typeof quickIngestAuthority.capture> | null = null
+    try { verified = quickIngestAuthority.capture({ sessionBound: false }) } catch { /* Unverified authority disables actions. */ }
+    const signal = verified?.signal ? AbortSignal.any([localSignal, verified.signal]) : localSignal
+    const isCurrent = () => Boolean(verified?.authorityKey === authorityKey && verified?.isCurrent() && ownerScope && ownerRef.current === ownerScope && !signal.aborted)
     const request = async <T,>(init: Parameters<typeof bgRequest<T>>[0]): Promise<T> => {
       if (!isCurrent()) throw new DOMException('Media account changed', 'AbortError')
-      const result = await bgRequest<T>({ ...init, abortSignal: signal })
+      const scoped = requestScopeFields(verified!.requestScope)
+      const result = await bgRequest<T>({ ...init, ...scoped, headers: { ...init.headers, ...scoped.headers }, abortSignal: signal })
       if (!isCurrent()) throw new DOMException('Media account changed', 'AbortError')
       return result
     }
-    return { signal, isCurrent, request }
-  }, [lifetime, ownerScope])
+    return { signal, isCurrent, request, authorityKey: verified?.authorityKey }
+  }, [authorityKey, lifetime, ownerScope])
   const isOwnerCurrent = useCallback(() => captureOperation().isCurrent(), [captureOperation])
 
   // Favorites
@@ -160,18 +198,35 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
   // Bulk selection
   const [bulkSelectionMode, setBulkSelectionMode] = useState(false)
-  const [bulkSelectedIds, setBulkSelectedIds] = useState<string[]>([])
+  const [bulkSelectedIds, updateBulkSelectedIds] = useState<string[]>([])
+  const setBulkSelectedIds = useCallback((value: React.SetStateAction<string[]>) => {
+    if (!ownerScope || ownerRef.current !== ownerScope || !authorityKey || authorityRef.current !== authorityKey) return
+    updateBulkSelectedIds(previous => {
+      const next = typeof value === 'function' ? value(previous) : value
+      return next.map(id => {
+        const item = displayResults.find(row => mediaResultKey(row) === id) || displayResults.find(row => String(row.id) === id)
+        if (item) { const key = mediaResultKey(item); if (!selectedMetadata.current.has(key)) selectedMetadata.current.set(key, item); return key }
+        return id
+      })
+    })
+  }, [authorityKey, displayResults, ownerScope])
+  useLayoutEffect(() => {
+    updateBulkSelectedIds(previous => previous.length ? [] : previous)
+    selectedMetadata.current.clear()
+    setBulkSelectionMode(false)
+  }, [authorityKey, ownerScope])
   const [bulkKeywordsDraft, setBulkKeywordsDraft] = useState('')
   const [bulkExportFormat, setBulkExportFormat] = useState<'json' | 'markdown' | 'text'>(
     'json'
   )
 
   // Collections
-  const [mediaCollections, setMediaCollections] = useOwnedMediaValues<MediaCollectionRecord>(
+  const [mediaCollections, setMediaCollections, collectionsReady] = useOwnedMediaValues<MediaCollectionRecord>(
     MEDIA_COLLECTIONS_STORAGE_KEY, ownerScope, isOwnerCurrent
   )
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null)
   const [collectionDraftName, setCollectionDraftName] = useState('')
+  const collectionAddPending = useRef(false)
 
   // Storage usage
   const [libraryStorageUsage, setLibraryStorageUsage] = useState<MediaLibraryStorageUsage>(
@@ -216,10 +271,25 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     () => new Set(bulkSelectedIds),
     [bulkSelectedIds]
   )
-  const bulkSelectedItems = useMemo(
-    () => displayResults.filter((item) => bulkSelectedIdSet.has(String(item.id))),
-    [bulkSelectedIdSet, displayResults]
-  )
+  useEffect(() => {
+    for (const key of selectedMetadata.current.keys()) {
+      if (!bulkSelectedIdSet.has(key)) selectedMetadata.current.delete(key)
+    }
+    const resultsChanged = lastDisplayResults.current !== displayResults
+    lastDisplayResults.current = displayResults
+    let refreshed = false
+    for (const item of displayResults) {
+      const key = mediaResultKey(item)
+      if (resultsChanged && bulkSelectedIdSet.has(key) && selectedMetadata.current.get(key) !== item) {
+        selectedMetadata.current.set(key, item)
+        refreshed = true
+      }
+    }
+    if (refreshed) setMetadataRevision(previous => previous + 1)
+  }, [bulkSelectedIdSet, displayResults])
+  const bulkSelectedItems = bulkSelectedIds
+    .map(id => selectedMetadata.current.get(id) || displayResults.find(item => mediaResultKey(item) === id))
+    .filter((item): item is MediaResultItem => Boolean(item))
   const bulkSelectedMediaItems = useMemo(
     () => bulkSelectedItems.filter((item) => item.kind === 'media'),
     [bulkSelectedItems]
@@ -231,20 +301,10 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     [activeCollectionId, mediaCollections]
   )
 
-  // Sync bulk selection with visible results
-  useEffect(() => {
-    if (bulkSelectedIds.length === 0) return
-    const visibleIdSet = new Set(displayResults.map((item) => String(item.id)))
-    setBulkSelectedIds((prev) => {
-      const next = prev.filter((id) => visibleIdSet.has(id))
-      return next.length === prev.length ? prev : next
-    })
-  }, [bulkSelectedIds.length, displayResults])
-
   useEffect(() => {
     if (bulkSelectionMode || bulkSelectedIds.length === 0) return
     setBulkSelectedIds([])
-  }, [bulkSelectedIds.length, bulkSelectionMode])
+  }, [bulkSelectedIds.length, bulkSelectionMode, setBulkSelectedIds])
 
   useEffect(() => {
     if (!activeCollectionId) return
@@ -392,7 +452,9 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
   }, [])
 
   const toggleBulkItemSelection = useCallback((id: string | number) => {
-    const idStr = String(id)
+    const item = displayResults.find(row => mediaResultKey(row) === String(id)) || displayResults.find(row => String(row.id) === String(id))
+    if (!item) return
+    const idStr = mediaResultKey(item)
     setBulkSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(idStr)) {
@@ -402,25 +464,25 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       }
       return Array.from(next)
     })
-  }, [])
+  }, [displayResults, setBulkSelectedIds])
 
   const handleSelectAllVisibleItems = useCallback(() => {
-    setBulkSelectedIds(displayResults.map((item) => String(item.id)))
-  }, [displayResults])
+    setBulkSelectedIds(previous => Array.from(new Set([...previous, ...displayResults.map(mediaResultKey)])))
+  }, [displayResults, setBulkSelectedIds])
 
   const handleClearBulkSelection = useCallback(() => {
     setBulkSelectedIds([])
-  }, [])
+  }, [setBulkSelectedIds])
 
-  const handleBulkAddKeywords = useCallback(async () => {
+  const handleBulkKeywords = useCallback(async (mode: 'add' | 'remove') => {
     const { request, isCurrent } = captureOperation()
     if (!isCurrent()) return
-    const keywordsToAdd = bulkKeywordsDraft
+    const requestedKeywords = bulkKeywordsDraft
       .split(',')
       .map((keyword) => keyword.trim())
       .filter((keyword, index, all) => keyword.length > 0 && all.indexOf(keyword) === index)
 
-    if (keywordsToAdd.length === 0) {
+    if (requestedKeywords.length === 0) {
       message.warning(
         t('review:mediaPage.bulkAddKeywordsMissing', {
           defaultValue: 'Enter at least one keyword.'
@@ -444,16 +506,20 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
     for (const item of bulkSelectedMediaItems) {
       if (!isCurrent()) return
-      const currentKeywords = Array.isArray(item.keywords) ? item.keywords : []
-      const mergedKeywords = Array.from(new Set([...currentKeywords, ...keywordsToAdd]))
+      const currentItem = selectedMetadata.current.get(mediaResultKey(item)) || item
       try {
-        await request({
-          path: `/api/v1/media/${item.id}` as any,
-          method: 'PUT' as any,
+        const updated = await request<{ keywords: string[] }>({
+          path: `/api/v1/media/${item.id}/keywords` as any,
+          method: 'PATCH' as any,
           headers: { 'Content-Type': 'application/json' },
-          body: { keywords: mergedKeywords }
+          body: { keywords: requestedKeywords, mode }
         })
-        updatedKeywordMap.set(String(item.id), mergedKeywords)
+        if (!Array.isArray(updated?.keywords) || !updated.keywords.every(keyword => typeof keyword === 'string')) {
+          throw new Error('Invalid media keyword confirmation')
+        }
+        selectedMetadata.current.set(mediaResultKey(item), { ...currentItem, keywords: updated.keywords })
+        setMetadataRevision(previous => previous + 1)
+        updatedKeywordMap.set(String(item.id), updated.keywords)
         updatedCount += 1
       } catch {
         if (!isCurrent()) return
@@ -463,7 +529,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
     if (updatedKeywordMap.size > 0) {
       setSelected((prev) => {
-        if (!prev) return prev
+        if (!prev || prev.kind !== 'media') return prev
         const nextKeywords = updatedKeywordMap.get(String(prev.id))
         if (!nextKeywords) return prev
         return { ...prev, keywords: nextKeywords }
@@ -508,7 +574,10 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     t
   ])
 
-  const handleBulkDelete = useCallback(async () => {
+  const handleBulkAddKeywords = useCallback(() => handleBulkKeywords('add'), [handleBulkKeywords])
+  const handleBulkRemoveKeywords = useCallback(() => handleBulkKeywords('remove'), [handleBulkKeywords])
+
+  const handleBulkDelete = useCallback(async (): Promise<MediaBulkTrashRecovery | void> => {
     const { request, isCurrent } = captureOperation()
     if (!isCurrent()) return
     if (bulkSelectedItems.length === 0) {
@@ -532,6 +601,8 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     let deletedCount = 0
     let failedCount = 0
     const deletedIdSet = new Set<string>()
+    const deletedNoteVersions = new Map<string, number>()
+    let deletedMediaCount = 0
 
     for (const item of bulkSelectedItems) {
       if (!isCurrent()) return
@@ -551,13 +622,15 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
             method: 'DELETE' as any,
             headers: { 'expected-version': String(expectedVersion) }
           })
+          deletedNoteVersions.set(String(item.id), expectedVersion + 1)
         } else {
           await request({
             path: `/api/v1/media/${item.id}` as any,
             method: 'DELETE' as any
           })
         }
-        deletedIdSet.add(String(item.id))
+        if (item.kind === 'media') deletedMediaCount += 1
+        deletedIdSet.add(mediaResultKey(item))
         deletedCount += 1
       } catch {
         if (!isCurrent()) return
@@ -567,11 +640,11 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
 
     if (deletedIdSet.size > 0) {
       setFavorites((prev: string[] | undefined) =>
-        (prev || []).filter((favoriteId) => !deletedIdSet.has(String(favoriteId)))
+        (prev || []).filter((favoriteId) => !deletedIdSet.has(`media:${favoriteId}`))
       )
       setSelected((prev) => {
         if (!prev) return prev
-        if (!deletedIdSet.has(String(prev.id))) return prev
+        if (!deletedIdSet.has(mediaResultKey(prev))) return prev
         return null
       })
       setBulkSelectedIds((prev) => prev.filter((id) => !deletedIdSet.has(id)))
@@ -583,23 +656,54 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       void refreshLibraryStorageUsage()
     }
 
+    let restoring = false
+    const recovery: MediaBulkTrashRecovery = {
+      mediaCount: deletedMediaCount,
+      noteCount: deletedNoteVersions.size,
+      restoreNotes: async () => {
+        if (!isCurrent() || restoring) return deletedNoteVersions.size
+        restoring = true
+        try {
+          for (const [id, version] of deletedNoteVersions) {
+            if (!isCurrent()) return deletedNoteVersions.size
+            try {
+              await restoreDeletedNote(request, id, version)
+              deletedNoteVersions.delete(id)
+            } catch {
+              if (!isCurrent()) return deletedNoteVersions.size
+            }
+          }
+          await refetch()
+          if (isCurrent() && deletedNoteVersions.size > 0) {
+            message.warning(t('review:mediaPage.noteRestorePartial', {
+              defaultValue: '{{count}} notes could not be restored. Try again.', count: deletedNoteVersions.size
+            }))
+          }
+          return deletedNoteVersions.size
+        } finally {
+          restoring = false
+        }
+      }
+    }
+
     if (failedCount > 0) {
       message.warning(
         t('review:mediaPage.bulkDeletePartial', {
-          defaultValue: 'Deleted {{deleted}} item(s), {{failed}} failed.',
+          defaultValue: 'Moved {{deleted}} item(s) to trash, {{failed}} failed.',
           deleted: deletedCount,
           failed: failedCount
         })
       )
-      return
+      return recovery
     }
 
     message.success(
       t('review:mediaPage.bulkDeleteSuccess', {
-        defaultValue: 'Deleted {{count}} item(s).',
+        defaultValue: 'Moved {{count}} item(s) to trash.',
         count: deletedCount
       })
     )
+    return recovery
   }, [
     captureOperation,
     bulkSelectedItems,
@@ -611,6 +715,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     setSelected,
     setSelectedContent,
     setSelectedDetail,
+    setBulkSelectedIds,
     t
   ])
 
@@ -687,121 +792,199 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     )
   }, [bulkExportFormat, bulkSelectedItems, isOwnerCurrent, message, t])
 
-  const handleAddSelectionToCollection = useCallback(() => {
-    if (!isOwnerCurrent()) return
-    if (bulkSelectedItems.length === 0) {
-      message.warning(
-        t('review:mediaPage.collectionRequiresSelection', {
-          defaultValue: 'Select at least one item first.'
-        })
-      )
-      return
+  const saveCollections = useCallback(async (next: React.SetStateAction<MediaCollectionRecord[]>) => {
+    if (!isOwnerCurrent() || !collectionsReady) return false
+    try {
+      await setMediaCollections(next)
+      return isOwnerCurrent()
+    } catch {
+      if (isOwnerCurrent()) message.error(t('review:mediaPage.collectionSaveFailed', { defaultValue: 'Could not save collections. Please try again.' }))
+      return false
     }
+  }, [collectionsReady, isOwnerCurrent, message, setMediaCollections, t])
 
-    const targetCollectionName =
-      collectionDraftName.trim() || activeCollection?.name?.trim() || ''
-    if (!targetCollectionName) {
-      message.warning(
-        t('review:mediaPage.collectionNameRequired', {
-          defaultValue: 'Enter a collection name.'
-        })
-      )
-      return
+  const handleSaveCollection = useCallback(async (id: string | null, name: string, description: string) => {
+    if (!isOwnerCurrent()) return null
+    name = name.trim()
+    description = description.trim()
+    if (!name || name.length > 120 || description.length > 2000 ||
+        mediaCollections.some(row => row.id !== id && row.name.toLowerCase() === name.toLowerCase()) ||
+        (id && !mediaCollections.some(row => row.id === id))) {
+      message.warning(t('review:mediaPage.collectionInvalidName', { defaultValue: 'Use a unique collection name (1–120 characters) and a description up to 2000 characters.' }))
+      return null
     }
-
-    const selectedItemIds = bulkSelectedItems.map((item) => String(item.id))
     const now = new Date().toISOString()
-    const normalizedName = targetCollectionName.toLowerCase()
-    const existing = mediaCollections.find(
-      (entry) => entry.name.trim().toLowerCase() === normalizedName
-    )
-    if (existing) {
-      setMediaCollections((prevCollections) => {
-        const collections = Array.isArray(prevCollections) ? prevCollections : []
-        return collections.map((entry) => {
-          if (entry.id !== existing.id) return entry
-          const mergedIds = Array.from(
-            new Set([...entry.itemIds.map((id) => String(id)), ...selectedItemIds])
-          )
-          return {
-            ...entry,
-            itemIds: mergedIds,
-            updatedAt: now
-          }
-        })
-      })
-      setActiveCollectionId(existing.id)
-    } else {
-      const slug =
-        targetCollectionName
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/(^-|-$)/g, '') || 'collection'
-      const created: MediaCollectionRecord = {
-        id: `${slug}-${Date.now()}`,
-        name: targetCollectionName,
-        itemIds: Array.from(new Set(selectedItemIds)),
-        createdAt: now,
-        updatedAt: now
-      }
-      setMediaCollections((prevCollections) => {
-        const collections = Array.isArray(prevCollections) ? prevCollections : []
-        return [...collections, created]
-      })
-      setActiveCollectionId(created.id)
-    }
-    setCollectionDraftName('')
-    message.success(
-      t('review:mediaPage.collectionSaved', {
-        defaultValue: 'Saved selection to collection.'
-      })
-    )
-  }, [
-    isOwnerCurrent,
-    activeCollection?.name,
-    bulkSelectedItems,
-    collectionDraftName,
-    mediaCollections,
-    message,
-    setMediaCollections,
-    t
-  ])
+    const collectionId = id || crypto.randomUUID()
+    if (!await saveCollections(rows => id
+      ? rows.map(row => row.id === id ? { ...row, name, description, updatedAt: now } : row)
+      : [...rows, { id: collectionId, name, description, itemIds: [], createdAt: now, updatedAt: now }])) return null
+    setActiveCollectionId(collectionId)
+    return collectionId
+  }, [isOwnerCurrent, mediaCollections, message, saveCollections, t])
 
-  const handleOpenSelectionInMultiReview = useCallback(async () => {
-    const { isCurrent } = captureOperation()
-    if (!isCurrent()) return
-    if (bulkSelectedIds.length === 0) {
-      message.warning(
-        t('review:mediaPage.bulkOpenInMultiReviewNone', {
-          defaultValue: 'Select items to open in multi-review.'
-        })
-      )
+  const handleRemoveCollectionMember = useCallback(async (id: string, memberId: string) => {
+    return saveCollections(rows => rows.map(row => row.id === id
+      ? { ...row, itemIds: row.itemIds.filter(value => value !== memberId), updatedAt: new Date().toISOString() } : row))
+  }, [saveCollections])
+
+  const handleDeleteCollection = useCallback(async (id: string) => {
+    const saved = await saveCollections(rows => rows.filter(row => row.id !== id))
+    if (saved && activeCollectionId === id) setActiveCollectionId(null)
+    return saved
+  }, [activeCollectionId, saveCollections])
+
+  const checkCollectionMembers = useCallback(async (ids: string[]) => {
+    const { request, isCurrent } = captureOperation()
+    const result = await Promise.all(ids.map(async id => {
+      if (!isCurrent()) return { id, available: false }
+      const note = id.startsWith('note:')
+      const sourceId = id.replace(/^(media|note):/, '')
+      try {
+        const detail = await request<{ is_deleted?: boolean; deleted?: boolean; deleted_at?: string | null; title?: string; source?: { title?: string } }>({ path: `/api/v1/${note ? 'notes' : 'media'}/${encodeURIComponent(sourceId)}` as `/${string}`, method: 'GET' })
+        const available = !!detail && !detail.is_deleted && !detail.deleted && !detail.deleted_at
+        return { id, available, ...(available && (detail.title || detail.source?.title) ? { title: String(detail.title || detail.source.title) } : {}) }
+      } catch {
+        return { id, available: false }
+      }
+    }))
+    return isCurrent() ? result : null
+  }, [captureOperation])
+
+  const handleCheckCollection = useCallback(async (id: string) => {
+    if (!isOwnerCurrent()) return null
+    const row = mediaCollections.find(row => row.id === id)
+    return row ? checkCollectionMembers(row.itemIds) : null
+  }, [checkCollectionMembers, isOwnerCurrent, mediaCollections])
+
+  const handleAddSelectionToCollection = useCallback(async () => {
+    if (!isOwnerCurrent() || !collectionsReady || collectionAddPending.current) return
+    collectionAddPending.current = true
+    try {
+    if (!bulkSelectedItems.length) {
+      message.warning(t('review:mediaPage.collectionRequiresSelection', { defaultValue: 'Select at least one item first.' }))
       return
     }
-    await setSetting(MEDIA_REVIEW_SELECTION_SETTING, bulkSelectedIds)
-    if (!isCurrent()) return
-    await setSetting(LAST_MEDIA_ID_SETTING, String(bulkSelectedIds[0]))
-    if (!isCurrent()) return
-    navigate('/media-multi')
-  }, [bulkSelectedIds, captureOperation, message, navigate, t])
+    const name = collectionDraftName.trim() || activeCollection?.name || ''
+    if (!name || name.length > 120) {
+      message.warning(t('review:mediaPage.collectionNameRequired', { defaultValue: 'Enter a collection name (1–120 characters).' }))
+      return
+    }
+    const existing = mediaCollections.find(row => row.name.toLowerCase() === name.toLowerCase())
+    const checked = await checkCollectionMembers(bulkSelectedItems.map(mediaResultKey))
+    if (!checked) return
+    const selectedItemIds = checked.filter(row => row.available).map(row => row.id)
+    const failed = checked.filter(row => !row.available).map(row => row.id)
+    if (failed.length) message.warning(t('review:mediaPage.collectionPartialAdd', { defaultValue: 'Not added (unavailable or inaccessible): {{ids}}', ids: failed.join(', ') }))
+    if (!selectedItemIds.length) return
+    const now = new Date().toISOString()
+    let id = existing?.id || crypto.randomUUID()
+    if (!await saveCollections(rows => {
+      const destination = existing ? rows.find(row => row.id === existing.id)
+        : rows.find(row => row.name.toLowerCase() === name.toLowerCase())
+      if (existing && !destination) throw new Error('Collection was removed during member checks')
+      if (destination) {
+        id = destination.id
+        return rows.map(row => row.id === id ? { ...row, itemIds: Array.from(new Set([...row.itemIds, ...selectedItemIds])), updatedAt: now } : row)
+      }
+      return [...rows, { id, name, description: '', itemIds: Array.from(new Set(selectedItemIds)), createdAt: now, updatedAt: now }]
+    })) return
+    setActiveCollectionId(id)
+    setCollectionDraftName('')
+    message.success(t('review:mediaPage.collectionSaved', { defaultValue: 'Saved selection to collection.' }))
+    } finally { collectionAddPending.current = false }
+  }, [activeCollection?.name, bulkSelectedItems, checkCollectionMembers, collectionDraftName, collectionsReady, isOwnerCurrent, mediaCollections, message, saveCollections, t])
+
+  const handleOpenSelectionInMultiReview = useCallback(
+    async (items = bulkSelectedMediaItems) => {
+      const { isCurrent, authorityKey: capturedAuthority } = captureOperation()
+      if (!isCurrent()) return
+      if (items.length === 0) {
+        message.warning(
+          t("review:mediaPage.bulkOpenInMultiReviewNone", {
+            defaultValue: "Select items to open in multi-review."
+          })
+        )
+        return
+      }
+      const mediaIds = items
+        .filter((item) => item.kind === "media")
+        .map((item) => String(item.id))
+      if (!mediaIds.length) return
+      try {
+        await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {
+          version: 1,
+          authorityKey: capturedAuthority!,
+          selectedIds: mediaIds
+        })
+        if (!isCurrent()) return
+        // The owned snapshot is authoritative; legacy mirrors are best-effort.
+        await setSetting(MEDIA_REVIEW_SELECTION_SETTING, mediaIds).catch(() => {
+          console.warn("Could not update a legacy Media review setting.")
+        })
+        if (!isCurrent()) return
+        await setSetting(LAST_MEDIA_ID_SETTING, String(mediaIds[0])).catch(() => {
+          console.warn("Could not update a legacy Media review setting.")
+        })
+        if (!isCurrent()) return
+        navigate("/media-multi")
+      } catch {
+        if (!isCurrent()) return
+        message.error(
+          t("review:mediaPage.reviewSelectionSaveFailed", {
+            defaultValue:
+              "Could not save the selection for Review. Please try again."
+          })
+        )
+      }
+    },
+    [bulkSelectedMediaItems, captureOperation, message, navigate, t]
+  )
 
   const handleOpenCollectionInMultiReview = useCallback(async () => {
-    const { isCurrent } = captureOperation()
+    const { isCurrent, authorityKey: capturedAuthority } = captureOperation()
     if (!isCurrent()) return
     if (!activeCollection || activeCollection.itemIds.length === 0) {
       message.warning(
-        t('review:mediaPage.collectionEmpty', {
-          defaultValue: 'No items in this collection.'
+        t("review:mediaPage.collectionEmpty", {
+          defaultValue: "No items in this collection."
         })
       )
       return
     }
-    const collectionIds = activeCollection.itemIds.map((id) => String(id))
-    await setSetting(MEDIA_REVIEW_SELECTION_SETTING, collectionIds)
-    if (!isCurrent()) return
-    await setSetting(LAST_MEDIA_ID_SETTING, String(collectionIds[0]))
-    if (!isCurrent()) return
-    navigate('/media-multi')
+    const collectionIds = activeCollection.itemIds
+      .filter((id) => !id.startsWith("note:"))
+      .map((id) => id.replace(/^media:/, ""))
+    if (!collectionIds.length) return
+    try {
+      await setSetting(MEDIA_REVIEW_SELECTION_SNAPSHOT_SETTING, {
+        version: 1,
+        authorityKey: capturedAuthority!,
+        selectedIds: collectionIds
+      })
+      if (!isCurrent()) return
+      // The owned snapshot is authoritative; legacy mirrors are best-effort.
+      await setSetting(MEDIA_REVIEW_SELECTION_SETTING, collectionIds).catch(
+        () => {
+          console.warn("Could not update a legacy Media review setting.")
+        }
+      )
+      if (!isCurrent()) return
+      await setSetting(LAST_MEDIA_ID_SETTING, String(collectionIds[0])).catch(
+        () => {
+          console.warn("Could not update a legacy Media review setting.")
+        }
+      )
+      if (!isCurrent()) return
+      navigate("/media-multi")
+    } catch {
+      if (!isCurrent()) return
+      message.error(
+        t("review:mediaPage.reviewSelectionSaveFailed", {
+          defaultValue:
+            "Could not save the selection for Review. Please try again."
+        })
+      )
+    }
   }, [activeCollection, captureOperation, message, navigate, t])
 
   const handleDeleteItem = useCallback(
@@ -909,11 +1092,11 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
       if (!isCurrent()) return
 
       const remainingResults = displayResults.filter(
-        (r) => String(r.id) !== idStr
+        (r) => mediaResultKey(r) !== mediaResultKey(item)
       )
       if (remainingResults.length > 0) {
         const currentIndex = displayResults.findIndex(
-          (r) => String(r.id) === idStr
+          (r) => mediaResultKey(r) === mediaResultKey(item)
         )
         const nextIndex =
           currentIndex >= 0
@@ -942,10 +1125,7 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
           if (!isCurrent()) return
           if (item.kind === 'note') {
             if (deletedAtVersion != null) {
-              await request({
-                path: `/api/v1/notes/${id}/restore?expected_version=${deletedAtVersion}` as any,
-                method: 'POST' as any
-              })
+              await restoreDeletedNote(request, idStr, deletedAtVersion)
             }
           } else {
             await request({
@@ -1024,9 +1204,11 @@ export function useMediaSelection(deps: UseMediaSelectionDeps) {
     handleSelectAllVisibleItems,
     handleClearBulkSelection,
     handleBulkAddKeywords,
+    handleBulkRemoveKeywords,
     handleBulkDelete,
     handleBulkExport,
     handleAddSelectionToCollection,
+    handleSaveCollection, handleRemoveCollectionMember, handleDeleteCollection, handleCheckCollection,
     handleOpenSelectionInMultiReview,
     handleOpenCollectionInMultiReview,
     handleDeleteItem,

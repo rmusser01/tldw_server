@@ -32,7 +32,7 @@ Remove the remaining GovernancePacksTab hardcoded Blocked canonical-state-label 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Implemented on branch codex/design-system-next-slice-4 after rebasing onto origin/dev at e66f1e75e. GovernancePacksTab now uses BLOCKED_STATE_LABEL from the design-system registry for blocked dry-run verdicts and blocked upgrade plans.
 
 Baseline update: removed the two GovernancePacksTab canonical-state-label Blocked exceptions. The remaining baseline after verification is 484 allowed legacy exceptions: 479 antd-product-state-import and 5 canonical-state-label.
@@ -44,7 +44,7 @@ TypeScript note: bunx tsc --noEmit --pretty false still exits 2 on existing pack
 Bandit not run: touched runtime scope is UI TypeScript plus JSON baseline and Backlog metadata, with no Python execution path.
 
 PR link: https://github.com/rmusser01/tldw_server/pull/1712
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

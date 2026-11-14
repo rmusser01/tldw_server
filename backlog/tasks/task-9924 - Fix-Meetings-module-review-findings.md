@@ -34,7 +34,7 @@ Docs/superpowers/plans/2026-06-23-meetings-review-hardening.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Replacement task created after an ID collision caused the original Meetings task file to disappear. Red checks: new SSE, stale-transition, unsupported finalize kind, empty include, and repeated-finalize tests failed against the prior implementation for expected reasons. Green checks: focused Meetings suite passed with --confcutdir=tldw_Server_API/tests/Meetings: 37 passed, 6 warnings in 18.23s. Security: Bandit on touched Meetings/API/DB source wrote /tmp/bandit_meetings_review_hardening.json with results_count=0 and no errors. Known skip: did not run test_meetings_routes_smoke.py because the developer guide calls out environment-specific heavy import crashes for that smoke path; focused endpoint coverage was run instead.
 
 PR: https://github.com/rmusser01/tldw_server/pull/2476
@@ -42,7 +42,7 @@ PR: https://github.com/rmusser01/tldw_server/pull/2476
 2026-06-24 rebase follow-up: Rebased `codex/meetings-review-hardening` onto latest `origin/dev` (`46595e31c`). PR review triage found no line comments or submitted reviews; issue comments were non-actionable bot status messages (Gemini quota, CodeRabbit skipped draft review). Re-ran focused Meetings suite on the rebased branch: 37 passed, 6 warnings in 2.42s. Re-ran Bandit on touched Meetings/API/DB source: `/tmp/bandit_meetings_review_hardening_worktree_rebase.json`, results empty and no errors.
 
 2026-06-24 PR comment follow-up: Rebased onto latest `origin/dev` (`3f3221aa8`). Addressed Qodo comments by adding docstrings to new helpers, adding explicit type hints to the new tests and nested helper, and fixing `include=[]` finalization so existing final artifacts are cleared transactionally. Red/green evidence: `test_finalize_session_empty_include_clears_existing_final_artifacts` failed before the fix with four stale artifacts remaining, then passed after the DB replacement-scope change. Verification: focused Meetings suite passed, 38 passed and 6 warnings in 4.82s. Security: Bandit on touched Meetings/API/DB source wrote `/tmp/bandit_meetings_review_hardening_pr_comments.json` with empty results and no errors.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

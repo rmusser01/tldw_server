@@ -30,13 +30,13 @@ Review the approved OpenWebUI attachment hydration design for implementation ris
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Reviewed the approved hydration design against current repo surfaces: Chatbooks import metadata and worker routing, OpenWebUI DB validation, ChaCha message_images/idempotency, allowed-root path handling, and Media DB registration/dedupe behavior.
 
 Patched the spec with eight design-review adjustments: deep metadata merge, message image source-key limits, Media DB binary registration/dedupe constraints, dedicated hydration job type, hydration-specific file schema validation, original source chat identity for DB fallbacks, preserved-reference limits, and byte-level classification guardrails.
 
 Verification: git diff --check passed, targeted rg confirmed all review findings and the dedicated job type are present. Bandit skipped because this review patch changes docs/task metadata only.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

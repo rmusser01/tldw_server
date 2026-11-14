@@ -61,7 +61,7 @@ Found by the comprehensive core-module review; independently verified by the orc
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Duplicate of TASK-13308 (filed twice during the 2026-09-22 review). Work and status are tracked there.
 
 
@@ -117,7 +117,7 @@ VERIFICATION
 
 Notes from the other branch (merged 2026-09-27):
 Closed 2026-09-27 after #3024 merged. ACs amended to the implemented contract: the original #2/#3/#5 assumed a raise-and-surface fix, but _resample now actually resamples, so there is no failure left to signal or surface. Old #4 ('the other two') is checked because the survey above found only one fail-open resampler. Qodo follow-up on #3024 added the rate and empty-input guards (new #4), with 11 tests.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

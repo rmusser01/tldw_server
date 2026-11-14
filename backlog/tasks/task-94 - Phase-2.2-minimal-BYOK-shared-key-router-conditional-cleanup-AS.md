@@ -39,13 +39,13 @@ Convert the minimal-test user_keys and shared_keys_scoped optional router block 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Baseline before edits: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k 'minimal_optional_router_specs and (keys or byok or shared)' -q passed 1 existing selected test. RED before production edits: /Users/macbook-dev/Documents/GitHub/tldw_server2/.venv/bin/python -m pytest tldw_Server_API/tests/Services/test_router_groups_contract.py -k 'byok_shared_keys' -q failed 3/3 because user_keys and shared_keys_scoped imported eagerly, missing imports left no lazy specs, and runtime failures could not propagate during registration.
 
 Implemented user_keys and shared_keys_scoped as ImportedRouterSpec entries using default precise optional-missing exceptions. Verification after implementation: focused byok_shared_keys tests passed 3/3; full router group contract passed 110/110; OpenAPI contract passed 69/69; main lifecycle contract passed 54/54; Bandit on tldw_Server_API/app/api/v1/router_groups/minimal.py reported zero findings; git diff --check passed.
 
 Opened PR https://github.com/rmusser01/tldw_server/pull/1335 against dev for this slice.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

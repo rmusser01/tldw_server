@@ -737,43 +737,6 @@ def format_file_path(file_path, fallback_path=None):
 
 #######################################################################################################################
 #
-# DB Config Loading
-
-
-def get_db_config():
-    """DEPRECATED: Use tldw_Server_API.app.core.DB_Management.DB_Manager.get_db_config instead.
-
-    This thin wrapper forwards to the canonical DB manager to avoid drift.
-    """
-    logging.warning(
-        "Utils.get_db_config() is deprecated; use DB_Management.DB_Manager.get_db_config() instead."
-    )
-    try:
-        from tldw_Server_API.app.core.DB_Management.DB_Manager import get_db_config as _dbm_get
-        return _dbm_get()
-    except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as e:
-        logging.exception(f"Failed to delegate to DB_Manager.get_db_config: {e}")
-        # Preserve a minimal, safe default
-        try:
-            from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
-            default_sqlite = str(DatabasePaths.get_media_db_path(DatabasePaths.get_single_user_id()))
-        except (AttributeError, ImportError, ModuleNotFoundError, OSError, RuntimeError, TypeError, ValueError) as exc:
-            logging.exception(f"Failed to resolve default SQLite path via DatabasePaths: {exc}")
-            raise
-        return {
-            'type': 'sqlite',
-            'sqlite_path': default_sqlite,
-            'elasticsearch_host': 'localhost',
-            'elasticsearch_port': 9200,
-        }
-
-#
-# End of DB Config Loading
-#######################################################################################################################
-
-
-#######################################################################################################################
-#
 # File Handling Functions
 
 

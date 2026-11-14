@@ -1,3 +1,6 @@
+import { captureNormalChatPreparation, runChatModeWithHistory, type HistoryChatModeParams } from "./normalChatMode"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import type { ActorSceneRead } from "@/services/actor-settings"
 import { type ChatHistory, type Message, type ToolChoice } from "~/store/option"
 import { getSessionFiles } from "@/db/dexie/helpers"
 import { generateHistory } from "@/utils/generate-history"
@@ -17,7 +20,6 @@ import { extractGenerationInfo } from "@/utils/llm-helpers"
 import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import {
   getRequiredServicePrompt,
-  runChatPipeline,
   type ChatModeDefinition
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
@@ -50,7 +52,7 @@ interface RagResponse {
   docs?: RagDocument[]
 }
 
-type DocumentChatModeParams = {
+type DocumentChatModeParams = HistoryChatModeParams & {
   selectedModel: string
   useOCR: boolean
   currentChatModelSettings: ChatModelSettings | null
@@ -71,6 +73,8 @@ type DocumentChatModeParams = {
   fileRetrievalEnabled: boolean
   setActionInfo: (actionInfo: string | null) => void
   systemPromptAppendix?: string
+  actorSceneSend?: ActorSceneSend
+  actorScene?: ActorSceneRead
   actorSettings?: ActorSettings
   clusterId?: string
   userMessageType?: string
@@ -124,6 +128,7 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
     parentMessageId: ctx.resolvedAssistantParentMessageId ?? null
   }),
   preparePrompt: async (ctx) => {
+    ctx.assertPreparationCurrent?.()
     let query = ctx.message
     const answerPrompt = getRequiredServicePrompt(
       ctx.servicePromptSnapshot,
@@ -149,6 +154,7 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
     let context = ""
     let source: any[] = []
     const docSize = await getNoOfRetrievedDocs()
+    ctx.assertPreparationCurrent?.()
 
     if (contextMessages.length > 2) {
       const lastTenMessages = contextMessages.slice(-10)
@@ -174,6 +180,7 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
         model: ctx.selectedModel,
         useOCR: ctx.useOCR
       })
+      ctx.assertPreparationCurrent?.()
       const questionOllama = await pageAssistModel({
         model: ctx.selectedModel,
         toolChoice: "none",
@@ -181,10 +188,12 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
         saveToDb: false,
         requestScope: ctx.servicePromptSnapshot?.requestScope
       })
+      ctx.assertPreparationCurrent?.()
       const response = await questionOllama.invoke(
         [questionMessage],
         { signal: ctx.signal }
       )
+      ctx.assertPreparationCurrent?.()
       query = response.content.toString()
       query = removeReasoning(query)
     }
@@ -212,10 +221,12 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
         signal: ctx.signal,
         requestScope: ctx.servicePromptSnapshot?.requestScope
       } as const
+      ctx.assertPreparationCurrent?.()
       const ragRes = (await tldwClient.ragSearch(
         query,
         ragPayload
       )) as RagResponse
+      ctx.assertPreparationCurrent?.()
       const docs: RagDocument[] =
         ragRes?.results || ragRes?.documents || ragRes?.docs || []
       if (docs.length > 0) {
@@ -238,12 +249,14 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
         ]
       }
     } catch (e) {
+      ctx.assertPreparationCurrent?.()
       if (ctx.signal.aborted || isRequestConfigScopeChangedError(e)) throw e
       console.error("media_db RAG failed; will fallback to inline context", e)
     }
 
     if (ctx.uploadedFiles.length > 0 && context.length === 0) {
       const maxContextSize = await getMaxContextSize()
+      ctx.assertPreparationCurrent?.()
       context += ctx.allFiles
         .map((file) => `File: ${file.filename}\nContent: ${file.content}\n---\n`)
         .join("")
@@ -290,6 +303,7 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
       model: ctx.selectedModel,
       useOCR: ctx.useOCR
     })
+    ctx.assertPreparationCurrent?.()
 
     let applicationChatHistory = generateHistory(
       ctx.historyForModel ?? ctx.history,
@@ -302,6 +316,7 @@ const documentChatModeDefinition: ChatModeDefinition<DocumentChatModeParams> = {
       ctx.actorSettings || null,
       templatesActive
     )
+    ctx.assertPreparationCurrent?.()
 
     return {
       chatHistory: applicationChatHistory,
@@ -322,14 +337,16 @@ export const documentChatMode = async (
   uploadedFiles: UploadedFile[],
   params: Omit<DocumentChatModeParams, "uploadedFiles" | "newFiles" | "allFiles">
 ): Promise<ChatSubmitResult> => {
+  const historyPreparation = params.historySelection
+    ? params.historyPreparation ?? captureNormalChatPreparation(params)
+    : undefined
   const ownsServicePromptSnapshot = !params.servicePromptSnapshot
   const servicePromptSnapshot =
     params.servicePromptSnapshot ??
     (await loadServicePromptSnapshot(
       ["chat.rag.answer", "chat.rag.question_rewrite"],
-      { signal }
+      { signal, requestScope: params.actorSceneSend?.requestScope }
     ))
-  const executionSignal = servicePromptSnapshot.scopeSignal
   const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal
   try {
     getRequiredServicePrompt(servicePromptSnapshot, "chat.rag.answer")
@@ -364,6 +381,7 @@ export const documentChatMode = async (
 
     const modeParams: DocumentChatModeParams = {
       ...params,
+      historyPreparation,
       saveMessageOnSuccess,
       documents: documentsForSave,
       uploadedFiles,
@@ -372,14 +390,14 @@ export const documentChatMode = async (
       servicePromptSnapshot
     }
 
-    return await runChatPipeline(
+    return await runChatModeWithHistory(
       documentChatModeDefinition,
       message,
       image,
       isRegenerate,
       messages,
       history,
-      executionSignal,
+      signal,
       {
         ...modeParams,
         discardCurrentTurnOnAbort: () =>

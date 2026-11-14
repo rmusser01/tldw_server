@@ -30,7 +30,7 @@ Finish optional parser test hardening by adding load_parser-based skip guards fo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Started after PR #1295 merged. This completes the optional parser guard pattern for the remaining JS/TS and C# parser-dependent positive tests.
 
 Added load_parser-based skip guards for JavaScript, TypeScript/TSX, and C# extractor modules plus indexer and MCP positive-path tests. Verification: focused parser-dependent tests passed with 15 passed and 5 warnings; Ruff passed on touched test files; Bandit on touched test scope with B101 skipped reported errors 0 and results 0 at /tmp/bandit_codegraph_remaining_parser_guards.json; git diff --check passed.
@@ -38,7 +38,7 @@ Added load_parser-based skip guards for JavaScript, TypeScript/TSX, and C# extra
 PR #1297 review-fix pass started: add guard helper docstrings, split TypeScript vs TSX extractor skips, and narrow the indexer TypeScript guard so it does not require the JavaScript parser.
 
 PR #1297 review fix completed: narrowed the indexer TypeScript guard to TS/TSX only, split TypeScript extractor module and TSX test skips, and added docstrings to parser guard helpers in indexer and MCP tests. Verification: focused pytest passed with 7 passed and 5 warnings; Ruff passed on touched test files; Bandit on touched test scope with B101 skipped reported errors 0 and results 0 at /tmp/bandit_codegraph_remaining_parser_guards_review.json; git diff --check passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

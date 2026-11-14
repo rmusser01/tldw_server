@@ -25,7 +25,7 @@ from typing import Any
 
 from loguru import logger
 
-from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
+from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import ByokResolutionError
 
 try:
     from .types import DataSource, Document

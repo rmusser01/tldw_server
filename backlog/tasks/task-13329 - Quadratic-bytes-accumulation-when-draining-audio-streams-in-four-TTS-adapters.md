@@ -37,7 +37,7 @@ Source: synthesis F29
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 DONE. All five sites converted from bytes to bytearray accumulation:
   dia_adapter.py:480, higgs_adapter.py:497, kokoro_adapter.py:1100 and :1117, vibevoice_adapter.py:1123.
 Each carries a comment naming the measured cost (1032x at 8000 chunks, ~1.1s of pure memcpy on the event loop thread).
@@ -50,7 +50,7 @@ Regression, stash-isolated: tests/TTS is 54 failed / 549 passed BOTH with and wi
 AC1 met - commit 8c1a637a2d: all five sites use bytearray and return bytes(...): dia_adapter.py:483-486, higgs_adapter.py:500-503, kokoro_adapter.py:1103-1106 and 1123-1137 (tuple return bytes(all_audio), alignment_payload), vibevoice_adapter.py:1126-1129. No remaining 'all_audio = b""' in adapters/.
 AC2 met - targeted adapter suites (dia/kokoro/higgs/vibevoice mock, kokoro_alignment, vibevoice_adapter_unit, kokoro_health_and_errors, higgs_integration_stub): 89 passed, 1 skipped (torch not available), 2 failed. Both failures are test_higgs_adapter_integration_stub.py asserting adapter.initialize() is True; it returns False because torch is not installed in this venv (higgs_adapter.py:183 'torch unavailable; disabling provider') - environmental, before the accumulation code, unrelated to this change.
 DoD3: no docs affected (internal accumulation change). DoD4: uvx bandit on the four adapter files - No issues identified.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

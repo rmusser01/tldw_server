@@ -48,18 +48,16 @@ Change the default transcription model selection so fresh/default STT settings u
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: the frontend initialized sttModel to whisper-1, so chat dictation and voice-chat sent an explicit model and bypassed backend defaults. Backend config also hard-coded ONNX, so it could not choose MLX on macOS.
 
 Implementation: frontend STT defaults now leave model empty/server-default; backend STT config default uses auto and resolves to parakeet-mlx on macOS and parakeet-tdt-0.6b-v3-onnx on Linux/Windows. Batch and streaming default paths share the resolver. Docs updated.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
 Frontend no longer defaults STT to whisper-1 and Speech Playground no longer promotes the first catalog model into request options when settings use the server default. Backend STT config supports auto, resolving to parakeet-mlx on macOS and parakeet-tdt-0.6b-v3-onnx on Linux/Windows. Verification included frontend STT/dictation/Speech tests, backend STT tests, typecheck, git diff --check, Bandit on touched backend files, live backend audio health showing parakeet-mlx, and review follow-up regression confirming Speech Playground omits model for server default.
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

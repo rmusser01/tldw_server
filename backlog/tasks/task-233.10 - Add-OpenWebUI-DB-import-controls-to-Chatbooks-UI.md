@@ -35,7 +35,7 @@ Implement Stage 5 frontend support for OpenWebUI database imports in the Chatboo
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: local package Vitest initially failed before the UI exposed OpenWebUI database mode; this confirmed the new DB-mode UI test captured the missing behavior.
 
 GREEN: cd apps/packages/ui && ./node_modules/.bin/vitest run src/services/__tests__/tldw-api-client.chatbooks-openwebui.test.ts src/components/Option/Chatbooks/__tests__/ChatbooksPlaygroundPage.openwebui-import.test.tsx -> 2 files passed, 7 tests passed. git diff --check clean.
@@ -43,7 +43,7 @@ GREEN: cd apps/packages/ui && ./node_modules/.bin/vitest run src/services/__test
 Bandit not applicable for this frontend-only Stage 5 slice; no Python code was touched in TASK-233.10.
 
 Re-ran the same focused Vitest command after adding explicit DB-mode assertions for hidden media/embedding controls; result remained 2 files passed, 7 tests passed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

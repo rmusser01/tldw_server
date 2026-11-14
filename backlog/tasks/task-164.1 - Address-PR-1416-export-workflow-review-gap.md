@@ -25,7 +25,7 @@ priority: medium
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 RED: bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx failed with the expected missing export wording in persona-visual-pack-empty.
 
 GREEN: bunx vitest run src/components/PersonaGarden/__tests__/VisualPackEditor.test.tsx passed with 7 tests after adding import/export copy.
@@ -39,7 +39,7 @@ BANDIT: not applicable; touched code is frontend TypeScript plus Backlog metadat
 REVIEW: Resolved GitHub review thread PRRT_kwDOL1aGf86A1J9- after pushing commit 7634fd9b7.
 
 PR CHECKS: Rechecked PR #1416 after push; checks were pending/skipping with no failed checks in the latest output.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

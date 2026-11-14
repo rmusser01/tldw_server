@@ -34,13 +34,9 @@ Docs/superpowers/plans/2026-07-03-webui-setup-choice-implementation-plan.md
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
-
 Design spec committed at Docs/superpowers/specs/2026-07-03-webui-setup-choice-design.md. Implementation plan written at Docs/superpowers/plans/2026-07-03-webui-setup-choice-implementation-plan.md and approved by plan review. Bandit skipped for the planning step because only Markdown/task files changed; implementation will need normal verification.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

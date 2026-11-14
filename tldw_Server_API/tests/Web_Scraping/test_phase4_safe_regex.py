@@ -1998,7 +1998,7 @@ def test_generated_regex_preserves_exact_sample_boundary(
 ) -> None:
     _install_regex_llm_response(monkeypatch, {"pattern": "a$"})
 
-    exact_result = _generate_regex("a" * 1_000_000)
+    exact_result = _generate_regex(("b" * 999_999) + "a")
 
     assert exact_result["success"] is True
     assert exact_result["sample_match"] == "a"

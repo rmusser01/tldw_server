@@ -27,9 +27,9 @@ Same class as TASK-13367. Running tests/Evaluations/unit locally writes 'evaluat
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Fixed in bd01ae1513 (tests/Evaluations/conftest.py autouse fixture, session temp AuthNZ DB, conditional pool/settings/ledger reset). Ledger count 1879 -> 1879 over a full RUN_EVALUATIONS=1 run (before: +71/run). Failure set = HEAD's 18 plus one xdist-ordering flake that passes alone. Root cause for all suites is tests/conftest.py:51 defaulting DATABASE_URL to the checkout's users.db; changing that globally needs a full-suite validation and is left as a follow-up. Bandit: test-only change.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

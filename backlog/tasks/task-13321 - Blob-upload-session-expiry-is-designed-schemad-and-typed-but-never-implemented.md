@@ -53,7 +53,7 @@ Found by the comprehensive core-module review; the absent writer, dead state and
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-23 verification: most of this was already implemented by TASK-13335 in 22b80424f1. That commit sets expires_at at insert from SyncV2Settings.blob_upload_session_ttl_seconds, makes summarize_blob_quota's two queries (per-user and per-dataset) skip expired rows for both reserved bytes and active count, adds SyncDatabase.expire_blob_upload_sessions called from the retention_compact apply_blob_gc leg, and adds compensation in notes.py. Checked each AC against the code and found three gaps, all closed in 4c435ef69b. (a) AC4: the sweep never called discard_upload, so staged chunks stayed on disk. expire_blob_upload_sessions now returns the upload_ids it actually transitioned (rowcount==1, so a session completed after the SELECT is left alone). retention_compact discards their chunks and logs OSError/SyncBlobStoreError by class. (b) AC2: the TTL setting was not configurable at deploy time. The factory now reads SYNC_V2_BLOB_UPLOAD_SESSION_TTL_SECONDS (positive int, default 86400), like its sibling settings. (c) AC7: the notes.py compensation had no test. AC6 amended: returning the upload_id to the client adds nothing. The Notes upload is one server-driven request that cancels its own session on failure, and expiry covers a crash mid-request. Tests, each red before and green after: tests/Sync/test_sync_v2_workspace_blobs.py::test_retention_sweep_expires_abandoned_sessions_and_discards_staged_chunks uses the default cap of 8; before, it failed only on the staged-chunk assertion. tests/Sync/test_sync_v2_factory.py (env read + 2 invalid-value cases) had 3 failures before. tests/Notes/test_notes_attachment_sync_api.py::test_active_one_shot_upload_releases_its_session_when_a_chunk_fails, with the compensation disabled, left the session 'created' instead of 'cancelled'. The existing expiry tests were updated for the list return type. Sync blob/attachment/retention/store/factory suites + Notes attachment/API suites: 558 passed, 0 failed. Bandit (-ll) on Sync_DB.py, factory.py, service.py, store.py: no issues. Docs: new ADR-052 (+ index), env var and expiry semantics added to Docs/API/Sync_V2_M2.md, design doc marks upload-session expiry implemented.
 
 
@@ -65,7 +65,7 @@ Status 2026-09-27: partly done in #3006 (merged). expires_at is stamped on creat
 - [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
 - [ ] #6 Known skips or blockers documented
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

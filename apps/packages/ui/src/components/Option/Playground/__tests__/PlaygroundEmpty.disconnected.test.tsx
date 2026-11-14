@@ -1,9 +1,26 @@
 import React from "react";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { PlaygroundEmpty } from "../PlaygroundEmpty";
 
 const navigate = vi.fn();
+const connection = vi.hoisted(() => ({
+  state: {} as Record<string, unknown>,
+}));
+const FAILED_CHECK = {
+  phase: "error",
+  isConnected: false,
+  isChecking: false,
+  lastCheckedAt: 1,
+  consecutiveFailures: 1,
+};
+const FIRST_CHECK_IN_FLIGHT = {
+  phase: "searching",
+  isConnected: false,
+  isChecking: true,
+  lastCheckedAt: null,
+  consecutiveFailures: 0,
+};
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -23,6 +40,7 @@ vi.mock("@/context/demo-mode", () => ({
 
 vi.mock("@/hooks/useConnectionState", () => ({
   useIsConnected: () => false,
+  useConnectionState: () => connection.state,
 }));
 
 vi.mock("@/store/tutorials", () => ({
@@ -36,24 +54,34 @@ vi.mock("react-router-dom", () => ({
 describe("PlaygroundEmpty – disconnected state", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    connection.state = FAILED_CHECK;
   });
 
-  it("keeps the blank chat shell neutral when disconnected", () => {
+  // CC-03 (#3101): no "Connect to start chatting" while the first check runs.
+  it("keeps the chat card while the first server check is still running", () => {
+    connection.state = FIRST_CHECK_IN_FLIGHT;
     render(<PlaygroundEmpty />);
-
     const shell = screen.getByTestId("playground-empty-shell");
-
+    expect(within(shell).getByText("Start a new chat")).toBeInTheDocument();
     expect(
       within(shell).getByText(
-        "Experiment with different models, prompts, and knowledge sources here.",
+        "Connecting to your tldw server. You can start writing your first message below.",
       ),
     ).toBeInTheDocument();
-    expect(
-      within(shell).queryByText("Connect to a tldw server to start chatting."),
-    ).not.toBeInTheDocument();
-    expect(
-      within(shell).queryByRole("button", { name: /open settings/i }),
-    ).not.toBeInTheDocument();
-    expect(navigate).not.toHaveBeenCalled();
+    expect(within(shell).queryByRole("button", { name: "Connect server" })).not.toBeInTheDocument();
+  });
+
+  it("offers connection setup before model choice and preserves intercepted navigation", () => {
+    const setup = vi.fn((event: Event) => event.preventDefault());
+    window.addEventListener("tldw:settings-navigation-request", setup);
+    try {
+      render(<PlaygroundEmpty />);
+      const shell = screen.getByTestId("playground-empty-shell");
+      expect(within(shell).getByText("Connect to your tldw server, then choose a model and start chatting.")).toBeInTheDocument();
+      fireEvent.click(within(shell).getByRole("button", { name: "Connect server" }));
+      expect(setup).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ detail: { destination: "/settings/tldw" } }));
+      expect(navigate).not.toHaveBeenCalled();
+      expect(within(shell).queryByRole("button", { name: "Explore chat modes" })).not.toBeInTheDocument();
+    } finally { window.removeEventListener("tldw:settings-navigation-request", setup); }
   });
 });

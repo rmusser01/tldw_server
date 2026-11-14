@@ -36,7 +36,7 @@ Add a focused operator-managed VZ helper lifecycle drill that exercises stop/sta
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan: Docs/superpowers/plans/2026-05-10-vz-helper-managed-restart-drill.md
 
 Verification: pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q => 93 passed, 1 skipped; git diff --check => pass; Bandit production script => 0 findings; Bandit test file with baseline test skips B101/B108/B404/B603 => 0 findings.
@@ -46,7 +46,7 @@ Known skips/blockers: no real VZ VM restart drill was run in this portable slice
 Review fix pass: Qodo opened two still-valid threads on missing helper docstrings and overlong _prefixed_results signature.
 
 Review fix verification: pytest tools/macos-vz-helper/Tests/test_vz_helperctl.py -q => 93 passed, 1 skipped; git diff --check => pass; Bandit helper script => 0 findings; Bandit helper tests with baseline skips B101/B108/B404/B603 => 0 findings.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

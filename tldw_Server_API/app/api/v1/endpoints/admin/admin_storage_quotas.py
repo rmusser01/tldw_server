@@ -8,23 +8,26 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.pagination import (
     OffsetPaginationMeta,
     default_offset_pagination_aliases,
 )
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+from tldw_Server_API.app.core.AuthNZ.exceptions import StorageError, UserNotFoundError
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
-    AuthnzStorageQuotasRepo,
     DEFAULT_HARD_LIMIT_PCT,
-    DEFAULT_ORG_QUOTA_MB,
     DEFAULT_SOFT_LIMIT_PCT,
-    DEFAULT_TEAM_QUOTA_MB,
+    AuthnzStorageQuotasRepo,
 )
+from tldw_Server_API.app.services.admin_audit_service import emit_storage_quota_audit_event
+from tldw_Server_API.app.services.storage_quota_service import get_storage_service
 
 router = APIRouter(prefix="/storage-quotas", tags=["admin-storage-quotas"])
 
@@ -50,7 +53,7 @@ class StorageQuotaResponse(BaseModel):
     quota_mb: int | None = None
     used_mb: float = 0.0
     remaining_mb: float | None = None
-    usage_pct: float = 0.0
+    usage_pct: float | None = 0.0
     at_soft_limit: bool = False
     at_hard_limit: bool = False
     has_quota: bool = False
@@ -72,6 +75,12 @@ class UpdateQuotaRequest(BaseModel):
         le=100,
         description="Hard limit percentage (enforcement threshold)",
     )
+
+
+class UpdateUserQuotaRequest(BaseModel):
+    """Request body for setting a user's own storage quota (limits.storage_quota_mb)."""
+
+    quota_mb: int | None = Field(..., ge=0, description="Quota in MB; 0 blocks uploads; null removes the user's value")
 
 
 class StorageQuotaSummaryResponse(BaseModel):
@@ -112,18 +121,13 @@ async def _get_repo() -> AuthnzStorageQuotasRepo:
     summary="Get user storage quota and usage",
 )
 async def get_user_storage_quota(user_id: int) -> StorageQuotaResponse:
-    """Get a user's storage quota status.
-
-    Currently delegates to the org-level quota that the user belongs to.
-    User-level quotas are stored on the users table; this endpoint provides
-    a unified view.
-    """
+    """Get a user's storage quota status (limits.storage_quota_mb; read-only)."""
     try:
-        repo = await _get_repo()
-        # User-level quotas are on the users table; for org/team quotas
-        # we would need the user's org_id. For now, return org-based status.
-        quota_status = await repo.check_quota_status(org_id=user_id)
+        service = await get_storage_service()
+        quota_status = await service.user_quota_status(user_id)
         return StorageQuotaResponse(**quota_status)
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="User not found") from exc
     except _NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Failed to get user storage quota")
         raise HTTPException(
@@ -134,26 +138,27 @@ async def get_user_storage_quota(user_id: int) -> StorageQuotaResponse:
 
 @router.put(
     "/users/{user_id}",
-    response_model=dict[str, Any],
+    response_model=StorageQuotaResponse,
     summary="Update user storage quota",
 )
 async def update_user_storage_quota(
     user_id: int,
-    body: UpdateQuotaRequest,
-) -> dict[str, Any]:
-    """Update a user's storage quota.
-
-    This sets the org-level quota for the user's primary organization.
-    """
+    body: UpdateUserQuotaRequest,
+    principal: AuthPrincipal = Depends(get_auth_principal),
+) -> StorageQuotaResponse:
+    """Set (or, with null, remove) a user's own storage quota (limits.storage_quota_mb)."""
     try:
-        repo = await _get_repo()
-        result = await repo.upsert_org_quota(
-            user_id,
-            quota_mb=body.quota_mb,
-            soft_limit_pct=body.soft_limit_pct,
-            hard_limit_pct=body.hard_limit_pct,
-        )
-        return result
+        service = await get_storage_service()
+        await service.set_user_quota(user_id, body.quota_mb, updated_by=principal.user_id)
+        await emit_storage_quota_audit_event(actor_id=principal.user_id, target_user_id=user_id, quota_mb=body.quota_mb)
+        return StorageQuotaResponse(**await service.user_quota_status(user_id))
+    except UserNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="User not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except StorageError as exc:
+        logger.warning("Failed to update user storage quota")
+        raise HTTPException(status_code=500, detail="Failed to update storage quota") from exc
     except _NONCRITICAL_EXCEPTIONS as exc:
         logger.warning("Failed to update user storage quota")
         raise HTTPException(

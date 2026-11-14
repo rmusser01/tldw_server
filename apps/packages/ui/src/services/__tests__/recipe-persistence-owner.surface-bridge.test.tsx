@@ -3,6 +3,7 @@ import { useComposerText } from "@/components/Chat/composer/hooks/useComposerTex
 import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { pullFromStudio } from "@/services/prompt-sync"
+import { isPromptOwnedBy, resolvePromptOwnerId } from "@/services/prompt-local-owner"
 import { RecipePersistenceRegistry } from "@/services/recipe-persistence-registry"
 import {
   readRecipePersistenceUncertainty,
@@ -125,6 +126,10 @@ vi.mock("@/services/prompt-studio-settings", () => ({
     defaultProjectId: 42,
     autoSyncWorkspacePrompts: true
   }),
+  getPromptStudioDefaultsForOwner: async (expectedOwnerId: string) => {
+    await resolvePromptOwnerId(expectedOwnerId)
+    return { defaultProjectId: 42, autoSyncWorkspacePrompts: true }
+  },
   setPromptStudioDefaults: async (value: unknown) => value
 }))
 
@@ -154,10 +159,15 @@ vi.mock("@/db/dexie/schema", () => ({
         boundary.rows.set(row.id, structuredClone(row))
       },
       where: (field: string) => ({
-        equals: (value: unknown) => ({
-          first: async () =>
-            [...boundary.rows.values()].find((row) => row[field] === value)
-        })
+        equals: (value: unknown) => {
+          const rows = () => [...boundary.rows.values()].filter(row => row[field] === value)
+          return {
+            first: async () => rows()[0],
+            filter: (predicate: (row: StoredPrompt) => boolean) => ({
+              first: async () => rows().find(predicate)
+            })
+          }
+        }
       })
     }
   }
@@ -166,11 +176,18 @@ vi.mock("@/db/dexie/schema", () => ({
 vi.mock("@/db/dexie/helpers", () => ({
   generateID: () => boundary.nextId,
   getAllPrompts: async () => structuredClone([...boundary.rows.values()]),
+  getSharedLocalPrompts: async (deleted = false) => structuredClone(
+    [...boundary.rows.values()].filter(row => row.ownerId == null &&
+      isPromptOwnedBy(row as Parameters<typeof isPromptOwnedBy>[0], null) && Boolean(row.deletedAt) === deleted)
+  ),
   getPromptById: async (id: string) => structuredClone(boundary.rows.get(id)),
-  savePrompt: async (fields: Record<string, unknown>) => {
+  savePrompt: async (fields: Record<string, unknown> & { expectedOwnerId?: string | null }) => {
+    const { expectedOwnerId, ...values } = fields
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId)
     const now = Date.now()
     const row = {
-      ...structuredClone(fields),
+      ...structuredClone(values),
+      ownerId,
       id: boundary.nextId,
       createdAt: now,
       updatedAt: now,
@@ -562,7 +579,8 @@ const openComposerRecipe = async (user: ReturnType<typeof userEvent.setup>) => {
   await screen.findByRole("region", { name: "Structured recipe builder" })
 }
 
-const openSystemRecipe = async (user: ReturnType<typeof userEvent.setup>) => {
+const openSystemRecipe = async (user: ReturnType<typeof userEvent.setup>, client: QueryClient, ownerId: string) => {
+  await waitFor(() => expect(client.getQueryState(["getAllPromptsForSelect", ownerId, "resolved"])?.status).toBe("success"))
   await user.click(await screen.findByRole("button", { name: "selectAPrompt" }))
   await user.click(
     await screen.findByRole("menuitem", { name: /edit.*system prompt/i })
@@ -636,7 +654,7 @@ describe("actual recipe surface adapter bridges", () => {
     const expectedOwner = await resolveRecipePersistenceOwnerView()
     const user = userEvent.setup()
     const view = renderSystemModal()
-    await openSystemRecipe(user)
+    await openSystemRecipe(user, view.client, expectedOwner!.ownerId)
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Save as new recipe" })
@@ -722,12 +740,9 @@ describe("actual recipe surface adapter bridges", () => {
     expect(ownerB!.ownerId).not.toBe(ownerA!.ownerId)
     const reopened = renderComposer()
     await openComposerRecipe(user)
-    await chooseSavedRecipe(user)
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Update recipe" })
-      ).toBeDisabled()
-    )
+    await waitFor(() => expect(reopened.client.getQueryState(["getAllPromptsForSelect", ownerB!.ownerId, "resolved"])?.status).toBe("success"))
+    expect(screen.queryByRole("option", { name: /Surface recipe|Untitled recipe/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Update recipe" })).not.toBeInTheDocument()
     const preview = await fillTask(user, "still local under owner B")
     expect(
       screen.getByRole("button", { name: "Apply to user message" })
@@ -744,14 +759,14 @@ describe("actual recipe surface adapter bridges", () => {
       await readRecipePersistenceUncertainty(boundary.nextId, ownerA!.ownerId)
     ).toBe("scoped")
 
+    const foreignRead = vi.spyOn(globalThis, "fetch")
     const ownerBPull = await pullFromStudio(101, boundary.nextId)
+    expect(foreignRead).not.toHaveBeenCalled()
     expect(ownerBPull).toMatchObject({
       success: false,
       syncStatus: "error",
       recipeWriteBlocked: true,
-      recipeOwnership: {
-        dispatch: { state: "dispatched", actualOwnerId: ownerB!.ownerId }
-      }
+      recipeOwnership: null
     })
     expect(
       await readRecipePersistenceUncertainty(boundary.nextId, ownerA!.ownerId)
@@ -850,7 +865,7 @@ describe("actual recipe surface adapter bridges", () => {
     )
     await fillTask(user, "unknown extension task")
     await user.click(screen.getByRole("button", { name: "Save as new recipe" }))
-    await screen.findByText(/server outcome could not be verified/i)
+    await screen.findByText(/server outcome and responsible connection are unknown/i)
     expect(boundary.mutationCount).toBe(1)
     expect(
       await readRecipePersistenceUncertainty(boundary.nextId, ownerA!.ownerId)
@@ -861,12 +876,9 @@ describe("actual recipe surface adapter bridges", () => {
     const ownerB = await resolveRecipePersistenceOwnerView()
     const reopened = renderComposer()
     await openComposerRecipe(user)
-    await chooseSavedRecipe(user)
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Update recipe" })
-      ).toBeDisabled()
-    )
+    await waitFor(() => expect(reopened.client.getQueryState(["getAllPromptsForSelect", ownerB!.ownerId, "resolved"])?.status).toBe("success"))
+    expect(screen.queryByRole("option", { name: /Surface recipe|Untitled recipe/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Update recipe" })).not.toBeInTheDocument()
     const preview = await fillTask(user, "unknown but locally editable")
     expect(
       screen.getByRole("button", { name: "Apply to user message" })
@@ -880,6 +892,7 @@ describe("actual recipe surface adapter bridges", () => {
     expect(boundary.mutationCount).toBe(1)
 
     reopened.unmount()
+    boundary.values.set("tldwConfig", config("owner-a-key"))
     const recovery = renderComposer()
     await openComposerRecipe(user)
     await chooseSavedRecipe(user)

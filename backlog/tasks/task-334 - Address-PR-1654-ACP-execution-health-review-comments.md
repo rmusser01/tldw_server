@@ -40,9 +40,9 @@ Resolve the actionable review feedback on PR #1654 for the ACP Agent Registry ex
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Verification: bunx vitest run src/components/Option/AgentRegistry/__tests__/AgentRegistryPage.connection.test.tsx passed with 9 tests; git diff --check passed; bun run verify:design-system-state passed with existing baseline exceptions; bunx tsc --noEmit --pretty false still fails on existing repo-wide type baseline issues outside the touched Agent Registry/readiness files. Bandit skipped because this task touched only TypeScript/JSON/Backlog files.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

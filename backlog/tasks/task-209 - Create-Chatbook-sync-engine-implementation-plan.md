@@ -48,7 +48,7 @@ Write a repo-grounded implementation plan for the approved Chatbook Sync Engine 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Created Docs/superpowers/plans/2026-05-10-chatbook-sync-engine-implementation-plan.md from the approved Chatbook Sync Engine PRD.
 
 Ran plan-document-reviewer pass 1: Issues Found for missing /attachments coverage, incomplete restore-manifest detail, and underspecified push/pull invariants. Patched all three into the plan.
@@ -58,7 +58,7 @@ Ran plan-document-reviewer pass 2: Issues Found for adapter-registry ordering an
 Ran plan-document-reviewer pass 3: Approved. Applied its advisory recommendation to make adapter_version explicit in Task 1 schema/test guidance.
 
 Verification: docs-only change. git diff --check passed for the plan file before finalization. Bandit is not applicable because no Python/code files were changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

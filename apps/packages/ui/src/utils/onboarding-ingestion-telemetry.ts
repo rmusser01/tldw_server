@@ -177,10 +177,13 @@ const setAverageTimeToFirstIngest = (
 }
 
 export const trackOnboardingIngestionTelemetry = async (
-  event: OnboardingIngestionTelemetryEvent
+  event: OnboardingIngestionTelemetryEvent,
+  isCurrent: () => boolean = () => true
 ) => {
   try {
+    if (!isCurrent()) return
     const state = await readTelemetryState()
+    if (!isCurrent()) return
     const now = Date.now()
     state.last_event_at = now
 
@@ -275,11 +278,11 @@ export const trackOnboardingFirstIngestSuccess = async (payload: {
     source_label: payload.primarySourceLabel
   })
 
-export const trackOnboardingChatSubmitSuccess = async (route = "/chat") =>
+export const trackOnboardingChatSubmitSuccess = async (route = "/chat", isCurrent?: () => boolean) =>
   trackOnboardingIngestionTelemetry({
     type: "onboarding_chat_submit_success",
     route
-  })
+  }, isCurrent)
 
 export const getOnboardingIngestionTelemetryState =
   async (): Promise<OnboardingIngestionTelemetryState> => readTelemetryState()

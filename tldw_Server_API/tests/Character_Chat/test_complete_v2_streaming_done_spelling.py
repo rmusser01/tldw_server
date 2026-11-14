@@ -1,4 +1,5 @@
-"""A provider DONE in any spelling ends a character stream with exactly one terminal frame (TASK-13370)."""
+"""A character stream ends with exactly one terminal frame for a provider DONE in any spelling (TASK-13370),
+and does not send OpenAI's usage chunk, which its request cannot ask for (TASK-13951)."""
 
 import json as _json
 import shutil
@@ -10,37 +11,27 @@ import pytest
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 
+CONTENT = _json.dumps(
+    {
+        "id": "chatcmpl-1",
+        "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": {"content": "Hello"}, "finish_reason": None}],
+    }
+)
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("streams_unified", ["0", "1"])
-@pytest.mark.parametrize("done_line", ["data: [done]", "data:[DONE]"])
-async def test_complete_v2_stream_emits_single_done_for_any_done_spelling(
-    monkeypatch,
-    healthy_absent_provider_override_snapshot,
-    character_provider_adapter_boundary,
-    streams_unified,
-    done_line,
-):
+
+async def _complete_v2_stream_lines(monkeypatch, bind_provider_call, streams_unified, provider_lines):
+    """Stream one complete-v2 request whose provider yields *provider_lines*; return the non-empty lines received."""
     monkeypatch.setenv("STREAMS_UNIFIED", streams_unified)
     monkeypatch.setenv("MINIMAL_TEST_APP", "1")
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    content = _json.dumps(
-        {
-            "id": "chatcmpl-1",
-            "object": "chat.completion.chunk",
-            "choices": [{"index": 0, "delta": {"content": "Hello"}, "finish_reason": None}],
-        }
-    )
-
     import tldw_Server_API.app.api.v1.endpoints.character_chat_sessions as chat_sessions_mod
-
-    _provider_calls, bind_provider_call = character_provider_adapter_boundary
 
     def _fake_perform_chat_api_call(*args, **kwargs):
         bind_provider_call(kwargs)
-        return iter([f"data: {content}", done_line])
+        return iter(provider_lines)
 
     monkeypatch.setattr(chat_sessions_mod, "perform_chat_api_call", _fake_perform_chat_api_call)
 
@@ -76,8 +67,50 @@ async def test_complete_v2_stream_emits_single_done_for_any_done_spelling(
                 async for line in response.aiter_lines():
                     if line:
                         lines.append(line)
-
-        assert f"data: {content}" in lines
-        assert [line for line in lines if is_done_line(line)] == ["data: [DONE]"]
+        return lines
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streams_unified", ["0", "1"])
+@pytest.mark.parametrize("done_line", ["data: [done]", "data:[DONE]"])
+async def test_complete_v2_stream_emits_single_done_for_any_done_spelling(
+    monkeypatch,
+    healthy_absent_provider_override_snapshot,
+    character_provider_adapter_boundary,
+    streams_unified,
+    done_line,
+):
+    _provider_calls, bind_provider_call = character_provider_adapter_boundary
+
+    lines = await _complete_v2_stream_lines(
+        monkeypatch, bind_provider_call, streams_unified, [f"data: {CONTENT}", done_line]
+    )
+
+    assert f"data: {CONTENT}" in lines
+    assert [line for line in lines if is_done_line(line)] == ["data: [DONE]"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streams_unified", ["0", "1"])
+async def test_complete_v2_stream_does_not_send_an_unrequested_usage_chunk(
+    monkeypatch,
+    healthy_absent_provider_override_snapshot,
+    character_provider_adapter_boundary,
+    streams_unified,
+):
+    """OpenAI's usage chunk (empty choices) is dropped; lines that are not one pass unchanged (TASK-13951)."""
+    _provider_calls, bind_provider_call = character_provider_adapter_boundary
+    usage_chunk = 'data: {"choices":[],"usage":{"prompt_tokens":9,"completion_tokens":1,"total_tokens":10}}'
+    others = ["data: plain text", 'data: {"choices": [], "usage"', 'data: {"choices":[],"usage":null}']
+
+    lines = await _complete_v2_stream_lines(
+        monkeypatch,
+        bind_provider_call,
+        streams_unified,
+        [f"data: {CONTENT}", usage_chunk, *others, "data: [DONE]"],
+    )
+
+    assert usage_chunk not in lines
+    assert [line for line in (f"data: {CONTENT}", *others) if line not in lines] == []

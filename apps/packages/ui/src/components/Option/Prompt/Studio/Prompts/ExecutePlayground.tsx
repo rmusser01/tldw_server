@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Drawer, Form, Input, Select, Skeleton, notification, Spin } from "antd"
 import { Play, Clock, Zap } from "lucide-react"
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Alert } from "@/components/ui/primitives"
 import {
@@ -11,6 +11,7 @@ import {
   type ExecutePromptPayload
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   getExecuteDefaultModel,
   getExecuteDefaultProvider,
@@ -41,6 +42,8 @@ export const ExecutePlayground: React.FC<ExecutePlaygroundProps> = ({
   const { t } = useTranslation(["settings", "common"])
   const [form] = Form.useForm<FormValues>()
   const [output, setOutput] = useState<string | null>(null)
+  const [executionError, setExecutionError] = useState<string | null>(null)
+  const executionGeneration = useRef(0)
   const [executionStats, setExecutionStats] = useState<{
     tokens?: number
     time?: number
@@ -82,19 +85,6 @@ export const ExecutePlayground: React.FC<ExecutePlaygroundProps> = ({
   )
   const fallbackModel = getExecuteDefaultModel(providersCatalog, effectiveProvider)
 
-  // Reset output when prompt changes
-  useEffect(() => {
-    if (open) {
-      setOutput(null)
-      setExecutionStats(null)
-      form.setFieldsValue({
-        inputs: "{}",
-        provider: undefined,
-        model: undefined
-      })
-    }
-  }, [open, promptId, form])
-
   useEffect(() => {
     if (!selectedModel) return
     if (!isValidExecuteModel(providersCatalog, effectiveProvider, selectedModel)) {
@@ -113,8 +103,25 @@ export const ExecutePlayground: React.FC<ExecutePlaygroundProps> = ({
 
   // Execute mutation
   const executeMutation = useMutation({
-    mutationFn: (payload: ExecutePromptPayload) => executePrompt(payload),
-    onSuccess: (response) => {
+    mutationFn: async ({
+      payload
+    }: {
+      payload: ExecutePromptPayload
+      generation: number
+    }) => {
+      const response = await executePrompt(payload)
+      if (!response.ok) {
+        throw new Error(
+          response.error ||
+            t("managePrompts.studio.prompts.executionFailed", {
+              defaultValue: "Prompt execution failed."
+            })
+        )
+      }
+      return response
+    },
+    onSuccess: (response, request) => {
+      if (request.generation !== executionGeneration.current) return
       const data = (response as any)?.data
       setOutput(data?.output || "No output")
       setExecutionStats({
@@ -122,40 +129,81 @@ export const ExecutePlayground: React.FC<ExecutePlaygroundProps> = ({
         time: data?.execution_time
       })
     },
-    onError: (error: any) => {
+    onError: (error, request) => {
+      if (request.generation !== executionGeneration.current) return
+      const message = sanitizeServerErrorMessage(
+        error,
+        t("managePrompts.studio.prompts.executionFailed", {
+          defaultValue: "Prompt execution failed."
+        })
+      )
+      setExecutionError(message)
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
-        description: error?.message || t("common:unknownError")
+        message: t("common:error.label", { defaultValue: "Error" }),
+        description: message
       })
       setOutput(null)
       setExecutionStats(null)
     }
   })
+  const { reset: resetExecution } = executeMutation
+
+  // Retire results belonging to a previous prompt, opening or mounted caller.
+  useEffect(() => {
+    executionGeneration.current += 1
+    resetExecution()
+    setOutput(null)
+    setExecutionStats(null)
+    setExecutionError(null)
+    if (open) {
+      form.setFieldsValue({
+        inputs: "{}",
+        provider: undefined,
+        model: undefined
+      })
+    }
+    return () => {
+      executionGeneration.current += 1
+    }
+  }, [open, promptId, form, resetExecution])
+
+  const handleClose = () => {
+    executionGeneration.current += 1
+    resetExecution()
+    setOutput(null)
+    setExecutionStats(null)
+    setExecutionError(null)
+    onClose()
+  }
 
   const handleExecute = (values: FormValues) => {
     if (!promptId) return
+    const generation = ++executionGeneration.current
+    setExecutionError(null)
+    setOutput(null)
+    setExecutionStats(null)
 
-    if (!isValidExecuteProvider(providersCatalog, values.provider)) {
-      notification.error({
-        message: t("managePrompts.studio.prompts.invalidProvider", {
-          defaultValue: "Provider is not available on this server"
-        })
+    const provider = values.provider || fallbackProvider || undefined
+    const model =
+      values.model ||
+      getExecuteDefaultModel(providersCatalog, provider) ||
+      undefined
+
+    if (!isValidExecuteProvider(providersCatalog, provider)) {
+      const message = t("managePrompts.studio.prompts.invalidProvider", {
+        defaultValue: "Provider is not available on this server"
       })
+      setExecutionError(message)
+      notification.error({ message })
       return
     }
 
-    if (
-      !isValidExecuteModel(
-        providersCatalog,
-        values.provider || fallbackProvider,
-        values.model
-      )
-    ) {
-      notification.error({
-        message: t("managePrompts.studio.prompts.invalidModel", {
-          defaultValue: "Model is not available for the selected provider"
-        })
+    if (!isValidExecuteModel(providersCatalog, provider, model)) {
+      const message = t("managePrompts.studio.prompts.invalidModel", {
+        defaultValue: "Model is not available for the selected provider"
       })
+      setExecutionError(message)
+      notification.error({ message })
       return
     }
 
@@ -163,22 +211,22 @@ export const ExecutePlayground: React.FC<ExecutePlaygroundProps> = ({
     try {
       inputs = JSON.parse(values.inputs || "{}")
     } catch {
-      notification.error({
-        message: t("managePrompts.studio.prompts.invalidInputs", {
-          defaultValue: "Invalid inputs JSON"
-        })
+      const message = t("managePrompts.studio.prompts.invalidInputs", {
+        defaultValue: "Invalid inputs JSON"
       })
+      setExecutionError(message)
+      notification.error({ message })
       return
     }
 
     const payload: ExecutePromptPayload = {
       prompt_id: promptId,
       inputs,
-      provider: values.provider || undefined,
-      model: values.model || undefined
+      provider,
+      model
     }
 
-    executeMutation.mutate(payload)
+    executeMutation.mutate({ payload, generation })
   }
 
   const generateInputTemplate = () => {
@@ -192,7 +240,7 @@ export const ExecutePlayground: React.FC<ExecutePlaygroundProps> = ({
   return (
     <Drawer
       open={open}
-      onClose={onClose}
+      onClose={handleClose}
       title={
         <span className="flex items-center gap-2">
           <Play className="size-5" />
@@ -240,7 +288,33 @@ export const ExecutePlayground: React.FC<ExecutePlaygroundProps> = ({
             </Alert>
           )}
 
-          <Form form={form} layout="vertical" onFinish={handleExecute}>
+          {executionError && (
+            <Alert
+              variant="error"
+              title={t("common:error.label", { defaultValue: "Error" })}
+            >
+              {executionError}
+            </Alert>
+          )}
+
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleExecute}
+            onFinishFailed={({ errorFields }) => {
+              executionGeneration.current += 1
+              setOutput(null)
+              setExecutionStats(null)
+              setExecutionError(
+                sanitizeServerErrorMessage(
+                  errorFields[0]?.errors[0],
+                  t("managePrompts.studio.prompts.invalidInputs", {
+                    defaultValue: "Invalid inputs JSON"
+                  })
+                )
+              )
+            }}
+          >
             <Form.Item
               name="inputs"
               label={t("managePrompts.studio.prompts.form.inputs", {

@@ -13,8 +13,8 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
     get_or_create_audit_service_for_user_id,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    _authnz_busy_http_exception,
     get_auth_principal,
     get_db_transaction,
     get_registration_service_dep,
@@ -25,6 +25,7 @@ from tldw_Server_API.app.api.v1.API_Deps.org_deps import (
     require_org_membership,
     require_org_owner,
 )
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     OrgBudgetItem,
     OrgBudgetSelfUpdateRequest,
@@ -56,12 +57,24 @@ from tldw_Server_API.app.api.v1.schemas.org_team_schemas import (
 from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, AuditEventType
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.AuthNZ.exceptions import (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
+    DatabaseLockError,
     DuplicateOrganizationError,
     DuplicateTeamError,
     InvalidRegistrationCodeError,
     RegistrationCodeExhaustedError,
     RegistrationCodeExpiredError,
     RegistrationDisabledError,
+)
+from tldw_Server_API.app.core.AuthNZ.membership_writer import (
+    ActorMembershipWriteContext,
+    MembershipAuthority,
+    MembershipAuthorizationError,
+    MembershipParentRequired,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.repos.orgs_teams_repo import AuthnzOrgsTeamsRepo
@@ -84,6 +97,74 @@ router = APIRouter(
         403: {"description": "Not authorized"},
     },
 )
+
+_MEMBERSHIP_CONTROL_ERRORS = (
+    ConnectionPoolExhaustedError,
+    DatabaseConcurrencyConflict,
+    DatabaseLockError,
+    MembershipAuthorizationError,
+    MembershipPreflightChanged,
+    MembershipScopeNotFound,
+    MembershipTargetNotFound,
+    TimeoutError,
+)
+
+
+def _membership_context(
+    principal: AuthPrincipal,
+    ctx: OrgContext | None = None,
+) -> ActorMembershipWriteContext:
+    if type(principal.user_id) is not int or principal.user_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        )
+    return ActorMembershipWriteContext(
+        actor_user_id=principal.user_id,
+        required_authority=(
+            MembershipAuthority.PLATFORM_ADMIN
+            if ctx is not None and ctx.is_platform_admin
+            else MembershipAuthority.SCOPED_MEMBERSHIP
+        ),
+    )
+
+
+def _membership_control_http_exception(
+    exc: (
+        MembershipAuthorizationError
+        | ConnectionPoolExhaustedError
+        | DatabaseConcurrencyConflict
+        | DatabaseLockError
+        | MembershipPreflightChanged
+        | MembershipScopeNotFound
+        | MembershipTargetNotFound
+        | TimeoutError
+    ),
+) -> HTTPException:
+    if isinstance(
+        exc,
+        (
+            ConnectionPoolExhaustedError,
+            DatabaseConcurrencyConflict,
+            DatabaseLockError,
+            TimeoutError,
+        ),
+    ):
+        return _authnz_busy_http_exception()
+    if isinstance(exc, MembershipAuthorizationError):
+        return HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to manage memberships",
+        )
+    if isinstance(exc, (MembershipScopeNotFound, MembershipTargetNotFound)):
+        return HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Membership scope or target not found",
+        )
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="Membership write conflicted; retry the request",
+    )
 
 
 # =============================================================================
@@ -144,17 +225,11 @@ async def create_org(
     repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
 
     try:
-        org = await repo.create_organization(
+        org = await repo.create_organization_with_owner_membership(
             name=body.name,
             slug=body.slug,
             owner_user_id=principal.user_id,
-        )
-
-        # Add creator as owner member
-        await repo.add_org_member(
-            org_id=org["id"],
-            user_id=principal.user_id,
-            role="owner",
+            context=_membership_context(principal),
         )
 
         logger.info(f"User {principal.user_id} created org {org['id']} ({body.name})")
@@ -171,6 +246,8 @@ async def create_org(
             team_count=0,
             user_role="owner",
         )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
     except DuplicateOrganizationError as e:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -274,6 +351,7 @@ async def update_org(
 )
 async def delete_org(
     ctx: OrgContext = Depends(require_org_owner()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> Response:
     """Delete an organization. Requires owner role."""
     # Check for active paid subscription before allowing deletion
@@ -293,7 +371,13 @@ async def delete_org(
 
     db_pool = await get_db_pool()
     repo = AuthnzOrgsTeamsRepo(db_pool=db_pool)
-    await repo.delete_organization_with_provider_secrets(org_id=ctx.org_id)
+    try:
+        await repo.delete_organization_with_provider_secrets(
+            org_id=ctx.org_id,
+            context=_membership_context(principal, ctx),
+        )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
 
     logger.info(f"Org {ctx.org_id} deleted by owner")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -320,11 +404,20 @@ async def transfer_ownership(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Ownership transfer requires an authenticated user",
         )
-    if body.new_owner_user_id == principal.user_id:
+    current_owner_user_id = principal.user_id
+    if ctx.is_platform_admin:
+        try:
+            current_owner_user_id = await repo.get_organization_owner_user_id(ctx.org_id)
+        except _MEMBERSHIP_CONTROL_ERRORS as exc:
+            raise _membership_control_http_exception(exc) from exc
+    if current_owner_user_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
+    if body.new_owner_user_id == current_owner_user_id:
         logger.warning(
-            "User {} attempted to transfer ownership of org {} to themselves",
+            "User {} attempted a no-op transfer of org {} to current owner {}",
             principal.user_id,
             ctx.org_id,
+            current_owner_user_id,
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -339,11 +432,15 @@ async def transfer_ownership(
             detail="New owner must be an existing member of the organization",
         )
 
-    org = await repo.transfer_organization_ownership(
-        org_id=ctx.org_id,
-        new_owner_user_id=body.new_owner_user_id,
-        current_owner_user_id=principal.user_id,
-    )
+    try:
+        org = await repo.transfer_organization_ownership(
+            org_id=ctx.org_id,
+            new_owner_user_id=body.new_owner_user_id,
+            current_owner_user_id=current_owner_user_id,
+            context=_membership_context(principal, ctx),
+        )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
 
     if not org:
         raise HTTPException(
@@ -351,7 +448,7 @@ async def transfer_ownership(
             detail="Organization not found",
         )
 
-    logger.info(f"Org {ctx.org_id} ownership transferred from {principal.user_id} to {body.new_owner_user_id}")
+    logger.info(f"Org {ctx.org_id} ownership transferred from {current_owner_user_id} to {body.new_owner_user_id}")
     return OrganizationResponse(**org)
 
 
@@ -387,6 +484,7 @@ async def list_org_members(
 async def add_org_member(
     body: OrgMemberAddRequest,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ):
     """Add a member to the organization. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -399,11 +497,15 @@ async def add_org_member(
             detail="Use the transfer ownership endpoint to add an owner",
         )
 
-    result = await repo.add_org_member(
-        org_id=ctx.org_id,
-        user_id=body.user_id,
-        role=body.role or "member",
-    )
+    try:
+        result = await repo.add_org_member(
+            org_id=ctx.org_id,
+            user_id=body.user_id,
+            role=body.role or "member",
+            context=_membership_context(principal, ctx),
+        )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
 
     logger.info(f"Added user {body.user_id} to org {ctx.org_id} as {body.role}")
     return OrgMemberResponse(**result)
@@ -418,6 +520,7 @@ async def update_member_role(
     user_id: int,
     body: OrgMemberRoleUpdateRequest,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ):
     """Update a member's role. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -430,11 +533,15 @@ async def update_member_role(
             detail="Use the transfer ownership endpoint to assign owner role",
         )
 
-    result = await repo.update_org_member_role(
-        org_id=ctx.org_id,
-        user_id=user_id,
-        role=body.role,
-    )
+    try:
+        result = await repo.update_org_member_role(
+            org_id=ctx.org_id,
+            user_id=user_id,
+            role=body.role,
+            context=_membership_context(principal, ctx),
+        )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
 
     if not result:
         raise HTTPException(
@@ -480,7 +587,14 @@ async def remove_org_member(
                 detail="Cannot remove the last owner. Transfer ownership first.",
             )
 
-    result = await repo.remove_org_member(org_id=ctx.org_id, user_id=user_id)
+    try:
+        result = await repo.remove_org_member(
+            org_id=ctx.org_id,
+            user_id=user_id,
+            context=_membership_context(principal, ctx),
+        )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
 
     if result.get("error") == "owner_required":
         raise HTTPException(
@@ -628,6 +742,7 @@ async def update_team(
 async def delete_team(
     team_id: int,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> Response:
     """Delete a team. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -641,7 +756,13 @@ async def delete_team(
             detail="Team not found",
         )
 
-    await repo.delete_team_with_provider_secrets(team_id=team_id)
+    try:
+        await repo.delete_team_with_provider_secrets(
+            team_id=team_id,
+            context=_membership_context(principal, ctx),
+        )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
 
     logger.info(f"Deleted team {team_id} from org {ctx.org_id}")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -698,6 +819,7 @@ async def add_team_member(
     team_id: int,
     body: TeamMemberAddRequest,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ):
     """Add a member to a team. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -719,11 +841,20 @@ async def add_team_member(
             detail="User must be an organization member first",
         )
 
-    result = await repo.add_team_member(
-        team_id=team_id,
-        user_id=body.user_id,
-        role=body.role or "member",
-    )
+    try:
+        result = await repo.add_team_member(
+            team_id=team_id,
+            user_id=body.user_id,
+            role=body.role or "member",
+            context=_membership_context(principal, ctx),
+        )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
+    except MembershipParentRequired as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User must be an organization member first",
+        ) from exc
 
     logger.info(f"Added user {body.user_id} to team {team_id}")
     return TeamMemberResponse(**result)
@@ -739,6 +870,7 @@ async def remove_team_member(
     team_id: int,
     user_id: int,
     ctx: OrgContext = Depends(require_org_admin()),
+    principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> Response:
     """Remove a member from a team. Requires admin or owner role."""
     db_pool = await get_db_pool()
@@ -752,7 +884,14 @@ async def remove_team_member(
             detail="Team not found",
         )
 
-    result = await repo.remove_team_member(team_id=team_id, user_id=user_id)
+    try:
+        result = await repo.remove_team_member(
+            team_id=team_id,
+            user_id=user_id,
+            context=_membership_context(principal, ctx),
+        )
+    except _MEMBERSHIP_CONTROL_ERRORS as exc:
+        raise _membership_control_http_exception(exc) from exc
     if not result.get("removed"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -981,6 +1120,18 @@ async def accept_org_invite(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc) or "Invalid invite code",
         ) from exc
+    except (MembershipScopeNotFound, MembershipParentRequired, MembershipTargetNotFound) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid invite code",
+        ) from exc
+    except (
+        ConnectionPoolExhaustedError,
+        DatabaseConcurrencyConflict,
+        DatabaseLockError,
+        TimeoutError,
+    ) as exc:
+        raise _membership_control_http_exception(exc) from exc
 
     async def _safe_audit_log_invite_accept() -> None:
         try:

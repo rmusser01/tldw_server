@@ -36,6 +36,7 @@ type UploadedFile = Pick<StoredUploadedFile, "id" | "filename" | "size"> &
 interface AttachmentsSummaryProps {
   /** Base64 image string */
   image: string
+  imageFilename?: string
   /** Selected browser tabs/documents */
   documents: Document[]
   /** Uploaded files */
@@ -58,6 +59,7 @@ interface AttachmentsSummaryProps {
 
 export const AttachmentsSummary: React.FC<AttachmentsSummaryProps> = ({
   image,
+  imageFilename,
   documents,
   files,
   onRemoveImage,
@@ -184,8 +186,8 @@ export const AttachmentsSummary: React.FC<AttachmentsSummaryProps> = ({
           {image && (
             <div className="space-y-2">
               <div className="flex items-center justify-between text-[11px] text-text-muted">
-                <span className="font-medium">
-                  {t("playground:attachments.image", "Image")}
+                <span className="min-w-0 truncate font-medium" title={imageFilename}>
+                  {imageFilename || t("playground:attachments.image", "Image")}
                 </span>
                 {!readOnly && (
                   <button

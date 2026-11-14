@@ -2,6 +2,7 @@ import i18n from "i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { chatRagMethods } from "../domains/chat-rag"
 import { TldwChatService } from "../TldwChat"
+import { tldwClient } from "../TldwApiClient"
 import { buildAssistantErrorContent, decodeChatErrorPayload } from "@/utils/chat-error-message"
 
 vi.mock("wxt/browser", () => ({ browser: { runtime: {} } }))
@@ -35,12 +36,32 @@ const consume = async (service: TldwChatService, signal?: AbortSignal) => {
   }
 }
 
-const serveStream = (firstOutputMs?: number, finish = true) => {
+type StreamShape = {
+  /** Send an SSE comment every second (the backend's heartbeats are off by default). */
+  heartbeat?: boolean
+  /** Frames sent as soon as the response opens, before any model output. */
+  preamble?: string[]
+}
+
+/** What the real backend sends before the model's first token. */
+const BACKEND_PREAMBLE = [
+  'data: {"event":"tldw_metadata","conversation_id":"saved-chat","tldw_conversation_id":"saved-chat"}\n\n',
+  'event: stream_start\ndata: {"conversation_id":"saved-chat","model":"local-model"}\n\n'
+]
+
+const serveStream = (
+  firstOutputMs?: number,
+  finish = true,
+  { heartbeat: sendHeartbeat = true, preamble = [] }: StreamShape = {}
+) => {
   const encoder = new TextEncoder()
   const fetch = vi.fn(async (_url: string, init: RequestInit) => {
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        const heartbeat = setInterval(() => controller.enqueue(encoder.encode(": processing\n\n")), 1_000)
+        for (const frame of preamble) controller.enqueue(encoder.encode(frame))
+        const heartbeat = sendHeartbeat
+          ? setInterval(() => controller.enqueue(encoder.encode(": processing\n\n")), 1_000)
+          : undefined
         let output: ReturnType<typeof setTimeout> | undefined
         const cleanup = () => {
           clearInterval(heartbeat)
@@ -70,6 +91,51 @@ const serveStream = (firstOutputMs?: number, finish = true) => {
   return fetch
 }
 
+/** Continuous hidden reasoning must not count as the native final-answer display. */
+const serveThinkingStream = (reasoningFrame: string, visibleAt?: number) => {
+  const encoder = new TextEncoder();
+  let cleanup = () => {};
+  const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const thinking = setInterval(
+          () => controller.enqueue(encoder.encode(reasoningFrame)),
+          250,
+        );
+        const visible =
+          visibleAt === undefined
+            ? undefined
+            : setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    'data: {"choices":[{"delta":{"content":"Grounded answer"}}]}\n\n',
+                  ),
+                );
+              }, visibleAt);
+        cleanup = () => {
+          clearInterval(thinking);
+          clearTimeout(visible);
+          init.signal?.removeEventListener("abort", abort);
+        };
+        const abort = () => {
+          cleanup();
+          controller.error(new DOMException("Aborted", "AbortError"));
+        };
+        init.signal?.addEventListener("abort", abort, { once: true });
+      },
+      cancel() {
+        cleanup();
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+};
+
 describe("Chat startup policy and diagnostics through browser transport", () => {
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -81,7 +147,7 @@ describe("Chat startup policy and diagnostics through browser transport", () => 
       apiKeyPersistence: "device", apiKeyServerOrigin: "http://127.0.0.1:8000"
     })
   })
-  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals() })
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks() })
 
   it.each([undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])(
     "allows first visible output after 10 seconds with missing/invalid startup setting %s",
@@ -140,6 +206,60 @@ describe("Chat startup policy and diagnostics through browser transport", () => 
     expect(fetch).toHaveBeenCalledOnce()
   })
 
+  describe("CM-N1 (#3107): the first token waits for the startup timeout on a silent stream", () => {
+    it.each([
+      ["nothing", []],
+      ["only the backend's metadata frames", BACKEND_PREAMBLE]
+    ])("completes a 60 s first token when the server sends %s before it", async (_label, preamble) => {
+      const fetch = serveStream(60_000, true, { heartbeat: false, preamble })
+      const result = consume(new TldwChatService())
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(await result).toEqual({ text: "Grounded answer", error: undefined })
+      expect(fetch).toHaveBeenCalledOnce()
+    })
+
+    it("applies the stream idle timeout between chunks once the first token has arrived", async () => {
+      const fetch = serveStream(1_000, false, { heartbeat: false, preamble: BACKEND_PREAMBLE })
+      const result = consume(new TldwChatService())
+      await vi.advanceTimersByTimeAsync(1_000 + 29_999)
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      const { text, error } = await result
+      expect(text).toBe("Grounded answer")
+      expect(error).toMatchObject({ name: "ChatStreamTimeoutError", phase: "idle", timeoutMs: 30_000 })
+    })
+
+    it("still fails a genuine hang past the startup timeout with a clear startup error", async () => {
+      const fetch = serveStream(undefined, true, { heartbeat: false, preamble: BACKEND_PREAMBLE })
+      const result = consume(new TldwChatService())
+      await vi.advanceTimersByTimeAsync(119_999)
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      const { error } = await result
+      expect(error).toMatchObject({ name: "ChatStreamTimeoutError", phase: "startup", timeoutMs: 120_000 })
+      expect(decodeChatErrorPayload(buildAssistantErrorContent("", error))).toMatchObject({
+        summary: "The model did not start responding in time.",
+        detail: expect.stringMatching(/120 seconds before any visible output/)
+      })
+      expect(fetch).toHaveBeenCalledOnce()
+    })
+
+    it("hands the web and extension transports a watchdog no shorter than the startup timeout", async () => {
+      // Both transports (direct fetch and the extension background port) take their
+      // byte-level idle timer only from this option, so one value covers both paths.
+      Object.assign(storage.get("tldwConfig")!, { chatStartupTimeoutMs: 90_000, chatStreamIdleTimeoutMs: 20_000 })
+      serveStream(10, true, { heartbeat: false })
+      const transport = vi.spyOn(tldwClient, "streamChatCompletion")
+      const result = consume(new TldwChatService())
+      await vi.advanceTimersByTimeAsync(10)
+      expect(await result).toEqual({ text: "Grounded answer", error: undefined })
+      expect(transport).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ streamIdleTimeoutMs: 90_000 })
+      )
+    })
+  })
+
   it("keeps an explicit Stop distinct from a startup timeout", async () => {
     const fetch = serveStream()
     const stop = new AbortController()
@@ -149,4 +269,96 @@ describe("Chat startup policy and diagnostics through browser transport", () => 
     expect((await result).error).toMatchObject({ name: "AbortError" })
     expect(fetch).toHaveBeenCalledOnce()
   })
+
+
+  it.each([
+    [
+      "provider reasoning delta",
+      'data: {"choices":[{"delta":{"reasoning_content":"Private thinking"}}]}\n\n',
+    ],
+    [
+      "legacy reasoning metadata",
+      'data: {"additional_kwargs":{"reasoning_content":"Private thinking"}}\n\n',
+    ],
+  ])(
+    "keeps the visible-output startup deadline while receiving %s",
+    async (_label, frame) => {
+      Object.assign(storage.get("tldwConfig")!, {
+        chatStartupTimeoutMs: 2_000,
+        chatStreamIdleTimeoutMs: 10_000,
+      });
+      const fetch = serveThinkingStream(frame);
+      const stop = new AbortController();
+      const result = consume(new TldwChatService(), stop.signal);
+      try {
+        await vi.advanceTimersByTimeAsync(1_999);
+        expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetch.mock.calls[0][1].signal?.aborted).toBe(true);
+        expect((await result).error).toMatchObject({
+          name: "ChatStreamTimeoutError",
+          phase: "startup",
+          timeoutMs: 2_000,
+        });
+      } finally {
+        stop.abort();
+        await result;
+      }
+    },
+  );
+
+  it("keeps the visible-answer idle deadline while hidden reasoning continues", async () => {
+    Object.assign(storage.get("tldwConfig")!, {
+      chatStartupTimeoutMs: 2_000,
+      chatStreamIdleTimeoutMs: 1_000,
+    });
+    const fetch = serveThinkingStream(
+      'data: {"choices":[{"delta":{"reasoning_content":"Private thinking"}}]}\n\n',
+      0,
+    );
+    const stop = new AbortController();
+    const result = consume(new TldwChatService(), stop.signal);
+    try {
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(true);
+      expect(await result).toMatchObject({
+        text: "Grounded answer",
+        error: {
+          name: "ChatStreamTimeoutError",
+          phase: "idle",
+          timeoutMs: 1_000,
+        },
+      });
+    } finally {
+      stop.abort();
+      await result;
+    }
+  });
+
+  it("allows visible content arriving after reasoning within its startup deadline", async () => {
+    Object.assign(storage.get("tldwConfig")!, {
+      chatStartupTimeoutMs: 2_000,
+      chatStreamIdleTimeoutMs: 1_000,
+    });
+    const fetch = serveThinkingStream(
+      'data: {"choices":[{"delta":{"reasoning_content":"Private thinking"}}]}\n\n',
+      1_500,
+    );
+    const stop = new AbortController();
+    const result = consume(new TldwChatService(), stop.signal);
+    try {
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false);
+      stop.abort();
+      expect(await result).toMatchObject({
+        text: "Grounded answer",
+        error: { name: "AbortError" },
+      });
+    } finally {
+      stop.abort();
+      await result;
+    }
+  });
 })

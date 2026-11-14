@@ -64,6 +64,11 @@ from tldw_Server_API.app.core.exceptions import PromptsConflictError as Conflict
 from tldw_Server_API.app.core.exceptions import PromptsDatabaseError as DatabaseError
 from tldw_Server_API.app.core.exceptions import ServicePromptRevisionConflict
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Utils.keyword_identity import (
+    dedupe_keywords,
+    normalize_keyword_identity,
+    rank_identity_matches,
+)
 
 #
 # Local Imports
@@ -1274,9 +1279,7 @@ class PromptsDatabase:
         try:
             with self.transaction() as conn:
                 cursor = conn.cursor()
-                cursor.execute('SELECT id, uuid, deleted, version FROM PromptKeywordsTable WHERE keyword = ?',
-                               (normalized_keyword,))
-                existing = cursor.fetchone()
+                existing = self._find_keyword(normalized_keyword, include_deleted=True)
 
                 if existing:
                     kw_id, kw_uuid, is_deleted, current_version = existing['id'], existing['uuid'], existing['deleted'], \
@@ -1292,7 +1295,7 @@ class PromptsDatabase:
                         cursor.execute("SELECT * FROM PromptKeywordsTable WHERE id=?", (kw_id,))
                         payload = dict(cursor.fetchone())
                         self._log_sync_event(conn, 'PromptKeywordsTable', kw_uuid, 'update', new_version, payload)
-                        self._update_fts_prompt_keyword(conn, kw_id, normalized_keyword)
+                        self._update_fts_prompt_keyword(conn, kw_id, existing['keyword'])
                         return kw_id, kw_uuid
                     else:  # Already active, just return its ID and UUID
                         logger.debug(
@@ -1318,9 +1321,54 @@ class PromptsDatabase:
             else:
                 raise DatabaseError(f"Failed to add/update prompt keyword: {e}") from e  # noqa: TRY003
 
+    def _match_keyword_identities(
+        self, keywords: list[str], *, include_deleted: bool, all_matches: bool = False
+    ) -> dict[str, list[dict]]:
+        """
+        Maps each requested keyword's ``normalize_keyword_identity`` to its stored rows.
+
+        Rows come active first, then oldest. One NOCASE lookup over the requested texts
+        and their identities finds every ASCII row (an ASCII row's casefold is its
+        lowercase). Only rows with a non-ASCII character can still match by identity
+        (ß/SS, accented capitals, NFC forms), so the fallback reads just those, and only
+        when an identity has no active hit or ``all_matches`` wants every legacy
+        duplicate (TASK-13950.5).
+        """
+        terms = dedupe_keywords(self._normalize_keyword(k) for k in keywords if k and k.strip())
+        wanted = {normalize_keyword_identity(term) for term in terms}
+        if not wanted:
+            return {}
+        values = [*terms, *(wanted - set(terms))]
+        active = "" if include_deleted else " AND deleted = 0"
+        select = "SELECT * FROM PromptKeywordsTable WHERE "
+        rows = [
+            dict(row)
+            for row in self.execute_query(
+                f"{select}keyword IN ({', '.join('?' * len(values))}){active}",  # nosec B608
+                tuple(values),
+            ).fetchall()
+        ]
+        groups = rank_identity_matches(wanted, rows)
+        if all_matches or any(identity not in groups or groups[identity][0]["deleted"] for identity in wanted):
+            # ponytail: scans the table for non-ASCII rows; add a stored identity column if that gets slow.
+            rows += [
+                dict(row)
+                for row in self.execute_query(f"{select}keyword GLOB '*[^ -~]*'{active}").fetchall()  # nosec B608
+            ]
+            groups = rank_identity_matches(wanted, rows)
+        return groups
+
+    def _find_keyword(self, keyword_text: str, *, include_deleted: bool) -> Optional[dict]:
+        """Returns the stored row for ``keyword_text``'s identity: active first, then oldest."""
+        text = self._normalize_keyword(keyword_text)
+        rows = self._match_keyword_identities([text], include_deleted=include_deleted).get(
+            normalize_keyword_identity(text)
+        )
+        return rows[0] if rows else None
+
     def get_active_keyword_by_text(self, keyword_text: str) -> Optional[dict]:
         """
-        Fetches an active (not deleted) keyword by its exact normalized text.
+        Fetches an active (not deleted) keyword matching ``keyword_text`` in any case.
 
         Args:
             keyword_text: The keyword text to search for.
@@ -1331,12 +1379,8 @@ class PromptsDatabase:
         if not keyword_text or not keyword_text.strip():
             return None  # Or raise InputError if strictness is preferred here
         normalized_keyword = self._normalize_keyword(keyword_text)
-        # Case-insensitive exact match using NOCASE collation
-        query = "SELECT id, uuid, keyword, last_modified, version, client_id FROM PromptKeywordsTable WHERE keyword = ? COLLATE NOCASE AND deleted = 0"
         try:
-            cursor = self.execute_query(query, (normalized_keyword,))
-            result = cursor.fetchone()
-            return dict(result) if result else None
+            return self._find_keyword(normalized_keyword, include_deleted=False)
         except (DatabaseError, sqlite3.Error) as e:
             logger.error(f"Error fetching active keyword by text '{normalized_keyword}': {e}")
             # Depending on desired strictness, could raise or return None
@@ -1525,9 +1569,9 @@ class PromptsDatabase:
             else: raise DatabaseError(f"Failed to process prompt '{name}': {e}") from e  # noqa: E701, TRY003
 
     def update_keywords_for_prompt(self, prompt_id: int, keywords_list: list[str]):
-        normalized_new_keywords = sorted({
+        normalized_new_keywords = dedupe_keywords(
             self._normalize_keyword(k) for k in keywords_list if k and k.strip()
-        })
+        )
         # Do NOT auto-add a default keyword when clearing; allow empty keyword sets
 
         try:
@@ -1968,8 +2012,7 @@ class PromptsDatabase:
         try:
             with self.transaction() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, uuid, version FROM PromptKeywordsTable WHERE keyword = ? AND deleted = 0", (normalized_keyword,))
-                kw_info = cursor.fetchone()
+                kw_info = self._find_keyword(normalized_keyword, include_deleted=False)
                 if not kw_info:
                     logger.warning(f"Prompt keyword '{normalized_keyword}' not found or already deleted.")
                     return False
@@ -2534,24 +2577,9 @@ class PromptsDatabase:
 
         if _pfx_norm == "keyword":
             kw_value_raw = (_rest or "")
-            kw_value = self._normalize_keyword(kw_value_raw)
             try:
-                # Match active keywords (case-insensitive exact match via NOCASE collation)
-                kw_cursor = self.execute_query(
-                    "SELECT id FROM PromptKeywordsTable WHERE keyword = ? COLLATE NOCASE AND deleted = 0",
-                    (kw_value,),
-                )
-                kw_ids = [row['id'] for row in kw_cursor.fetchall()]
-                if not kw_ids:
-                    # Python-side normalization fallback for edge cases (control chars, locale quirks)
-                    try:
-                        all_kw_cur = self.execute_query("SELECT id, keyword FROM PromptKeywordsTable WHERE deleted = 0")
-                        target_norm = self._normalize_keyword(kw_value_raw).casefold()
-                        for r in all_kw_cur.fetchall():
-                            if self._normalize_keyword(r['keyword']).casefold() == target_norm:
-                                kw_ids.append(r['id'])
-                    except _PROMPTS_NONCRITICAL_EXCEPTIONS:
-                        pass
+                matches = self._match_keyword_identities([kw_value_raw], include_deleted=False, all_matches=True)
+                kw_ids = [row['id'] for rows in matches.values() for row in rows]
                 if not kw_ids:
                     return [], 0
                 placeholders = ','.join('?' * len(kw_ids))
@@ -2604,7 +2632,7 @@ class PromptsDatabase:
                     cursor = self.execute_query("SELECT rowid FROM prompts_fts WHERE prompts_fts MATCH ?", (fts_query,))
                     used_fts = True
                     matching_prompt_ids.update(row['rowid'] for row in cursor.fetchall())
-                except sqlite3.Error as e:
+                except (DatabaseError, sqlite3.Error) as e:
                     logging.warning(f"FTS search on prompts failed: {e}; will fallback to naive search.")
                     fts_error = True
 
@@ -2625,11 +2653,11 @@ class PromptsDatabase:
                             tuple(matching_keyword_ids)
                         )
                         matching_prompt_ids.update(row['prompt_id'] for row in link_cursor.fetchall())
-                except sqlite3.Error as e:
+                except (DatabaseError, sqlite3.Error) as e:
                     logging.warning(f"FTS search on keywords failed: {e}; will fallback to naive search.")
                     fts_error = True
 
-            if not matching_prompt_ids and not used_fts:
+            if not matching_prompt_ids and not used_fts and not fts_error:
                 return [], 0  # No FTS used and no matches requested
 
             # Add the final ID list to the main query conditions
@@ -2639,7 +2667,12 @@ class PromptsDatabase:
                 params.extend(list(matching_prompt_ids))
 
         # If FTS was used but resulted in no matches, prevent unfiltered result set before fallback.
-        if search_query and search_fields and used_fts and not matching_prompt_ids and ("author:" not in str(search_query).lower()) and ("keyword:" not in str(search_query).lower()):
+        if (
+            search_query
+            and search_fields
+            and (used_fts or fts_error)
+            and not matching_prompt_ids
+        ):
             conditions.append("1 = 0")
 
         # --- Build and Execute Final Query ---
@@ -2929,15 +2962,17 @@ def export_prompts_formatted(db_instance: PromptsDatabase,
 
     # Keyword filtering
     if filter_keywords and len(filter_keywords) > 0:
-        normalized_filter_keywords = [db_instance._normalize_keyword(k) for k in filter_keywords if k and k.strip()]
-        if normalized_filter_keywords:
-            placeholders = ','.join(['?'] * len(normalized_filter_keywords))
+        if any(k and k.strip() for k in filter_keywords):
+            # Every active keyword row matching a filter's identity (TASK-13950.5).
+            matches = db_instance._match_keyword_identities(filter_keywords, include_deleted=False, all_matches=True)
+            # IN (NULL) selects nothing when no keyword matches.
+            keyword_ids = [row['id'] for rows in matches.values() for row in rows] or [None]
+            placeholders = ','.join(['?'] * len(keyword_ids))
             query_sql += f"""
                 JOIN PromptKeywordLinks pkl ON p.id = pkl.prompt_id
-                JOIN PromptKeywordsTable pkw ON pkl.keyword_id = pkw.id
-                WHERE p.deleted = 0 AND pkw.deleted = 0 AND pkw.keyword IN ({placeholders})
+                WHERE p.deleted = 0 AND pkl.keyword_id IN ({placeholders})
             """
-            query_params.extend(normalized_filter_keywords)
+            query_params.extend(keyword_ids)
         else: # No valid filter keywords, so just filter active prompts
             query_sql += " WHERE p.deleted = 0"
     else: # No keyword filter, just active prompts

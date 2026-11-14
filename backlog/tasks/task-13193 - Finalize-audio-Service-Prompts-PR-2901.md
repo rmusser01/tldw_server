@@ -35,22 +35,15 @@ Resolve generated fingerprint against dev84b6928dcf; verify audio and authentica
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Previous head5647aa39e2 passed all seven required checks; Qodo zero bugs/violations, all threads resolved. Rebase required after Buddy PR2902 merged. Only generated fingerprint conflicted. Historic verification:236 backend,198 shared UI,5 WebUI tests; post-activation rebase125 focused tests and zero Bandit findings. Full suite and live STT/provider calls not run locally.
-<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 Rebased onto dev84b6928dcf. Range-diff confirms runtime and test patches unchanged; generated fingerprint now65bab92528ee0dbfb42d33045bbaa85508eb56617591eb5303edef38c40456dd (2073paths/3142schemas). Audio/registry/API/request-contract plus new cookie-owner regressions:140passed,10warnings. Bandit zero findings; official OpenAPI typegen and fingerprint validation pass. Logs: /tmp/audio-buddy-dev-tests.log, /tmp/bandit_audio_buddy_dev.json, /tmp/audio-buddy-fingerprint.log. Awaiting fresh current-head CI and Qodo before merge.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
-<!-- SECTION:FINAL_SUMMARY:END -->
-<!-- SECTION:FINAL_SUMMARY:END -->
-
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

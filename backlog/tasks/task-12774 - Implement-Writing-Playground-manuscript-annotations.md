@@ -36,7 +36,7 @@ Execute Docs/superpowers/plans/2026-06-23-writing-playground-manuscript-annotati
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Task 1 complete: added pure manuscript annotation anchor constants/helpers and tests.
 
 TDD evidence:
@@ -243,7 +243,7 @@ Security/static checks:
 - `git diff --check` passed.
 - Bandit on the touched backend scope wrote `/tmp/bandit_writing_manuscript_annotations.json` with zero high, medium, or low findings.
 - `NODE_OPTIONS=--max-old-space-size=8192 bunx tsc --noEmit --pretty false` still fails only on existing unrelated package errors in Notes, AudioStudio, ScheduledTasks, Setup, Dexie audiobook migration, background, scheduled-tasks control-plane, and voice-cloning files. No touched Writing Playground annotation/tree/service files were reported.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

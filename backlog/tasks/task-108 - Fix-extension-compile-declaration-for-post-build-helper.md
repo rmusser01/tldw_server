@@ -40,7 +40,7 @@ Fix the extension TypeScript compile failure that blocks the WebUI dependency cl
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Root cause: apps/extension/tsconfig.compile.json includes wxt.config.ts under strict checking, and wxt.config.ts imports the local ESM helper ./scripts/post-build-tasks.mjs without a sibling declaration file. TypeScript therefore treated the helper as implicit any and failed with TS7016.
 
 Fix: added apps/extension/scripts/post-build-tasks.d.mts with typed exports for PostBuildTask, RunPostBuildTasksOptions, getPostBuildTasks, runPostBuildTasks, and getWxtTargetName. This keeps strict TypeScript enabled and avoids broad .mjs-any declarations.
@@ -48,7 +48,7 @@ Fix: added apps/extension/scripts/post-build-tasks.d.mts with typed exports for 
 Verification: bun run compile passed from apps/extension; bunx vitest run tests/unit/post-build-tasks.test.ts passed from apps/extension with 1 file and 4 tests; bun install --frozen-lockfile passed from apps/ with no changes; pubsub usage search still returned no matches; git diff --check passed.
 
 Bandit skipped: this follow-up changes TypeScript declaration metadata and Backlog task documentation only; no Python code changed.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

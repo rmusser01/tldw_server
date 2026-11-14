@@ -3,13 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import SplashOverlay from "../SplashOverlay"
 
-function createCard(overrides?: Partial<{ name: string; effect: string | null; asciiArt: string; title: string; duration: number }>) {
+function createCard(
+  overrides?: Partial<{
+    name: string
+    effect: string | null
+    asciiArt: string
+    title: string
+    duration: number
+  }>
+) {
   return {
     name: overrides?.name ?? "test-card",
     effect: overrides?.effect ?? null,
     asciiArt: overrides?.asciiArt ?? "default_splash",
     title: overrides?.title,
-    duration: overrides?.duration,
+    duration: overrides?.duration
   }
 }
 
@@ -18,15 +26,16 @@ function mockMatchMedia(reducedMotion: boolean): void {
     configurable: true,
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      matches: query === "(prefers-reduced-motion: reduce)" ? reducedMotion : false,
+      matches:
+        query === "(prefers-reduced-motion: reduce)" ? reducedMotion : false,
       media: query,
       onchange: null,
       addListener: vi.fn(),
       removeListener: vi.fn(),
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
+      dispatchEvent: vi.fn()
+    }))
   })
 }
 
@@ -42,8 +51,50 @@ describe("Splash Stage 5 overlay behavior", () => {
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       writable: true,
-      value: originalMatchMedia,
+      value: originalMatchMedia
     })
+  })
+
+  it("cancels the old fade callback when a newer card replaces it", () => {
+    const dismiss = vi.fn()
+    const view = render(
+      <SplashOverlay
+        card={createCard({ name: "same-card", duration: 10_000 })}
+        message="Old splash"
+        onDismiss={dismiss}
+      />
+    )
+    fireEvent.click(screen.getByRole("dialog", { name: "Splash screen" }))
+    view.rerender(
+      <SplashOverlay
+        card={createCard({ name: "same-card", duration: 10_000 })}
+        message="New splash"
+        onDismiss={dismiss}
+      />
+    )
+    act(() => vi.advanceTimersByTime(300))
+    expect(dismiss).not.toHaveBeenCalled()
+    expect(
+      screen.getByRole("dialog", { name: "Splash screen" }).style.opacity
+    ).toBe("1")
+    fireEvent.click(screen.getByRole("dialog", { name: "Splash screen" }))
+    act(() => vi.advanceTimersByTime(300))
+    expect(dismiss).toHaveBeenCalledOnce()
+  })
+
+  it("cancels a pending fade callback on unmount", () => {
+    const dismiss = vi.fn()
+    const view = render(
+      <SplashOverlay
+        card={createCard()}
+        message="Original splash"
+        onDismiss={dismiss}
+      />
+    )
+    fireEvent.click(screen.getByRole("dialog", { name: "Splash screen" }))
+    view.unmount()
+    act(() => vi.advanceTimersByTime(300))
+    expect(dismiss).not.toHaveBeenCalled()
   })
 
   it("auto-dismiss uses fade path before unmount callback", () => {
@@ -130,7 +181,9 @@ describe("Splash Stage 5 overlay behavior", () => {
 
     expect(container.querySelector("canvas")).toBeNull()
     expect(screen.getByText("Reduced motion mode")).toBeInTheDocument()
-    expect(screen.getByLabelText("TLDW Chatbook splash art")).toBeInTheDocument()
+    expect(
+      screen.getByLabelText("TLDW Chatbook splash art")
+    ).toBeInTheDocument()
   })
 
   it("uses theme-aware CSS variables for overlay readability", () => {
@@ -142,16 +195,23 @@ describe("Splash Stage 5 overlay behavior", () => {
       />
     )
 
-    const dialogStyle = screen.getByRole("dialog", { name: "Splash screen" }).getAttribute("style") ?? ""
+    const dialogStyle =
+      screen
+        .getByRole("dialog", { name: "Splash screen" })
+        .getAttribute("style") ?? ""
     expect(dialogStyle).toContain("var(--color-bg)")
 
-    const artStyle = (container.querySelector("pre")?.getAttribute("style") ?? "")
+    const artStyle = container.querySelector("pre")?.getAttribute("style") ?? ""
     expect(artStyle).toContain("var(--color-text)")
 
-    const titleStyle = screen.getByRole("heading", { name: "Theme Test" }).getAttribute("style") ?? ""
+    const titleStyle =
+      screen
+        .getByRole("heading", { name: "Theme Test" })
+        .getAttribute("style") ?? ""
     expect(titleStyle).toContain("var(--color-primary)")
 
-    const messageStyle = screen.getByText("Theme message").getAttribute("style") ?? ""
+    const messageStyle =
+      screen.getByText("Theme message").getAttribute("style") ?? ""
     expect(messageStyle).toContain("var(--color-text-muted)")
   })
 })

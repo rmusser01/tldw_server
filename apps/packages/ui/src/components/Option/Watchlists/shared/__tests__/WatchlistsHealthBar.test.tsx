@@ -90,6 +90,7 @@ const buildOverviewData = (
     total: 0,
     active: 0,
     nextRunAt: null,
+    nextActiveJob: null,
     attention: 0
   },
   items: {
@@ -192,6 +193,7 @@ describe("WatchlistsHealthBar", () => {
           total: 2,
           active: 2,
           nextRunAt: null,
+          nextActiveJob: null,
           attention: 0
         },
         runs: {

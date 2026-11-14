@@ -62,7 +62,7 @@ export const TestCaseGenerateModal: React.FC<TestCaseGenerateModalProps> = ({
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }

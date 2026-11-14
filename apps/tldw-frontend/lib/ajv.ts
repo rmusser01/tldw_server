@@ -1,4 +1,4 @@
-import type { JsonSchema } from '@web/lib/schema';
+import type { JsonSchema } from './schema';
 
 interface AjvError {
   instancePath?: string;
@@ -19,8 +19,9 @@ interface AjvValidateFunction {
   errors?: AjvError[] | null;
 }
 
-export async function validateWithAjv(data: unknown, schema?: JsonSchema): Promise<string[]> {
+export async function validateWithAjv(data: unknown, schema?: JsonSchema, options: { strict?: boolean } = {}): Promise<string[]> {
   if (!schema) return [];
+  if (options.strict && (schema as Record<string, unknown>).$async) throw new Error('Asynchronous workflow input schemas are not supported');
   let ajv: AjvInstance;
   try {
     const mod = await import('ajv') as AjvModule;
@@ -28,7 +29,7 @@ export async function validateWithAjv(data: unknown, schema?: JsonSchema): Promi
     if (!Ajv) {
       throw new Error('missing default export');
     }
-    ajv = new Ajv({ allErrors: true, allowUnionTypes: true, strict: false });
+    ajv = new Ajv({ allErrors: true, allowUnionTypes: true, strict: options.strict ?? false });
   } catch (err) {
     // ajv not installed or failed to initialize; surface to caller
     if (typeof console !== 'undefined') {

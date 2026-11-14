@@ -64,7 +64,7 @@ Planned structure:
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Wrote
 Docs/superpowers/plans/2026-05-06-design-system-product-state-guard-implementation-plan.md
 in the clean design-system-product-state-guard-spec worktree. The plan
@@ -82,7 +82,7 @@ Verification for this planning slice: plan review approved; git diff --check
 passed in the spec worktree. Runtime tests were not run because this task only
 adds a future implementation plan and Backlog metadata. Bandit skipped because
 no Python files were touched.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

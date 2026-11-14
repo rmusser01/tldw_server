@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import WebSocketDisconnect
+from fastapi import HTTPException, WebSocketDisconnect, WebSocketException
 from fastapi.testclient import TestClient
 from starlette.testclient import WebSocketTestSession
 
@@ -27,11 +27,16 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.events import AgentEvent, AgentEventKind
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessage
+from tldw_Server_API.app.core.AuthNZ import websocket_principal
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.services.acp_runtime_policy_service import (
     ACPRuntimePolicySnapshot,
 )
 
 pytestmark = pytest.mark.unit
+
+STREAM = "/api/v1/acp/sessions/test-session/stream"
+AUTH = {"Authorization": "Bearer valid-token"}  # what fake_verifier admits as user 1
 
 
 # Stub heavyweight audio deps before app import in shared fixtures.
@@ -135,7 +140,7 @@ class MockRunnerClient:
                 return True
         return False
 
-    async def prompt(self, session_id: str, prompt: List[Dict]) -> Dict[str, Any]:
+    async def prompt(self, session_id: str, prompt: List[Dict], *, on_native_text=None) -> Dict[str, Any]:
         self.prompt_calls.append((session_id, prompt))
         return {"stopReason": "end", "detail": "ok"}
 
@@ -159,7 +164,7 @@ class _FakeMultiplexWebSocket:
         self.closed_codes: list[int] = []
         self.sent_text: list[str] = []
 
-    async def accept(self) -> None:
+    async def accept(self, subprotocol: str | None = None) -> None:
         self.accepted = True
 
     async def close(self, code: int = 1000) -> None:
@@ -221,17 +226,23 @@ def mock_get_runner_client(mock_runner_client, monkeypatch):
 
 
 @pytest.fixture
-def mock_jwt_manager(monkeypatch):
-    """Mock JWT manager for WebSocket authentication."""
-    mock_manager = MagicMock()
-    mock_token_data = MagicMock()
-    mock_token_data.user_id = 1
-    mock_manager.verify_token.return_value = mock_token_data
+def fake_verifier(monkeypatch):
+    """Stand in for HTTP's get_auth_principal behind resolve_ws_principal.
 
-    import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+    "Bearer valid-token" and the API key "test-api-key" are user 1; anything else is a 401.
+    Returns the (Authorization, X-API-KEY) pairs it was asked to verify, in order.
+    """
+    seen: list[tuple[str | None, str | None]] = []
 
-    monkeypatch.setattr(acp_endpoints, "get_jwt_manager", lambda: mock_manager)
-    return mock_manager
+    async def _get_auth_principal(request):
+        credential = (request.headers.get("authorization"), request.headers.get("x-api-key"))
+        seen.append(credential)
+        if credential in {("Bearer valid-token", None), (None, "test-api-key")}:
+            return AuthPrincipal(kind="user", user_id=1)
+        raise HTTPException(status_code=401)
+
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", _get_auth_principal)
+    return seen
 
 
 @pytest.mark.asyncio
@@ -270,10 +281,15 @@ async def test_acp_session_stream_start_failure_skips_unset_callback_cleanup(mon
             return {}
 
     class _FakeWebSocket:
+        headers: dict[str, str] = {}
+
+        async def accept(self, subprotocol: str | None = None) -> None:
+            return None
+
         async def close(self, code: int = 1000) -> None:
             return None
 
-    async def _fake_authenticate_ws(websocket, token=None, api_key=None, required_scope="read"):
+    async def _fake_authenticate_ws(websocket, *, required_scope):
         return 1
 
     async def _fake_get_runner_client():
@@ -286,7 +302,6 @@ async def test_acp_session_stream_start_failure_skips_unset_callback_cleanup(mon
     await acp_endpoints.acp_session_stream(
         _FakeWebSocket(),
         "session-start-failure",
-        token="valid-token",  # nosec B106
     )
 
     if stub_client.unregister_calls:
@@ -333,15 +348,15 @@ async def test_acp_session_stream_reconnect_cleans_up_replay_broadcaster(
             raise WebSocketDisconnect(code=1000)
 
     class _FakeWebSocket:
+        headers: dict[str, str] = {}
+
+        async def accept(self, subprotocol: str | None = None) -> None:
+            return None
+
         async def close(self, code: int = 1000) -> None:
             return None
 
-    async def _fake_authenticate_ws(
-        websocket: Any,
-        token: str | None = None,
-        api_key: str | None = None,
-        required_scope: str = "read",
-    ) -> int:
+    async def _fake_authenticate_ws(websocket: Any, *, required_scope: str) -> int:
         return 1
 
     async def _fake_get_runner_client() -> MockRunnerClient:
@@ -369,7 +384,6 @@ async def test_acp_session_stream_reconnect_cleans_up_replay_broadcaster(
     await acp_endpoints.acp_session_stream(
         _FakeWebSocket(),
         session_id,
-        token="valid-token",
         last_sequence=1,
     )
 
@@ -391,269 +405,212 @@ async def test_acp_session_stream_reconnect_cleans_up_replay_broadcaster(
 class TestACPWebSocketConnection:
     """Tests for WebSocket connection handling."""
 
-    def test_websocket_connect_with_valid_token(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+    def test_websocket_connect_with_bearer_header(
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
-        """Test successful WebSocket connection with valid JWT token."""
-        with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
-        ) as websocket:
+        """Test successful WebSocket connection with a valid bearer header."""
+        with client_user_only.websocket_connect(STREAM, headers=AUTH) as websocket:
             # Should receive connected message
             data = websocket.receive_json()
             assert data["type"] == "connected"
             assert data["session_id"] == "test-session"
             assert "agent_capabilities" in data
+        assert fake_verifier == [("Bearer valid-token", None)]
 
     def test_websocket_connect_with_subprotocol_bearer(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
-        """Test WebSocket connection using Sec-WebSocket-Protocol bearer token."""
-        with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream",
-            subprotocols=["bearer", "valid-token"],
-        ) as websocket:
+        """The bearer subprotocol is verified and only its marker is echoed (browsers need the echo)."""
+        with client_user_only.websocket_connect(STREAM, subprotocols=["bearer", "valid-token"]) as websocket:
+            assert websocket.accepted_subprotocol == "bearer"
             data = websocket.receive_json()
             assert data["type"] == "connected"
             assert data["session_id"] == "test-session"
+        assert fake_verifier == [("Bearer valid-token", None)]
 
-    def test_websocket_connect_with_async_jwt_manager(
-        self, client_user_only, mock_get_runner_client, monkeypatch
+    @pytest.mark.parametrize(
+        ("query", "forwarded"),
+        [("token=valid-token", ("Bearer valid-token", None)), ("api_key=test-api-key", (None, "test-api-key"))],
+    )
+    def test_deprecated_query_credential_goes_to_the_same_verifier(
+        self, client_user_only, mock_get_runner_client, fake_verifier, query, forwarded
     ):
-        """Async verify_token implementations should be supported for JWT auth."""
-        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+        """Shipped clients still send ?token= / ?api_key=; the shim forwards them, unparsed (TASK-13950.7)."""
+        with client_user_only.websocket_connect(f"{STREAM}?{query}") as websocket:
+            assert websocket.accepted_subprotocol is None
+            assert websocket.receive_json()["type"] == "connected"
+        assert fake_verifier == [forwarded]
 
-        class AsyncJWTManager:
-            async def verify_token(self, token: str):
-                return types.SimpleNamespace(user_id=1)
+    def test_deprecated_x_api_key_subprotocol_goes_to_the_same_verifier(
+        self, client_user_only, mock_get_runner_client, fake_verifier
+    ):
+        """The ACP SSH panel offers ``x-api-key, <key>``; echo the marker, never the key."""
+        with client_user_only.websocket_connect(STREAM, subprotocols=["x-api-key", "test-api-key"]) as websocket:
+            assert websocket.accepted_subprotocol == "x-api-key"
+            assert websocket.receive_json()["type"] == "connected"
+        assert fake_verifier == [(None, "test-api-key")]
 
-        monkeypatch.setattr(acp_endpoints, "get_jwt_manager", lambda: AsyncJWTManager())
+    def test_a_header_credential_bypasses_the_deprecated_shim(
+        self, client_user_only, mock_get_runner_client, fake_verifier
+    ):
+        with client_user_only.websocket_connect(f"{STREAM}?token=revoked-token", headers=AUTH) as websocket:
+            assert websocket.receive_json()["type"] == "connected"
+        assert fake_verifier == [("Bearer valid-token", None)]
 
-        with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
-        ) as websocket:
-            data = websocket.receive_json()
-            assert data["type"] == "connected"
+    @pytest.mark.parametrize(
+        ("headers", "subprotocols", "verified"),
+        [
+            ({"Authorization": "Bearer revoked-token"}, None, ("Bearer revoked-token", None)),
+            ({"X-API-KEY": "revoked-key"}, None, (None, "revoked-key")),
+            ({}, ["bearer", "revoked-token"], ("Bearer revoked-token", None)),
+        ],
+        ids=["bearer-header", "x-api-key-header", "bearer-subprotocol"],
+    )
+    def test_a_refused_resolver_credential_is_not_rescued_by_a_valid_query_token(
+        self, client_user_only, mock_get_runner_client, fake_verifier, headers, subprotocols, verified
+    ):
+        """The shim runs only without a resolver credential, so it never retries a refused one."""
+        with pytest.raises(WebSocketDisconnect) as rejection:
+            with client_user_only.websocket_connect(
+                f"{STREAM}?token=valid-token", headers=headers, subprotocols=subprotocols
+            ):
+                pytest.fail("A valid query token rescued a refused header credential")
+        assert rejection.value.code == 4401
+        assert fake_verifier == [verified]
 
     def test_websocket_connect_with_revoked_token_fails(
-        self, client_user_only, mock_get_runner_client, monkeypatch
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
-        """Revoked/blacklisted JWT tokens should be rejected."""
-        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+        """Revoked/blacklisted JWT tokens should be rejected, on the deprecated query too."""
+        with pytest.raises(WebSocketDisconnect) as rejection:
+            with client_user_only.websocket_connect(f"{STREAM}?token=revoked-token"):
+                pytest.fail("A revoked query token was accepted")
+        assert rejection.value.code == 4401
+        assert fake_verifier == [("Bearer revoked-token", None)]
 
-        class RevokedJWTManager:
-            async def verify_token(self, token: str):
-                return None
+    def test_rejected_bearer_header_is_verified_once_and_closes_4401(
+        self, client_user_only, mock_get_runner_client, fake_verifier
+    ):
+        """A rejected header bearer was re-read and re-verified until RecursionError (TASK-13950.7)."""
+        with pytest.raises(WebSocketDisconnect) as rejection:
+            with client_user_only.websocket_connect(STREAM, headers={"Authorization": "Bearer revoked-token"}):
+                pytest.fail("A revoked bearer was accepted")
 
-        monkeypatch.setattr(acp_endpoints, "get_jwt_manager", lambda: RevokedJWTManager())
+        assert rejection.value.code == 4401
+        assert fake_verifier == [("Bearer revoked-token", None)]
 
-        with pytest.raises(Exception):
+    @pytest.mark.parametrize(
+        ("headers", "subprotocols"),
+        [({"Authorization": "X-API-KEY test-api-key"}, None), ({}, ["api-key", "test-api-key"])],
+        ids=["authorization-x-api-key", "api-key-subprotocol"],
+    )
+    def test_retired_credential_channels_are_refused(
+        self, client_user_only, mock_get_runner_client, fake_verifier, headers, subprotocols
+    ):
+        """No client sent these; they are removed, not deprecated (TASK-13950.7)."""
+        with pytest.raises(WebSocketDisconnect) as rejection:
+            with client_user_only.websocket_connect(STREAM, headers=headers, subprotocols=subprotocols):
+                pytest.fail("A retired credential channel was accepted")
+        assert rejection.value.code == 4401
+
+    @pytest.mark.parametrize("path", ["stream", "ssh"])
+    def test_websocket_rejects_read_only_api_key_in_multi_user_mode(
+        self, client_user_only, mock_get_runner_client, monkeypatch, path
+    ):
+        """ACP control and SSH sockets must require write scope for multi-user API keys."""
+
+        async def _read_scope_key(request):
+            request.state._api_key_scope = "read"
+            return AuthPrincipal(kind="api_key", user_id=1, api_key_id=3)
+
+        monkeypatch.setattr(websocket_principal, "get_auth_principal", _read_scope_key)
+
+        with pytest.raises(WebSocketDisconnect) as rejection:
             with client_user_only.websocket_connect(
-                "/api/v1/acp/sessions/test-session/stream?token=revoked-token"
+                f"/api/v1/acp/sessions/test-session/{path}", headers={"X-API-KEY": "read-key"}
             ):
-                pass
+                pytest.fail("A read-scope key opened an ACP socket")
+        assert rejection.value.code == 4403
 
-    def test_websocket_connect_with_api_key(
+    def test_websocket_connect_uses_the_resolved_user_id(
         self, client_user_only, mock_get_runner_client, monkeypatch
     ):
-        """Test WebSocket connection with API key in single-user mode."""
-        import os
+        """Session access is checked for the principal's user, e.g. a SINGLE_USER_FIXED_ID of 42."""
 
-        monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key")
+        async def _user_42(request):
+            return AuthPrincipal(kind="user", user_id=42)
 
-        with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?api_key=test-api-key"
-        ) as websocket:
-            data = websocket.receive_json()
-            assert data["type"] == "connected"
-
-    def test_websocket_stream_rejects_read_only_api_key_in_multi_user_mode(
-        self, client_user_only, mock_get_runner_client, monkeypatch
-    ):
-        """ACP control stream must require write scope for multi-user API keys."""
-        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
-
-        seen_required_scopes: list[str | None] = []
-
-        class _Settings:
-            AUTH_MODE = "multi_user"
-
-        class _APIKeyManager:
-            async def validate_api_key(self, api_key: str, required_scope: str | None = None, ip_address: str | None = None):
-                seen_required_scopes.append(required_scope)
-                if api_key == "write-key" and required_scope == "write":
-                    return {"user_id": 1}
-                raise RuntimeError("scope_denied")
-
-        monkeypatch.setattr(acp_endpoints, "get_auth_settings", lambda: _Settings())
-        monkeypatch.setattr(acp_endpoints, "resolve_client_ip", lambda websocket, settings=None: "127.0.0.1")
-
-        async def _get_api_key_manager():
-            return _APIKeyManager()
-
-        monkeypatch.setattr(acp_endpoints, "get_api_key_manager", _get_api_key_manager)
-
-        with pytest.raises(Exception):
-            with client_user_only.websocket_connect(
-                "/api/v1/acp/sessions/test-session/stream?api_key=read-key"
-            ):
-                pass
-
-        assert seen_required_scopes == ["write"]
-
-    def test_websocket_ssh_rejects_read_only_api_key_in_multi_user_mode(
-        self, client_user_only, monkeypatch
-    ):
-        """ACP SSH socket must require write scope for multi-user API keys."""
-        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
-
-        seen_required_scopes: list[str | None] = []
-
-        class _Settings:
-            AUTH_MODE = "multi_user"
-
-        class _APIKeyManager:
-            async def validate_api_key(self, api_key: str, required_scope: str | None = None, ip_address: str | None = None):
-                seen_required_scopes.append(required_scope)
-                raise RuntimeError("scope_denied")
-
-        monkeypatch.setattr(acp_endpoints, "get_auth_settings", lambda: _Settings())
-        monkeypatch.setattr(acp_endpoints, "resolve_client_ip", lambda websocket, settings=None: "127.0.0.1")
-
-        async def _get_api_key_manager():
-            return _APIKeyManager()
-
-        monkeypatch.setattr(acp_endpoints, "get_api_key_manager", _get_api_key_manager)
-
-        with pytest.raises(Exception):
-            with client_user_only.websocket_connect(
-                "/api/v1/acp/sessions/test-session/ssh?api_key=read-key"
-            ):
-                pass
-
-        assert seen_required_scopes == ["write"]
-
-    def test_websocket_connect_with_api_key_uses_configured_fixed_id(
-        self, client_user_only, mock_get_runner_client, monkeypatch
-    ):
-        """Ensure API-key auth uses SINGLE_USER_FIXED_ID rather than hardcoded ID."""
-        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
-
-        class _Settings:
-            AUTH_MODE = "single_user"
-            SINGLE_USER_API_KEY = "test-api-key"
-            SINGLE_USER_FIXED_ID = 42
-
+        monkeypatch.setattr(websocket_principal, "get_auth_principal", _user_42)
         mock_get_runner_client.expected_user_id = 42
-        monkeypatch.setattr(acp_endpoints, "get_auth_settings", lambda: _Settings())
-        monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key")
 
-        with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?api_key=test-api-key"
-        ) as websocket:
+        with client_user_only.websocket_connect(STREAM, headers=AUTH) as websocket:
             data = websocket.receive_json()
             assert data["type"] == "connected"
         assert ("test-session", 42) in mock_get_runner_client.access_checks
 
-    def test_websocket_rejects_single_user_test_key_outside_pytest_runtime(
-        self, client_user_only, mock_get_runner_client, monkeypatch
+    def test_websocket_ssh_echoes_the_x_api_key_subprotocol(
+        self, client_user_only, mock_get_runner_client, fake_verifier, monkeypatch
     ):
-        """SINGLE_USER_TEST_API_KEY must not be accepted outside explicit pytest runtime."""
-        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
+        """The SSH panel offers ``x-api-key, <key>`` and a browser fails a handshake that echoes nothing."""
 
-        class _Settings:
-            AUTH_MODE = "single_user"
-            SINGLE_USER_API_KEY = "primary-api-key"
-            SINGLE_USER_FIXED_ID = 1
+        async def _ssh_info(session_id, user_id=None):
+            return ("127.0.0.1", 22, "agent", "not-a-key")
 
-        monkeypatch.setattr(acp_endpoints, "get_auth_settings", lambda: _Settings())
-        monkeypatch.setattr(acp_endpoints, "is_explicit_pytest_runtime", lambda: False)
-        monkeypatch.setattr(acp_endpoints, "resolve_client_ip", lambda websocket, settings=None: "127.0.0.1")
-        monkeypatch.setattr(acp_endpoints, "is_single_user_ip_allowed", lambda ip, settings=None: True)
-        monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", "test-only-key")
-        monkeypatch.delenv("SINGLE_USER_API_KEY", raising=False)
-        monkeypatch.delenv("API_KEY", raising=False)
+        def _no_ssh(*args, **kwargs):
+            raise ConnectionError("no sandbox in this test")
 
-        with pytest.raises(Exception):
-            with client_user_only.websocket_connect(
-                "/api/v1/acp/sessions/test-session/stream?api_key=test-only-key"
-            ):
-                pass
+        mock_get_runner_client.get_ssh_info = _ssh_info
+        monkeypatch.setitem(sys.modules, "asyncssh", types.SimpleNamespace(import_private_key=str, connect=_no_ssh))
 
-    def test_websocket_rejects_single_user_api_key_when_ip_disallowed(
-        self, client_user_only, mock_get_runner_client, monkeypatch
-    ):
-        """Single-user API-key auth should enforce IP allowlist parity."""
-        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
-
-        class _Settings:
-            AUTH_MODE = "single_user"
-            SINGLE_USER_API_KEY = "test-api-key"
-            SINGLE_USER_FIXED_ID = 7
-
-        monkeypatch.setattr(acp_endpoints, "get_auth_settings", lambda: _Settings())
-        monkeypatch.setattr(acp_endpoints, "resolve_client_ip", lambda websocket, settings=None: "10.0.0.25")
-        monkeypatch.setattr(acp_endpoints, "is_single_user_ip_allowed", lambda ip, settings=None: False)
-        monkeypatch.setenv("SINGLE_USER_API_KEY", "test-api-key")
-
-        with pytest.raises(Exception):
-            with client_user_only.websocket_connect(
-                "/api/v1/acp/sessions/test-session/stream?api_key=test-api-key"
-            ):
-                pass
+        with client_user_only.websocket_connect(
+            "/api/v1/acp/sessions/test-session/ssh", subprotocols=["x-api-key", "test-api-key"]
+        ) as websocket:
+            assert websocket.accepted_subprotocol == "x-api-key"
+            assert websocket.receive()["code"] == 1011  # the fake sandbox refused, after accept
+        assert fake_verifier == [(None, "test-api-key")]
 
     def test_websocket_connect_without_session_access_fails(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Connection should be rejected when the user does not own the session."""
         mock_get_runner_client.expected_user_id = 999
         with pytest.raises(Exception):
             with client_user_only.websocket_connect(
-                "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+                STREAM, headers=AUTH
             ):
                 pass
 
     def test_websocket_connect_without_auth_fails(
-        self, client_user_only, mock_get_runner_client, monkeypatch
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test that WebSocket connection without authentication closes with 4401."""
-        # Clear any auth environment
-        monkeypatch.delenv("SINGLE_USER_API_KEY", raising=False)
-
-        # Mock JWT manager to fail
-        import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
-
-        mock_manager = MagicMock()
-        mock_manager.verify_token.return_value = None
-        monkeypatch.setattr(acp_endpoints, "get_jwt_manager", lambda: mock_manager)
-
-        with pytest.raises(Exception):
-            # Connection should be rejected
-            with client_user_only.websocket_connect(
-                "/api/v1/acp/sessions/test-session/stream"
-            ) as websocket:
-                pass
+        with pytest.raises(WebSocketDisconnect) as rejection:
+            with client_user_only.websocket_connect(STREAM):
+                pytest.fail("An unauthenticated socket was accepted")
+        assert rejection.value.code == 4401
+        assert fake_verifier == []
 
     def test_websocket_connection_quota_per_user_enforced(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager, monkeypatch
+        self, client_user_only, mock_get_runner_client, fake_verifier, monkeypatch
     ):
         """Second concurrent stream from same user should be rejected when per-user cap is reached."""
         monkeypatch.setenv("ACP_WS_MAX_CONNECTIONS_PER_USER", "1")
 
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as ws1:
             data = ws1.receive_json()
             assert data["type"] == "connected"
 
             with pytest.raises(Exception):
                 with client_user_only.websocket_connect(
-                    "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+                    STREAM, headers=AUTH
                 ):
                     pass
 
         # Ensure quota slot is released on disconnect.
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as ws2:
             data = ws2.receive_json()
             assert data["type"] == "connected"
@@ -663,11 +620,11 @@ class TestACPWebSocketMessages:
     """Tests for WebSocket message handling."""
 
     def test_send_prompt_via_websocket(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test sending a prompt message via WebSocket."""
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             # Receive connected message
             connected = websocket.receive_json()
@@ -687,7 +644,7 @@ class TestACPWebSocketMessages:
             assert response["stop_reason"] == "end"
 
     def test_websocket_prompt_shadow_deny_is_not_blocked(
-        self, client_user_only, mock_jwt_manager, monkeypatch
+        self, client_user_only, fake_verifier, monkeypatch
     ):
         """Shadow rollout deny decisions should not be blocked by the WS endpoint."""
         import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
@@ -716,7 +673,7 @@ class TestACPWebSocketMessages:
         monkeypatch.setattr(acp_endpoints, "get_runner_client", _get_runner_client)
 
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             connected = websocket.receive_json()
             assert connected["type"] == "connected"
@@ -732,7 +689,7 @@ class TestACPWebSocketMessages:
             assert response["raw_result"]["detail"] == "ok"
 
     def test_websocket_prompt_records_prompt_in_session_store(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager, monkeypatch
+        self, client_user_only, mock_get_runner_client, fake_verifier, monkeypatch
     ):
         """WS prompt path must persist prompt history through the ACP session store."""
         import tldw_Server_API.app.api.v1.endpoints.agent_client_protocol as acp_endpoints
@@ -741,7 +698,9 @@ class TestACPWebSocketMessages:
             def __init__(self) -> None:
                 self.calls: list[tuple[str, List[Dict], Dict[str, Any]]] = []
 
-            async def record_prompt(self, session_id: str, prompt: List[Dict], result: Dict[str, Any]):
+            async def record_prompt(self, session_id: str, prompt: List[Dict], result: Dict[str, Any], *, assistant_text=None):
+                if assistant_text is not None:
+                    raise AssertionError("This legacy fixture emits no native text")
                 self.calls.append((session_id, prompt, result))
                 return None
 
@@ -753,7 +712,7 @@ class TestACPWebSocketMessages:
         monkeypatch.setattr(acp_endpoints, "get_acp_session_store", _get_store)
 
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             connected = websocket.receive_json()
             assert connected["type"] == "connected"
@@ -776,11 +735,11 @@ class TestACPWebSocketMessages:
         ]
 
     def test_cancel_operation_via_websocket(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test cancelling an operation via WebSocket."""
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             # Receive connected message
             connected = websocket.receive_json()
@@ -801,11 +760,11 @@ class TestACPWebSocketMessages:
             assert "test-session" in mock_get_runner_client.cancel_calls
 
     def test_unknown_message_type_returns_error(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test that unknown message types return an error."""
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             # Receive connected message
             connected = websocket.receive_json()
@@ -823,11 +782,11 @@ class TestACPWebSocketMessages:
             assert response["code"] == "unknown_message_type"
 
     def test_invalid_json_returns_error(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test that invalid JSON returns an error."""
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             # Receive connected message
             connected = websocket.receive_json()
@@ -846,7 +805,7 @@ class TestACPPermissionFlow:
     """Tests for permission request/response flow."""
 
     def test_permission_response_approved(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test approving a permission request."""
         # Set up a pending permission
@@ -855,7 +814,7 @@ class TestACPPermissionFlow:
         }
 
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             # Receive connected message
             connected = websocket.receive_json()
@@ -876,7 +835,7 @@ class TestACPPermissionFlow:
             )
 
     def test_permission_response_denied(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test denying a permission request."""
         mock_get_runner_client._pending_permissions["test-session"] = {
@@ -884,7 +843,7 @@ class TestACPPermissionFlow:
         }
 
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             connected = websocket.receive_json()
             assert connected["type"] == "connected"
@@ -904,11 +863,11 @@ class TestACPPermissionFlow:
             )
 
     def test_permission_response_not_found(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test permission response for non-existent request."""
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             connected = websocket.receive_json()
             assert connected["type"] == "connected"
@@ -926,11 +885,11 @@ class TestACPPermissionFlow:
             assert response["code"] == "permission_not_found"
 
     def test_permission_response_missing_request_id(
-        self, client_user_only, mock_get_runner_client, mock_jwt_manager
+        self, client_user_only, mock_get_runner_client, fake_verifier
     ):
         """Test permission response without request_id."""
         with client_user_only.websocket_connect(
-            "/api/v1/acp/sessions/test-session/stream?token=valid-token"
+            STREAM, headers=AUTH
         ) as websocket:
             connected = websocket.receive_json()
             assert connected["type"] == "connected"
@@ -1021,7 +980,7 @@ class TestACPRunnerClientPermissions:
         assert client._determine_permission_tier("fs.chmod") == "batch"
 
     @pytest.mark.asyncio
-    async def test_permission_request_message_includes_runtime_policy_metadata(self):
+    async def test_permission_request_message_includes_runtime_policy_metadata(self, admitted_permission_prompt):
         mock_config = MagicMock()
         mock_config.command = "echo"
         mock_config.args = []
@@ -1073,6 +1032,7 @@ class TestACPRunnerClientPermissions:
 
         client._broadcast_to_session = _fake_broadcast  # type: ignore[method-assign]
 
+        await admitted_permission_prompt(client, session_id)
         response = await client._handle_request(
             ACPMessage(
                 jsonrpc="2.0",
@@ -1100,8 +1060,8 @@ class TestACPMultiplexWebSocket:
     ) -> None:
         import tldw_Server_API.app.api.v1.endpoints.acp_multiplex as multiplex_endpoints
 
-        async def _fake_authenticate_ws(*args: Any, **kwargs: Any) -> None:
-            return None
+        async def _fake_authenticate_ws(*args: Any, **kwargs: Any) -> int:
+            raise WebSocketException(code=4401, reason="authentication_required")
 
         monkeypatch.setattr(multiplex_endpoints, "_authenticate_ws", _fake_authenticate_ws)
         ws = _FakeMultiplexWebSocket()

@@ -36,7 +36,7 @@ Backfill the implemented TTS/STT preset ownership decision from INV-022 and the 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 ADR check: ADR required: yes. ADR-047 records the current per-user Audio API/Media DB ownership boundary, backed by TASK-12356 owner decision and TASK-12363 implementation. Live provider-readiness validation and stricter kind/config behavior are explicitly outside this ADR.
 
 Verification 2026-09-25: Inspected audio preset endpoint, schema, Media DB SQLite/PostgreSQL structures, and existing Audio endpoint tests. ADR/source design links resolve, ADR-047 index status matches, source/published ADR copies compare byte-for-byte, and git diff --check passed. Documentation-only backfill; pytest and Bandit not run. No .venv exists in isolated worktree.
@@ -44,7 +44,7 @@ Verification 2026-09-25: Inspected audio preset endpoint, schema, Media DB SQLit
 PR: https://github.com/rmusser01/tldw_server/pull/3014. Merge gate remains: requester must provide a human-written Change summary.
 
 PR #3014 Qodo review: added a dated subsequent-resolution note to ADR-011 and its published copy, preserving the original accepted rationale while clarifying that ADR-047 now covers INV-022. Qodo task-status finding was already resolved by commit b25cd3d4ef.
-<!-- SECTION:NOTES:END -->
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 

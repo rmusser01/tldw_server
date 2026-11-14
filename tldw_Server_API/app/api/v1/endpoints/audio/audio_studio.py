@@ -31,6 +31,8 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioExportJobResponse,
     AudioStudioGenerationCreate,
     AudioStudioGenerationJobResponse,
+    AudioStudioJobListResponse,
+    AudioStudioJobStateResponse,
     AudioStudioMediaTicketCreate,
     AudioStudioMediaTicketPurpose,
     AudioStudioMediaTicketResponse,
@@ -40,6 +42,7 @@ from tldw_Server_API.app.api.v1.schemas.audio_studio_schemas import (
     AudioStudioMigrationPreviewResponse,
     AudioStudioProjectArchiveRequest,
     AudioStudioProjectCreate,
+    AudioStudioProjectDetailResponse,
     AudioStudioProjectListResponse,
     AudioStudioProjectResponse,
     AudioStudioProjectUpdate,
@@ -57,6 +60,7 @@ from tldw_Server_API.app.core.Audio_Studio.export import create_audio_studio_exp
 from tldw_Server_API.app.core.Audio_Studio.jobs import (
     AUDIO_STUDIO_DOMAIN,
     JOB_TYPE_EXPORT,
+    JOB_TYPE_GENERATE,
     JOB_TYPE_RENDER,
     enqueue_audio_studio_export_job,
     enqueue_audio_studio_generation_job,
@@ -382,7 +386,7 @@ def _load_audio_studio_job_or_404(
     job_id: str,
     project: AudioStudioProjectRow,
     current_user: User,
-    job_type: str,
+    job_type: str | None = None,
 ) -> dict[str, Any]:
     job = JobManager().get_job_by_uuid(job_id)
     if not job:
@@ -390,7 +394,8 @@ def _load_audio_studio_job_or_404(
     payload = _job_payload(job)
     if (
         job.get("domain") != AUDIO_STUDIO_DOMAIN
-        or job.get("job_type") != job_type
+        or job.get("job_type") not in {JOB_TYPE_GENERATE, JOB_TYPE_RENDER, JOB_TYPE_EXPORT}
+        or (job_type is not None and job.get("job_type") != job_type)
         or str(job.get("owner_user_id") or "") != str(current_user.id)
         or str(payload.get("project_id") or "") != project.project_id
     ):
@@ -1011,15 +1016,25 @@ async def list_audio_studio_projects(
     )
 
 
-@router.get("/projects/{project_id}", response_model=AudioStudioProjectResponse)
+@router.get("/projects/{project_id}", response_model=AudioStudioProjectDetailResponse)
 async def get_audio_studio_project(
     project_id: AudioStudioIdPath,
     current_user: User = Depends(get_request_user),
     collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
-) -> AudioStudioProjectResponse:
+) -> AudioStudioProjectDetailResponse:
     """Fetch a project owned by the current user."""
     _ = current_user
-    return _project_response(_load_project_or_404(collections_db, project_id))
+    owned = _load_project_or_404(collections_db, project_id)
+    try:
+        row, sections, tracks, clips = collections_db.get_audio_studio_project_snapshot(owned.id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="audio_studio_project_not_found") from exc
+    return AudioStudioProjectDetailResponse(
+        **_project_response(row).model_dump(),
+        sections=[_section_response(section) for section in sections],
+        tracks=[_track_response(track) for track in tracks],
+        clips=[_clip_response(clip) for clip in clips],
+    )
 
 
 @router.patch("/projects/{project_id}", response_model=AudioStudioProjectResponse)
@@ -1270,7 +1285,73 @@ async def get_audio_studio_generation(
         row = collections_db.get_audio_studio_generation_job(project_row_id=project.id, job_id=job_id)
     except KeyError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio_studio_generation_job_not_found") from exc
-    return _generation_job_response(row, project_id=project.project_id)
+    actual = _load_audio_studio_job_or_404(job_id=job_id, project=project, current_user=current_user, job_type=JOB_TYPE_GENERATE)
+    state = _audio_studio_job_state(actual, project.project_id)
+    return _generation_job_response(row, project_id=project.project_id).model_copy(update={"status": state.status, "result": state.result})
+
+
+def _audio_studio_job_state(job: dict[str, Any], project_id: str) -> AudioStudioJobStateResponse:
+    payload = _job_payload(job)
+    status_value = str(job.get("status") or "queued")
+    result = job.get("result") if isinstance(job.get("result"), dict) else None
+    if status_value == "completed" and result and result.get("status") == "skipped":
+        status_value = "skipped"
+    return AudioStudioJobStateResponse(
+        job_id=str(job.get("uuid") or ""), job_type=str(job.get("job_type") or ""),
+        status=status_value, project_id=project_id,
+        target_resource_kind=str(payload.get("target_resource_kind") or ""),
+        target_resource_id=str(payload.get("target_resource_id") or ""),
+        target_revision_id=str(payload.get("target_revision_id") or ""),
+        retry_count=int(job.get("retry_count") or 0), max_retries=int(job.get("max_retries") or 0),
+        result=result if status_value in {"completed", "skipped"} else None,
+        error="Audio Studio job failed. Check the selected provider, model and voice before retrying." if status_value in {"failed", "quarantined"} else None,
+        created_at=_string_or_none(job.get("created_at")),
+    )
+
+
+@router.get("/projects/{project_id}/jobs", response_model=AudioStudioJobListResponse)
+async def list_audio_studio_jobs(
+    project_id: AudioStudioIdPath,
+    limit: int = Query(100, ge=1, le=100),
+    before_id: int | None = Query(None, ge=1),
+    created_before: datetime | None = Query(None),
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioJobListResponse:
+    """Reopen this owner's project work through the indexed Jobs batch identity."""
+    project = _load_project_or_404(collections_db, project_id)
+    if before_id is not None and created_before is None:
+        raise HTTPException(status_code=422, detail="created_before_required_with_before_id")
+    rows = JobManager().list_jobs(domain=AUDIO_STUDIO_DOMAIN, owner_user_id=str(current_user.id),
+        batch_group=f"audio-studio:{project.project_id}", limit=limit, before_id=before_id, created_before=created_before)
+    jobs = [_audio_studio_job_state(job, project.project_id) for job in rows
+            if _job_payload(job).get("project_id") == project.project_id
+            and job.get("job_type") in {JOB_TYPE_GENERATE, JOB_TYPE_RENDER, JOB_TYPE_EXPORT}]
+    last = rows[-1] if len(rows) == limit else None
+    return AudioStudioJobListResponse(jobs=jobs,
+        next_before_id=int(last["id"]) if last else None,
+        next_created_before=str(last["created_at"]) if last else None)
+
+
+@router.post("/projects/{project_id}/jobs/{job_id}/cancel", response_model=AudioStudioJobStateResponse)
+async def cancel_audio_studio_job(
+    project_id: AudioStudioIdPath,
+    job_id: AudioStudioIdPath,
+    current_user: User = Depends(get_request_user),
+    collections_db: CollectionsDatabase = Depends(get_collections_db_for_user),
+) -> AudioStudioJobStateResponse:
+    """Cancel owned queued work only while its queued status is locked."""
+    project = _load_project_or_404(collections_db, project_id)
+    job = _load_audio_studio_job_or_404(job_id=job_id, project=project, current_user=current_user)
+    if job.get("status") not in {"queued", "pending", "scheduled", "cancelled"}:
+        raise HTTPException(status_code=409, detail="audio_studio_job_already_started_or_terminal")
+    if job.get("status") != "cancelled":
+        cancelled = JobManager().cancel_job(int(job["id"]), reason="requested_by_owner", expected_uuid=job_id,
+            expected_domain=AUDIO_STUDIO_DOMAIN, expected_job_type=str(job["job_type"]), queued_only=True)
+        if not cancelled:
+            raise HTTPException(status_code=409, detail="audio_studio_job_already_started_or_terminal")
+    current = _load_audio_studio_job_or_404(job_id=job_id, project=project, current_user=current_user)
+    return _audio_studio_job_state(current, project.project_id)
 
 
 @router.post(
