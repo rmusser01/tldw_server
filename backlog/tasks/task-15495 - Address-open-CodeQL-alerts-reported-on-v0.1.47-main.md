@@ -26,6 +26,7 @@ Review the 15 open CodeQL findings on v0.1.47 main against current source. Patch
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Initial inventory: 2705, 2735–2747, 2759. Both VN idempotency helpers preserve the existing caller contract and recovery protocol. No new ADR is needed for replacing their random source.
 Trace review of 15 findings is in Docs/Evidence/v0.1.47-codeql-follow-up.md. Changes address 2705, 2735, 2742, 2743 and 2747. The other ten findings stay open for reviewer confirmation, including the three OAuth/gateway fingerprints already tracked by TASK-13950.102. Verified 437 VN tests, 7 Admin Teams tests, 286 focused Python tests, and 27 loopback transport tests with a temporary curl dependency. Bandit reported no medium or high findings in the touched Python files. Broader local Chroma and MIME tests had failures, recorded in the evidence. Hosted CodeQL is pending.
+Post-rebase rerun: 437 VN tests, 7 Teams tests, and 483 focused Python tests passed (1 skipped). With the supported Chroma 1.5.9 SDK, all 84 Chroma and DB-path tests passed. Nine upload MIME tests still fail when puremagic 1.30 falls back to the claimed extension. The path-containment finding stays open pending review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
