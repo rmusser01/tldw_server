@@ -3,6 +3,7 @@
 import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -133,7 +134,11 @@ def accounting(monkeypatch):
     )
     repo, usage, billing, governor = Repo(), Usage(), Billing(), Governor()
     service = ModelCompletionAccounting(
-        policy=policy, reservations=repo, usage=usage, billing=billing, governor=governor
+        policy=policy,
+        reservations=cast(Any, repo),
+        usage=cast(Any, usage),
+        billing=cast(Any, billing),
+        governor=cast(Any, governor),
     )
     return SimpleNamespace(service=service, repo=repo, usage=usage, governor=governor, events=events)
 

@@ -1,3 +1,4 @@
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import {
   Segmented,
   Space,
@@ -451,7 +452,7 @@ export const TldwBillingSettings = ({
               <button
                 type="button"
                 className="text-xs underline"
-                onClick={() => document.getElementById('tldw-billing-plans')?.scrollIntoView({ behavior: 'smooth' })}
+                onClick={() => document.getElementById('tldw-billing-plans')?.scrollIntoView({ behavior: smoothScrollBehavior() })}
               >
                 {t('settings:tldw.billing.viewPlans', 'View upgrade options')}
               </button>

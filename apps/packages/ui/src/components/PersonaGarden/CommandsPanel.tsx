@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 import { Input, Select, Tag } from "antd"
 
@@ -680,7 +681,7 @@ export const CommandsPanel: React.FC<CommandsPanelProps> = ({
     if (lastHandledHandoffTokenRef.current === handoffFocusRequest.token) return
 
     const focusCommandForm = () => {
-      commandFormRef.current?.scrollIntoView?.({ block: "start", behavior: "smooth" })
+      commandFormRef.current?.scrollIntoView?.({ block: "start", behavior: smoothScrollBehavior() })
       commandNameInputRef.current?.focus()
     }
 
@@ -699,7 +700,7 @@ export const CommandsPanel: React.FC<CommandsPanelProps> = ({
       : null
 
     if (firstEditButton) {
-      firstEditButton.scrollIntoView?.({ block: "start", behavior: "smooth" })
+      firstEditButton.scrollIntoView?.({ block: "start", behavior: smoothScrollBehavior() })
       firstEditButton.focus()
     } else {
       focusCommandForm()

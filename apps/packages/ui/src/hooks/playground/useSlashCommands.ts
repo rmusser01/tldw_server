@@ -1,6 +1,7 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu"
+import { openModelSelector } from "@/utils/model-selector-events"
 
 /**
  * A parsed composer submission. Resolving one never runs a command: the
@@ -34,7 +35,6 @@ export type UseSlashCommandsParams = {
   handleImageUpload: () => void
   imageBackendDefaultTrimmed: string
   imageBackendLabel: string
-  setOpenModelSettings: (open: boolean) => void
   currentMessage: string
 }
 
@@ -46,7 +46,6 @@ export function useSlashCommands({
   handleImageUpload,
   imageBackendDefaultTrimmed,
   imageBackendLabel,
-  setOpenModelSettings,
   currentMessage
 }: UseSlashCommandsParams) {
   const { t } = useTranslation(["playground", "common"])
@@ -119,11 +118,14 @@ export function useSlashCommands({
         command: "model",
         label: t("common:commandPalette.switchModel", "Switch Model"),
         description: t(
-          "common:currentChatModelSettings",
-          "Open current chat settings"
+          "playground:composer.slashModelDesc",
+          "Choose the model for this chat"
         ),
-        keywords: ["settings", "parameters", "temperature"],
-        action: () => setOpenModelSettings(true)
+        keywords: ["llm", "provider", "switch"],
+        // The composer's model picker, not the chat settings (AX-01).
+        action: () => {
+          openModelSelector()
+        }
       }
     ],
     [
@@ -134,8 +136,7 @@ export function useSlashCommands({
       setChatMode,
       setWebSearch,
       t,
-      webSearch,
-      setOpenModelSettings
+      webSearch
     ]
   )
 
@@ -283,8 +284,11 @@ export function useSlashCommands({
         requestAnimationFrame(() => textareaRef.current?.focus())
         return
       }
+      const focusBefore = document.activeElement
       command.action?.()
       formSetFieldValue("message", parsed?.remainder || "")
+      // A command that moved focus (/model opens the model picker) keeps it.
+      if (document.activeElement !== focusBefore) return
       requestAnimationFrame(() => textareaRef.current?.focus())
     },
     [currentMessage, parseSlashInput]

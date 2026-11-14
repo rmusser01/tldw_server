@@ -1,5 +1,6 @@
 import React from "react"
 import { useStorage } from "@plasmohq/storage/hook"
+import { isExtensionRuntime } from "@/utils/browser-runtime"
 
 export interface TabInfo {
   id: number
@@ -19,7 +20,11 @@ export const useTabMentions = (
   options?: { includeActive?: boolean }
 ) => {
   const includeActive = options?.includeActive ?? false
-  const [tabMentionsEnabled] = useStorage("tabMentionsEnabled", false)
+  const [storedTabMentionsEnabled] = useStorage("tabMentionsEnabled", false)
+  // '@' lists browser tabs, which only the extension can read; the web app
+  // ignores a setting turned on before it was hidden there (CC-11).
+  const tabMentionsEnabled =
+    storedTabMentionsEnabled === true && isExtensionRuntime()
   const [showMentions, setShowMentions] = React.useState(false)
   const [mentionPosition, setMentionPosition] = React.useState<MentionPosition | null>(null)
   const [availableTabs, setAvailableTabs] = React.useState<TabInfo[]>([])

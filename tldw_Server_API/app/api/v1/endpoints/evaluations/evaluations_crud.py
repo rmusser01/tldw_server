@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, 
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import rbac_rate_limit, TokenScopeGuard, User
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota_on_own_key
 
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     check_evaluation_rate_limit,
@@ -32,6 +32,7 @@ from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import (
 from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.audit_adapter import MandatoryAuditWriteError
+from tldw_Server_API.app.core.Evaluations.eval_runner import run_llm_provider
 from tldw_Server_API.app.core.Evaluations.unified_evaluation_service import (
     get_unified_evaluation_service_for_user,
 )
@@ -323,12 +324,14 @@ async def create_run(
                         return RunResponse(**existing)
             except _EVALS_CRUD_NONCRITICAL_EXCEPTIONS:
                 logger.debug("evaluations_crud: run idempotency lookup failed")
-        # Usage quotas (LLM usage accounting spec §4a): a run's samples are LLM calls, made in a task
-        # started from this request, so the run is checked here and then runs to completion.
-        await enforce_llm_quota(getattr(current_user, "id", None))
         target_model = request.target_model
         # Allow free-form config; convert Pydantic models if provided in future
         config = model_dump_compat(request.config) if hasattr(request.config, 'model_dump') else (request.config or {})
+        # Usage quotas (LLM usage accounting spec §4a): a run's samples are LLM calls, made in a task
+        # started from this request, so the run is checked here, naming its judge, and then runs to completion
+        # on the user's own key when they stored one (TASK-15426).
+        provider, model = run_llm_provider(await svc.get_evaluation(eval_id, created_by=identity.created_by), config)
+        own_key = await enforce_llm_quota_on_own_key(getattr(current_user, "id", None), provider, model=model)
         dataset_override = model_dump_compat(request.dataset_override) if request.dataset_override else None
         webhook_url = request.webhook_url
         run = await svc.create_run(
@@ -339,6 +342,7 @@ async def create_run(
             webhook_url=webhook_url,
             created_by=identity.created_by,
             webhook_user_id=identity.webhook_user_id,
+            provider_credentials=own_key,
         )
         try:
             if idempotency_key and run.get("id"):

@@ -70,7 +70,8 @@ export const ChatSettings = () => {
       SIDEPANEL_STICKY_CHAT_INPUT_KEY,
       SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
     )
-  // The web app shares this screen but has no side panel.
+  // The web app shares this screen but has no side panel and cannot read
+  // browser tabs.
   const hasSidepanel = isExtensionRuntime()
   const [quickChatDocsNamespace, setQuickChatDocsNamespace] = useStorage<string>(
     "quickChatDocsIndexNamespace",
@@ -1277,26 +1278,29 @@ export const ChatSettings = () => {
           />
         }
       />
-      <SettingRow
-        label={
-          <span className="inline-flex items-center gap-2">
-            {t("generalSettings.settings.tabMentionsEnabled.label")}
-            <BetaTag />
-          </span>
-        }
-        {...getResetProps(
-          tabMentionsEnabled,
-          DEFAULT_CHAT_SETTINGS.tabMentionsEnabled,
-          setTabMentionsEnabled
-        )}
-        control={
-          <Switch
-            checked={tabMentionsEnabled}
-            onChange={setTabMentionsEnabled}
-            aria-label={t("generalSettings.settings.tabMentionsEnabled.label")}
-          />
-        }
-      />
+      {/* '@' tab mentions read browser tabs, which only the extension can (CC-11). */}
+      {hasSidepanel && (
+        <SettingRow
+          label={
+            <span className="inline-flex items-center gap-2">
+              {t("generalSettings.settings.tabMentionsEnabled.label")}
+              <BetaTag />
+            </span>
+          }
+          {...getResetProps(
+            tabMentionsEnabled,
+            DEFAULT_CHAT_SETTINGS.tabMentionsEnabled,
+            setTabMentionsEnabled
+          )}
+          control={
+            <Switch
+              checked={tabMentionsEnabled}
+              onChange={setTabMentionsEnabled}
+              aria-label={t("generalSettings.settings.tabMentionsEnabled.label")}
+            />
+          }
+        />
+      )}
       <SettingRow
         label={t("generalSettings.settings.pasteLargeTextAsFile.label")}
         {...getResetProps(

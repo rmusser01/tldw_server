@@ -274,12 +274,21 @@ class MutableRepository(ReadOnlyRepository):
             current_path.unlink()
         return _load_task(target)
 
-    def renumber_task(self, path: Path, new_id: str, *, note: str | Sequence[str] | None = None) -> TaskRecord:
+    def renumber_task(
+        self,
+        path: Path,
+        new_id: str,
+        *,
+        note: str | Sequence[str] | None = None,
+        check_remote: bool = True,
+    ) -> TaskRecord:
         """Give the task file at ``path`` (relative to the project root) a new id, in place.
 
         Takes a path because two files can share an id, which ``edit_task`` cannot tell apart. The
         file keeps its directory and its file-name tail, and is normalized like every edit. Refuses
-        an id that any task file in backlog/tasks, backlog/completed or backlog/archive/tasks holds.
+        an id that any task file in backlog/tasks, backlog/completed or backlog/archive/tasks holds,
+        and, like ``create_task``, a top-level id that origin/dev or an open PR holds, unless
+        ``check_remote`` is False.
         A subtask id (``P.n``) also sets ``parent_task_id`` to ``P``.
         ``note`` may be one text or several, each appended as its own block, like ``append_notes``.
         """
@@ -292,6 +301,8 @@ class MutableRepository(ReadOnlyRepository):
         normalized_id = _normalize_task_id(new_id)
         if normalized_id in self._all_task_ids():
             raise TaskMutationError(f"Task id already exists: {normalized_id}")
+        if check_remote:
+            self._reject_remote_id(normalized_id)
         with current_path.open("r", encoding="utf-8", newline="") as task_file:
             raw = task_file.read()
         try:

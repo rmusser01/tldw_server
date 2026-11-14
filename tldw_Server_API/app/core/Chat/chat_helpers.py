@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import json
 import random
+import unicodedata
 from typing import Any, Optional
 
 from loguru import logger
@@ -273,13 +274,107 @@ async def _ensure_default_character(
     return await asyncio.to_thread(_create_default)
 
 
+_NEW_CONVERSATION_TITLE_WORDS = 6
+_NEW_CONVERSATION_TITLE_MAX_CHARS = 60
+_MONTH_ABBREVIATIONS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+_ZERO_WIDTH_JOINER = "\u200d"
+
+
+def _joins_previous(char: str) -> bool:
+    """True for a code point that belongs to the character before it."""
+    code = ord(char)
+    return (
+        unicodedata.category(char).startswith("M")  # combining marks
+        or char == _ZERO_WIDTH_JOINER
+        or 0xFE00 <= code <= 0xFE0F  # variation selectors
+        or 0x1F3FB <= code <= 0x1F3FF  # emoji skin tone modifiers
+        or 0xDC00 <= code <= 0xDFFF  # a low surrogate left by surrogateescape
+    )
+
+
+def _grapheme_safe_cut(text: str, limit: int) -> str:
+    """`text` cut to at most `limit` code points without splitting a letter from its marks or an emoji sequence."""
+    cut = min(limit, len(text))
+    while 0 < cut < len(text) and (_joins_previous(text[cut]) or text[cut - 1] == _ZERO_WIDTH_JOINER):
+        cut -= 1
+    return text[:cut]
+
+
+def _local_now() -> datetime.datetime:
+    """The server's local time with its zone; the clock fallback titles read (tests replace it)."""
+    return datetime.datetime.now().astimezone()
+
+
+def _message_part_text(part: Any) -> str:
+    """The text of one content part (an object or a dict); other parts give ''."""
+    part_type = part.get("type") if isinstance(part, dict) else getattr(part, "type", None)
+    if part_type != "text":
+        return ""
+    text = part.get("text") if isinstance(part, dict) else getattr(part, "text", None)
+    return text if isinstance(text, str) else ""
+
+
+def first_user_message_text(messages: Any) -> Optional[str]:
+    """
+    The text of the first user message that has any, from request messages
+    (Pydantic objects or dicts, string or multi-part content), or None.
+    """
+    for message in messages or []:
+        role = message.get("role") if isinstance(message, dict) else getattr(message, "role", None)
+        if role != "user":
+            continue
+        content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+        if isinstance(content, str):
+            text = content
+        elif isinstance(content, list):
+            text = " ".join(_message_part_text(part) for part in content)
+        else:
+            text = ""
+        if text.strip():
+            return text.strip()
+    return None
+
+
+def format_new_conversation_title(
+    character_name: str,
+    first_user_message: Optional[str] = None,
+    now: Optional[datetime.datetime] = None,
+) -> str:
+    """
+    Title a chat the server creates so people can read it (XP-14).
+
+    The first six words of the user's first message name the chat. Without
+    message text (an image-only turn, a voice session) the assistant's name and
+    the start time do, in the server's local time with its zone so it does not
+    pass for the reader's own, for example "Helpful AI Assistant · Nov 12,
+    16:41 PST", instead of a machine timestamp such as "(20261112_164105)".
+    """
+    # Split off only the words the title needs; a first message can be megabytes.
+    words = (first_user_message or "").split(maxsplit=_NEW_CONVERSATION_TITLE_WORDS)
+    if words:
+        title = " ".join(words[:_NEW_CONVERSATION_TITLE_WORDS])
+        if len(words) > _NEW_CONVERSATION_TITLE_WORDS:
+            title += "…"
+        # The cap applies to the finished title, ellipsis included.
+        if len(title) > _NEW_CONVERSATION_TITLE_MAX_CHARS:
+            return _grapheme_safe_cut(title, _NEW_CONVERSATION_TITLE_MAX_CHARS - 1).rstrip() + "…"
+        return title
+    moment = now or _local_now()
+    month = _MONTH_ABBREVIATIONS[moment.month - 1]
+    zone = moment.tzname() or moment.strftime("%z")
+    return f"{character_name} · {month} {moment.day}, {moment:%H:%M} {zone}".rstrip()
+
+
 async def get_or_create_conversation(
     db: CharactersRAGDB,
     conversation_id: Optional[str],
     character_id: int,
     character_name: str,
     client_id: str,
-    loop
+    loop,
+    first_user_message: Optional[str] = None,
 ) -> tuple[str, bool]:
     """
     Get existing conversation or create a new one with proper concurrency handling.
@@ -288,9 +383,10 @@ async def get_or_create_conversation(
         db: Database instance
         conversation_id: Optional existing conversation ID
         character_id: Character database ID
-        character_name: Character name for title
+        character_name: Character name, for the title of a chat without message text
         client_id: Client identifier
         loop: Event loop
+        first_user_message: The user's first message, which names a new chat
 
     Returns:
         Tuple of (conversation_id, was_created)
@@ -315,8 +411,7 @@ async def get_or_create_conversation(
 
     # Create new conversation if needed with retry logic for race conditions
     if not conversation_id:
-        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-        title = f"{character_name} ({timestamp})"
+        title = format_new_conversation_title(character_name, first_user_message)
         conv_data = {
             'character_id': character_id,
             'title': title,
@@ -348,10 +443,6 @@ async def get_or_create_conversation(
                 if attempt < max_retries - 1:
                     # Add small random delay to reduce collision probability
                     await asyncio.sleep(0.05 + random.random() * 0.1)
-                    # Update timestamp for uniqueness
-                    timestamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-                    title = f"{character_name} ({timestamp})"
-                    conv_data['title'] = title
                 else:
                     logger.error(f"Failed to create conversation after {max_retries} attempts: {e}")
                     raise

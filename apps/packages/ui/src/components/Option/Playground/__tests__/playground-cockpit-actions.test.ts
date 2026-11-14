@@ -85,6 +85,20 @@ describe("playground cockpit actions", () => {
     });
   });
 
+  // AX-01: the command palette falls back to chat settings only when no
+  // composer picker is on the page to take the request.
+  it("reports whether a composer's model picker took the request", () => {
+    expect(openModelSelector()).toBe(false);
+
+    const claim = (event: Event) => event.preventDefault();
+    window.addEventListener(OPEN_MODEL_SELECTOR_EVENT, claim);
+    try {
+      expect(openModelSelector()).toBe(true);
+    } finally {
+      window.removeEventListener(OPEN_MODEL_SELECTOR_EVENT, claim);
+    }
+  });
+
   it("opens actor settings through the existing actor-settings event", async () => {
     const event = nextCustomEvent(OPEN_ACTOR_SETTINGS_EVENT);
 

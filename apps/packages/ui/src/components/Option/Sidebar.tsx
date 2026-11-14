@@ -346,6 +346,9 @@ export const Sidebar = ({ onClose, isOpen }: Props) => {
         if (clearChat() === false) return
         updatePageTitle()
       }
+    },
+    onError: () => {
+      message.error(t("common:deleteHistoriesError"))
     }
   })
 

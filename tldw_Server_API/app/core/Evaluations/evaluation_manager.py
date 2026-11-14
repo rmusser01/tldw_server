@@ -553,20 +553,35 @@ class EvaluationManager:
         scoring_criteria: dict[str, Any],
         api_name: str = "openai",
         api_key: Optional[str] = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
-        """Evaluate using custom metric definition"""
+        """Evaluate using custom metric definition.
+
+        Both LLM calls, the model's response (when an input value is ``{model_response}``) and the judge's score,
+        run on the key of ``provider_credentials`` when it is given (the user's own key; TASK-15426), else on
+        ``api_key`` or the server's. ``score`` is None when the item has no score (its model or judge call failed,
+        or the reply held none): the callers count it unscored, in no average (TASK-15485).
+        """
         runtime_input_data = dict(input_data)
         if self._contains_model_response_placeholder(runtime_input_data):
-            model_response = await self._generate_model_response(
+            model_call = self._generate_model_response(
                 input_data=runtime_input_data,
                 api_name=api_name,
                 api_key=api_key,
+                provider_credentials=provider_credentials,
             )
+            try:
+                model_response = await model_call
+            except LLMQuotaExceededError:
+                raise  # the user's limit is not an unscored item
+            except Exception as e:  # a model call that raised (provider error, timeout, rate limit) is unscored too
+                model_response = f"Error: {e}"
             if isinstance(model_response, str) and model_response.startswith("Error:"):
                 logger.error(f"Model response generation failed for metric '{metric_name}': {model_response}")
+                # score None is "no score": the callers count the item unscored, in no average (owner, 2026-11-10)
                 return {
                     "metric_name": metric_name,
-                    "score": 0.0,
+                    "score": None,
                     "explanation": model_response,
                     "raw_output": None,
                 }
@@ -593,8 +608,16 @@ class EvaluationManager:
                 full_prompt,
                 api_key,
                 temp=0.3,
-                system_message="You are an expert evaluator. Provide scores and detailed explanations."
+                system_message="You are an expert evaluator. Provide scores and detailed explanations.",
+                input_is_literal_text=True,
+                provider_credentials=provider_credentials,
             )
+
+            # A failed judge call (provider error, timeout, rate limit, truncated or empty reply)
+            # is unscored with the error, as for the model's own answer above; not a silent 0.5.
+            if isinstance(response, str) and response.startswith("Error:"):
+                logger.error(f"Judge call failed for metric '{metric_name}': {response}")
+                return {"metric_name": metric_name, "score": None, "explanation": response, "raw_output": None}
 
             # Parse response with strict validation
             import json as json_module
@@ -621,13 +644,15 @@ class EvaluationManager:
                 # Fallback to regex parsing with strict validation
                 # Only accept scores that are clearly delimited (e.g., "Score: 8")
                 score_patterns = [
+                    # the labelled "SCORE: 8" (also "**SCORE:** 8") wins over prose such as "Score 10 for a correct answer"
+                    r'score[*_\s]*:[*_\s]*(\d+(?:\.\d+)?)\s*(?:/\s*10)?',
                     r'[Ss]core[:\s]+(\d+(?:\.\d+)?)\s*(?:/\s*10)?',  # Score: 8 or Score: 8/10
                     r'(\d+(?:\.\d+)?)\s*(?:/\s*10)\s+points?',  # 8/10 points
                     r'^(\d+(?:\.\d+)?)\s*$'  # Just a number on its own line
                 ]
 
                 for pattern in score_patterns:
-                    match = re.search(pattern, response, re.MULTILINE)
+                    match = re.search(pattern, response, re.MULTILINE | re.IGNORECASE)  # benchmarks ask "SCORE:"
                     if match:
                         try:
                             raw_score = float(match.group(1))
@@ -638,6 +663,12 @@ class EvaluationManager:
                         except (ValueError, IndexError):
                             continue
 
+                # SimpleQA's grader answers with a grade (simpleqa_eval.parse_grading_response); it decides.
+                # Only a prompt that asks for a GRADE reads one ("Grade: ..." elsewhere is prose).
+                grade = re.search(r'GRADE[*_\s]*:[*_\s\[]*(correct|incorrect|not_attempted)\b', response, re.IGNORECASE)
+                if grade and "GRADE:" in evaluation_prompt:
+                    score = 1.0 if grade.group(1).lower() == "correct" else 0.0
+
                 # Extract explanation (everything after first score mention or first newline)
                 if '\n' in response:
                     lines = response.split('\n')
@@ -645,10 +676,9 @@ class EvaluationManager:
                     explanation_lines = [l for l in lines if not re.match(r'^\s*\d+(?:\.\d+)?\s*(?:/\s*10)?\s*$', l)]
                     explanation = '\n'.join(explanation_lines).strip()
 
-            # Default to 0.5 if no valid score found
+            # No valid score found: the item is unscored (None), not a 0.5 placeholder
             if score is None:
                 logger.warning(f"Could not parse valid score from response: {response[:100]}...")
-                score = 0.5
 
             return {
                 "metric_name": metric_name,
@@ -663,7 +693,7 @@ class EvaluationManager:
             logger.error(f"Custom metric evaluation failed: {e}")
             return {
                 "metric_name": metric_name,
-                "score": 0.0,
+                "score": None,
                 "explanation": f"Evaluation failed: {str(e)}",
                 "raw_output": None
             }
@@ -739,6 +769,7 @@ class EvaluationManager:
         input_data: dict[str, Any],
         api_name: str,
         api_key: Optional[str],
+        provider_credentials: Any = None,
     ) -> str:
         prompt = self._build_model_response_prompt(input_data)
         response = await asyncio.to_thread(
@@ -751,6 +782,7 @@ class EvaluationManager:
             system_message=(
                 "You are a helpful assistant. Respond directly to the task."
             ),
+            provider_credentials=provider_credentials,
         )
         if isinstance(response, str):
             return response.strip()

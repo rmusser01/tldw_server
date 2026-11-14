@@ -526,7 +526,8 @@ def test_create_note_invalid_links_404(client_with_notes_db: TestClient):
     assert bad_msg.status_code == 404
 
 
-def test_keywords_only_update_keeps_version(client_with_notes_db: TestClient):
+def test_keywords_only_update_bumps_version(client_with_notes_db: TestClient):
+    """A tag change is an edit: optimistic locking only sees it if the version moves (#3157)."""
     client = client_with_notes_db
 
     created = client.post("/api/v1/notes/", json={"title": "K", "content": "V"}).json()
@@ -536,12 +537,12 @@ def test_keywords_only_update_keeps_version(client_with_notes_db: TestClient):
     resp = client.patch(f"/api/v1/notes/{note_id}", json={"keywords": ["alpha", "beta"]})
     assert resp.status_code == 200
     payload = resp.json()
-    assert payload.get("version") == original_version
+    assert payload.get("version") == original_version + 1
     kw_texts = {k.get("keyword") for k in payload.get("keywords", [])}
     assert {"alpha", "beta"}.issubset(kw_texts)
 
     reread = client.get(f"/api/v1/notes/{note_id}").json()
-    assert reread.get("version") == original_version
+    assert reread.get("version") == original_version + 1
 
 
 def test_bulk_create_reports_missing_note_fetch(client_with_bulk_stub: TestClient):

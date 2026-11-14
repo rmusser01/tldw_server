@@ -1,4 +1,5 @@
 import { useQuickChatPopoutRestore } from "@/components/Common/QuickChatHelper/popout-state"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import React, { useEffect, useRef } from "react"
 import { Select } from "antd"
 import { useQuery } from "@tanstack/react-query"
@@ -52,7 +53,7 @@ const QuickChatPopout: React.FC = () => {
   // Scroll to bottom when messages change
   useEffect(() => {
     if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+      messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
     }
   }, [messages])
 

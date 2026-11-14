@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from loguru import logger
@@ -40,6 +41,17 @@ def test_redacts_ticket_token_in_uvicorn_access_message() -> None:
     assert "raw-secret-token-123" not in redacted
     assert "/api/v1/audio-studio/media-tickets/[REDACTED]?download=1" in redacted
     assert redacted.endswith('HTTP/1.1" 206')
+
+
+@pytest.mark.parametrize("path", ["/api/v1/auth/verify-email", "/api/v1/auth/verify-email/"])
+def test_redacts_verification_query_from_uvicorn_request_target(path: str) -> None:
+    message = f'127.0.0.1 - "GET {path}?source=email&token=fixture-value HTTP/1.1" 200'
+    assert redact_access_log_message(message) == f'127.0.0.1 - "GET {path}?[REDACTED] HTTP/1.1" 200'
+
+
+def test_keeps_query_for_unrelated_route_with_similar_name() -> None:
+    message = '127.0.0.1 - "GET /api/v1/auth/verify-email-status?detail=1 HTTP/1.1" 200'
+    assert redact_access_log_message(message) == message
 
 
 def test_intercept_handler_redacts_uvicorn_access_ticket_token(monkeypatch) -> None:

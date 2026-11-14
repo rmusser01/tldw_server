@@ -369,13 +369,15 @@ async def _evaluate_batch(batch: list[dict[str, Any]], evaluator,
 
 def _save_results(results: list[dict[str, Any]], benchmark_name: str, output_path: str):
     """Save evaluation results to file."""
+    scores = [r["score"] for r in results if r.get("score") is not None]  # an unscored item is in no average
     output_data = {
         "benchmark": benchmark_name,
         "num_samples": len(results),
         "results": results,
         "summary": {
             "total": len(results),
-            "average_score": sum(r.get('score', 0) for r in results) / len(results) if results else 0
+            "unscored": len(results) - len(scores),
+            "average_score": sum(scores) / len(scores) if scores else 0
         }
     }
 

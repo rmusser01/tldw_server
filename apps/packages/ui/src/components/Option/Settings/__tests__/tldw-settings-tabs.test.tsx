@@ -3,6 +3,8 @@
 import React from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+// Scripted scrolls honour the OS reduced-motion setting (AX-19).
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 import { TldwSettingsTabs } from "../tldw-settings-tabs"
 
@@ -159,7 +161,7 @@ describe("TldwSettingsTabs", () => {
 
     expect(scrollIntoView).toHaveBeenCalledTimes(2)
     expect(scrollIntoView).toHaveBeenCalledWith({
-      behavior: "smooth",
+      behavior: smoothScrollBehavior(),
       block: "start"
     })
   })

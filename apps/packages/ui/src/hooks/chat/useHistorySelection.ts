@@ -1636,6 +1636,7 @@ export function useHistorySelection(
           !saved ||
           (saved.turn.action !== 'edit_resend' &&
             saved.turn.action !== 'regenerate' &&
+            saved.turn.action !== 'continue' &&
             !saved.turn.roleplay_resume &&
             !(
               saved.turn.action === undefined &&

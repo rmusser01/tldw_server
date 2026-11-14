@@ -42,6 +42,15 @@ module.exports = {
           error: "rgb(var(--state-error) / <alpha-value>)"
         }
       },
+      // Text utilities read text-on-tint shades, so text-success stays
+      // readable on bg-success/10 (#3124). Fills, borders and rings keep the
+      // base colours above. Values: tailwind-shared.css, themes/text-on-tint.ts.
+      textColor: {
+        primary: "rgb(var(--color-primary-text) / <alpha-value>)",
+        success: "rgb(var(--color-success-text) / <alpha-value>)",
+        warn: "rgb(var(--color-warn-text) / <alpha-value>)",
+        danger: "rgb(var(--color-danger-text) / <alpha-value>)"
+      },
       fontFamily: {
         display: ["Space Grotesk", "Inter", "sans-serif"],
         body: ["var(--font-family, Inter)", "system-ui", "sans-serif"],

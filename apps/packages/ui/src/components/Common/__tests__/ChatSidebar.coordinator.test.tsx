@@ -136,6 +136,18 @@ describe("ChatSidebar coordinator integration", () => {
       useChatSurfaceCoordinatorStore.getState().visiblePanels["server-history"]
     ).toBe(true)
   })
+
+  // AX-14: screen-reader users find chat history by landmark.
+  it.each([true, false])("is a Chat history navigation landmark when collapsed=%s", (collapsed) => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <ChatSidebar collapsed={collapsed} />
+      </MemoryRouter>
+    )
+
+    const landmark = screen.getByRole("navigation", { name: "Chat history" })
+    expect(landmark).toBe(screen.getByTestId("chat-sidebar"))
+  })
 })
 
 vi.mock("../ChatSidebar/LocalChatList", () => ({ LocalChatList: () => <div data-testid="local-chat-list" /> }))

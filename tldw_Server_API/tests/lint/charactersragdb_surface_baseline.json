@@ -1,5 +1,5 @@
 {
   "delegated_methods": {"count": 306, "reason": null},
   "methods": {"count": 863, "reason": null},
-  "private_member_reaches": {"count": 551, "reason": null}
+  "private_member_reaches": {"count": 553, "reason": "#3157 data-loss fix: NoteStore.bump_note_version scopes its conditional version bump to the owner and stamps last_modified, through the same db helpers every NoteStore write uses"}
 }
