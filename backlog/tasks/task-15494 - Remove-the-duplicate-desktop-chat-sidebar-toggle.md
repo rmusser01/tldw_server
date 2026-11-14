@@ -1,0 +1,46 @@
+---
+id: TASK-15494
+title: Remove the duplicate desktop chat sidebar toggle
+status: Done
+labels:
+- webui
+- navigation
+references:
+- TASK-15493
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+When the persistent sidebar is on screen, both its chevron and the header hamburger control the same collapsed state. Keep the chevron on desktop and use the header opener for drawers.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 A persistent sidebar has one toggle when collapsed or expanded.
+- [x] #2 Mobile and legacy drawers remain reachable and can be dismissed.
+- [x] #3 Sidebar shortcuts still work with the persistent layout.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Follow-up to TASK-15493. Use the existing persistent-sidebar rendering predicate in the WebUI and shared layouts. Retain the existing drawer and keyboard behavior.
+Two layout integration cases reproduced the duplicate before the change. The two layout conditions now keep only the desktop rail control whenever the persistent sidebar renders. Updated the shared research UAT script to locate the existing page-launcher button for geometry and the single accessible sidebar button for opening Chats. Verified 211 focused tests and scoped ESLint, plus local Chromium at 1440px for arrow expansion and collapse and at 390px for hamburger opening and keyboard dismissal. The live shared research UAT and hosted rollout were outside this check. Bandit is inapplicable to the TS/JS-only diff.
+<!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Removed the duplicate desktop hamburger in both shell layouts. Mobile and legacy drawers keep their header opener.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
+<!-- DOD:END -->

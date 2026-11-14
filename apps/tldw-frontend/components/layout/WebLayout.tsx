@@ -549,7 +549,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
                 )}
               >
                 <Header
-                  onToggleSidebar={shellSidebarEnabled ? toggleSidebar : undefined}
+                  onToggleSidebar={shellSidebarEnabled && !shouldRenderChatSidebar ? toggleSidebar : undefined}
                   sidebarCollapsed={headerSidebarCollapsed}
                   notificationCount={notificationCount}
                   notificationState={notificationState}
