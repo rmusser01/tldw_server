@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { Link } from "react-router-dom"
 import {
   Button,
@@ -1115,7 +1116,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
     setFocusedQuestionId(nextQuestion.id)
     window.requestAnimationFrame(() => {
       questionRefs.current.get(nextQuestion.id)?.scrollIntoView({
-        behavior: "smooth",
+        behavior: smoothScrollBehavior(),
         block: "center"
       })
     })
@@ -1383,7 +1384,7 @@ export const TakeQuizTab: React.FC<TakeQuizTabProps> = ({
   const focusQuestion = React.useCallback((questionId: number) => {
     setFocusedQuestionId(questionId)
     questionRefs.current.get(questionId)?.scrollIntoView({
-      behavior: "smooth",
+      behavior: smoothScrollBehavior(),
       block: "center"
     })
   }, [])

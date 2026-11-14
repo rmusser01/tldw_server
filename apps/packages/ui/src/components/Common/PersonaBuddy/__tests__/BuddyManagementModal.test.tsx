@@ -150,6 +150,36 @@ it("resolves a composer conversation into its workspace before allowing Apply", 
     expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled()
   )
 })
+// XP-14 (#3115): the starter picker shows titles, not licence captions; the
+// licence stays one hover or focus away.
+it("keeps a starter's licence caption behind an info button", async () => {
+  mocks.catalog.mockResolvedValue({
+    starter_packs: [
+      { id: "lens", title: "Lens", production_status: "art_ready", license_label: "CC BY 4.0 · Example Artist" }
+    ]
+  })
+  render(<BuddyManagementModal {...props} profiles={[]} />)
+  const info = await screen.findByRole("button", { name: "Artwork licence: Lens" })
+  expect(screen.queryByText("CC BY 4.0 · Example Artist", { selector: "p" })).not.toBeInTheDocument()
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  fireEvent.mouseEnter(info)
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("CC BY 4.0 · Example Artist")
+})
+
+// Review of XP-14: hover alone leaves touch and screen-reader users without
+// the licence. A tap opens it, and the button describes itself with it.
+it("lets touch and screen-reader users reach a starter's licence", async () => {
+  mocks.catalog.mockResolvedValue({
+    starter_packs: [
+      { id: "lens", title: "Lens", production_status: "art_ready", license_label: "CC BY 4.0 · Example Artist" }
+    ]
+  })
+  render(<BuddyManagementModal {...props} profiles={[]} />)
+  const info = await screen.findByRole("button", { name: "Artwork licence: Lens" })
+  expect(info).toHaveAccessibleDescription("CC BY 4.0 · Example Artist")
+  fireEvent.click(info)
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("CC BY 4.0 · Example Artist")
+})
 it("waits for preview and prevents follow-up attachment writes after unmount", async () => {
   mocks.catalog.mockResolvedValue({
     starter_packs: [

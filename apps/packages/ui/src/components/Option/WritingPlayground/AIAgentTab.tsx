@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { Button, Empty, Input, Segmented, Spin, Typography } from "antd"
 import { Send } from "lucide-react"
 import { useWritingPlaygroundStore } from "@/store/writing-playground"
@@ -74,7 +75,7 @@ export function AIAgentTab({ isOnline }: AIAgentTabProps) {
 
   useEffect(() => {
     if (typeof messagesEndRef.current?.scrollIntoView === "function") {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+      messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
     }
   }, [messages])
 

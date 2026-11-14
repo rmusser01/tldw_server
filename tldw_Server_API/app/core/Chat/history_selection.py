@@ -28,6 +28,25 @@ class HistorySelectionError(ValueError):
         return self.code
 
 
+# Why a saved-reply Regenerate or Continue was refused. The 409 body carries it
+# as ``reason`` next to ``unsupported_history_regeneration`` or
+# ``unsupported_history_continuation``, so the client can withdraw exactly the
+# actions that cannot run instead of guessing from the code:
+#   "question": the saved question can't be reused, so Regenerate and Continue
+#               are both refused;
+#   "reply":    only this reply has no text to continue; Regenerate still runs;
+#   "request":  the request itself is not a valid reply action (for example
+#               tools sent with Continue); the saved question and reply may be fine.
+REPLY_ACTION_REFUSED_QUESTION = "question"
+REPLY_ACTION_REFUSED_REPLY = "reply"
+REPLY_ACTION_REFUSED_REQUEST = "request"
+
+
+def reply_action_refusal(code: str, reason: str) -> HistorySelectionError:
+    """Return a saved-reply action refusal that names what was refused."""
+    return HistorySelectionError(code, details={"reason": reason})
+
+
 class HistoryEditTargetChangedError(HistorySelectionError):
     """The original excluded Edit target changed; no input was admitted."""
 

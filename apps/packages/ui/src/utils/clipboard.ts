@@ -46,6 +46,7 @@ export const copyToClipboard = async ({
     }
   }
 
-  // Fallback to plain text copying
-  navigator.clipboard.writeText(text)
+  // Fallback to plain text copying. Awaited, so a refused write rejects
+  // instead of letting the caller confirm a copy that did not happen.
+  await navigator.clipboard.writeText(text)
 }

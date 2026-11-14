@@ -128,6 +128,7 @@ def test_stale_or_unqualified_regeneration_writes_nothing(history_db, boundary):
         regenerate(db, cid, selection, target, **extra)
     if boundary == "missing-authority":
         assert rejected.value.code == "unsupported_history_regeneration"
+        assert rejected.value.details == {"reason": "question"}
     assert db.get_messages_for_conversation(cid) == before
     assert db.get_conversation_by_id(cid)["history_version"] == fence
 
@@ -160,8 +161,9 @@ def test_tool_parent_is_refused_without_guessing_the_original_user(history_db):
     )
     settle(db, cid, tool, "tool-answer")
     before = db.get_messages_for_conversation(cid)
-    with pytest.raises(HistorySelectionError, match="unsupported_history_regeneration"):
+    with pytest.raises(HistorySelectionError, match="unsupported_history_regeneration") as rejected:
         regenerate(db, cid, selected(db, cid, after="tool-answer"), "tool-answer")
+    assert rejected.value.details == {"reason": "question"}
     assert db.get_messages_for_conversation(cid) == before
 
 

@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -174,6 +174,7 @@ describe("NotesManagerPage NS-04 save keeps the list in place", { timeout: 60_00
   let holdTrash: boolean
   let holdSearch: boolean
   let releaseList: Array<() => void>
+  let activeRows: typeof listRows
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -181,6 +182,7 @@ describe("NotesManagerPage NS-04 save keeps the list in place", { timeout: 60_00
     holdTrash = false
     holdSearch = false
     releaseList = []
+    activeRows = listRows
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
     mockClearSetting.mockResolvedValue(undefined)
@@ -200,7 +202,7 @@ describe("NotesManagerPage NS-04 save keeps the list in place", { timeout: 60_00
         return held({ items: [listRows[1]], pagination: { total_items: 1, total_pages: 1 } }, holdSearch)
       }
       if (path.startsWith("/api/v1/notes/?")) {
-        const payload = { items: listRows, pagination: { total_items: listRows.length, total_pages: 1 } }
+        const payload = { items: activeRows, pagination: { total_items: activeRows.length, total_pages: 1 } }
         if (!holdListRefetch) return payload
         return new Promise((resolve) => {
           releaseList.push(() => resolve(payload))
@@ -302,6 +304,24 @@ describe("NotesManagerPage NS-04 save keeps the list in place", { timeout: 60_00
     releaseList.forEach((release) => release())
     expect(await screen.findByTestId("notes-open-button-n2")).toBeInTheDocument()
     expect(screen.queryByTestId("notes-open-button-n1")).not.toBeInTheDocument()
+  })
+
+  it("keeps the empty state while an empty list refetches", async () => {
+    activeRows = []
+    renderPage()
+    expect(await screen.findByText("No notes yet")).toBeInTheDocument()
+
+    holdListRefetch = true
+    await act(async () => {
+      void queryClients[0].invalidateQueries()
+    })
+
+    await waitFor(() => {
+      expect(releaseList.length).toBeGreaterThan(0)
+    })
+    expect(screen.queryByTestId("notes-list-loading")).not.toBeInTheDocument()
+    expect(screen.getByText("No notes yet")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-header-count")).not.toHaveTextContent("Loading")
   })
 
   it("asks the list endpoint to skip its duplicate arrays", async () => {

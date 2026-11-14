@@ -533,6 +533,13 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     expect(within(panels).getAllByRole('button', { name: 'My first note' })).toHaveLength(1)
     // No "No related notes yet." under a link that is right there.
     expect(screen.queryByTestId('notes-related-empty')).not.toBeInTheDocument()
+    // AX-14: Connections sits under the note title's h2.
+    expect(
+      within(screen.getByTestId('notes-section-connections')).getByRole('heading', {
+        level: 3,
+        name: /^Connections/
+      })
+    ).toBeInTheDocument()
   })
 
   it('lists an incoming manual link once and keeps the [[link]] to a manually linked note (NE-10)', async () => {

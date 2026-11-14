@@ -1,6 +1,8 @@
 import React from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+// Scripted scrolls honour the OS reduced-motion setting (AX-19).
+import { smoothScrollBehavior } from '@/utils/reduced-motion'
 import { ContentViewer } from '../ContentViewer'
 
 vi.mock('react-i18next', () => ({
@@ -111,7 +113,7 @@ describe('ContentViewer stage 2 ergonomics', () => {
 
     fireEvent.click(button)
 
-    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
+    expect(scrollToMock).toHaveBeenCalledWith({ top: 0, behavior: smoothScrollBehavior() })
     expect(screen.queryByRole('button', { name: 'Back to top' })).not.toBeInTheDocument()
   })
 

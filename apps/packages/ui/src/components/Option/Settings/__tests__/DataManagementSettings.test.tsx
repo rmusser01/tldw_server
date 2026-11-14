@@ -151,4 +151,38 @@ describe("DataManagementSettings", () => {
     expect(mocks.notificationSuccess).not.toHaveBeenCalled()
   })
 
+  it.each(["local", "sync"])("waits for migration before reset and reports a Chrome %s clear failure", async (area) => {
+    let unlock!: () => void
+    const pendingMigration = new Promise<void>((resolve) => { unlock = resolve })
+    const request = vi.fn(async (_name: string, operation: () => Promise<void>) => {
+      await pendingMigration
+      return operation()
+    })
+    const localClear = vi.fn((done?: () => void) => {
+      if (area === "local") Object.assign(chrome.runtime, { lastError: { message: "Storage inaccessible" } })
+      done?.()
+      Reflect.deleteProperty(chrome.runtime, "lastError")
+    })
+    vi.stubGlobal("navigator", Object.create(navigator, { locks: { value: { request } } }))
+    vi.stubGlobal("chrome", { runtime: { id: "reset-test-extension" }, storage: { local: { clear: localClear } } })
+    vi.stubGlobal("browser", { runtime: chrome.runtime, storage: {
+      local: { clear: localClear },
+      session: { clear: mocks.storageClear },
+      sync: { clear: area === "sync" ? vi.fn().mockRejectedValue(new Error("Sync inaccessible")) : mocks.storageClear }
+    } })
+    render(<DataManagementSettings />)
+
+    fireEvent.click(screen.getByRole("button", { name: /reset all/i }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "RESET" } })
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(request).toHaveBeenCalledWith("tldw:legacy-chat-storage", expect.any(Function)))
+    expect(mocks.clearDB).not.toHaveBeenCalled()
+    expect(localClear).not.toHaveBeenCalled()
+
+    unlock()
+    await waitFor(() => expect(mocks.notificationError).toHaveBeenCalledWith({ message: "Reset failed" }))
+    expect(mocks.notificationSuccess).not.toHaveBeenCalled()
+    expect(mocks.clearDB).not.toHaveBeenCalled()
+  })
+
 })

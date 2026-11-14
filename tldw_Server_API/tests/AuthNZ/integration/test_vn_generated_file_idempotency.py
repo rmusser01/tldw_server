@@ -2,6 +2,7 @@
 
 import os
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlparse
 
 import pytest
@@ -59,7 +60,7 @@ def _vn_runtime_env(tmp_path: Path, request: pytest.FixtureRequest, backend: str
         assert urlparse(database_url).path.lstrip("/") == db_name, "Use the fixture-owned database"
     else:
         database_url = f"sqlite:///{tmp_path / 'users.db'}"
-    return _runtime_env(tmp_path, database_url, backend=backend)
+    return cast(dict[str, str], _runtime_env(tmp_path, database_url, backend=backend))
 
 
 @pytest.mark.integration
@@ -675,7 +676,7 @@ def _storage_result(
     if quota_policy is not None:
         env["USAGE_QUOTAS_ENABLED"] = "true" if quota_policy == "on" else "false"
     env["VN_STORAGE_CASE"] = case
-    return _run_runtime(tmp_path, env, STORAGE_SCRIPT)
+    return cast(dict[str, object], _run_runtime(tmp_path, env, STORAGE_SCRIPT))
 
 
 @pytest.mark.integration

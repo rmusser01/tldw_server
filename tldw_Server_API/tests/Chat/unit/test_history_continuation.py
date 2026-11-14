@@ -33,6 +33,23 @@ def test_merge_continued_reply_prefixes_the_saved_text(content, expected):
     assert payload["content"] == content
 
 
+@pytest.mark.parametrize(
+    ("continuation", "expected"),
+    [
+        # A provider that extends the stripped text writes its own spacing:
+        # it replaces the saved trailing whitespace instead of doubling it.
+        ("\n\nNext part.", "Saved start.\n\nNext part."),
+        (" more", "Saved start. more"),
+        # A provider that answers with a new message keeps the saved spacing.
+        ("Next part.", "Saved start.\n\nNext part."),
+        ([{"type": "text", "text": "\n\nNext"}], [{"type": "text", "text": "Saved start.\n\nNext"}]),
+    ],
+)
+def test_merge_continued_reply_does_not_double_the_saved_trailing_whitespace(continuation, expected):
+    merged = merge_continued_reply({"role": "assistant", "content": continuation}, "Saved start.\n\n")
+    assert merged["content"] == expected
+
+
 def test_continued_reply_prefix_returns_plain_saved_text():
     assert continued_reply_prefix({"message": "Saved start", "images": (), "tool_calls": None}) == "Saved start"
 
@@ -52,3 +69,5 @@ def test_continued_reply_prefix_refuses_replies_without_continuable_text(item):
     with pytest.raises(HistorySelectionError) as excinfo:
         continued_reply_prefix(item)
     assert excinfo.value.code == UNSUPPORTED_CONTINUATION
+    # Only this reply is the problem: Regenerate on its question can still run.
+    assert excinfo.value.details == {"reason": "reply"}

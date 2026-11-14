@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render as renderComponent, screen } from "@testing-library/react";
+import { render as renderComponent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
@@ -325,7 +325,20 @@ describe("Playground sticky composer layout integration", () => {
       transcript.compareDocumentPosition(dock) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(findCenteredWidthContract(dock)).toBeDefined();
+    // The composer keeps the centred width itself (it is not forced wide).
+    expect(screen.getByTestId("playground-form")).toHaveAttribute(
+      "data-force-wide-mode",
+      "false",
+    );
+  });
+
+  // CO-03 (#3113): a bordered "Composer" pill above the composer looked like
+  // a control, did nothing and cost about 26px of transcript.
+  it("does not label the composer dock with a decorative Composer pill", () => {
+    render(<Playground />);
+
+    const dock = screen.getByTestId("playground-chat-composer-dock");
+    expect(within(dock).queryByText("Composer", { exact: true })).toBeNull();
   });
 
   it("removes centered chat width constraints when cockpit rails are collapsed", () => {

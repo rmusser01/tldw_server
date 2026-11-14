@@ -125,7 +125,7 @@ const controlRowModelPickerRef = nodes
 const compiled = ts.transpileModule(
   `
   return function useSidebarValidation(scope) {
-    const { form, selectedModel, isSending, isConnectionReady, isProMode, draftReady, protectedHistory = false, personaMode = "none" } = scope;
+    const { form, selectedModel, isSending, isConnectionReady, isProMode, isNextgenV5Composer = false, draftReady, protectedHistory = false, personaMode = "none" } = scope;
     const audioHealthEnabled = false, greetingHistorySelection = protectedHistory ? { getCurrent: () => ({ status: "ready", owner: null, view: null }) } : null;
     const effectiveAssistantState = resolveEffectiveAssistantState({ tracked: personaMode === "tracked" ? { assistantKind: "persona", assistantId: "loaded-persona" } : null,
       settings: personaMode === "overlay" ? { assistantOverlay: { kind: "persona", id: "loaded-persona", name: "Persona overlay", system_prompt: "Fixture overlay" } } : null });
@@ -189,6 +189,7 @@ const useSidebarValidation = new Function(
   isSending: boolean
   isConnectionReady: boolean
   isProMode: boolean
+  isNextgenV5Composer?: boolean
   draftReady: boolean
   protectedHistory?: boolean
   personaMode?: "none" | "tracked" | "overlay"
@@ -215,6 +216,7 @@ function Harness({
   busy = false,
   connected = true,
   pro = false,
+  v5 = false,
   draftReady = true,
   text = "keep my draft",
   image = "",
@@ -234,6 +236,7 @@ function Harness({
     isSending: busy,
     isConnectionReady: connected,
     isProMode: pro,
+    isNextgenV5Composer: v5,
     draftReady,
     protectedHistory,
     personaMode
@@ -256,7 +259,8 @@ function Harness({
       </output>
       <output data-testid="tracked-selection-loading">{String(trackedSelectionLoading)}</output>
       {inline}
-      {pro && controlRowModelPickerRef === "modelPickerRef" && (
+      {/* The v5 composer renders no control row. */}
+      {pro && !v5 && controlRowModelPickerRef === "modelPickerRef" && (
         <div data-testid="pro-control-row">
           <ModelSelect ref={modelPickerRef} showSelectedName />
         </div>
@@ -492,6 +496,19 @@ describe("sidebar model validation", () => {
     await waitForCatalog()
     const row = await screen.findByTestId("pro-control-row")
     expect(row).toContainElement(screen.getByTestId("chat-model-select"))
+    fireEvent.click(screen.getByText("Send"))
+    await screen.findByRole("alert")
+    const search = await screen.findByPlaceholderText("Search models")
+    await waitFor(() => expect(search).toHaveFocus())
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
+
+  // #3343: the v5 composer never renders the Pro control row, so its model
+  // chip must come from somewhere else for a blocked Send to open it.
+  it("XS-02: opens a model picker in the Pro v5 composer when Send is blocked by the model", async () => {
+    renderHarness(<Harness model="" pro v5 />)
+    await waitForCatalog()
+    expect(screen.queryByTestId("pro-control-row")).not.toBeInTheDocument()
     fireEvent.click(screen.getByText("Send"))
     await screen.findByRole("alert")
     const search = await screen.findByPlaceholderText("Search models")

@@ -51,3 +51,31 @@ def test_postgres_tag_filter_is_exact_and_supports_all_and_any(pg_database_confi
     finally:
         db.close_all_connections()
         other.close_all_connections()
+
+
+def test_postgres_tag_filter_matches_by_keyword_identity(pg_database_config: DatabaseConfig) -> None:
+    """LOWER() misses ß/SS; the filter compares normalize_keyword_identity instead."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(db_path=":memory:", client_id="930003", backend=backend)
+    other = CharactersRAGDB(db_path=":memory:", client_id="930004", backend=backend)
+    try:
+        for title, tags in {
+            "eclair": ["Éclair"],
+            "street": ["Straße"],
+            "both": ["Éclair", "Straße"],
+        }.items():
+            note_id = db.add_note(title=title, content=f"Body of {title}")
+            for tag in tags:
+                _tag(db, note_id, tag)
+        foreign = other.add_note(title="foreign street", content="Body")
+        _tag(other, foreign, "Straße")
+
+        assert _titles(db, ["ÉCLAIR"], "all") == ["both", "eclair"]
+        assert _titles(db, ["STRASSE"], "all") == ["both", "street"]
+        assert _titles(db, ["éclair", "strasse"], "all") == ["both"]
+        assert _titles(db, ["éclair", "strasse"], "any") == ["both", "eclair", "street"]
+        assert db.count_notes_matching_keywords(None, ["STRASSE"], match="all") == 2
+        assert db.count_notes_matching_keywords(None, ["éclair", "strasse"], match="any") == 3
+    finally:
+        db.close_all_connections()
+        other.close_all_connections()
