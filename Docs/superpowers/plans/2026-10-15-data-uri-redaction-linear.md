@@ -185,30 +185,30 @@ index 59962e9790..670f66a3cc 100644
 +        return DATA_URI_REDACT_RE.sub(r"\1<omitted>", request_json)
      except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
          return request_json
- 
+
 diff --git a/tldw_Server_API/app/api/v1/schemas/chat_validators.py b/tldw_Server_API/app/api/v1/schemas/chat_validators.py
 index abddcd6692..4fb749b116 100644
 --- a/tldw_Server_API/app/api/v1/schemas/chat_validators.py
 +++ b/tldw_Server_API/app/api/v1/schemas/chat_validators.py
 @@ -12,6 +12,7 @@ from typing import Any, Optional
  from loguru import logger
- 
+
  from tldw_Server_API.app.core.custom_openai_providers import iter_custom_openai_provider_names
 +from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
- 
+
  #######################################################################################################################
  #
 @@ -23,10 +24,6 @@ CONVERSATION_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_-]{1,100}$')
  # Valid character ID pattern (numeric or name)
  CHARACTER_ID_PATTERN = re.compile(r'^(\d+|[a-zA-Z0-9_\- ]{1,100})$')
- 
+
 -# Pre-compiled pattern for redacting base64 image data in request size validation
 -# Matches data:image URIs and captures the prefix for redaction
 -DATA_URI_REDACT_PATTERN = re.compile(r'(data:image[^,]*,)[^"\s]+')
 -
  # Maximum tool definition size (reduced from 10KB to 5KB for security)
  MAX_TOOL_DEFINITION_SIZE = 5000  # characters
- 
+
 @@ -338,7 +335,7 @@ def validate_request_size(request_data: Any) -> bool:
          # If it's already a JSON string, avoid re-serializing: redact via regex only.
          if isinstance(request_data, str):
@@ -227,13 +227,13 @@ index 25ab2882ea..f84439aa33 100644
  from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
  from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
 +from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
- 
+
  _CHAT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
      ChatAPIError,
 @@ -3023,13 +3024,10 @@ def estimate_tokens_from_json(request_json: str) -> int:
          return 1
- 
- 
+
+
 -_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
 -
 -
@@ -244,7 +244,7 @@ index 25ab2882ea..f84439aa33 100644
 +        return DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)
      except _CHAT_NONCRITICAL_EXCEPTIONS:
          return text
- 
+
 diff --git a/tldw_Server_API/app/core/LLM_Calls/usage_accounting.py b/tldw_Server_API/app/core/LLM_Calls/usage_accounting.py
 index 0b55a6cc91..12340bfc8a 100644
 --- a/tldw_Server_API/app/core/LLM_Calls/usage_accounting.py
@@ -262,13 +262,13 @@ index 0b55a6cc91..12340bfc8a 100644
  )
  from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
 +from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
- 
+
  _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
  _MARK = "__llm_accounted__"
 @@ -64,12 +64,6 @@ def _approx_tokens(char_count: int) -> int:
      return max(1, char_count // 4) if char_count > 0 else 0
- 
- 
+
+
 -# Redacts base64 image payloads before the estimate, as the chat endpoint's estimator does.
 -# The media-type part is bounded: an unbounded ``[^,]*`` rescans to the end of the text for
 -# every ``data:image`` with no comma after it, which is quadratic on a crafted prompt.
@@ -286,7 +286,7 @@ index 0b55a6cc91..12340bfc8a 100644
 +        return max(1, len(DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)) // 4)
      except Exception:  # noqa: BLE001 - an estimate must never fail a call
          return 1
- 
+
 diff --git a/tldw_Server_API/app/core/Utils/image_validation.py b/tldw_Server_API/app/core/Utils/image_validation.py
 index 3440ed7092..5760ba9888 100644
 --- a/tldw_Server_API/app/core/Utils/image_validation.py
@@ -294,7 +294,7 @@ index 3440ed7092..5760ba9888 100644
 @@ -202,6 +202,12 @@ MAX_BASE64_STRING_LENGTH = int(MAX_BASE64_BYTES * 4 / 3) + 100
  # Regex pattern for data URI validation
  DATA_URI_PATTERN = re.compile(r'^data:([^;]+);base64,(.+)$')
- 
+
 +# Finds data:image payloads in free text (a request body, a prompt) for redaction; group 1 is
 +# the "data:image/...," prefix to keep. The media-type part is bounded: an unbounded ``[^,]*``
 +# rescans to the end of the text for every ``data:image`` with no comma after it, which is
