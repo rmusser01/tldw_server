@@ -566,21 +566,6 @@ export function ChatHeader({
       : []),
     { type: "divider" },
     {
-      key: "home",
-      label: companionHomeLabel,
-      icon: <House className="size-4" aria-hidden="true" />,
-      onClick: () => runMenuAction(onOpenCompanionHome)
-    },
-    {
-      key: "pages",
-      label: shortcutsExpanded
-        ? toText(t("option:header.closePageLauncher", "Close page launcher"))
-        : toText(t("option:header.browsePages", "Browse pages")),
-      icon: <Signpost className="size-4" aria-hidden="true" />,
-      onClick: () => runMenuAction(() => onToggleShortcuts(!shortcutsExpanded))
-    },
-    { type: "divider" },
-    {
       key: "settings",
       label: toText(t("sidepanel:header.openSettingsAria", "Open settings")),
       icon: <CogIcon className="size-4" aria-hidden="true" />,
@@ -610,6 +595,39 @@ export function ChatHeader({
     }
   ]
   const headerActionClass = `inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-md px-2 text-sm text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`
+
+  const navigationActionClass = showChatTitle
+    ? headerActionClass
+    : `inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`
+  const navigationControls = (
+    <>
+      <Tooltip title={companionHomeLabel}>
+        <button
+          type="button"
+          onClick={onOpenCompanionHome}
+          aria-label={companionHomeLabel}
+          className={navigationActionClass}
+          title={companionHomeLabel}
+          data-testid="chat-header-companion-home"
+        >
+          <House className="size-4" aria-hidden="true" />
+        </button>
+      </Tooltip>
+      <Tooltip title={shortcutsToggleLabel}>
+        <button
+          type="button"
+          onClick={() => onToggleShortcuts(!shortcutsExpanded)}
+          aria-label={shortcutsToggleLabel}
+          aria-expanded={shortcutsExpanded}
+          className={navigationActionClass}
+          title={shortcutsToggleLabel}
+          data-testid="chat-toggle-shortcuts"
+        >
+          <Signpost className="size-4" aria-hidden="true" />
+        </button>
+      </Tooltip>
+    </>
+  )
 
   const sessionBadges = showSessionModeBadge ? (
     <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1">
@@ -658,7 +676,7 @@ export function ChatHeader({
       data-testid="chat-conversation-header"
       className="z-20 w-full border-b border-border bg-surface"
     >
-      <div className="flex min-h-14 w-full items-center gap-1 px-2 py-1.5 sm:gap-2 sm:px-4">
+      <div className="flex min-h-14 w-full flex-wrap items-center gap-1 px-2 py-1.5 sm:gap-2 sm:px-4">
         {showSidebarToggle && (
           <button
             type="button"
@@ -672,7 +690,8 @@ export function ChatHeader({
             <Menu className="size-4" aria-hidden="true" />
           </button>
         )}
-        <div className="min-w-0 flex-1">
+        {navigationControls}
+        <div className="min-w-24 flex-1">
           <h2 className="truncate text-sm font-semibold leading-5 text-text">
             {canEditTitle ? (
               isEditingTitle ? (
@@ -741,7 +760,7 @@ export function ChatHeader({
             </p>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1">
           <button
             type="button"
             onClick={onOpenCommandPalette}
@@ -867,31 +886,7 @@ export function ChatHeader({
             <span className="text-sm font-medium">
               {toText(t("common:pageAssist", "tldw"))}
             </span>
-            <Tooltip title={companionHomeLabel}>
-              <button
-                type="button"
-                onClick={onOpenCompanionHome}
-                aria-label={companionHomeLabel}
-                className={`inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
-                title={companionHomeLabel}
-                data-testid="chat-header-companion-home"
-              >
-                <House className="size-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
-            <Tooltip title={shortcutsToggleLabel}>
-              <button
-                type="button"
-                onClick={() => onToggleShortcuts(!shortcutsExpanded)}
-                aria-label={shortcutsToggleLabel}
-                aria-expanded={shortcutsExpanded}
-                className={`inline-flex items-center justify-center rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
-                title={shortcutsToggleLabel}
-                data-testid="chat-toggle-shortcuts"
-              >
-                <Signpost className="size-4" aria-hidden="true" />
-              </button>
-            </Tooltip>
+            {navigationControls}
           </div>
           {sessionBadges}
         </div>
