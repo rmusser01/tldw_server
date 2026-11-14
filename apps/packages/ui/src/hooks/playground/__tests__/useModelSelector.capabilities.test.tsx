@@ -9,6 +9,7 @@ import { MemoryRouter } from "react-router-dom"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
 import { validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { normalizeTldwModels } from "@/services/tldw/model-normalization"
+import { invalidateChatModels } from "@/services/chat-models-invalidation"
 
 const chatModelSettingsState = vi.hoisted(() => ({
   apiProvider: null as string | null,
@@ -264,6 +265,73 @@ describe("useModelSelector capability rendering", () => {
     expect(result.current.filteredModels.map((model: any) => model.model)).toEqual([
       "tldw:ready-model"
     ])
+  })
+
+  // #3343: a failed catalog read used to leave the list silently short.
+  it("says when 'All models' could not load and offers to try again", async () => {
+    const ready = { model: "tldw:ready-model", provider: "openai", is_configured: true }
+    const loadCatalogModels = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Request failed: HTTP 502"))
+      .mockResolvedValueOnce([
+        ready,
+        { model: "tldw:claude-catalog", provider: "anthropic", is_configured: false, catalog_only: true }
+      ])
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [ready],
+        selectedModel: "openai:ready-model",
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn(),
+        loadCatalogModels
+      })
+    )
+    const retryItem = () =>
+      result.current.modelDropdownMenuItems.find((item: any) => item?.key === "model-catalog-retry") as any
+
+    act(() => {
+      result.current.setModelListScope("catalog")
+    })
+    await waitFor(() => expect(retryItem()).toBeTruthy())
+    render(<>{retryItem().label}</>)
+    expect(screen.getByText(/Couldn't load all models/)).toBeInTheDocument()
+
+    act(() => {
+      retryItem().onClick()
+    })
+    await waitFor(() =>
+      expect(result.current.filteredModels.map((model: any) => model.model)).toContain("tldw:claude-catalog")
+    )
+    expect(retryItem()).toBeUndefined()
+  })
+
+  it("loads 'All models' again for the new account once the chat models are invalidated", async () => {
+    const ready = { model: "tldw:ready-model", provider: "openai", is_configured: true }
+    const loadCatalogModels = vi
+      .fn()
+      .mockResolvedValueOnce([ready, { model: "tldw:old-account", provider: "anthropic", catalog_only: true }])
+      .mockResolvedValueOnce([ready, { model: "tldw:new-account", provider: "anthropic", catalog_only: true }])
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [ready],
+        selectedModel: "openai:ready-model",
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn(),
+        loadCatalogModels
+      })
+    )
+    const names = () => result.current.filteredModels.map((model: any) => model.model)
+    act(() => {
+      result.current.setModelListScope("catalog")
+    })
+    await waitFor(() => expect(names()).toContain("tldw:old-account"))
+
+    act(() => {
+      invalidateChatModels()
+    })
+
+    await waitFor(() => expect(names()).toContain("tldw:new-account"))
+    expect(names()).not.toContain("tldw:old-account")
   })
 
   it.each([null, "tldw"])("CC-06: never names the tldw transport as the provider (stored provider %s)", (provider) => {

@@ -1,6 +1,8 @@
 import React from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+// Scripted scrolls honour the OS reduced-motion setting (AX-19).
+import { smoothScrollBehavior } from '@/utils/reduced-motion'
 import { DiffViewModal } from '../DiffViewModal'
 
 vi.mock('react-i18next', () => ({
@@ -103,19 +105,19 @@ describe('DiffViewModal stage 1 keyboard regressions', () => {
     fireEvent.keyDown(region, { key: 'Home' })
     fireEvent.keyDown(region, { key: 'End' })
 
-    expect(scrollBy).toHaveBeenCalledWith({ top: 100, behavior: 'smooth' })
-    expect(scrollBy).toHaveBeenCalledWith({ top: -100, behavior: 'smooth' })
-    expect(scrollBy).toHaveBeenCalledWith({ top: 400, behavior: 'smooth' })
-    expect(scrollBy).toHaveBeenCalledWith({ top: -400, behavior: 'smooth' })
-    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: 'smooth' })
-    expect(scrollTo).toHaveBeenCalledWith({ top: 1200, behavior: 'smooth' })
+    expect(scrollBy).toHaveBeenCalledWith({ top: 100, behavior: smoothScrollBehavior() })
+    expect(scrollBy).toHaveBeenCalledWith({ top: -100, behavior: smoothScrollBehavior() })
+    expect(scrollBy).toHaveBeenCalledWith({ top: 400, behavior: smoothScrollBehavior() })
+    expect(scrollBy).toHaveBeenCalledWith({ top: -400, behavior: smoothScrollBehavior() })
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: smoothScrollBehavior() })
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1200, behavior: smoothScrollBehavior() })
 
     fireEvent.click(screen.getByRole('button', { name: 'Side by Side' }))
     expect(screen.getAllByText('Version 3').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Version 2').length).toBeGreaterThan(0)
 
     fireEvent.keyDown(region, { key: 'ArrowDown' })
-    expect(scrollBy).toHaveBeenCalledWith({ top: 100, behavior: 'smooth' })
+    expect(scrollBy).toHaveBeenCalledWith({ top: 100, behavior: smoothScrollBehavior() })
 
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalledTimes(1)

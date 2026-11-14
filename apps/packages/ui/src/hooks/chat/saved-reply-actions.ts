@@ -156,12 +156,26 @@ export const isSavedReplyActionRefusal = (error: unknown): boolean => {
   )
 }
 
-/** Remember a definitive refusal; a refused Regenerate also rules out Continue. */
-export const rememberSavedReplyRefusal = (intent: NativeHistoryRegenerate) => {
+/**
+ * The actions a definitive refusal rules out, from the server's `reason`:
+ * - `question`: the saved question can't be reused, so neither action can run;
+ * - `reply`: only this reply has no text to continue; Regenerate still runs;
+ * - `request`: the request itself was refused, so only that action is withdrawn.
+ * A server that sends no reason can't say which; the reply itself is checked
+ * before Continue is offered, so the saved question is the likely cause.
+ */
+const actionsRefusedBy = (intent: NativeHistoryRegenerate, error: unknown): SavedReplyAction[] => {
+  const reason = (error as { details?: { detail?: { reason?: unknown } } } | null)?.details?.detail?.reason
+  if (reason === "reply") return ["continue"]
+  if (reason === "request") return [intent.action === "continue" ? "continue" : "regenerate"]
+  return ["regenerate", "continue"]
+}
+
+/** Remember a definitive refusal and withdraw exactly the actions it covers. */
+export const rememberSavedReplyRefusal = (intent: NativeHistoryRegenerate, error: unknown) => {
   const key = savedReplyKey(intent)
   const refused = refusedSavedReplies.get(key) ?? new Set<SavedReplyAction>()
-  refused.add("continue")
-  if (intent.action !== "continue") refused.add("regenerate")
+  for (const action of actionsRefusedBy(intent, error)) refused.add(action)
   refusedSavedReplies.set(key, refused)
 }
 

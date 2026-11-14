@@ -1,4 +1,5 @@
 import { readableForeground } from "./contrast"
+import { TEXT_ON_TINT_VARS, textOnTintTokens } from "./text-on-tint"
 import type { ThemeColorTokens, ThemeDefinition } from "./types"
 
 // ---------------------------------------------------------------------------
@@ -36,6 +37,7 @@ const ALL_CSS_VARS: string[] = [
   ...Object.values(TOKEN_TO_CSS_VAR),
   "--color-primary-foreground",
   "--color-primary-strong-foreground",
+  ...Object.values(TEXT_ON_TINT_VARS),
   // Shadows
   "--shadow-sm",
   "--shadow-md",
@@ -106,6 +108,11 @@ export function applyThemeTokens(tokens: ThemeColorTokens, theme: ThemeDefinitio
     ["primaryStrong", "--color-primary-strong-foreground"]
   ] as const) {
     style.setProperty(cssVar, readableForeground(tokens[key]))
+  }
+
+  // Text shades that stay readable on their own /10 tints (#3124).
+  for (const [cssVar, value] of textOnTintTokens(tokens)) {
+    style.setProperty(cssVar, value)
   }
 
   // --- Shadows (raw CSS values) ---

@@ -358,7 +358,9 @@ export const createFakeTldwServer = ({
     const continueId = body.metadata?.tldw_continue_from_message_id
     const regenerateId = continueId !== undefined && body.metadata?.tldw_regenerate_from_message_id === undefined
       ? continueId : body.metadata?.tldw_regenerate_from_message_id
-    const refusal = continueId !== undefined ? "unsupported_history_continuation" : "unsupported_history_regeneration"
+    const code = continueId !== undefined ? "unsupported_history_continuation" : "unsupported_history_regeneration"
+    // Like the server, a refusal says whether the request or the saved question was refused.
+    const refusal = (reason: "request" | "question") => Object.assign(new Error(code), { reason })
     let prefix = ""
     let chat: FakeChat, user: FakeChatMessage, admission: HistoryAdmissionV1 | undefined
     if (edited) {
@@ -372,7 +374,7 @@ export const createFakeTldwServer = ({
           selection?.version !== 1 || selection.purpose !== "send" || selection.interpretation?.kind !== "parent_graph_v1" ||
           selection.cursor?.kind !== "after_message" || selection.cursor.message_id !== regenerateId ||
           (continueId !== undefined && body.metadata?.tldw_regenerate_from_message_id !== undefined))
-        throw new Error(refusal)
+        throw refusal("request")
       chat = existing
       const target = chat.messages.find(row => row.id === regenerateId)
       const input = chat.messages.find(row => row.id === target?.parent_message_id)
@@ -387,7 +389,7 @@ export const createFakeTldwServer = ({
           selectionDigest(selection) !== selection.selection_digest || historyDigest(context) !== selection.request_context_digest ||
           canonicalHistoryJson(body.messages.filter((row: JsonBody) => row.role === "user")) !==
             canonicalHistoryJson([{ role: "user", content: input.content }]))
-        throw new Error(refusal)
+        throw refusal("question")
       user = input
       if (continueId !== undefined) prefix = target.content
     } else {
@@ -500,7 +502,8 @@ export const createFakeTldwServer = ({
       // Matches the server: a saved-reply refusal is an unsupported history capability.
       return edited ? editRefusal(error) : json({ detail: { status: "unsupported_history_capability",
         code: body?.metadata?.tldw_continue_from_message_id !== undefined
-          ? "unsupported_history_continuation" : "unsupported_history_regeneration" } }, 409)
+          ? "unsupported_history_continuation" : "unsupported_history_regeneration",
+        ...((error as { reason?: string }).reason ? { reason: (error as { reason?: string }).reason } : {}) } }, 409)
     }
     if (!body?.stream) {
       return json({

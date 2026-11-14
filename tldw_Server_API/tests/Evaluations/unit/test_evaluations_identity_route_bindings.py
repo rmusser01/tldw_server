@@ -230,6 +230,10 @@ async def test_create_run_uses_canonical_identity_for_service_and_webhook_owner(
         def __init__(self):
             self.db = _DB()
 
+        async def get_evaluation(self, eval_id, *, created_by):
+            captured["evaluation_owner"] = created_by
+            return None
+
         async def create_run(
             self,
             *,
@@ -240,6 +244,7 @@ async def test_create_run_uses_canonical_identity_for_service_and_webhook_owner(
             webhook_url,
             created_by,
             webhook_user_id,
+            provider_credentials=None,
         ):
             captured["eval_id"] = eval_id
             captured["target_model"] = target_model
@@ -281,6 +286,7 @@ async def test_create_run_uses_canonical_identity_for_service_and_webhook_owner(
     assert result.id == "run_identity_1"
     assert captured["service_user"] == "tenant-scope"
     assert captured["lookup_user"] == "tenant-created"
+    assert captured["evaluation_owner"] == "tenant-created"
     assert captured["created_by"] == "tenant-created"
     assert captured["webhook_user_id"] == "user_tenant-scope"
     assert captured["record_user"] == "tenant-created"

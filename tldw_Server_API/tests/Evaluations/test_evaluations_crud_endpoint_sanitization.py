@@ -158,6 +158,9 @@ class _RunLookupDebugService:
     def __init__(self):
         self.db = _RunLookupDebugDB()
 
+    async def get_evaluation(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
     async def create_run(self, **_kwargs: object) -> dict[str, object]:
         return _run_row()
 
@@ -186,6 +189,9 @@ class _RunRecordDebugDB:
 class _RunRecordDebugService:
     def __init__(self):
         self.db = _RunRecordDebugDB()
+
+    async def get_evaluation(self, *_args: object, **_kwargs: object) -> None:
+        return None
 
     async def create_run(self, **_kwargs: object) -> dict[str, object]:
         return _run_row()

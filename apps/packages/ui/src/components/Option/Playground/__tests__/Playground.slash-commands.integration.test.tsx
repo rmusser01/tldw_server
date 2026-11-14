@@ -15,7 +15,9 @@ import {
   waitFor,
   waitForChatIdle
 } from "./harness/playground-harness"
+import { fireEvent } from "@testing-library/react"
 import { beforeEach, describe, expect, it } from "vitest"
+import { isMac } from "@/hooks/useKeyboardShortcuts"
 import { useStoreMessageOption } from "@/store/option"
 
 const MODEL_SETTINGS_TITLE = "Current Chat Model Settings"
@@ -25,6 +27,8 @@ const modelSettingsDialog = () =>
   screen
     .queryAllByRole("dialog")
     .find((dialog) => dialog.textContent?.includes(MODEL_SETTINGS_TITLE)) ?? null
+
+const modelSearch = () => screen.queryByRole("textbox", { name: "Search models" })
 
 const typeOneKeyAtATime = async (
   view: Awaited<ReturnType<typeof renderPlayground>>,
@@ -93,22 +97,37 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     expect(screen.queryByText(/@ mentions/)).toBeNull()
   })
 
-  it("does not open model settings while '/model' is typed, only when the command is chosen", async () => {
+  // AX-01: '/model' opens the composer's model picker (search focused), not
+  // the chat settings, and only once the command is chosen.
+  it("opens the model picker only when '/model' is chosen, not while it is typed", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
 
     await view.user.click(view.composer)
     const openedAt: string[] = []
     await typeOneKeyAtATime(view, "/model", (typed) => {
-      if (modelSettingsDialog()) openedAt.push(typed)
+      if (modelSettingsDialog() || modelSearch()) openedAt.push(typed)
     })
     // The settings dialog is lazy-loaded; give it time to appear if it was opened.
     await new Promise((resolve) => setTimeout(resolve, 1_500))
-    if (modelSettingsDialog()) openedAt.push("after typing")
+    if (modelSettingsDialog() || modelSearch()) openedAt.push("after typing")
     expect(openedAt).toEqual([])
     expect(view.composer).toHaveFocus()
 
     await view.user.keyboard("{Enter}")
-    await waitFor(() => expect(modelSettingsDialog()).not.toBeNull(), HARNESS_WAIT)
+    await waitFor(() => expect(modelSearch()).toHaveFocus(), HARNESS_WAIT)
+    expect(screen.getByTestId("model-selector")).toHaveAttribute("aria-expanded", "true")
+    expect(modelSettingsDialog()).toBeNull()
+  })
+
+  it("opens the model picker from the composer with the Switch model shortcut", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+
+    await view.user.click(view.composer)
+    fireEvent.keyDown(view.composer, { key: "e", metaKey: isMac, ctrlKey: !isMac })
+
+    await waitFor(() => expect(modelSearch()).toHaveFocus(), HARNESS_WAIT)
+    expect(modelSettingsDialog()).toBeNull()
   })
 })

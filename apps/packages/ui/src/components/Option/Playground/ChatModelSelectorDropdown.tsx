@@ -9,6 +9,32 @@ import type { ComposerModelReadiness } from "./hooks/useComposerModelReadiness"
 
 // The search box, not the scope control's radio inputs, takes focus on open.
 const MODEL_SEARCH_INPUT = 'input:not([type="radio"]):not([type="checkbox"])'
+const MODEL_LIST_ITEM = "[role='menuitem']:not([aria-disabled='true'])"
+
+/**
+ * ArrowDown from the search box, or from the Sort control while its own
+ * options are closed, moves into the model list; ArrowUp on the first model
+ * returns to the search (AX-01). Runs in the capture phase, ahead of the
+ * controls' own handlers (a closed Select would open on ArrowDown). Returns
+ * true when it moved focus.
+ */
+const moveBetweenSearchAndList = (popup: HTMLElement, event: React.KeyboardEvent) => {
+  const target = event.target as HTMLElement
+  const first = popup.querySelector<HTMLElement>(MODEL_LIST_ITEM)
+  if (!first || event.altKey || event.ctrlKey || event.metaKey) return false
+  if (event.key === "ArrowDown") {
+    const entry = target.matches(MODEL_SEARCH_INPUT)
+    const listOpen = target.getAttribute("aria-expanded") === "true"
+    if (!entry || listOpen) return false
+    first.focus()
+    return true
+  }
+  if (event.key === "ArrowUp" && target === first) {
+    popup.querySelector<HTMLInputElement>(MODEL_SEARCH_INPUT)?.focus()
+    return true
+  }
+  return false
+}
 
 type ChatModelSelectorDropdownProps = {
   apiModelLabel: string
@@ -203,6 +229,11 @@ export const ChatModelSelectorDropdown = React.memo(
               }
             }}
             className="flex max-h-[calc(100dvh-16px)] min-w-0 flex-col overflow-y-auto rounded-lg border border-border bg-surface shadow-lg"
+            onKeyDownCapture={(event) => {
+              if (!moveBetweenSearchAndList(event.currentTarget, event)) return
+              event.preventDefault()
+              event.stopPropagation()
+            }}
             onKeyDown={(event) => {
               // Keep Tab available to the search, sort, menu and help controls.
               if (event.key === "Tab") event.stopPropagation()

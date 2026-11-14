@@ -302,7 +302,7 @@ export const SidepanelForm = ({
   }, [isConnectionReady])
   const { data: chatModels, isFetching: chatModelsLoading } = useChatModelCatalog(isConnectionReady)
   useSidepanelStartupModel({ enabled: isConnectionReady, models: chatModels })
-  // Opens the model picker (Casual chip or Pro control row) when a send is blocked by the model (XS-02).
+  // Opens the model picker (the chip in Casual and v5, else the Pro control row) when a send is blocked by the model (XS-02).
   const modelPickerRef = React.useRef<ModelSelectHandle>(null)
   useModelPickerOpenRequests(modelPickerRef) // the history review's "Switch model" (CC-02)
   const voiceChatModelOptions = React.useMemo(() => {
@@ -3902,7 +3902,7 @@ export const SidepanelForm = ({
                       const composerInlineMessagesNode = (
                         <>
                           {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
-                          {isConnectionReady && !isProMode && <ModelSelect
+                          {isConnectionReady && (!isProMode || isNextgenV5Composer) && <ModelSelect
                             ref={modelPickerRef}
                             iconClassName="size-4"
                             showSelectedName
@@ -4068,7 +4068,6 @@ export const SidepanelForm = ({
                               className="flex min-w-0 flex-wrap items-center gap-2">
                               {/* L15: gap-2 provides visual separation */}
                               <>
-                                {!primaryAction.showStop ? (
                                   <>
                                     <Tooltip
                                       title={t("playground:actions.upload", "Attach image")}
@@ -4101,7 +4100,7 @@ export const SidepanelForm = ({
                                         <button
                                           type="button"
                                           onClick={handleVoiceChatToggle}
-                                          disabled={!voiceChatAvailable || streaming}
+                                          disabled={!voiceChatAvailable || isSending}
                                           className={`rounded-md border p-1 transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50 ${voiceChatToneClass}`}
                                           aria-label={voiceChatStatusLabel}
                                         >
@@ -4206,7 +4205,7 @@ export const SidepanelForm = ({
                                       </button>
                                     </Tooltip>
                                   </>
-                                ) : (
+                                {primaryAction.showStop && (
                                   <Tooltip title={t("tooltip.stopStreaming")}>
                                     <button
                                       type="button"
@@ -4436,7 +4435,7 @@ export const SidepanelForm = ({
                                     <button
                                       type="button"
                                       onClick={handleVoiceChatToggle}
-                                      disabled={!voiceChatAvailable || streaming}
+                                      disabled={!voiceChatAvailable || isSending}
                                       className={`h-11 w-11 min-h-[44px] min-w-[44px] rounded-full border p-0 transition hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50 ${voiceChatToneClass}`}
                                       aria-label={voiceChatStatusLabel}
                                     >
@@ -4732,7 +4731,6 @@ export const SidepanelForm = ({
                           "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                         const v5InlineSlot = (
                           <>
-                            {!primaryAction.showStop ? (
                               <>
                                 <Tooltip
                                   title={t(
@@ -4808,7 +4806,7 @@ export const SidepanelForm = ({
                                       <button
                                         type="button"
                                         onClick={handleVoiceChatToggle}
-                                        disabled={!voiceChatAvailable || streaming}
+                                        disabled={!voiceChatAvailable || isSending}
                                         className={`${v5ActionButtonClass} ${voiceChatToneClass}`}
                                         aria-label={voiceChatStatusLabel}
                                       >
@@ -4884,7 +4882,7 @@ export const SidepanelForm = ({
                                   </button>
                                 </Tooltip>
                               </>
-                            ) : (
+                            {primaryAction.showStop && (
                               <Tooltip title={t("tooltip.stopStreaming")}>
                                 <button
                                   type="button"

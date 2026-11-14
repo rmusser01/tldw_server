@@ -3,11 +3,13 @@
  * Small button to copy text to clipboard with feedback
  */
 
-import React, { useState, useCallback } from "react"
+import React, { useCallback } from "react"
 import { Button, Tooltip } from "antd"
 import { Check, Copy } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { copyToClipboard } from "@/utils/clipboard"
+import { CopyStatus, useCopyFailedHint } from "@/components/Common/CopyStatus"
+import { useCopyFeedback } from "@/components/Common/useCopyFeedback"
 
 interface CopyButtonProps {
   text: string
@@ -23,13 +25,13 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
   showTooltip = true
 }) => {
   const { t } = useTranslation(["common"])
-  const [copied, setCopied] = useState(false)
+  const { status, attempt, copied, failed, run } = useCopyFeedback(2000)
+  const failedHint = useCopyFailedHint()
 
-  const handleCopy = useCallback(async () => {
-    await copyToClipboard({ text })
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }, [text])
+  // A refused write is shown next to the button, never left uncaught (G17).
+  const handleCopy = useCallback(() => {
+    void run(() => copyToClipboard({ text }))
+  }, [run, text])
 
   const button = (
     <Button
@@ -47,20 +49,25 @@ export const CopyButton: React.FC<CopyButtonProps> = ({
     />
   )
 
-  if (!showTooltip) {
-    return button
-  }
-
   return (
-    <Tooltip
-      title={
-        copied
-          ? t("common:copied", { defaultValue: "Copied!" })
-          : t("common:copyToClipboard", { defaultValue: "Copy to clipboard" })
-      }
-    >
-      {button}
-    </Tooltip>
+    <span className="inline-flex items-center gap-1">
+      {showTooltip ? (
+        <Tooltip
+          title={
+            copied
+              ? t("common:copied", { defaultValue: "Copied!" })
+              : failed
+                ? failedHint
+                : t("common:copyToClipboard", { defaultValue: "Copy to clipboard" })
+          }
+        >
+          {button}
+        </Tooltip>
+      ) : (
+        button
+      )}
+      <CopyStatus status={status} attempt={attempt} />
+    </span>
   )
 }
 

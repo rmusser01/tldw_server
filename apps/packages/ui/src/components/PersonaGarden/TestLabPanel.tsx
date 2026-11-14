@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -112,7 +113,7 @@ export const TestLabPanel: React.FC<TestLabPanelProps> = ({
     if (lastHandledHandoffTokenRef.current === handoffFocusRequest.token) return
     const target = heardTextInputRef.current
     if (!target) return
-    target.scrollIntoView?.({ block: "nearest", behavior: "smooth" })
+    target.scrollIntoView?.({ block: "nearest", behavior: smoothScrollBehavior() })
     target.focus()
     lastHandledHandoffTokenRef.current = handoffFocusRequest.token
     onSetupHandoffFocusConsumed?.(handoffFocusRequest.token)

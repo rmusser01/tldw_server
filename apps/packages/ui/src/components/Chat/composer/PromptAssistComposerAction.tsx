@@ -498,6 +498,13 @@ export function PromptAssistComposerAction({
     },
     [onReturnFocus]
   )
+  const handlePromptActionsOpenChange = React.useCallback((open: boolean) => {
+    if (open) {
+      pendingDrawerFocusRef.current = false
+      pendingRecipeTriggerFocusRef.current = false
+    }
+    setPromptActionsOpen(open)
+  }, [])
   const start = React.useCallback((operation: () => Promise<void>) => {
     setRecipeUndo(null)
     setPanelOpen(true)
@@ -583,7 +590,7 @@ export function PromptAssistComposerAction({
         onReviewChanges={() => start(promptAssist.reviewChanges)}
         onBuildFromRecipe={openRecipeBuilder}
         onSelectModel={onSelectModel}
-        onOpenChange={setPromptActionsOpen}
+        onOpenChange={handlePromptActionsOpenChange}
         disabled={sending || promptAssist.state.status === "analyzing"}
         compact
         placement="top"

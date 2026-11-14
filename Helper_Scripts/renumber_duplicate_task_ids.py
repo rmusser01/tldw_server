@@ -595,7 +595,8 @@ def record(p: dict, task_ref: str, today: str) -> str:
 def apply(p: dict, root: Path, task_ref: str, today: str) -> None:
     repo = MutableRepository.from_path(root)
     for r in p["rows"]:
-        repo.renumber_task(Path(r["copy"].path), r["new"], note=note(r, task_ref, today))
+        # check_remote=False: this PR's own block shows as an open PR's ids (TASK-13961)
+        repo.renumber_task(Path(r["copy"].path), r["new"], note=note(r, task_ref, today), check_remote=False)
     new_id = {r["copy"].path: r["new"] for r in p["rows"]}
     by_path = {t.path: t for t in p["tasks"]}
     for path, change in p["edits"].items():

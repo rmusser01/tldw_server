@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 import { Button, Input, Empty, Spin } from "antd"
 import { Send, Square, Bot, User, Wrench, AlertCircle, Copy, Check } from "lucide-react"
@@ -233,7 +234,7 @@ export const ACPChatPanel: React.FC<ACPChatPanelProps> = ({
 
   // Auto-scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+    messagesEndRef.current?.scrollIntoView({ behavior: smoothScrollBehavior() })
   }, [updates])
 
   const handleSend = () => {

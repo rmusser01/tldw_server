@@ -279,6 +279,49 @@ async def test_summarize_items_for_output_lets_a_quota_refusal_through(adapter: 
 
 
 @pytest.mark.unit
+async def test_summaries_run_on_the_handle_they_are_given(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Over the limit, every summary request carries the user's own-key handle, so the check at each call lets it
+    run: their key, recorded as theirs (TASK-15426)."""
+    from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import users_own_key_credentials
+    from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
+    from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
+    from tldw_Server_API.app.core.Usage.llm_call_context import bind_llm_call_user, call_credential_source
+    from tldw_Server_API.app.core.Usage.llm_roots import ensure_llm_state_executor
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls, users_own_key
+
+    requests: list[dict] = []
+
+    class _Provider(ChatProvider):
+        """A provider below the usage-accounting wrapper, which checks each call."""
+
+        name = "openai"
+
+        def capabilities(self) -> dict:
+            return {}
+
+        def chat(self, request: dict, *, timeout: float | None = None) -> dict:
+            requests.append(request)
+            return {"choices": [{"message": {"content": "Model summary."}}]}
+
+        def stream(self, request: dict, *, timeout: float | None = None):
+            return iter(())
+
+    registry = ChatProviderRegistry(include_defaults=False)
+    registry.register_adapter("openai", _Provider)
+    monkeypatch.setattr(summarization, "get_registry", lambda: registry)
+    users_own_key(monkeypatch, "openai")
+    handle = await users_own_key_credentials(1, "openai")
+    refuse_llm_calls(monkeypatch)
+    bind_llm_call_user(1)
+    ensure_llm_state_executor()  # the server's default executor, which carries the call state to each summary
+    items = [{"id": 1, "content": "Cedar article body."}, {"id": 2, "content": "Birch article body."}]
+
+    await outputs_service.summarize_items_for_output(items, provider_credentials=handle, **_LLM)
+
+    assert [(r["api_key"], call_credential_source(r)) for r in requests] == [("sk-users-own-key", "user")] * 2
+
+
+@pytest.mark.unit
 async def test_generate_group_summaries_sends_text_with_braces_once(adapter: _Adapter) -> None:
     groups = [{"name": "Rust", "items": [{"title": "Rust {macros} and {}"}]}]
     result = await outputs_service.generate_group_summaries(groups, **_LLM)
