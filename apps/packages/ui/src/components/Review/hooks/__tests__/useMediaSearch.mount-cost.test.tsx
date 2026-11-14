@@ -18,7 +18,9 @@ vi.mock("@plasmohq/storage", () => ({
 }))
 
 const MEDIA_LISTING_PATH = "/api/v1/media/?page=1&results_per_page=20&include_keywords=true"
-const NOTES_LISTING_PATH = "/api/v1/notes/?page=1&results_per_page=20"
+// Notes ride the notes API's own contract (#3149): limit/offset paging with
+// include_keywords, built by buildReviewNotesRequestPath.
+const NOTES_LISTING_PATH = "/api/v1/notes/?limit=20&offset=0&include_keywords=true"
 // The retired type-discovery fan-out fetched /api/v1/media/ pages 1-3 at
 // results_per_page=50 before/alongside the first search.
 const DISCOVERY_PATH = "/api/v1/media/?page=1&results_per_page=50"
