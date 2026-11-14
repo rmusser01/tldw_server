@@ -624,12 +624,14 @@ function TeamsPageContent() {
                             <TableCell>{new Date(team.created_at).toLocaleDateString()}</TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">
-                                <Link href={`/teams/${team.id}`}>
-                                  <Button variant="outline" size="sm">
-                                    <Users className="mr-2 h-4 w-4" />
-                                    Manage
-                                  </Button>
-                                </Link>
+                                {Number.isSafeInteger(team.id) && team.id > 0 && (
+                                  <Link href={`/teams/${String(team.id)}`}>
+                                    <Button variant="outline" size="sm">
+                                      <Users className="mr-2 h-4 w-4" />
+                                      Manage
+                                    </Button>
+                                  </Link>
+                                )}
                                 <Button
                                   variant="outline"
                                   size="sm"

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createVNPlayIdempotencyKey,
   getVNPlayErrorInfo,
@@ -6,13 +6,17 @@ import {
 } from '@web/components/vn-play/runtime';
 
 describe('VN Play runtime helpers', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it('creates prefixed idempotency keys with random UUIDs when available', () => {
-    const originalCrypto = globalThis.crypto;
     vi.stubGlobal('crypto', { randomUUID: () => 'uuid-1' });
 
     expect(createVNPlayIdempotencyKey('retry')).toBe('retry-uuid-1');
+  });
 
-    vi.stubGlobal('crypto', originalCrypto);
+  it('uses cryptographic random bytes when randomUUID is unavailable', () => {
+    vi.stubGlobal('crypto', { getRandomValues: (bytes: Uint8Array) => bytes.fill(0x02) });
+    expect(createVNPlayIdempotencyKey('retry')).toBe(`retry-${'02'.repeat(16)}`);
   });
 
   it('extracts structured API error details without [object Object] fallback text', () => {

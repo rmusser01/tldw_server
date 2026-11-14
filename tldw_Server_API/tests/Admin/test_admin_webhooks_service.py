@@ -566,4 +566,9 @@ async def test_delivery_warnings_log_only_the_url_origin(
     assert "SECRETTOKEN" not in observed
     assert "/services/T000" not in observed
     if outcome != "delivered":
-        assert "https://hooks.slack.com" in "".join(loguru_records)
+        warning_targets = {
+            message.split(" to ", 1)[1].split(maxsplit=1)[0]
+            for record in loguru_records
+            if (message := json.loads(record)["record"]["message"]).startswith("Webhook delivery")
+        }
+        assert warning_targets == {"https://hooks.slack.com"}
