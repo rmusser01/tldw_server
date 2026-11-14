@@ -375,21 +375,25 @@ describe("ChatHeader shortcut toggle", () => {
 })
 
 describe("calm conversation header", () => {
-  it("hands overlays a persistent focus-return target when launched from More", async () => {
+  it("makes Home and the page launcher directly available on Chat", async () => {
     const user = userEvent.setup()
-    let returnTarget: Element | null = null
-    const props = createProps({
-      onToggleShortcuts: () => {
-        returnTarget = document.activeElement
-      }
-    })
-    render(<ChatHeader {...props} />)
-    const more = screen.getByRole("button", { name: "More actions" })
-    await user.click(more)
-    await user.click(
-      await screen.findByRole("menuitem", { name: "Browse pages" })
-    )
-    expect(returnTarget).toBe(more)
+    const props = createProps()
+    const { rerender } = render(<ChatHeader {...props} />)
+
+    await user.click(screen.getByRole("button", { name: "Companion Home" }))
+    expect(props.onOpenCompanionHome).toHaveBeenCalledTimes(1)
+
+    const showPages = screen.getByRole("button", { name: "Show pages" })
+    expect(showPages).toHaveAttribute("aria-expanded", "false")
+    await user.click(showPages)
+    expect(props.onToggleShortcuts).toHaveBeenLastCalledWith(true)
+    expect(showPages).toHaveFocus()
+
+    rerender(<ChatHeader {...props} shortcutsExpanded />)
+    const hidePages = screen.getByRole("button", { name: "Hide pages" })
+    expect(hidePages).toHaveAttribute("aria-expanded", "true")
+    await user.click(hidePages)
+    expect(props.onToggleShortcuts).toHaveBeenLastCalledWith(false)
   })
 
   it("leads with the conversation title as a heading beside persistence state", () => {
