@@ -95,7 +95,7 @@ dependencies = [
   "tomli>=2.0.0",
   "tqdm>=4.65.0",
   "uvicorn[standard]==0.54.0",
-  "websockets==15.0.1",
+  "websockets==17.4",
 
 
   # Security
@@ -227,14 +227,14 @@ dev = [
   "mypy>=1.20.1",
   "ruff>=0.15.10",
   "pre-commit>=4.5.1",
-  "websockets==15.0.1",
+  "websockets==17.4",
   "locust>=2.20.0"
 ]
 
 # Tooling smoke helpers and local scripts
 tooling = [
   "requests>=2.31.0",
-  "websockets==15.0.1",
+  "websockets==17.4",
 ]
 
 # OpenTelemetry (optional, for metrics/tracing export)
