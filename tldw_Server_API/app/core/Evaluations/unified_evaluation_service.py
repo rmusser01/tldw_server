@@ -458,9 +458,13 @@ class UnifiedEvaluationService:
         webhook_url: Optional[str] = None,
         created_by: str = "system",
         webhook_user_id: Optional[str] = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
         """
         Create and start an evaluation run.
+
+        ``provider_credentials``, a runtime-issued handle for the run's judge provider, runs every
+        judge call on its key (the user's own, TASK-15426); it is never stored.
 
         Args:
             eval_id: ID of evaluation to run
@@ -521,6 +525,7 @@ class UnifiedEvaluationService:
                 "config": config or {},
                 "webhook_url": webhook_url,
                 "created_by": created_by,
+                "provider_credentials": provider_credentials,
             }
 
             # Start async evaluation only after the mandatory audit and row persistence succeed

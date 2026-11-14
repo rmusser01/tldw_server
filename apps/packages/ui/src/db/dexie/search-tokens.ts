@@ -17,8 +17,8 @@ import type { Message, SearchTokenRow } from "./types"
  *   mirror writes, history-selection admits, forks) and the v17 upgrade
  *   backfills pre-existing rows.
  * - Stale tokens (content edited away, messages deleted) only cost an extra
- *   candidate that exact verification then rejects, so delete paths skip
- *   token cleanup deliberately.
+ *   candidate that exact verification then rejects. Message edits and
+ *   deletes may leave stale rows. Full history erasure removes those rows.
  */
 
 /** Index one message's content. Idempotent per (token, history) pair. */

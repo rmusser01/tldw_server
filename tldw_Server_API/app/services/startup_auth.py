@@ -4,12 +4,17 @@ Auth services initialization extracted from the application lifespan startup.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from importlib import import_module
 from types import ModuleType
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.exceptions import DatabaseError
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 
 _STARTUP_GUARD_EXCEPTIONS = (
     AttributeError,
@@ -35,15 +40,15 @@ class AuthStartupError(RuntimeError):
     """Raised when AuthNZ startup cannot safely continue."""
 
 
-async def init_auth_services() -> object:
-    """Initialize AuthNZ database access, migrations, seed data, and overrides."""
+async def _get_startup_db_pool() -> DatabasePool:
+    """Acquire the current AuthNZ pool or abort startup with a sanitized error."""
     try:
         from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 
         db_pool = await get_db_pool()
         if db_pool is None:
             raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_RETURNED_NONE")
-        logger.info("App Startup: Database pool initialized")
+        return db_pool
     except AuthStartupError:
         raise
     except _STARTUP_GUARD_EXCEPTIONS as exc:
@@ -51,6 +56,12 @@ async def init_auth_services() -> object:
             "App Startup: Failed to initialize database pool"
         )
         raise AuthStartupError("AUTHNZ_DB_POOL_STARTUP_FAILED") from None
+
+
+async def init_auth_services() -> object:
+    """Initialize AuthNZ database access, migrations, seed data, and overrides."""
+    db_pool = await _get_startup_db_pool()
+    logger.info("App Startup: Database pool initialized")
 
     try:
         from tldw_Server_API.app.core.AuthNZ.initialize import ensure_authnz_schema_ready_once
@@ -77,6 +88,9 @@ async def init_auth_services() -> object:
         logger.bind(exception_type=type(exc).__name__).debug(
             "App Startup: RBAC single-user seed ensure skipped"
         )
+
+    # Seeding may replace the registered pool; keep refresh and teardown on its owner.
+    db_pool = await _get_startup_db_pool()
 
     override_store = await refresh_provider_override_snapshot(db_pool)
     if override_store is not None:
@@ -105,7 +119,7 @@ async def refresh_provider_override_snapshot(db_pool: object) -> ModuleType | No
     return override_store
 
 
-async def _validate_pg_serving_schema(db_pool: object) -> bool:
+async def _validate_pg_serving_schema(db_pool: DatabasePool) -> bool:
     """Admit a nonowner only after required schema and backfill checks succeed."""
     from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
         ensure_authnz_lockout_tables_pg,
@@ -151,7 +165,7 @@ async def _validate_pg_serving_schema(db_pool: object) -> bool:
     return True
 
 
-async def _ensure_pg_extras(db_pool: object) -> None:
+async def _ensure_pg_extras(db_pool: DatabasePool) -> None:
     """Ensure additive PostgreSQL-only AuthNZ tables when a PG pool is active."""
     try:
         if not getattr(db_pool, "pool", None):
@@ -181,7 +195,7 @@ async def _ensure_pg_extras(db_pool: object) -> None:
             ensure_virtual_key_counters_pg,
         )
 
-        pg_ensures = [
+        pg_ensures: list[tuple[str, Callable[[DatabasePool], Awaitable[bool]], str | None]] = [
             (
                 "users timestamp time zones",
                 ensure_user_timestamp_timezones_pg,

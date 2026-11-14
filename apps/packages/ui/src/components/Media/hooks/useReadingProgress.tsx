@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { smoothScrollBehavior } from '@/utils/reduced-motion'
 import {
   describeMediaNavigationTarget,
   type MediaNavigationTargetLike
@@ -52,7 +53,7 @@ const findHeadingMatchInContent = (
 
 const focusNavigationMatch = (element: HTMLElement): void => {
   element.scrollIntoView({
-    behavior: 'smooth',
+    behavior: smoothScrollBehavior(),
     block: 'start',
     inline: 'nearest'
   })
@@ -87,7 +88,7 @@ const scrollToCharOffset = (
   if (Number.isFinite(containerMaxScroll) && containerMaxScroll > 0) {
     const top = Math.round(containerMaxScroll * ratio)
     if (typeof container.scrollTo === 'function') {
-      container.scrollTo({ top, behavior: 'smooth' })
+      container.scrollTo({ top, behavior: smoothScrollBehavior() })
     } else {
       container.scrollTop = top
     }
@@ -108,9 +109,9 @@ const scrollToCharOffset = (
   const top = Math.round(docMaxScroll * ratio)
 
   if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
-    window.scrollTo({ top, behavior: 'smooth' })
+    window.scrollTo({ top, behavior: smoothScrollBehavior() })
   } else if (typeof docScroller.scrollTo === 'function') {
-    docScroller.scrollTo({ top, behavior: 'smooth' })
+    docScroller.scrollTo({ top, behavior: smoothScrollBehavior() })
   } else {
     docScroller.scrollTop = top
   }
@@ -133,7 +134,7 @@ const scrollToPageNumber = (
   if (Number.isFinite(containerMaxScroll) && containerMaxScroll > 0) {
     const top = Math.round(containerMaxScroll * ratio)
     if (typeof container.scrollTo === 'function') {
-      container.scrollTo({ top, behavior: 'smooth' })
+      container.scrollTo({ top, behavior: smoothScrollBehavior() })
     } else {
       container.scrollTop = top
     }
@@ -154,9 +155,9 @@ const scrollToPageNumber = (
   const top = Math.round(docMaxScroll * ratio)
 
   if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
-    window.scrollTo({ top, behavior: 'smooth' })
+    window.scrollTo({ top, behavior: smoothScrollBehavior() })
   } else if (typeof docScroller.scrollTo === 'function') {
-    docScroller.scrollTo({ top, behavior: 'smooth' })
+    docScroller.scrollTo({ top, behavior: smoothScrollBehavior() })
   } else {
     docScroller.scrollTop = top
   }
@@ -232,7 +233,7 @@ export function useReadingProgress(deps: UseReadingProgressDeps) {
     const container = contentScrollContainerRef.current
     if (!container) return
     if (typeof container.scrollTo === 'function') {
-      container.scrollTo({ top: 0, behavior: 'smooth' })
+      container.scrollTo({ top: 0, behavior: smoothScrollBehavior() })
     } else {
       container.scrollTop = 0
     }

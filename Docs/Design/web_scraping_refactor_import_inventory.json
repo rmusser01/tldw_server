@@ -5,7 +5,7 @@
       {
         "import_kind": "from",
         "imported_name": "is_content_page",
-        "line": 387,
+        "line": 383,
         "module": "tldw_Server_API.app.core.Web_Scraping.Article_Extractor_Lib",
         "path": "tldw_Server_API/app/core/Watchlists/fetchers.py",
         "target_name": "Article_Extractor_Lib"
@@ -1041,7 +1041,7 @@
       {
         "import_kind": "from",
         "imported_name": "EnhancedWebScraper",
-        "line": 388,
+        "line": 384,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/app/core/Watchlists/fetchers.py",
         "target_name": "enhanced_web_scraping"

@@ -1,4 +1,5 @@
 import React, { useRef, useEffect } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 import { Card, Tag, Typography, Collapse } from "antd"
 import { useDarkMode } from "@/hooks/useDarkmode"
@@ -27,7 +28,7 @@ export const ChunkCardView: React.FC<ChunkCardViewProps> = ({
     if (highlightedIndex !== null) {
       const card = cardRefs.current.get(highlightedIndex)
       if (card) {
-        card.scrollIntoView({ behavior: "smooth", block: "nearest" })
+        card.scrollIntoView({ behavior: smoothScrollBehavior(), block: "nearest" })
       }
     }
   }, [highlightedIndex])

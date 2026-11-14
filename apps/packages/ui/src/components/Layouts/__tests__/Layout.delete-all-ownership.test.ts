@@ -41,13 +41,20 @@ const callbackFor = (file: string) => {
 }
 
 describe.each(files)("held delete-all ownership (%s)", (file) => {
-  it.each([false, true])(
-    "uses the original H1 selection after confirmation (retired=%s)",
-    async (retired) => {
+  it.each([
+    { retired: false, rejected: false },
+    { retired: true, rejected: false },
+    { retired: false, rejected: true }
+  ])(
+    "uses the original selection and reports erase errors (retired=$retired rejected=$rejected)",
+    async ({ retired, rejected }) => {
       let current = true
       let confirm!: (accepted: boolean) => void
       const clear = vi.fn(() => true)
-      const remove = vi.fn(async () => undefined)
+      const remove = vi.fn(async () => {
+        if (rejected) throw new Error("Storage inaccessible")
+      })
+      const showError = vi.fn()
       const invalidate = vi.fn(async () => undefined)
       const run = new Function(
         "captureChatDraftSource",
@@ -56,6 +63,7 @@ describe.each(files)("held delete-all ownership (%s)", (file) => {
         "clearChat",
         "PageAssistDatabase",
         "queryClient",
+        "message",
         "t",
         callbackFor(file)
       )(
@@ -70,6 +78,7 @@ describe.each(files)("held delete-all ownership (%s)", (file) => {
           deleteAllChatHistory = remove
         },
         { invalidateQueries: invalidate },
+        { error: showError },
         (key: string) => key
       )
       const result = run()
@@ -78,7 +87,9 @@ describe.each(files)("held delete-all ownership (%s)", (file) => {
       await result
       expect(clear).toHaveBeenCalledTimes(Number(!retired))
       expect(remove).toHaveBeenCalledTimes(Number(!retired))
-      expect(invalidate).toHaveBeenCalledTimes(Number(!retired))
+      expect(invalidate).toHaveBeenCalledTimes(Number(!retired && !rejected))
+      expect(showError).toHaveBeenCalledTimes(Number(rejected))
+      if (rejected) expect(showError).toHaveBeenCalledWith("common:deleteHistoriesError")
       if (!retired)
         expect(clear).toHaveBeenCalledWith({ discardTemporaryConfirmed: true })
     }

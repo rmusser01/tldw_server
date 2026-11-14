@@ -32,6 +32,9 @@ def test_create_run_uses_typed_model(evals_crud_client, monkeypatch):
 
     # Patch evaluation service with minimal stub
     class _SvcStub:
+        async def get_evaluation(self, eval_id, **_kwargs):
+            return None
+
         async def create_run(
             self,
             eval_id,
@@ -41,6 +44,7 @@ def test_create_run_uses_typed_model(evals_crud_client, monkeypatch):
             webhook_url=None,
             created_by=None,
             webhook_user_id=None,
+            provider_credentials=None,
         ):
             return {
                 "id": "run_123",
@@ -86,6 +90,9 @@ def test_create_run_returns_503_on_mandatory_audit_failure(evals_crud_client, mo
     client, headers = evals_crud_client
 
     class _SvcStub:
+        async def get_evaluation(self, eval_id, **_kwargs):
+            return None
+
         async def create_run(self, *args, **kwargs):
             raise MandatoryAuditWriteError("Mandatory audit persistence unavailable")
 
@@ -106,24 +113,42 @@ def test_create_run_returns_503_on_mandatory_audit_failure(evals_crud_client, mo
     assert body["detail"]["error"]["code"] == "audit_persistence_failure"
 
 
+_GRADED = {"eval_type": "model_graded", "eval_spec": {"sub_type": "summarization"}}
+
+
 @pytest.mark.integration
-def test_create_run_refuses_an_over_quota_user_before_the_run_starts(evals_crud_client, monkeypatch):
+@pytest.mark.parametrize(
+    ("evaluation", "config", "stored", "admitted", "asks"),
+    [
+        (_GRADED, {"api_name": "openai"}, "openai", True, ["openai"]),
+        (_GRADED, {"api_name": "openai"}, "anthropic", False, ["openai"]),
+        (_GRADED, {"api_name": "openai", "api_key": "sk-raw"}, "openai", False, []),
+        ({"eval_type": "model_graded", "eval_spec": {"sub_type": "rag_pipeline"}}, {}, "openai", False, []),
+        ({"eval_type": "exact_match", "eval_spec": {}}, {}, "openai", False, []),
+    ],
+    ids=["own-key", "server-key", "raw-api-key", "rag-pipeline", "no-llm"],
+)
+def test_create_run_names_its_judge_provider_to_the_llm_quota(
+    evals_crud_client, monkeypatch, evaluation, config, stored, admitted, asks
+):
     """A run's samples are LLM calls made in a task the request starts, so the run is checked at creation (§4a).
 
-    They run on the server's key, so a key the user stored does not lift the refusal (TASK-13956).
+    Past a limit, a run whose judge (named by the run config here) runs on the user's own key starts on that key,
+    unmarked. A run on the server's key, on a raw ``api_key``, a ``rag_pipeline`` run, or one that makes no LLM
+    call is refused before it starts (TASK-15426).
     """
-    from tldw_Server_API.tests.helpers.llm_quota import (
-        assert_llm_quota_402,
-        own_keys_for_every_provider,
-        refuse_llm_work,
-    )
+    from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work, users_own_key
 
     client, headers = evals_crud_client
-    started: list[str] = []
+    started: list[tuple] = []
 
     class _SvcStub:
-        async def create_run(self, eval_id, target_model, **_kwargs):
-            started.append(eval_id)
+        async def get_evaluation(self, eval_id, **_kwargs):
+            return evaluation
+
+        async def create_run(self, eval_id, target_model, provider_credentials=None, **_kwargs):
+            started.append((getattr(provider_credentials, "api_key", None), current_llm_call_context().prechecked))
             return {"id": "run_1", "object": "run", "eval_id": eval_id, "status": "pending",
                     "target_model": target_model, "created": 1700000000}
 
@@ -131,10 +156,16 @@ def test_create_run_refuses_an_over_quota_user_before_the_run_starts(evals_crud_
 
     monkeypatch.setattr(crud, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
     refuse_llm_work(monkeypatch)
-    asked = own_keys_for_every_provider(monkeypatch)
+    asked = users_own_key(monkeypatch, stored)
 
-    r = client.post("/api/v1/evaluations/eval_abc/runs", json={"target_model": "gpt-4o-mini", "config": {}}, headers=headers)
+    r = client.post(
+        "/api/v1/evaluations/eval_abc/runs", json={"target_model": "gpt-4o-mini", "config": config}, headers=headers
+    )
 
-    assert_llm_quota_402(r)
-    assert started == []
-    assert asked == []
+    assert asked == asks
+    if admitted:
+        assert r.status_code == 202, r.text
+        assert started == [("sk-users-own-key", False)]
+    else:
+        assert_llm_quota_402(r)
+        assert started == []

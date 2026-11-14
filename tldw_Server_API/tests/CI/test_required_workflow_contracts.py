@@ -34,6 +34,97 @@ def _python_test_function_names(path: str) -> set[str]:
     }
 
 
+def test_frontend_install_diagnostics_preserve_status_and_private_output(tmp_path: Path) -> None:
+    import os
+    import shutil
+    import subprocess  # nosec B404 - execute repository shell against a synthetic Bun stub
+    import sys
+
+    bash = shutil.which("bash")
+    assert bash is not None
+    workflow = _load(".github/workflows/frontend-required.yml")
+    scripts = []
+    for job in ("frontend-unit-tests", "shared-ui-coverage"):
+        step = _get_step(workflow["jobs"][job]["steps"], "Install frontend dependencies")
+        assert step["working-directory"] == "apps"
+        assert not step.get("continue-on-error", False)
+        scripts.append(step["run"])
+        cases = ((0, False, False), (1, False, False), (7, False, False),
+                 (137, False, False), (7, True, False), (7, False, True))
+        for status, helper_fails, cleanup_fails in cases:
+            root = tmp_path / f"{job}-{status}-{helper_fails}-{cleanup_fails}"
+            apps, runner, binaries = (root / name for name in ("apps", "runner", "bin"))
+            for directory in (apps, runner, binaries):
+                directory.mkdir(parents=True)
+            (apps / "bun.lock").write_text('{"packages": {}}\n')
+            (apps / "package.json").write_text('{"private": true}\n')
+            calls_path = root / "calls.jsonl"
+            stub = binaries / "bun"
+            stub.write_text(
+                f"#!{sys.executable}\n" + '''import json, os, pathlib, sys
+mask = os.umask(0)
+os.umask(mask)
+private = list(pathlib.Path(os.environ["RUNNER_TEMP"]).glob("bun-install.*"))
+record = {"args": sys.argv[1:], "cwd": os.getcwd(),
+          "umask": mask,
+          "skip": os.environ.get("SKIP_WXT_PREPARE"), "node": os.environ.get("NODE_OPTIONS"),
+          "directory_modes": [p.stat().st_mode & 0o777 for p in private],
+          "file_modes": [f.stat().st_mode & 0o777 for p in private for f in p.iterdir()],
+          "snapshot": [(p / "bun.lock").read_text() for p in private]}
+with open(os.environ["CALL_LOG"], "a") as f:
+    f.write(json.dumps(record) + "\\n")
+if sys.argv[1] == "install":
+    print("> Authorization: private-install-marker")
+    print("private-script-marker", file=sys.stderr)
+    sys.exit(int(os.environ["INSTALL_STATUS"]))
+if os.environ["HELPER_FAILS"] == "1":
+    print("private-helper-marker", file=sys.stderr)
+    sys.exit(95)
+print('{"classification":"unidentified_install_failure"}')
+'''
+            )
+            stub.chmod(0o755)
+            if cleanup_fails:
+                cleanup_stub = binaries / "rm"
+                cleanup_stub.write_text("#!/bin/sh\nexit 33\n")
+                cleanup_stub.chmod(0o755)
+            result = subprocess.run(  # nosec B603 - fixed repository shell, isolated cwd and stubbed Bun
+                [bash, "-eo", "pipefail", "-c", "umask 022\n" + step["run"]], cwd=apps,
+                env={**os.environ, "PATH": f"{binaries}{os.pathsep}{os.environ['PATH']}",
+                     "RUNNER_TEMP": str(runner), "GITHUB_WORKSPACE": str(Path.cwd()),
+                     "CALL_LOG": str(calls_path), "INSTALL_STATUS": str(status),
+                     "HELPER_FAILS": "1" if helper_fails else "0", "SKIP_WXT_PREPARE": "1",
+                     "NODE_OPTIONS": "--max-old-space-size=4096"},
+                capture_output=True, text=True, timeout=5, check=False,
+            )
+            assert result.returncode == status, (status, result.returncode, result.stderr)
+            assert "private-" not in result.stdout + result.stderr
+            calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+            assert len(calls) == (1 if status == 0 else 2)
+            assert calls[0]["args"] == ["install", "--frozen-lockfile", "--verbose"]
+            assert Path(calls[0]["cwd"]).resolve() == apps.resolve()
+            assert calls[0]["skip"] == "1"
+            assert calls[0]["node"] == "--max-old-space-size=4096"
+            assert calls[0]["umask"] == 0o022
+            assert calls[0]["directory_modes"] == [0o700]
+            assert calls[0]["file_modes"] and set(calls[0]["file_modes"]) == {0o600}
+            assert calls[0]["snapshot"] == ['{"packages": {}}\n']
+            if status:
+                assert calls[1]["args"][0] == "--no-install"
+                assert calls[1]["args"][1].endswith("/Helper_Scripts/ci/summarize_bun_install.mjs")
+                expected = "diagnostic-unavailable" if helper_fails else "unidentified_install_failure"
+                assert expected in result.stdout
+            if cleanup_fails:
+                assert "Bun diagnostic cleanup failed" in result.stderr
+                remaining = list(runner.iterdir())
+                assert len(remaining) == 1
+                shutil.rmtree(remaining[0])
+            assert not list(runner.iterdir())
+            assert (apps / "bun.lock").read_text() == '{"packages": {}}\n'
+            assert (apps / "package.json").read_text() == '{"private": true}\n'
+    assert scripts[0] == scripts[1]
+
+
 def _is_pytest_fixture(node: ast.AsyncFunctionDef | ast.FunctionDef) -> bool:
     for decorator in node.decorator_list:
         target = decorator.func if isinstance(decorator, ast.Call) else decorator

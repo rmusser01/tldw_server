@@ -65,11 +65,30 @@ describe.each(["github", "compact"] as const)(
       fireEvent.click(screen.getByRole("button", { name: "Copy code" }))
 
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(pythonSource))
-      expect(await screen.findByText("Copied")).toBeInTheDocument()
+      const copied = await screen.findByText("Copied")
+      // Announced from a status region outside the button: a button's
+      // accessible name hides its content from screen readers.
+      expect(copied.closest('[role="status"]')).not.toBeNull()
+      expect(screen.getByRole("button", { name: "Copy code" })).not.toContainElement(copied)
       await act(async () => {
         vi.advanceTimersByTime(4_000)
       })
       expect(screen.queryByText("Copied")).not.toBeInTheDocument()
+    })
+
+    it("says when copying fails and keeps the copy icon", async () => {
+      Object.defineProperty(navigator, "clipboard", {
+        configurable: true,
+        value: { writeText: vi.fn().mockRejectedValue(new Error("Denied")) }
+      })
+      render(<Markdown message={pythonReply} codeBlockVariant={codeBlockVariant} />)
+
+      fireEvent.click(screen.getByRole("button", { name: "Copy code" }))
+
+      const failed = await screen.findByText("Couldn't copy")
+      expect(failed.closest('[role="status"]')).toHaveTextContent(/select the text/i)
+      expect(screen.queryByText("Copied")).not.toBeInTheDocument()
+      expect(document.querySelector(".lucide-copy-check")).toBeNull()
     })
 
     it("labels a fence without a language as plain text", () => {

@@ -18,9 +18,13 @@ export {
   OPEN_PROMPT_SELECT_EVENT,
   type PromptSelectOpenDetail,
 } from "@/utils/prompt-select-events";
+export {
+  OPEN_MODEL_SELECTOR_EVENT,
+  openModelSelector,
+  type ModelSelectorOpenDetail,
+} from "@/utils/model-selector-events";
 
 export const OPEN_KNOWLEDGE_PANEL_EVENT = "tldw:open-knowledge-panel";
-export const OPEN_MODEL_SELECTOR_EVENT = "tldw:open-model-selector";
 export const OPEN_MODEL_SETTINGS_EVENT = "tldw:open-model-settings";
 export const OPEN_ACTOR_SETTINGS_EVENT = "tldw:open-actor-settings";
 export const OPEN_MCP_TOOLS_EVENT = "tldw:open-mcp-tools";
@@ -34,10 +38,6 @@ export type SearchAndContextTab = "search" | "context";
 export type ModelSettingsOpenDetail = {
   returnFocusSelector?: string;
   settingsScope?: string | null;
-};
-
-export type ModelSelectorOpenDetail = {
-  returnFocusSelector?: string;
 };
 
 export type McpSettingsOpenDetail = {
@@ -71,14 +71,6 @@ export const openModelSettings = (
   dispatchCockpitEvent<ModelSettingsOpenDetail>(OPEN_MODEL_SETTINGS_EVENT, {
     returnFocusSelector: options.returnFocusSelector,
     settingsScope: options.settingsScope,
-  });
-};
-
-export const openModelSelector = (
-  options: { returnFocusSelector?: string } = {},
-) => {
-  dispatchCockpitEvent<ModelSelectorOpenDetail>(OPEN_MODEL_SELECTOR_EVENT, {
-    returnFocusSelector: options.returnFocusSelector,
   });
 };
 

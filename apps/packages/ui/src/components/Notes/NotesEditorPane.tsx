@@ -149,6 +149,8 @@ export interface NotesEditorPaneProps {
   /** Page-owned open/closed choice for Connections (NE-10). */
   connectionsMemory?: ConnectionsMemory
   onRetryNeighbors?: () => void
+  /** Ask again after a 403, for example once an administrator grants access. */
+  onRecheckNeighborsAccess?: () => void
 
   // Pinning
   selectedNotePinned: boolean
@@ -369,6 +371,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   onRequestNeighbors,
   connectionsMemory,
   onRetryNeighbors,
+  onRecheckNeighborsAccess,
   selectedNotePinned,
   editorMode,
   editorInputMode,
@@ -1097,6 +1100,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         {selectedId != null && (
           <CollapsibleSection
             key={noteNeighborsRequestKey}
+            headingLevel={3}
             title={t('option:notesSearch.connectionsSectionTitle', {
               defaultValue: 'Connections'
             })}
@@ -1119,11 +1123,16 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             testId="notes-section-connections"
           >
           {noteNeighborsUnavailable ? (
-            <Typography.Text type="secondary" role="status">
-              {t('option:notesSearch.connectionsUnavailable', {
-                defaultValue: 'Note connections are unavailable for this account.'
-              })}
-            </Typography.Text>
+            <div>
+              <Typography.Text type="secondary" role="status">
+                {t('option:notesSearch.connectionsUnavailable', {
+                  defaultValue: 'Note connections are unavailable for this account.'
+                })}
+              </Typography.Text>
+              {onRecheckNeighborsAccess && <Button size="small" type="link" onClick={onRecheckNeighborsAccess} data-testid="notes-connections-recheck">
+                {t('option:notesSearch.relatedNotesRetry', { defaultValue: 'Retry' })}
+              </Button>}
+            </div>
           ) : noteNeighborsLoading ? (
             <Typography.Text type="secondary" role="status">
               {t('option:notesSearch.connectionsLoading', {
@@ -1643,6 +1652,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           <div className="mt-3 rounded-lg border border-border bg-surface2 p-2">
             <CollapsibleSection
               key={`${selectedId ?? 'draft'}-${tocEntries.length > 6}`}
+              headingLevel={3}
               title={t('option:notesSearch.tocHeading', { defaultValue: 'Table of contents' })}
               badge={tocEntries.length}
               defaultOpen={tocEntries.length <= 6}

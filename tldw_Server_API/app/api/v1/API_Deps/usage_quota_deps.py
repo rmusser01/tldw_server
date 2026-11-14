@@ -88,6 +88,40 @@ async def users_own_key_serves(user_id: Any, provider: str) -> bool:
         return False
 
 
+async def users_own_key_credentials(user_id: Any, provider: str | None, *, model: str | None = None) -> Any:
+    """A runtime-issued credential handle for the user's own stored key for ``provider``, or None (TASK-15426).
+
+    None unless ``users_own_key_serves`` holds, so a user without such a key keeps the server's key and
+    the call path it had. So does a resolution that fails or no longer finds the key. The runtime is
+    closed once the handle is issued: the handle keeps its key for the caller's calls.
+    """
+    if not provider or not await users_own_key_serves(user_id, provider):
+        return None
+    from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
+        capture_provider_override_call_snapshot,
+    )
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import ProviderCredentialRuntime
+
+    # ponytail: resolved once and closed, so the handle is never refreshed (an OAuth key that expires mid-job
+    # fails its calls) and never marks the key used; hold the runtime open around the calls if either matters.
+    try:
+        runtime = ProviderCredentialRuntime(
+            user_id=as_quota_user_id(user_id),
+            team_ids=None,
+            org_ids=None,
+            trusted_base_url_override=False,
+            override_snapshot_resolver=capture_provider_override_call_snapshot,
+        )
+        try:
+            handle = await runtime.resolve(provider, model=model)
+        finally:
+            await runtime.close()
+    except Exception as error:  # noqa: BLE001 - the server's key, as for a user without one
+        logger.bind(exception_type=type(error).__name__).warning("Own-key credential resolution failed")
+        return None
+    return handle if handle.credential_source == USER_KEY_SOURCE else None
+
+
 async def enforce_llm_quota(
     user_id: Any,
     estimated_tokens: int = 1,
@@ -116,6 +150,16 @@ async def enforce_llm_quota(
     if names and all(names) and (own_key if own_key is not None else await _own_key_serves_each(user_id, names)):
         return
     raise LLMQuotaExceededError(**asdict(refusal))
+
+
+async def enforce_llm_quota_on_own_key(user_id: Any, provider: str | None, *, model: str | None = None) -> Any:
+    """``enforce_llm_quota`` for a request whose LLM calls all run on ``provider``, with the handle for the
+    user's own key for it (``users_own_key_credentials``) as its answer; returns that handle, or None for the
+    server's key (TASK-15426). An over-limit user is let through, unmarked, only when the handle was issued.
+    """
+    handle = await users_own_key_credentials(user_id, provider, model=model)
+    await enforce_llm_quota(user_id, provider=provider, own_key=handle is not None)
+    return handle
 
 
 async def _own_key_serves_each(user_id: Any, providers: list[str]) -> bool:

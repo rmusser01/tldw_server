@@ -294,7 +294,8 @@ describe("NotesManagerPage stage 27 source link surfacing", () => {
     authority.scope = "bob-notes"
     view.rerenderPage()
     await act(async () => { resolveGraph({ nodes: [{ id: "source:web:private", type: "source", label: "Private source" }], edges: [] }) })
-    await waitFor(() => expect(view.queryClient.getQueryData(["note-graph-neighbors", "alice-notes", "note-source-1", 0])).toBeNull())
+    // The authority change aborts the request, so the late response is never stored.
+    await waitFor(() => expect(view.queryClient.getQueryData(["note-graph-neighbors", "alice-notes", "note-source-1", 0])).toBeUndefined())
     expect(screen.queryByText("Private source")).toBeNull()
     fireEvent.click(await screen.findByTestId("notes-open-button-note-source-1"))
     await screen.findByDisplayValue("Source note")

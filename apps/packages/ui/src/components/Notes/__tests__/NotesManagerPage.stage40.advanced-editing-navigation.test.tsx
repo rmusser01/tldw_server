@@ -2,7 +2,7 @@ import React from "react"
 import { ConfigProvider } from "antd"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -427,6 +427,13 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
     })
 
     expect(await screen.findByTestId("notes-toc-panel")).toBeInTheDocument()
+    // AX-14: the contents sit under the note title's h2.
+    expect(
+      within(screen.getByTestId("notes-toc-panel")).getByRole("heading", {
+        level: 3,
+        name: /^Table of contents/
+      })
+    ).toBeInTheDocument()
     fireEvent.click(screen.getByTestId("notes-toc-item-section-b"))
 
     await waitFor(() => {
