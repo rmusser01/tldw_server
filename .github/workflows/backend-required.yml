@@ -518,6 +518,7 @@ jobs:
             tldw_Server_API/tests/lint/test_schemas_config_boundary.py \
             tldw_Server_API/tests/lint/test_direct_llm_adapter_calls_ratchet.py \
             tldw_Server_API/tests/lint/test_service_singleton_ratchet.py \
+            tldw_Server_API/tests/lint/test_endpoint_monkeypatch_ratchet.py \
             tldw_Server_API/tests/lint/test_llm_calls_import_isolation.py \
             tldw_Server_API/tests/lint/test_no_inline_sse_frames.py \
             tldw_Server_API/tests/lint/test_private_coercion_ratchet.py \
