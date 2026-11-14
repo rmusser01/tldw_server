@@ -1,6 +1,8 @@
 """Regression tests for PostgreSQL pool checkout cleanup and scoping."""
 
+from contextlib import nullcontext
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
@@ -24,6 +26,12 @@ class _DummyConn:
 
     def rollback(self) -> None:
         self.rollback_calls += 1
+        self.info.transaction_status.name = "IDLE"
+
+    def cursor(self):
+        return nullcontext(SimpleNamespace(execute=lambda _statement: None))
+
+    def commit(self) -> None:
         self.info.transaction_status.name = "IDLE"
 
 
@@ -64,7 +72,7 @@ def test_psycopg_pool_constructor_opens_primary_and_compatibility_paths(
 
     pool = pg_backend.PostgreSQLConnectionPool(cfg)
 
-    assert pool._pool is delegate
+    assert cast(object, pool._pool) is delegate
     assert [call.get("open") for call in calls] == [True, True]
 
 
@@ -192,6 +200,55 @@ def test_pool_refuses_to_start_without_psycopg_pool(monkeypatch):
 
     with pytest.raises(pg_backend.DatabaseError, match="psycopg-pool is not installed"):
         pg_backend.PostgreSQLConnectionPool(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
+
+
+@pytest.mark.parametrize("failure_step", ["rollback", "reset"])
+def test_pool_return_discards_failed_cleanup_and_preserves_capacity(monkeypatch, failure_step):
+    """Failed cleanup must never leave an open checkout available for reuse."""
+    returned: list[_DummyConn] = []
+    monkeypatch.setattr(
+        pg_backend,
+        "psycopg_pool",
+        SimpleNamespace(ConnectionPool=lambda *_args, **_kwargs: SimpleNamespace(putconn=returned.append)),
+    )
+    pool = pg_backend.PostgreSQLConnectionPool(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
+    connection = _DummyConn()
+
+    def fail(*_args):
+        raise RuntimeError("cleanup failed")
+
+    if failure_step == "rollback":
+        monkeypatch.setattr(connection, "rollback", fail)
+    else:
+        monkeypatch.setattr(connection, "cursor", fail)
+
+    pool.return_connection(connection)
+
+    assert connection.closed
+    assert returned == [connection]
+
+
+def test_pool_return_unclassified_cleanup_failure_discards_before_propagating(monkeypatch):
+    returned: list[_DummyConn] = []
+    monkeypatch.setattr(
+        pg_backend,
+        "psycopg_pool",
+        SimpleNamespace(ConnectionPool=lambda *_args, **_kwargs: SimpleNamespace(putconn=returned.append)),
+    )
+    pool = pg_backend.PostgreSQLConnectionPool(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
+    connection = _DummyConn()
+    failure = Exception("unclassified rollback failure")
+
+    def fail():
+        raise failure
+
+    monkeypatch.setattr(connection, "rollback", fail)
+    with pytest.raises(Exception) as raised:
+        pool.return_connection(connection)
+
+    assert raised.value is failure
+    assert connection.closed
+    assert returned == [connection]
 
 
 def test_native_connect_retains_dsn_factory_identity_and_scope(monkeypatch):

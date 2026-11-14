@@ -278,9 +278,22 @@ describe("PageHelpModal shortcuts", () => {
       "Toggle Quick Chat Helper",
       "Go to Sources",
       "Search this conversation",
-      "Open mode launcher"
+      "Open mode launcher",
+      "Switch model"
     ])
       expect(within(dialog).queryByText(text)).not.toBeInTheDocument()
+  })
+
+  // AX-01: Mod+E opens the composer's model picker on /chat.
+  it("documents the Switch model shortcut in the full app", async () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <PageHelpModalHost />
+      </MemoryRouter>
+    )
+    act(() => window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal")))
+    const dialog = await screen.findByRole("dialog", { name: "Page Help" })
+    expect(within(dialog).getByText("Switch model")).toBeVisible()
   })
 
   it("omits sidebar and Quick Chat commands when their hosts are unavailable", async () => {

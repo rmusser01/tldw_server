@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   Button,
@@ -284,7 +285,7 @@ export const ImportPanel: React.FC<TransferActionReporterProps> = ({ onTransferA
         : (cb: FrameRequestCallback) => window.setTimeout(cb, 0)
     schedule(() => {
       const target = document.getElementById(anchorId)
-      target?.scrollIntoView({ behavior: "smooth", block: "center" })
+      target?.scrollIntoView({ behavior: smoothScrollBehavior(), block: "center" })
     })
   }, [])
 

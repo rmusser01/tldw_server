@@ -58,7 +58,9 @@ const VARIANTS: VariantOption[] = [
     highlights: [
       "240px brief panel with labelled fields",
       "Token meter with cost estimate",
-      "@ mentions + / slash commands inline",
+      // No "@ mentions": they are browser tabs, which only the extension
+      // reads, and only with tab mentions on (CC-11).
+      "/ slash commands inline",
     ],
   },
   {
@@ -98,8 +100,7 @@ export const ComposerStyleSettings: React.FC = () => {
         <p className="text-sm text-text-muted leading-relaxed">
           Pick a layout for the chat composer. Your selection applies to the
           main chat and the extension sidepanel; individual features
-          (slash commands, mentions, voice, attachments) work the same in
-          all three.
+          (slash commands, voice, attachments) work the same in all three.
         </p>
 
         <div className="mt-3 flex items-center gap-3 rounded-md border border-border/60 bg-surface2/40 px-3 py-2">

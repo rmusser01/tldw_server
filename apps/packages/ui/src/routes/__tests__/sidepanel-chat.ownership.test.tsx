@@ -1473,9 +1473,9 @@ describe.each([
     expect(screen.getByTestId("chat-scroll-latest")).toBeInTheDocument()
   })
 
-  it("keeps 'Scroll to latest' above an unpinned composer (XS-09)", async () => {
+  it("keeps 'Scroll to latest' above a pinned composer (XS-09)", async () => {
     io.useComposer = true
-    io.sidepanelStickyChatInput = false
+    io.sidepanelStickyChatInput = true
     const measure = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function (this: HTMLElement) {
@@ -1490,6 +1490,30 @@ describe.each([
       // The pill sits 24px above the measured composer, not at a fixed 8rem.
       await waitFor(() =>
         expect(screen.getByTestId("chat-scroll-latest").parentElement).toHaveStyle({ bottom: "324px" })
+      )
+    } finally {
+      measure.mockRestore()
+    }
+  })
+
+  it("keeps 'Scroll to latest' near the bottom over an unpinned composer (G19)", async () => {
+    // An unpinned composer scrolls with the messages, so it is not under the
+    // pill; offsetting by its height would leave the pill hanging over replies.
+    io.useComposer = true
+    io.sidepanelStickyChatInput = false
+    const measure = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const height = this.dataset.testid === "sidepanel-composer-dock" ? 300 : 0
+        return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height, toJSON: () => ({}) } as DOMRect
+      })
+    try {
+      io.data.set(storedKey("alice"), tabsState())
+      render(<Route />)
+      await screen.findByText("alice first")
+      await screen.findByRole("textbox", { name: "Composer draft" })
+      await waitFor(() =>
+        expect(screen.getByTestId("chat-scroll-latest").parentElement!.style.bottom).toMatch(/^calc\(16px/)
       )
     } finally {
       measure.mockRestore()

@@ -210,6 +210,50 @@ describe("audio-studio service", () => {
     )
   })
 
+  it("resolves a media ticket through the hosted proxy", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "hosted")
+    try {
+      tldwClientMocks.getConfig.mockResolvedValueOnce(null)
+      mocks.bgRequest.mockResolvedValueOnce({
+        ticket_path: "/api/v1/audio-studio/media-tickets/hosted_ticket",
+        expires_at: "2026-06-24T12:00:00Z",
+        purpose: "playback",
+        artifact_id: "artifact-1"
+      })
+
+      await expect(mintAudioStudioArtifactMediaTicket("project-1", "artifact-1", "playback"))
+        .resolves.toMatchObject({ ticket_url: "/api/proxy/audio-studio/media-tickets/hosted_ticket" })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("rejects a fallback path outside the media-ticket route", async () => {
+    tldwClientMocks.getConfig.mockResolvedValueOnce(null)
+    mocks.bgRequest.mockResolvedValueOnce({
+      ticket_path: "/api/v1/audio-studio/workflows",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "download",
+      artifact_id: "artifact-1"
+    })
+
+    await expect(mintAudioStudioArtifactMediaTicket("project-1", "artifact-1", "download"))
+      .rejects.toThrow("Invalid Audio Studio media ticket path")
+  })
+
+  it("rejects a ticket URL resolved against an invalid configured server", async () => {
+    tldwClientMocks.getConfig.mockResolvedValueOnce({ serverUrl: "unconfigured" })
+    mocks.bgRequest.mockResolvedValueOnce({
+      ticket_path: "/api/v1/audio-studio/media-tickets/ticket-playback",
+      expires_at: "2026-06-24T12:00:00Z",
+      purpose: "playback",
+      artifact_id: "artifact-1"
+    })
+
+    await expect(mintAudioStudioArtifactMediaTicket("project-1", "artifact-1", "playback"))
+      .rejects.toThrow("Invalid Audio Studio media ticket URL")
+  })
+
   it("fetches artifact media as a blob using the response MIME type", async () => {
     const buffer = new Uint8Array([1, 2, 3]).buffer
     mocks.bgRequest.mockResolvedValueOnce({

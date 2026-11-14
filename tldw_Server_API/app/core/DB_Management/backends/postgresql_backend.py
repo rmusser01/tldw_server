@@ -15,6 +15,7 @@ import os
 import time
 from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, suppress
+from types import ModuleType
 from typing import Any, Optional, Union
 
 from loguru import logger
@@ -49,7 +50,8 @@ try:
     import psycopg
     from psycopg.rows import dict_row
     try:
-        import psycopg_pool
+        import psycopg_pool as _psycopg_pool
+        psycopg_pool: ModuleType | None = _psycopg_pool
     except ImportError:  # core dependency; PostgreSQLConnectionPool refuses to start without it
         psycopg_pool = None
     PSYCOPG2_AVAILABLE = True  # Legacy name used by tests to simulate missing driver
@@ -127,8 +129,8 @@ def _reset_pooled_connection(conn: Any) -> None:
     its ``app.is_admin``, whenever re-applying scope at checkout fails.
 
     A connection that cannot be fully scrubbed must not be reused, so any
-    failure is raised rather than swallowed: psycopg_pool discards a connection
-    whose reset callback raises, which is exactly the outcome wanted. Returning
+    failure is raised rather than swallowed: return_connection discards a
+    connection whose cleanup raises, which is exactly the outcome wanted. Returning
     quietly would put a connection still carrying another account's identity
     back into rotation.
     """
@@ -140,7 +142,7 @@ def _reset_pooled_connection(conn: Any) -> None:
         except Exception as exc:  # noqa: BLE001 - recorded, then raised below
             failures.append(f"{statement}: {exc}")
 
-    # psycopg_pool requires the callback to hand back a connection that is NOT
+    # psycopg_pool requires check-in to hand back a connection that is NOT
     # in a transaction. The statements above open an implicit one, so it has to
     # be closed here, and with a commit: SET and RESET are transactional in
     # PostgreSQL, so a rollback would undo the very reset just performed.
@@ -186,6 +188,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
         max_size = max(1, int(self.config.pool_size or 10))
         timeout = float(self.config.pool_timeout or 30.0)
         recycle = int(self.config.pool_recycle or 3600)
+        self._pool: _psycopg_pool.ConnectionPool[psycopg.Connection[Any]]
         try:
             self._pool = psycopg_pool.ConnectionPool(
                 self._dsn,
@@ -197,16 +200,11 @@ class PostgreSQLConnectionPool(ConnectionPool):
                 open=True,
                 # Ensure JSON is parsed into Python objects consistently
                 configure=lambda conn: setattr(conn, 'row_factory', dict_row),
-                # Clear tenant GUCs on check-in so one request's identity
-                # cannot be inherited by the next borrower.
-                reset=_reset_pooled_connection,
             )
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-            # Fallback to defaults if parameters unsupported. The reset hook
-            # is not optional -- it is what stops tenant GUCs leaking between
-            # requests -- so it is kept on this path too.
+            # Session cleanup is owned by return_connection on both paths.
             self._pool = psycopg_pool.ConnectionPool(
-                self._dsn, open=True, reset=_reset_pooled_connection
+                self._dsn, open=True
             )
         pool_class = type(self._pool)
         logger.info(
@@ -233,6 +231,19 @@ class PostgreSQLConnectionPool(ConnectionPool):
         if self._closed or connection is None:
             with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 connection.close()
+            return
+        # Queued psycopg reset tasks can be discarded at shutdown; finish the
+        # return here so close_all() owns every checked-in connection.
+        try:
+            connection.rollback()
+            _reset_pooled_connection(connection)
+        except BaseException as exc:
+            self.discard_connection(connection)
+            if not isinstance(exc, _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                raise
+            logger.bind(exception_type=type(exc).__name__).warning(
+                "Discarding PostgreSQL checkout after return cleanup failed"
+            )
             return
         try:
             self._pool.putconn(connection)

@@ -1244,6 +1244,15 @@
   "notesSearch_linkedConversation": {
     "message": "Linked to conversation"
   },
+  "notesSearch_linkedChatUnresolved": {
+    "message": "Linked chat"
+  },
+  "notesSearch_linkedConversationIdLabel": {
+    "message": "Conversation ID"
+  },
+  "notesSearch_linkedMessageIdLabel": {
+    "message": "Message ID"
+  },
   "notesSearch_openConversation": {
     "message": "Open conversation"
   },

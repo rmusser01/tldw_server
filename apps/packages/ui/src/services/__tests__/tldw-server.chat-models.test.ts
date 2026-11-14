@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
-  getChatModels: vi.fn()
+  getChatModels: vi.fn(),
+  getModels: vi.fn()
 }))
 
 vi.mock("@plasmohq/storage", () => ({
@@ -28,7 +29,9 @@ vi.mock("@/services/tldw", () => ({
   },
   tldwModels: {
     getChatModels: (...args: unknown[]) =>
-      (mocks.getChatModels as (...args: unknown[]) => unknown)(...args)
+      (mocks.getChatModels as (...args: unknown[]) => unknown)(...args),
+    getModels: (...args: unknown[]) =>
+      (mocks.getModels as (...args: unknown[]) => unknown)(...args)
   }
 }))
 
@@ -91,5 +94,23 @@ describe("fetchChatModels", () => {
       false,
       true
     ])
+  })
+})
+
+// #3343: TldwModels.getModels() answers [] when the read fails, which left the
+// picker's "All models" scope silently short. The catalog is read strictly.
+describe("fetchChatModelCatalog", () => {
+  beforeEach(() => {
+    vi.resetModules()
+    mocks.getModels.mockReset()
+  })
+
+  it("reports a failed catalog read instead of an empty catalog", async () => {
+    mocks.getModels.mockImplementation(async (_forceRefresh?: boolean, options?: { throwOnError?: boolean }) => {
+      if (options?.throwOnError) throw new Error("Request failed: HTTP 502")
+      return []
+    })
+    const { fetchChatModelCatalog } = await import("../tldw-server")
+    await expect(fetchChatModelCatalog()).rejects.toThrow("HTTP 502")
   })
 })

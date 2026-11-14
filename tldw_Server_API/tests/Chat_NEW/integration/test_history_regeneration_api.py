@@ -195,6 +195,10 @@ def test_invalid_regeneration_never_reaches_provider_or_message_writes(history_a
     if boundary in {"missing-authority", "branch-absent", "branch-false"}:
         assert response.json()["detail"]["code"] == "unsupported_history_regeneration"
         assert response.json()["detail"]["status"] == "unsupported_history_capability"
+        # A question without an admission refuses Continue as well.
+        assert response.json()["detail"]["reason"] == (
+            "question" if boundary == "missing-authority" else "request"
+        )
     assert (
         db.get_messages_for_conversation(cid),
         db.get_conversation_by_id(cid),

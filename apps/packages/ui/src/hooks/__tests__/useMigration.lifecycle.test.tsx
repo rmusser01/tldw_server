@@ -1,6 +1,6 @@
 import React from "react"
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest"
 import { useMigration } from "../useMigration"
 
@@ -85,4 +85,22 @@ it("continues to block while a real legacy migration runs and records success", 
   await act(async () => release())
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("migrated"))
   expect(mocks.set).toHaveBeenCalledWith("isMigrated", true)
+})
+
+it("finishes a local migration check while the browser is offline", async () => {
+  onlineManager.setOnline(false)
+  try {
+    mocks.get.mockResolvedValue(false)
+    const client = new QueryClient()
+    clients.add(client)
+    function Shell() {
+      const migration = useMigration()
+      return <output>{migration.isLoading ? "checking" : "ready"}</output>
+    }
+    render(<QueryClientProvider client={client}><Shell /></QueryClientProvider>)
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("ready"))
+    expect(mocks.set).toHaveBeenCalledWith("isMigrated", true)
+  } finally {
+    onlineManager.setOnline(true)
+  }
 })
