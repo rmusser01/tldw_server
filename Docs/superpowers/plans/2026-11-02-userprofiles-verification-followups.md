@@ -633,3 +633,27 @@ ADR assessment: no new durable decision. The rebase preserves existing
 membership and task-format rules (ADR-085, ADR-059, ADR-084). Fresh required
 checks on the published head and current dev ancestry remain mandatory.
 TASK-15413 stays In Progress until verified merge.
+
+## November 14 Endpoint Patch Ratchet Integration
+
+All eight checks passed on `55f49b582c`, but dev had advanced to
+`975ca46d7d6b593a4c732881fcbacf4ffc436686` with PR #3449. All 22 prior
+patches replayed unchanged on `98768ed8a9`; the seven incoming paths are
+exact dev objects and modes, with no overlap or conflict.
+
+The incoming endpoint patch ratchet reproduced two PR-owned overages
+(`acp_multiplex` 20 > 19 and `audio_streaming` 91 > 90; 115 other tests
+passed). The fix uses one fixture to install and observe the real stub-runner
+loader and one fixture for the existing first-work observation and audio
+acknowledgement. The auth order, delayed real verifier, denial and positive
+control assertions are retained. No runtime, workflow, timeout, suppression
+or ceiling edits, and no new ADR is needed.
+
+The full WebSocket matrix, endpoint and singleton ratchets, license workflow
+contracts and canonical task tests passed together: 302 passed, no skips.
+Touched fixture Bandit is unchanged (106 B101, two B105, zero scan errors);
+inherited Python findings match exact dev. Compile and diff checks passed.
+Raw logs: `/private/tmp/pr3404-975-verification.log` and
+`/private/tmp/pr3404-975-fixed-verification.log`. These are scoped results,
+not full-suite or current-head hosted proof. Task remains In Progress until
+verified merge.
