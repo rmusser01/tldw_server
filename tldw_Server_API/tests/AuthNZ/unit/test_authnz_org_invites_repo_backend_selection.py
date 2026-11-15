@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
 from tldw_Server_API.app.core.AuthNZ.repos.org_invites_repo import AuthnzOrgInvitesRepo
 
 
@@ -26,6 +27,10 @@ class _PoolStub:
 
     def transaction(self) -> _Tx:
         return _Tx(self._conn)
+
+
+def _repo_for(conn: Any, *, postgres: bool) -> AuthnzOrgInvitesRepo:
+    return AuthnzOrgInvitesRepo(db_pool=cast(DatabasePool, _PoolStub(conn, postgres=postgres)))
 
 
 class _SqliteCursor:
@@ -101,11 +106,12 @@ class _PostgresConnWithSqliteTrap:
 
 class _PostgresConnForListInvites:
     def __init__(self) -> None:
+        self.execute_calls: list[tuple[str, datetime]] = []
         self.fetchrow_calls: list[tuple[str, tuple[Any, ...]]] = []
         self.fetch_calls: list[tuple[str, tuple[Any, ...]]] = []
 
     async def execute(self, query: str, cutoff: datetime) -> str:
-        assert cutoff.tzinfo is None
+        self.execute_calls.append((query, cutoff))
         return "UPDATE 1" if query.startswith("UPDATE") else "DELETE 1"
 
     async def fetchrow(self, query: str, *params: Any) -> tuple[int]:
@@ -144,7 +150,7 @@ class _PostgresConnForListInvites:
 @pytest.mark.asyncio
 async def test_create_invite_sqlite_backend_selection_uses_execute():
     conn = _SqliteConnWithFetchrowTrap()
-    repo = AuthnzOrgInvitesRepo(db_pool=_PoolStub(conn, postgres=False))
+    repo = _repo_for(conn, postgres=False)
 
     created = await repo.create_invite(org_id=5, created_by=9)
 
@@ -159,7 +165,7 @@ async def test_create_invite_sqlite_backend_selection_uses_execute():
 @pytest.mark.asyncio
 async def test_create_invite_postgres_backend_selection_uses_fetchrow():
     conn = _PostgresConnWithSqliteTrap()
-    repo = AuthnzOrgInvitesRepo(db_pool=_PoolStub(conn, postgres=True))
+    repo = _repo_for(conn, postgres=True)
 
     created = await repo.create_invite(org_id=5, created_by=9)
 
@@ -177,7 +183,7 @@ async def test_create_invite_postgres_backend_selection_uses_fetchrow():
 @pytest.mark.asyncio
 async def test_list_org_invites_postgres_uses_numbered_limit_offset_placeholders():
     conn = _PostgresConnForListInvites()
-    repo = AuthnzOrgInvitesRepo(db_pool=_PoolStub(conn, postgres=True))
+    repo = _repo_for(conn, postgres=True)
 
     invites, total = await repo.list_org_invites(org_id=5, limit=25, offset=10)
 
@@ -205,8 +211,14 @@ async def test_list_org_invites_postgres_uses_numbered_limit_offset_placeholders
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("deactivate_only", [True, False])
-async def test_cleanup_expired_invites_postgres_accepts_naive_utc_cutoff(deactivate_only):
-    repo = AuthnzOrgInvitesRepo(db_pool=_PoolStub(_PostgresConnForListInvites(), postgres=True))
+@pytest.mark.parametrize(("deactivate_only", "command"), [(True, "UPDATE"), (False, "DELETE")])
+async def test_cleanup_expired_invites_postgres_accepts_naive_utc_cutoff(
+    deactivate_only: bool, command: str
+) -> None:
+    conn = _PostgresConnForListInvites()
+    repo = _repo_for(conn, postgres=True)
 
     assert await repo.cleanup_expired_invites(deactivate_only=deactivate_only) == 1
+    [(query, cutoff)] = conn.execute_calls
+    assert query.startswith(command)
+    assert cutoff.tzinfo is None

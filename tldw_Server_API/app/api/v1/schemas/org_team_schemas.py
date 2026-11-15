@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TypeVar
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 
 
-def _default_offset_pagination_aliases(response):
+_PaginatedResponse = TypeVar("_PaginatedResponse", "OrganizationListResponse", "OrgInviteListResponse")
+
+
+def _default_offset_pagination_aliases(response: _PaginatedResponse) -> _PaginatedResponse:
     if response.has_more is None:
         response.has_more = response.pagination.has_more
     if response.next_offset is None:

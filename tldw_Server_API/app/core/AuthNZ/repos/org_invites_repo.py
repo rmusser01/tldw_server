@@ -9,7 +9,7 @@ import secrets
 import string
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
@@ -407,7 +407,7 @@ class AuthnzOrgInvitesRepo:
                         "UPDATE org_invites SET uses_count = uses_count + 1 WHERE id = ?",
                         (invite_id,)
                     )
-                    return cur.rowcount > 0
+                    return cast(int, cur.rowcount) > 0
         except Exception as exc:
             logger.error(f"AuthnzOrgInvitesRepo.increment_uses_count failed: {exc}")
             raise
@@ -431,7 +431,7 @@ class AuthnzOrgInvitesRepo:
                         "UPDATE org_invites SET is_active = 0 WHERE id = ? AND org_id = ?",
                         (invite_id, org_id)
                     )
-                    return cur.rowcount > 0
+                    return cast(int, cur.rowcount) > 0
         except Exception as exc:
             logger.error(f"AuthnzOrgInvitesRepo.deactivate_invite failed: {exc}")
             raise
@@ -581,7 +581,7 @@ class AuthnzOrgInvitesRepo:
                             "DELETE FROM org_invites WHERE expires_at < ?",
                             (now_str,)
                         )
-                    return cur.rowcount
+                    return cast(int, cur.rowcount)
         except Exception as exc:
             logger.error(f"AuthnzOrgInvitesRepo.cleanup_expired_invites failed: {exc}")
             raise
