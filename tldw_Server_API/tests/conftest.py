@@ -1028,16 +1028,17 @@ def client_with_single_user(monkeypatch):
                 logging.getLogger(__name__).debug("Failed to set request.state.auth: %s", e)
         return principal
 
-    fastapi_app.dependency_overrides[get_request_user] = _override_user
-    fastapi_app.dependency_overrides[get_usage_event_logger] = _override_logger
-    fastapi_app.dependency_overrides[get_auth_principal] = _override_principal
+    # Through monkeypatch, not set-then-pop: a test that also overrides one of
+    # these keys with monkeypatch.setitem recorded this fixture's value and, as
+    # monkeypatch tears down after this fixture, put it back on the shared app
+    # after the pop, so every later test in the process ran authenticated.
+    # monkeypatch undoes both in reverse order.
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_request_user, _override_user)
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_usage_event_logger, _override_logger)
+    monkeypatch.setitem(fastapi_app.dependency_overrides, get_auth_principal, _override_principal)
 
     with TestClient(fastapi_app) as client:
         yield client, usage_logger
-
-    fastapi_app.dependency_overrides.pop(get_request_user, None)
-    fastapi_app.dependency_overrides.pop(get_usage_event_logger, None)
-    fastapi_app.dependency_overrides.pop(get_auth_principal, None)
 
 
 @pytest.fixture()

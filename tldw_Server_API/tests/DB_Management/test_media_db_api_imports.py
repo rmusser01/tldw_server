@@ -171,6 +171,40 @@ class _LazyLegacyMediaDBProxy(ModuleType):
 legacy_media_db = _LazyLegacyMediaDBProxy()
 
 
+@pytest.fixture(autouse=True)
+def _undo_module_reloads(monkeypatch):
+    """Put back every module this file reloads or unloads.
+
+    ``importlib.reload`` re-runs a module inside the same module object, so the
+    module then hands out new functions while every route, ``Depends`` and
+    ``from x import y`` built before keeps the old ones. After
+    ``reload(DB_Deps)``, a later test's ``dependency_overrides`` keyed on
+    ``get_media_db_for_user`` no longer matches the dependency the app's routes
+    resolve, and its requests write to the real per-user Media DB.
+    """
+    real_reload = importlib.reload
+    namespaces: dict[ModuleType, dict] = {}
+
+    def reload_and_remember(module):
+        namespaces.setdefault(module, dict(vars(module)))
+        return real_reload(module)
+
+    monkeypatch.setattr(importlib, "reload", reload_and_remember)
+    loaded = dict(sys.modules)
+    yield
+    for module, namespace in namespaces.items():
+        current = vars(module)
+        for name in set(current) - set(namespace):
+            del current[name]
+        current.update(namespace)
+    for name, module in loaded.items():
+        if sys.modules.get(name) is not module:
+            sys.modules[name] = module
+            parent, _, child = name.rpartition(".")
+            if parent in sys.modules:
+                setattr(sys.modules[parent], child, module)
+
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 

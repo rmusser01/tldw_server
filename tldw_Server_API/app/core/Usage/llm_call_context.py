@@ -58,6 +58,8 @@ class LLMCallContext:
     records_itself: bool = False
     prechecked: bool = False
     credential_source: str | None = None
+    # A runtime-issued handle for the user's own key, for ``analyze`` calls that bring no key (TASK-15426).
+    provider_credentials: Any = None
 
 
 @dataclass(frozen=True)
@@ -230,3 +232,24 @@ def mark_llm_quota_prechecked() -> None:
     response body runs. Tasks and threads started after this inherit the mark.
     """
     _CTX.set(replace(_CTX.get(), prechecked=True))
+
+
+def bind_provider_credentials(handle: Any) -> None:
+    """Carry ``handle`` for the rest of the current task; None binds nothing (TASK-15426).
+
+    An ``analyze`` call for the handle's provider that brings no key of its own then runs on it.
+    A plain set, like ``mark_llm_quota_prechecked``; tasks, threads and queues that take the call
+    state take the handle with it.
+    """
+    if handle is not None:
+        _CTX.set(replace(_CTX.get(), provider_credentials=handle))
+
+
+def scoped_provider_credentials(provider: str) -> Any:
+    """The handle the call context carries (``bind_provider_credentials``) when it is for ``provider``, else None."""
+    from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+
+    handle = _CTX.get().provider_credentials
+    if handle is None or getattr(handle, "provider", None) != canonical_provider_name(provider):
+        return None
+    return handle
