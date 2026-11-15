@@ -4,6 +4,7 @@
 #
 # Imports
 import hashlib
+import importlib.util
 import os
 import sqlite3
 import uuid
@@ -121,7 +122,17 @@ VALID_HTML_URL = "https://example.com/" # Use example.com for basic HTML
 INVALID_URL = "http://this.url.definitely.does.not.exist.invalid/resource.mp4"
 URL_404 = "https://example.com/status/404"
 
-PDF_ENGINES_TO_TEST = ["pymupdf4llm", "pymupdf", "docling"]
+# docling is a declared dependency but heavy; skip its cases where it is not installed.
+PDF_ENGINES_TO_TEST = [
+    "pymupdf4llm",
+    "pymupdf",
+    pytest.param(
+        "docling",
+        marks=pytest.mark.skipif(
+            importlib.util.find_spec("docling") is None, reason="docling not installed"
+        ),
+    ),
+]
 TEST_VIDEO_TRANSCRIPTION_MODEL = "small"
 TEST_VIDEO_START_TIME = "0"
 TEST_VIDEO_END_TIME = "00:00:20"
@@ -701,7 +712,14 @@ class TestProcessVideos:
 class TestProcessAudios:
     ENDPOINT = "/api/v1/media/process-audios"
 
-    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers, controlled_transcription):
+    def test_process_audio_url_success_no_analysis_no_chunking(self, client, dummy_headers, controlled_transcription, monkeypatch):
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files
+
+        def fake_download(*, url, dest, **kwargs):
+            assert url == VALID_AUDIO_URL
+            Path(dest).write_bytes(b"ID3" + b"\x00" * 512)
+
+        monkeypatch.setattr(Audio_Files, "http_download", fake_download)
 
         form_data = {
             "urls": [VALID_AUDIO_URL],
@@ -709,35 +727,6 @@ class TestProcessAudios:
             "perform_chunking": "false"
         }
         response = client.post(self.ENDPOINT, data=form_data, headers=dummy_headers)
-        # In some environments (e.g., CI without outbound network or with
-        # strict egress DNS policies), the CDN host for VALID_AUDIO_URL may
-        # not resolve, causing the processing pipeline to return a 207 with
-        # a download failure error. Treat that as an environment quirk and
-        # skip rather than fail the test.
-        if response.status_code == 207:
-            try:
-                data_debug = response.json()
-            except Exception:
-                data_debug = {}
-            errors = data_debug.get("errors", [])
-            error_str = str(errors)
-            response_str = str(data_debug)
-            if (
-                "Download failed" in error_str
-                or "Host could not be resolved" in error_str
-                or "URL blocked by security policy" in error_str
-                or "Host not in allowlist" in error_str
-                or "nodename nor servname provided" in error_str
-                or "Name or service not known" in error_str
-                or "Audio processing failed" in error_str
-                or "Processing execution failed" in response_str
-                or "Transcription failed" in response_str
-            ):
-                pytest.skip(
-                    "Audio URL download/transcription failed in the processing "
-                    "pipeline - likely due to restricted test environment egress "
-                    "or unavailable local STT runtime"
-                )
 
         controlled_transcription.assert_called_once()
 
