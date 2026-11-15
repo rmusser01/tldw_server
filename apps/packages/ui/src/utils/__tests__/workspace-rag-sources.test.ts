@@ -1,3 +1,4 @@
+import { getSourceFeedbackKey } from "../feedback";
 import { describe, expect, it } from "vitest";
 import {
   projectWorkspaceRagSources,
@@ -12,6 +13,18 @@ const source = {
   metadata: { media_id: 42, secret: "do-not-retain" },
 };
 describe("S04 recorded workspace source references", () => {
+  it("keeps same-document passages distinct after save and reopen", () => {
+    const rows = [1, 2].map(index => ({ ...source, type: "pdf", metadata: {
+      media_id: 42, chunk_id: `chunk-${index}`, citation_index: index,
+      page_number: 352 + index, page_spans: [{ page_number: 352 + index, printed_page_label: String(319 + index) }]
+    }}));
+    const restored = restoreWorkspaceRagSources(projectWorkspaceRagSources(rows));
+    expect(restored.map((row, index) => getSourceFeedbackKey(row, index))).toEqual(["chunk:chunk-1", "chunk:chunk-2"]);
+    expect(restored[0].metadata).toMatchObject({ chunk_id: "chunk-1", printed_page_label: "320", page_number: 353, citation_index: 1 });
+  });
+  it("keeps legacy filename-only citation cards distinct", () => {
+    expect(getSourceFeedbackKey(source, 0)).not.toBe(getSourceFeedbackKey(source, 1));
+  });
   it("preserves physical page and citation identity through a sourced note roundtrip", () => {
     const recorded = projectWorkspaceRagSources([{
       ...source, type: "pdf", metadata: { media_id: 42, page_number: 352, citation_index: 2 }

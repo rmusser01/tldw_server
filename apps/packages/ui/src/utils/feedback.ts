@@ -58,8 +58,10 @@ export const getSourceImpressionId = (
 export const getSourceFeedbackKey = (source: any, index?: number): string => {
   const { documentIds, chunkIds } = extractSourceFeedbackIds(source)
   if (chunkIds.length > 0) return `chunk:${chunkIds[0]}`
-  if (documentIds.length > 0) return `doc:${documentIds[0]}`
-  return getSourceImpressionId(source, index)
+  const identity = documentIds.length > 0 ? `doc:${documentIds[0]}` : getSourceImpressionId(source, index)
+  // Older saved citations have no chunk ID; keep separate passages independently reviewable.
+  const citation = source?.metadata?.citation_index ?? index
+  return citation != null ? `${identity}:citation:${citation}` : identity
 }
 
 export const collectImpressionList = (sources: any[] = []): string[] => {

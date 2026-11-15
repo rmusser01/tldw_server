@@ -71,6 +71,8 @@ class NotesProvenanceSource(_StrictModel):
     originalVersion: PositiveId | None = None
     pageNumber: PositiveId | None = None
     citationIndex: PositiveId | None = None
+    chunkId: ShortString | None = None
+    printedPageLabel: ShortString | None = None
 
 
 SourceList = Annotated[list[NotesProvenanceSource], Field(max_length=100)]

@@ -12,34 +12,14 @@ import type { PdfDocumentProxy } from "@/hooks/document-workspace/usePdfSearch"
 import { getBrowserRuntime, isExtensionRuntime } from "@/utils/browser-runtime"
 import type { ViewMode } from "../../types"
 
-// Configure PDF.js worker
-// For Next.js: The worker is copied to public/ during postinstall (scripts/copy-pdf-worker.mjs)
-// For browser extension: Uses bundled worker via runtime.getURL (with CDN fallback)
-// For development: Uses CDN for simplicity
+// Use packaged workers in every environment so the viewer respects the CSP
+// and works offline. Next.js postinstall copies the matching react-pdf worker.
 function getPdfWorkerSrc(): string {
-  // CDN fallback URL
-  const cdnUrl = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
-
-  // SSR check
-  if (typeof window === "undefined") {
-    return cdnUrl
-  }
-
-  // In extension runtime, use the packaged worker file from the extension bundle.
   const runtime = getBrowserRuntime()
-  const inExtensionRuntime = isExtensionRuntime(runtime)
-  if (inExtensionRuntime) {
-    return runtime?.getURL ? runtime.getURL("pdf.worker.min.mjs") : cdnUrl
+  if (isExtensionRuntime(runtime) && runtime?.getURL) {
+    return runtime.getURL("pdf.worker.min.mjs")
   }
-
-  // In Next.js production builds, use the local worker from public/
-  // The file is copied by scripts/copy-pdf-worker.mjs during postinstall
-  if (process.env.NODE_ENV === "production") {
-    return "/pdf.worker.min.mjs"
-  }
-
-  // Development and other environments: use CDN
-  return cdnUrl
+  return "/pdf.worker.min.mjs"
 }
 
 pdfjs.GlobalWorkerOptions.workerSrc = getPdfWorkerSrc()

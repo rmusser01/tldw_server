@@ -10,7 +10,7 @@ const testState = vi.hoisted(() => ({
   openFromPicker: null as null | ((id: number, hint: "pdf", operation: QuickIngestOperation) => Promise<void>),
   workspace: {} as Record<string, unknown>,
   searchParams: new URLSearchParams(),
-  getMediaDetails: vi.fn(() => new Promise(() => {})),
+  getMediaDetails: vi.fn((_id: number, _options: { signal: AbortSignal }) => new Promise<unknown>(() => {})),
   setSearchParams: vi.fn(),
   setStorage: vi.fn(),
   retrySync: vi.fn(),
@@ -210,6 +210,58 @@ describe("DocumentWorkspacePage design-system alerts", () => {
     testState.searchParams = new URLSearchParams(`open=42&page=${page}`)
     render(<DocumentWorkspacePage />)
     expect(store.getState().currentPage).toBe(10)
+  })
+
+  it("restarts an aborted citation open during Strict Mode mount replay", async () => {
+    testState.searchParams = new URLSearchParams("open=1&page=352")
+    const dispatched = vi.fn()
+    testState.getMediaDetails.mockImplementation(async (_id, { signal }) => {
+      // The transport resolves its owner before dispatching. Strict Mode can
+      // abort the first effect during that asynchronous boundary.
+      await Promise.resolve()
+      signal.throwIfAborted()
+      dispatched()
+      return { type: "pdf", title: "Cited PDF" }
+    })
+    const { bgRequest } = await import("@/services/background-proxy")
+    vi.mocked(bgRequest).mockResolvedValue(new ArrayBuffer(3))
+    URL.createObjectURL = vi.fn(() => "blob:cited-pdf")
+    vi.mocked(testState.workspace.openDocument as (doc: unknown) => void).mockImplementation(doc => {
+      store.setState({ activeDocumentId: 1, activeDocumentType: "pdf", totalPages: 922,
+        openDocuments: [doc] } as never)
+    })
+
+    render(<React.StrictMode><DocumentWorkspacePage /></React.StrictMode>)
+
+    await waitFor(() => expect(store.getState().currentPage).toBe(352))
+    expect(dispatched).toHaveBeenCalledTimes(1)
+    expect(testState.workspace.openDocument).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText("Loading document...")).not.toBeInTheDocument()
+  })
+
+  it("keeps a newer document loading when an aborted earlier open settles", async () => {
+    const pending = new Map<number, (value: unknown) => void>()
+    testState.getMediaDetails.mockImplementation(id => new Promise(resolve => pending.set(id, resolve)))
+    const { bgRequest } = await import("@/services/background-proxy")
+    vi.mocked(bgRequest).mockResolvedValue(new ArrayBuffer(3))
+    URL.createObjectURL = vi.fn(() => "blob:newer-pdf")
+    render(<React.StrictMode><DocumentWorkspacePage /></React.StrictMode>)
+    fireEvent.click(screen.getByTestId("document-open-picker-button"))
+    await screen.findByText("Picker mounted")
+    let earlier!: Promise<void>
+    let newer!: Promise<void>
+    act(() => {
+      earlier = testState.openFromPicker!(1, "pdf", testState.owner!)
+      newer = testState.openFromPicker!(2, "pdf", testState.owner!)
+    })
+
+    await act(async () => { pending.get(1)!({ type: "pdf", title: "Earlier PDF" }); await earlier })
+    expect(screen.getByText("Loading document...")).toBeInTheDocument()
+    expect(testState.workspace.openDocument).not.toHaveBeenCalled()
+
+    await act(async () => { pending.get(2)!({ type: "pdf", title: "Newer PDF" }); await newer })
+    expect(testState.workspace.openDocument).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ id: 2 }))
+    expect(screen.queryByText("Loading document...")).not.toBeInTheDocument()
   })
 
   it("renders the auto-open loading state through the design-system Alert", async () => {

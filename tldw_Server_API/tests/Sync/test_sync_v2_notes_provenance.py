@@ -182,3 +182,17 @@ def test_safe_positive_source_ids_roundtrip(source_id):
     data = payload()
     data["research"]["sources"][0]["mediaId"] = source_id
     assert validate_notes_provenance_payload(data) == data
+
+
+def test_retains_bounded_pdf_citation_identity():
+    from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import validate_notes_provenance_payload
+
+    data = payload()
+    source = data["research"]["sources"][0]["evidence"]["sources"][0]
+    source.update(chunkId="chunk-1", printedPageLabel="319", pageNumber=352, citationIndex=2)
+    assert validate_notes_provenance_payload(data) == data
+    for field in ("chunkId", "printedPageLabel"):
+        invalid = copy.deepcopy(data)
+        invalid["research"]["sources"][0]["evidence"]["sources"][0][field] = "x" * 513
+        with pytest.raises(ValueError):
+            validate_notes_provenance_payload(invalid)

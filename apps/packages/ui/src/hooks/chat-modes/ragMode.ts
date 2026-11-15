@@ -479,7 +479,7 @@ const prepareRagRetrieval = async (
       metadata: doc.metadata || {}
     }))
   )
-  const source = docs.map((doc) => ({
+  const source = docs.map((doc, index) => ({
     name:
       getMetadataString(doc.metadata, "title") ||
       getMetadataString(doc.metadata, "source") ||
@@ -491,7 +491,7 @@ const prepareRagRetrieval = async (
     mode: "rag" as const,
     url: getMetadataString(doc.metadata, "url"),
     pageContent: doc.content || doc.text || doc.chunk || "",
-    metadata: doc.metadata || {}
+    metadata: { ...doc.metadata, citation_index: index + 1 }
   }))
   return {
     query,

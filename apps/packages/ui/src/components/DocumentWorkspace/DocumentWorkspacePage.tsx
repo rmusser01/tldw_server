@@ -601,6 +601,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
   const [loadingDocumentId, setLoadingDocumentId] = useState<number | null>(null)
   const blobUrlMapRef = useRef(new Map(openDocuments.filter(doc => doc.url?.startsWith("blob:")).map(doc => [doc.id, doc.url])))
   const openDocumentRequestRef = useRef(0)
+  const autoOpenHandledRef = useRef<string | null>(null)
   const openingMediaIdRef = useRef<number | null>(null)
   const ownedCloseNotices = useRef(new Set<string>())
   const ownedCloseDialogs = useRef(new Set<ReturnType<typeof Modal.confirm>>())
@@ -796,10 +797,19 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     cleanupRemovedBlobUrls()
   }, [cleanupRemovedBlobUrls])
 
-  useEffect(() => () => {
-    openDocumentRequestRef.current += 1
-    openAbortRef.current?.abort()
-    // Same-owner route returns reuse the store's still-owned Blob URLs.
+  useEffect(() => {
+    // Strict Mode replays setup after cleanup while retaining refs and state.
+    // Let the URL effect restart the open that the previous lifetime aborted.
+    if (openAbortRef.current?.signal.aborted) {
+      autoOpenHandledRef.current = null
+      openingMediaIdRef.current = null
+      setLoadingDocumentId(null)
+    }
+    return () => {
+      openDocumentRequestRef.current += 1
+      openAbortRef.current?.abort()
+      // Same-owner route returns reuse the store's still-owned Blob URLs.
+    }
   }, [])
 
   const openDocumentById = useCallback(
@@ -968,7 +978,6 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
 
   // Handle ?open={mediaId} URL parameter for auto-opening documents
   const autoOpenId = searchParams.get("open")
-  const autoOpenHandledRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!autoOpenId) {

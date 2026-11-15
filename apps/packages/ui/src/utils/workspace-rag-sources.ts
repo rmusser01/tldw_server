@@ -95,6 +95,11 @@ export const projectWorkspaceRagSources = (
     const url = row.url ?? metadata.url;
     const pageNumber = positiveId(row.pageNumber ?? row.page_number ?? metadata.page_number ?? metadata.pageNumber);
     const citationIndex = positiveId(row.citationIndex ?? row.citation_index ?? metadata.citation_index ?? metadata.citationIndex);
+    const chunkId = row.chunkId ?? row.chunk_id ?? metadata.chunk_id ?? metadata.chunkId;
+    const pageSpan = Array.isArray(metadata.page_spans)
+      ? metadata.page_spans.find(span => record(span) && span.page_number === pageNumber)
+      : null;
+    const printedPageLabel = metadata.printed_page_label ?? pageSpan?.printed_page_label;
     sources.push({
       originalId: mediaId,
       excerpt,
@@ -107,6 +112,8 @@ export const projectWorkspaceRagSources = (
       ...(typeof url === "string" && url && safeUrl(url) ? { url } : {}),
       ...(pageNumber !== null ? {pageNumber} : {}),
       ...(citationIndex !== null ? {citationIndex} : {}),
+      ...(typeof chunkId === "string" && chunkId.length > 0 && chunkId.length <= 512 ? {chunkId} : {}),
+      ...(pageNumber !== null && typeof printedPageLabel === "string" && printedPageLabel.length > 0 && printedPageLabel.length <= 512 ? {printedPageLabel} : {}),
     });
   }
   return readWorkspaceRagSourceProvenance({ origin: "knowledge_qa", sources });
@@ -125,5 +132,7 @@ export const restoreWorkspaceRagSources = (value: unknown) =>
       type: source.sourceType || source.type,
       ...(source.pageNumber != null ? {page_number: source.pageNumber} : {}),
       ...(source.citationIndex != null ? {citation_index: source.citationIndex} : {}),
+      ...(source.chunkId != null ? {chunk_id: source.chunkId} : {}),
+      ...(source.printedPageLabel != null ? {printed_page_label: source.printedPageLabel} : {}),
     },
   })) || [];

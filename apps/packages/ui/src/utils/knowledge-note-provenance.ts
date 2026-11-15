@@ -14,6 +14,8 @@ export type KnowledgeNoteSource = {
   originalVersion?: number | null;
   pageNumber?: number | null;
   citationIndex?: number | null;
+  chunkId?: string | null;
+  printedPageLabel?: string | null;
 };
 export type KnowledgeNoteEvidence = {
   importId: string;
@@ -112,10 +114,14 @@ const source = (value: unknown): boolean =>
     "originalVersion",
     "pageNumber",
     "citationIndex",
+    "chunkId",
+    "printedPageLabel",
   ]) &&
   (value.originalId === null ||
     shortString(value.originalId) ||
     positiveId(value.originalId)) &&
+  optional(value.chunkId, shortString) &&
+  optional(value.printedPageLabel, shortString) &&
   excerpt(value.excerpt) &&
   (value.mediaId === null || positiveId(value.mediaId)) &&
   shortString(value.title) &&
