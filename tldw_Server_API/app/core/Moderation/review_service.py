@@ -12,7 +12,6 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.Moderation_Review_DB import ModerationReviewStore
 from tldw_Server_API.app.core.testing import is_truthy
 
-
 _ACTION_STATUS = {
     "approve": "approved",
     "block": "blocked",
@@ -287,6 +286,6 @@ def capture_moderation_review_item(**kwargs: Any) -> dict[str, Any] | None:
         return None
     try:
         return get_moderation_review_service().record_item(payload)
-    except Exception as exc:
-        logger.warning("Moderation review capture failed: {}: {}", type(exc).__name__, str(exc))
+    except Exception:  # noqa: BLE001 - best-effort capture never logs failed content.
+        logger.warning("Moderation review capture failed")
         return None

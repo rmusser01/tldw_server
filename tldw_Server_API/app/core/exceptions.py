@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 
 from .exception_types import (  # noqa: F401 - centralized compatibility exports.
+    ModerationExecutionError,
     PersonaArtworkValidationError,
     PromptCatalogError,
     ProviderUsageReservationError,

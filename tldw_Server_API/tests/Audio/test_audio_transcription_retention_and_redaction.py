@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
 from tldw_Server_API.app.api.v1.endpoints.audio.audio import router as audio_router
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+from tldw_Server_API.app.core.exception_types import MODERATION_EXECUTION_REASONS, ModerationExecutionError
 
 TEST_API_KEY = "test-api-key-1234567890"
 
@@ -70,17 +71,17 @@ def _setup_stubbed_audio_app(
     monkeypatch.setenv("SINGLE_USER_TEST_API_KEY", TEST_API_KEY)
     monkeypatch.setenv("SINGLE_USER_FIXED_ID", "1")
 
-    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
-        get_auth_principal,
-        get_db_transaction,
-    )
-    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
     import tldw_Server_API.app.api.v1.endpoints.audio.audio as audio_ep
     import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_transcriptions
     import tldw_Server_API.app.core.DB_Management.db_path_utils as db_path_utils
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy as stt_policy
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_provider_adapter as stt_adapter
+    from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+        get_auth_principal,
+        get_db_transaction,
+    )
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 
     async def _fake_get_request_user() -> User:
         return User(id=1, username="single_user")
@@ -169,6 +170,41 @@ def _setup_stubbed_audio_app(
     return app
 
 
+@pytest.mark.parametrize("reason", sorted(MODERATION_EXECUTION_REASONS))
+def test_transcription_moderation_failure_is_safe_http_503(monkeypatch, tmp_path, bypass_api_limits, reason):
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_transcriptions
+    from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
+
+    monkeypatch.setenv("STT_REDACT_PII", "1")
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
+    prepare_moderation_incident_store()
+    app = _setup_stubbed_audio_app(monkeypatch, transcript_text="private transcript", temp_outputs_dir=tmp_path)
+
+    def fail(*args, **kwargs):
+        raise ModerationExecutionError(reason)
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
+    from tldw_Server_API.tests.unit.test_moderation_execution_service import make_service
+
+    moderation = make_service()
+    monkeypatch.setattr(moderation, "redact_text", fail)
+    monkeypatch.setattr(stt_policy, "get_moderation_service", lambda: moderation)
+    retained = AsyncMock()
+    monkeypatch.setattr(audio_transcriptions, "retain_stt_audio_artifact", retained)
+    with bypass_api_limits(app), TestClient(app) as client:
+        response = client.post(
+            "/api/v1/audio/transcriptions",
+            headers={"X-API-KEY": TEST_API_KEY},
+            files={"file": ("sample.wav", io.BytesIO(_make_wav_bytes()), "audio/wav")},
+            data={"model": "external:stub", "response_format": "verbose_json"},
+        )
+    assert response.status_code == 503
+    assert response.json()["detail"]["error_code"] == "moderation_unavailable"
+    assert "private transcript" not in response.text
+    assert "segments" not in response.text
+    retained.assert_not_called()
+
+
 def test_stt_policy_accepts_stricter_request_overrides() -> None:
     stt_policy = _load_stt_policy_module()
 
@@ -245,6 +281,57 @@ def test_audio_transcriptions_redacts_text_and_segments_when_stt_redaction_enabl
         body = resp.json()
         assert body["text"] == "contact [PII]"
         assert body["segments"][0]["text"] == "contact [PII]"
+
+
+@pytest.mark.parametrize("output_cap,status", [(4, 200), (3, 503)])
+def test_http_transcript_and_segments_share_one_atomic_child_batch(monkeypatch, tmp_path, bypass_api_limits, output_cap, status):
+    import re
+
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_transcriptions
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
+    from tldw_Server_API.app.core.Moderation import execution_runner, moderation_service
+    from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds
+    from tldw_Server_API.app.core.Moderation.models import PatternRule
+    from tldw_Server_API.tests.unit.test_moderation_execution_service import make_service
+
+    monkeypatch.setenv("STT_REDACT_PII", "1")
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
+    prepare_moderation_incident_store()
+    app = _setup_stubbed_audio_app(monkeypatch, transcript_text="a", temp_outputs_dir=tmp_path)
+    service = make_service()
+    monkeypatch.setattr(service, "_load_builtin_pii_rules", lambda: [PatternRule(re.compile("a"), replacement="zz")])
+    monkeypatch.setattr(stt_policy, "get_moderation_service", lambda: service)
+    monkeypatch.setattr(moderation_service, "ExecutionBounds", lambda: ExecutionBounds(max_output_chars=output_cap))
+    children = []
+
+    def spawn(*args, **kwargs):
+        child = execution_runner.subprocess.Popen(*args, **kwargs)
+        children.append(child)
+        return child
+
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds(), process_factory=spawn)
+    monkeypatch.setattr(execution_runner, "get_execution_runner", lambda: owner)
+    retained = AsyncMock()
+    monkeypatch.setattr(audio_transcriptions, "retain_stt_audio_artifact", retained)
+    try:
+        with bypass_api_limits(app), TestClient(app) as client:
+            response = client.post(
+                "/api/v1/audio/transcriptions", headers={"X-API-KEY": TEST_API_KEY},
+                files={"file": ("sample.wav", io.BytesIO(_make_wav_bytes()), "audio/wav")},
+                data={"model": "external:stub", "response_format": "verbose_json"},
+            )
+        assert response.status_code == status, response.text
+        assert len(children) == 1 and children[0].poll() == 0
+        assert not owner._entries
+        if status == 200:
+            assert response.json()["text"] == response.json()["segments"][0]["text"] == "zz"
+        else:
+            assert response.json()["detail"]["error_code"] == "moderation_unavailable"
+            assert "segments" not in response.text
+        retained.assert_not_called()
+    finally:
+        owner.close()
 
 
 def test_audio_transcriptions_emit_bounded_stt_metrics_when_redaction_applies(

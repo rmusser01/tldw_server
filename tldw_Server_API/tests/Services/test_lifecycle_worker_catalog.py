@@ -36,6 +36,118 @@ async def _wait_for_stop(stop_event: asyncio.Event) -> None:
     await stop_event.wait()
 
 
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_moderation_provider_is_registered_lazy_and_closes_admission(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_incidents, execution_runner
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds
+    from tldw_Server_API.app.services.startup_moderation_workers import provide_moderation_worker_specs
+    from tldw_Server_API.app.services.startup_worker_groups import startup_worker_spec_providers
+
+    assert provide_moderation_worker_specs in startup_worker_spec_providers()
+    review_db_path = tmp_path / "moderation_review.db"
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(review_db_path))
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds())
+    monkeypatch.setattr(execution_runner, "_runner", owner)
+    monkeypatch.setattr(async_execution, "_closed", False)
+    monkeypatch.setattr(execution_incidents, "_closed", False)
+    specs = provide_moderation_worker_specs(_context())
+    assert review_db_path.is_file()
+    assert len(specs) == 1
+    assert not owner._closed
+    assert owner._reaper is None
+    callback = specs[0].shutdown_callback_factory(_context())
+    await callback()
+    assert owner._closed
+    assert async_execution._closed
+    assert execution_incidents._closed
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_moderation_prepare_failure_keeps_catalog_and_shutdown_owner(monkeypatch, tmp_path, enabled):
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_incidents, execution_runner
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds
+    from tldw_Server_API.app.services.lifecycle_worker_catalog import collect_worker_specs
+    from tldw_Server_API.app.services.startup_moderation_workers import provide_moderation_worker_specs
+
+    messages, metrics = [], []
+    path = tmp_path / "unavailable.db"
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(path))
+    monkeypatch.setenv("MODERATION_ENABLED", str(enabled).lower())
+    monkeypatch.setattr(execution_incidents, "_last_error", float("-inf"))
+    monkeypatch.setattr(execution_incidents, "log_counter", lambda name, **kw: metrics.append((name, kw)))
+    monkeypatch.setattr(async_execution, "_closed", False)
+    monkeypatch.setattr(execution_incidents, "_closed", False)
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds())
+    monkeypatch.setattr(execution_runner, "_runner", owner)
+
+    def fail():
+        raise OSError("SECRET_STORE_EXCEPTION")
+
+    monkeypatch.setattr(execution_incidents, "prepare_moderation_incident_store", fail)
+    sink = logger.add(lambda message: messages.append(str(message)), level="ERROR")
+    context = _context()
+    context.settings["MODERATION_ENABLED"] = enabled
+    try:
+        specs = collect_worker_specs(context, [provide_moderation_worker_specs])
+        collect_worker_specs(context, [provide_moderation_worker_specs])
+    finally:
+        logger.remove(sink)
+    assert [spec.name for spec in specs] == ["moderation_execution"]
+    assert len(messages) == 1
+    assert "enforcement remains blocked" in messages[0]
+    assert "SECRET" not in str(messages) + str(metrics)
+    assert not path.exists()
+    assert not owner._entries
+    await specs[0].shutdown_callback_factory(context)()
+    assert owner._closed and async_execution._closed and execution_incidents._closed
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_moderation_trusted_startup_reopens_same_settled_owner(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.DB_Management.Moderation_Review_DB import ModerationReviewStore
+    from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+    from tldw_Server_API.app.core.Moderation import async_execution, execution_incidents, execution_runner
+    from tldw_Server_API.app.core.Moderation.execution_models import ExecutionBounds, FailureMetadata
+    from tldw_Server_API.app.services.startup_moderation_workers import provide_moderation_worker_specs
+    from tldw_Server_API.tests.unit.test_moderation_execution_runner import request, scope
+
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "restart.db"))
+    owner = execution_runner.ModerationExecutionRunner(ExecutionBounds())
+    monkeypatch.setattr(execution_runner, "_runner", owner)
+    monkeypatch.setattr(async_execution, "_closed", False)
+    monkeypatch.setattr(execution_incidents, "_closed", False)
+    context = _context()
+    for lifecycle in range(2):
+        specs = provide_moderation_worker_specs(context)
+        try:
+            result = await async_execution._run_moderation_offload(
+                lambda: owner.execute(request(), scope()), scope=scope()
+            )
+            assert result.result.text == "hello"
+            assert execution_runner.get_execution_runner() is owner
+            if lifecycle:
+                with pytest.raises(ModerationExecutionError, match="size_exceeded"):
+                    await async_execution.run_moderation_async(
+                        lambda: pytest.fail("oversized input was admitted"),
+                        metadata=FailureMetadata("evaluate", None, 1_000_001),
+                    )
+                [item] = ModerationReviewStore(tmp_path / "restart.db").list_items()["items"]
+                assert item["excerpt"] == execution_incidents.ENGINE_FAILURE_EXCERPT
+                assert item["context"]["reason"] == "size_exceeded"
+                assert item["context"]["input_chars"] == 1_000_001
+                assert item["matches"] == [] and item["effective_policy"] == {}
+        finally:
+            await specs[0].shutdown_callback_factory(context)()
+        with pytest.raises(ModerationExecutionError, match="worker_unavailable"):
+            await async_execution._run_moderation_offload(lambda: "unexpected", scope=scope())
+
+
 def _worker_spec(name: str, **overrides: Any) -> WorkerSpec:
     values: dict[str, Any] = {
         "name": name,

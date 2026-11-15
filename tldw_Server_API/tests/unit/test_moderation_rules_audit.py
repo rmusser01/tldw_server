@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Audit.unified_audit_service import AuditContext, A
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_CONFIGURE
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
 from tldw_Server_API.app.core.Moderation import moderation_service
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 
 PRIVATE_PATTERN = "S05-PRIVATE-RULE-DO-NOT-AUDIT"
 
@@ -159,6 +160,22 @@ async def test_rules_test_audits_verdict_not_sample_or_target_identity(rule_case
     assert details["flagged"] is flagged and details["verdict"] == ("block" if flagged else "pass")  # nosec B101 -- Fixed outcome.
     assert details["actor_id"] == case.actor.principal_id and len(details["policy_fingerprint"]) == 64  # nosec B101 -- Authenticated attribution and immutable policy link.
     assert PRIVATE_PATTERN not in json.dumps(event)  # nosec B101 -- Raw sample and pattern are private.
+
+
+@pytest.mark.asyncio
+async def test_rules_test_execution_failure_returns_safe_error_without_audit(rule_case, monkeypatch):
+    def fail_evaluation(*_args):
+        raise ModerationExecutionError("worker_crashed")
+
+    monkeypatch.setattr(rule_case.service, "evaluate_text", fail_evaluation)
+    response = await rule_case.client.post("/api/v1/moderation/test", json={"text": PRIVATE_PATTERN})
+
+    assert response.status_code == 503  # nosec B101 -- Execution failure is terminal.
+    assert response.json()["detail"] == {  # nosec B101 -- Only sanitized details leave the endpoint.
+        "error_code": "moderation_unavailable",
+        "message": "Moderation is currently unavailable",
+    }
+    assert await rule_case.audit.query_events(user_id="41") == []  # nosec B101 -- No successful verdict was reached.
 
 
 @pytest.mark.asyncio

@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.endpoints.chat import router as chat_router
 from tldw_Server_API.app.api.v1.endpoints.health import router as health_router
 from tldw_Server_API.app.core.Audit.unified_audit_service import MandatoryAuditWriteError
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.exception_types import MODERATION_EXECUTION_REASONS, ModerationExecutionError
 from tldw_Server_API.app.core.Moderation.moderation_service import (
     ModerationPolicy,
     ModerationService,
@@ -268,7 +269,7 @@ class _CharacterScopedGuardianEngine:
             )
         return base_policy
 
-    def check_text(self, text: str, dependent_user_id: str, phase: str, chat_type: str | None = None):
+    async def check_text_async(self, text: str, dependent_user_id: str, phase: str, chat_type: str | None = None):
         self.check_calls.append((phase, chat_type, text))
         is_character_secret = chat_type == "character" and "secret" in (text or "").lower()
         return SimpleNamespace(
@@ -324,6 +325,93 @@ def test_input_block_returns_400(monkeypatch, credentialed_test_client_factory):
         except Exception:
             _ = None
         app.dependency_overrides.pop(get_chacha_db_for_user, None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("reason", sorted(MODERATION_EXECUTION_REASONS))
+@pytest.mark.parametrize("surface", ["input", "output", "stream", "stream_final"])
+def test_execution_failure_never_returns_or_saves_reply(
+    monkeypatch, tmp_path, credentialed_test_client_factory, reason, surface
+):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Chat import chat_service
+    from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
+
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
+    monkeypatch.setenv("STREAMS_UNIFIED", "0")
+    prepare_moderation_incident_store()
+    db, db_path = _make_test_db()
+    save = AsyncMock()
+    monkeypatch.setattr(chat_service, "save_assistant_message", save)
+    policy = _StubPolicy()
+
+    class Service(_StubModerationService):
+        def __init__(self):
+            super().__init__(policy)
+            self.output_calls = 0
+
+        def evaluate_action_with_match(self, text, policy, phase):
+            if phase == "output":
+                self.output_calls += 1
+            if (
+                (surface == "input" and phase == "input")
+                or (surface in {"output", "stream"} and phase == "output")
+                or (surface == "stream_final" and self.output_calls == 2)
+            ):
+                raise ModerationExecutionError(reason)
+            return "pass", None, None, None, None
+
+    def upstream():
+        yield {"choices": [{"delta": {"content": "private reply"}}]}
+        yield {"choices": [{"delta": {}, "finish_reason": "stop"}]}
+
+    reply = {
+        "id": "chatcmpl-test",
+        "object": "chat.completion",
+        "created": 1,
+        "model": "test",
+        "choices": [
+            {"index": 0, "message": {"role": "assistant", "content": "private reply"}, "finish_reason": "stop"}
+        ],
+    }
+    try:
+        app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+        with (
+            patch("tldw_Server_API.app.api.v1.endpoints.chat.get_moderation_service", return_value=Service()),
+            patch(
+                "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+                return_value=upstream() if surface.startswith("stream") else reply,
+            ) as provider,
+        ):
+            with credentialed_test_client_factory(app) as client:
+                client.csrf_token = client.get("/api/v1/health").cookies.get("csrf_token", "")
+                response = _post_with_csrf(
+                    client,
+                    "/api/v1/chat/completions",
+                    json={
+                        "api_provider": "openai",
+                        "model": "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": "hello"}],
+                        "stream": surface.startswith("stream"),
+                        "save_to_db": True,
+                    },
+                    headers=_auth_headers(client),
+                )
+                if surface.startswith("stream"):
+                    assert response.status_code == 200
+                    assert '"moderation_unavailable"' in response.text
+                    assert '"finish_reason": "stop"' not in response.text
+                else:
+                    assert response.status_code == 503
+                    assert response.json()["detail"]["error_code"] == "moderation_unavailable"
+                    assert "private reply" not in response.text
+                if surface == "input":
+                    provider.assert_not_called()
+        save.assert_not_called()
+    finally:
+        app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        _cleanup_db_artifacts(db, db_path)
 
 
 @pytest.mark.unit

@@ -28,6 +28,9 @@ from tldw_Server_API.app.core.Chat.response_processor import (
     primary_choice,
     set_choice_content,
 )
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
+from tldw_Server_API.app.core.Moderation.async_execution import run_moderation_async
+from tldw_Server_API.app.core.Moderation.execution_models import FailureMetadata
 from tldw_Server_API.app.core.Moderation.moderation_service import get_moderation_service
 from tldw_Server_API.app.core.Monitoring.topic_monitoring_service import get_topic_monitoring_service
 
@@ -248,10 +251,26 @@ async def _apply_output_moderation(
             if not target_text:
                 continue
 
-            decision = _evaluate_output_moderation(
-                moderation=moderation,
-                eff_policy=eff_policy,
-                target_text=target_text,
+            def evaluate_target(target_text=target_text, target_content=target_content):
+                decision = _evaluate_output_moderation(
+                    moderation=moderation, eff_policy=eff_policy, target_text=target_text
+                )
+                redacted_content = (
+                    _redact_output_content(
+                        moderation=moderation,
+                        eff_policy=eff_policy,
+                        target_content=target_content,
+                        target_text=target_text,
+                        decision=decision,
+                    )
+                    if decision.action == "redact"
+                    else None
+                )
+                return decision, redacted_content
+
+            decision, redacted_content = await run_moderation_async(
+                evaluate_target,
+                metadata=FailureMetadata("evaluate", "output", len(target_text)),
             )
             _schedule_output_topic_monitoring(
                 runtime=runtime,
@@ -267,13 +286,6 @@ async def _apply_output_moderation(
                     req_user_id=req_user_id,
                 )
             if decision.action == "redact":
-                redacted_content = _redact_output_content(
-                    moderation=moderation,
-                    eff_policy=eff_policy,
-                    target_content=target_content,
-                    target_text=target_text,
-                    decision=decision,
-                )
                 _track_output_redaction(runtime, req_user_id, decision)
                 await _audit_output_redaction(runtime, decision)
                 if target is not None:
@@ -299,6 +311,11 @@ async def _apply_output_moderation(
             return OutputSafetyResult(first_choice.content, first_choice.content_text)
         fallback_content = get_fallback()
         return OutputSafetyResult(fallback_content, extract_text_from_content(fallback_content))
+    except ModerationExecutionError:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "moderation_unavailable", "message": "Moderation is currently unavailable"},
+        ) from None
     except HTTPException:
         raise
     except MandatoryAuditWriteError:
@@ -330,11 +347,15 @@ def _evaluate_output_moderation(
                 match_span = eval_res[4] if len(eval_res) >= 5 else None
             else:
                 action, redacted_value, matched_pattern = eval_res  # type: ignore[misc]
+        except ModerationExecutionError:
+            raise
         except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
             action = None
         if match_span and hasattr(moderation, "build_sanitized_snippet"):
             try:
                 sample = moderation.build_sanitized_snippet(target_text, eff_policy, match_span, matched_pattern)
+            except ModerationExecutionError:
+                raise
             except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
                 sample = None
     elif hasattr(moderation, "evaluate_action"):
@@ -345,12 +366,16 @@ def _evaluate_output_moderation(
                 category = eval_res[3] if len(eval_res) >= 4 else None
             else:
                 action, redacted_value, matched_pattern = eval_res  # type: ignore[misc]
+        except ModerationExecutionError:
+            raise
         except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
             action = None
 
     if action and action != "pass" and sample is None:
         try:
             _, sample = moderation.check_text(target_text, eff_policy, "output")
+        except ModerationExecutionError:
+            raise
         except _OUTPUT_SAFETY_NONCRITICAL_EXCEPTIONS:
             sample = None
     if not action:

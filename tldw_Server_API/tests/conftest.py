@@ -725,7 +725,7 @@ def _keep_app_main_reloads_from_leaking() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _reset_main_app_lifecycle_state_between_tests():
+def _reset_main_app_lifecycle_state_between_tests(monkeypatch, tmp_path_factory):
     """Keep TestClient lifespan shutdown from leaking drain state across tests.
 
     Resets every app that has lifecycle state, not just the one the current
@@ -734,8 +734,12 @@ def _reset_main_app_lifecycle_state_between_tests():
     keep routing through the object they pinned -- and it is those pinned
     objects a lifespan exit tends to drain. Resetting only the current one
     leaves them draining, and ``DrainGateMiddleware`` then answers 503 to every
-    request through them.
+    request through them. Direct service tests also need settled Moderation
+    admission prepared after an earlier app lifespan closed it. Preparation
+    never forgets a live native owner or activates an unloaded module.
     """
+
+    from tldw_Server_API.tests.helpers.app_main_state import prepare_loaded_moderation_for_test
 
     def _reset() -> None:
         try:
@@ -747,7 +751,10 @@ def _reset_main_app_lifecycle_state_between_tests():
         except Exception:
             _ = None
 
+    review_directory = tmp_path_factory.mktemp("moderation-review")
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(review_directory / "review.db"))
     _reset()
+    prepare_loaded_moderation_for_test()
     yield
     _reset()
 

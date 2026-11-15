@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Audio.Realtime.pipeline import (
     RealtimePipelineTranscriptDone,
     RealtimePipelineTurnDone,
 )
+from tldw_Server_API.app.core.exception_types import ModerationExecutionError
 from tldw_Server_API.app.core.LLM_Calls.sse import is_done_line
 from tldw_Server_API.app.core.TTS.speech_schemas import OpenAISpeechRequest
 
@@ -78,6 +79,8 @@ class DefaultRealtimePipeline:
                 sample_rate_hz=sample_rate_hz,
                 language=language,
             )
+        except ModerationExecutionError:
+            raise
         except Exception as exc:
             raise RealtimePipelineError(stage="stt", message="Realtime transcription failed", cause=exc) from exc
         return transcript
@@ -320,7 +323,7 @@ def build_default_realtime_pipeline(
     from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
     from tldw_Server_API.app.core.Chat.chat_service import perform_chat_api_call_async
     from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.stt_policy import (
-        apply_transcript_text_policy,
+        apply_transcript_text_policy_async,
         resolve_effective_stt_policy,
     )
     from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
@@ -347,7 +350,7 @@ def build_default_realtime_pipeline(
             raise RealtimePipelineError(stage="stt", message="Realtime transcription quota exceeded")
         policy = await resolve_effective_stt_policy(principal=principal, user_id=resolved_user_id, db=None)
         text = await default_stt_transcribe_pcm16(audio, sample_rate_hz=sample_rate_hz, language=language)
-        return apply_transcript_text_policy(text, policy=policy, is_partial=False)
+        return await apply_transcript_text_policy_async(text, policy=policy, is_partial=False)
 
     async def chat(**kwargs: Any) -> AsyncIterator[Any]:
         """Retain one authoritative provider credential snapshot until stream cleanup."""

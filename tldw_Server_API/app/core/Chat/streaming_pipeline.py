@@ -9,6 +9,7 @@ The streaming implementation remains in ``streaming_utils``. This module gives
 
 from __future__ import annotations
 
+from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -25,7 +26,7 @@ class StreamingPipelineRequest:
     on_first_output: Callable[..., Any] | None = None
     idle_timeout: float | None = None
     heartbeat_interval: float | None = None
-    text_transform: Callable[[str], str] | None = None
+    text_transform: Callable[[str], str | Awaitable[str]] | None = None
     before_success_callback: Callable[..., Any] | None = None
     system_message_id: str | None = None
     continuation_metadata: dict[str, Any] | None = None

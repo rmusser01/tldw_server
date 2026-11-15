@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from configparser import ConfigParser
 import importlib.machinery
 import sys
-from types import SimpleNamespace
 import types
+from configparser import ConfigParser
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 import tldw_Server_API.app.core.Metrics.metrics_manager as metrics_manager
+from tldw_Server_API.app.core.exception_types import MODERATION_EXECUTION_REASONS, ModerationExecutionError
 
 # Stub heavyweight audio deps before importing endpoint modules.
 if "torch" not in sys.modules:
@@ -638,3 +639,49 @@ async def test_stream_transcribe_allows_unredacted_partials_but_redacts_final_pa
     assert "[PII]" in finals[0]["text"]
     assert any(call["transcription"] == "contact alice@example.com" for call in calls)
     assert any("[PII]" in call["transcription"] for call in calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", sorted(MODERATION_EXECUTION_REASONS))
+@pytest.mark.parametrize("site", ["callback", "send"])
+async def test_moderation_failure_is_terminal_before_transcript_persistence(monkeypatch, tmp_path, reason, site):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import stt_policy
+    from tldw_Server_API.app.core.Moderation.execution_incidents import prepare_moderation_incident_store
+
+    monkeypatch.setenv("STT_REDACT_PII", "1")
+    monkeypatch.setenv("MODERATION_REVIEW_DB_PATH", str(tmp_path / "review.db"))
+    prepare_moderation_incident_store()
+    ws = DummyWebSocket(query_params={"persist_transcript": "1", "persist_partial_transcript": "1", "media_id": "42"})
+    save = Mock()
+    monkeypatch.setattr(audio_streaming, "upsert_transcript", save)
+    monkeypatch.setattr(audio_streaming, "_resolve_media_db_for_user", lambda _user: DummyMediaDB())
+
+    def fail(*args, **kwargs):
+        raise ModerationExecutionError(reason)
+
+    from tldw_Server_API.tests.unit.test_moderation_execution_service import make_service
+
+    moderation = make_service()
+    monkeypatch.setattr(moderation, "redact_text", fail)
+    monkeypatch.setattr(stt_policy, "get_moderation_service", lambda: moderation)
+
+    async def handle(socket, config, **callbacks):
+        if site == "callback":
+            await callbacks["on_transcript_result"](
+                {"type": "transcription", "text": "private transcript", "is_final": True}, "private cached snapshot"
+            )
+        else:
+            await socket.send_json(
+                {"type": "transcription", "text": "private transcript", "segments": [{"text": "private segment"}]}
+            )
+        await socket.send_json({"type": "done"})
+
+    monkeypatch.setattr(audio_streaming, "handle_unified_websocket", handle)
+    await audio_streaming.websocket_transcribe(ws, token=None)
+    assert any(frame.get("code") == "moderation_unavailable" for frame in ws.sent_json)
+    assert all(frame.get("type") not in {"transcription", "full_transcript", "done"} for frame in ws.sent_json)
+    assert "private" not in str(ws.sent_json)
+    assert ws.closed
+    save.assert_not_called()
