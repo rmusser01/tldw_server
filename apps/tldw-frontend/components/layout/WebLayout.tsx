@@ -79,7 +79,11 @@ const TutorialRunner = lazy(() =>
     default: m.TutorialRunner,
   }))
 );
-const TutorialPrompt = lazy(() => import('@/components/Common/TutorialPrompt'));
+const TutorialPrompt = lazy(() =>
+  import('@/components/Common/TutorialPrompt').then((m) => ({
+    default: m.TutorialPrompt,
+  }))
+);
 const PAGE_OWNED_TUTORIAL_ROUTES = ['/research-workspace'];
 import { useConfirmDanger } from '@/components/Common/confirm-danger';
 import { DemoModeProvider, useDemoMode } from '@/context/demo-mode';

@@ -35,6 +35,8 @@ Signed-in beta UAT identified the Notes auto-tour and PostgreSQL timestamp failu
 Public PR #3473. Signed-in owner UAT also exposed an invitation list 500 after recovering the member list. The repository uses naive UTC parameters for PostgreSQL TIMESTAMP in list, create, and expiry cleanup. Eight focused backend cases passed.
 PR #3473 CI reproduced the mobile parity guard failure against an unchanged dev source. dev already removed the decorative Composer pill in 157b04a3ac. Remove the stale source assertion; the sticky composer integration test covers the intended absence.
 Verified all three local Playground CI suites (52 composer, 15 device matrix, and 63 accessibility tests), plus four sticky-composer integration tests.
+Local WebUI gate reproduction found the lazy TutorialPrompt default import breaking command palette and loader focus mocks that already match the shared layout named export. Use the same named export in WebLayout.
+All 20 layout integration tests passed with Node 20 after matching the named export. The remaining local WebUI failures also reproduce on untouched dev and the affected suites passed in Linux required frontend CI job 132613158739. Its independent shared-UI shard failure is the already-fixed stale Composer pill assertion.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
