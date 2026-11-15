@@ -92,6 +92,7 @@ from tldw_Server_API.app.core.Chat.moderation_pipeline import (
     apply_output_safety_to_choices,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
+    NativeStreamPersistence,
     build_assistant_message_payload,
     save_assistant_message,
     save_tool_messages,
@@ -3038,6 +3039,20 @@ def _format_selected_history_messages(
     return output
 
 
+def _normalize_history_overlap_content(value: Any, *, assistant: bool) -> Any:
+    """Normalize text parts for comparing the saved and submitted history."""
+    if isinstance(value, str):
+        value = [{"type": "text", "text": value}]
+    if assistant and isinstance(value, list):
+        return [
+            {**part, "text": strip_reasoning_blocks(part["text"])}
+            if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
+            else part
+            for part in value
+        ]
+    return value
+
+
 async def build_context_and_messages(
     chat_db: Any,
     request_data: Any,
@@ -3629,25 +3644,10 @@ async def build_context_and_messages(
             msg.get("role") in {"assistant", "tool"} for msg in request_messages
         )
         all_user_roles = all(msg.get("role") == "user" for msg in request_messages)
-        def _normalize_content(value: Any, *, assistant: bool) -> Any:
-            if isinstance(value, str):
-                if assistant:
-                    value = strip_reasoning_blocks(value)
-                return [{"type": "text", "text": value}]
-            if isinstance(value, list):
-                if assistant:
-                    return [
-                        {**part, "text": strip_reasoning_blocks(part["text"])}
-                        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str)
-                        else part for part in value
-                    ]
-                return value
-            return value
-
         def _msg_sig(msg: dict[str, Any]) -> str:
             payload = {
                 "role": msg.get("role"),
-                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if reuse_saved_turn and msg.get("role") == "user" else _normalize_content(msg.get("content"), assistant=msg.get("role") == "assistant")),
+                "content": (_retry_content_components(retry_history_content.get(id(msg), msg.get("content"))) if reuse_saved_turn and msg.get("role") == "user" else _normalize_history_overlap_content(msg.get("content"), assistant=msg.get("role") == "assistant")),
                 "tool_calls": msg.get("tool_calls"),
                 "function_call": msg.get("function_call"),
                 "tool_call_id": msg.get("tool_call_id"),
@@ -4262,8 +4262,7 @@ async def execute_streaming_call(
     continuation_metadata: dict[str, Any] | None = None,
     queue_request_id: str | None = None,
     provider_factory_timeout: float | None = None,
-    history_persistence_ack: bool = False,
-    retain_reasoning_history: bool = False,
+    native_persistence: NativeStreamPersistence | None = None,
     forward_usage_chunk: bool = False,
 ) -> StreamingResponse:
     """Execute a streaming LLM call with queue, failover, moderation, and persistence.
@@ -5100,11 +5099,11 @@ async def execute_streaming_call(
     # selection, where the server owns settlement. Other save_to_db clients
     # retry an unanswered turn with tldw_retry_failed_turn, and that contract
     # needs the failed turn to have no saved reply.
-    keep_partial_replies = bool(should_persist and history_persistence_ack)
+    keep_partial_replies = bool(should_persist and native_persistence)
 
     async def _prepare_saved_stream_reply(full_reply: str) -> tuple[str | None, bool]:
         """Apply save policies to answer and thinking without checking synthetic tags."""
-        if not retain_reasoning_history or not keep_partial_replies or structured_request_context is not None:
+        if native_persistence != "retain_reasoning" or not keep_partial_replies or structured_request_context is not None:
             return await _apply_stream_output_policies(full_reply)
         answer, thinking = split_reasoning_text(full_reply)
         approved_answer, blocked = await _apply_stream_output_policies(answer)
@@ -5669,10 +5668,10 @@ async def execute_streaming_call(
                     system_message_id=system_message_id,
                     user_message_id=user_message_id,
                     continuation_metadata=normalized_continuation_metadata,
-                    history_persistence_ack=history_persistence_ack or None,
+                    history_persistence_ack=bool(native_persistence) or None,
                     forward_usage_chunk=forward_usage_chunk,
                     retain_reasoning=(
-                        retain_reasoning_history and keep_partial_replies and structured_request_context is None
+                        native_persistence == "retain_reasoning" and keep_partial_replies and structured_request_context is None
                     ) or None,
                 ),
                 stream_factory=create_streaming_response_with_timeout,

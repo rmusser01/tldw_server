@@ -186,10 +186,10 @@ from tldw_Server_API.app.core.Chat.chat_target_resolution import (
 from tldw_Server_API.app.core.Chat.knowledge_save import (
     KnowledgeFlashcardError,
     resolve_knowledge_flashcard,
-    strip_reasoning_blocks,
 )
 from tldw_Server_API.app.core.Chat.persistence_service import (
     assistant_generation_extra,
+    native_stream_persistence,
     save_workspace_chat_model_selection,
 )
 
@@ -4816,12 +4816,7 @@ async def create_chat_completion(
                             # Continue saves the original reply plus its continuation as one sibling reply.
                             from tldw_Server_API.app.core.Chat.history_continuation import merge_continued_reply
                             payload = merge_continued_reply(payload, continue_prefix)
-                        content = payload.get("content")
-                        if payload.get("role") == "assistant" and isinstance(content, str) and len(content) > MAX_TEXT_LENGTH:
-                            answer = strip_reasoning_blocks(content)
-                            if answer.strip():
-                                payload = {**payload, "content": answer}
-                        prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
+                        prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync, max_assistant_text_length=MAX_TEXT_LENGTH)
                         prepared["extra_metadata"].update(assistant_generation_extra(payload))
                         prepared["id"] = str(uuid.uuid4())
                         prepared["parent_message_id"] = (reference["input_message_id"] if reference is not None
@@ -5622,7 +5617,6 @@ async def create_chat_completion(
                     )
 
                 if request_data.stream:
-                    request_metadata = getattr(request_data, "metadata", None)
 
                     async def _execute_stream_response(
                         active_call_func: Callable[[], Any],
@@ -5645,10 +5639,8 @@ async def create_chat_completion(
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
                             save_message_fn=completion_save_message,
-                            history_persistence_ack=history_admission is not None or existing_input_selection is not None,
-                            retain_reasoning_history=(
-                                isinstance(request_metadata, dict)
-                                and request_metadata.get("tldw_retain_reasoning_history_v1") is True
+                            native_persistence=native_stream_persistence(
+                                request_data, history_admission is not None or existing_input_selection is not None
                             ),
                             system_message_id=system_message_id,
                             user_message_id=continuation_runtime.get("user_message_id"),

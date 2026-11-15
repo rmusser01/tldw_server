@@ -231,13 +231,8 @@ def test_native_thinking_blocks_survive_save_edit_and_reload(settled_api, monkey
     assert context[-1]["content"] == "An answer."
 
 
-@pytest.mark.parametrize("supports_thinking", [False, True])
-def test_native_thinking_cannot_truncate_the_answer(settled_api, monkeypatch, supports_thinking):
-    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
-
+def test_native_completion_without_thinking_opt_in_keeps_only_the_answer(settled_api, monkeypatch):
     client, db, cid, headers = settled_api
-    if supports_thinking:
-        monkeypatch.setattr(chat_endpoint, "MAX_TEXT_LENGTH", 64)
 
     async def provider() -> AsyncIterator[str]:
         yield _sse({"choices": [{"index": 0, "delta": {"reasoning_content": "Thinking " * 10}}]})
@@ -252,7 +247,6 @@ def test_native_thinking_cannot_truncate_the_answer(settled_api, monkeypatch, su
         json={
             **_completion_body(cid, versioned_selection=selection),
             "max_tokens": 128,
-            "metadata": {"tldw_retain_reasoning_history_v1": supports_thinking},
         },
     )
     assert response.status_code == 200, response.text

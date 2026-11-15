@@ -30,6 +30,8 @@ ADR required: no. Reuse tagged assistant text and existing edit and history owne
 Design: Docs/Design/2026-11-14-chat-thinking-blocks.md. Reproduced both gaps. Verified 813 frontend tests, including actual disclosure edits and two consecutive mounted native sends. The capture and completion opt-ins preserve compatibility with older peers. Existing ADR-049 governs ownership; this change adds no storage schema.
 Verified 813 UI tests and the WebUI typecheck. Backend sweep passed 86 checks, then the corrected native fixture passed all 3 focused tests, including exact edit and reload, provider context, and message-size and old-client boundaries. Chromium saved and reloaded the untouched answer and both blocks in a seeded local chat and verified dark-mode rendering at desktop and mobile widths. Bandit reported zero findings excluding the pytest assert rule.
 Renumbered before opening the PR because open PR #3474 already reserved TASK-15501.
+Merge preflight reproduced OpenAPI fingerprint drift and existing function-size ceilings. Refresh the generated API contract and relocate the new history logic within the existing persistence helpers.
+Also verified the merge preflight after regenerating the OpenAPI fingerprint and types, fitting the persistence changes within existing function ceilings, and moving the size-limit test to the core persistence helper. Existing OpenAPI path union is unchanged. Passed 17 function/backlog checks, 82 contract checks, 45 streaming and settlement tests before the fixture relocation, and all 3 focused native and size-limit tests afterward. Bandit reported zero findings in the touched production files.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
