@@ -227,7 +227,7 @@ async def test_multi_user_sqlite_register_login_load(tmp_path, monkeypatch):
 
         with (
             patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-openai-key-12345"})),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", side_effect=_mock_chat_call),
+            patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=_mock_chat_call),
             patch("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", side_effect=_mock_chat_call),
         ):
             if chat_per_user > 0:
@@ -387,7 +387,7 @@ async def test_multi_user_sqlite_streaming_chat_worst_case(tmp_path, monkeypatch
 
         with (
             patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-openai-key-12345"})),
-            patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", side_effect=_mock_chat_call),
+            patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=_mock_chat_call),
             patch("tldw_Server_API.app.core.Chat.chat_orchestrator.chat_api_call", side_effect=_mock_chat_call),
         ):
             t0 = time.time()

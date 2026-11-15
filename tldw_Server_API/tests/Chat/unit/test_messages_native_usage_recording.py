@@ -84,7 +84,7 @@ class _Runtime:
 def _stub_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     """Make the test's loop the accounting loop, and stub the endpoint's credentials and base URL."""
     monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
-    monkeypatch.setattr(messages_endpoint, "derive_trusted_credential_scope", lambda _r, user: (user.id_int, [], [], False))
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.byok_helpers.derive_trusted_credential_scope", lambda _r, user: (user.id_int, [], [], False))
     monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
     monkeypatch.setattr(messages_endpoint, "_resolve_messages_base_url", lambda _p, _c: "http://provider.test/v1")
 

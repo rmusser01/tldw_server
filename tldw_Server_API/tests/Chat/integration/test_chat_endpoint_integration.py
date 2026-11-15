@@ -137,7 +137,7 @@ def test_client(test_db):
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
             }
 
-            with patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call", return_value=mock_response):
+            with patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=mock_response):
                 # Override authentication to use test user
                 async def mock_get_request_user(api_key=None, token=None):
                     return test_user

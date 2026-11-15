@@ -20,7 +20,7 @@ async def test_chat_stream_disconnect_no_generatorexit(async_client, auth_header
         yield " response."
 
     with patch(
-        "tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
         return_value=provider_stream_generator(),
     ):
         async with async_client.stream(

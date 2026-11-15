@@ -176,7 +176,7 @@ def _install_conversation_observability_spies(monkeypatch: pytest.MonkeyPatch):
         if args and isinstance(args[0], str) and args[0].startswith("Conversation list failed:"):
             error_calls.append((args, kwargs))
 
-    monkeypatch.setattr(chat_router, "get_metrics_registry", lambda: registry, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.get_metrics_registry", lambda: registry, raising=False)
     monkeypatch.setattr(chat_router.logger, "debug", capture_debug)
     monkeypatch.setattr(chat_router.logger, "error", capture_error)
     return registry, debug_calls, error_calls

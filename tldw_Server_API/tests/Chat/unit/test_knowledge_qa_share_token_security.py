@@ -47,7 +47,7 @@ def _break_derivation(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom():
         raise RuntimeError("HSM unavailable")
 
-    monkeypatch.setattr(chat_ep, "derive_hmac_key", _boom)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", _boom)
 
 
 # --------------------------------------------------------------------------
@@ -90,7 +90,7 @@ def test_transient_derivation_failure_is_not_pinned(
             raise RuntimeError("transient")
         return b"real-derived-key"
 
-    monkeypatch.setattr(chat_ep, "derive_hmac_key", _flaky)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", _flaky)
 
     with pytest.raises(RuntimeError):
         chat_ep._get_knowledge_qa_share_signing_key()

@@ -43,7 +43,6 @@ from tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas import (
 )
 from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc
 from tldw_Server_API.app.core.Character_Chat.chat_dictionary import (
-    ChatDictionaryService,
     TokenBudgetExceededWarning,
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -52,6 +51,8 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     ConflictError,
     InputError,
 )
+import tldw_Server_API.app.api.v1.schemas.chat_dictionary_schemas as _chat_dictionary_schemas
+import tldw_Server_API.app.core.Character_Chat.chat_dictionary as _chat_dictionary
 
 router = APIRouter()
 
@@ -395,7 +396,7 @@ async def create_chat_dictionary(
     """
     Create a new chat dictionary for pattern-based text replacements.
     """
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_id = service.create_dictionary(
             name=dictionary.name,
@@ -442,7 +443,7 @@ async def list_chat_dictionaries(
 ) -> DictionaryListResponse:
     """List all chat dictionaries for the current user."""
     try:
-        service = ChatDictionaryService(db)
+        service = _chat_dictionary.ChatDictionaryService(db)
         dictionaries = service.list_dictionaries_with_entry_counts(include_inactive=include_inactive)
         if include_usage and dictionaries:
             usage_summary = service.get_dictionary_usage_summary(
@@ -513,7 +514,7 @@ async def get_chat_dictionary(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> ChatDictionaryWithEntries:
     """Get a specific dictionary with all its entries."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
         entries = service.get_entries(dictionary_id=dictionary_id, active_only=False) if dict_data else []
@@ -557,7 +558,7 @@ async def update_chat_dictionary(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> ChatDictionaryResponse:
     """Update a dictionary's metadata."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         success = service.update_dictionary(
             dictionary_id,
@@ -612,7 +613,7 @@ async def delete_chat_dictionary(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> Response:
     """Delete a dictionary (soft delete by default)."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         success = service.delete_dictionary(dictionary_id, hard_delete=hard_delete)
     except HTTPException:
@@ -648,7 +649,7 @@ async def add_dictionary_entry(
     """
     Add a new entry to a dictionary.
     """
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
     except CharactersRAGDBError as e:
@@ -726,7 +727,7 @@ async def list_dictionary_entries(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> EntryListResponse:
     """List all entries in a dictionary, optionally filtered by group."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
         entries = service.get_entries(dictionary_id=dictionary_id, group=group, active_only=False) if dict_data else []
@@ -770,7 +771,7 @@ async def update_dictionary_entry(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> DictionaryEntryResponse:
     """Update a dictionary entry."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
 
     # Security: Validate regex pattern safety when updates could enable regex matching.
     # The Pydantic validator only validates when BOTH type and pattern are provided.
@@ -885,7 +886,7 @@ async def delete_dictionary_entry(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> Response:
     """Delete a dictionary entry."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         success = service.delete_entry(entry_id)
     except HTTPException:
@@ -917,7 +918,7 @@ async def bulk_dictionary_entry_operations(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> BulkOperationResponse:
     """Perform bulk operations on dictionary entries with partial-failure reporting."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         affected_count = 0
         failed_ids: list[int] = []
@@ -949,7 +950,7 @@ async def bulk_dictionary_entry_operations(
         if failed_ids:
             message += f", {len(failed_ids)} failed"
 
-        return BulkOperationResponse(
+        return _chat_dictionary_schemas.BulkOperationResponse(
             success=len(failed_ids) == 0,
             affected_count=affected_count,
             failed_ids=failed_ids,
@@ -978,7 +979,7 @@ async def reorder_dictionary_entries(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> DictionaryEntryReorderResponse:
     """Reorder entries for a dictionary using a full ordered list of entry IDs."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
         if not dict_data:
@@ -1028,7 +1029,7 @@ async def process_text_with_dictionaries(
     Process text through active dictionaries to apply replacements.
     """
     try:
-        service = ChatDictionaryService(db)
+        service = _chat_dictionary.ChatDictionaryService(db)
 
         start_time = time.time()
         dictionary_ids = request.dictionary_ids
@@ -1169,7 +1170,7 @@ async def import_dictionary(
     Import a dictionary from markdown format.
     """
     try:
-        service = ChatDictionaryService(db)
+        service = _chat_dictionary.ChatDictionaryService(db)
 
         dict_id = service.import_from_markdown(import_request.content, import_request.name)
 
@@ -1215,7 +1216,7 @@ async def export_dictionary(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> ExportDictionaryResponse:
     """Export a dictionary to markdown format."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
         content = service.export_to_markdown(dictionary_id) if dict_data else None
@@ -1259,7 +1260,7 @@ async def export_dictionary_json(
 ) -> ExportDictionaryJSONResponse:
     """Export a dictionary to JSON."""
     try:
-        service = ChatDictionaryService(db)
+        service = _chat_dictionary.ChatDictionaryService(db)
         data = service.export_to_json(dictionary_id)
         return ExportDictionaryJSONResponse(**data)
     except (InputError, CharactersRAGDBError) as e:
@@ -1290,7 +1291,7 @@ async def import_dictionary_json(
 ) -> ImportDictionaryResponse:
     """Import a dictionary and entries from JSON."""
     try:
-        service = ChatDictionaryService(db)
+        service = _chat_dictionary.ChatDictionaryService(db)
         dict_id = service.import_from_json(import_request.data)
         entries = service.get_entries(dictionary_id=dict_id, active_only=False)
         if import_request.activate:
@@ -1328,7 +1329,7 @@ async def list_dictionary_activity(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> DictionaryActivityListResponse:
     """Return paginated recent transformation activity for a dictionary."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
         if not dict_data:
@@ -1379,7 +1380,7 @@ async def list_dictionary_versions(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> DictionaryVersionListResponse:
     """Return paginated dictionary version history."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
         if not dict_data:
@@ -1435,7 +1436,7 @@ async def get_dictionary_version(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> DictionaryVersionDetailResponse:
     """Get a specific dictionary revision snapshot."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         snapshot = service.get_dictionary_version(dictionary_id, revision)
         if not snapshot:
@@ -1498,7 +1499,7 @@ async def revert_dictionary_version(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> DictionaryVersionRevertResponse:
     """Revert dictionary to a previous version snapshot."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         result = service.revert_dictionary_to_revision(dictionary_id, revision)
         return DictionaryVersionRevertResponse(**result)
@@ -1536,7 +1537,7 @@ async def get_dictionary_statistics(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> DictionaryStatistics:
     """Get statistics for a dictionary."""
-    service = ChatDictionaryService(db)
+    service = _chat_dictionary.ChatDictionaryService(db)
     try:
         dict_data = service.get_dictionary(dictionary_id)
         stats = service.get_statistics(dictionary_id) if dict_data else {}

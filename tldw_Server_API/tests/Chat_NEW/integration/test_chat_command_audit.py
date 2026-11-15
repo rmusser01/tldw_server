@@ -79,7 +79,7 @@ def test_chat_command_audit_logged_preface_mode(monkeypatch, credentialed_test_c
     def fake_call(**kwargs):
         captured_msg["messages"] = kwargs.get("messages_payload")
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     payload = {"model": "openai/gpt-4o-mini", "messages": [{"role": "user", "content": "/time"}], "stream": False}
     response = credentialed_test_client.post("/api/v1/chat/completions", json=payload, headers=auth_headers)
@@ -189,7 +189,7 @@ def test_chat_command_weather_default_location_system_mode(monkeypatch, credenti
     def fake_call(**kwargs):
         captured["system_message"] = kwargs.get("system_message")
         return {"choices": [{"message": {"role": "assistant", "content": "ok"}}]}
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", fake_call)
 
     # Override audit dep
     captured_events = {"events": []}

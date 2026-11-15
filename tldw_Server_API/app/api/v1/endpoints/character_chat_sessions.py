@@ -114,7 +114,6 @@ from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_me
 # Character chat helpers
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import (
     map_sender_to_role,
-    post_message_to_conversation,
     replace_placeholders,
 )
 from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
@@ -136,15 +135,12 @@ from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import (
 from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
     INTERNAL_CHAT_SETTINGS_KEYS,
     ChatSettingsSizeError,
-    validate_chat_settings_storage,
 )
 
 # Import shared constants
 from tldw_Server_API.app.core.Character_Chat.constants import (
     MAX_MESSAGE_IMAGE_BYTES,
     MAX_PERSIST_CONTENT_LENGTH,
-    MAX_STREAMING_BYTES,
-    MAX_STREAMING_CHUNKS,
     MAX_TOOL_CALLS_COUNT,
     MAX_TOOL_CALLS_SIZE,
     THROTTLE_CACHE_MAX_KEYS,
@@ -169,7 +165,6 @@ from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
 )
 from tldw_Server_API.app.core.config_llm_providers import get_default_provider
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
-from tldw_Server_API.app.core.Provider_Credentials.byok_helpers import derive_trusted_credential_scope
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     record_byok_missing_credentials,
@@ -208,20 +203,12 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
 from tldw_Server_API.app.core.Chat import conversation_import
 from tldw_Server_API.app.core.Chat.bounded_daemon import (
     STREAM_CLEANUP_DAEMON_POOL,
-    STREAM_DAEMON_POOL,
-    await_bounded_daemon_with_timeout,
     await_owned_worker,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import ChatAPIError
 
 # Chat helpers and utilities
 # For chat completions
-from tldw_Server_API.app.core.Chat.chat_service import (
-    is_model_known_for_provider,
-    perform_chat_api_call,
-    perform_chat_api_call_async,
-    resolve_provider_and_model,
-)
 from tldw_Server_API.app.core.Chat.conversation_create_idempotency import (
     CHAT_DELETED,
     CHAT_ID_CONFLICT,
@@ -230,21 +217,16 @@ from tldw_Server_API.app.core.Chat.conversation_create_idempotency import (
     resolve_client_chat_replay,
 )
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
-from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
-    evaluate_prompt_cost_guardrails,
-    load_prompt_cost_guardrail_config,
-)
 from tldw_Server_API.app.core.Chat.streaming_utils import (
     StreamTaskCapacityError,
     await_bounded_owned_operation,
-    invoke_owned_stream_close,
     invoke_stream_close_bounded,
     is_empty_choices_usage_chunk,
     normalize_provider_stream_error,
     provider_stream_error_payload,
     sanitized_provider_stream_exception,
 )
-from tldw_Server_API.app.core.config import load_and_log_configs, settings as app_settings
+from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.chacha.workspace_chat_startup_store import WorkspaceStartupError
@@ -259,19 +241,15 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.ResearchSessionsDB import ResearchSessionsDB
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
-from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
 from tldw_Server_API.app.core.LLM_Calls.routing import (
     InMemoryRoutingDecisionStore,
     RouterRequest,
     RoutingPolicy,
     RoutingUsageContext,
-    build_provider_order_for_routing,
     extract_router_choice,
     flatten_provider_listing_for_routing,
-    log_model_router_usage,
     resolve_routing_policy,
     route_model,
-    select_llm_router_choice,
 )
 from tldw_Server_API.app.core.LLM_Calls.routing.candidate_pool import (
     build_candidate_pool,
@@ -308,13 +286,25 @@ from tldw_Server_API.app.core.Sync.v2.server_origin import (
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.testing import is_test_context, is_truthy
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
-from tldw_Server_API.app.core.Utils.common import parse_boolean
 from tldw_Server_API.app.core.Utils.image_validation import MAX_IMAGE_PIXELS
 from tldw_Server_API.app.core.Visual_Identities.service import VisualIdentityService
 from tldw_Server_API.app.core.Workspaces.assistant_defaults import project_assistant_startup
-from tldw_Server_API.app.core.Workspaces.chat_startup import start_workspace_chat
 
 from .llm_providers import get_configured_providers
+import tldw_Server_API.app.api.v1.utils.chat_message_images as _chat_message_images
+import tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade as _Character_Chat_Lib_facade
+import tldw_Server_API.app.core.Character_Chat.chat_settings_validation as _chat_settings_validation
+import tldw_Server_API.app.core.Character_Chat.constants as _constants
+import tldw_Server_API.app.core.Chat.chat_service as _chat_service
+import tldw_Server_API.app.core.Chat.prompt_cost_guardrails as _prompt_cost_guardrails
+import tldw_Server_API.app.core.Chat.streaming_utils as _streaming_utils
+import tldw_Server_API.app.core.LLM_Calls.bounded_daemon as _bounded_daemon
+import tldw_Server_API.app.core.LLM_Calls.provider_metadata as _provider_metadata
+import tldw_Server_API.app.core.LLM_Calls.routing as _routing
+import tldw_Server_API.app.core.Provider_Credentials.byok_helpers as _byok_helpers
+import tldw_Server_API.app.core.Utils.common as _common
+import tldw_Server_API.app.core.Workspaces.chat_startup as _chat_startup
+import tldw_Server_API.app.core.config as _config
 
 _CHAR_CHAT_SESSIONS_NONCRITICAL_EXCEPTIONS = (
     ChatAPIError,
@@ -386,7 +376,7 @@ def _new_character_credential_runtime(
 ) -> ProviderCredentialRuntime:
     """Build one credential runtime from trusted authenticated request state."""
     user_id, team_ids, org_ids, trusted_base_url_override = (
-        derive_trusted_credential_scope(request, current_user)
+        _byok_helpers.derive_trusted_credential_scope(request, current_user)
     )
     return ProviderCredentialRuntime(
         user_id=user_id,
@@ -532,10 +522,10 @@ async def _run_bounded_character_sync_call(
     cleanup_claimed: threading.Event | None = None,
 ) -> Any:
     """Run one blocking character adapter operation with capacity and a deadline."""
-    pool = STREAM_CLEANUP_DAEMON_POOL if cleanup else STREAM_DAEMON_POOL
+    pool = STREAM_CLEANUP_DAEMON_POOL if cleanup else _bounded_daemon.STREAM_DAEMON_POOL
     worker_released = threading.Event()
     return await await_bounded_owned_operation(
-        await_bounded_daemon_with_timeout(
+        _bounded_daemon.await_bounded_daemon_with_timeout(
             call,
             pool=pool,
             name=name,
@@ -731,7 +721,7 @@ async def _close_character_provider_stream(
             continue
         try:
             if owned_cleanup:
-                await invoke_owned_stream_close(
+                await _streaming_utils.invoke_owned_stream_close(
                     close,
                     timeout=CHARACTER_STREAM_CLOSE_TIMEOUT_SECONDS,
                 )
@@ -828,7 +818,7 @@ random = _greeting_random
 @lru_cache(maxsize=1)
 def _config_default_llm_provider() -> str | None:
     """Read default provider from config sections used by chat endpoints."""
-    cfg = load_and_log_configs()
+    cfg = _config.load_and_log_configs()
     if not isinstance(cfg, dict):
         return None
 
@@ -1147,7 +1137,7 @@ async def _select_auto_character_llm_router_choice(
 
         with llm_call_context(records_itself=True):
             result = await await_owned_worker(
-                perform_chat_api_call_async(
+                _chat_service.perform_chat_api_call_async(
                     api_endpoint=router_model.provider,
                     messages_payload=router_messages,
                     api_key=provider_credentials.api_key,
@@ -1170,7 +1160,7 @@ async def _select_auto_character_llm_router_choice(
 
     async def _log_router_usage(router_model, usage, latency_ms):
         try:
-            await log_model_router_usage(
+            await _routing.log_model_router_usage(
                 context=RoutingUsageContext(
                     surface="character_chat",
                     endpoint="POST:/api/v1/chats/{chat_id}/complete-v2",
@@ -1196,7 +1186,7 @@ async def _select_auto_character_llm_router_choice(
 
     try:
         try:
-            return await select_llm_router_choice(
+            return await _routing.select_llm_router_choice(
                 router_request=router_request,
                 policy=policy,
                 candidates=candidates,
@@ -1282,7 +1272,7 @@ async def _resolve_auto_character_chat_routing_decision(
         candidates=candidates,
         sticky_store=sticky_store,
         llm_router_choice=llm_router_choice,
-        provider_order=build_provider_order_for_routing(
+        provider_order=_routing.build_provider_order_for_routing(
             provider_listing,
             objective=policy.objective,
             priority_resolver=partial(
@@ -2241,7 +2231,7 @@ def _validate_chat_settings_payload(
 ) -> dict[str, Any]:
     """Validate settings payload size, shape, and known enum fields."""
     try:
-        settings = validate_chat_settings_storage(settings)
+        settings = _chat_settings_validation.validate_chat_settings_storage(settings)
     except ChatSettingsSizeError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -2514,7 +2504,7 @@ def _validate_chat_settings_payload(
                 detail="Invalid summary.updatedAt. Expected ISO timestamp string"
             )
     try:
-        return validate_chat_settings_storage(settings)
+        return _chat_settings_validation.validate_chat_settings_storage(settings)
     except ChatSettingsSizeError as exc:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -3176,7 +3166,7 @@ def _validate_final_chat_settings_storage(
     snapshot = resume_state.get("behavior_snapshot")
     snapshot_valid = isinstance(snapshot, Mapping) and snapshot.get("status") == "valid"
     try:
-        return validate_chat_settings_storage(
+        return _chat_settings_validation.validate_chat_settings_storage(
             settings,
             reject_credentials=snapshot_valid,
             allow_internal=True,
@@ -4207,7 +4197,7 @@ def _persist_auto_summary_to_settings(
                                 "effective_completion"
                             ],
                         }
-                current_settings = validate_chat_settings_storage(
+                current_settings = _chat_settings_validation.validate_chat_settings_storage(
                     current_settings,
                     reject_credentials=(
                         isinstance(resume_state.get("behavior_snapshot"), Mapping)
@@ -4496,7 +4486,7 @@ async def create_workspace_chat_startup(
 
     def start_and_project() -> tuple[ChatSessionResponse, bool]:
         """Keep synchronous acceptance and post-commit reads on the same worker."""
-        result = start_workspace_chat(
+        result = _chat_startup.start_workspace_chat(
             db, owner_id=owner_id, request=session_data, idempotency_key=idempotency_key,
             receipt_limit=receipt_limit, chat_limit=rate_limiter._limits.max_chats_per_user,
             title_timestamp=datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S"),
@@ -4973,7 +4963,7 @@ async def create_chat_session(
                         choice_text = fm
                 if isinstance(choice_text, str) and choice_text.strip():
                     content = choice_text
-                    post_message_to_conversation(
+                    _Character_Chat_Lib_facade.post_message_to_conversation(
                         db=db,
                         conversation_id=created_id,
                         character_name=raw_name,
@@ -5724,7 +5714,7 @@ async def get_chat_context(
 
         settings_row = db.get_conversation_settings(chat_id)
         history_messages, attachment_urls = await run_in_threadpool(
-            read_messages_with_images, db, chat_id, limit=1000, for_completions=True,
+            _chat_message_images.read_messages_with_images, db, chat_id, limit=1000, for_completions=True,
         )
         history_messages = [m for m in history_messages if not m.get('deleted')]
         turn_context = _resolve_chat_turn_context(
@@ -5893,7 +5883,7 @@ async def prepare_chat_completion(
         )
 
         messages, attachment_urls = await run_in_threadpool(
-            read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
+            _chat_message_images.read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
         )
         # Filter deleted
         messages = [m for m in messages if not m.get('deleted')]
@@ -6806,9 +6796,9 @@ async def _complete_roleplay_resume(
     await limiter.check_message_limit(chat_id, current_count + 1)
     provider_arguments = prepared["context"]["provider_arguments"]
     try:
-        guardrail_config = load_prompt_cost_guardrail_config()
+        guardrail_config = _prompt_cost_guardrails.load_prompt_cost_guardrail_config()
         if guardrail_config.enabled:
-            decision = evaluate_prompt_cost_guardrails(
+            decision = _prompt_cost_guardrails.evaluate_prompt_cost_guardrails(
                 build_prompt_cost_envelope(
                     prepared["context"]["guardrail_messages"],
                     world_book_text=prepared["context"]["world_book_text"],
@@ -6842,7 +6832,7 @@ async def _complete_roleplay_resume(
         runtime = _new_character_credential_runtime(http_request, current_user)
         credentials = await runtime.resolve(provider, model=model)
         provider_key = canonical_provider_name(provider)
-        if provider_requires_api_key(provider_key) and not provider_auth_is_resolved(
+        if _provider_metadata.provider_requires_api_key(provider_key) and not provider_auth_is_resolved(
             provider_key,
             api_key=credentials.api_key,
             app_config=credentials.app_config,
@@ -6859,7 +6849,7 @@ async def _complete_roleplay_resume(
         await limiter.check_chat_completion_rate(current_user.id)
         result = await _execute_character_provider_call(
             partial(
-                perform_chat_api_call,
+                _chat_service.perform_chat_api_call,
                 api_endpoint=provider,
                 **provider_arguments,
                 api_key=credentials.api_key,
@@ -7103,7 +7093,7 @@ async def character_chat_completion(
                 raise _chat_completion_persist_sync_unsupported_error()
 
         messages, attachment_urls = await run_in_threadpool(
-            read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
+            _chat_message_images.read_messages_with_images, db, chat_id, limit=limit, offset=offset, for_completions=True,
         )
         messages = [m for m in messages if not m.get("deleted")]
         paginated = messages
@@ -7301,7 +7291,7 @@ async def character_chat_completion(
                 selected_provider,
                 selected_model,
                 provider_debug,
-            ) = resolve_provider_and_model(
+            ) = _chat_service.resolve_provider_and_model(
                 request_data=resolution_req,
                 metrics_default_provider=default_provider,
                 normalize_default_provider=default_provider,
@@ -7322,7 +7312,7 @@ async def character_chat_completion(
         await _enforce_character_reply_quota(current_user.id, provider, settings_row, will_persist)
 
         if strict_model_selection and explicit_model_requested:
-            availability = is_model_known_for_provider(provider, model)
+            availability = _chat_service.is_model_known_for_provider(provider, model)
             if availability is False:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -7354,15 +7344,15 @@ async def character_chat_completion(
 
         # Attempt provider call; allow offline simulation for local-llm in test/dev.
         # Offline simulation toggle (supports new flags for clarity, backward compatible with ALLOW_LOCAL_LLM_CALLS)
-        enable_local_llm = parse_boolean(os.getenv("ENABLE_LOCAL_LLM_PROVIDER"))
-        disable_offline_sim = parse_boolean(os.getenv("DISABLE_OFFLINE_SIM"))
-        legacy_allow_local = parse_boolean(os.getenv("ALLOW_LOCAL_LLM_CALLS"))
+        enable_local_llm = _common.parse_boolean(os.getenv("ENABLE_LOCAL_LLM_PROVIDER"))
+        disable_offline_sim = _common.parse_boolean(os.getenv("DISABLE_OFFLINE_SIM"))
+        legacy_allow_local = _common.parse_boolean(os.getenv("ALLOW_LOCAL_LLM_CALLS"))
         offline_sim = provider == "local-llm" and not (enable_local_llm or disable_offline_sim or legacy_allow_local)
         streams_unified = str(os.getenv("STREAMS_UNIFIED", "0")).strip().lower() in {"1", "true", "on", "yes"}
         turn_prompt_guardrail_diagnostics: Optional[dict[str, Any]] = None
         prompt_guardrails_enabled = False
         try:
-            prompt_guardrail_config = load_prompt_cost_guardrail_config()
+            prompt_guardrail_config = _prompt_cost_guardrails.load_prompt_cost_guardrail_config()
             prompt_guardrails_enabled = prompt_guardrail_config.enabled
             if prompt_guardrail_config.enabled:
                 prompt_guardrail_envelope = build_prompt_cost_envelope(
@@ -7373,7 +7363,7 @@ async def character_chat_completion(
                     ),
                     world_book_text=turn_lorebook_text_for_guardrails,
                 )
-                prompt_guardrail_decision = evaluate_prompt_cost_guardrails(
+                prompt_guardrail_decision = _prompt_cost_guardrails.evaluate_prompt_cost_guardrails(
                     prompt_guardrail_envelope,
                     request_options={"max_tokens": body.max_tokens, "streaming": bool(body.stream)},
                     config=prompt_guardrail_config,
@@ -7437,7 +7427,7 @@ async def character_chat_completion(
                     model=model,
                 )
                 provider_key = canonical_provider_name(provider)
-                if provider_requires_api_key(provider_key) and not provider_auth_is_resolved(
+                if _provider_metadata.provider_requires_api_key(provider_key) and not provider_auth_is_resolved(
                     provider_key,
                     api_key=provider_credentials.api_key,
                     app_config=provider_credentials.app_config,
@@ -7456,7 +7446,7 @@ async def character_chat_completion(
                 await rate_limiter.check_chat_completion_rate(current_user.id)
                 llm_resp = await _execute_character_provider_call(
                     partial(
-                        perform_chat_api_call,
+                        _chat_service.perform_chat_api_call,
                         api_endpoint=provider,
                         messages_payload=formatted,
                         api_key=provider_credentials.api_key,
@@ -7722,11 +7712,11 @@ async def character_chat_completion(
                 async def _handle_chunk(chunk: Any) -> bool:
                     nonlocal chunk_count, total_bytes
                     chunk_count += 1
-                    if chunk_count > MAX_STREAMING_CHUNKS:
+                    if chunk_count > _constants.MAX_STREAMING_CHUNKS:
                         stream_success_state["successful"] = False
                         logger.warning(
                             "Streaming chunk limit exceeded ({})",
-                            MAX_STREAMING_CHUNKS,
+                            _constants.MAX_STREAMING_CHUNKS,
                         )
                         await _emit_stream_limit_error("Streaming limit exceeded.")
                         return False
@@ -7736,11 +7726,11 @@ async def character_chat_completion(
                         return True
 
                     total_bytes += len(line.encode("utf-8"))
-                    if total_bytes > MAX_STREAMING_BYTES:
+                    if total_bytes > _constants.MAX_STREAMING_BYTES:
                         stream_success_state["successful"] = False
                         logger.warning(
                             "Streaming byte limit exceeded ({})",
-                            MAX_STREAMING_BYTES,
+                            _constants.MAX_STREAMING_BYTES,
                         )
                         await _emit_stream_limit_error("Streaming size limit exceeded.")
                         return False
@@ -7840,11 +7830,11 @@ async def character_chat_completion(
                         ),
                     ):
                         chunk_count += 1
-                        if chunk_count > MAX_STREAMING_CHUNKS:
+                        if chunk_count > _constants.MAX_STREAMING_CHUNKS:
                             stream_success_state["successful"] = False
                             logger.warning(
                                 "Streaming chunk limit exceeded ({})",
-                                MAX_STREAMING_CHUNKS,
+                                _constants.MAX_STREAMING_CHUNKS,
                             )
                             yield sse_data({'error': 'Streaming limit exceeded.'})
                             break
@@ -7854,11 +7844,11 @@ async def character_chat_completion(
                             continue
 
                         total_bytes += len(line.encode("utf-8"))
-                        if total_bytes > MAX_STREAMING_BYTES:
+                        if total_bytes > _constants.MAX_STREAMING_BYTES:
                             stream_success_state["successful"] = False
                             logger.warning(
                                 "Streaming byte limit exceeded ({})",
-                                MAX_STREAMING_BYTES,
+                                _constants.MAX_STREAMING_BYTES,
                             )
                             yield sse_data({'error': 'Streaming size limit exceeded.'})
                             break
@@ -7946,7 +7936,7 @@ async def character_chat_completion(
             )
             # Persist appended user message first, if any
             if body.append_user_message:
-                appended_user_id = post_message_to_conversation(
+                appended_user_id = _Character_Chat_Lib_facade.post_message_to_conversation(
                     db=db,
                     conversation_id=chat_id,
                     character_name=char_label,
@@ -7963,7 +7953,7 @@ async def character_chat_completion(
 
             # Persist assistant response (tool_calls stored in metadata only)
             assistant_content_for_storage = assistant_text if assistant_text else " "
-            assistant_msg_id = post_message_to_conversation(
+            assistant_msg_id = _Character_Chat_Lib_facade.post_message_to_conversation(
                 db=db,
                 conversation_id=chat_id,
                 character_name=char_label,
@@ -9427,7 +9417,7 @@ async def persist_streamed_assistant_message(
 
         # Persist assistant response via Character_Chat guardrails
         try:
-            assistant_msg_id = post_message_to_conversation(
+            assistant_msg_id = _Character_Chat_Lib_facade.post_message_to_conversation(
                 db=db,
                 conversation_id=chat_id,
                 character_name=resolved_speaker_name,

@@ -446,9 +446,8 @@ def test_chat_user_credential_never_uses_server_fallback_or_leaks(
     try:
         with (
             patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-            patch.object(
-                chat_endpoint,
-                "get_provider_manager",
+            patch(
+                "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
                 return_value=provider_manager,
             ),
             patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
@@ -457,9 +456,8 @@ def test_chat_user_credential_never_uses_server_fallback_or_leaks(
                 "resolve_provider_api_key",
                 side_effect=AssertionError("server fallback used"),
             ) as server_fallback,
-            patch.object(
-                chat_endpoint,
-                "execute_non_stream_call",
+            patch(
+                "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
                 side_effect=execute_non_stream,
             ),
             patch.object(
@@ -559,22 +557,20 @@ def test_chat_oauth_refresh_keeps_user_credential_isolated_and_secret_free(
     try:
         with (
             patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-            patch.object(
-                chat_endpoint,
-                "get_provider_manager",
+            patch(
+                "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
                 return_value=provider_manager,
             ),
             patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-            patch.object(chat_endpoint, "get_request_queue", return_value=None),
+            patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
             patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
             patch.object(
                 chat_endpoint,
                 "resolve_provider_api_key",
                 side_effect=AssertionError("server fallback used"),
             ) as server_fallback,
-            patch.object(
-                chat_endpoint,
-                "perform_chat_api_call",
+            patch(
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 side_effect=provider_results,
             ) as provider_call,
         ):
@@ -668,9 +664,8 @@ def test_chat_terminal_credential_resolution_never_falls_back_or_leaks(
     try:
         with (
             patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-            patch.object(
-                chat_endpoint,
-                "get_provider_manager",
+            patch(
+                "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
                 return_value=provider_manager,
             ),
             patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
@@ -679,7 +674,7 @@ def test_chat_terminal_credential_resolution_never_falls_back_or_leaks(
                 "resolve_provider_api_key",
                 side_effect=AssertionError("server fallback used"),
             ) as server_fallback,
-            patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+            patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
         ):
             response = authenticated_client.post(
                 "/api/v1/chat/completions",
@@ -710,7 +705,7 @@ def test_chat_completion_basic(authenticated_client, mock_chacha_db, setup_depen
 
     # Mock the LLM call and API keys
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
@@ -752,8 +747,8 @@ def test_chat_completion_missing_saved_llamacpp_grammar_is_bad_request(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -785,7 +780,7 @@ def test_chat_completion_streaming(authenticated_client, mock_chacha_db):
         yield "data: [DONE]\n\n"
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = mock_stream()
@@ -818,7 +813,7 @@ def test_chat_completion_with_character(authenticated_client, mock_chacha_db, se
     )
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
@@ -868,7 +863,7 @@ def test_chat_completion_invalid_model(authenticated_client, mock_chacha_db, set
     )
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         # Simulate an error for invalid model
@@ -893,10 +888,10 @@ def test_chat_completion_explicit_model_unavailable_returns_400(
     )
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.is_model_known_for_provider",
+            "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider",
             return_value=False,
         ),
     ):
@@ -938,11 +933,11 @@ def test_chat_completion_disables_provider_fallback_for_explicit_model(
     provider_manager.get_available_provider = MagicMock(return_value="anthropic")
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
         patch(
-            "tldw_Server_API.app.api.v1.endpoints.chat.is_model_known_for_provider",
+            "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider",
             return_value=True,
         ),
     ):
@@ -988,8 +983,8 @@ def test_chat_completion_strict_selection_accepts_a_saved_dotted_anthropic_name(
     monkeypatch.setattr(gateway, "discover_provider_models", chat_service.discover_provider_models)
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"anthropic": "test-key"})),
     ):
         response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
@@ -1011,10 +1006,10 @@ def test_chat_completion_revalidates_default_model(authenticated_client, mock_ch
         return None
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_override_default_model", return_value="bad-model"),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.validate_provider_override", side_effect=_fake_validate),
+        patch("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_override_default_model", return_value="bad-model"),
+        patch("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.validate_provider_override", side_effect=_fake_validate),
     ):
         mock_llm.return_value = {
             "id": "chatcmpl-test",
@@ -1050,10 +1045,10 @@ def test_chat_completion_default_model_tracks_model(authenticated_client, mock_c
         }
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
+        patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", side_effect=fake_execute_non_stream_call),
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.get_override_default_model", return_value="default-model"),
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.validate_provider_override", return_value=None),
+        patch("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_override_default_model", return_value="default-model"),
+        patch("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.validate_provider_override", return_value=None),
     ):
         response = authenticated_client.post("/api/v1/chat/completions", json=request_data.model_dump())
 
@@ -1121,15 +1116,15 @@ def test_chat_completion_omitted_model_uses_provider_configuration_in_payload(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
         patch.object(
             chat_endpoint,
             "_get_default_model_for_provider_name",
             side_effect=default_model,
         ),
-        patch.object(chat_endpoint, "validate_provider_override", return_value=None),
-        patch.object(chat_endpoint, "execute_non_stream_call", side_effect=execute_non_stream),
+        patch("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.validate_provider_override", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", side_effect=execute_non_stream),
         patch.object(chat_endpoint, "execute_streaming_call", side_effect=execute_stream),
     ):
         response = authenticated_client.post(
@@ -1159,7 +1154,7 @@ def test_chat_completion_omitted_model_without_configuration_fails_before_dispat
     provider_call = AsyncMock()
     with (
         patch.object(chat_endpoint, "_get_default_model_for_provider_name", return_value=None),
-        patch.object(chat_endpoint, "execute_non_stream_call", provider_call),
+        patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", provider_call),
         patch.object(chat_endpoint, "execute_streaming_call", provider_call),
     ):
         response = authenticated_client.post(
@@ -1211,15 +1206,15 @@ def test_chat_completion_explicit_model_precedes_provider_configuration(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
         patch.object(
             chat_endpoint,
             "_get_default_model_for_provider_name",
             side_effect=AssertionError("provider default consulted for explicit model"),
         ),
-        patch.object(chat_endpoint, "validate_provider_override", return_value=None),
-        patch.object(chat_endpoint, "execute_non_stream_call", side_effect=execute_non_stream),
+        patch("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.validate_provider_override", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call", side_effect=execute_non_stream),
         patch.object(chat_endpoint, "execute_streaming_call", side_effect=execute_stream),
     ):
         response = authenticated_client.post(
@@ -1272,7 +1267,7 @@ def test_chat_completion_downgrades_structured_response_format_before_provider_c
     )
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
@@ -1330,11 +1325,10 @@ def test_chat_completion_uses_one_runtime_and_marks_success_once(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(
-            chat_endpoint,
-            "execute_non_stream_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
         patch.object(
@@ -1385,11 +1379,10 @@ def test_chat_completion_resolves_health_fallback_with_same_runtime(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(
-            chat_endpoint,
-            "execute_non_stream_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
         patch.object(
@@ -1497,14 +1490,13 @@ def test_health_fallback_keeps_model_policy_atomic_during_config_rotation(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", Runtime),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(
-            chat_endpoint,
-            "execute_non_stream_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=fake_execute_non_stream_call,
         ),
-        patch.object(chat_endpoint, "get_override_default_model", return_value=None),
+        patch("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.get_override_default_model", return_value=None),
         patch.object(chat_endpoint, "get_llm_provider_override", return_value=None),
     ):
         def post_after_slow_start():
@@ -1562,8 +1554,8 @@ async def test_auto_router_uses_request_credential_runtime(monkeypatch):
         await kwargs["execute_router_call"](router_model, [{"role": "user", "content": "route"}])
         return {"provider": "openai", "model": "gpt-4o-mini"}, {}
 
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call_async", fake_call)
-    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", fake_select)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", fake_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", fake_select)
 
     await chat_endpoint._select_auto_chat_llm_router_choice(
         router_request=SimpleNamespace(scope=None),
@@ -1691,9 +1683,9 @@ async def test_real_adapter_router_boundary_has_exact_attempt_accounting(
     _install_real_openai_adapter_transport(monkeypatch, responder)
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_PROVIDER", "openai")
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_MODEL", "router-model")
-    monkeypatch.setattr(chat_endpoint, "get_chat_metrics", lambda: metrics)
-    monkeypatch.setattr(chat_endpoint, "get_provider_manager", lambda: provider_manager)
-    monkeypatch.setattr(chat_endpoint, "log_model_router_usage", usage_log)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_metrics.get_chat_metrics", lambda: metrics)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: provider_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage", usage_log)
     router_request, policy, candidates, provider_listing = _real_router_inputs(
         f"router-boundary-{outcome}"
     )
@@ -1800,9 +1792,9 @@ async def test_router_mark_failure_does_not_reclassify_provider_success(
     _install_real_openai_adapter_transport(monkeypatch, responder)
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_PROVIDER", "openai")
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_MODEL", "router-model")
-    monkeypatch.setattr(chat_endpoint, "get_chat_metrics", lambda: metrics)
-    monkeypatch.setattr(chat_endpoint, "get_provider_manager", lambda: provider_manager)
-    monkeypatch.setattr(chat_endpoint, "log_model_router_usage", usage_log)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_metrics.get_chat_metrics", lambda: metrics)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: provider_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage", usage_log)
     router_request, policy, candidates, provider_listing = _real_router_inputs(
         "router-mark-failure"
     )
@@ -1931,16 +1923,14 @@ async def test_concurrent_router_mark_failure_is_request_isolated(
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_PROVIDER", "openai")
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_MODEL", "router-model")
     monkeypatch.setattr(
-        chat_endpoint,
-        "get_chat_metrics",
+        "tldw_Server_API.app.core.Chat.chat_metrics.get_chat_metrics",
         lambda: metrics[active_index.get()],
     )
     monkeypatch.setattr(
-        chat_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: provider_managers[active_index.get()],
     )
-    monkeypatch.setattr(chat_endpoint, "log_model_router_usage", usage_log)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage", usage_log)
 
     tasks = [asyncio.create_task(invoke(index)) for index in range(2)]
     try:
@@ -2125,8 +2115,8 @@ async def test_normal_chat_router_marks_each_semantic_provider_success(
         return chat_endpoint.extract_router_choice(response), {}
 
     runtime = Runtime()
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call_async", provider_call)
-    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     result = await chat_endpoint._select_auto_chat_llm_router_choice(
         router_request=SimpleNamespace(scope=None),
@@ -2275,16 +2265,14 @@ async def test_concurrent_chat_router_results_are_request_isolated(
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_PROVIDER", "openai")
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_MODEL", "router-model")
     monkeypatch.setattr(
-        chat_endpoint,
-        "get_chat_metrics",
+        "tldw_Server_API.app.core.Chat.chat_metrics.get_chat_metrics",
         lambda: metrics[active_index.get()],
     )
     monkeypatch.setattr(
-        chat_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: provider_managers[active_index.get()],
     )
-    monkeypatch.setattr(chat_endpoint, "log_model_router_usage", usage_log)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage", usage_log)
 
     tasks = [asyncio.create_task(invoke(index)) for index in range(2)]
     try:
@@ -2373,8 +2361,8 @@ async def test_chat_router_valid_result_drains_mark_before_cancellation(
         return chat_endpoint.extract_router_choice(response), {}
 
     runtime = Runtime()
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call_async", provider_call)
-    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     task = asyncio.create_task(
         chat_endpoint._select_auto_chat_llm_router_choice(
@@ -2499,8 +2487,8 @@ async def test_auto_router_cancellation_marks_only_semantic_late_success(
         return None, {}
 
     runtime = Runtime()
-    monkeypatch.setattr(chat_endpoint, "perform_chat_api_call_async", provider_call)
-    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     task = asyncio.create_task(
         chat_endpoint._select_auto_chat_llm_router_choice(
@@ -2553,8 +2541,7 @@ async def test_cancelled_router_drains_real_adapter_before_classify_mark_and_clo
     monkeypatch.setattr(chat_service, "_nonstream_provider_result_is_usable", classify)
     if hasattr(chat_endpoint, "_nonstream_provider_result_is_usable"):
         monkeypatch.setattr(
-            chat_endpoint,
-            "_nonstream_provider_result_is_usable",
+            "tldw_Server_API.app.core.Chat.chat_service._nonstream_provider_result_is_usable",
             classify,
         )
 
@@ -2608,13 +2595,12 @@ async def test_cancelled_router_drains_real_adapter_before_classify_mark_and_clo
     )
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_PROVIDER", "openai")
     monkeypatch.setenv("MODEL_ROUTING_ROUTER_MODEL", "router-model")
-    monkeypatch.setattr(chat_endpoint, "get_chat_metrics", lambda: _RouterMetrics())
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_metrics.get_chat_metrics", lambda: _RouterMetrics())
     monkeypatch.setattr(
-        chat_endpoint,
-        "get_provider_manager",
+        "tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager",
         lambda: _RouterProviderManager(),
     )
-    monkeypatch.setattr(chat_endpoint, "log_model_router_usage", AsyncMock(return_value=None))
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage", AsyncMock(return_value=None))
     router_request, policy, candidates, provider_listing = _real_router_inputs(
         "cancelled-real-router"
     )
@@ -2685,8 +2671,8 @@ async def test_auto_router_cancellation_drains_usage_log_before_reraise(
         )
         return None, {}
 
-    monkeypatch.setattr(chat_endpoint, "log_model_router_usage", blocking_usage_log)
-    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage", blocking_usage_log)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     task = asyncio.create_task(
         chat_endpoint._select_auto_chat_llm_router_choice(
@@ -2732,7 +2718,7 @@ async def test_auto_router_propagates_cancellation_from_selection(
         await release.wait()
         return None, {}
 
-    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     task = asyncio.create_task(
         chat_endpoint._select_auto_chat_llm_router_choice(
@@ -2787,7 +2773,7 @@ async def test_auto_router_does_not_swallow_terminal_credential_error(monkeypatc
             return None, {"error": type(exc).__name__}
         raise AssertionError("credential resolution should fail")
 
-    monkeypatch.setattr(chat_endpoint, "select_llm_router_choice", swallowing_select)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", swallowing_select)
 
     with pytest.raises(ByokResolutionError) as exc_info:
         await chat_endpoint._select_auto_chat_llm_router_choice(
@@ -2839,9 +2825,9 @@ def test_chat_credential_resolution_errors_are_terminal_503(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -2870,9 +2856,9 @@ def test_chat_missing_runtime_credentials_are_terminal_503(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -2899,8 +2885,8 @@ def test_test_mode_invalid_runtime_key_maps_to_downstream_auth_502(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=True),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.testing.is_test_mode", return_value=True),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -2940,14 +2926,13 @@ def test_health_fallback_configuration_error_preserves_structured_503(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(
-            chat_endpoint,
-            "build_call_params_from_request",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.build_call_params_from_request",
             side_effect=build_or_fail,
         ),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -2995,11 +2980,10 @@ def test_chat_provider_auth_and_config_errors_are_sanitized_and_terminal(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "legacy-key"})),
-        patch.object(
-            chat_endpoint,
-            "execute_non_stream_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.execute_non_stream_call",
             side_effect=provider_error,
         ),
     ):
@@ -3297,9 +3281,8 @@ def test_chat_closes_runtime_for_every_setup_failure_after_construction(
             )
         elif failure_point == "provider_resolution":
             stack.enter_context(
-                patch.object(
-                    chat_endpoint,
-                    "resolve_provider_and_model",
+                patch(
+                    "tldw_Server_API.app.core.Chat.chat_service.resolve_provider_and_model",
                     side_effect=failure,
                 )
             )
@@ -3317,7 +3300,7 @@ def test_chat_closes_runtime_for_every_setup_failure_after_construction(
                     return_value=None,
                 )
                 metrics.track_request.return_value = track_context
-            stack.enter_context(patch.object(chat_endpoint, "get_chat_metrics", return_value=metrics))
+            stack.enter_context(patch("tldw_Server_API.app.core.Chat.chat_metrics.get_chat_metrics", return_value=metrics))
             if failure_point == "metrics_exit":
                 async def successful_stream():
                     yield 'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n'
@@ -3403,8 +3386,8 @@ def test_chat_closes_runtime_when_billing_exit_fails_after_stream_response_creat
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "enforcement_enabled", return_value=True),
-        patch.object(chat_endpoint, "LimitEnforcer", return_value=billing_enforcer),
+        patch("tldw_Server_API.app.core.Billing.enforcement.enforcement_enabled", return_value=True),
+        patch("tldw_Server_API.app.api.v1.API_Deps.billing_deps.LimitEnforcer", return_value=billing_enforcer),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",
@@ -3483,7 +3466,7 @@ def test_chat_completion_openai_oauth_auth_failure_retries_once(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
-        patch.object(chat_endpoint, "perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
     ):
         mock_llm.side_effect = [
             ChatAuthenticationError("expired oauth access token", provider="openai"),
@@ -3524,7 +3507,7 @@ def test_chat_completion_openai_oauth_propagates_original_auth_error_after_secon
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type, create=True),
-        patch.object(chat_endpoint, "perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
     ):
         mock_llm.side_effect = [
             ChatAuthenticationError("expired oauth access token", provider="openai"),
@@ -3561,9 +3544,8 @@ def test_chat_completion_openai_oauth_refresh_failure_does_not_log_raw_error(
     try:
         with (
             patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-            patch.object(
-                chat_endpoint,
-                "perform_chat_api_call",
+            patch(
+                "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                 side_effect=ChatAuthenticationError("expired oauth access token", provider="openai"),
             ) as provider_call,
         ):
@@ -3618,11 +3600,11 @@ def test_real_openai_adapter_nonstream_failure_is_bounded_across_endpoint_logs_a
     try:
         with (
             patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-            patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+            patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
             patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
-            patch.object(chat_endpoint, "get_request_queue", return_value=None),
+            patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
             patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-            patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+            patch("tldw_Server_API.app.core.testing.is_test_mode", return_value=False),
             # Production mode turns on strict selection, which asks the live model list (TASK-13460).
             patch.object(chat_endpoint, "_validate_explicit_model_availability", return_value=None),
             patch.object(adapter_module, "http_client_factory", fail_before_dispatch),
@@ -3673,15 +3655,15 @@ def test_nonstream_output_limit_guidance_reaches_http_boundary(
     provider_manager.circuit_breakers = {"openai": SimpleNamespace(can_attempt_call=lambda: True)}
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_service, "get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch("tldw_Server_API.app.core.testing.is_test_mode", return_value=False),
         # Production mode turns on strict selection, which asks the live model list (TASK-13460).
         patch.object(chat_endpoint, "_validate_explicit_model_availability", return_value=None),
-        patch.object(chat_endpoint, "perform_chat_api_call", return_value=provider_result) as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=provider_result) as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -3757,7 +3739,7 @@ def test_plain_provider_exception_is_bounded_across_endpoint_logs_and_audit(
         with ExitStack() as stack:
             stack.enter_context(patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type))
             stack.enter_context(
-                patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager)
+                patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager)
             )
             stack.enter_context(
                 patch.object(
@@ -3766,19 +3748,18 @@ def test_plain_provider_exception_is_bounded_across_endpoint_logs_and_audit(
                     execution_mode == "fallback",
                 )
             )
-            stack.enter_context(patch.object(chat_endpoint, "get_request_queue", return_value=queue))
+            stack.enter_context(patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=queue))
             stack.enter_context(patch.object(chat_service, "get_request_queue", return_value=queue))
             stack.enter_context(
                 patch.object(chat_endpoint, "QUEUED_EXECUTION", execution_mode == "queued")
             )
-            stack.enter_context(patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False))
+            stack.enter_context(patch("tldw_Server_API.app.core.testing.is_test_mode", return_value=False))
             stack.enter_context(
                 patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False)
             )
             stack.enter_context(
-                patch.object(
-                    chat_endpoint,
-                    "perform_chat_api_call",
+                patch(
+                    "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
                     side_effect=primary_side_effect,
                 )
             )
@@ -3831,9 +3812,9 @@ def test_health_fallback_to_anthropic_does_not_refresh_requested_openai_oauth(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         provider_call.side_effect = [
             ChatAuthenticationError("anthropic rejected key", provider="anthropic"),
@@ -3870,9 +3851,9 @@ def test_health_fallback_to_openai_oauth_refreshes_selected_provider_once(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         provider_call.side_effect = [
             ChatAuthenticationError("expired selected oauth", provider="openai"),
@@ -3936,10 +3917,10 @@ def test_streaming_preoutput_typed_error_maps_before_response_handoff(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call", return_value=lazy_stream()),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=lazy_stream()),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -3988,12 +3969,11 @@ def test_streaming_eager_typed_error_maps_before_response_handoff(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=eager_error,
         ),
     ):
@@ -4038,10 +4018,10 @@ def test_streaming_lazy_openai_oauth_refreshes_once_before_output(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         provider_call.side_effect = [expired_stream(), refreshed_stream()]
         response = authenticated_client.post(
@@ -4088,10 +4068,10 @@ def test_streaming_oauth_retry_records_one_usage_row_for_the_successful_attempt(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
         patch.object(chat_service, "log_llm_usage", usage_log),
     ):
         provider_call.side_effect = [expired_stream(), refreshed_stream()]
@@ -4185,10 +4165,10 @@ def test_real_openai_401_refreshes_oauth_once_before_stream_output(
     with (
         patch.dict(os.environ, {"STREAMS_UNIFIED": "1"}),
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch("tldw_Server_API.app.core.testing.is_test_mode", return_value=False),
         patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
         patch.object(openai_adapter, "http_client_factory", lambda **_kwargs: Client()),
         patch.object(bounded_daemon_module, "STREAM_DAEMON_POOL", pool),
@@ -4234,12 +4214,11 @@ def test_streaming_keepalive_before_auth_error_does_not_certify_replay(
     provider_side_effect = [keepalive_then_error()]
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=provider_side_effect,
         ) as provider_call,
     ):
@@ -4281,10 +4260,10 @@ def test_streaming_sse_control_field_before_auth_error_does_not_certify_replay(
     side_effect = [control_then_error()]
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call", side_effect=side_effect) as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=side_effect) as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -4327,11 +4306,11 @@ def test_streaming_delayed_sse_controls_do_not_certify_replay(
     side_effect = [delayed_control_then_error()]
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.dict(os.environ, {"MODERATION_STREAM_BUFFER_CHARS": "0"}),
-        patch.object(chat_endpoint, "perform_chat_api_call", side_effect=side_effect) as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=side_effect) as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -4368,13 +4347,12 @@ def test_execution_fallback_to_openai_oauth_refreshes_nonstream_and_marks_active
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=[
                 _certified_pre_dispatch(
                     ChatProviderError(provider="anthropic", message="initial failed", status_code=502)
@@ -4418,13 +4396,12 @@ def test_execution_fallback_oauth_refresh_failure_is_terminal_nonstream(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=_certified_pre_dispatch(
                 ChatProviderError(provider="anthropic", message="initial failed", status_code=502)
             ),
@@ -4478,13 +4455,12 @@ def test_execution_fallback_lazy_stream_auth_uses_active_oauth_state(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=[
                 _certified_pre_dispatch(
                     ChatProviderError(provider="anthropic", message="initial failed", status_code=502)
@@ -4541,13 +4517,12 @@ def test_execution_fallback_stream_refresh_failure_is_terminal_and_sanitized(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=[
                 _certified_pre_dispatch(
                     ChatProviderError(provider="anthropic", message="initial failed", status_code=502)
@@ -4587,13 +4562,12 @@ def test_execution_fallback_lazy_stream_config_is_terminal_and_sanitized(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=[
                 _certified_pre_dispatch(
                     ChatProviderError(provider="anthropic", message="initial failed", status_code=502)
@@ -4642,14 +4616,13 @@ def test_streaming_fallback_excludes_every_attempted_provider_and_terminates(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
         patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=[failed_stream("anthropic"), failed_stream("openai")],
         ) as provider_call,
     ):
@@ -4754,15 +4727,14 @@ def test_queued_lazy_stream_fallback_uses_unique_attempt_ids_while_prior_job_is_
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
         patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
-        patch.object(chat_endpoint, "get_request_queue", return_value=queue),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=queue),
         patch.object(chat_service, "get_request_queue", return_value=queue),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", True),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=[failed_stream(), healthy_stream()],
         ) as provider_call,
     ):
@@ -4803,8 +4775,8 @@ def test_streaming_prompt_guardrail_preserves_terminal_sse_contract_at_endpoint_
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(
             chat_service,
@@ -4814,7 +4786,7 @@ def test_streaming_prompt_guardrail_preserves_terminal_sse_contract_at_endpoint_
                 block_total_estimated_tokens=1,
             ),
         ),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -4904,13 +4876,12 @@ def test_oauth_refresh_failure_preserves_terminal_credential_taxonomy(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=provider_side_effect,
         ) as provider_call,
     ):
@@ -5004,10 +4975,10 @@ def test_streaming_auth_failure_after_output_is_sanitized_without_refresh(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call", return_value=partial_stream()),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=partial_stream()),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -5063,12 +5034,12 @@ def test_streaming_provider_failure_after_output_is_sanitized_without_fallback(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.dict(os.environ, {"MODERATION_STREAM_BUFFER_CHARS": "0"}),
-        patch.object(chat_endpoint, "perform_chat_api_call", return_value=partial_stream()) as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=partial_stream()) as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -5128,10 +5099,10 @@ def test_streaming_empty_terminal_is_bounded_without_usage_mark(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call", return_value=empty_stream()),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=empty_stream()),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -5185,12 +5156,11 @@ def test_streaming_semantic_output_is_not_rejected_as_empty(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             return_value=iter(provider_chunks),
         ),
     ):
@@ -5254,11 +5224,11 @@ def test_concurrent_empty_and_valid_streams_keep_usage_accounting_isolated(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call", side_effect=provider_call),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=provider_call),
     ):
         with ThreadPoolExecutor(max_workers=2) as executor:
             empty_future = executor.submit(post, "openai")
@@ -5314,7 +5284,7 @@ def test_chat_completion_with_conversation_history(authenticated_client, mock_ch
     )
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
@@ -5353,7 +5323,7 @@ def test_chat_completion_rate_limiting(authenticated_client, mock_chacha_db, set
     )
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test-key"})),
     ):
         mock_llm.return_value = {
@@ -5420,7 +5390,7 @@ def test_chat_completion_rg_primary_deny(
     monkeypatch.setattr(gov, "commit", fake_commit, raising=False)
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(
             config_llm_providers,
             "get_api_keys",
@@ -5500,7 +5470,7 @@ def test_chat_completion_rg_shadow_vs_primary_behaviour(
         return None
 
     with (
-        patch("tldw_Server_API.app.api.v1.endpoints.chat.perform_chat_api_call") as mock_llm,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as mock_llm,
         patch.object(
             config_llm_providers,
             "get_api_keys",
@@ -5627,12 +5597,12 @@ def test_streaming_provider_failure_is_bounded_at_http_boundary(
     try:
         with (
             patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-            patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+            patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
             patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-            patch.object(chat_endpoint, "get_request_queue", return_value=None),
+            patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
             patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
             patch.dict(os.environ, {"MODERATION_STREAM_BUFFER_CHARS": "0"}),
-            patch.object(chat_endpoint, "perform_chat_api_call", return_value=source()) as provider_call,
+            patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=source()) as provider_call,
         ):
             response = authenticated_client.post(
                 "/api/v1/chat/completions",
@@ -5714,12 +5684,12 @@ def test_streaming_semantic_output_blocks_certified_replay_and_closes_once(
     try:
         with (
             patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-            patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+            patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
             patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-            patch.object(chat_endpoint, "get_request_queue", return_value=None),
+            patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
             patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
             patch.dict(os.environ, {"MODERATION_STREAM_BUFFER_CHARS": "0"}),
-            patch.object(chat_endpoint, "perform_chat_api_call", return_value=source()) as provider_call,
+            patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=source()) as provider_call,
         ):
             response = authenticated_client.post(
                 "/api/v1/chat/completions",
@@ -5796,11 +5766,11 @@ def test_streaming_replay_requires_literal_trusted_three_flag_certificate(
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call", return_value=source()) as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=source()) as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -6387,8 +6357,8 @@ def test_provider_forged_guardrail_response_boolean_cannot_bypass_stream_priming
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "execute_streaming_call", forged_service_response),
     ):
@@ -6435,10 +6405,10 @@ def test_provider_forged_guardrail_http_exception_boolean_is_sanitized(
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call", side_effect=forged_provider_error),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=forged_provider_error),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -6500,8 +6470,8 @@ def test_concurrent_real_guardrail_and_normal_provider_response_are_isolated(
 
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(
             chat_service,
@@ -6516,7 +6486,7 @@ def test_concurrent_real_guardrail_and_normal_provider_response_are_isolated(
             "execute_streaming_call",
             gated_execute_streaming_call,
         ),
-        patch.object(chat_endpoint, "perform_chat_api_call", side_effect=healthy_provider) as call_mock,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=healthy_provider) as call_mock,
     ):
         with ThreadPoolExecutor(max_workers=2) as executor:
             blocked_future = executor.submit(post, "blocked " * 200)
@@ -6565,10 +6535,10 @@ def test_endpoint_preserves_malformed_error_like_assistant_json(
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "perform_chat_api_call", return_value=source()),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", return_value=source()),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -6639,8 +6609,8 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.06),
         patch.object(chat_endpoint, "_provider_stream_monotonic", clock),
@@ -6652,7 +6622,7 @@ def test_stream_prime_factory_and_metadata_share_one_absolute_deadline(
             "execute_streaming_call",
             capture_execute_streaming_call,
         ),
-        patch.object(chat_endpoint, "perform_chat_api_call", side_effect=delayed_factory),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=delayed_factory),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -6737,10 +6707,10 @@ def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
         patch.object(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", True),
         patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
         patch.object(chat_endpoint, "PROVIDER_STREAM_PRIME_MAX_ELAPSED_SECONDS", 0.06),
         patch.object(chat_endpoint, "_provider_stream_monotonic", clock),
@@ -6752,9 +6722,8 @@ def test_stream_prime_fallback_attempts_share_one_absolute_deadline(
             "execute_streaming_call",
             capture_execute_streaming_call,
         ),
-        patch.object(
-            chat_endpoint,
-            "perform_chat_api_call",
+        patch(
+            "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
             side_effect=provider_call,
         ) as provider_call,
     ):
@@ -6850,10 +6819,10 @@ def test_real_openai_nonstream_auth_status_controls_oauth_refresh(
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch("tldw_Server_API.app.core.testing.is_test_mode", return_value=False),
         patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
         patch.object(openai_adapter, "http_client_factory", lambda **_kwargs: Client()),
     ):
@@ -6907,10 +6876,10 @@ def _real_openai_inventory_call(client, *, discover, stream: bool = False, auth_
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=None),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", False),
-        patch.object(chat_endpoint, "_shared_is_test_mode", return_value=False),
+        patch("tldw_Server_API.app.core.testing.is_test_mode", return_value=False),
         patch.object(chat_endpoint, "_should_enforce_strict_model_selection", return_value=False),
         patch.object(gateway, "resolve_provider_models_base_url", lambda *_a, **_k: "https://api.openai.com/v1"),
         patch.object(chat_service, "discover_provider_models", discover),
@@ -7124,8 +7093,8 @@ def test_queued_real_prompt_guardrail_returns_terminal_sse_without_enqueue_or_di
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=queue),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=queue),
         patch.object(chat_service, "get_request_queue", return_value=queue),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", True),
         patch.object(
@@ -7136,7 +7105,7 @@ def test_queued_real_prompt_guardrail_returns_terminal_sse_without_enqueue_or_di
                 block_total_estimated_tokens=1,
             ),
         ),
-        patch.object(chat_endpoint, "perform_chat_api_call") as provider_call,
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call") as provider_call,
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",
@@ -7219,11 +7188,11 @@ def test_queued_provider_forged_guardrail_boolean_is_sanitized(
     )
     with (
         patch.object(chat_endpoint, "ProviderCredentialRuntime", runtime_type),
-        patch.object(chat_endpoint, "get_provider_manager", return_value=provider_manager),
-        patch.object(chat_endpoint, "get_request_queue", return_value=queue),
+        patch("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", return_value=provider_manager),
+        patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=queue),
         patch.object(chat_service, "get_request_queue", return_value=queue),
         patch.object(chat_endpoint, "QUEUED_EXECUTION", True),
-        patch.object(chat_endpoint, "perform_chat_api_call", side_effect=forged_provider_error),
+        patch("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", side_effect=forged_provider_error),
     ):
         response = authenticated_client.post(
             "/api/v1/chat/completions",

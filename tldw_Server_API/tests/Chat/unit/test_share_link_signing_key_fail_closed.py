@@ -27,7 +27,7 @@ def _boom(*_args, **_kwargs):
 def broken_key_derivation(monkeypatch):
     monkeypatch.delenv("KNOWLEDGE_QA_SHARE_LINK_SECRET", raising=False)
     monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
-    monkeypatch.setattr(chat_mod, "derive_hmac_key", _boom)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", _boom)
     chat_mod._get_knowledge_qa_share_signing_key.cache_clear()
     yield
     chat_mod._get_knowledge_qa_share_signing_key.cache_clear()
@@ -58,7 +58,7 @@ def test_transient_failure_is_not_pinned(broken_key_derivation, monkeypatch) -> 
     with pytest.raises(RuntimeError):
         chat_mod._get_knowledge_qa_share_signing_key()
     good = b"k" * 32
-    monkeypatch.setattr(chat_mod, "derive_hmac_key", lambda *a, **k: good)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.crypto_utils.derive_hmac_key", lambda *a, **k: good)
     assert chat_mod._get_knowledge_qa_share_signing_key() == good
     token = chat_mod._build_knowledge_qa_share_token({"v": 1, "share_id": "ok"})
     assert chat_mod._decode_knowledge_qa_share_token(token) == {"v": 1, "share_id": "ok"}

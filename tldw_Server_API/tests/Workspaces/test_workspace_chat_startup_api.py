@@ -91,7 +91,7 @@ def test_startup_storage_failure_logs_safe_context_without_private_content(monke
         """Emulate a driver error that embeds private receipt/request values."""
         raise BackendDatabaseError(_PRIVATE)
 
-    monkeypatch.setattr(sessions, "start_workspace_chat", fail)
+    monkeypatch.setattr("tldw_Server_API.app.core.Workspaces.chat_startup.start_workspace_chat", fail)
     app, _, _ = _app(object(), monkeypatch)
     logs: list[str] = []
     sink = sessions.logger.add(logs.append, format="{message}", level="ERROR")
@@ -204,7 +204,7 @@ def test_accept_replay_current_metadata_capacity_and_quota(
         creation_db.workspace_chat_startups.require_outermost()
         return result
 
-    monkeypatch.setattr(sessions, "start_workspace_chat", observe, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.Workspaces.chat_startup.start_workspace_chat", observe, raising=False)
     with TestClient(app) as client:
         first = client.post(_PATH, json=_payload(), headers={"Idempotency-Key": "private-key-accepted"})
         assert first.status_code == 201
@@ -357,7 +357,7 @@ def test_explicit_none_does_not_lookup_unavailable_persona_or_seed_sync(
 
     monkeypatch.setattr(creation_db, "get_persona_profile", unexpected)
     monkeypatch.setattr(sessions, "_active_chat_sync_service", unexpected)
-    monkeypatch.setattr(sessions, "post_message_to_conversation", unexpected)
+    monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation", unexpected)
     monkeypatch.setattr(sessions, "ProviderCredentialRuntime", unexpected)
     app, _, _ = _app(creation_db, monkeypatch)
     with TestClient(app) as client:
