@@ -25,6 +25,17 @@ afterEach(() => {
 
 describe("tutorial registry route matching", () => {
   it.each([
+    ["/media", "media-results-list"],
+    ["/prompts", "prompts-add"],
+    ["/settings/preferences", "settings-nav-select"]
+  ])("starts the %s walkthrough on its task control", (route, testId) => {
+    const tutorial = getPrimaryTutorialForRoute(route)
+    expect(tutorial?.requireFirstTargetForPrompt).toBe(true)
+    expect(tutorial?.steps[0]?.target).toContain(testId)
+    expect(tutorial?.steps[0]?.disableBeacon).toBe(true)
+  })
+
+  it.each([
     ["/settings", "settings-basics"],
     ["/settings/preferences", "settings-basics"],
     ["/collections", "collections-basics"]

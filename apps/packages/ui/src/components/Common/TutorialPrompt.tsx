@@ -165,13 +165,7 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
         ),
         description: (
           <span className="text-text-muted">
-            {t("tutorials:prompt.description", {
-              defaultValue: "Take a quick tour to learn the key features.",
-              tutorialName: t(
-                primaryTutorial.labelKey,
-                primaryTutorial.labelFallback
-              )
-            })}
+            {t(primaryTutorial.descriptionKey, primaryTutorial.descriptionFallback)}
           </span>
         ),
         icon: (

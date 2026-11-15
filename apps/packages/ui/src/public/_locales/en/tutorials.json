@@ -210,7 +210,7 @@
     "message": "Media Basics"
   },
   "media_basics_description": {
-    "message": "Search, filter, inspect, and manage ingested media in the library"
+    "message": "Open a saved item and inspect its content."
   },
   "media_basics_searchTitle": {
     "message": "Search Media"
@@ -234,7 +234,7 @@
     "message": "Results List"
   },
   "media_basics_resultsContent": {
-    "message": "Review matched items, select one, and navigate pages to inspect more content."
+    "message": "Select an item to inspect it. If this list is empty, add a file or URL with Add media."
   },
   "media_basics_viewerTitle": {
     "message": "Content Viewer"
@@ -258,7 +258,7 @@
     "message": "Ask a Question"
   },
   "knowledge_basics_searchContent": {
-    "message": "Enter a focused question about your docs, notes, or media to start retrieval."
+    "message": "Ask a question your saved sources can answer, such as “What decisions were made in the last meeting?”"
   },
   "knowledge_basics_sourcesTitle": {
     "message": "Choose Sources"
@@ -324,7 +324,7 @@
     "message": "Prompts Basics"
   },
   "prompts_basics_description": {
-    "message": "Create reusable prompts, search your library, and manage prompt workflow segments"
+    "message": "Save instructions you can reuse in Chat."
   },
   "prompts_basics_segmentedTitle": {
     "message": "Prompt Workspaces"
@@ -336,7 +336,7 @@
     "message": "Create Prompt"
   },
   "prompts_basics_createContent": {
-    "message": "Create a reusable prompt template you can insert into chat conversations."
+    "message": "Choose New prompt and save a set of instructions you use often. Insert the saved prompt in Chat when you need it."
   },
   "prompts_basics_searchTitle": {
     "message": "Search Prompts"
@@ -699,7 +699,7 @@
     "message": "Settings by section"
   },
   "settings_basics_overviewContent": {
-    "message": "Settings are grouped by task. The heading and current section show which settings you are editing."
+    "message": "Check the heading after switching sections so you know which settings your changes will affect."
   },
   "settings_basics_navigationTitle": {
     "message": "Find a setting"

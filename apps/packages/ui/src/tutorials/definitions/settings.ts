@@ -14,20 +14,20 @@ export const settingsTutorials: TutorialDefinition[] = [
     requireFirstTargetForPrompt: true,
     steps: [
       {
-        target: '#settings-route-heading',
-        titleKey: "tutorials:settings.basics.overviewTitle",
-        titleFallback: "Settings by section",
-        contentKey: "tutorials:settings.basics.overviewContent",
-        contentFallback: "Settings are grouped by task. The heading and current section show which settings you are editing.",
-        placement: "bottom",
-        disableBeacon: true
-      },
-      {
+        disableBeacon: true,
         target: '[data-testid="settings-nav-select"], [data-testid="settings-nav-filter"]',
         titleKey: "tutorials:settings.basics.navigationTitle",
         titleFallback: "Find a setting",
         contentKey: "tutorials:settings.basics.navigationContent",
         contentFallback: "Search for a section on desktop, or choose a section from the Settings menu on mobile.",
+        placement: "bottom"
+      },
+      {
+        target: '#settings-route-heading',
+        titleKey: "tutorials:settings.basics.overviewTitle",
+        titleFallback: "Settings by section",
+        contentKey: "tutorials:settings.basics.overviewContent",
+        contentFallback: "Check the heading after switching sections so you know which settings your changes will affect.",
         placement: "bottom"
       }
     ]

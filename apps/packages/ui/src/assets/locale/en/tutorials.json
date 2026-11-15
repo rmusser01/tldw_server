@@ -96,7 +96,7 @@
   "media": {
     "basics": {
       "label": "Media Basics",
-      "description": "Search, filter, inspect, and manage ingested media in the library",
+      "description": "Open a saved item and inspect its content.",
       "searchTitle": "Search Media",
       "searchContent": "Start with a query here to find items by title or content.",
       "filtersTitle": "Filter and Scope",
@@ -104,7 +104,7 @@
       "submitTitle": "Run Search",
       "submitContent": "Submit your query after adjusting filters to refresh the result set.",
       "resultsTitle": "Results List",
-      "resultsContent": "Review matched items, select one, and navigate pages to inspect more content.",
+      "resultsContent": "Select an item to inspect it. If this list is empty, add a file or URL with Add media.",
       "viewerTitle": "Content Viewer",
       "viewerContent": "Inspect selected content, metadata, and navigation details in the main viewer pane.",
       "toolsTitle": "Library Tools",
@@ -116,7 +116,7 @@
       "label": "Knowledge Basics",
       "description": "Search your indexed sources and review grounded answers with citations",
       "searchTitle": "Ask a Question",
-      "searchContent": "Enter a focused question about your docs, notes, or media to start retrieval.",
+      "searchContent": "Ask a question your saved sources can answer, such as “What decisions were made in the last meeting?”",
       "sourcesTitle": "Choose Sources",
       "sourcesContent": "Select which source groups to query so answers stay scoped to what you care about.",
       "contextTitle": "Search Context Bar",
@@ -146,11 +146,11 @@
   "prompts": {
     "basics": {
       "label": "Prompts Basics",
-      "description": "Create reusable prompts, search your library, and manage prompt workflow segments",
+      "description": "Save instructions you can reuse in Chat.",
       "segmentedTitle": "Prompt Workspaces",
       "segmentedContent": "Switch between Custom, Copilot, Studio, and Trash to manage different prompt sources.",
       "createTitle": "Create Prompt",
-      "createContent": "Create a reusable prompt template you can insert into chat conversations.",
+      "createContent": "Choose New prompt and save a set of instructions you use often. Insert the saved prompt in Chat when you need it.",
       "searchTitle": "Search Prompts",
       "searchContent": "Search prompt names, content, and keywords to quickly find the right template.",
       "filtersTitle": "Filter and Scope",
@@ -308,7 +308,7 @@
       "label": "Settings Basics",
       "description": "Find the settings you need and see what each section controls.",
       "overviewTitle": "Settings by section",
-      "overviewContent": "Settings are grouped by task. The heading and current section show which settings you are editing.",
+      "overviewContent": "Check the heading after switching sections so you know which settings your changes will affect.",
       "navigationTitle": "Find a setting",
       "navigationContent": "Search for a section on desktop, or choose a section from the Settings menu on mobile."
     }

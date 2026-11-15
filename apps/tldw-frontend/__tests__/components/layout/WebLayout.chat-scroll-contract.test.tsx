@@ -1671,7 +1671,12 @@ describe('WebLayout chat tour rendered outcome', () => {
 
   it('offers Settings help even when the page uses its own header', async () => {
     routerState.location.pathname = '/settings/preferences';
-    render(<OptionLayout hideHeader><h1 id="settings-route-heading">Preferences</h1></OptionLayout>);
+    render(
+      <OptionLayout hideHeader>
+        <select data-testid="settings-nav-select" aria-label="Settings section" />
+        <h1 id="settings-route-heading">Preferences</h1>
+      </OptionLayout>
+    );
     expect(await screen.findByText('New to this page?', {}, { timeout: 4_000 })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
     expect(useTutorialStore.getState().hasSeenPromptForPage('/settings')).toBe(true);

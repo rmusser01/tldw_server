@@ -26,6 +26,8 @@ Offer the existing first-visit prompt on eligible web pages and add Settings and
 ADR assessment: no new decision. Reuse the registered tutorials, prompt, and runner in the existing web shell.
 Red: web Chat and Settings prompt tests and three registry cases reproduced absence. Green: 124 focused WebLayout, prompt lifecycle, registry, locale, Settings focus and Joyride runner tests passed. A single browser-level Settings prompt covers its subroutes. Page-owned Notes and Research guides remain in place.
 Code review caught early prompts on loading pages and trailing-slash URLs. Added failing cases first, then deferred new prompts until their first target mounts and honored page-owned guides using canonical routes. Final connected focused Vitest suite: 126 passed.
+Signed-in hosted UAT: Media/Prompts first anchors absent in deployed variants, Knowledge skips unavailable secondary targets, handheld Settings spotlight can leave view, and generic offers hide the task. Follow-up aligns tours to actual stable controls and shows task descriptions before Start.
+Candidate verification: 119 web-shell, registry, prompt, locale and Joyride tests passed, plus 12 offline demo unit tests. Browser fixtures opened the corrected Media and Prompts tours and kept the first Settings target visible at 320 px. Beta UAT verified Not now survives reload and Flashcards remains in Help.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -37,13 +37,17 @@ const getPrimaryTutorialForRouteMock = vi.fn<
     id: string
     labelKey: string
     labelFallback: string
+    descriptionKey: string
+    descriptionFallback: string
     requireFirstTargetForPrompt?: boolean
     steps?: { target: string }[]
   }
 >(() => ({
   id: "playground-basics",
   labelKey: "tutorials:playground.basics.label",
-  labelFallback: "Chat Basics"
+  labelFallback: "Chat Basics",
+  descriptionKey: "tutorials:playground.basics.description",
+  descriptionFallback: "Start a conversation"
 }))
 
 let capturedNavigate: ReturnType<typeof useNavigate> | null = null
@@ -196,6 +200,8 @@ describe("TutorialPrompt behavior", () => {
       id: "test-async-tour",
       labelKey: "tutorials:testAsync",
       labelFallback: "Test tour",
+      descriptionKey: "tutorials:testAsyncDescription",
+      descriptionFallback: "Review your account",
       requireFirstTargetForPrompt: true,
       steps: [{ target: "#test-async-tour-anchor" }]
     })
@@ -245,6 +251,7 @@ describe("TutorialPrompt behavior", () => {
 
     expect(infoMock).toHaveBeenCalledTimes(1)
     expect(infoMock.mock.calls[0][0]?.key).toBe("tutorial-prompt-global")
+    expect(infoMock.mock.calls[0][0].description.props.children).toBe("Start a conversation")
   })
 
   it("passes completed tutorial IDs into tutorial route lookups", () => {
