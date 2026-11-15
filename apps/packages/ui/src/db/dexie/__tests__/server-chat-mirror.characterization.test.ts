@@ -163,7 +163,16 @@ describe("server-chat mirror reconcile characterization", () => {
     const merged = reconcileServerChatMessages(current, firstIncoming())
     const outcome = merged.map(message => ({ id: message.id, serverMessageId: message.serverMessageId ?? null, message: message.message, parent: message.parentMessageId ?? null }))
     if (process.env.CAPTURE_GOLDEN) console.log(`PURE_START${canonicalJson(outcome)}PURE_END`)
-    expect(canonicalJson(outcome)).toBe("[{\"id\":\"legacy-u\",\"message\":\"Repeat alpha\",\"parent\":null,\"serverMessageId\":\"u1\"},{\"id\":\"local-a\",\"message\":\"Local answer text\",\"parent\":\"u1\",\"serverMessageId\":\"a1\"},{\"id\":\"mid-q\",\"message\":\"Correlated beta\",\"parent\":null,\"serverMessageId\":\"u2\"},{\"id\":\"q2-row\",\"message\":\"Locally edited second question\",\"parent\":null,\"serverMessageId\":\"q2\"},{\"id\":\"a2\",\"message\":\"Server answer two words\",\"parent\":\"q2\",\"serverMessageId\":\"a2\"},{\"id\":\"u3\",\"message\":\"Captured gamma text\",\"parent\":null,\"serverMessageId\":\"u3\"},{\"id\":\"z-draft\",\"message\":\"Unsent zebra draft\",\"parent\":null,\"serverMessageId\":null}]")
+    // TASK-15505.2: the older local draft now keeps its chronological position.
+    expect(canonicalJson(outcome)).toBe(canonicalJson([
+      { id: "z-draft", message: "Unsent zebra draft", parent: null, serverMessageId: null },
+      { id: "legacy-u", message: "Repeat alpha", parent: null, serverMessageId: "u1" },
+      { id: "local-a", message: "Local answer text", parent: "u1", serverMessageId: "a1" },
+      { id: "mid-q", message: "Correlated beta", parent: null, serverMessageId: "u2" },
+      { id: "q2-row", message: "Locally edited second question", parent: null, serverMessageId: "q2" },
+      { id: "a2", message: "Server answer two words", parent: "q2", serverMessageId: "a2" },
+      { id: "u3", message: "Captured gamma text", parent: null, serverMessageId: "u3" }
+    ]))
   })
 })
 

@@ -270,10 +270,12 @@ type WorkspaceIndexedDbChatPointer = {
   updatedAt: number
 }
 
+type WorkspaceArtifactPayloadField = "content" | "data" | "versionMetadata"
+
 type WorkspaceIndexedDbArtifactPayloadPointer = {
   offloadType: typeof WORKSPACE_ARTIFACT_POINTER_KIND
   key: string
-  fields: Array<"content" | "data">
+  fields: WorkspaceArtifactPayloadField[]
   updatedAt: number
 }
 
@@ -299,6 +301,7 @@ type WorkspaceIndexedDbArtifactPayloadRecord = {
   payload: {
     content?: string
     data?: Record<string, unknown>
+    versionMetadata?: GeneratedArtifact["versionMetadata"]
   }
   updatedAt: number
 }
@@ -567,8 +570,8 @@ const parseWorkspaceIndexedDbArtifactPayloadPointer = (
   if (!Array.isArray(candidate.fields)) return null
 
   const fields = candidate.fields.filter(
-    (field): field is "content" | "data" =>
-      field === "content" || field === "data"
+    (field): field is WorkspaceArtifactPayloadField =>
+      field === "content" || field === "data" || field === "versionMetadata"
   )
   if (fields.length === 0) return null
 
@@ -1007,10 +1010,10 @@ const buildIndexedDbArtifactPayload = (
   artifact: GeneratedArtifact
 ): {
   payload: WorkspaceIndexedDbArtifactPayloadRecord["payload"]
-  fields: Array<"content" | "data">
+  fields: WorkspaceArtifactPayloadField[]
 } => {
   const payload: WorkspaceIndexedDbArtifactPayloadRecord["payload"] = {}
-  const fields: Array<"content" | "data"> = []
+  const fields: WorkspaceArtifactPayloadField[] = []
 
   if (typeof artifact.content === "string") {
     payload.content = artifact.content
@@ -1020,6 +1023,11 @@ const buildIndexedDbArtifactPayload = (
   if (isRecord(artifact.data)) {
     payload.data = cloneWorkspaceValue(artifact.data as Record<string, unknown>)
     fields.push("data")
+  }
+
+  if (isRecord(artifact.versionMetadata)) {
+    payload.versionMetadata = cloneWorkspaceValue(artifact.versionMetadata)
+    fields.push("versionMetadata")
   }
 
   return { payload, fields }
@@ -1045,9 +1053,7 @@ const hashWorkspacePersistString = (value: string): string => {
 const hashWorkspaceArtifactPayload = (
   payload: WorkspaceIndexedDbArtifactPayloadRecord["payload"]
 ): string => {
-  const dataJson =
-    payload.data === undefined ? "" : JSON.stringify(payload.data)
-  return `${hashWorkspacePersistString(payload.content ?? "")}|${hashWorkspacePersistString(dataJson)}`
+  return hashWorkspacePersistString(JSON.stringify(payload))
 }
 
 // Offload dedup registry (WP-16): adapter -> (record key -> payload hash +
@@ -1086,6 +1092,45 @@ const invalidateWorkspaceArtifactOffloadStamps = (
   }
 }
 
+const withWorkspaceArtifactPayloadPointer = (
+  artifact: GeneratedArtifact,
+  key: string,
+  fields: WorkspaceArtifactPayloadField[],
+  updatedAt: number
+): PersistedWorkspaceArtifact => {
+  const persisted: PersistedWorkspaceArtifact = {
+    ...artifact,
+    [WORKSPACE_ARTIFACT_PAYLOAD_POINTER_KEY]: {
+      offloadType: WORKSPACE_ARTIFACT_POINTER_KIND, key, fields, updatedAt
+    }
+  }
+  for (const field of fields) delete persisted[field]
+  return persisted
+}
+
+// Lifecycle writes cannot await IndexedDB, but must not inline unchanged
+// multi-megabyte payloads that have already committed there.
+const reuseDurableWorkspaceArtifactPayloads = (
+  workspaceId: string,
+  snapshot: WorkspaceSnapshot,
+  indexedDbAdapter: WorkspaceIndexedDbAdapter
+): WorkspaceSnapshot => {
+  if (!indexedDbAdapter.isAvailable()) return snapshot
+  return {
+    ...snapshot,
+    generatedArtifacts: (snapshot.generatedArtifacts || []).map((artifact) => {
+      if (!artifact || typeof artifact.id !== "string") return artifact
+      const key = buildWorkspaceIndexedDbArtifactRecordKey(workspaceId, artifact.id)
+      const stamp = getWorkspaceArtifactOffloadStamps(indexedDbAdapter).get(key)
+      if (!stamp) return artifact
+      const { payload, fields } = buildIndexedDbArtifactPayload(artifact)
+      return stamp.hash === hashWorkspaceArtifactPayload(payload)
+        ? withWorkspaceArtifactPayloadPointer(artifact, key, fields, stamp.updatedAt)
+        : artifact
+    })
+  }
+}
+
 const offloadWorkspaceSnapshotArtifacts = async (
   workspaceId: string,
   snapshot: WorkspaceSnapshot,
@@ -1106,7 +1151,7 @@ const offloadWorkspaceSnapshotArtifacts = async (
         kind: "pointer"
         artifact: GeneratedArtifact
         key: string
-        fields: Array<"content" | "data">
+        fields: WorkspaceArtifactPayloadField[]
         pointerUpdatedAt: number
       }
 
@@ -1116,7 +1161,7 @@ const offloadWorkspaceSnapshotArtifacts = async (
     artifact: GeneratedArtifact
     key: string
     payload: WorkspaceIndexedDbArtifactPayloadRecord["payload"]
-    fields: Array<"content" | "data">
+    fields: WorkspaceArtifactPayloadField[]
     hash: string
   }> = []
 
@@ -1193,21 +1238,9 @@ const offloadWorkspaceSnapshotArtifacts = async (
       continue
     }
 
-    const nextArtifact: PersistedWorkspaceArtifact = {
-      ...outcome.artifact,
-      [WORKSPACE_ARTIFACT_PAYLOAD_POINTER_KEY]: {
-        offloadType: WORKSPACE_ARTIFACT_POINTER_KIND,
-        key: outcome.key,
-        fields: outcome.fields,
-        updatedAt: outcome.pointerUpdatedAt
-      }
-    }
-    if (outcome.fields.includes("content")) {
-      delete nextArtifact.content
-    }
-    if (outcome.fields.includes("data")) {
-      delete nextArtifact.data
-    }
+    const nextArtifact = withWorkspaceArtifactPayloadPointer(
+      outcome.artifact, outcome.key, outcome.fields, outcome.pointerUpdatedAt
+    )
 
     persistedArtifacts.push(nextArtifact)
     if (typeof outcome.artifact.id === "string") {
@@ -1253,6 +1286,12 @@ const rehydrateWorkspaceSnapshotArtifacts = async (
           isRecord(payloadRecord.payload.data)
         ) {
           clonedArtifact.data = cloneWorkspaceValue(payloadRecord.payload.data)
+        }
+        if (
+          pointer.fields.includes("versionMetadata") &&
+          isRecord(payloadRecord.payload.versionMetadata)
+        ) {
+          clonedArtifact.versionMetadata = cloneWorkspaceValue(payloadRecord.payload.versionMetadata)
         }
       }
     }
@@ -1851,8 +1890,8 @@ const writeSplitWorkspacePersistence = async (
      * "lifecycle": this pass was flushed by pagehide/beforeunload/tab-hidden.
      * Every IndexedDB await is skipped (artifact/chat offload and record
      * reconciliation) so all localStorage writes land synchronously — page
-     * death cannot lose the buffered state. Oversized artifacts stay INLINE
-     * for this pass; the next coalesced pass re-offloads them.
+     * death cannot lose the buffered state. Matching durable artifact
+     * pointers are reused; other payloads stay inline for this pass.
      */
     durability?: WorkspacePersistDurability
   }
@@ -1981,7 +2020,9 @@ const writeSplitWorkspacePersistence = async (
       const retainedArtifactKeys = new Set<string>()
 
       if (snapshot) {
-        let snapshotForStorage = snapshot
+        let snapshotForStorage = lifecycleFlush
+          ? reuseDurableWorkspaceArtifactPayloads(workspaceStorageId, snapshot, indexedDbAdapter)
+          : snapshot
         let offloadedArtifactIds = new Set<string>()
         if (indexedDbAdapter.isAvailable() && !lifecycleFlush) {
           const offloadResult = await offloadWorkspaceSnapshotArtifacts(
@@ -2039,10 +2080,9 @@ const writeSplitWorkspacePersistence = async (
               ? previousRevision + 1
               : previousRevision,
             previousArtifactIds: nextArtifactIds,
-            // Lifecycle flushes write artifacts INLINE, so the freshly written
-            // snapshot holds no pointers — carry the previous pointer-key cache
-            // forward instead so the next coalesced pass can still reconcile
-            // (delete) the records this pass deliberately left in place.
+            // Lifecycle flushes may inline changed artifacts. Retain the old
+            // pointer keys so the next coalesced pass can reconcile records
+            // this synchronous pass deliberately left in place.
             previousArtifactPointerKeys: lifecycleFlush
               ? previousArtifactPointerKeys
               : collectWorkspaceArtifactPointerKeysFromSnapshot(
@@ -3573,7 +3613,11 @@ const sanitizeArtifactForPersistence = (
   const hasServerBackedPayload =
     sanitizedArtifact.serverId !== null &&
     sanitizedArtifact.serverId !== undefined
-  if (!hasServerBackedPayload) {
+  if (!hasServerBackedPayload || (
+    isWorkspaceIndexedDbRuntimeAvailable() &&
+    isWorkspaceSplitKeyStorageEnabled() &&
+    isWorkspaceIndexedDbOffloadEnabled()
+  )) {
     return sanitizedArtifact
   }
 
@@ -3762,7 +3806,12 @@ export const reviveArtifacts = (artifacts: GeneratedArtifact[]): GeneratedArtifa
       completedAt: reviveDateOrUndefined(artifact.completedAt)
     }
 
-    if (revivedArtifact.status !== "generating") {
+    const savedJobId = revivedArtifact.producerMetadata?.job_id
+    const reconnectableJob = ["summary", "report", "compare_sources"].includes(revivedArtifact.type) &&
+      Boolean(revivedArtifact.workspaceArtifactId) &&
+      revivedArtifact.producerMetadata?.origin === "research_workspace_output_job" &&
+      typeof savedJobId === "number" && Number.isSafeInteger(savedJobId) && savedJobId > 0
+    if (revivedArtifact.status !== "generating" || reconnectableJob) {
       return revivedArtifact
     }
 

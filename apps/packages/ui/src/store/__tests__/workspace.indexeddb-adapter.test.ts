@@ -223,6 +223,32 @@ describe("workspace IndexedDB offload adapter", () => {
     expect(idb.artifactRecords.size).toBe(0)
   })
 
+  it("offloads multi-megabyte version metadata and restores every field exactly", async () => {
+    const workspaceId = "large-section-analysis"
+    const idb = createInMemoryIndexedDbAdapter(true)
+    const storage = createWorkspaceStorage({ indexedDbAdapter: idb.adapter })
+    const state = buildWorkspaceState(workspaceId)
+    const artifact = Object.assign(state.workspaceSnapshots[workspaceId].generatedArtifacts[0], {
+      serverId: "canonical-section-artifact",
+      versionMetadata: { workspaceClient: { schemaVersion: 1, data: {
+        sectionAnalysis: { evidence: "Exact source passage. ".repeat(300_000) }
+      } } }
+    })
+
+    await storage.setItem(STORAGE_KEY, buildEnvelope(state))
+
+    expect(localStorage.getItem(snapshotKey(workspaceId))!.length).toBeLessThan(10_000)
+    expect(localStorage.getItem(STORAGE_KEY)!.length).toBeLessThan(10_000)
+    const hydrated = JSON.parse((await storage.getItem(STORAGE_KEY))!)
+    expect(hydrated.state.workspaceSnapshots[workspaceId].generatedArtifacts[0]).toEqual(artifact)
+
+    // A metadata-only update must invalidate the offload dedup hash.
+    artifact.versionMetadata.workspaceClient.data.sectionAnalysis.evidence += "Updated evidence."
+    await storage.setItem(STORAGE_KEY, buildEnvelope(state))
+    const updated = JSON.parse((await storage.getItem(STORAGE_KEY))!)
+    expect(updated.state.workspaceSnapshots[workspaceId].generatedArtifacts[0]).toEqual(artifact)
+  })
+
   it("cleans up offloaded records when workspace storage is removed", async () => {
     const workspaceId = "workspace-a"
     const artifactId = "artifact-1"

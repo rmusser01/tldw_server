@@ -2835,7 +2835,10 @@ function OwnedKnowledgeQAProvider({
           results = extracted.results
           answer = extracted.answer
           backendTrust = extractKnowledgeTrustMetadata(extracted.metadata)
-          clarificationRequired = extracted.metadata?.clarification?.required === true
+          const clarification = extracted.metadata?.clarification
+          clarificationRequired =
+            typeof clarification === "object" && clarification !== null &&
+            "required" in clarification && clarification.required === true
           if (answer) {
             dispatch({ type: "SET_QUERY_STAGE", payload: "generating" })
           }

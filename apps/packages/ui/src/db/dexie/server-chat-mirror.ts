@@ -308,7 +308,15 @@ export const reconcileServerChatMessages = (
     // A synthetic greeting is superseded only by an acknowledged server greeting.
     if (!canonicalId(local) && (local.messageType === "character:greeting" || local.messageType === "greeting") &&
       hasServerGreeting) continue
-    merged.push(local)
+    // Retained failed or unsaved turns belong at their original time. Insert
+    // without sorting the canonical snapshot or guessing undated chronology.
+    const localCreatedAt = canonicalCreatedAt(local.createdAt)
+    const position = localCreatedAt === undefined ? -1 : merged.findIndex(message => {
+      const createdAt = canonicalCreatedAt(message.createdAt)
+      return createdAt !== undefined && createdAt > localCreatedAt
+    })
+    if (position < 0) merged.push(local)
+    else merged.splice(position, 0, local)
   }
   return merged
 }

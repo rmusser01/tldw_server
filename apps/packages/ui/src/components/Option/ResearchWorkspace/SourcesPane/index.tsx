@@ -36,6 +36,7 @@ import { READY_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { isAbsoluteHttpUrl } from "@/utils/absolute-url-guard"
 import { safeExternalUrl } from "@/utils/safe-external-url"
 import {
+  isWorkspaceSourceActivelyProcessing,
   isWorkspaceSourcePartiallyQueryable,
   isWorkspaceSourceSelectable
 } from "@/store/workspace-source-status"
@@ -1538,6 +1539,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       statusGuardrailsEnabled && hasSourceStatusDrilldown(source, sourceStatus)
     const isReady = sourceStatus === "ready"
     const isProcessing = sourceStatus === "processing"
+    const isActivelyProcessing = isWorkspaceSourceActivelyProcessing(source)
     const isError = sourceStatus === "error"
     const isPartiallyQueryable = isWorkspaceSourcePartiallyQueryable(source)
     const isSelectable = isWorkspaceSourceSelectable(source)
@@ -1752,10 +1754,12 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
             </Tooltip>
             {statusGuardrailsEnabled && isProcessing && (
               <p
-                className="mt-0.5 flex items-center gap-1 text-[11px] text-primary"
+                className={`mt-0.5 flex items-center gap-1 text-[11px] ${isActivelyProcessing ? "text-primary" : "text-warning"}`}
                 title={processingStatusText}
               >
-                <Loader2 className="h-3 w-3 animate-spin" />
+                {isActivelyProcessing
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <AlertTriangle className="h-3 w-3 shrink-0" />}
                 {processingStatusText}
               </p>
             )}
@@ -2621,7 +2625,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               ? previewSource.status || "ready"
               : "ready"
             const previewStatusLabel =
-              previewStatus === "processing"
+              statusGuardrailsEnabled && isWorkspaceSourcePartiallyQueryable(previewSource)
+                ? t("playground:sources.statusTextSearchable", "Text searchable")
+                : previewStatus === "processing"
                 ? t("playground:sources.statusProcessing", "Processing")
                 : previewStatus === "error"
                   ? t("playground:sources.statusErrorShort", "Error")

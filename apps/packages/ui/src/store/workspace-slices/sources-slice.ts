@@ -13,7 +13,7 @@ import {
   createWorkspaceOrganizationStateIndex,
   reviveDateOrNull
 } from '../workspace'
-import { isWorkspaceSourceSelectable } from '../workspace-source-status'
+import { isWorkspaceSourceAvailabilityUnknown, isWorkspaceSourceSelectable } from '../workspace-source-status'
 
 import {
   collectDescendantFolderIds,
@@ -411,7 +411,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       return {
         sources: nextSources,
         selectedSourceIds:
-          status === "error"
+          status === "error" && !isWorkspaceSourceAvailabilityUnknown(statusDetails)
             ? state.selectedSourceIds.filter((id) => id !== sourceId)
             : state.selectedSourceIds
       }
@@ -453,7 +453,7 @@ export const createSourcesSlice: WorkspaceSlice<SourcesActions> = (set, get) => 
       return {
         sources: nextSources,
         selectedSourceIds:
-          status === "error"
+          status === "error" && !isWorkspaceSourceAvailabilityUnknown(statusDetails)
             ? state.selectedSourceIds.filter((id) => id !== targetSource.id)
             : state.selectedSourceIds
       }

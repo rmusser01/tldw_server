@@ -139,6 +139,7 @@ import {
 import type { WorkspaceAgentTaskPrefill } from "./WorkspaceAgentTaskHandoffModal"
 import { isEditableTarget } from "@/utils/editable-target"
 import { restoreMigratedResearchWorkspace } from "@/services/workspace-server-restore"
+import { isTransientSourceStatusError, isWorkspaceSourceActivelyProcessing } from "@/store/workspace-source-status"
 
 const SourcesPane = React.lazy(() =>
   import("./SourcesPane").then((module) => ({ default: module.SourcesPane }))
@@ -808,25 +809,6 @@ const isMediaLikelyReadyForRag = (detail: unknown): boolean => {
   }
 
   return false
-}
-
-const isTransientSourceStatusError = (
-  error: unknown
-): { transient: boolean; message: string } => {
-  const status = (error as { status?: number } | null)?.status
-  const message =
-    error instanceof Error ? error.message : String(error ?? "Unknown error")
-  const transient =
-    status === 0 ||
-    status === 404 ||
-    status === 408 ||
-    status === 429 ||
-    status === 502 ||
-    status === 503 ||
-    status === 504 ||
-    /network|timeout|abort/i.test(message)
-
-  return { transient, message }
 }
 
 const mapWorkspaceLifecycleToLocalSourceStatus = (
@@ -1623,13 +1605,14 @@ const ResearchWorkspaceBody: React.FC = () => {
   )
   const activeWorkspaceOperations = React.useMemo(() => {
     const operations: string[] = []
+    const activeSourceCount = sources.filter(isWorkspaceSourceActivelyProcessing).length
 
-    if (processingMediaIds.length > 0) {
+    if (activeSourceCount > 0) {
       operations.push(
         `${t("playground:workspace.activityProcessing", "Processing")} ${
-          processingMediaIds.length
+          activeSourceCount
         } ${t("playground:workspace.activitySource", "source")}${
-          processingMediaIds.length === 1 ? "" : "s"
+          activeSourceCount === 1 ? "" : "s"
         }`
       )
     }
@@ -1647,7 +1630,7 @@ const ResearchWorkspaceBody: React.FC = () => {
     }
 
     return operations
-  }, [generatingOutputType, isGeneratingOutput, processingMediaIds.length, t])
+  }, [generatingOutputType, isGeneratingOutput, sources, t])
 
   const workspaceContextStatus = React.useMemo(() => {
     if (!workspaceStatusProjectionError) return null

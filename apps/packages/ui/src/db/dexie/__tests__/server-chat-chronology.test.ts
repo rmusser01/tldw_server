@@ -163,6 +163,33 @@ describe("saved Chat canonical chronology", () => {
     expect(memory.filter(message => !message.serverMessageId).map(message => message.id)).toEqual([
       "local-timeout", "draft-one", "draft-two"
     ])
+    expect(memory.map(message => message.id)).toEqual([
+      "local-timeout", "local-user", "local-answer", "draft-one", "draft-two"
+    ])
+  })
+
+  it("places dated unmatched rows chronologically while preserving canonical order, ties, and undated rows", () => {
+    const local = (id: string, createdAt?: number): ChatMessage => ({
+      id, role: "user", isBot: false, name: "You", message: id, sources: [], images: [], createdAt
+    })
+    const canonical = [remote("first", "user", "First", 1000), remote("answer", "assistant", "Answer", 2000)]
+    const retained = [local("old-failure", 500), local("middle", 1500), local("same-time", 2000),
+      local("latest", 3000), local("unknown-time")]
+    const merged = reconcileServerChatMessages(retained, canonical)
+    expect(merged.map(message => message.id)).toEqual([
+      "old-failure", "first", "middle", "answer", "same-time", "latest", "unknown-time"
+    ])
+    expect(merged.filter(message => message.serverMessageId)).toEqual(canonical)
+    expect(merged.filter(message => !message.serverMessageId)).toEqual(retained)
+  })
+
+  it("does not reorder canonical rows whose timestamps arrive out of order", () => {
+    const canonical = [remote("first", "user", "First", 2000), remote("answer", "assistant", "Answer", 1000)]
+    const local = { id: "unsaved", role: "user" as const, isBot: false, name: "You", message: "Local",
+      sources: [], images: [], createdAt: 1500 }
+    const merged = reconcileServerChatMessages([local], canonical)
+    expect(merged.map(message => message.id)).toEqual(["unsaved", "first", "answer"])
+    expect(reconcileServerChatMessages(merged, canonical)).toEqual(merged)
   })
 
   it.each(["owner", "conversation", "history"])("does not adopt chronology across a changed %s", async changed => {

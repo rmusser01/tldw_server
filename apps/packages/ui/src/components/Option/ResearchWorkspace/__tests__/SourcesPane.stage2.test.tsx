@@ -490,6 +490,22 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     expect(mockToggleSourceSelection).toHaveBeenCalledWith("s-partial")
   })
 
+  it("labels the preview text searchable after vector indexing has failed", async () => {
+    workspaceStoreState.sources = [{
+      ...defaultSources[0], status: "processing", statusMessage: "Text search is available, but vector indexing failed.",
+      readiness: { metadata_ready: true, text_extracted: true, fts_ready: true,
+        vector_ready: false, citation_ready: true, summary_ready: true, tool_accessible: true },
+      statusDetails: { lifecycleState: "partially_queryable", statusReason: "vector_index_failed",
+        retryEligible: true, nextAction: "retry_vector_indexing" }
+    }]
+    render(<SourcesPane />)
+    const row = screen.getByText("Source One").closest('[data-source-id="s1"]')
+    expect(row?.querySelector(".animate-spin")).toBeNull()
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+    await screen.findByText("Source preview and annotations")
+    expect(screen.getByText("pdf / Text searchable")).toBeInTheDocument()
+  })
+
   it("surfaces backend processing detail text when available", () => {
     workspaceStoreState.sources = [
       defaultSources[0],

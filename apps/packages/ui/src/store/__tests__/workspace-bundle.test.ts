@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
+import { buildWorkspaceBundleSnapshot, hydrateWorkspaceBundleSnapshot } from "../workspace"
 import {
   LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT,
   WORKSPACE_EXPORT_BUNDLE_FORMAT,
@@ -137,6 +138,42 @@ describe("workspace bundle zip compatibility", () => {
     expect(parsed.workspace.snapshot.workspaceBanner.image?.mimeType).toBe(
       "image/webp"
     )
+  })
+
+  it("round-trips a large completed chapter artifact through ZIP and imported snapshots without truncation", async () => {
+    const bundle = createBundleFixture()
+    const artifact = bundle.workspace.snapshot.generatedArtifacts[0]
+    const sectionAnalysis = {
+      batches: Array.from({ length: 117 }, (_, batchIndex) => ({
+        status: "completed",
+        evidence: Array.from({ length: 30 }, (_, passageIndex) => ({
+          id: `batch-${batchIndex}-passage-${passageIndex}`,
+          quote: `Exact source passage ${batchIndex}/${passageIndex}: ${"Evidence é文. ".repeat(100)}`,
+          start_char: batchIndex * 30_000 + passageIndex * 1000,
+          page_spans: [{ page_number: batchIndex + 34, printed_page_label: String(batchIndex + 1) }]
+        }))
+      }))
+    }
+    artifact.serverId = "canonical-large-output"
+    artifact.workspaceArtifactId = "canonical-large-output"
+    artifact.content = "## Completed chapter\nSummary with exact evidence [1].\n".repeat(12_000)
+    artifact.data = { sectionAnalysis }
+    artifact.versionMetadata = { workspaceClient: { schemaVersion: 1, data: { sectionAnalysis } } }
+    const expected = toSerializableBundle(bundle).workspace.snapshot.generatedArtifacts[0]
+    expect(new TextEncoder().encode(JSON.stringify(bundle)).byteLength).toBeGreaterThan(5 * 1024 * 1024)
+
+    const zip = await createWorkspaceExportZipBlob(bundle)
+    const parsed = await parseWorkspaceImportFile(new File([zip], "large.workspace.zip", {
+      type: WORKSPACE_EXPORT_BUNDLE_ZIP_MIME
+    }))
+    const imported = hydrateWorkspaceBundleSnapshot(parsed.workspace.snapshot,
+      "imported-large", "Imported large", "workspace:imported-large")
+    const reexported = buildWorkspaceBundleSnapshot(imported)!
+
+    expect(reexported.generatedArtifacts[0].content).toBe(expected.content)
+    expect(reexported.generatedArtifacts[0].data).toEqual(expected.data)
+    expect(reexported.generatedArtifacts[0].versionMetadata).toEqual(expected.versionMetadata)
+    expect(reexported.generatedArtifacts[0].status).toBe("completed")
   })
 
   it("round-trips source folder organization through zip export/import", async () => {

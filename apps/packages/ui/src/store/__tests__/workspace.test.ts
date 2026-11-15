@@ -12,6 +12,7 @@ import {
   createWorkspaceStorage,
   estimateWorkspacePersistenceMetrics,
   generateWorkspaceId,
+  reviveArtifacts,
   WORKSPACE_STORAGE_INDEXEDDB_FLAG_STORAGE_KEY,
   WORKSPACE_STORAGE_SPLIT_KEY_FLAG_STORAGE_KEY,
   useWorkspaceStore,
@@ -2124,6 +2125,24 @@ describe("workspace store snapshot persistence", () => {
     expect(persistedArtifact?.data).toBeUndefined()
   })
 
+  it("preserves full server-backed payloads for IndexedDB persistence", () => {
+    const artifact = {
+      id: "canonical-chapter-summary", type: "summary" as const, title: "Chapter summary",
+      status: "completed" as const, serverId: "server-output-42", createdAt: new Date(),
+      content: "Exact chapter evidence. ".repeat(3000),
+      data: { sectionAnalysis: { evidence: "Exact evidence. ".repeat(3000) } }
+    }
+    vi.stubGlobal("indexedDB", {})
+    try {
+      const partialize = useWorkspaceStore.persist.getOptions().partialize!
+      const persisted = partialize({ ...useWorkspaceStore.getState(),
+        workspaceId: "full-artifact", generatedArtifacts: [artifact] })
+      expect(persisted.workspaceSnapshots["full-artifact"].generatedArtifacts[0]).toEqual(artifact)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("focuses sources by media id and source id for cross-pane navigation", () => {
     useWorkspaceStore.getState().initializeWorkspace("Citation Workspace")
     const addedSource = useWorkspaceStore
@@ -2331,6 +2350,26 @@ describe("workspace store snapshot persistence", () => {
     state = useWorkspaceStore.getState()
     expect(state.selectedSourceIds).toEqual([])
     expect(state.getSelectedMediaIds()).toEqual([])
+  })
+
+  it.each(["unknown", "missing_media"])("retains selected intent while source availability is %s", async lifecycleState => {
+    useWorkspaceStore.getState().initializeWorkspace("Recovering Source Workspace")
+    const source = useWorkspaceStore.getState().addSource({
+      mediaId: 334, title: "Recovering PDF", type: "pdf", status: "ready"
+    })
+    useWorkspaceStore.getState().setSelectedSourceIds([source.id])
+    useWorkspaceStore.getState().setSourceStatusByMediaId(334, "error", "Temporarily unavailable", undefined, { lifecycleState })
+    expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([source.id])
+    expect(useWorkspaceStore.getState().getEffectiveSelectedMediaIds()).toEqual([])
+    workspacePersistWriterInternals.flush()
+    const persisted = localStorage.getItem(STORAGE_KEY)!
+    resetWorkspaceStore()
+    localStorage.setItem(STORAGE_KEY, persisted)
+    await useWorkspaceStore.persist.rehydrate()
+    expect(useWorkspaceStore.getState().selectedSourceIds).toEqual([source.id])
+    expect(useWorkspaceStore.getState().getEffectiveSelectedMediaIds()).toEqual([])
+    useWorkspaceStore.getState().setSourceStatusByMediaId(334, "ready")
+    expect(useWorkspaceStore.getState().getEffectiveSelectedMediaIds()).toEqual([334])
   })
 
   it("stores source status drilldown details from workspace status projection", () => {
@@ -2934,3 +2973,23 @@ describe("workspace store snapshot persistence", () => {
     expect(state.leftPaneCollapsed).toBe(true)
   })
 })
+
+
+it.each([41, 0, -1, '41'])('revives only a valid saved output job receipt as reconnectable (%s)', jobId => {
+  const [artifact] = reviveArtifacts([{
+    id: 'local-card', workspaceArtifactId: 'canonical-summary', type: 'summary', title: 'Summary',
+    status: 'generating', createdAt: new Date(),
+    producerMetadata: { origin: 'research_workspace_output_job', job_id: jobId }
+  }]);
+  expect(artifact.status).toBe(jobId === 41 ? 'generating' : 'failed');
+  if (jobId === 41) expect(artifact.errorMessage).toBeUndefined();
+});
+
+
+it.each(['infographic', 'video_overview'] as const)('keeps %s reload recovery on its existing regeneration path', type => {
+  const [artifact] = reviveArtifacts([{
+    id: 'local-card', workspaceArtifactId: 'canonical-media', type, title: 'Media', status: 'generating', createdAt: new Date(),
+    producerMetadata: { origin: 'research_workspace_output_job', job_id: 41 }
+  }]);
+  expect(artifact.status).toBe('failed');
+});

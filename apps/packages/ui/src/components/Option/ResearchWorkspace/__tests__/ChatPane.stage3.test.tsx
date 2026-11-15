@@ -1,4 +1,5 @@
 import { Modal } from "antd"
+import { parseReasoning } from "@/libs/reasoning"
 import * as workspaceUndo from "../undo-manager"
 import { webcrypto } from "node:crypto"
 import { sha256Text } from "@/store/workspace-migration"
@@ -255,7 +256,7 @@ vi.mock("@/components/Common/Playground/Message", () => ({
     onSourceClick
   }: {
     message: string
-    onSaveToWorkspaceNotes?: () => void
+    onSaveToWorkspaceNotes?: (payload: { message: string }) => void
     onRegenerate?: () => void
     onEditFormSubmit?: (value: string, isSend: boolean) => void
     sources?: unknown[]
@@ -269,7 +270,7 @@ vi.mock("@/components/Common/Playground/Message", () => ({
         Edit and send capture test
       </button>
       {onSaveToWorkspaceNotes && (
-        <button type="button" onClick={onSaveToWorkspaceNotes}>
+        <button type="button" onClick={() => onSaveToWorkspaceNotes({ message: parseReasoning(message).filter(part => part.type === "text").map(part => part.content).join("\n\n").trim() })}>
           Save to Notes
         </button>
       )}
@@ -1839,6 +1840,15 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     renderChatPane();
     fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
     expect(mockCaptureToCurrentNote).not.toHaveBeenCalled();
+  });
+
+  it("saves the visible answer without optional model reasoning", () => {
+    messageOptionState.messages = [{ id: "reasoned", isBot: true, name: "Assistant",
+      message: "<think>Private draft reasoning.</think>Visible cited answer.", sources: [] }];
+    renderChatPane();
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }));
+    expect(mockCaptureToCurrentNote).toHaveBeenCalledWith(expect.objectContaining({content: "Visible cited answer."}));
+    expect(mockCaptureToCurrentNote.mock.calls[0][0].title).not.toContain("reasoning");
   });
 
   it("saves chat message content into workspace note draft", () => {

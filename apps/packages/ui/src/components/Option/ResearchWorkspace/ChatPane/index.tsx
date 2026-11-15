@@ -2378,6 +2378,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   const handleSubmit = async (message: string): Promise<boolean> => {
     if (preparingSourceContext) return false
+    const submissionOwner = captureChatReferenceOwner()
     if (
       typeof selectedModel !== "string" ||
       selectedModel.trim().length === 0
@@ -2486,6 +2487,16 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             "status" in submitResult &&
             (submitResult as { status?: unknown }).status !== "submitted"
           ) {
+            if (submitResult.status === "skipped" && submissionOwner?.isCurrent()) {
+              if ("discardedMessageIds" in submitResult && Array.isArray(submitResult.discardedMessageIds)) {
+                const discarded = new Set(submitResult.discardedMessageIds.filter((id): id is string => typeof id === "string"))
+                setMessages(previous => previous.filter(row => !discarded.has(row.id)))
+              }
+              setSourceContextNotice(t(
+                "playground:chat.preparationChanged",
+                "Your sources or chat changed before answering. Review your selection and send the question again."
+              ))
+            }
             return false
           }
           const activeScope = temporarySourceScopeRef.current
@@ -3557,10 +3568,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         onSourceClick={
                           provenanceEnabled ? handleCitationSourceClick : undefined
                         }
-                        onSaveToWorkspaceNotes={() =>
+                        onSaveToWorkspaceNotes={(capture) =>
                           handleSaveMessageToNotes({
                             isBot: msg.isBot,
-                            message: msg.message,
+                            message: capture.message,
                             name: msg.name,
                             sources: msg.sources
                           })
