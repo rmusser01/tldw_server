@@ -82,7 +82,7 @@ from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
 # Invalidate persisted retrieval snapshots when matching behavior changes.
-_RETRIEVAL_MATCHING_POLICY_VERSION = 2
+_RETRIEVAL_MATCHING_POLICY_VERSION = 3
 _RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
 
 

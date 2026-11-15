@@ -297,7 +297,15 @@ _MEDIA_ANSWER_DIRECTIVE_RE = re.compile(
     r"(?:(?:a|an|the|brief|concise|short|detailed|neutral|factual|balanced|clear)\s+){0,6}"
     r"(?:answer|response|summary|explanation)\b|"
     r"\b(?:cite|include)\s+(?:the\s+)?(?:supporting\s+)?(?:passages|sources|citations|page\s+numbers)\b|"
+    r"\b(?:cite|citing)\s+(?:its|their|the)\s+(?:(?:printed|physical|pdf)\s+){0,3}pages?\b|"
+    r"[.!?;]\s+use\s+only\s+(?:the\s+)?selected\s+(?:pdf|source|document)s?\b|"
     r"[.!?;]\s+(?:quote|cite)\b",
+    re.IGNORECASE,
+)
+_MEDIA_QUOTE_REQUEST_PREFIX_RE = re.compile(
+    r"^(?:please\s+)?quote\s+"
+    r"(?:(?:a|an|the|original|opening|initial|exact|relevant|supporting)\s+){0,6}"
+    r"(?:proposal|recommendation|statement|passage|text|wording)\s+(?:about|on|regarding|for)\s+",
     re.IGNORECASE,
 )
 _MEDIA_NAMED_CHAPTER_RE = re.compile(r"\b((?:[A-Z][a-z]+\s+){2,5}[A-Z][a-z]+)\s+(?:chapter|section)\b")
@@ -320,6 +328,7 @@ def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3
 
     # Presentation instructions are not source-search facets. Spell correction
     # may remove '?' punctuation, so recognize the imperative clause itself.
+    raw_text = _MEDIA_QUOTE_REQUEST_PREFIX_RE.sub("", raw_text, count=1)
     directive = _MEDIA_ANSWER_DIRECTIVE_RE.search(raw_text)
     if directive and directive.start() > 0:
         raw_text = raw_text[:directive.start()]
@@ -1721,7 +1730,7 @@ class MediaDBRetriever(BaseRetriever):
         fallback_terms = kwargs.get("_fallback_query_terms")
         # Rerank only natural-question fallback. Explicit FTS expressions retain
         # their exact matching and scoring policy, including score thresholds.
-        candidate_limit = min(128, max(32, self.config.max_results * 8)) if fallback_terms else self.config.max_results
+        candidate_limit = 128 if fallback_terms else self.config.max_results
         backend_type = getattr(self.media_db, "backend_type", None)
         if backend_type == BackendType.SQLITE:
             # Ensure FTS virtual table exists; rebuild if empty to prime content

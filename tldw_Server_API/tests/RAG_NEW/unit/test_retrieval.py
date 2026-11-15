@@ -274,12 +274,19 @@ class TestMediaDBRetriever:
         assert await retriever.retrieve(f'"{question_word}"', allowed_media_ids=[media_id]) == []
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("directive", [
+    @pytest.mark.parametrize("question", [
+        "Does chapter 11 propose eliminating the federal Department of Labor? "
         "Quote the opening proposal exactly and cite its printed page and physical PDF page. "
         "This is a question about what the document proposes, not whether the proposal became law.",
+        "Does chapter 11 propose eliminating the federal Department of Labor? "
         "Cite its printed page and physical PDF page. Include the original wording.",
+        "Quote the opening proposal about eliminating the Department of Labor in chapter 11, "
+        "citing its printed page and physical PDF page. Use only the selected PDF and distinguish the proposal from enacted law.",
+        "Please quote the original statement regarding eliminating the Department of Labor, citing the physical PDF page.",
+        "Quote the relevant passage on eliminating the Department of Labor. "
+        "Use only the selected document and distinguish the proposal from enacted law.",
     ])
-    async def test_quote_and_citation_directives_do_not_hide_short_opening_proposal(self, tmp_path, directive):
+    async def test_quote_and_citation_directives_do_not_hide_short_opening_proposal(self, tmp_path, question):
         db = _create_media_db(tmp_path)
         evidence = "The federal Department of Labor should be eliminated."
         passages = ["Department of Labor"] * 12 + [
@@ -297,11 +304,49 @@ class TestMediaDBRetriever:
         retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
             use_fts=True, use_vector=False, fts_level="chunk", max_results=3, min_score=0.2), media_db=db)
         docs = await retriever.retrieve(
-            f"Does chapter 11 propose eliminating the federal Department of Labor? {directive}",
+            question,
             allowed_media_ids=[media_id],
         )
         assert docs and docs[0].content == evidence
         assert docs[0].metadata["page_number"] == len(passages)
+
+    def test_quotation_topic_words_are_preserved_outside_an_answer_instruction(self):
+        terms = retr_mod._derive_bounded_media_term_query(
+            "What does the proposal say about quote attribution and printed page numbering?", max_terms=32,
+        )
+        assert all(term in terms.split(" OR ") for term in ("proposal", "quote", "attribution", "printed", "page"))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("max_results", [1, 8])
+    async def test_small_answer_count_keeps_substantive_passage_in_bounded_candidate_pool(self, tmp_path, max_results):
+        db = _create_media_db(tmp_path)
+        evidence = (
+            "The Department of Labor should be eliminated. "
+            "This proposal would transfer responsibilities to regional offices, with local review of services. "
+            "It describes the proposed transition and explains how remaining duties would be reassigned. "
+            "The discussion distinguishes future recommendations from existing rules and sets out the reasoning "
+            "for the suggested changes, including oversight and a review of implementation."
+        )
+        passages = ["Department of Labor eliminated."] * 90 + [evidence]
+        chunks, offset = [], 0
+        for text in passages:
+            chunks.append({
+                "text": text, "start_char": offset, "end_char": offset + len(text), "chunk_type": "text",
+                "metadata": {"ancestry_titles": ["Department of Labor"]},
+            })
+            offset += len(text) + 2
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Policy collection", media_type="document", content="\n\n".join(passages), keywords=[], chunks=chunks,
+        )
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk", max_results=max_results, min_score=0.2,
+        ), media_db=db)
+        docs = await retriever.retrieve(
+            "Quote the opening proposal about eliminating the Department of Labor, citing its printed page.",
+            allowed_media_ids=[media_id],
+        )
+        assert docs[0].content == evidence
+        assert len(docs) <= max_results
 
     @pytest.mark.asyncio
     async def test_named_chapter_finds_abbreviated_body_after_repeated_page_headers(self, tmp_path):
