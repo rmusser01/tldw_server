@@ -29,6 +29,7 @@ ADR required: no; this fixes retry behavior at the existing chat loader and pres
 Red: opening a missing chat through the real history controller retried the rejected capture on rerender (2 requests instead of 1). Green: 111 focused WebUI tests passed, including the new regression. The loader suppresses only ambient retries of a failed capture for the same conversation; explicit selection and existing authorization checks still apply.
 The shared client mistook the expected_version query parameter in a network error for a conflict and hid the original DELETE failure behind a follow-up GET. The added transport control accepts the same bodyless 204 in the open-source client. Final focused matrix: 184 WebUI tests; eight backend Trash and lifecycle controls.
 Pre-merge independent review found successful suppression of repeated native history captures left the chat marked loading. Record a current native capture error as failed so Retry works, and keep verified read-only captures readable. Reproduced the loading state and skipped read-only hydration in red tests. The public chat suites passed 301 tests after the fix.
+The rebased PR activated the Playground quality gate. Its device-matrix source guard still required the decorative Composer pill removed by CO-03 (157b04a3ac). The guard now requires the pill label to stay absent. Confirmed the red assertion locally, then passed the composer (52), device matrix (15), and accessibility (63) suites using the CI commands.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
