@@ -1,6 +1,7 @@
 import React from "react"
 import type { TFunction } from "i18next"
 import { Collapse } from "antd"
+import { Button } from "@/components/Common/Button"
 import { humanizeMilliseconds } from "@/utils/humanize-milliseconds"
 
 const Markdown = React.lazy(() => import("../../Common/Markdown"))
@@ -16,6 +17,8 @@ type ReasoningBlockProps = {
   searchQuery?: string
   t: TFunction
   enableMermaidDiagrams?: boolean
+  editor?: React.ReactNode
+  onEdit?: () => void
 }
 
 export function ReasoningBlock({
@@ -28,13 +31,25 @@ export function ReasoningBlock({
   markdownBaseClasses,
   searchQuery,
   t,
-  enableMermaidDiagrams
+  enableMermaidDiagrams,
+  editor,
+  onEdit
 }: ReasoningBlockProps) {
   const isReasoningStreaming = isStreaming && Boolean(reasoningRunning)
+  const editButton = React.useRef<HTMLButtonElement>(null)
+  const isEditing = Boolean(editor)
+  const wasEditing = React.useRef(false)
+
+  React.useEffect(() => {
+    if (!isEditing && wasEditing.current) editButton.current?.focus()
+    wasEditing.current = isEditing
+  }, [isEditing])
 
   return (
     <Collapse
-      className="border-none text-text-muted !mb-3 "
+      ghost
+      className="!mb-3 rounded-md !border !border-solid !border-border !bg-surface"
+      classNames={{ header: "!text-text", body: "border-t border-border !text-text" }}
       defaultActiveKey={openReasoning ? "reasoning" : undefined}
       items={[
         {
@@ -57,29 +72,41 @@ export function ReasoningBlock({
               )}
             </span>
           ),
-          children: (
-            <React.Suspense
-              fallback={
-                <p className={`text-body text-text-muted ${assistantTextClass}`}>
-                  {t("reasoning.loading")}
-                </p>
-              }
-            >
-              <div>
-                <Markdown
-                  message={content}
-                  className={`${markdownBaseClasses} ${assistantTextClass}`}
-                  searchQuery={searchQuery}
-                  codeBlockVariant="github"
-                  enableMermaidDiagrams={
-                    Boolean(enableMermaidDiagrams) && !isReasoningStreaming
-                  }
-                />
-                {isReasoningStreaming && (
-                  <span className="inline-block w-2 h-4 ml-1 bg-text-muted animate-pulse rounded-sm" />
-                )}
-              </div>
-            </React.Suspense>
+          children: editor ?? (
+            <>
+              <React.Suspense
+                fallback={
+                  <p className={`text-body text-text-muted ${assistantTextClass}`}>
+                    {t("reasoning.loading")}
+                  </p>
+                }
+              >
+                <div>
+                  <Markdown
+                    message={content}
+                    className={`${markdownBaseClasses} ${assistantTextClass}`}
+                    searchQuery={searchQuery}
+                    codeBlockVariant="github"
+                    enableMermaidDiagrams={
+                      Boolean(enableMermaidDiagrams) && !isReasoningStreaming
+                    }
+                  />
+                  {isReasoningStreaming && (
+                    <span className="inline-block w-2 h-4 ml-1 bg-text-muted animate-pulse rounded-sm" />
+                  )}
+                </div>
+              </React.Suspense>
+              {onEdit && (
+                <Button
+                  ref={editButton}
+                  variant="text"
+                  size="sm"
+                  className="mt-2"
+                  onClick={onEdit}>
+                  {t("reasoning.edit", "Edit thinking")}
+                </Button>
+              )}
+            </>
           )
         }
       ]}

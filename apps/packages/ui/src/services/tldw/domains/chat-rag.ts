@@ -1464,7 +1464,7 @@ export const chatRagMethods = {
         buildQuery({
           ...toChatScopeParams(options.scope),
           ...(options.includeNativeCompletion === true
-            ? { include_native_completion: true }
+            ? { include_native_completion: true, include_reasoning_history_support: true }
             : {})
         })
       ),

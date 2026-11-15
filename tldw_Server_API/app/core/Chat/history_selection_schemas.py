@@ -298,6 +298,7 @@ class NativeCompletionCapabilityV1(HistoryWireModel):
 
     policy: Literal["selected_history_v1"]
     supported: StrictBool
+    reasoning_history_supported: Literal[True] | None = Field(None, exclude_if=lambda value: value is None)
     storage_context_digest: str = Field(min_length=1)
 
 

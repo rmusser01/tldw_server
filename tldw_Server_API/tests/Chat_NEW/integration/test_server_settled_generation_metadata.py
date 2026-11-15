@@ -158,6 +158,108 @@ def _extra(db: CharactersRAGDB, message_id: str) -> dict[str, Any]:
     return metadata.get("extra") or {}
 
 
+def test_native_thinking_blocks_survive_save_edit_and_reload(settled_api, monkeypatch):
+    from tldw_Server_API.app.core.Chat.chat_service import _format_selected_history_messages
+
+    client, db, cid, headers = settled_api
+    monkeypatch.setenv("MODERATION_STREAM_BUFFER_CHARS", "0")
+
+    async def provider() -> AsyncIterator[str]:
+        yield _sse({"additional_kwargs": {"reasoning_content": "First </th"}})
+        yield _sse(
+            {"choices": [{"index": 0, "delta": {"reasoning_content": "ink> thought", "content": "An "}}]}
+        )
+        yield _sse({"choices": [{"index": 0, "delta": {"reasoning_content": "Second thought"}}]})
+        yield _content("answer.", "stop")
+        yield "data: [DONE]\n\n"
+
+    _install_provider(monkeypatch, provider)
+    selection = _selection(client, cid, headers, "thinking-blocks")
+    completion = client.post(
+        "/api/v1/chat/completions",
+        headers=headers,
+        json={
+            **_completion_body(cid, versioned_selection=selection),
+            "max_tokens": 128,
+            "metadata": {"tldw_retain_reasoning_history_v1": True},
+        },
+    )
+    assert completion.status_code == 200, completion.text
+    assert '"reasoning_content": "First </th"' in completion.text
+    (reply,) = _assistant_rows(db, cid)
+    original = "<think>First &#x00003c;/think> thought</think>An <think>Second thought</think>answer."
+    assert reply["content"] == original
+
+    edited = "<think>First &#x00003c;/think> thought</think>An <think>Edited thought</think>answer."
+    save = client.put(
+        f"/api/v1/messages/{reply['id']}",
+        headers=headers,
+        params={"expected_version": reply["version"]},
+        json={"content": edited},
+    )
+    assert save.status_code == 200, save.text
+
+    reload = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection",
+        headers=headers,
+        params={"include_native_completion": "true", "include_reasoning_history_support": "true"},
+        json={
+            "purpose": "send",
+            "view": {
+                "view_session_id": "reloaded-thinking-blocks",
+                "conversation_id": cid,
+                "interpretation": {"kind": "parent_graph_v1"},
+                "cursor": {"kind": "after_message", "message_id": reply["id"]},
+                "selection_revision": 1,
+            },
+        },
+    )
+    assert reload.status_code == 200, reload.text
+    reloaded = reload.json()
+    assert reloaded["selected_content"][-1]["message"] == edited
+    assert reloaded["native_completion_v1"]["reasoning_history_supported"] is True
+
+    owner_key = reloaded["view"]["owner_key"]
+    snapshot = db.get_conversation_history_snapshot(cid, owner_client_id="1", owner_key=owner_key)
+    # Public captures omit the raw versions used by the provider formatter.
+    selected_content = [
+        {**row, "_message_version": db.get_message_by_id(row["id"])["version"]}
+        for row in reloaded["selected_content"]
+    ]
+    context = _format_selected_history_messages(snapshot, selected_content, {})
+    assert context[-1]["role"] == "assistant"
+    assert context[-1]["content"] == "An answer."
+
+
+@pytest.mark.parametrize("supports_thinking", [False, True])
+def test_native_thinking_cannot_truncate_the_answer(settled_api, monkeypatch, supports_thinking):
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+    client, db, cid, headers = settled_api
+    if supports_thinking:
+        monkeypatch.setattr(chat_endpoint, "MAX_TEXT_LENGTH", 64)
+
+    async def provider() -> AsyncIterator[str]:
+        yield _sse({"choices": [{"index": 0, "delta": {"reasoning_content": "Thinking " * 10}}]})
+        yield _content("Short answer.", "stop")
+        yield "data: [DONE]\n\n"
+
+    _install_provider(monkeypatch, provider)
+    selection = _selection(client, cid, headers, "thinking-budget")
+    response = client.post(
+        "/api/v1/chat/completions",
+        headers=headers,
+        json={
+            **_completion_body(cid, versioned_selection=selection),
+            "max_tokens": 128,
+            "metadata": {"tldw_retain_reasoning_history_v1": supports_thinking},
+        },
+    )
+    assert response.status_code == 200, response.text
+    (reply,) = _assistant_rows(db, cid)
+    assert reply["content"] == "Short answer."
+
+
 def test_client_disconnect_mid_stream_saves_partial_as_interrupted(settled_api, monkeypatch):
     client, db, cid, headers = settled_api
     # No moderation holdback, so the client has seen exactly what is saved.

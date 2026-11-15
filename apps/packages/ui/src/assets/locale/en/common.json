@@ -397,7 +397,9 @@
   "reasoning": {
     "thinking": "Thinking…",
     "loading": "Loading reasoning…",
-    "thought": "Model’s reasoning (optional)"
+    "thought": "Model’s reasoning (optional)",
+    "edit": "Edit thinking",
+    "invalidEdit": "Enter thinking text and keep any thinking tags balanced."
   },
   "mermaid": "Mermaid",
   "search": "Search",
