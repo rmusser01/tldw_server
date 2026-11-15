@@ -40,6 +40,16 @@ function ContextProbe() {
 }
 
 describe("KnowledgeQAProvider answer length override", () => {
+  it("keeps nonstream clarification distinct from a completed empty search", async () => {
+    ragSearchMock.mockResolvedValue({ results: [], generated_answer: "Which document?", metadata: { clarification: { required: true } } })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await waitFor(() => expect(latestContext).not.toBeNull())
+    await act(async () => { await latestContext!.selectThread("local-clarification") })
+    act(() => latestContext!.setQuery("What does this propose?"))
+    await act(async () => { await latestContext!.search() })
+    expect(latestContext!.queryStage).toBe("clarification")
+    expect(latestContext!.messages.at(-1)?.ragContext?.clarification_required).toBe(true)
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     latestContext = null
@@ -49,7 +59,7 @@ describe("KnowledgeQAProvider answer length override", () => {
     })
   })
 
-  it("reruns the current query with per-request token limit override", async () => {
+  it.each([420, 4096, 8192])("reruns the current query with per-request token limit %s", async (tokens) => {
     render(
       <KnowledgeQAProvider>
         <ContextProbe />
@@ -66,13 +76,13 @@ describe("KnowledgeQAProvider answer length override", () => {
     })
 
     await act(async () => {
-      await latestContext!.rerunWithTokenLimit(420)
+      await latestContext!.rerunWithTokenLimit(tokens)
     })
 
     expect(ragSearchMock).toHaveBeenCalledWith(
       "expand this topic",
       expect.objectContaining({
-        max_generation_tokens: 420,
+        max_generation_tokens: tokens,
         enable_generation: true,
       })
     )

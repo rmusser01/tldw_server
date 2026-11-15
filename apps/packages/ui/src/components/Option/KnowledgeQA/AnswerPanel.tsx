@@ -645,11 +645,11 @@ export function AnswerPanel({ className }: AnswerPanelProps) {
     const baseTokens =
       typeof settings?.max_generation_tokens === "number"
         ? settings.max_generation_tokens
-        : 800
+        : 4096
     const nextLimit =
       action === "shorter"
         ? Math.max(200, Math.round(baseTokens * 0.6))
-        : Math.min(4000, Math.round(baseTokens * 1.5))
+        : Math.min(8192, Math.round(baseTokens * 1.5))
 
     setAnswerLengthAction(action)
     try {

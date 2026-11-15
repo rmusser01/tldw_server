@@ -1191,7 +1191,7 @@ function GenerationSection({ settings, updateSetting }: SectionSettingsProps) {
             value={settings.max_generation_tokens}
             onChange={(v) => updateSetting("max_generation_tokens", v)}
             min={50}
-            max={2000}
+            max={8192}
             step={50}
           />
           <SettingToggle

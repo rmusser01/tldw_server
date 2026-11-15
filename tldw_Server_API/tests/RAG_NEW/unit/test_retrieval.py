@@ -1,6 +1,10 @@
 """Tests for the database-backed retrieval helpers in the RAG service."""
 
 from datetime import datetime
+import asyncio
+import hashlib
+import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Iterable
@@ -72,6 +76,155 @@ class TestRetrievalConfig:
 
 @pytest.mark.unit
 class TestMediaDBRetriever:
+    def test_same_length_edited_media_does_not_reuse_old_page_map(self, tmp_path):
+        retriever = MediaDBRetriever(str(tmp_path / "unused.db"), config=RetrievalConfig(use_vector=False))
+        original = "Alpha\n\nBravo"
+        edited = "Bravo\n\nAlpha"
+        docs = retriever._build_media_documents([{
+            "id": 1, "title": "Book", "content": edited,
+            "safe_metadata": {
+                "page_map": [{"page_number": 1, "start_char": 0, "end_char": len(original)}],
+                "page_map_content_hash": hashlib.sha256(original.encode()).hexdigest(),
+            },
+        }], backend_type=BackendType.SQLITE)
+        assert "page_map" not in docs[0].metadata
+
+    def test_mapped_media_loads_canonical_document_version_metadata(self, tmp_path):
+        db = _create_media_db(tmp_path)
+        content = "  Education evidence.\n"
+        page_map = [{"page_number": 1, "start_char": 0, "end_char": len(content)}]
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Book title", media_type="document", content=content, keywords=[],
+            safe_metadata=json.dumps({
+                "page_map": page_map, "page_count": 1,
+                "page_map_content_hash": hashlib.sha256(content.encode()).hexdigest(),
+            }),
+        )
+        retriever = MediaDBRetriever(str(db.db_path), media_db=db)
+        docs = retriever._build_media_documents(
+            [db.get_media_by_id(media_id)], backend_type=BackendType.SQLITE,
+        )
+        assert (docs[0].content, docs[0].metadata["page_map"]) == (content, page_map)
+
+    def test_latest_document_edit_rejects_map_inherited_from_original_media(self, tmp_path):
+        db = _create_media_db(tmp_path)
+        original, edited = "Alpha\n\nBravo", "Bravo\n\nAlpha"
+        metadata = json.dumps({
+            "page_map": [{"page_number": 1, "start_char": 0, "end_char": len(original)}],
+            "page_map_content_hash": hashlib.sha256(original.encode()).hexdigest(),
+        })
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Book", media_type="document", content=original, keywords=[], safe_metadata=metadata,
+        )
+        db.create_document_version(media_id=media_id, content=edited, safe_metadata=metadata)
+        retriever = MediaDBRetriever(str(db.db_path), media_db=db)
+        docs = retriever._build_media_documents([db.get_media_by_id(media_id)], backend_type=BackendType.SQLITE)
+        assert edited in docs[0].content
+        assert "page_map" not in docs[0].metadata
+
+    def test_cancelled_chunk_search_stops_before_fallback_work(self, tmp_path, monkeypatch):
+        db = _create_media_db(tmp_path)
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk"), media_db=db)
+        cancelled = threading.Event()
+        calls = []
+        def search(*args, **kwargs):
+            calls.append("search")
+            cancelled.set()
+            return [], 0
+        monkeypatch.setattr(retriever, "_retrieve_chunk_fts_with_stats", search)
+        monkeypatch.setattr(retriever, "_retrieve_via_backend", lambda *args, **kwargs: calls.append("fallback") or [])
+        assert retriever._retrieve_sync("education policy", _cancelled=cancelled) == []
+        assert calls == ["search"]
+
+    def test_mapped_media_preserves_exact_text_and_page_metadata(self, tmp_path):
+        retriever = MediaDBRetriever(str(tmp_path / "unused.db"))
+        content = "  Education evidence.\n"
+        page_map = [{"page_number": 1, "start_char": 0, "end_char": len(content), "printed_page_label": "i"}]
+        docs = retriever._build_media_documents([{
+            "id": 1, "title": "Book title", "content": content,
+            "safe_metadata": {
+                "page_map": page_map, "page_count": 1,
+                "page_map_content_hash": hashlib.sha256(content.encode()).hexdigest(),
+            },
+        }], backend_type=BackendType.SQLITE)
+        assert docs[0].content == content
+        assert docs[0].metadata["page_map"] == page_map
+
+    @pytest.mark.asyncio
+    async def test_blocking_media_search_does_not_delay_request_cancellation(self, tmp_path, monkeypatch):
+        db = _create_media_db(tmp_path)
+        retriever = MediaDBRetriever(str(db.db_path), media_db=db)
+        entered, release = threading.Event(), threading.Event()
+        def blocked(*args, **kwargs):
+            entered.set()
+            release.wait(0.5)
+            return []
+        monkeypatch.setattr(retriever, "_retrieve_via_backend", blocked)
+        task = asyncio.create_task(retriever.retrieve("education"))
+        try:
+            await asyncio.to_thread(entered.wait, 1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        finally:
+            release.set()
+
+    def test_unprepared_large_source_requires_preparation_instead_of_unbounded_rechunk(self, tmp_path):
+        retriever = MediaDBRetriever(str(tmp_path / "unused.db"))
+        with pytest.raises(retr_mod.RAGDatabaseError, match="stored chunks"):
+            retriever._late_chunk_media_documents("education", [Document(
+                id="1", content="education " * 30000, source=DataSource.MEDIA_DB, metadata={},
+            )])
+
+    @pytest.mark.asyncio
+    async def test_question_retrieves_persisted_chunks_without_rechunking(self, tmp_path, monkeypatch):
+        db = _create_media_db(tmp_path)
+        content = "The Department of Education should return funding control to states."
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Mandate", media_type="document", content=content, keywords=[],
+            chunks=[{"text": content, "start_char": 0, "end_char": len(content), "chunk_type": "text"}],
+        )
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk"), media_db=db)
+        def no_rechunk(*args, **kwargs):
+            raise AssertionError("Prepared media must use persisted chunks")
+        monkeypatch.setattr(retriever, "_late_chunk_media_documents", no_rechunk)
+        docs = await retriever.retrieve(
+            "What does this document propose for the Department of Education? Cite the relevant pages and distinguish proposals from enacted policy.",
+            allowed_media_ids=[media_id],
+        )
+        control = await retriever.retrieve("Education", allowed_media_ids=[media_id])
+        assert docs and docs[0].id == control[0].id
+        assert docs[0].content == content
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", ['"Department of Education"', 'Education AND funding', 'Educat*'])
+    async def test_explicit_chunk_search_syntax_matches(self, tmp_path, query):
+        db = _create_media_db(tmp_path)
+        content = "Department of Education funding"
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Mandate", media_type="document", content=content, keywords=[],
+            chunks=[{"text": content, "start_char": 0, "end_char": len(content), "chunk_type": "text"}],
+        )
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk"), media_db=db)
+        docs = await retriever.retrieve(query, allowed_media_ids=[media_id])
+        control = await retriever.retrieve("Education", allowed_media_ids=[media_id])
+        assert docs and docs[0].id == control[0].id
+
+    @pytest.mark.asyncio
+    async def test_explicit_phrase_miss_does_not_broaden_or_rechunk(self, tmp_path):
+        db = _create_media_db(tmp_path)
+        content = "Education funding is managed by the department."
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Mandate", media_type="document", content=content, keywords=[],
+            chunks=[{"text": content, "start_char": 0, "end_char": len(content), "chunk_type": "text"}],
+        )
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk"), media_db=db)
+        assert await retriever.retrieve('"Department of Education"', allowed_media_ids=[media_id]) == []
+
     def test_initializes_vector_store_from_default_factory_when_type_is_unset(self, monkeypatch):
         sentinel_store = object()
         factory_calls: list[tuple[dict, str]] = []
@@ -1007,7 +1160,10 @@ class TestMultiDatabaseRetriever:
 
     @pytest.mark.asyncio
     async def test_retrieve_uses_media_adapter_without_sqlite_path(self, monkeypatch):
-        fake_media_db = SimpleNamespace(backend_type=BackendType.POSTGRESQL)
+        fake_media_db = SimpleNamespace(
+            backend_type=BackendType.POSTGRESQL,
+            get_document_version=lambda **kwargs: None,
+        )
         search_calls: list[tuple[object, dict[str, object]]] = []
 
         monkeypatch.setattr(retr_mod.MediaDBRetriever, "_initialize_vector_store", lambda self: None)

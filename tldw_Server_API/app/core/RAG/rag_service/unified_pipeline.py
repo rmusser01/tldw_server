@@ -29,7 +29,7 @@ from collections import Counter
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
-from functools import partial
+from functools import partial, wraps
 from numbers import Real
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Literal, Optional, Protocol, TypedDict, cast, overload
@@ -2013,6 +2013,17 @@ def _should_restore_classification_local_retrieval(
     )
 
 
+def _with_request_deadline(operation):
+    """Bound the complete request, including sequential optional retrieval passes."""
+    @wraps(operation)
+    async def bounded(*args, **kwargs):
+        timeout = kwargs.get("timeout_seconds")
+        async with asyncio.timeout(timeout if timeout and timeout > 0 else None):
+            return await operation(*args, **kwargs)
+    return bounded
+
+
+@_with_request_deadline
 async def unified_rag_pipeline(
     # ========== REQUIRED PARAMETERS ==========
     query: str,
@@ -2123,7 +2134,7 @@ async def unified_rag_pipeline(
     generation_prompt: Optional[str] = None,
     enable_pre_retrieval_clarification: Optional[bool] = None,
     clarification_timeout_sec: Optional[float] = None,
-    max_generation_tokens: int = 500,
+    max_generation_tokens: int = 4096,
     # Abstention & multi-turn synthesis
     enable_abstention: bool = False,
     abstention_behavior: Literal["continue", "ask", "decline"] = "continue",
@@ -3184,7 +3195,7 @@ async def unified_rag_pipeline(
         effective_pre_clarify = (
             enable_pre_retrieval_clarification
             if enable_pre_retrieval_clarification is not None
-            else effective_enable_generation
+            else effective_enable_generation and not (include_media_ids or include_note_ids)
         )
         if effective_pre_clarify and assess_query_for_clarification is not None:
             clarification_start = time.time()
@@ -7062,7 +7073,13 @@ async def unified_rag_pipeline(
                         if isinstance(_writer_policy, dict):
                             result.metadata["structured_writer"]["depth_policy"] = _writer_policy
                     else:
-                        context = "\n\n".join([getattr(doc, "content", str(doc)) for doc in context_docs])
+                        from .response_writer import format_page_location
+
+                        context = "\n\n".join(
+                            f"[{index}] {format_page_location(getattr(doc, 'metadata', {}) or {})}\n"
+                            f"{getattr(doc, 'content', str(doc))}"
+                            for index, doc in enumerate(context_docs, 1)
+                        )
 
                     if enable_multi_turn_synthesis:
                         # Strict budget control
@@ -8860,7 +8877,7 @@ async def unified_rag_pipeline(
                 result.errors.append(f"Retrieval metrics failed: {_rm_err}")
 
         # ---- Faithfulness evaluation (optional) ----
-        if enable_faithfulness_eval and result.generated_answer:
+        if enable_faithfulness_eval and result.generated_answer and not asyncio.current_task().cancelling():
             try:
                 from .faithfulness import FaithfulnessEvaluator as _FaithEval
 

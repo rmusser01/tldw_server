@@ -206,7 +206,7 @@ async def test_standard_generation_routes_through_generation_executor(monkeypatc
     assert captured.get("retrieval_plan") is not None
     assert derived_evidence is not None
     assert len(getattr(derived_evidence, "documents", [])) == 2
-    assert captured.get("generation_context") == "First doc with content\n\nSecond doc with content"
+    assert captured.get("generation_context") == "[1] Page location unavailable\nFirst doc with content\n\n[2] Page location unavailable\nSecond doc with content"
 
     ga = getattr(res, "generated_answer", None) or (res.get("generated_answer") if isinstance(res, dict) else None)
     md = getattr(res, "metadata", None) or (res.get("metadata") if isinstance(res, dict) else {})
@@ -228,7 +228,9 @@ async def test_generation_keeps_full_retrieval_set_when_executor_returns_smaller
         generation_context,
     ):
         assert retrieval_plan is not None
-        assert generation_context == "Document 0\n\nDocument 1\n\nDocument 2\n\nDocument 3\n\nDocument 4"
+        assert generation_context == "\n\n".join(
+            f"[{index + 1}] Page location unavailable\nDocument {index}" for index in range(5)
+        )
         return RAGResult(
             documents=list(derived_evidence.documents[:5]),
             query=resolved_request.query,
@@ -288,6 +290,6 @@ async def test_structured_response_generation_uses_writer_transformed_context(mo
     )
 
     assert captured["context"] == "USER::Use writer context::XML::First doc with content|Second doc with content"
-    assert captured["prompt_template"] == "base prompt\n\nSYSTEM::balanced::500"
+    assert captured["prompt_template"] == "base prompt\n\nSYSTEM::balanced::4096"
     ga = getattr(res, "generated_answer", None) or (res.get("generated_answer") if isinstance(res, dict) else None)
     assert ga == "writer answer"

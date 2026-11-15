@@ -178,6 +178,7 @@ export type RagSettings = {
   include_page_numbers: boolean
   enable_chunk_citations: boolean
   enable_generation: boolean
+  enable_pre_retrieval_clarification?: boolean | null
   strict_extractive: boolean
   generation_model: string | null
   generation_provider: string | null
@@ -385,11 +386,12 @@ export const DEFAULT_RAG_SETTINGS: RagSettings = {
   include_page_numbers: true,
   enable_chunk_citations: true,
   enable_generation: true,
+  enable_pre_retrieval_clarification: null,
   strict_extractive: false,
   generation_model: null,
   generation_provider: null,
   generation_prompt: null,
-  max_generation_tokens: 800,
+  max_generation_tokens: 4096,
   enable_abstention: true,
   abstention_behavior: "ask",
   enable_multi_turn_synthesis: false,
@@ -589,6 +591,7 @@ export const buildRagSearchRequest = (settings: RagSettings) => {
     Number.isFinite(timeout_seconds) && timeout_seconds > 0
       ? Math.round(timeout_seconds * 1000)
       : undefined
+  if (timeoutMs !== undefined) options.timeout_seconds = timeout_seconds
   return {
     query: query.trim(),
     options,

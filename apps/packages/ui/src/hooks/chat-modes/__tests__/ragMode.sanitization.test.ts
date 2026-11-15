@@ -210,6 +210,20 @@ const createRagContext = (overrides: Record<string, unknown> = {}) =>
   }) as any
 
 describe("ragMode sanitizer", () => {
+  it("preserves an explicit selected-source clarification override", async () => {
+    mocks.ragSearch.mockResolvedValue({ documents: [], generated_answer: "Which proposal should I explain?", metadata: { clarification: { required: true } } })
+    const response = await __testing__.ragModeDefinition.preflight?.(createRagContext({
+      ragAdvancedOptions: { enable_pre_retrieval_clarification: true },
+    }))
+    expect(mocks.ragSearch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ enable_pre_retrieval_clarification: true }))
+    expect(response?.fullText).toBe("Which proposal should I explain?")
+  })
+  it("retrieves the original question separately from inline source context", async () => {
+    mocks.ragSearch.mockResolvedValue({ documents: [{ content: "Education evidence", metadata: { source: "media_db" } }] })
+    const context = createRagContext({ message: "Source text ".repeat(4000), ragQuery: "What is proposed for Education?" })
+    await __testing__.ragModeDefinition.preflight?.(context)
+    expect(mocks.ragSearch).toHaveBeenCalledWith("What is proposed for Education?", expect.any(Object))
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.promptForRag.mockResolvedValue({

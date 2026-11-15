@@ -3,6 +3,16 @@ import { describe, expect, it } from "vitest"
 import { DEFAULT_RAG_SETTINGS, buildRagSearchRequest } from "../unified-rag"
 
 describe("buildRagSearchRequest scope filters", () => {
+  it("leaves reasoning room for selected DeepSeek QA unless the user sets a token cap", () => {
+    const settings = { ...DEFAULT_RAG_SETTINGS, generation_provider: "deepseek", generation_model: "deepseek-flash", include_media_ids: [1] }
+    expect(buildRagSearchRequest(settings).options.max_generation_tokens).toBe(4096)
+    expect(buildRagSearchRequest({ ...settings, max_generation_tokens: 800 }).options.max_generation_tokens).toBe(800)
+  })
+  it("forwards the deadline to the server as well as the transport", () => {
+    const request = buildRagSearchRequest({ ...DEFAULT_RAG_SETTINGS, timeout_seconds: 30 })
+    expect(request.options.timeout_seconds).toBe(30)
+    expect(request.timeoutMs).toBe(30000)
+  })
   it.each(["llama", "llamacpp", "llama_cpp", "llama-cpp"])(
     "normalizes the catalog provider %s while preserving the selected model",
     (provider) => {

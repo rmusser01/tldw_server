@@ -59,6 +59,43 @@ def _retrieval_plan() -> RetrievalPlan:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("override,expected", [(None, False), (False, False), (True, True)])
+async def test_stream_selected_scope_preserves_explicit_clarification_override(override, expected):
+    request = _resolved_request()
+    async def retrieve(**kwargs):
+        assert kwargs["enable_pre_retrieval_clarification"] is expected
+        return UnifiedSearchResult(query="query", documents=[])
+    await streaming_executor._retrieve_standard_documents(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+        pipeline_kwargs={"include_media_ids": [1], "enable_pre_retrieval_clarification": override},
+        payload=request.payload,
+    )
+
+
+@pytest.mark.asyncio
+async def test_request_deadline_stops_heartbeat_retrieval(monkeypatch):
+    monkeypatch.setattr(streaming_executor, "_RETRIEVAL_HEARTBEAT_SECONDS", 0.005)
+    request = _resolved_request()
+    request.payload["timeout_seconds"] = 0.03
+    stopped = asyncio.Event()
+
+    async def retrieve(**kwargs):
+        try:
+            await asyncio.sleep(0.1)
+            return UnifiedSearchResult(query="stream query", documents=[])
+        finally:
+            stopped.set()
+
+    events = [event async for event in stream_rag_events(
+        resolved_request=request, retrieval_plan=_retrieval_plan(), standard_pipeline=retrieve,
+        extra_context={"generate_streaming_response": _fake_generate_streaming_response},
+    )]
+    assert stopped.is_set()
+    assert events[-1]["type"] == "error"
+    assert not any(event["type"] == "contexts" for event in events)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("with_progress", [False, True])
 async def test_slow_retrieval_emits_keepalive_and_preserves_result(monkeypatch, with_progress):
     monkeypatch.setattr(streaming_executor, "_RETRIEVAL_HEARTBEAT_SECONDS", 0.01, raising=False)
@@ -307,6 +344,17 @@ def test_stream_context_preserves_inspectable_evidence_without_internal_metadata
     assert context["chunk_id"] == "chunk-1"
     assert context["excerpt"] == document.content[:4000]
     assert "must-not-leak" not in str(event)
+
+
+def test_stream_context_preserves_only_public_page_spans():
+    document = Document(id="chunk", content="Evidence", source=DataSource.MEDIA_DB, metadata={
+        "start_char": 10, "end_char": 18,
+        "page_spans": [{"page_number": 4, "start_char": 10, "end_char": 18, "printed_page_label": "ii", "internal_secret": "private"}],
+    })
+    context = streaming_executor._context_events(docs=[document], payload={}, request_defaults={})[0]["contexts"][0]
+    assert context["page_spans"] == [{"page_number": 4, "start_char": 10, "end_char": 18, "printed_page_label": "ii"}]
+    assert context["start_char"] == 10
+    assert "private" not in str(context)
 
 
 def test_stream_context_keeps_late_chunk_parent_identity():

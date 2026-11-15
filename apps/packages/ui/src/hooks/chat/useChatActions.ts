@@ -3454,6 +3454,7 @@ export const useChatActions = ({
 
   const submitResponse = async ({
     message,
+    ragQuery,
     image,
     isRegenerate = false,
     messages: chatHistory,
@@ -3495,6 +3496,7 @@ export const useChatActions = ({
     historyRecoveryRetrySystemPrompts
   }: {
     message: string
+    ragQuery?: string
     image: string
     isRegenerate?: boolean
     isContinue?: boolean
@@ -4266,6 +4268,7 @@ export const useChatActions = ({
         sdkViewIsCurrent = workspaceServerChat.viewIsCurrent
         const ragModeParamsWithSnapshot = {
           ...chatModeParamsWithRegen,
+          ragQuery,
           ...alternateHistoryParams,
           actorSceneSend: workspaceServerChat.sceneSend,
           servicePromptSnapshot: turnServicePromptSnapshot

@@ -162,7 +162,7 @@ const sanitizeRagAdvancedOptions = (options?: Record<string, unknown>) => {
     }
 
     const defaultValue = (DEFAULT_RAG_SETTINGS as Record<string, unknown>)[key]
-    if (typeof defaultValue === "boolean") {
+    if (typeof defaultValue === "boolean" || key === "enable_pre_retrieval_clarification") {
       const coerced = coerceBooleanOrNull(value)
       if (coerced === null) continue
       sanitized[key] = coerced
@@ -229,6 +229,7 @@ type RagSourceEntry = {
 }
 
 type RagModeParams = HistoryChatModeParams & {
+  ragQuery?: string
   selectedModel: string
   useOCR: boolean
   selectedKnowledge: Knowledge | null
@@ -333,7 +334,7 @@ const buildSelectedSourceGroundingResponse = (
 })
 
 const buildRagRewritePrompt = (ctx: ChatModeContext<RagModeParams>) => {
-  if (hasSelectedMediaSources(ctx)) {
+  if (hasSelectedMediaSources(ctx) || ctx.ragQuery?.trim()) {
     return null
   }
 
@@ -378,7 +379,7 @@ const resolveRagQuery = async (
   promptForQuestion: string | null
 ) => {
   ctx.assertPreparationCurrent?.()
-  if (!promptForQuestion) return ctx.message
+  if (!promptForQuestion) return ctx.ragQuery?.trim() || ctx.message
   const questionOllama = await pageAssistModel({
     model: ctx.selectedModel,
     toolChoice: "none",
@@ -449,7 +450,7 @@ const buildRagOptions = async (
     // Backend intent routing can otherwise bypass retrieval and produce an
     // ungrounded clarification for source-bound questions.
     ragOptions.enable_intent_routing = false
-    ragOptions.enable_pre_retrieval_clarification = false
+    ragOptions.enable_pre_retrieval_clarification ??= false
   }
   ragOptions.signal = ctx.signal
   ragOptions.requestScope = ctx.servicePromptSnapshot?.requestScope
@@ -540,6 +541,20 @@ const ragModeDefinition: ChatModeDefinition<RagModeParams> = {
       if (retrieval.source.length > 0) {
         selectedSourceRetrievalCache.set(ctx, retrieval)
         return null
+      }
+
+      const clarification = retrieval.rawResponse?.metadata?.clarification
+      if (
+        sanitizeRagAdvancedOptions(ctx.ragAdvancedOptions).enable_pre_retrieval_clarification === true &&
+        clarification && typeof clarification === "object" &&
+        "required" in clarification && clarification.required === true &&
+        retrieval.rawResponse?.generated_answer?.trim()
+      ) {
+        return buildSelectedSourceGroundingResponse(
+          retrieval.rawResponse.generated_answer,
+          "clarification_required",
+          retrieval.rawResponse
+        )
       }
 
       return buildSelectedSourceGroundingResponse(

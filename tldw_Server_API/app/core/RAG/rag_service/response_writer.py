@@ -8,13 +8,32 @@ and appropriate depth. Inspired by Perplexica's writer prompt pattern.
 
 from __future__ import annotations
 
+import re
 from html import escape
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Context formatting
 # ---------------------------------------------------------------------------
+
+def format_page_location(metadata: dict[str, Any]) -> str:
+    """Separate physical and printed pages without trusting arbitrary prompt markup."""
+    spans = metadata.get("page_spans")
+    if not isinstance(spans, list) or not spans:
+        spans = [{"page_number": metadata.get("page_number")}]
+    locations = []
+    for span in spans[:20]:
+        if not isinstance(span, dict):
+            continue
+        number = span.get("page_number")
+        if type(number) is not int or number < 1:
+            continue
+        location = f"PDF page {number}"
+        label = span.get("printed_page_label")
+        if isinstance(label, str) and re.fullmatch(r"[\w.-]{1,24}", label):
+            location += f" (printed page {label})"
+        locations.append(location)
+    return "; ".join(locations) or "Page location unavailable"
 
 def format_context_xml(chunks: list[dict[str, Any]]) -> str:
     """Format retrieval results as XML-tagged context blocks.
@@ -52,7 +71,8 @@ def format_context_xml(chunks: list[dict[str, Any]]) -> str:
             safe_source = escape(str(source), quote=True)
             attrs += f' source="{safe_source}"'
 
-        safe_content = escape(content, quote=False)
+        location = format_page_location(metadata) if isinstance(metadata, dict) else "Page location unavailable"
+        safe_content = escape(f"{location}\n{content}", quote=False)
         parts.append(f"  <result {attrs}>{safe_content}</result>")
 
     if emitted == 0:

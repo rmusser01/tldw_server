@@ -114,6 +114,39 @@ function account(name: string) {
 }
 
 describe("Knowledge QA verified account boundary", () => {
+  it("keeps streamed physical page spans in saved evidence", async () => {
+    const spans = [{ page_number: 4, start_char: 10, end_char: 18, printed_page_label: "ii" }]
+    harness.stream.mockImplementation(async function* () {
+      yield { type: "contexts", contexts: [{ id: "chunk", source_id: "1", source: "media_db", excerpt: "Evidence", page_number: 4, page_spans: spans, start_char: 10, end_char: 18 }] }
+      yield { type: "delta", text: "A claim [1]." }
+      yield { schema_version: 1, type: "complete", code: "complete", upstream_dispatched: true, output_emitted: true, allow_non_stream_fallback: false, message: "Search completed." }
+    })
+    render(view())
+    await waitFor(() => expect(current.historyHydrated).toBe(true))
+    act(() => current.setQuery("Describe the evidence"))
+    await act(async () => { await current.search() })
+    expect(current.results[0].metadata?.page_spans).toEqual(spans)
+    expect(current.messages.at(-1)?.ragContext?.retrieved_documents[0].metadata?.page_spans).toEqual(spans)
+  })
+  it("preserves a clarification outcome through streaming and thread restoration", async () => {
+    harness.stream.mockImplementation(async function* () {
+      yield { type: "clarification", required: true, stage: "pre_retrieval" }
+      yield { type: "delta", text: "Which document do you mean?" }
+      yield { schema_version: 1, type: "complete", code: "complete", upstream_dispatched: true, output_emitted: true, allow_non_stream_fallback: false, message: "Search completed." }
+    })
+    render(view())
+    await waitFor(() => expect(current.historyHydrated).toBe(true))
+    act(() => current.setQuery("What does this document propose?"))
+    await act(async () => { await current.search() })
+    expect(current.queryStage).toBe("clarification")
+    expect(current.answer).toBe("Which document do you mean?")
+    const assistant = current.messages.find(message => message.role === "assistant")!
+    expect(assistant.ragContext?.clarification_required).toBe(true)
+    harness.fetch.mockResolvedValue(response(current.messages))
+    await act(async () => { await current.selectThread("alice-thread") })
+    expect(current.queryStage).toBe("clarification")
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()

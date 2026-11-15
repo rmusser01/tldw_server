@@ -58,6 +58,13 @@ vi.mock("../FollowUpInput", () => ({
 }))
 
 describe("AnswerWorkspace accessibility announcements", () => {
+  it("shows clarification without claiming search completion or evidence failure", () => {
+    state.answer = "Which document do you mean?"
+    render(<AnswerWorkspace queryStage="clarification" />)
+    expect(screen.getByRole("status")).toHaveTextContent("Needs clarification; search not run.")
+    expect(screen.getByText("Which document do you mean?")).toBeInTheDocument()
+    expect(screen.queryByTestId("knowledge-answer-panel")).not.toBeInTheDocument()
+  })
   beforeEach(async () => {
     await testI18n.init({
       lng: "en", fallbackLng: "en", defaultNS: "knowledge",

@@ -11,6 +11,7 @@ export type QueryStage =
   | "generating"
   | "verifying"
   | "complete"
+  | "clarification"
   | "cancelled"
   | "error"
 
@@ -132,6 +133,7 @@ export type RagContextData = {
     metadata?: Record<string, unknown>
   }>
   generated_answer?: string
+  clarification_required?: boolean
   trust_state?: KnowledgeAnswerTrustState
   trust_reason_codes?: KnowledgeTrustReasonCode[]
   trust_evidence_origin?: EvidenceOrigin

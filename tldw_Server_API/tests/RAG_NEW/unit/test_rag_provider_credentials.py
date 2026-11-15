@@ -996,6 +996,36 @@ async def test_agentic_typed_failure_bypasses_raw_fallback(
 
 
 @pytest.mark.asyncio
+async def test_standard_request_deadline_returns_detached_timeout_and_closes_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_runtime(monkeypatch)
+    _install_common_endpoint_fakes(monkeypatch, bundle=_bundle())
+
+    async def timed_out(**_kwargs: Any) -> UnifiedSearchResult:
+        raise TimeoutError(_SENTINEL_SECRET)
+
+    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", timed_out)
+    with pytest.raises(HTTPException) as exc_info:
+        await rag_endpoint.unified_search_endpoint(
+            request_raw=_request(),
+            request=rag_endpoint.UnifiedRAGRequest(query="credential runtime"),
+            background_tasks=BackgroundTasks(),
+            current_user=_user(),
+            media_db=_db("media.db"),
+            chacha_db=_db("notes.db"),
+            prompts_db=_db("prompts.db"),
+            collections_db=SimpleNamespace(),
+        )
+
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail["error_code"] == "request_timeout"
+    assert _SENTINEL_SECRET not in json.dumps(exc_info.value.detail)
+    assert exc_info.value.__cause__ is None and exc_info.value.__context__ is None
+    assert _RecordingRuntime.created[0].close_calls == 1
+
+
+@pytest.mark.asyncio
 async def test_runtime_construction_typed_failure_is_detached(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
