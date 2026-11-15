@@ -80,6 +80,7 @@ const TutorialRunner = lazy(() =>
   }))
 );
 const TutorialPrompt = lazy(() => import('@/components/Common/TutorialPrompt'));
+const PAGE_OWNED_TUTORIAL_ROUTES = ['/notes', '/research-workspace'];
 import { useConfirmDanger } from '@/components/Common/confirm-danger';
 import { DemoModeProvider, useDemoMode } from '@/context/demo-mode';
 
@@ -715,12 +716,9 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
             <TutorialRunner />
           </Suspense>
 
-          {/* Notes and Research Workspace offer their own first-visit guides. */}
-          {location.pathname !== '/notes' && location.pathname !== '/research-workspace' && (
-            <Suspense fallback={null}>
-              <TutorialPrompt />
-            </Suspense>
-          )}
+          <Suspense fallback={null}>
+            <TutorialPrompt excludedRoutes={PAGE_OWNED_TUTORIAL_ROUTES} />
+          </Suspense>
 
           {/* Quick Ingest Modal Host - listens for global open events */}
           <QuickIngestModalHost />

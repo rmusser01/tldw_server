@@ -11,6 +11,7 @@ export const collectionsTutorials: TutorialDefinition[] = [
     descriptionFallback: "Organize saved articles, highlights, and reading digests.",
     icon: Library,
     priority: 1,
+    requireFirstTargetForPrompt: true,
     steps: [
       {
         target: '[data-testid="collections-heading"]',

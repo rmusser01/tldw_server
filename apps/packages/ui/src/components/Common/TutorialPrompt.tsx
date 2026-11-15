@@ -29,7 +29,9 @@ const NOTIFICATION_KEY = "tutorial-prompt-global"
 // Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const TutorialPrompt: React.FC = () => {
+export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = ({
+  excludedRoutes
+}) => {
   const { t } = useTranslation(["tutorials", "common"])
   const location = useLocation()
   const [api, contextHolder] = notification.useNotification()
@@ -65,6 +67,7 @@ export const TutorialPrompt: React.FC = () => {
     const launchTutorial = launcherRef.current
     let active = true
     const pageKey = normalizeTutorialRoute(location.pathname)
+    let targetObserver: MutationObserver | undefined
     const tutorialLookupOptions = {
       completedTutorialIds: completedTutorials
     }
@@ -86,7 +89,7 @@ export const TutorialPrompt: React.FC = () => {
     }
 
     // Skip prompts while a tutorial/help modal is active.
-    if (isHelpModalOpen || activeTutorialId) {
+    if (isHelpModalOpen || activeTutorialId || excludedRoutes?.includes(pageKey)) {
       return
     }
 
@@ -120,9 +123,12 @@ export const TutorialPrompt: React.FC = () => {
     )
     const delayMs = Math.max(PROMPT_DELAY_MS, cooldownRemaining)
 
-    // Show notification after a delay
-    timeoutRef.current = globalThis.setTimeout(() => {
-      if (!active) return
+    const firstTarget = primaryTutorial.requireFirstTargetForPrompt
+      ? primaryTutorial.steps[0]?.target
+      : undefined
+    const showPrompt = () => {
+      if (!active || (firstTarget && !document.querySelector(firstTarget))) return
+      targetObserver?.disconnect()
       shownRef.current.add(pageKey)
       lastPromptShownAtRef.current = Date.now()
       activePromptPageRef.current = pageKey
@@ -201,10 +207,19 @@ export const TutorialPrompt: React.FC = () => {
           activePromptPageRef.current = null
         }
       })
+    }
+
+    timeoutRef.current = globalThis.setTimeout(() => {
+      if (firstTarget) {
+        targetObserver = new MutationObserver(showPrompt)
+        targetObserver.observe(document.body, { childList: true, subtree: true })
+      }
+      showPrompt()
     }, delayMs)
 
     return () => {
       active = false
+      targetObserver?.disconnect()
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current)
         timeoutRef.current = null
@@ -220,6 +235,7 @@ export const TutorialPrompt: React.FC = () => {
     location.pathname,
     activeTutorialId,
     api,
+    excludedRoutes,
     isHelpModalOpen,
     completedTutorials,
     t,

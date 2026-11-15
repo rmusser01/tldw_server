@@ -11,6 +11,7 @@ export const settingsTutorials: TutorialDefinition[] = [
     descriptionFallback: "Find the settings you need and see what each section controls.",
     icon: Settings,
     priority: 1,
+    requireFirstTargetForPrompt: true,
     steps: [
       {
         target: '#settings-route-heading',
