@@ -476,7 +476,7 @@ class FileValidator:
             logging.warning("Yara scanning disabled: optional dependency unavailable")
 
         if not self.magic_available and not self.python_magic_available:
-            logging.warning("puremagic and python-magic unavailable; MIME validation relies on extension guesses")
+            logging.warning("puremagic and python-magic unavailable. MIME validation requires content detection for HTML and uses extensions for other formats.")
 
         self._custom_media_configs: dict[str, dict] = {}
         if custom_media_configs:
@@ -659,6 +659,7 @@ class FileValidator:
         # 4. Validate MIME type
         detected_mime_type: Optional[str] = None
         mime_detection_source: str = "unavailable"
+        is_html = (media_type_key or "").lower() == "html"
         normalized_allowed_mimetypes = (
             {mt.lower() for mt in final_allowed_mimetypes} if final_allowed_mimetypes else None
         )
@@ -672,20 +673,9 @@ class FileValidator:
                 if detected_mime_type:
                     detected_mime_type = detected_mime_type.strip()
                     mime_detection_source = "magic"
-                    if media_type_key == "html" and detected_mime_type == "text/plain":
-                        # HTML magic is offset-zero; legal leading whitespace can
-                        # otherwise become generic text in the file deep scan.
-                        with contextlib.suppress(*_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
-                            with current_file_path.open("rb") as source:
-                                prefix = source.read(4096).lstrip(b" \t\r\n\f")
-                            if prefix.startswith(b"\xef\xbb\xbf"):
-                                prefix = prefix[3:].lstrip(b" \t\r\n\f")
-                            if getattr(puremagic, "from_string")(prefix, mime=True) == "text/html":  # noqa: B009
-                                detected_mime_type = "text/html"
-            except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:  # Catch other errors during MIME detection
-                logging.warning("MIME magic detection failed; using extension fallback (error_type={})", exception_type_for_log(e))
+            except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
+                logging.warning("MIME magic detection failed (error_type={})", exception_type_for_log(e))
                 detected_mime_type = None
-                mime_detection_source = "fallback"
         elif self.python_magic_available and self._python_magic_mime is not None:
             try:
                 detected_mime_type = self._python_magic_mime.from_file(str(current_file_path))
@@ -693,14 +683,23 @@ class FileValidator:
                     detected_mime_type = str(detected_mime_type).strip()
                     mime_detection_source = "python-magic"
             except _UPLOAD_SINK_NONCRITICAL_EXCEPTIONS as e:
-                logging.warning("python-magic detection failed; using extension fallback (error_type={})", exception_type_for_log(e))
+                logging.warning("python-magic detection failed (error_type={})", exception_type_for_log(e))
                 detected_mime_type = None
-                mime_detection_source = "fallback"
 
-        if not detected_mime_type and fallback_mime_type:
+        if is_html:
+            # Offset-zero signatures can miss HTML with leading whitespace or a BOM.
+            if self.magic_available and detected_mime_type in (None, "", "text/plain"):
+                with contextlib.suppress(*_UPLOAD_SINK_NONCRITICAL_EXCEPTIONS):
+                    with current_file_path.open("rb") as source:
+                        prefix = source.read(4096).lstrip(b" \t\r\n\f")
+                    if prefix.startswith(b"\xef\xbb\xbf"):
+                        prefix = prefix[3:].lstrip(b" \t\r\n\f")
+                    if getattr(puremagic, "from_string")(prefix, mime=True) == "text/html":  # noqa: B009
+                        detected_mime_type = "text/html"
+                        mime_detection_source = "magic"
+        elif not detected_mime_type and fallback_mime_type:
             detected_mime_type = fallback_mime_type
-            if mime_detection_source == "unavailable":
-                mime_detection_source = "fallback"
+            mime_detection_source = "fallback"
 
         if normalized_allowed_mimetypes:
             fallback_lower = (fallback_mime_type or '').lower() or None
@@ -722,6 +721,8 @@ class FileValidator:
                             f"Detected MIME type '{detected_mime_type}' for file '{_original_filename}' is not allowed. "
                             f"Allowed: {final_allowed_mimetypes}"
                         )
+            elif is_html:
+                issues.append("Unable to determine MIME type from HTML file content.")
             else:
                 # No detected MIME available; rely on extension guess if present
                 if fallback_lower is None or fallback_lower not in normalized_allowed_mimetypes:
