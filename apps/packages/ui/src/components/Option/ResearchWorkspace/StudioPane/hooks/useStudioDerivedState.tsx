@@ -7,7 +7,7 @@ const OUTPUT_VIRTUAL_OVERSCAN = 4
 const STUDIO_DEFAULT_RAG_TOP_K = 8
 const STUDIO_DEFAULT_RAG_MIN_SCORE = 0.2
 const STUDIO_DEFAULT_ENABLE_RERANKING = true
-const STUDIO_DEFAULT_MAX_TOKENS = 800
+const STUDIO_DEFAULT_MAX_TOKENS = 4096
 const STUDIO_DEFAULT_SUMMARY_INSTRUCTION =
   "Provide a comprehensive summary of the key points and main ideas."
 

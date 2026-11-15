@@ -77,7 +77,7 @@ const deps = (): UseArtifactGenerationDeps => ({
 beforeEach(() => {
   vi.clearAllMocks(); io.request.mockReset(); io.complete.mockReset(); localStorage.clear();
   stored = []; controller = new AbortController();
-  io.speech.mockReset(); io.verified.mockReset();
+  io.speech.mockReset(); io.verified.mockReset(); io.submit.mockReset(); io.output.mockReset();
   io.speech.mockResolvedValue({ buffer: new ArrayBuffer(8), generatedFileId: 47, actualBackend: 'pocket_tts', fallbackUsed: false });
   io.verified.mockResolvedValue({ content: 'Selene tours start Friday at 18:00.', data: {} });
   io.state = { workspaceId: 'owned', generatedArtifacts: [] };
@@ -510,4 +510,82 @@ describe('migrated Studio result durability', () => {
     });
   });
 
+});
+
+it('compares two reviewed sections of one source through a durable job', async () => {
+  const selections = [
+    { source_id: 'source-1', node_id: 'dsi:1', navigation_version: 'v1' },
+    { source_id: 'source-1', node_id: 'dsi:2', navigation_version: 'v1' },
+  ];
+  const row = { id: 'compare-1', workspace_id: 'owned', artifact_type: 'compare_sources', title: 'Section comparison',
+    status: 'complete', content: 'Coverage: 2 of 2 selected sections completed.\nThe authors disagree [E1.1.1].', version: 2,
+    created_at: new Date().toISOString(), version_metadata: { workspaceClient: { schemaVersion: 1,
+      data: { sectionAnalysis: { sections: [{ status: 'completed' }, { status: 'completed' }] } } } } } as WorkspaceArtifactApiResponse;
+  io.submit.mockImplementation(async () => { stored.push(row); return { job_id: 41, artifact_id: row.id, workspace_id: 'owned', artifact_type: 'compare_sources', status: 'queued' }; });
+  io.output.mockResolvedValue({ job_id: 41, workspace_id: 'owned', artifact_id: row.id, status: 'completed', artifact: row });
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: selections }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('compare_sources'); });
+  expect(io.state.generatedArtifacts[0]).toMatchObject({ workspaceArtifactId: 'compare-1', content: expect.stringContaining('Coverage: 2 of 2'), data: { sectionAnalysis: { sections: [{ status: 'completed' }, { status: 'completed' }] } } });
+});
+
+it('routes an ordinary long report through complete-source generation rather than an opening excerpt', async () => {
+  io.media.mockResolvedValue({ content: 'Opening material. ' + 'body '.repeat(1800) + 'Late opposing author.' });
+  const row = { id: 'report-1', workspace_id: 'owned', artifact_type: 'report', title: 'Report', status: 'complete',
+    content: 'Coverage: 1 of 1 selected sections completed. Late opposing author is represented.', version: 2,
+    created_at: new Date().toISOString(), version_metadata: { workspaceClient: { schemaVersion: 1, data: { sectionAnalysis: { sections: [{ status: 'completed' }] } } } } } as WorkspaceArtifactApiResponse;
+  io.submit.mockImplementation(async () => { stored.push(row); return { job_id: 42, artifact_id: row.id, workspace_id: 'owned', artifact_type: 'report', status: 'queued' }; });
+  io.output.mockResolvedValue({ job_id: 42, workspace_id: 'owned', artifact_id: row.id, status: 'completed', artifact: row });
+  const hook = renderHook(() => useArtifactGeneration(deps()));
+  await act(async () => { await hook.result.current.handleGenerateOutput('report'); });
+  expect(io.state.generatedArtifacts[0]).toMatchObject({ workspaceArtifactId: 'report-1', content: expect.stringContaining('Late opposing author') });
+});
+
+
+it('honors the selected output budget for a short report', async () => {
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), resolvedNumPredict: 4096 }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('report'); });
+  expect(io.complete.mock.calls[0][0]).toMatchObject({ max_tokens: 4096 });
+});
+
+it('rejects one selected section even when two sources are selected', async () => {
+  const second = { ...source, id: 'source-2', mediaId: 102 };
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSources: [source, second],
+    selectedMediaIds: [101, 102], selectedMediaCount: 2,
+    selectedSections: [{ source_id: source.id, node_id: 'n1', navigation_version: 'v1' }] }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('compare_sources'); });
+  expect(messages.warning).toHaveBeenCalled();
+  expect(io.submit).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('retries the saved section identity with cleared selection=%s', async (cleared) => {
+  const selections = [{ source_id: 'source-1', node_id: 'dsi:1', navigation_version: 'v1' }];
+  const settings = { sections: selections, provider: 'deepseek', model: 'saved-model', temperature: 0.7, top_p: 0.8,
+    max_tokens: 8192, summary_instruction: 'Saved instruction' };
+  const row = { id: 'summary-saved', workspace_id: 'owned', artifact_type: 'summary', title: 'Partial summary', status: 'failed',
+    content: 'Partial coverage with a completed quotation.', version: 2, created_at: new Date().toISOString(),
+    producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings } } as WorkspaceArtifactApiResponse;
+  stored.push(row);
+  const original = mapServerArtifactToLocal(row);
+  bindWorkspaceArtifactOrigin(original, 'server:alice', 'owned');
+  io.state.generatedArtifacts = [original];
+  io.submit.mockResolvedValue({ job_id: 42, artifact_id: row.id, status: 'queued' });
+  io.output.mockResolvedValue({ job_id: 41, status: 'failed', artifact: row });
+  const other = { ...source, id: 'source-2', mediaId: 102 };
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSources: cleared ? [] : [other],
+    selectedMediaIds: cleared ? [] : [102], selectedMediaCount: cleared ? 0 : 1, hasSelectedSources: !cleared }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('summary', { mode: 'replace', targetArtifactId: original.id }); });
+  expect(io.submit).toHaveBeenCalledWith('owned', expect.objectContaining({ source_ids: ['source-1'],
+    resume_artifact_id: row.id, settings: expect.objectContaining(settings) }), expect.anything());
+});
+
+it('preserves partial status when only the client metadata save fails', async () => {
+  const row = { id: 'partial-1', workspace_id: 'owned', artifact_type: 'summary', title: 'Partial summary', status: 'failed',
+    content: 'Partial coverage', version: 2, created_at: new Date().toISOString() } as WorkspaceArtifactApiResponse;
+  io.submit.mockImplementation(async () => { stored.push(row); return { job_id: 41, artifact_id: row.id, status: 'queued' }; });
+  io.output.mockResolvedValue({ job_id: 41, status: 'failed', artifact: row });
+  io.request.mockImplementation(async (request) => { if (request.method === 'GET') return stored; throw new Error('Save failed'); });
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }] }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('summary'); });
+  expect(hook.result.current.unsavedArtifact?.status).toBe('failed');
+  expect(io.state.generatedArtifacts[0].status).toBe('failed');
 });

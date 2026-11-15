@@ -41,6 +41,11 @@ export type MediaNavigationResponse = {
 export type MediaNavigationContentResponse = {
   media_id: number
   node_id: string
+  navigation_version?: string
+  resolved_start_char?: number | null
+  resolved_end_char?: number | null
+  coverage_status?: "exact" | "unavailable"
+  page_spans?: Array<{ page_number: number; start_char: number; end_char: number; printed_page_label?: string }>
   title: string
   content_format: MediaNavigationFormat
   available_formats: MediaNavigationFormat[]

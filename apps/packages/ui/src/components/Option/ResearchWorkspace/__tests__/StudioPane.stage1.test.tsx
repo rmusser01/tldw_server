@@ -909,6 +909,17 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(screen.getByRole("button", { name: "Slides" })).toBeEnabled()
   })
 
+  it("keeps saved section retry available when the source selection is cleared", () => {
+    workspaceStoreState.selectedSourceIds = []
+    workspaceStoreState.generatedArtifacts = [{
+      id: "saved-section", workspaceArtifactId: "saved-section", type: "summary", title: "Partial summary",
+      status: "failed", content: "Completed evidence", createdAt: new Date(),
+      producerMetadata: { origin: "research_workspace_output_job", job_id: 41, source_ids: ["source-1"] },
+    }]
+    renderStudioPane()
+    expect(screen.getByTestId("studio-artifact-retry-saved-section")).toBeEnabled()
+  })
+
   it("shows source readiness instead of unavailable generation actions until sources are selected", () => {
     workspaceStoreState.selectedSourceIds = []
 
@@ -1116,7 +1127,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     renderStudioPane()
 
     expect(
-      screen.getByText(/studio can use extracted text/i)
+      screen.getByText(/studio can use.*extracted text/i)
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Summary" })).toBeEnabled()
 
@@ -1165,7 +1176,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
 
     expect(screen.getByRole("button", { name: "Summary" })).toBeEnabled()
     expect(
-      screen.getByText(/studio can use extracted text/i)
+      screen.getByText(/studio can use.*extracted text/i)
     ).toBeInTheDocument()
   })
 
@@ -1428,7 +1439,7 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     const reportRequest = mockCreateChatCompletion.mock.calls[0]?.[0]
     expect(reportRequest).toMatchObject({
       model: "gpt-4o-mini",
-      max_tokens: 450
+      max_tokens: 800
     })
     expect(reportRequest.messages?.[0]?.content).toContain(
       "source-grounded report writer"

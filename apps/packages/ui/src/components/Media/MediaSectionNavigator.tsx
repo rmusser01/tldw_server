@@ -13,6 +13,7 @@ type Props = {
   error?: unknown
   onRetry?: () => void
   onSelectNode: (node: MediaNavigationNode) => void
+  selection?: { nodeIds: string[]; onToggle: (node: MediaNavigationNode) => void; disabled?: boolean }
   className?: string
 }
 
@@ -37,6 +38,7 @@ export const MediaSectionNavigator: React.FC<Props> = ({
   error,
   onRetry,
   onSelectNode,
+  selection,
   className = ""
 }) => {
   const [quickJump, setQuickJump] = React.useState("")
@@ -172,6 +174,9 @@ export const MediaSectionNavigator: React.FC<Props> = ({
             ) : (
               <span className="inline-block w-4" aria-hidden="true" />
             )}
+            {selection && <input type="checkbox" aria-label={`Include ${node.title}`}
+              checked={selection.nodeIds.includes(node.id)} disabled={selection.disabled}
+              onChange={() => selection.onToggle(node)} />}
             <button
               type="button"
               onClick={() => handleSelect(node)}
@@ -209,6 +214,7 @@ export const MediaSectionNavigator: React.FC<Props> = ({
       expandedIds,
       handleSelect,
       selectedNodeId,
+      selection,
       toggleChildGroupExpanded,
       toggleExpanded,
       tree.childrenByParent

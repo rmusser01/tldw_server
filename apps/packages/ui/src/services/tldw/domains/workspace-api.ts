@@ -589,6 +589,9 @@ export interface WorkspaceArtifactApiResponse {
 export type ResearchWorkspaceOutputArtifactType =
   | "video_overview"
   | "infographic"
+  | "summary"
+  | "compare_sources"
+  | "report"
 
 export type ResearchWorkspaceOutputStatus =
   | "queued"
@@ -597,10 +600,17 @@ export type ResearchWorkspaceOutputStatus =
   | "failed"
   | "cancelled"
 
+export interface ResearchWorkspaceSectionSelection {
+  source_id: string
+  node_id: string
+  navigation_version: string
+}
+
 export interface ResearchWorkspaceOutputSubmitRequest {
   artifact_type: ResearchWorkspaceOutputArtifactType
   source_ids: string[]
   settings?: Record<string, unknown>
+  resume_artifact_id?: string
 }
 
 export interface ResearchWorkspaceOutputSubmitResponse {
@@ -1818,6 +1828,11 @@ export const workspaceApiMethods = {
       ...requestScopeFields(options?.requestScope),
       abortSignal: options?.signal
     })
+  },
+
+  async cancelWorkspaceOutput(workspaceId: string, jobId: number, options?: ScopedRequestOptions): Promise<{ cancelled: boolean }> {
+    return await bgRequest({ path: workspacePath(workspaceId, `/outputs/${encodeWorkspacePathSegment(String(jobId), "jobId")}`),
+      method: "DELETE", ...requestScopeFields(options?.requestScope), abortSignal: options?.signal })
   },
 
   async getWorkspaceSourcePreview(

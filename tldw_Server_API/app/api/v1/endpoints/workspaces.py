@@ -94,6 +94,7 @@ from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError,
 from tldw_Server_API.app.core.feature_flags import is_persona_enabled
 from tldw_Server_API.app.core.Jobs.manager import _JOB_NONCRITICAL_EXCEPTIONS, JobManager
 from tldw_Server_API.app.core.Research_Workspace.output_jobs import (
+    cancel_research_workspace_output_job,
     get_research_workspace_output_job_status,
     submit_research_workspace_output_job,
 )
@@ -2518,6 +2519,27 @@ async def get_workspace_output_status(
         raise HTTPException(status_code=exc.status_code, detail=exc.public_code) from exc
     except (ConflictError, InputError, CharactersRAGDBError) as exc:
         raise map_db_error_to_http(exc, default_detail="Failed to fetch workspace output job") from exc
+
+
+@router.delete(
+    "/{workspace_id}/outputs/{job_id}",
+    dependencies=[Depends(WORKSPACES_WRITE_RATE_LIMIT)],
+    summary="Cancel a workspace output job while retaining completed sections",
+)
+async def cancel_workspace_output(workspace_id: str, job_id: int,
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    jm: JobManager | None = Depends(try_get_workspace_job_manager),
+    current_user: User = Depends(get_request_user),
+) -> dict[str, bool]:
+    """Cancel only a job verified to belong to this owner and workspace."""
+    _require_workspace(db, workspace_id)
+    if jm is None:
+        raise HTTPException(status_code=503, detail="jobs_unavailable")
+    try:
+        return {"cancelled": cancel_research_workspace_output_job(workspace_id=workspace_id, job_id=job_id,
+            job_manager=jm, user_id=current_user.id, workspace_db=db)}
+    except ResearchWorkspaceOutputJobError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.public_code) from exc
 
 
 # ── Artifacts ───────────────────────────────────────────────────

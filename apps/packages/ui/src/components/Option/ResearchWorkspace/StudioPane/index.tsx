@@ -1,3 +1,5 @@
+import { SectionScopePicker } from "./SectionScopePicker"
+import type { ResearchWorkspaceSectionSelection } from "@/services/tldw/domains/workspace-api"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React, { Suspense, useState, useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
@@ -480,8 +482,8 @@ const buildSelectedSourceReadinessNotice = (input: {
       title: "Source text is ready",
       description:
         textReadyProcessingCount === 1
-          ? "Studio can use extracted text while chunking or vector indexing continues."
-          : "Studio can use extracted text from selected sources while chunking or vector indexing continues.",
+          ? "Studio can use the extracted text. Some search features are not ready."
+          : "Studio can use the selected sources' extracted text. Some search features are not ready.",
       blocking
     }
   }
@@ -1081,7 +1083,16 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   // ── Hooks ──
 
+  const [sectionScopeOpen, setSectionScopeOpen] = React.useState(false)
+  const [sectionSelections, setSectionSelections] = React.useState<ResearchWorkspaceSectionSelection[]>([])
+  const selectedSections = React.useMemo(() => sectionSelections.filter(section =>
+    selectedSources.some(source => source.id === section.source_id)), [sectionSelections, selectedSources])
+  const changeSectionSelection = React.useCallback((sourceId: string, sections: ResearchWorkspaceSectionSelection[]) => {
+    setSectionSelections(previous => [...previous.filter(section => section.source_id !== sourceId), ...sections])
+  }, [])
+
   const artifactGeneration = useArtifactGeneration({
+    selectedSections,
     messageApi,
     selectedMediaIds,
     selectedSources,
@@ -1115,6 +1126,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
   const {
     generationPhase,
+    sectionProgress,
     chatModels: _chatModels,
     loadingChatModels,
     selectedUnavailableModel,
@@ -1323,7 +1335,12 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     async (type: ArtifactType, options?: ArtifactGenerationOptions) => {
       const button = OUTPUT_BUTTONS.find((entry) => entry.type === type)
       const label = button?.label ?? type.replace(/_/g, " ")
-      if (generationPrerequisiteMessage) {
+      const savedSectionRetry = options?.mode === "replace" && generatedArtifacts.some(artifact =>
+        artifact.id === options.targetArtifactId && artifact.workspaceArtifactId &&
+        ["summary", "report", "compare_sources"].includes(artifact.type) &&
+        artifact.producerMetadata?.origin === "research_workspace_output_job" &&
+        Array.isArray(artifact.producerMetadata?.source_ids) && artifact.producerMetadata.source_ids.length > 0)
+      if (generationPrerequisiteMessage && !savedSectionRetry) {
         messageApi.warning(generationPrerequisiteMessage)
         return
       }
@@ -1370,6 +1387,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     },
     [
       generationPrerequisiteMessage,
+      generatedArtifacts,
       getOutputCapability,
       handleGenerateOutput,
       messageApi,
@@ -2265,6 +2283,14 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             </Button>
           </div>
         )}
+        {selectedSources.length > 0 && <details onToggle={event => setSectionScopeOpen(event.currentTarget.open)} className="mb-3 rounded border border-border p-3">
+          <summary className="cursor-pointer text-sm font-medium">Review sections for summaries and comparisons</summary>
+          <p className="my-2 text-xs text-text-muted">Choose chapters or opposing contributions from the existing source outline. Selected sections set the scope for Summary, Report, Brief and Compare. With no section selection, Summary covers all selected source text.</p>
+          <p className="mb-2 text-xs">{selectedSections.length} sections selected. Check boundaries in the preview before generating.</p>
+          <div className="space-y-2">{sectionScopeOpen && selectedSources.map(source => <SectionScopePicker key={source.id} source={source}
+            selections={selectedSections} onChange={changeSectionSelection} disabled={isGeneratingOutput} />)}</div>
+        </details>}
+        {sectionProgress && isGeneratingOutput && <p role="status" className="mb-2 text-sm">{sectionProgress}</p>}
         {(() => {
           const primaryButtons = OUTPUT_BUTTONS.filter((b) => PRIMARY_OUTPUT_TYPES.has(b.type))
           const secondaryButtons = OUTPUT_BUTTONS.filter((b) => !PRIMARY_OUTPUT_TYPES.has(b.type))
@@ -2284,7 +2310,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             const isGenerating =
               isGeneratingOutput && generatingOutputType === type
             const requiresMultipleSources =
-              type === "compare_sources" && selectedMediaCount < 2
+              type === "compare_sources" && (selectedSections.length ? selectedSections.length < 2 : selectedMediaCount < 2)
             const capability = getOutputCapability(type)
             const capabilityBlocked = capability?.mode === "block"
             const capabilityMessage = capability
@@ -2957,15 +2983,15 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                           <p className="truncate text-sm font-medium text-text">
                             {artifact.title}
                           </p>
-                          {artifact.status === "failed" ? (
+                          {artifact.status === "failed" || (artifact.status === "generating" && artifact.producerMetadata?.job_id && !isGeneratingOutput) ? (
                             <>
                               <Tooltip title={failedRetryLabel}>
                                 <button
                                   type="button"
-                                  disabled={!hasSelectedSources || isGeneratingOutput}
+                                  disabled={(!hasSelectedSources && !artifact.producerMetadata?.job_id) || isGeneratingOutput}
                                   onClick={(event) => {
                                     event.stopPropagation()
-                                    if (!hasSelectedSources || isGeneratingOutput) return
+                                    if ((!hasSelectedSources && !artifact.producerMetadata?.job_id) || isGeneratingOutput) return
                                     void handleCapabilityAwareGenerateOutput(artifact.type, {
                                       mode: "replace",
                                       targetArtifactId: artifact.id,
@@ -2974,7 +3000,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                   }}
                                   onKeyDown={handleIconButtonKeyDown}
                                   className="rounded p-0.5 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
-                                  aria-label={failedRetryLabel}
+                                  aria-label={artifact.status === "generating" ? "Check saved generation progress" : failedRetryLabel}
                                   data-testid={`studio-artifact-retry-${artifact.id}`}
                                 >
                                   <RefreshCw className="h-3.5 w-3.5 shrink-0 text-text-muted hover:text-primary" />
