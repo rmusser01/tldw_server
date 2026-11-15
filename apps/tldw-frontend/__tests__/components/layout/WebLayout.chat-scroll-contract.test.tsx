@@ -115,6 +115,7 @@ const backendUnavailableGateState = vi.hoisted(() => ({
 vi.mock('antd', async (original) => {
   const actual = await original<typeof import('antd')>();
   return {
+    ...actual,
     Drawer: (props: React.ComponentProps<typeof actual.Drawer>) =>
       capabilityProbe.actualDrawer ? (
         <actual.Drawer {...props} />
