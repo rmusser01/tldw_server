@@ -1479,7 +1479,13 @@ describe("SourceViewControls", () => {
           />
         )
         const invoker = screen.getByRole("button", { name: "Save source view" })
-        await user.click(invoker)
+        if (action === "Escape") {
+          // Avoid a hover tooltip sharing the Modal's Escape registration ID in jsdom.
+          invoker.focus()
+          await user.keyboard("{Enter}")
+        } else {
+          await user.click(invoker)
+        }
         const first = await screen.findByRole("dialog")
         await waitFor(() =>
           expect(first.className).toContain("ant-zoom-appear-active")
@@ -1504,12 +1510,8 @@ describe("SourceViewControls", () => {
         fireEvent.animationEnd(current)
         await waitFor(() => expect(current.className).not.toContain("ant-zoom"))
         if (action === "Escape") {
-          fireEvent.keyDown(current, {
-            key: "Escape",
-            code: "Escape",
-            keyCode: 27,
-            which: 27
-          })
+          await waitFor(() => expect(input).toHaveFocus())
+          await user.keyboard("{Escape}")
         } else
           await user.click(within(current).getByRole("button", { name: action }))
         await waitFor(() =>

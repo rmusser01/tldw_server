@@ -657,3 +657,23 @@ Raw logs: `/private/tmp/pr3404-975-verification.log` and
 `/private/tmp/pr3404-975-fixed-verification.log`. These are scoped results,
 not full-suite or current-head hosted proof. Task remains In Progress until
 verified merge.
+
+## November 14 Source View Save Escape
+
+On published `1fecdfd86b`, frontend shard 6/8 failed waiting for the reopened
+Save dialog to start its leave animation after Escape (job `132439358670`).
+The original test passed without induced scheduling. With the real Ant Design
+Tooltip and Modal, waiting for the pointer-entered tooltip to finish leaving
+after the dialog reopened reproduced the CI assertion failure. Escape worked
+when sent before tooltip cleanup. In test mode both portals register under the
+same Escape stack ID; cleanup of the tooltip removes the dialog registration.
+This demonstrates the test-mode race, not a production defect or proof of
+the precise hosted scheduling.
+
+Only the Escape case opens the first dialog by keyboard, avoiding a hover
+tooltip. It waits for input focus before sending a user keyboard Escape to the
+reopened dialog. Cancel and Close still exercise pointer input, and the draft,
+leave motion and removal assertions remain. All 44 affected file tests passed
+locally after the change. No runtime, workflow, timeout, or license policy
+changes and no new ADR. Logs: `/private/tmp/pr3404-source-escape-*.log`.
+The task stays In Progress until fresh required CI and a verified merge.
