@@ -710,14 +710,16 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         media_id = result_item.get("db_id") if isinstance(result_item, dict) else None
 
         if media_id and getattr(form_data, "generate_embeddings", False):
-            asyncio.create_task(
-                _schedule_embeddings(
-                    media_id=int(media_id),
-                    user_id=user_id,
-                    db=db,
-                    form_data=form_data,
+            # The task outlives the job: it keeps the owner, not the job's admission or key.
+            with llm_call_context(prechecked=False, provider_credentials=None):
+                asyncio.create_task(
+                    _schedule_embeddings(
+                        media_id=int(media_id),
+                        user_id=user_id,
+                        db=db,
+                        form_data=form_data,
+                    )
                 )
-            )
 
         progress.percent = 100.0
         progress.message = "completed"
