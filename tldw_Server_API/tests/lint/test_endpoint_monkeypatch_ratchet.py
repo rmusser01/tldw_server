@@ -36,7 +36,7 @@ Phase 2 of TASK-13950.20 drains it from SEED, the total on dev when this ratchet
 Known limits. These escape the count: the builtin ``setattr(ep, ...)``; ``patch.dict``,
 ``patch.multiple`` and ``monkeypatch.setitem(<endpoint>.X, ...)``; a module object supplied by a
 fixture, a helper's return value, tuple unpacking or a parameter; attribute chains through another
-module's import (``runner_client.sandbox_ep._service``); control-flow-dependent bindings (the rule is
+module's import (``runner_client.endpoint_alias.name``); control-flow-dependent bindings (the rule is
 lexical); targets built with ``getattr`` or an f-string; a renamed ``patch``
 (``from unittest.mock import patch as _patch``, as in tests/Chat/integration/test_chat_endpoint.py:636-638).
 Comprehension variables and ``global``/``nonlocal`` names bind as if in the enclosing function. A
@@ -499,6 +499,47 @@ def test_no_route_less_endpoint_modules() -> None:
     found = set(route_less_endpoint_modules())
     assert sorted(found - set(ROUTE_LESS_ALLOWED)) == []
     assert sorted(set(ROUTE_LESS_ALLOWED) - found) == []  # an allowed module that grew routes is stale
+
+
+def _load_time_nodes(node: ast.AST) -> Iterator[ast.AST]:
+    """Nodes evaluated when the module loads: all but function and lambda bodies (defaults and decorators run)."""
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for part in (child.args, *getattr(child, "decorator_list", ())):
+                yield from ast.walk(part)
+        else:
+            yield child
+            yield from _load_time_nodes(child)
+
+
+def sandbox_service_copies(root: Path = APP_ROOT) -> list[str]:
+    """``path:line`` of each by-name import of ``sandbox_service`` and each read of it when a module loads."""
+    copies = []
+    for path, tree in parse_tree(root).items():
+        where = path.relative_to(root.resolve())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("Sandbox.default_service"):
+                copies += [f"{where}:{node.lineno}" for a in node.names if a.name == "sandbox_service"]
+        copies += [f"{where}:{n.lineno}" for n in _load_time_nodes(tree) if getattr(n, "attr", None) == "sandbox_service"]
+    return sorted(copies)
+
+
+def test_sandbox_service_copies_are_found(tmp_path: Path) -> None:
+    head = "from x.Sandbox import default_service as d\n"
+    root = _seed(
+        tmp_path,
+        {
+            "app/a.py": "from x.Sandbox.default_service import sandbox_service\n",
+            "app/b.py": head + "try:\n    s: object = d.sandbox_service\nexcept ImportError:\n    pass\n",
+            "app/c.py": head + "class C:\n    s = d.sandbox_service\n    def f(self, s=d.sandbox_service):\n        return d.sandbox_service\n",
+        },
+    )
+    assert sandbox_service_copies(root / "app") == ["a.py:1", "b.py:3", "c.py:3", "c.py:4"]  # c.py:5 is a call-time read
+
+
+def test_no_module_copies_the_default_sandbox_service() -> None:
+    """Callers read default_service.sandbox_service at call time, so one patch reaches routes and the ACP runner."""
+    assert sandbox_service_copies() == []
 
 
 if __name__ == "__main__":

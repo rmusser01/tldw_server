@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints import sandbox as sandbox_endpoint
+from tldw_Server_API.app.core.Sandbox import default_service
 
 
 @pytest.mark.asyncio
@@ -13,7 +14,7 @@ async def test_cancel_run_sanitizes_internal_failure(monkeypatch):
     def _raise_cancel_failure(_run_id):
         raise RuntimeError("sandbox cancel backend exploded at /private/sandbox.sock")
 
-    monkeypatch.setattr(sandbox_endpoint._service, "cancel_run", _raise_cancel_failure)
+    monkeypatch.setattr(default_service.sandbox_service, "cancel_run", _raise_cancel_failure)
 
     with pytest.raises(HTTPException) as exc_info:
         await sandbox_endpoint.cancel_run(

@@ -65,11 +65,11 @@ def _seed_run_and_artifact(client: TestClient) -> tuple[str, str]:
     assert r.status_code == 200
     run_id = r.json()["id"]
 
-    from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     artifact_path = "range-out.txt"
     payload = b"0123456789"
-    sb._service._orch.store_artifacts(run_id, {artifact_path: payload})  # type: ignore[attr-defined]
+    default_service.sandbox_service._orch.store_artifacts(run_id, {artifact_path: payload})  # type: ignore[attr-defined]
     return run_id, artifact_path
 
 
