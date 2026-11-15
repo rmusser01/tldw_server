@@ -70,6 +70,8 @@ export interface TutorialDefinition {
   /** Optional icon to display in the tutorial list */
   icon?: LucideIcon
   /** The steps that make up this tutorial */
+  /** Wait for the intro step's page content before offering the first-visit prompt. */
+  requireFirstTargetForPrompt?: boolean
   steps: TutorialStep[]
   /** IDs of other tutorials that should be completed first (optional) */
   prerequisites?: string[]

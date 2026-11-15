@@ -37,6 +37,8 @@ const getPrimaryTutorialForRouteMock = vi.fn<
     id: string
     labelKey: string
     labelFallback: string
+    requireFirstTargetForPrompt?: boolean
+    steps?: { target: string }[]
   }
 >(() => ({
   id: "playground-basics",
@@ -187,6 +189,37 @@ describe("TutorialPrompt behavior", () => {
   afterEach(() => {
     startTutorialMock.mock.calls.forEach((call) => call[1]?.dispose?.())
     vi.useRealTimers()
+  })
+
+  it("waits for async page content before offering its walkthrough", async () => {
+    getPrimaryTutorialForRouteMock.mockReturnValueOnce({
+      id: "test-async-tour",
+      labelKey: "tutorials:testAsync",
+      labelFallback: "Test tour",
+      requireFirstTargetForPrompt: true,
+      steps: [{ target: "#test-async-tour-anchor" }]
+    })
+    const renderPrompt = (ready: boolean) => (
+      <MemoryRouter initialEntries={["/account"]}>
+        <TutorialPrompt />
+        {ready && <h1 id="test-async-tour-anchor">Account</h1>}
+      </MemoryRouter>
+    )
+    const view = render(renderPrompt(false))
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+    await act(async () => view.rerender(renderPrompt(true)))
+    expect(infoMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("honors page-owned guides even when the route has a trailing slash", () => {
+    render(
+      <MemoryRouter initialEntries={["/notes/"]}>
+        <TutorialPrompt excludedRoutes={["/notes", "/research-workspace"]} />
+      </MemoryRouter>
+    )
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
   })
 
   it("shows a prompt with a single global notification key", () => {
