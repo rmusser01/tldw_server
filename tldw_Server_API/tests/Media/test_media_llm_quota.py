@@ -9,7 +9,8 @@ import pytest
 from ebooklib import epub
 
 import tldw_Server_API.app.api.v1.endpoints.media as media_mod
-from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_provider, media_analysis_requested
+from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio import Audio_Files
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video import Video_DL_Ingestion_Lib
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib
@@ -89,13 +90,13 @@ _ANALYSIS = {"perform_analysis": "true", "api_name": "openai"}
 
 # The last value is how many analysis calls an admitted request makes.
 _OTHER_HANDLERS = [
-    pytest.param("/api/v1/media/process-audios", _ANALYSIS, [("files", ("a.wav", _wav(), "audio/wav"))], 1, id="audios"),
+    pytest.param("/api/v1/media/process-audios", _ANALYSIS, [("files", ("a.wav", _wav, "audio/wav"))], 1, id="audios"),
     pytest.param("/api/v1/media/process-videos", _ANALYSIS, [("files", ("v.mp4", b"fake", "video/mp4"))], 1, id="videos"),
     pytest.param("/api/v1/media/process-documents", _ANALYSIS, [("files", ("d.txt", b"fake", "text/plain"))], 1, id="documents"),
     pytest.param(
         "/api/v1/media/process-pdfs",
         {**_ANALYSIS, "pdf_parsing_engine": "pymupdf"},
-        [("files", ("d.pdf", _pdf(), "application/pdf"))],
+        [("files", ("d.pdf", _pdf, "application/pdf"))],
         1,
         id="pdfs",
     ),
@@ -113,6 +114,49 @@ def test_analysis_is_requested_only_with_a_provider(perform_analysis: bool, api_
     """The same condition the processing libraries use to decide whether to call the LLM."""
     form = SimpleNamespace(perform_analysis=perform_analysis, api_name=api_name)
     assert media_analysis_requested(form) is expected
+
+
+_NO_OTHER_STAGE = {"api_name": "OpenAI", "perform_claims_extraction": False}
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "stage",
+    [
+        {"perform_claims_extraction": True},
+        {"enable_contextual_chunking": True},
+        {"contextual_llm_model": "gpt-4o-mini"},
+        {"context_window_size": 500},
+        {"auto_chunking_use_llm": True},
+        {"auto_apply_template": True},
+        {"chunking_template_name": "academic_paper"},
+        {"perform_confabulation_check_of_analysis": True},
+        {"proposition_engine": "llm"},
+        {"proposition_engine": " Auto "},
+    ],
+    ids=lambda stage: next(iter(stage)) + ("=" + str(stage["proposition_engine"]).strip() if "proposition_engine" in stage else ""),
+)
+def test_another_llm_stage_names_no_provider(stage: dict) -> None:
+    """Every other LLM stage the boundary cannot place on the user's key makes the request name no provider, so an
+    over-limit user is refused (TASK-15426)."""
+    assert media_analysis_provider(SimpleNamespace(**_NO_OTHER_STAGE)) == "openai"
+    assert media_analysis_provider(SimpleNamespace(**{**_NO_OTHER_STAGE, **stage})) is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("server_default", "perform_claims_extraction", "expected"),
+    [(True, None, None), (False, None, "openai"), (True, False, "openai")],
+    ids=["server-default-on", "server-default-off", "opted-out"],
+)
+def test_claims_by_the_servers_default_name_no_provider(
+    monkeypatch: pytest.MonkeyPatch, server_default: bool, perform_claims_extraction: bool | None, expected: str | None
+) -> None:
+    """Claims the server turns on by default (ENABLE_INGESTION_CLAIMS) are another LLM stage unless the request opts
+    out with perform_claims_extraction=false (TASK-15426)."""
+    monkeypatch.setitem(settings, "ENABLE_INGESTION_CLAIMS", server_default)
+    form = SimpleNamespace(api_name="openai", perform_claims_extraction=perform_claims_extraction)
+    assert media_analysis_provider(form) == expected
 
 
 @pytest.mark.integration
@@ -198,6 +242,7 @@ def test_media_handlers_name_the_analysis_provider_to_the_llm_quota(
     asked = users_own_key(monkeypatch, "openai" if own_key else "anthropic")
 
     with block_live_network() as attempts:
+        files = [(field, (name, body() if callable(body) else body, mime)) for field, (name, body, mime) in files]
         response = client.post(path, data=data, files=files)
 
     assert attempts == []
