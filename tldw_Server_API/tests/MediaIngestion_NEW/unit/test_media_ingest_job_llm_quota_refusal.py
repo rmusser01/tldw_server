@@ -268,3 +268,32 @@ async def test_the_admission_ends_with_the_job(
     assert [getattr(handle, "api_key", None) for handle in used] == ["sk-users-own-key"]
     assert current_llm_call_context().prechecked is False
     assert current_llm_call_context().provider_credentials is None
+
+
+@pytest.mark.asyncio
+async def test_the_embeddings_task_carries_no_key_and_no_admission(
+    job_dbs: Path, under_the_limit: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fire-and-forget embeddings task outlives the job, so it starts with neither the job's admission nor the
+    owner's key: an LLM call it made would be checked at the call, on the server's key (TASK-15500)."""
+    seen: list[Any] = []
+    started = asyncio.Event()
+
+    async def _embeddings(**kwargs: Any) -> None:
+        seen.append((current_llm_call_context(), kwargs["user_id"]))
+        started.set()
+
+    monkeypatch.setattr(worker, "_schedule_embeddings", _embeddings)
+    monkeypatch.setattr(summary, "_summarize_via_adapter", lambda **_kwargs: "Cedar opens.")
+    users_own_key(monkeypatch, "openai")
+    manager = JobManager()
+    row = _create_job(manager, job_dbs, _write_document(job_dbs, "Cedar"), "document", generate_embeddings=True)
+
+    result = await worker._handle_job(manager.get_job(int(row["id"])), manager, worker._ProgressState())
+    await asyncio.wait_for(started.wait(), timeout=5)
+
+    assert result["status"] == "Success", result
+    [(context, user_id)] = seen
+    assert context.provider_credentials is None
+    assert context.prechecked is False
+    assert str(user_id) == "1"
