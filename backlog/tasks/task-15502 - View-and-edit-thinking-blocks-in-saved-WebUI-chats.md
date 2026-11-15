@@ -7,6 +7,7 @@ labels:
 - chat
 references:
 - Docs/Design/2026-11-14-chat-thinking-blocks.md
+- https://github.com/rmusser01/tldw_server/pull/3475
 ---
 
 ## Description
