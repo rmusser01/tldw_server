@@ -33,6 +33,8 @@ Candidate verification: 119 web-shell, registry, prompt, locale and Joyride test
 Signed-in Team UAT reproduced HTTP 500. The production response model rejects a synthetic PostgreSQL datetime at added_at; retain the API string result with explicit normalization.
 Signed-in beta UAT identified the Notes auto-tour and PostgreSQL timestamp failure. The fix preserves first-visit dismissal and Notes Help replay. Targeted frontend checks and all three schema regression cases passed.
 Public PR #3473. Signed-in owner UAT also exposed an invitation list 500 after recovering the member list. The repository uses naive UTC parameters for PostgreSQL TIMESTAMP in list, create, and expiry cleanup. Eight focused backend cases passed.
+PR #3473 CI reproduced the mobile parity guard failure against an unchanged dev source. dev already removed the decorative Composer pill in 157b04a3ac. Remove the stale source assertion; the sticky composer integration test covers the intended absence.
+Verified all three local Playground CI suites (52 composer, 15 device matrix, and 63 accessibility tests), plus four sticky-composer integration tests.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
