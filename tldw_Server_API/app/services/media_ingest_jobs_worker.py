@@ -42,6 +42,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.Usage.llm_call_context import (
+    FRESH_ROOT,
     bind_provider_credentials,
     current_llm_user_id,
     llm_call_context,
@@ -711,7 +712,7 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
 
         if media_id and getattr(form_data, "generate_embeddings", False):
             # The task outlives the job: it keeps the owner, not the job's admission or key.
-            with llm_call_context(prechecked=False, provider_credentials=None):
+            with llm_call_context(**FRESH_ROOT):
                 asyncio.create_task(
                     _schedule_embeddings(
                         media_id=int(media_id),

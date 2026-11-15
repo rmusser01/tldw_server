@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from tldw_Server_API.app.core.Usage.llm_call_context import (
+    FRESH_ROOT,
     capture_llm_call_state,
     llm_call_context,
     run_with_llm_call_state,
@@ -61,7 +62,7 @@ def llm_call_root(user_id: Any, *, operation: str | None = None) -> Iterator[Non
     A media ingest job that asks for analysis checks once when it starts, and
     then marks itself admitted until it ends (TASK-13864).
     """
-    overrides: dict[str, Any] = {"prechecked": False, "provider_credentials": None}  # nor its own-key handle
+    overrides: dict[str, Any] = dict(FRESH_ROOT)
     resolved = as_quota_user_id(user_id)
     if resolved is not None:
         overrides["user_id"] = resolved

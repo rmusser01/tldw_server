@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from fnmatch import fnmatchcase
+from types import MappingProxyType
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -73,6 +74,9 @@ class LLMCallState:
 _DEFAULT_CONTEXT = LLMCallContext()
 _CTX: ContextVar[LLMCallContext] = ContextVar("llm_call_context", default=_DEFAULT_CONTEXT)
 _IN_ACCOUNTED_CALL: ContextVar[bool] = ContextVar("llm_in_accounted_call", default=False)
+# What a unit of background work never inherits from whatever started it: the request's admission and the
+# user's own-key handle (llm_call_root; the media ingest job's embeddings task, TASK-15500).
+FRESH_ROOT: Mapping[str, Any] = MappingProxyType({"prechecked": False, "provider_credentials": None})
 
 
 def current_llm_call_context() -> LLMCallContext:

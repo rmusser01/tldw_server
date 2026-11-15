@@ -15,7 +15,7 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary
 from tldw_Server_API.app.core.Usage import llm_accounting, quota_resolver
-from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context, current_llm_user_id
 from tldw_Server_API.app.core.Usage.llm_quota_gate import user_to_check
 from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls, users_own_key
 
@@ -280,7 +280,7 @@ async def test_the_embeddings_task_carries_no_key_and_no_admission(
     started = asyncio.Event()
 
     async def _embeddings(**kwargs: Any) -> None:
-        seen.append((current_llm_call_context(), kwargs["user_id"]))
+        seen.append((current_llm_call_context(), current_llm_user_id(), kwargs["user_id"]))
         started.set()
 
     monkeypatch.setattr(worker, "_schedule_embeddings", _embeddings)
@@ -293,7 +293,8 @@ async def test_the_embeddings_task_carries_no_key_and_no_admission(
     await asyncio.wait_for(started.wait(), timeout=5)
 
     assert result["status"] == "Success", result
-    [(context, user_id)] = seen
+    [(context, context_user_id, user_id)] = seen
     assert context.provider_credentials is None
     assert context.prechecked is False
+    assert context_user_id == 1
     assert str(user_id) == "1"
