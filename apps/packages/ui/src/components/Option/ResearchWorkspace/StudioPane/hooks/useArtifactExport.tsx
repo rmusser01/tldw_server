@@ -508,6 +508,25 @@ export function useArtifactExport(deps: UseArtifactExportDeps) {
         return
       }
 
+      // Workspace artifact IDs belong to a different resource than legacy Outputs.
+      // Export the hydrated text itself; a preview is not a complete download.
+      if (artifact.workspaceArtifactId && [
+        "summary", "report", "compare_sources", "timeline", "mindmap", "slides", "data_table"
+      ].includes(artifact.type)) {
+        if (typeof artifact.content !== "string" || !artifact.content.trim()) {
+          messageApi.error(t(
+            "playground:studio.downloadTextNotLoaded",
+            "Saved output text is not loaded. Reopen the output and retry the download."
+          ))
+          return
+        }
+        downloadBlobFile(
+          new Blob([artifact.content], { type: "text/plain;charset=utf-8" }),
+          `${artifact.title}.${getFileExtension(artifact.type)}`
+        )
+        return
+      }
+
       if (artifact.serverId && artifact.type !== "mindmap") {
         try {
           const blob = await tldwClient.downloadOutput(String(artifact.serverId))
