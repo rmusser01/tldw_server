@@ -102,6 +102,8 @@ PR-specific summary waiver recorded; no unapproved check bypass or unrelated cle
    The refreshed inventory passed all 12 tests. The updated dev backend gate
    found nine endpoint-module patches over its existing ceilings. Moved the
    stubs to service collaborators; the legacy media shim and assertions are
-   unchanged. The focused endpoint/ratchet run passed 137 cases, independent
-   review approved, and production Bandit found no issues. Chat and hosted CI
-   remain open.
+   unchanged. The focused endpoint/ratchet run passed 137 cases and independent
+   review approved. The final backend step passed 1,129 contracts (one skip)
+   and 193 WebSocket cases; production Bandit found no issues. Regenerated the
+   four affected inventory line references and reran all 12 inventory tests
+   successfully. Chat and hosted CI remain open.
