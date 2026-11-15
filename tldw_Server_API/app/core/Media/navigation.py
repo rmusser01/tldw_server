@@ -39,7 +39,7 @@ NAVIGATION_SOURCE_PRIORITY = (
     "transcript_segment",
     "chunk_metadata",
 )
-NAVIGATION_CACHE_VERSION = 3
+NAVIGATION_CACHE_VERSION = 4
 _WS_RE = re.compile(r"\s+")
 _MD_HEADING_LINE_RE = re.compile(
     r"(?m)^(?P<prefix>\s{0,3})(?P<marks>#{1,6})\s+(?P<title>[^\n#].*?)\s*$",
@@ -1483,6 +1483,7 @@ def _derive_content_span(
         [item.model_dump() for item in all_nodes],
         get_media_page_map(media, content or "", db) if node.target_type == "page" else [],
         content_length,
+        content=content,
     )
 
 

@@ -897,6 +897,8 @@ async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves
     assert "600–1200" not in reduction_prompt
     assert "Compress only the supplied portions" in reduction_prompt
     assert "Final-only detailed report request" in calls[-1]["messages_payload"][0]["content"]
+    assert "reference lists may be shared across a chapter" in calls[0]["messages_payload"][0]["content"]
+    assert all("Cited names and bibliographic links do not establish" in call["system_message"] for call in calls)
     assert "at most 250 words" in calls[2]["system_message"]
     assert "concrete policy proposals and opposing policy stances" in calls[2]["system_message"]
     assert options["workspace_db"].row["status"] == "complete"
@@ -1056,3 +1058,48 @@ async def test_grouped_synthesis_citations_reject_unknown_evidence_ids(monkeypat
         section = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]
         assert section["error_code"] == "unknown_evidence_reference"
         assert citation not in row["content"]
+
+
+@pytest.mark.asyncio
+async def test_comparison_uses_exact_child_boundaries_and_keeps_shared_reference_text(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    content = "# Chapter\n**Abolish**\nAuthor A closing position.\n**Retain**\nAuthor B supports retention.\n**ENDNOTES**\nShared citations.\nNext chapter"
+    next_start = content.index("Next chapter")
+    nodes = [
+        {"id": "chapter", "title": "1. Two views", "level": 1, "target_start": 1},
+        {"id": "a", "title": "Abolish", "level": 2, "parent_id": "chapter", "target_start": 1},
+        {"id": "b", "title": "Retain", "level": 2, "parent_id": "chapter", "target_start": 1},
+        {"id": "next", "title": "2. Next", "level": 1, "target_start": 2},
+    ]
+    for node in nodes:
+        node.update(target_type="page", source="generated_toc")
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": content, "navigation_version": "v1", "nodes": nodes,
+        "page_map": [{"page_number": 1, "printed_page_label": "1", "start_char": 0, "end_char": next_start},
+                     {"page_number": 2, "printed_page_label": "2", "start_char": next_start, "end_char": len(content)}],
+    }))
+    prompts = []
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            prompts.append(prompt.split("SOURCE:", 1)[1])
+            text = json.dumps({"summary": "An attributed position", "evidence": [{"claim": "Position", "source_span_ids": ["P1"]}]})
+        else:
+            text = "Two positions remain distinct."
+        return {"choices": [{"message": {"content": text}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    selections = [{"source_id": "source", "node_id": node, "navigation_version": "v1"} for node in ("a", "b")]
+    settings = request().settings.model_validate({"sections": selections})
+    options = args(settings)
+    options["payload"]["artifact_type"] = "compare_sources"
+    await mod.process_section_summary(**options)
+    assert len(prompts) == 2
+    assert "Author A closing position" in prompts[0] and "Author B" not in prompts[0]
+    assert "Author B supports retention" in prompts[1] and "Author A" not in prompts[1]
+    assert "Shared citations" in prompts[1]
+    assert options["workspace_db"].row["status"] == "complete"

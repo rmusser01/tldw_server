@@ -3,8 +3,8 @@
 import hashlib
 
 import pytest
-from hypothesis import given, strategies as st
-
+from hypothesis import given
+from hypothesis import strategies as st
 
 pytestmark = pytest.mark.unit
 
@@ -120,7 +120,9 @@ def test_char_section_keeps_explicit_end_when_no_child_is_truncated():
 async def test_pdf_pages_survive_persistence_and_chunk_retrieval(tmp_path):
     import asyncio
     import json
+
     import pymupdf
+
     from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
     from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, get_document_version
     from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
@@ -167,3 +169,67 @@ async def test_pdf_pages_survive_persistence_and_chunk_retrieval(tmp_path):
             assert documents[0].page_number is not None
         finally:
             db.close_connection()
+
+
+def contribution_fixture(second_heading="**The case for support**"):
+    pages = [
+        "# 1. Two positions\n\n**The case for abolition**\nAuthor A argues abolition.\n",
+        "Running header\nAuthor A's final sentence.\n\n" + second_heading + "\nAuthor B argues support.\n\n**ENDNOTES**\nShared references.\n",
+        "# 2. Next chapter\nOther material.\n",
+    ]
+    content = "\n\n".join(pages)
+    offset = 0
+    page_map = []
+    for index, page in enumerate(pages):
+        page_map.append({"page_number": index + 1, "printed_page_label": str(index + 7),
+                         "start_char": offset, "end_char": offset + len(page)})
+        offset += len(page) + 2
+    nodes = [
+        {"id": "chapter", "title": "1. Two positions", "level": 1, "target_start": 7},
+        {"id": "abolish", "title": "The case for abolition", "parent_id": "chapter", "level": 2, "target_start": 7},
+        {"id": "support", "title": "The case for support", "parent_id": "chapter", "level": 2, "target_start": 8},
+        {"id": "next", "title": "2. Next chapter", "level": 1, "target_start": 9},
+    ]
+    for node in nodes:
+        node.update(target_type="page", source="generated_toc")
+    return content, page_map, nodes
+
+
+def test_child_contribution_boundary_keeps_previous_authors_closing_text_and_shared_references():
+    from tldw_Server_API.app.core.Media.page_provenance import resolve_navigation_span
+
+    content, page_map, nodes = contribution_fixture()
+    first = resolve_navigation_span(nodes[1], nodes, page_map, len(content), content=content)
+    second = resolve_navigation_span(nodes[2], nodes, page_map, len(content), content=content)
+    assert first == (content.index("**The case for abolition**"), content.index("**The case for support**"))
+    assert second == (first[1], page_map[2]["start_char"])
+    assert "Author A's final sentence" in content[first[0]:first[1]]
+    assert "Author A's final sentence" not in content[second[0]:second[1]]
+    assert "Shared references" in content[second[0]:second[1]]
+
+
+@pytest.mark.parametrize("node_index", [0, 3])
+def test_child_refinement_preserves_parent_chapter_ranges(node_index):
+    from tldw_Server_API.app.core.Media.page_provenance import resolve_navigation_span
+
+    content, page_map, nodes = contribution_fixture()
+    before = resolve_navigation_span(nodes[node_index], nodes, page_map, len(content))
+    assert resolve_navigation_span(nodes[node_index], nodes, page_map, len(content), content=content) == before
+
+
+@pytest.mark.parametrize("heading", ["**The case for support**\n\n**The case for support**", "**The case for supports**", "No matching heading"])
+def test_child_heading_ambiguous_or_missing_fails_closed_for_both_adjacent_contributions(heading):
+    from tldw_Server_API.app.core.Media.page_provenance import resolve_navigation_span
+
+    content, page_map, nodes = contribution_fixture(heading)
+    for index in (1, 2):
+        assert resolve_navigation_span(nodes[index], nodes, page_map, len(content), content=content) is None
+
+
+def test_child_heading_matches_markup_and_whitespace_but_never_a_different_page():
+    from tldw_Server_API.app.core.Media.page_provenance import resolve_navigation_span
+
+    content, page_map, nodes = contribution_fixture("### **The   case for support**")
+    assert resolve_navigation_span(nodes[2], nodes, page_map, len(content), content=content)[0] == content.index("### **The")
+    nodes[2]["target_start"] = 9
+    assert resolve_navigation_span(nodes[2], nodes, page_map, len(content), content=content) is None

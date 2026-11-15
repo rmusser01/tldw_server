@@ -1,6 +1,7 @@
 """Exact PDF locations in the final normalized, stored document text."""
 
 import hashlib
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -67,6 +68,8 @@ def resolve_navigation_span(
     nodes: Sequence[Mapping[str, Any]],
     page_map: Any,
     content_length: int,
+    *,
+    content: str | None = None,
 ) -> tuple[int, int] | None:
     """Resolve exact node bounds, keeping child headings inside their parent."""
     page_map = validate_page_map(page_map, content_length)
@@ -85,7 +88,36 @@ def resolve_navigation_span(
             matches = [entry for entry in page_map if entry.get("printed_page_label") == str(target)]
         else:
             return None
-        return matches[0]["start_char"] if len(matches) == 1 else None
+        if len(matches) != 1:
+            return None
+        page = matches[0]
+        parent = next((candidate for candidate in nodes if candidate.get("id") == item.get("parent_id")), None)
+        numbered_title = r"^(?:chapter\s+)?\d+[.)]?\s+"
+        is_contribution = (
+            item.get("source") == "generated_toc"
+            and parent is not None
+            and re.match(numbered_title, str(parent.get("title", "")), re.I)
+            and not re.match(numbered_title, str(item.get("title", "")), re.I)
+        )
+        if not is_contribution:
+            return page["start_char"]
+        if content is None or len(content) != content_length:
+            return None
+
+        def heading_text(value: str) -> str:
+            value = re.sub(r"^#{1,6}\s+", "", value.strip())
+            return " ".join(value.strip("*_`").split())
+
+        title = heading_text(str(item.get("title", "")))
+        offsets = []
+        offset = page["start_char"]
+        for line in content[page["start_char"] : page["end_char"]].splitlines(keepends=True):
+            if title and heading_text(line) == title:
+                offsets.append(offset)
+            offset += len(line)
+        # A page location is not an author boundary. Never guess when the exact
+        # child heading is missing or ambiguous, including for a sibling's end.
+        return offsets[0] if len(offsets) == 1 else None
 
     start = start_of(node)
     if start is None:
