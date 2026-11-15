@@ -190,6 +190,28 @@ describe("DocumentWorkspacePage design-system alerts", () => {
     expect(testState.workspace.openDocument).not.toHaveBeenCalled()
   })
 
+  it("opens successive citation pages in an already open PDF without pinning later reading", async () => {
+    store.setState({activeDocumentId: 42, activeDocumentType: "pdf", totalPages: 922,
+      currentPage: 1, openDocuments: [{id: 42, type: "pdf", title: "Book"}] } as never)
+    testState.searchParams = new URLSearchParams("open=42&page=352")
+    const view = render(<DocumentWorkspacePage />)
+    await waitFor(() => expect(store.getState().currentPage).toBe(352))
+    testState.searchParams = new URLSearchParams("open=42&page=582")
+    view.rerender(<DocumentWorkspacePage />)
+    await waitFor(() => expect(store.getState().currentPage).toBe(582))
+    act(() => store.getState().setCurrentPage(583))
+    view.rerender(<DocumentWorkspacePage />)
+    expect(store.getState().currentPage).toBe(583)
+  })
+
+  it.each(["0", "-1", "1.5", "999", "2oops"])("ignores invalid citation page %s", (page) => {
+    store.setState({activeDocumentId: 42, activeDocumentType: "pdf", totalPages: 922,
+      currentPage: 10, openDocuments: [{id: 42, type: "pdf", title: "Book"}] } as never)
+    testState.searchParams = new URLSearchParams(`open=42&page=${page}`)
+    render(<DocumentWorkspacePage />)
+    expect(store.getState().currentPage).toBe(10)
+  })
+
   it("renders the auto-open loading state through the design-system Alert", async () => {
     testState.searchParams = new URLSearchParams("open=42")
 

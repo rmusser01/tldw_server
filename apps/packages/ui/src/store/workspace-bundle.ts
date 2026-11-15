@@ -1,4 +1,5 @@
 import type { ChatHistory, Message } from "@/store/option"
+import type { SourceAnnotations } from "@/utils/source-annotations"
 import type {
   AudioGenerationSettings,
   GeneratedArtifact,
@@ -27,6 +28,7 @@ export interface WorkspaceBundleSnapshot {
   workspaceCreatedAt: ExportDateValue
   studyMaterialsPolicy: StudyMaterialsPolicy | null
   sources: WorkspaceSource[]
+  sourceAnnotations?: SourceAnnotations
   selectedSourceIds: string[]
   sourceFolders?: WorkspaceSourceFolder[]
   sourceFolderMemberships?: WorkspaceSourceFolderMembership[]

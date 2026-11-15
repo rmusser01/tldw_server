@@ -8,6 +8,7 @@ import {
  */
 
 import { createWithEqualityFn } from "zustand/traditional"
+import { readSourceAnnotationsForExport } from "@/utils/source-annotations"
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { ChatHistory, Message } from "@/store/option"
 import {
@@ -4381,29 +4382,34 @@ export const buildWorkspaceSnapshot = (state: WorkspaceState): WorkspaceSnapshot
 
 export const buildWorkspaceBundleSnapshot = (
   snapshot: WorkspaceSnapshot
-): WorkspaceBundleSnapshot => ({
-  workspaceName: snapshot.workspaceName,
-  workspaceTag: snapshot.workspaceTag,
-  studyMaterialsPolicy: snapshot.studyMaterialsPolicy ?? null,
-  workspaceCreatedAt: snapshot.workspaceCreatedAt,
-  sources: snapshot.sources.map((source) => ({ ...source })),
-  selectedSourceIds: [...snapshot.selectedSourceIds],
-  sourceFolders: snapshot.sourceFolders.map((folder) => ({ ...folder })),
-  sourceFolderMemberships: snapshot.sourceFolderMemberships.map((membership) => ({
-    ...membership
-  })),
-  selectedSourceFolderIds: [...snapshot.selectedSourceFolderIds],
-  activeFolderId: snapshot.activeFolderId,
-  generatedArtifacts: snapshot.generatedArtifacts.map((artifact) => ({
-    ...artifact
-  })),
-  notes: snapshot.notes,
-  currentNote: { ...snapshot.currentNote },
-  workspaceBanner: cloneWorkspaceValue(snapshot.workspaceBanner),
-  leftPaneCollapsed: snapshot.leftPaneCollapsed,
-  rightPaneCollapsed: snapshot.rightPaneCollapsed,
-  audioSettings: { ...snapshot.audioSettings }
-})
+): WorkspaceBundleSnapshot | null => {
+  const sourceAnnotations = readSourceAnnotationsForExport(snapshot.workspaceId, snapshot.sources.map(source => source.id))
+  if (sourceAnnotations === null) return null
+  return {
+    workspaceName: snapshot.workspaceName,
+    workspaceTag: snapshot.workspaceTag,
+    studyMaterialsPolicy: snapshot.studyMaterialsPolicy ?? null,
+    workspaceCreatedAt: snapshot.workspaceCreatedAt,
+    sources: snapshot.sources.map((source) => ({ ...source })),
+    sourceAnnotations,
+    selectedSourceIds: [...snapshot.selectedSourceIds],
+    sourceFolders: snapshot.sourceFolders.map((folder) => ({ ...folder })),
+    sourceFolderMemberships: snapshot.sourceFolderMemberships.map((membership) => ({
+      ...membership
+    })),
+    selectedSourceFolderIds: [...snapshot.selectedSourceFolderIds],
+    activeFolderId: snapshot.activeFolderId,
+    generatedArtifacts: snapshot.generatedArtifacts.map((artifact) => ({
+      ...artifact
+    })),
+    notes: snapshot.notes,
+    currentNote: { ...snapshot.currentNote },
+    workspaceBanner: cloneWorkspaceValue(snapshot.workspaceBanner),
+    leftPaneCollapsed: snapshot.leftPaneCollapsed,
+    rightPaneCollapsed: snapshot.rightPaneCollapsed,
+    audioSettings: { ...snapshot.audioSettings }
+  }
+}
 
 export const cloneWorkspaceBundleChatSession = (
   session: WorkspaceBundleChatSession

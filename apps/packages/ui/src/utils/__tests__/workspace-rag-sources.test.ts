@@ -12,6 +12,20 @@ const source = {
   metadata: { media_id: 42, secret: "do-not-retain" },
 };
 describe("S04 recorded workspace source references", () => {
+  it("preserves physical page and citation identity through a sourced note roundtrip", () => {
+    const recorded = projectWorkspaceRagSources([{
+      ...source, type: "pdf", metadata: { media_id: 42, page_number: 352, citation_index: 2 }
+    }])!;
+    expect(recorded.sources![0]).toMatchObject({ pageNumber: 352, citationIndex: 2 });
+    expect(restoreWorkspaceRagSources(recorded)[0].metadata).toMatchObject({ page_number: 352, citation_index: 2 });
+  });
+  it("does not turn malformed location metadata into a saved citation", () => {
+    const recorded = projectWorkspaceRagSources([{
+      ...source, metadata: { media_id: 42, page_number: -4, citation_index: "2oops" }
+    }])!;
+    expect(recorded.sources![0]).not.toHaveProperty("pageNumber");
+    expect(recorded.sources![0]).not.toHaveProperty("citationIndex");
+  });
   it("round-trips only the bounded reference fields, without treating arbitrary metadata as evidence", () => {
     const recorded = projectWorkspaceRagSources([source])!;
     expect(recorded.sources).toEqual([

@@ -318,7 +318,7 @@ def _status_from_media(
         reason="vector_index_pending",
         readiness=readiness,
         progress_percent=75.0,
-        progress_message="Text search is available while vector indexing continues.",
+        progress_message="Text search is available. Semantic search is not ready.",
     )
 
 

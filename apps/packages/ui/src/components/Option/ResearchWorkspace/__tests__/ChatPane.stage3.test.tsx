@@ -4,7 +4,7 @@ import { webcrypto } from "node:crypto"
 import { sha256Text } from "@/store/workspace-migration"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ReactNode } from "react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useLocation } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectionPhase } from "@/types/connection"
 import { ChatPane } from "../ChatPane"
@@ -250,15 +250,20 @@ vi.mock("@/components/Common/Playground/Message", () => ({
     message,
     onSaveToWorkspaceNotes,
     onRegenerate,
-    onEditFormSubmit
+    onEditFormSubmit,
+    sources,
+    onSourceClick
   }: {
     message: string
     onSaveToWorkspaceNotes?: () => void
     onRegenerate?: () => void
     onEditFormSubmit?: (value: string, isSend: boolean) => void
+    sources?: unknown[]
+    onSourceClick?: (source: unknown) => void
   }) => (
     <div>
       <div data-testid="playground-message">{message}</div>
+      {sources?.[0] && <button onClick={() => onSourceClick?.(sources[0])}>Open cited evidence</button>}
       <button onClick={onRegenerate}>Regenerate capture test</button>
       <button onClick={() => onEditFormSubmit?.("edited question", true)}>
         Edit and send capture test
@@ -466,6 +471,20 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
       modal.mockRestore()
       workspaceUndo.clearWorkspaceUndoActionsForTests()
     }
+  })
+
+  it("opens a PDF citation at the recorded page instead of focusing only the source row", async () => {
+    workspaceStoreState.sources = [{id: "pdf-source", mediaId: 42, title: "Book", type: "pdf"}]
+    messageOptionState.messages = [{id: "answer", isBot: true, name: "Assistant", message: "Cited answer", sources: [
+      {type: "pdf", metadata: {media_id: 42, page_number: 352}, pageContent: "Evidence"}
+    ]}]
+    const Location = () => {
+      const location = useLocation()
+      return <output data-testid="citation-route">{location.pathname}{location.search}</output>
+    }
+    render(<MemoryRouter><Location /><ChatPane /></MemoryRouter>)
+    fireEvent.click(await screen.findByRole("button", {name: "Open cited evidence"}))
+    expect(screen.getByTestId("citation-route").textContent).toBe("/document-workspace?open=42&page=352")
   })
 
   it("does not Undo into a replacement account after Clear", () => {
@@ -1404,6 +1423,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith({
         message: prompt,
+        ragQuery: prompt,
         image: ""
       })
     })
@@ -1608,6 +1628,22 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         message: expect.stringContaining("User question: What's the synopsis?")
       })
     )
+  })
+
+  it("uses focused retrieval for oversized full-source text and keeps the original question", async () => {
+    workspaceStoreState.selectedSourceIds = ["source-doc-1"]
+    workspaceStoreState.getSelectedSources = () => [{ id: "source-doc-1", mediaId: 101, title: "Long book", type: "pdf", status: "ready" }]
+    workspaceStoreState.getSelectedMediaIds = () => [101]
+    mockGetMediaDetails.mockResolvedValue({ content: { text: "Full book text. ".repeat(10000) } })
+    renderChatPane()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Include full source contents" }))
+    fireEvent.change(screen.getByLabelText("Chat message"), { target: { value: "What does Education propose?" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    const submitted = mockOnSubmit.mock.calls.at(-1)?.[0]
+    expect(submitted.ragQuery).toBe("What does Education propose?")
+    expect(submitted.message).not.toContain("Full book text.")
+    expect(submitted.message).toContain("What does Education propose?")
   })
 
   it("does not duplicate question framing when full source contents and response presets are enabled", async () => {

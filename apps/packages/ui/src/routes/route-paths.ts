@@ -10,6 +10,14 @@ export const WORKSPACES_PATH = "/workspaces"
 export const PROTOTYPE_WORKSPACES_PATH = "/prototype-workspaces"
 export const RESEARCH_WORKSPACE_PATH = "/research-workspace"
 export const DOCUMENT_WORKSPACE_PATH = "/document-workspace"
+
+/** A citation opens through the authenticated viewer, never a raw file URL. */
+export const buildDocumentPagePath = (mediaId: unknown, page: unknown): string | null => {
+  if (typeof mediaId !== "number" && !(typeof mediaId === "string" && /^[1-9]\d*$/.test(mediaId))) return null
+  const id = Number(mediaId)
+  if (!Number.isSafeInteger(id) || id <= 0 || typeof page !== "number" || !Number.isSafeInteger(page) || page <= 0) return null
+  return `${DOCUMENT_WORKSPACE_PATH}?open=${id}&page=${page}`
+}
 export const CLAIMS_REVIEW_PATH = "/claims-review"
 export const MODERATION_REVIEW_PATH = "/moderation"
 export const MODERATION_RULES_PATH = "/moderation/rules"

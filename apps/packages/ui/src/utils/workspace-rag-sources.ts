@@ -93,6 +93,8 @@ export const projectWorkspaceRagSources = (
     )
       return null;
     const url = row.url ?? metadata.url;
+    const pageNumber = positiveId(row.pageNumber ?? row.page_number ?? metadata.page_number ?? metadata.pageNumber);
+    const citationIndex = positiveId(row.citationIndex ?? row.citation_index ?? metadata.citation_index ?? metadata.citationIndex);
     sources.push({
       originalId: mediaId,
       excerpt,
@@ -103,6 +105,8 @@ export const projectWorkspaceRagSources = (
         : "text") as KnowledgeNoteSource["type"],
       sourceType: typeof sourceType === "string" ? sourceType : null,
       ...(typeof url === "string" && url && safeUrl(url) ? { url } : {}),
+      ...(pageNumber !== null ? {pageNumber} : {}),
+      ...(citationIndex !== null ? {citationIndex} : {}),
     });
   }
   return readWorkspaceRagSourceProvenance({ origin: "knowledge_qa", sources });
@@ -119,5 +123,7 @@ export const restoreWorkspaceRagSources = (value: unknown) =>
       media_id: source.mediaId,
       title: source.title,
       type: source.sourceType || source.type,
+      ...(source.pageNumber != null ? {page_number: source.pageNumber} : {}),
+      ...(source.citationIndex != null ? {citation_index: source.citationIndex} : {}),
     },
   })) || [];

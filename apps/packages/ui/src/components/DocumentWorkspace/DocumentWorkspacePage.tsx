@@ -555,6 +555,8 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
 
   // Get active document for hooks
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
+  const activeDocumentType = useDocumentWorkspaceStore((s) => s.activeDocumentType)
+  const totalPages = useDocumentWorkspaceStore((s) => s.totalPages)
   const openDocuments = useDocumentWorkspaceStore((s) => s.openDocuments)
   const openDocument = useDocumentWorkspaceStore((s) => s.openDocument)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -982,11 +984,32 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     autoOpenHandledRef.current = autoOpenId
     if (openDocuments.some(doc => doc.id === mediaId)) {
       openingMediaIdRef.current = mediaId
-      useDocumentWorkspaceStore.getState().setActiveDocument(mediaId)
+      if (activeDocumentId !== mediaId) useDocumentWorkspaceStore.getState().setActiveDocument(mediaId)
       return
     }
     void openDocumentById(mediaId)
-  }, [autoOpenId, loadingDocumentId, openDocuments, openDocumentById, searchParams, setSearchParams])
+  }, [autoOpenId, activeDocumentId, loadingDocumentId, openDocuments, openDocumentById, searchParams, setSearchParams])
+
+  const citationPage = searchParams.get("page")
+  const appliedCitationPage = useRef<string | null>(null)
+  useEffect(() => {
+    if (!citationPage) {
+      appliedCitationPage.current = null
+      return
+    }
+    if (!owner?.isCurrent() || activeDocumentType !== "pdf" ||
+      String(activeDocumentId) !== autoOpenId || loadingDocumentId !== null ||
+      readingProgress.isPending || totalPages <= 0 || !/^[1-9]\d*$/.test(citationPage)) return
+    const key = `${owner.authorityKey}:${owner.authorityRevision}:${autoOpenId}:${citationPage}`
+    if (appliedCitationPage.current === key) return
+    appliedCitationPage.current = key
+    const page = Number(citationPage)
+    if (!Number.isSafeInteger(page) || page > totalPages) {
+      message.error(t("option:documentWorkspace.citationPageUnavailable", "The cited PDF page is outside this document. Check the source reference."))
+      return
+    }
+    useDocumentWorkspaceStore.getState().setCurrentPage(page)
+  }, [owner, activeDocumentId, activeDocumentType, autoOpenId, citationPage, loadingDocumentId, readingProgress.isPending, totalPages, message, t])
 
   useEffect(() => {
     if (openingMediaIdRef.current !== null) {
@@ -997,6 +1020,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     if (autoOpenId === String(activeDocumentId)) return
     const next = new URLSearchParams(searchParams)
     next.set("open", String(activeDocumentId))
+    next.delete("page")
     setSearchParams(next, {replace: true})
   }, [activeDocumentId, loadingDocumentId, autoOpenId, searchParams, setSearchParams])
 

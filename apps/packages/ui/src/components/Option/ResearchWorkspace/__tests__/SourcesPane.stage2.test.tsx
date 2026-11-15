@@ -170,10 +170,10 @@ describe("SourcesPane Stage 2 source highlighting", () => {
       ({
         apply
       }: {
-        apply: () => void
-        undo: () => void
+        apply: () => void | boolean
+        undo: () => void | boolean
       }) => {
-        apply()
+        if (apply() === false) return null
         return { id: "undo-1", expiresAt: Date.now() + 10000 }
       }
     )
@@ -631,6 +631,63 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     expect(screen.queryByText(/^Added /)).not.toBeInTheDocument()
   })
 
+  it("keeps the annotation draft when browser storage refuses the save", async () => {
+    render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+    await screen.findByText("Source preview and annotations")
+    fireEvent.change(screen.getByPlaceholderText("Annotation note"), {target: {value: "Keep this unsaved draft"}})
+    const storage = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {throw new Error("Quota exceeded")})
+    try {
+      fireEvent.click(screen.getByRole("button", {name: "Add annotation"}))
+      expect(screen.getByPlaceholderText("Annotation note")).toHaveValue("Keep this unsaved draft")
+      expect(screen.getByText("No local annotations yet.")).toBeInTheDocument()
+    } finally {
+      storage.mockRestore()
+    }
+  })
+
+  it("retains the edited draft when annotation deletion refuses persistence", async () => {
+    localStorage.setItem("tldw:research-workspace:source-annotations:v1:workspace-1", JSON.stringify({
+      s1: [{id: "a", quote: "", note: "Saved annotation", createdAt: 1, updatedAt: 2}]
+    }))
+    render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+    await screen.findByText("Saved annotation")
+    fireEvent.click(screen.getByRole("button", {name: "Edit"}))
+    fireEvent.change(screen.getByPlaceholderText("Annotation note"), {target: {value: "Unsaved edit"}})
+    const storage = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {throw new Error("Storage unavailable")})
+    try {
+      fireEvent.click(screen.getByRole("button", {name: "Delete"}))
+      expect(screen.getByPlaceholderText("Annotation note")).toHaveValue("Unsaved edit")
+      expect(screen.getByText("Saved annotation")).toBeInTheDocument()
+      expect(screen.queryByText("Annotation removed.")).not.toBeInTheDocument()
+    } finally {
+      storage.mockRestore()
+    }
+  })
+
+  it("keeps failed annotation Undo visible and permits a successful retry", async () => {
+    localStorage.setItem("tldw:research-workspace:source-annotations:v1:workspace-1", JSON.stringify({
+      s1: [{id: "a", quote: "", note: "Saved annotation", createdAt: 1, updatedAt: 2}]
+    }))
+    mockUndoWorkspaceAction.mockImplementation(() => mockScheduleWorkspaceUndoAction.mock.calls[0][0].undo() !== false)
+    render(<SourcesPane />)
+    fireEvent.click(screen.getByTestId("preview-source-s1"))
+    await screen.findByText("Saved annotation")
+    fireEvent.click(screen.getByRole("button", {name: "Delete"}))
+    const storage = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {throw new Error("Storage unavailable")})
+    try {
+      fireEvent.click(await screen.findByRole("button", {name: "Undo"}))
+      expect(screen.queryByText("Saved annotation")).not.toBeInTheDocument()
+      expect(screen.queryByText("Annotation restored")).not.toBeInTheDocument()
+      expect(screen.getByRole("button", {name: "Undo"})).toBeInTheDocument()
+    } finally {
+      storage.mockRestore()
+    }
+    fireEvent.click(screen.getByRole("button", {name: "Undo"}))
+    expect(await screen.findByText("Saved annotation")).toBeInTheDocument()
+  })
+
   it("supports source preview annotations create, edit, and delete with undo parity", async () => {
     render(<SourcesPane />)
 
@@ -783,7 +840,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     ).toBeInTheDocument()
     expect(screen.getByText("Local highlights & annotations")).toBeInTheDocument()
     expect(
-      screen.getByText("Saved in this browser for this workspace.")
+      screen.getByText("Stored in this browser and included in workspace exports.")
     ).toBeInTheDocument()
   })
 

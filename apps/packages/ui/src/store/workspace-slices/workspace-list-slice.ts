@@ -1,4 +1,5 @@
 import type { WorkspaceSlice } from './types'
+import { persistSourceAnnotations, validateSourceAnnotations } from '@/utils/source-annotations'
 import type {
   WorkspaceState,
   WorkspaceChatSession,
@@ -447,6 +448,9 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       state.workspaceChatSessions[activeChatSessionKey] ||
       state.workspaceChatSessions[targetWorkspaceId]
 
+    const bundleSnapshot = buildWorkspaceBundleSnapshot(snapshot)
+    if (!bundleSnapshot) return null
+
     return {
       format: WORKSPACE_EXPORT_BUNDLE_FORMAT,
       schemaVersion: WORKSPACE_EXPORT_BUNDLE_SCHEMA_VERSION,
@@ -459,7 +463,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
           savedWorkspace?.createdAt ||
           null,
         studyMaterialsPolicy: snapshot.studyMaterialsPolicy ?? null,
-        snapshot: buildWorkspaceBundleSnapshot(snapshot),
+        snapshot: bundleSnapshot,
         ...(chatSession
           ? {
               chatSession: cloneWorkspaceBundleChatSession({
@@ -487,6 +491,8 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     const snapshotPayload = bundle.workspace?.snapshot
     if (!snapshotPayload) return null
 
+    if (snapshotPayload.sourceAnnotations !== undefined && !Array.isArray(snapshotPayload.sources)) return null
+
     const state = get()
     const now = new Date()
     const currentSnapshot = state.workspaceId
@@ -511,6 +517,9 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       importedName,
       importedTag
     )
+    const annotations = snapshotPayload.sourceAnnotations === undefined ? undefined :
+      validateSourceAnnotations(snapshotPayload.sourceAnnotations, importedSnapshot.sources.map(source => source.id))
+    if (annotations === null) return null
 
     const nextSnapshots: Record<string, unknown> = {
       ...state.workspaceSnapshots,
@@ -559,6 +568,8 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
           }
         }
       : state.workspaceChatSessions
+
+    if (annotations && !persistSourceAnnotations(importedSnapshot.workspaceId, annotations)) return null
 
     set({
       ...applyWorkspaceSnapshot(importedSnapshot),

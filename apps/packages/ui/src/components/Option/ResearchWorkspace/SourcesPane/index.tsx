@@ -1,4 +1,5 @@
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
+import { readPersistedSourceAnnotations, persistSourceAnnotations, type SourceAnnotation } from "@/utils/source-annotations"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -107,8 +108,6 @@ const SOURCE_VIRTUAL_ROW_HEIGHT = 80
 const SOURCE_VIRTUAL_OVERSCAN = 5
 const SOURCE_PREVIEW_MAX_CHARS = 3000
 const SOURCE_PREVIEW_CHUNK_LIMIT = 3
-const SOURCE_ANNOTATIONS_STORAGE_KEY =
-  "tldw:research-workspace:source-annotations:v1"
 
 const SOURCE_REVIEW_BADGES: Record<
   WorkspaceSourceReviewState,
@@ -303,64 +302,6 @@ const StatusDetailRow: React.FC<{
   </>
 )
 
-type SourceAnnotation = {
-  id: string
-  quote: string
-  note: string
-  createdAt: number
-  updatedAt: number
-}
-
-const buildSourceAnnotationsStorageKey = (workspaceId: string | null | undefined): string =>
-  `${SOURCE_ANNOTATIONS_STORAGE_KEY}:${workspaceId || "local"}`
-
-const isSourceAnnotation = (value: unknown): value is SourceAnnotation => {
-  const candidate = value as Partial<SourceAnnotation>
-  return (
-    typeof candidate?.id === "string" &&
-    typeof candidate.quote === "string" &&
-    typeof candidate.note === "string" &&
-    typeof candidate.createdAt === "number" &&
-    typeof candidate.updatedAt === "number"
-  )
-}
-
-const readPersistedSourceAnnotations = (
-  workspaceId: string | null | undefined
-): Record<string, SourceAnnotation[]> => {
-  if (typeof window === "undefined") return {}
-  try {
-    const raw = window.localStorage.getItem(
-      buildSourceAnnotationsStorageKey(workspaceId)
-    )
-    if (!raw) return {}
-    const parsed = JSON.parse(raw) as Record<string, unknown>
-    const next: Record<string, SourceAnnotation[]> = {}
-    for (const [sourceId, annotations] of Object.entries(parsed || {})) {
-      if (!Array.isArray(annotations)) continue
-      next[sourceId] = annotations.filter(isSourceAnnotation)
-    }
-    return next
-  } catch {
-    return {}
-  }
-}
-
-const persistSourceAnnotations = (
-  workspaceId: string | null | undefined,
-  annotations: Record<string, SourceAnnotation[]>
-): void => {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.setItem(
-      buildSourceAnnotationsStorageKey(workspaceId),
-      JSON.stringify(annotations)
-    )
-  } catch {
-    // Annotation persistence is best-effort local UI state.
-  }
-}
-
 const describePreviewUnavailable = (
   preview: WorkspaceSourcePreviewResponse | null,
   t: (key: string, fallback: string) => string
@@ -515,6 +456,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   const [sourceAnnotations, setSourceAnnotations] = React.useState<
     Record<string, SourceAnnotation[]>
   >(() => readPersistedSourceAnnotations(workspaceId))
+  const sourceAnnotationsRef = React.useRef(sourceAnnotations)
   const [sourcePreviewState, setSourcePreviewState] =
     React.useState<SourcePreviewLoadState>({
       sourceId: null,
@@ -1012,7 +954,9 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
   React.useEffect(() => {
     if (annotationsWorkspaceIdRef.current === workspaceId) return
     annotationsWorkspaceIdRef.current = workspaceId
-    setSourceAnnotations(readPersistedSourceAnnotations(workspaceId))
+    const restored = readPersistedSourceAnnotations(workspaceId)
+    sourceAnnotationsRef.current = restored
+    setSourceAnnotations(restored)
   }, [workspaceId])
 
   const commitSourceAnnotations = React.useCallback(
@@ -1021,13 +965,17 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         previous: Record<string, SourceAnnotation[]>
       ) => Record<string, SourceAnnotation[]>
     ) => {
-      setSourceAnnotations((previous) => {
-        const next = updater(previous)
-        persistSourceAnnotations(workspaceId, next)
-        return next
-      })
+      if (annotationsWorkspaceIdRef.current !== workspaceId) return false
+      const next = updater(sourceAnnotationsRef.current)
+      if (!persistSourceAnnotations(workspaceId, next)) {
+        messageApi.error(t("playground:sources.annotationSaveFailed", "Could not save this annotation in your browser. Free storage and try again."))
+        return false
+      }
+      sourceAnnotationsRef.current = next
+      setSourceAnnotations(next)
+      return true
     },
-    [workspaceId]
+    [workspaceId, messageApi, t]
   )
 
   React.useEffect(() => {
@@ -1256,7 +1204,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
       return
     }
 
-    commitSourceAnnotations((previous) => {
+    const saved = commitSourceAnnotations((previous) => {
       const existing = previous[previewSourceId] || []
       const now = Date.now()
       if (editingAnnotationId) {
@@ -1287,7 +1235,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
         [previewSourceId]: [nextAnnotation, ...existing]
       }
     })
-    resetAnnotationEditor()
+    if (saved) resetAnnotationEditor()
   }, [
     annotationNoteDraft,
     annotationQuoteDraft,
@@ -1319,7 +1267,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
 
       const undoHandle = scheduleWorkspaceUndoAction({
         apply: () => {
-          commitSourceAnnotations((previous) => {
+          const saved = commitSourceAnnotations((previous) => {
             const current = previous[sourceId] || []
             return {
               ...previous,
@@ -1328,12 +1276,14 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               )
             }
           })
+          if (!saved) return false
           if (wasEditingRemovedAnnotation) {
             resetAnnotationEditor()
           }
+          return true
         },
         undo: () => {
-          commitSourceAnnotations((previous) => {
+          const saved = commitSourceAnnotations((previous) => {
             const current = previous[sourceId] || []
             if (current.some((annotation) => annotation.id === annotationId)) {
               return previous
@@ -1349,13 +1299,16 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               [sourceId]: restored
             }
           })
+          if (!saved) return false
           if (wasEditingRemovedAnnotation) {
             setAnnotationQuoteDraft(removedAnnotation.quote)
             setAnnotationNoteDraft(removedAnnotation.note)
             setEditingAnnotationId(removedAnnotation.id)
           }
+          return true
         }
       })
+      if (!undoHandle) return
 
       const undoMessageKey = `workspace-source-annotation-undo-${undoHandle.id}`
       const maybeOpen = (
@@ -1382,8 +1335,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                     "Annotation restored"
                   )
                 )
+                messageApi.destroy(undoMessageKey)
               }
-              messageApi.destroy(undoMessageKey)
             }}
           >
             {t("common:undo", "Undo")}
@@ -2745,7 +2698,7 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
                 </p>
                 {previewData?.readiness?.citation_ready && (
                   <span className="rounded bg-success/10 px-2 py-0.5 text-[11px] font-medium text-success">
-                    {t("playground:sources.citationReady", "Citation ready")}
+                    {t("playground:sources.sourceTextAvailable", "Source text available")}
                   </span>
                 )}
               </div>
@@ -2852,8 +2805,8 @@ export const SourcesPane: React.FC<SourcesPaneProps> = ({
               </p>
               <p className="mb-2 text-xs text-text-muted">
                 {t(
-                  "playground:sources.localAnnotationsScope",
-                  "Saved in this browser for this workspace."
+                  "playground:sources.portableAnnotationsScope",
+                  "Stored in this browser and included in workspace exports."
                 )}
               </p>
               <Input

@@ -80,7 +80,7 @@ import { PlaygroundMessage } from "@/components/Common/Playground/Message"
 import { Link, useNavigate } from "react-router-dom"
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
-import { buildChatLorebookDebugPath } from "@/routes/route-paths"
+import { buildChatLorebookDebugPath, buildDocumentPagePath } from "@/routes/route-paths"
 import {
   WORKSPACE_SOURCE_DRAG_TYPE,
   parseWorkspaceSourceDragPayload
@@ -1335,6 +1335,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [submitError, setSubmitError] = React.useState<string | null>(null)
   const [includeFullSourceContents, setIncludeFullSourceContents] =
     React.useState(false)
+  const [sourceContextNotice, setSourceContextNotice] = React.useState<string | null>(null)
   const [preparingSourceContext, setPreparingSourceContext] =
     React.useState(false)
   const [lorebookActivityTurns, setLorebookActivityTurns] = React.useState<
@@ -2201,13 +2202,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       responsePresetInstruction?: string | null,
       options?: ScopedRequestOptions,
       assertCurrent: () => void = () => {}
-    ): Promise<string> => {
+    ): Promise<{ message: string; focusedRetrieval?: boolean }> => {
+      setSourceContextNotice(null)
       const messageWithResponsePreset = responsePresetInstruction
         ? `${responsePresetInstruction}\n\nUser question: ${message}`
         : message
 
       if (!includeFullSourceContents || queryableSelectedSources.length === 0) {
-        return messageWithResponsePreset
+        return { message: messageWithResponsePreset }
       }
 
       setPreparingSourceContext(true)
@@ -2292,7 +2294,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               "Couldn't load full source contents; sending your question without inline source text."
             )
           )
-          return messageWithResponsePreset
+          return { message: messageWithResponsePreset }
         }
 
         if (skippedSourceCount > 0) {
@@ -2308,6 +2310,14 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           )
         }
 
+        if (resolvedSourceContexts.reduce((total, item) => total + item.fullText.length, 0) > 18000) {
+          setSourceContextNotice(t(
+            "playground:chat.longSourceUsesRetrieval",
+            "This source is too long for one answer. Searching relevant passages; use Studio chapter summaries to cover the whole document."
+          ))
+          return { message: messageWithResponsePreset, focusedRetrieval: true }
+        }
+
         const fullSourceBlock = resolvedSourceContexts
           .map(({ source, fullText }) => {
             const sourceHeader = `Source ${source.mediaId}: ${source.title}`
@@ -2315,7 +2325,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           })
           .join("\n\n")
 
-        return [
+        return { message: [
           t(
             "playground:chat.fullSourceContextInstruction",
             "Use the complete source contents below when answering the user question."
@@ -2329,7 +2339,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           fullSourceBlock,
           "",
           `${t("playground:chat.fullSourceContextQuestionLabel", "User question")}: ${message}`
-        ].join("\n")
+        ].join("\n") }
       } catch (reason) {
         assertCurrent()
         if (queryableSelectedSources.some((source) => source.webCapture))
@@ -2340,7 +2350,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             "Failed to fetch full source contents; sending your question without inline source text."
           )
         )
-        return messageWithResponsePreset
+        return { message: messageWithResponsePreset }
       } finally {
         setPreparingSourceContext(false)
       }
@@ -2462,7 +2472,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           }
           assertCurrent()
           const submitResult = await onSubmit({
-            message: preparedMessage,
+            message: preparedMessage.message,
+            ragQuery: message,
+            ...(preparedMessage.focusedRetrieval ? {
+              requestOverrides: { fileRetrievalEnabled: true, ragMediaIds: queryableSelectedSources.map(source => source.mediaId) }
+            } : {}),
             image: "",
             ...(controller ? { controller, assertCurrent } : {})
           })
@@ -2857,6 +2871,15 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         workspace_id: workspaceSessionId || null,
         has_media_id: citationMediaId !== null
       })
+      const record = isRecord(citation) ? citation : null
+      const metadata = isRecord(record?.metadata) ? record.metadata : null
+      const source = sources.find(item => item.mediaId === citationMediaId)
+      const type = source?.type || record?.type || metadata?.type || metadata?.media_type
+      const pagePath = type === "pdf" ? buildDocumentPagePath(citationMediaId, metadata?.page_number ?? record?.page_number) : null
+      if (pagePath) {
+        navigate(pagePath)
+        return
+      }
       if (citationMediaId !== null && focusSourceByMediaId(citationMediaId)) {
         return
       }
@@ -2869,6 +2892,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [
       focusSourceById,
       focusSourceByMediaId,
+      navigate,
       provenanceEnabled,
       sources,
       workspaceSessionId
@@ -3853,6 +3877,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               )}
             </p>
           )}
+          {sourceContextNotice && <p role="status" className="mb-2 text-xs text-text-muted">{sourceContextNotice}</p>}
           {preparingSourceContext && (
             <p className="mb-2 flex items-center gap-1.5 text-xs text-text-muted">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />

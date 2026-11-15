@@ -2576,6 +2576,44 @@ describe("workspace store snapshot persistence", () => {
     ])
   })
 
+  it("exports browser source annotations in a ZIP and restores them under the imported workspace", async () => {
+    useWorkspaceStore.getState().initializeWorkspace("Annotated research")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+    const source = useWorkspaceStore.getState().addSource({mediaId: 42, title: "Book", type: "pdf"})
+    const annotations = {[source.id]: [{id: "annotation-1", quote: "Evidence", note: "Verify this claim", createdAt: 1, updatedAt: 2}]}
+    const key = (id: string) => `tldw:research-workspace:source-annotations:v1:${id}`
+    localStorage.setItem(key(workspaceId), JSON.stringify(annotations))
+    const bundle = useWorkspaceStore.getState().exportWorkspaceBundle()!
+    expect(bundle.workspace.snapshot.sourceAnnotations).toEqual(annotations)
+    const {createWorkspaceExportZipBlob, parseWorkspaceImportFile} = await import("../workspace-bundle")
+    const blob = await createWorkspaceExportZipBlob(bundle)
+    const parsed = await parseWorkspaceImportFile(new File([blob], "research.workspace.zip", {type: "application/zip"}))
+    const importedId = useWorkspaceStore.getState().importWorkspaceBundle(parsed)!
+    expect(importedId).not.toBe(workspaceId)
+    expect(JSON.parse(localStorage.getItem(key(importedId))!)).toEqual(annotations)
+  })
+
+  it.each(["oversized", "malformed"])("refuses export when saved annotations are %s instead of omitting them", (kind) => {
+    useWorkspaceStore.getState().initializeWorkspace("Annotated research")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+    const source = useWorkspaceStore.getState().addSource({mediaId: 42, title: "Book", type: "pdf"})
+    const annotations = {[source.id]: [{id: "a", quote: "Evidence", note: kind === "oversized" ? "x".repeat(100001) : 123, createdAt: 1, updatedAt: 2}]}
+    const key = `tldw:research-workspace:source-annotations:v1:${workspaceId}`
+    const stored = JSON.stringify(annotations)
+    localStorage.setItem(key, stored)
+    expect(useWorkspaceStore.getState().exportWorkspaceBundle()).toBeNull()
+    expect(localStorage.getItem(key)).toBe(stored)
+  })
+
+  it("rejects imported annotations for sources outside the bundle without replacing current research", () => {
+    useWorkspaceStore.getState().initializeWorkspace("Current research")
+    const workspaceId = useWorkspaceStore.getState().workspaceId
+    const bundle = useWorkspaceStore.getState().exportWorkspaceBundle()!
+    bundle.workspace.snapshot.sourceAnnotations = {foreign: [{id: "annotation-1", quote: "Evidence", note: "Foreign note", createdAt: 1, updatedAt: 2}]}
+    expect(useWorkspaceStore.getState().importWorkspaceBundle(bundle)).toBeNull()
+    expect(useWorkspaceStore.getState().workspaceId).toBe(workspaceId)
+  })
+
   it("exports and imports workspace bundles with full snapshot fidelity", () => {
     useWorkspaceStore.getState().initializeWorkspace("Exportable Workspace")
     const originalWorkspaceId = useWorkspaceStore.getState().workspaceId
