@@ -29,9 +29,6 @@ type TutorialRouteOptions = {
   completedTutorialIds?: readonly string[]
 }
 
-const hasTutorialsForRouteMock = vi.fn<
-  (route: string, options?: TutorialRouteOptions) => boolean
->(() => true)
 const getPrimaryTutorialForRouteMock = vi.fn<
   (
     route: string,
@@ -40,6 +37,8 @@ const getPrimaryTutorialForRouteMock = vi.fn<
     id: string
     labelKey: string
     labelFallback: string
+    requireFirstTargetForPrompt?: boolean
+    steps?: { target: string }[]
   }
 >(() => ({
   id: "playground-basics",
@@ -87,9 +86,8 @@ vi.mock("@/store/tutorials", () => ({
   )
 }))
 
-vi.mock("@/tutorials", () => ({
-  hasTutorialsForRoute: (route: string, options?: TutorialRouteOptions) =>
-    hasTutorialsForRouteMock(route, options),
+vi.mock("@/tutorials", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/tutorials")>()),
   getPrimaryTutorialForRoute: (route: string, options?: TutorialRouteOptions) =>
     getPrimaryTutorialForRouteMock(route, options)
 }))
@@ -193,6 +191,37 @@ describe("TutorialPrompt behavior", () => {
     vi.useRealTimers()
   })
 
+  it("waits for async page content before offering its walkthrough", async () => {
+    getPrimaryTutorialForRouteMock.mockReturnValueOnce({
+      id: "test-async-tour",
+      labelKey: "tutorials:testAsync",
+      labelFallback: "Test tour",
+      requireFirstTargetForPrompt: true,
+      steps: [{ target: "#test-async-tour-anchor" }]
+    })
+    const renderPrompt = (ready: boolean) => (
+      <MemoryRouter initialEntries={["/account"]}>
+        <TutorialPrompt />
+        {ready && <h1 id="test-async-tour-anchor">Account</h1>}
+      </MemoryRouter>
+    )
+    const view = render(renderPrompt(false))
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+    await act(async () => view.rerender(renderPrompt(true)))
+    expect(infoMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("honors page-owned guides even when the route has a trailing slash", () => {
+    render(
+      <MemoryRouter initialEntries={["/notes/"]}>
+        <TutorialPrompt excludedRoutes={["/notes", "/research-workspace"]} />
+      </MemoryRouter>
+    )
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+  })
+
   it("shows a prompt with a single global notification key", () => {
     render(
       <MemoryRouter initialEntries={["/chat"]}>
@@ -244,10 +273,6 @@ describe("TutorialPrompt behavior", () => {
     const expectedOptions = {
       completedTutorialIds: ["getting-started"]
     }
-    expect(hasTutorialsForRouteMock).toHaveBeenCalledWith(
-      "/knowledge",
-      expectedOptions
-    )
     expect(getPrimaryTutorialForRouteMock).toHaveBeenCalledWith(
       "/knowledge",
       expectedOptions
