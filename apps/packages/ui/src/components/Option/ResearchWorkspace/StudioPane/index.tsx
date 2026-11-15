@@ -1032,6 +1032,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     temperature,
     topP,
     numPredict,
+    provider: selectedModelSelection.provider || normalizedApiProvider,
     setRagTopK,
     setRagAdvancedOptions,
     setTemperature,
@@ -1150,6 +1151,12 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     handleRetryArtifactSave,
     loadFlashcardDecks,
   } = artifactGeneration
+
+  const generatingSectionOutput = isGeneratingOutput &&
+    ["summary", "report", "compare_sources"].includes(generatingOutputType || "") &&
+    (selectedSections.length > 0 || Boolean(sectionProgress) || generatedArtifacts.some(artifact =>
+      artifact.status === "generating" && artifact.type === generatingOutputType &&
+      artifact.producerMetadata?.origin === "research_workspace_output_job"));
 
   const claimsVerificationModelOptions = React.useMemo(() => {
     if (!claimsVerificationProviderForRequest) {
@@ -2244,6 +2251,11 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
+              {generatingSectionOutput ? (
+                <p className="text-[11px] text-text-muted">
+                  {t("playground:studio.longDocumentDuration", "Long documents can take several minutes. Progress is saved after each portion.")}
+                </p>
+              ) : <>
               <p className="text-[11px] text-text-muted">
                 {t(
                   "playground:studio.generatingWithEta",
@@ -2261,6 +2273,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   "Usually takes 10\u201330 seconds"
                 )}
               </p>
+              </>}
             </div>
             <Button
               size="small"
@@ -2920,13 +2933,18 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
         >
           {generatedArtifacts.length > 0 && (
             <div className="mb-2 rounded border border-border bg-surface/60 px-2.5 py-2 text-[11px] text-text-muted">
-              {t(
+              {cumulativeUsage.includedArtifacts === 0
+                ? t("playground:studio.workspaceUsageUnavailable", "Workspace usage unavailable")
+                : t(
                 "playground:studio.usageSummary",
                 "Estimated workspace usage: {{tokens}} tokens • ${{cost}}",
                 {
                   tokens: Math.round(cumulativeUsage.tokens).toLocaleString(),
                   cost: cumulativeUsage.costUsd.toFixed(3)
                 }
+              )}
+              {cumulativeUsage.includedArtifacts > 0 && cumulativeUsage.unmeasuredArtifacts > 0 && (
+                <> • {t("playground:studio.usageExcludesUnmeasured", "Excludes outputs with unavailable usage")}</>
               )}
             </div>
           )}
@@ -2953,6 +2971,10 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
             >
               {visibleArtifacts.map((artifact) => {
                 const Icon = ARTIFACT_TYPE_ICONS[artifact.type] || FileText
+                const sectionJob = ["summary", "report", "compare_sources"].includes(artifact.type) &&
+                  artifact.producerMetadata?.origin === "research_workspace_output_job"
+                const usageTokens = artifact.totalTokens ?? (sectionJob ? undefined : artifact.estimatedTokens)
+                const usageCost = artifact.totalCostUsd ?? (sectionJob ? undefined : artifact.estimatedCostUsd)
                 const StatusConfig = STATUS_ICONS[artifact.status]
                 const StatusIcon = StatusConfig.icon
                 const deepResearchLaunchHref =
@@ -2983,9 +3005,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                           <p className="truncate text-sm font-medium text-text">
                             {artifact.title}
                           </p>
-                          {artifact.status === "failed" || (artifact.status === "generating" && artifact.producerMetadata?.job_id && !isGeneratingOutput) ? (
+                          {artifact.status === "failed" || (artifact.status === "generating" && sectionJob && artifact.producerMetadata?.job_id && !isGeneratingOutput) ? (
                             <>
-                              <Tooltip title={failedRetryLabel}>
+                              <Tooltip title={artifact.status === "generating" ? "Check saved generation progress" : failedRetryLabel}>
                                 <button
                                   type="button"
                                   disabled={(!hasSelectedSources && !artifact.producerMetadata?.job_id) || isGeneratingOutput}
@@ -3032,23 +3054,19 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                         <p className="text-xs text-text-muted">
                           {artifact.createdAt.toLocaleString()}
                         </p>
-                        {(artifact.totalTokens ||
-                          artifact.estimatedTokens ||
-                          artifact.totalCostUsd ||
-                          artifact.estimatedCostUsd) && (
+                        {(usageTokens !== undefined || usageCost !== undefined || sectionJob) && (
                           <p className="text-[11px] text-text-muted">
-                            {t(
-                              "playground:studio.usagePerOutput",
-                              "Tokens: {{tokens}} • Cost: ${{cost}}",
-                              {
-                                tokens: Math.round(
-                                  artifact.totalTokens || artifact.estimatedTokens || 0
-                                ).toLocaleString(),
-                                cost: (
-                                  artifact.totalCostUsd || artifact.estimatedCostUsd || 0
-                                ).toFixed(3)
-                              }
-                            )}
+                            {usageTokens === undefined
+                              ? t("playground:studio.tokenUsageUnavailable", "Token usage unavailable")
+                              : `${artifact.totalTokens === undefined
+                                ? t("playground:studio.estimatedTokens", "Estimated tokens")
+                                : t("playground:studio.actualTokens", "Tokens")}: ${Math.round(usageTokens).toLocaleString()}`}
+                            {" • "}
+                            {usageCost === undefined
+                              ? t("playground:studio.costUnavailable", "Cost unavailable")
+                              : `${artifact.totalCostUsd === undefined
+                                ? t("playground:studio.estimatedCost", "Estimated cost")
+                                : t("playground:studio.actualCost", "Cost")}: $${usageCost.toFixed(3)}`}
                           </p>
                         )}
                         {artifact.errorMessage && (

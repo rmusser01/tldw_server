@@ -86,3 +86,24 @@ def test_deepseek_adapter_native_http_streaming(monkeypatch):
     chunks = list(a.stream({"messages": [{"role": "user", "content": "hi"}], "model": "deepseek-chat", "api_key": "k", "stream": True}))
     assert any(c.startswith("data: ") for c in chunks)
     assert sum(1 for c in chunks if "[DONE]" in c) == 1
+
+
+@pytest.mark.parametrize("controls", [
+    {"thinking": {"type": "disabled"}},
+    {"thinking": {"type": "enabled"}, "reasoning_effort": "max"},
+    {"reasoning_effort": "low"},
+])
+def test_deepseek_optional_thinking_controls_reach_native_payload(controls):
+    from tldw_Server_API.app.core.LLM_Calls.providers.deepseek_adapter import DeepSeekAdapter
+    payload = DeepSeekAdapter()._build_payload({"model": "deepseek-flash", "messages": [], **controls})
+    assert all(payload.get(key) == value for key, value in controls.items())
+
+
+def test_deepseek_normal_chat_keeps_default_and_explicit_config_controls():
+    from tldw_Server_API.app.core.LLM_Calls.providers.deepseek_adapter import DeepSeekAdapter
+    adapter = DeepSeekAdapter()
+    assert "thinking" not in adapter._build_payload({"model": "deepseek-flash", "messages": []})
+    request = adapter._apply_config_defaults({"thinking": {"type": "disabled"}, "app_config": {
+        "deepseek_api": {"thinking": {"type": "enabled"}, "reasoning_effort": "max"}}})
+    assert request["thinking"] == {"type": "disabled"}
+    assert request["reasoning_effort"] == "max"

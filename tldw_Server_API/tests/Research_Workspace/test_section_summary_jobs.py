@@ -7,6 +7,9 @@ import importlib
 import json
 
 import pytest
+from hypothesis import given
+from hypothesis import settings as hypothesis_settings
+from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from tldw_Server_API.app.core.exceptions import ResearchWorkspaceOutputJobError
@@ -122,9 +125,7 @@ async def test_failed_batch_resume_preserves_full_ranges_and_coverage(monkeypatc
                     "evidence": [
                         {
                             "claim": "The contribution proposes a bank policy",
-                            "quote": "Author A supports retaining the bank."
-                            if "SOURCE:" in prompt and "Author A" in prompt
-                            else "Author B opposes it.",
+                            "source_span_ids": ["P1"],
                         }
                     ],
                 }
@@ -290,7 +291,7 @@ async def test_unresolved_section_remains_visible_while_other_section_completes(
             json.dumps(
                 {
                     "summary": "A proposal.",
-                    "evidence": [{"claim": "A proposal is present", "quote": "A supported proposal."}],
+                    "evidence": [{"claim": "A proposal is present", "source_span_ids": ["P1"]}],
                 }
             )
             if "SOURCE:" in kwargs["messages_payload"][0]["content"]
@@ -489,3 +490,543 @@ def test_queued_cancel_persists_terminal_artifact_and_retains_completed_evidence
     assert db.row["content"] == "Completed quotation"
     assert db.row["producer_metadata"]["job_status"] == "cancelled"
     assert db.row["producer_metadata"]["job_id"] == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "code"),
+    [
+        ({"choices": [{"finish_reason": "length", "message": {"content": "{unfinished"}}]}, "output_truncated"),
+        ({"choices": [{"message": {"content": ""}}]}, "empty_response"),
+        ({"choices": [{"message": {"content": "not JSON"}}]}, "invalid_json"),
+        (
+            {
+                "choices": [
+                    {"message": {"content": '{"summary":"S","evidence":[{"claim":"C","source_span_ids":["P999999"]}]}'}}
+                ]
+            },
+            "unknown_source_span",
+        ),
+    ],
+)
+async def test_batch_failure_reports_actionable_bounded_reason(monkeypatch, response, code):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(
+            return_value={"content": "Exact source proposal", "navigation_version": "v1", "nodes": [], "page_map": []}
+        ),
+    )
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", AsyncMock(return_value=response))
+    options = args(request().settings.model_copy(update={"sections": []}))
+    result = await mod.process_section_summary(**options)
+    section = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][
+        0
+    ]
+    assert section["batches"][0]["error_code"] == code
+    assert section["batches"][0]["error"] in options["workspace_db"].row["content"]
+    assert result["partial"] and options["workspace_db"].row["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_repeated_unknown_passage_stops_unread_work_and_retry_keeps_completed_batch(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "Unique first portion. " + "supported proposal. " * 7000
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(return_value={"content": source, "navigation_version": "v1", "nodes": [], "page_map": []}),
+    )
+    calls = []
+    fail = True
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        calls.append(prompt)
+        if "SOURCE:" not in prompt:
+            return {"choices": [{"message": {"content": "Supported summary [E1.1.1]."}}]}
+        passage_id = "P999999" if fail and len(calls) > 1 else "P1"
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {
+                                "summary": "A proposal",
+                                "evidence": [{"claim": "A supported claim", "source_span_ids": [passage_id]}],
+                            }
+                        )
+                    }
+                }
+            ]
+        }
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    result = await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    analysis = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    batches = analysis["sections"][0]["batches"]
+    assert len(calls) == 3
+    assert [b["status"] for b in batches[:3]] == ["completed", "failed", "failed"]
+    assert all(b["status"] == "unread" for b in batches[3:])
+    assert analysis["stopped_error_code"] == "unknown_source_span"
+    assert "Stopped" in row["content"] and result["partial"]
+    first_prompt = calls[0]
+    fail = False
+    await mod.process_section_summary(**options)
+    assert calls.count(first_prompt) == 1
+    assert row["status"] == "complete"
+    assert "error" not in row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]
+    assert "Retry needed" not in row["content"]
+    assert "stopped_error_code" not in row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage", ["section", "final"])
+async def test_truncated_synthesis_never_marks_output_complete(monkeypatch, stage):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(
+            return_value={"content": "Exact source proposal", "navigation_version": "v1", "nodes": [], "page_map": []}
+        ),
+    )
+    responses = [
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": json.dumps(
+                            {"summary": "Summary", "evidence": [{"claim": "Claim", "source_span_ids": ["P1"]}]}
+                        )
+                    }
+                }
+            ]
+        }
+    ]
+    if stage == "final":
+        responses.append({"choices": [{"message": {"content": "Section summary [E1.1.1]."}}]})
+    responses.append({"choices": [{"finish_reason": "length", "message": {"content": "Incomplete synthesis"}}]})
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", AsyncMock(side_effect=responses))
+    options = args(request().settings.model_copy(update={"sections": []}))
+    result = await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    assert row["status"] == "failed" and result["partial"]
+    assert "Increase Max tokens" in row["content"]
+    assert "Incomplete synthesis" not in row["content"]
+
+
+def test_deepseek_uses_reasoning_budget_only_when_output_budget_is_unset():
+    from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs import ResearchWorkspaceOutputSettings
+
+    assert ResearchWorkspaceOutputSettings(provider="deepseek").max_tokens == 8192
+    assert ResearchWorkspaceOutputSettings(provider="deepseek", max_tokens=4096).max_tokens == 4096
+    assert ResearchWorkspaceOutputSettings(provider="other").max_tokens == 4096
+
+
+@pytest.mark.asyncio
+async def test_deepseek_json_mode_retains_exact_original_quote_and_offsets(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "Before. Director of Com\u00ad munications. After."
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(return_value={"content": source, "navigation_version": "v1", "nodes": [], "page_map": []}),
+    )
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        if "SOURCE:" in kwargs["messages_payload"][0]["content"]:
+            return {
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {
+                            "content": json.dumps(
+                                {
+                                    "summary": "A role",
+                                    "evidence": [{"claim": "A named role", "source_span_ids": ["P1"]}],
+                                }
+                            )
+                        },
+                    }
+                ]
+            }
+        return {"choices": [{"message": {"content": "A role [E1.1.1]."}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": [], "provider": "deepseek"}))
+    await mod.process_section_summary(**options)
+    assert calls[0]["response_format"] == {"type": "json_object"}
+    assert "response_format" not in calls[1]
+    row = options["workspace_db"].row
+    evidence = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]["batches"][0][
+        "evidence"
+    ][0]
+    assert evidence["quote"] == source
+    assert source[evidence["start_char"] : evidence["end_char"]] == evidence["quote"]
+    assert row["status"] == "complete"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A sentence.\n\nAnother paragraph.",
+        "x" * 3500,
+        "emoji 😀 and Unicode é. " * 150,
+        "First. " + "long words " * 300,
+    ],
+)
+def test_source_passages_partition_every_original_character_without_gaps(text):
+    from tldw_Server_API.app.core.Research_Workspace.section_summaries import build_section_extraction_prompt
+
+    prompt, passages = build_section_extraction_prompt("Section", "Summarize", text)
+    assert "".join(p["text"] for p in passages) == text
+    assert all(p["text"] == text[p["start_char"] : p["end_char"]] and 0 < len(p["text"]) <= 1000 for p in passages)
+    assert [p["id"] for p in passages] == [f"P{i + 1}" for i in range(len(passages))]
+    assert passages[0]["start_char"] == 0 and passages[-1]["end_char"] == len(text)
+    assert all(left["end_char"] == right["start_char"] for left, right in zip(passages, passages[1:]))
+    assert "source_span_ids" in prompt
+
+
+@pytest.mark.asyncio
+async def test_selected_passages_copy_exact_source_instead_of_model_retyped_quote(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "Author A proposes\nretention. Soft\u00ad hyphen and ‘quotes’."
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(return_value={"content": source, "navigation_version": "v1", "nodes": [], "page_map": []}),
+    )
+    response = {
+        "summary": "A proposal",
+        "evidence": [{"claim": "Retention is proposed", "source_span_ids": ["P1"], "quote": "Untrusted retyped text"}],
+    }
+    chat = AsyncMock(
+        side_effect=[
+            {"choices": [{"message": {"content": json.dumps(response)}}]},
+            {"choices": [{"message": {"content": "Summary [E1.1.1]."}}]},
+            {"choices": [{"message": {"content": "Synthesis [E1.1.1]."}}]},
+        ]
+    )
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(
+        request().settings.model_copy(update={"sections": [], "provider": "deepseek", "model": "deepseek-flash"})
+    )
+    await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    evidence = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]["batches"][0][
+        "evidence"
+    ][0]
+    assert evidence["quote"] == source
+    assert evidence["start_char"] == 0 and evidence["end_char"] == len(source)
+    assert all(call.kwargs["thinking"] == {"type": "disabled"} for call in chat.call_args_list)
+    assert row["status"] == "complete"
+
+
+@hypothesis_settings(max_examples=30, deadline=None)
+@given(st.text(min_size=1, max_size=5000))
+def test_passage_partition_preserves_arbitrary_unicode_source(text):
+    from tldw_Server_API.app.core.Research_Workspace.section_summaries import build_section_extraction_prompt
+
+    _, passages = build_section_extraction_prompt("Section", "Summarize", text)
+    assert "".join(p["text"] for p in passages) == text
+    assert all(p["text"] == text[p["start_char"] : p["end_char"]] and len(p["text"]) <= 1000 for p in passages)
+
+
+@pytest.mark.asyncio
+async def test_gateway_validation_failure_checkpoints_and_stops_unread_work(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.exceptions import ChatBadRequestError
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(
+            return_value={
+                "content": "Source proposal. " * 6000,
+                "navigation_version": "v1",
+                "nodes": [],
+                "page_map": [],
+            }
+        ),
+    )
+    chat = AsyncMock(side_effect=ChatBadRequestError("Unsupported fields for provider: private detail"))
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    result = await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    analysis = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert chat.await_count == 2
+    assert analysis["stopped_error_code"] == "provider_failed"
+    assert analysis["sections"][0]["batches"][2]["status"] == "unread"
+    assert row["status"] == "failed" and result["partial"]
+    assert "private detail" not in row["content"]
+
+
+@pytest.mark.asyncio
+async def test_rejected_evidence_logs_only_shape_metadata(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(return_value={"content": "x" * 5000, "navigation_version": "v1", "nodes": [], "page_map": []}),
+    )
+    logs = []
+    monkeypatch.setattr(mod.logger, "warning", lambda message, *values: logs.append((message, values)))
+    response = {"summary": "Private summary", "evidence": [{"claim": "Private claim contents", "source_span_ids": []}]}
+    monkeypatch.setattr(
+        mod,
+        "perform_chat_api_call_async",
+        AsyncMock(return_value={"choices": [{"message": {"content": json.dumps(response)}}]}),
+    )
+    result = await mod.process_section_summary(**args(request().settings.model_copy(update={"sections": []})))
+    assert result["partial"]
+    assert any("Evidence shape rejected" in message and values == ("str", False, "list", 0) for message, values in logs)
+    assert "Private claim" not in repr(logs) and "Private summary" not in repr(logs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unknown", [False, True])
+async def test_multi_passage_claim_keeps_every_exact_known_source_span(monkeypatch, unknown):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "x" * 5000
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(return_value={"content": source, "navigation_version": "v1", "nodes": [], "page_map": []}),
+    )
+    response = {
+        "summary": "Combined proposal",
+        "evidence": [
+            {
+                "claim": "A supported multi-passage claim",
+                "source_span_ids": ["P1", "P2", "P3", "P999" if unknown else "P4"],
+            }
+        ],
+    }
+    chat = AsyncMock(
+        side_effect=[
+            {"choices": [{"message": {"content": json.dumps(response)}}]},
+            {"choices": [{"message": {"content": "Section [E1.1.1] [E1.1.2] [E1.1.3] [E1.1.4]"}}]},
+            {"choices": [{"message": {"content": "Synthesis [E1.1.4]"}}]},
+        ]
+    )
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    batch = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]["batches"][0]
+    if unknown:
+        assert batch["error_code"] == "unknown_source_span"
+        assert row["status"] == "failed"
+        assert chat.await_count == 1
+    else:
+        assert row["status"] == "complete"
+        assert [entry["source_span_id"] for entry in batch["evidence"]] == ["P1", "P2", "P3", "P4"]
+        assert all(entry["quote"] == source[entry["start_char"] : entry["end_char"]] for entry in batch["evidence"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_budget", [1024, 8192])
+async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves_completed_batches(
+    monkeypatch, output_budget
+):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(return_value={"content": "Source " * 6000, "navigation_version": "v1", "nodes": [], "page_map": []}),
+    )
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        if "SOURCE:" in kwargs["messages_payload"][0]["content"]:
+            content = json.dumps(
+                {"summary": "Main point. " * 1500, "evidence": [{"claim": "Source claim", "source_span_ids": ["P1"]}]}
+            )
+        else:
+            content = "Opposing positions remain distinct [E1.1.1]."
+        return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": [], "max_tokens": output_budget}))
+    await mod.process_section_summary(**options)
+    assert [call["max_tokens"] for call in calls] == [
+        output_budget,
+        output_budget,
+        min(output_budget, 2048),
+        min(output_budget, 2048),
+        output_budget,
+        output_budget,
+    ]
+    assert "at most 250 words" in calls[2]["system_message"]
+    assert options["workspace_db"].row["status"] == "complete"
+    calls.clear()
+    await mod.process_section_summary(**options)
+    assert len(calls) == 1 and "SOURCE:" not in calls[0]["messages_payload"][0]["content"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("slow_reduction", [False, True])
+async def test_nonreducing_synthesis_stops_without_accepting_or_discarding_saved_evidence(monkeypatch, slow_reduction):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(return_value={"content": "Source " * 6000, "navigation_version": "v1", "nodes": [], "page_map": []}),
+    )
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        content = (
+            json.dumps(
+                {"summary": "Main point. " * 1500, "evidence": [{"claim": "Source claim", "source_span_ids": ["P1"]}]}
+            )
+            if "SOURCE:" in kwargs["messages_payload"][0]["content"]
+            else "Verbose expansion. " * 2000
+        )
+        if slow_reduction and "SOURCE:" not in kwargs["messages_payload"][0]["content"]:
+            content = "x" * (17000 - 10 * (len(calls) - 2))
+        return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": [], "max_tokens": 8192}))
+    await mod.process_section_summary(**options)
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert len(calls) == (18 if slow_reduction else 4)
+    assert all(call["max_tokens"] == 2048 for call in calls[2:])
+    assert options["workspace_db"].row["status"] == "failed"
+    assert analysis["sections"][0]["error_code"] == "synthesis_not_reduced"
+    assert all(batch["status"] == "completed" and batch["evidence"] for batch in analysis["sections"][0]["batches"])
+    assert "Verbose expansion" not in options["workspace_db"].row["content"]
+
+
+@pytest.mark.asyncio
+async def test_combined_synthesis_progress_reports_completed_and_failed_sections(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(
+            return_value={
+                "content": "Alpha. Bravo.",
+                "navigation_version": "v1",
+                "page_map": [],
+                "nodes": [
+                    {
+                        "id": "dsi:1",
+                        "title": "A",
+                        "level": 1,
+                        "target_type": "char_range",
+                        "target_start": 0,
+                        "target_end": 7,
+                    },
+                    {
+                        "id": "dsi:2",
+                        "title": "B",
+                        "level": 1,
+                        "target_type": "char_range",
+                        "target_start": 7,
+                        "target_end": 13,
+                    },
+                ],
+            }
+        ),
+    )
+    progress = SimpleNamespace(message="")
+    final_progress = []
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            content = (
+                "invalid JSON"
+                if "Bravo" in prompt
+                else json.dumps({"summary": "Alpha", "evidence": [{"claim": "Claim", "source_span_ids": ["P1"]}]})
+            )
+        else:
+            content = "Alpha [E1.1.1]."
+            if "Synthesize the completed" in prompt:
+                final_progress.append(progress.message)
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    settings = request().settings
+    settings.sections.append(settings.sections[0].model_copy(update={"node_id": "dsi:2"}))
+    options = args(settings)
+    await mod.process_section_summary(**options, progress=progress)
+    assert len(final_progress) == 1
+    assert "Combining 1 of 2 reviewed sections" in final_progress[0]
+    assert "1 section needs retry" in final_progress[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("citation,accepted", [("[E1.1.1, E1.1.1]", True), ("[E1.1.1, E99.1.1]", False)])
+async def test_grouped_synthesis_citations_reject_unknown_evidence_ids(monkeypatch, citation, accepted):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(
+        mod,
+        "load_navigation_sections",
+        AsyncMock(return_value={"content": "Exact source.", "navigation_version": "v1", "nodes": [], "page_map": []}),
+    )
+
+    async def chat(**kwargs):
+        content = (
+            json.dumps({"summary": "Summary", "evidence": [{"claim": "Claim", "source_span_ids": ["P1"]}]})
+            if "SOURCE:" in kwargs["messages_payload"][0]["content"]
+            else "Summary " + citation
+        )
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    assert row["status"] == ("complete" if accepted else "failed")
+    if not accepted:
+        section = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]
+        assert section["error_code"] == "unknown_evidence_reference"
+        assert citation not in row["content"]

@@ -2517,4 +2517,31 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     }
   })
 
+it('shows long-document timing for a saved section job instead of a per-file estimate', () => {
+  workspaceStoreState.isGeneratingOutput = true;
+  workspaceStoreState.generatingOutputType = 'summary';
+  workspaceStoreState.generatedArtifacts = [{
+    id: 'long-output', type: 'summary', title: 'Chapters', status: 'generating', createdAt: new Date(),
+    workspaceArtifactId: 'saved-output', producerMetadata: { origin: 'research_workspace_output_job', job_id: 9 }
+  }];
+  renderStudioPane();
+  expect(screen.getByText('Long documents can take several minutes. Progress is saved after each portion.')).toBeInTheDocument();
+  expect(screen.queryByText(/Usually takes 10/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/~\d+s for/)).not.toBeInTheDocument();
+});
+
+it.each(['section', 'estimated', 'actual'])('labels %s artifact usage without treating a source estimate as billed usage', mode => {
+  workspaceStoreState.generatedArtifacts = [{
+    id: 'usage-card', type: 'summary', title: 'Summary', status: 'completed', createdAt: new Date(),
+    estimatedTokens: 1200, estimatedCostUsd: 0.004,
+    ...(mode === 'section' ? { workspaceArtifactId: 'canonical-summary', producerMetadata: { origin: 'research_workspace_output_job', job_id: 41 } } : {}),
+    ...(mode === 'actual' ? { totalTokens: 500, totalCostUsd: 0.01 } : {})
+  }];
+  renderStudioPane();
+  const card = screen.getByTestId('studio-artifact-card-usage-card');
+  if (mode === 'section') expect(screen.getByText('Workspace usage unavailable')).toBeInTheDocument();
+  expect(within(card).getByText(mode === 'section' ? 'Token usage unavailable • Cost unavailable' : mode === 'estimated'
+    ? 'Estimated tokens: 1,200 • Estimated cost: $0.004' : 'Tokens: 500 • Cost: $0.010')).toBeInTheDocument();
+});
+
 })

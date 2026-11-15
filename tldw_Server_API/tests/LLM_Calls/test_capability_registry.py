@@ -281,3 +281,11 @@ def test_default_policy_keeps_legacy_sampling_modifiers():
 def test_sampling_modifier_policy_requires_real_boolean(value):
     with pytest.raises(TypeError, match="allow_sampling_modifiers"):
         cr.ProviderCallPolicy(allow_sampling_modifiers=value)
+
+
+@pytest.mark.parametrize("control", [{"thinking": {"type": "disabled"}}, {"reasoning_effort": "high"}])
+def test_deepseek_thinking_controls_pass_central_validation(control):
+    payload = {"messages": [], "model": "deepseek-flash", **control}
+    assert cr.validate_payload("deepseek", payload) == payload
+    with pytest.raises(ChatBadRequestError):
+        cr.validate_payload("openai", payload)

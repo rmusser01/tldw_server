@@ -39,6 +39,18 @@ class ResearchWorkspaceOutputSettings(BaseModel):
     image_width: int | None = Field(default=None, ge=256, le=2048)
     image_height: int | None = Field(default=None, ge=256, le=2048)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _provider_output_budget(cls, value: Any) -> Any:
+        """Honor explicit budgets; DeepSeek reasoning shares the output allowance."""
+        if (
+            isinstance(value, dict)
+            and "max_tokens" not in value
+            and str(value.get("provider") or "").strip().lower() == "deepseek"
+        ):
+            return {**value, "max_tokens": 8192}
+        return value
+
 
 class ResearchWorkspaceOutputSubmitRequest(BaseModel):
     """Request body for submitting a Research Workspace media output job."""

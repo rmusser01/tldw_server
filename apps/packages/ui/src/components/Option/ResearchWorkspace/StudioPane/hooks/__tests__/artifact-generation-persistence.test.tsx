@@ -12,7 +12,7 @@ import { useArtifactGeneration, type UseArtifactGenerationDeps } from '../useArt
 const io = vi.hoisted(() => ({
   migrated: true,
   state: { workspaceId: 'owned', generatedArtifacts: [] as GeneratedArtifact[] },
-  request: vi.fn(), snapshot: vi.fn(), verified: vi.fn(), speech: vi.fn(), complete: vi.fn(), media: vi.fn(), sources: vi.fn(), submit: vi.fn(), output: vi.fn(),
+  request: vi.fn(), snapshot: vi.fn(), verified: vi.fn(), speech: vi.fn(), complete: vi.fn(), media: vi.fn(), sources: vi.fn(), submit: vi.fn(), output: vi.fn(), cancel: vi.fn(),
 }));
 vi.mock('@/store/workspace', () => ({
   useWorkspaceStore: { getState: () => io.state },
@@ -28,7 +28,7 @@ vi.mock('@/services/tldw/TldwApiClient', () => ({
     getMediaDetails: io.media,
     getWorkspaceSources: io.sources,
     createChatCompletion: io.complete,
-    submitWorkspaceOutput: io.submit, getWorkspaceOutputStatus: io.output,
+    submitWorkspaceOutput: io.submit, getWorkspaceOutputStatus: io.output, cancelWorkspaceOutput: io.cancel,
   }
 }));
 vi.mock('@/services/tldw', () => ({
@@ -52,7 +52,7 @@ const source: WorkspaceSource = {
 };
 const update = vi.fn((id: string, status: GeneratedArtifact['status'], patch?: Partial<GeneratedArtifact>) => {
   io.state.generatedArtifacts = io.state.generatedArtifacts.map((artifact) =>
-    artifact.id === id ? { ...artifact, ...patch, status } : artifact);
+    artifact.id === id ? { ...artifact, status, ...patch } : artifact);
 });
 const deps = (): UseArtifactGenerationDeps => ({
   workspaceId: io.state.workspaceId, workspaceName: 'Rowan', workspaceTag: 'workspace:owned',
@@ -525,6 +525,8 @@ it('compares two reviewed sections of one source through a durable job', async (
   io.output.mockResolvedValue({ job_id: 41, workspace_id: 'owned', artifact_id: row.id, status: 'completed', artifact: row });
   const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: selections }));
   await act(async () => { await hook.result.current.handleGenerateOutput('compare_sources'); });
+  expect(io.state.generatedArtifacts[0].totalTokens).toBeUndefined();
+  expect(io.state.generatedArtifacts[0].totalCostUsd).toBeUndefined();
   expect(io.state.generatedArtifacts[0]).toMatchObject({ workspaceArtifactId: 'compare-1', content: expect.stringContaining('Coverage: 2 of 2'), data: { sectionAnalysis: { sections: [{ status: 'completed' }, { status: 'completed' }] } } });
 });
 
@@ -557,35 +559,200 @@ it('rejects one selected section even when two sources are selected', async () =
   expect(io.submit).not.toHaveBeenCalled();
 });
 
-it.each([false, true])('retries the saved section identity with cleared selection=%s', async (cleared) => {
+it.each([{ cleared: false, cold: false }, { cleared: true, cold: false },
+  { cleared: false, cold: true }, { cleared: true, cold: true }])(
+  'retries the saved section identity with $cleared cleared selection and $cold cold restoration', async ({ cleared, cold }) => {
   const selections = [{ source_id: 'source-1', node_id: 'dsi:1', navigation_version: 'v1' }];
   const settings = { sections: selections, provider: 'deepseek', model: 'saved-model', temperature: 0.7, top_p: 0.8,
     max_tokens: 8192, summary_instruction: 'Saved instruction' };
   const row = { id: 'summary-saved', workspace_id: 'owned', artifact_type: 'summary', title: 'Partial summary', status: 'failed',
     content: 'Partial coverage with a completed quotation.', version: 2, created_at: new Date().toISOString(),
-    producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings } } as WorkspaceArtifactApiResponse;
+    producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings },
+    version_metadata: { workspaceClient: { schemaVersion: 1, id: 'local-summary-card' } } } as WorkspaceArtifactApiResponse;
   stored.push(row);
   const original = mapServerArtifactToLocal(row);
-  bindWorkspaceArtifactOrigin(original, 'server:alice', 'owned');
+  if (cold) {
+    original.producerMetadata = { ...original.producerMetadata, source_ids: ['stale-cache-source'], settings: { model: 'stale-cache-model' } };
+  } else bindWorkspaceArtifactOrigin(original, 'server:alice', 'owned');
   io.state.generatedArtifacts = [original];
-  io.submit.mockResolvedValue({ job_id: 42, artifact_id: row.id, status: 'queued' });
-  io.output.mockResolvedValue({ job_id: 41, status: 'failed', artifact: row });
+  io.submit.mockImplementation(async () => {
+    return { job_id: 42, artifact_id: row.id, status: 'queued' };
+  });
+  let statusAtDispatch: GeneratedArtifact['status'] | undefined;
+  io.output.mockImplementation(async () => {
+    statusAtDispatch ??= io.state.generatedArtifacts[0].status;
+    return { job_id: 41, status: 'completed', artifact: row };
+  });
   const other = { ...source, id: 'source-2', mediaId: 102 };
   const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSources: cleared ? [] : [other],
     selectedMediaIds: cleared ? [] : [102], selectedMediaCount: cleared ? 0 : 1, hasSelectedSources: !cleared }));
   await act(async () => { await hook.result.current.handleGenerateOutput('summary', { mode: 'replace', targetArtifactId: original.id }); });
   expect(io.submit).toHaveBeenCalledWith('owned', expect.objectContaining({ source_ids: ['source-1'],
     resume_artifact_id: row.id, settings: expect.objectContaining(settings) }), expect.anything());
+  expect(statusAtDispatch).toBe('generating');
+  expect(io.state.generatedArtifacts[0]).toMatchObject({ id: 'local-summary-card', workspaceArtifactId: row.id });
 });
 
 it('preserves partial status when only the client metadata save fails', async () => {
   const row = { id: 'partial-1', workspace_id: 'owned', artifact_type: 'summary', title: 'Partial summary', status: 'failed',
     content: 'Partial coverage', version: 2, created_at: new Date().toISOString() } as WorkspaceArtifactApiResponse;
   io.submit.mockImplementation(async () => { stored.push(row); return { job_id: 41, artifact_id: row.id, status: 'queued' }; });
-  io.output.mockResolvedValue({ job_id: 41, status: 'failed', artifact: row });
+  let statusAtDispatch: GeneratedArtifact['status'] | undefined;
+  io.output.mockImplementation(async () => {
+    statusAtDispatch ??= io.state.generatedArtifacts[0].status;
+    return { job_id: 41, status: 'completed', artifact: row };
+  });
   io.request.mockImplementation(async (request) => { if (request.method === 'GET') return stored; throw new Error('Save failed'); });
   const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }] }));
   await act(async () => { await hook.result.current.handleGenerateOutput('summary'); });
   expect(hook.result.current.unsavedArtifact?.status).toBe('failed');
   expect(io.state.generatedArtifacts[0].status).toBe('failed');
+});
+
+
+it.each(['foreign-origin', 'missing', 'wrong-workspace', 'ambiguous'])(
+  'refuses cold section Retry with %s canonical authority', async (invalid) => {
+    const row = { id: 'saved-summary', workspace_id: 'owned', artifact_type: 'summary', title: 'Partial',
+      status: 'failed', content: 'Completed evidence', version: 2, created_at: new Date().toISOString(),
+      producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings: {} }
+    } as WorkspaceArtifactApiResponse;
+    const original = mapServerArtifactToLocal(row);
+    io.state.generatedArtifacts = [original];
+    if (invalid === 'foreign-origin') bindWorkspaceArtifactOrigin(original, 'server:bob', 'owned');
+    if (invalid === 'wrong-workspace') stored.push({ ...row, workspace_id: 'foreign' });
+    else if (invalid === 'ambiguous') stored.push(row, row);
+    else if (invalid !== 'missing') stored.push(row);
+    const hook = renderHook(() => useArtifactGeneration(deps()));
+    await act(async () => { await hook.result.current.handleGenerateOutput('summary', { mode: 'replace', targetArtifactId: original.id }); });
+    expect(io.submit).not.toHaveBeenCalled();
+    expect(io.media).not.toHaveBeenCalled();
+    expect(io.state.generatedArtifacts).toEqual([original]);
+    if (invalid === 'foreign-origin') expect(io.request).not.toHaveBeenCalled();
+  });
+
+it.each(['account', 'workspace', 'edit', 'delete'])(
+  'retires cold section Retry when %s changes during canonical reload', async (change) => {
+    const row = { id: 'saved-summary', workspace_id: 'owned', artifact_type: 'summary', title: 'Partial',
+      status: 'failed', content: 'Completed evidence', version: 2, created_at: new Date().toISOString(),
+      producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings: {} }
+    } as WorkspaceArtifactApiResponse;
+    const original = mapServerArtifactToLocal(row);
+    io.state.generatedArtifacts = [original];
+    let release!: (rows: WorkspaceArtifactApiResponse[]) => void;
+    io.request.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const hook = renderHook(() => useArtifactGeneration(deps()));
+    let retry!: Promise<void>;
+    act(() => { retry = hook.result.current.handleGenerateOutput('summary', { mode: 'replace', targetArtifactId: original.id }); });
+    await waitFor(() => expect(io.request).toHaveBeenCalledTimes(1));
+    if (change === 'account') controller.abort();
+    if (change === 'workspace') io.state.workspaceId = 'other';
+    if (change === 'delete') io.state.generatedArtifacts = [];
+    if (change === 'edit') io.state.generatedArtifacts = [{ ...original, content: 'Newer user edit' }];
+    const expected = io.state.generatedArtifacts;
+    await act(async () => { release([row]); await retry; });
+    expect(io.submit).not.toHaveBeenCalled();
+    expect(io.state.generatedArtifacts).toEqual(expected);
+  });
+
+
+it.each(['edit', 'delete'])('retires cold section Retry after a local %s during source reload', async (change) => {
+  const row = { id: 'saved-summary', workspace_id: 'owned', artifact_type: 'summary', title: 'Partial',
+    status: 'failed', content: 'Completed evidence', version: 2, created_at: new Date().toISOString(),
+    producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings: {} }
+  } as WorkspaceArtifactApiResponse;
+  stored.push(row);
+  const original = mapServerArtifactToLocal(row);
+  io.state.generatedArtifacts = [original];
+  let release!: (rows: unknown[]) => void;
+  io.sources.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const hook = renderHook(() => useArtifactGeneration(deps()));
+  let retry!: Promise<void>;
+  act(() => { retry = hook.result.current.handleGenerateOutput('summary', { mode: 'replace', targetArtifactId: original.id }); });
+  await waitFor(() => expect(io.sources).toHaveBeenCalledTimes(1));
+  io.state.generatedArtifacts = change === 'delete' ? [] : [{ ...original, content: 'Newer user edit' }];
+  const expected = io.state.generatedArtifacts;
+  await act(async () => {
+    release([{ id: 'source-1', workspace_id: 'owned', media_id: 101, title: 'Rowan Observatory' }]);
+    await retry;
+  });
+  expect(io.submit).not.toHaveBeenCalled();
+  expect(io.state.generatedArtifacts).toEqual(expected);
+});
+
+
+it.each(['transient', 'offline', 'already-completed'])(
+  'keeps the saved section job identity through %s status polling', async (mode) => {
+    vi.useFakeTimers();
+    try {
+      const selections = [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }];
+      const row = { id: 'saved-summary', workspace_id: 'owned', artifact_type: 'summary', title: 'Summary',
+        status: 'complete', content: 'Completed evidence', version: 2, created_at: new Date().toISOString(),
+        producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings: { sections: selections } }
+      } as WorkspaceArtifactApiResponse;
+      stored.push(row);
+      io.submit.mockResolvedValue({ job_id: 41, artifact_id: row.id, status: 'queued' });
+      const finished = { job_id: 41, artifact_id: row.id, status: 'completed', artifact: row };
+      if (mode === 'offline') io.output.mockRejectedValue(new Error('Request timed out'));
+      else if (mode === 'transient') io.output.mockRejectedValueOnce(new Error('Request timed out')).mockResolvedValue(finished);
+      else {
+        const original = bindWorkspaceArtifactOrigin(mapServerArtifactToLocal(row), 'server:alice', 'owned');
+        io.state.generatedArtifacts = [{ ...original, status: 'generating' }];
+        io.output.mockResolvedValue(finished);
+      }
+      const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: selections }));
+      await act(async () => {
+        const pending = hook.result.current.handleGenerateOutput('summary', mode === 'already-completed'
+          ? { mode: 'replace', targetArtifactId: row.id } : undefined);
+        await vi.runAllTimersAsync();
+        await pending;
+      });
+      if (mode === 'offline') {
+        expect(io.state.generatedArtifacts[0]).toMatchObject({ status: 'generating', workspaceArtifactId: row.id,
+          errorMessage: expect.stringContaining('Check saved generation progress') });
+        expect(io.output).toHaveBeenCalledTimes(3);
+        expect(messages.error).not.toHaveBeenCalled();
+        io.output.mockReset().mockResolvedValueOnce({ ...finished, status: 'processing', artifact: { ...row, status: 'generating' } }).mockResolvedValue(finished);
+        hook.rerender();
+        await act(async () => {
+          const pending = hook.result.current.handleGenerateOutput('summary', { mode: 'replace', targetArtifactId: io.state.generatedArtifacts[0].id });
+          await vi.runAllTimersAsync();
+          await pending;
+        });
+      }
+      expect(io.state.generatedArtifacts[0]).toMatchObject({ status: 'completed', workspaceArtifactId: row.id, content: 'Completed evidence' });
+      expect(io.submit).toHaveBeenCalledTimes(mode === 'already-completed' ? 0 : 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+
+it('excludes unmeasured section jobs from aggregate usage while retaining actual and labeled estimates', () => {
+  const base = { type: 'summary' as const, title: 'Summary', status: 'completed' as const, createdAt: new Date() };
+  io.state.generatedArtifacts = [
+    { ...base, id: 'unmeasured', estimatedTokens: 1200, estimatedCostUsd: 0.004,
+      producerMetadata: { origin: 'research_workspace_output_job', job_id: 41 } },
+    { ...base, id: 'ordinary', estimatedTokens: 100, estimatedCostUsd: 0.001 },
+    { ...base, id: 'measured', totalTokens: 50, totalCostUsd: 0.01,
+      producerMetadata: { origin: 'research_workspace_output_job', job_id: 42 } }
+  ];
+  const hook = renderHook(() => useArtifactGeneration(deps()));
+  expect(hook.result.current.cumulativeUsage).toMatchObject({ tokens: 150, costUsd: 0.011, includedArtifacts: 2, unmeasuredArtifacts: 1 });
+});
+
+
+it('retains a submitted section job and its checkpoint when Studio unmounts without explicit Cancel', async () => {
+  io.submit.mockResolvedValue({ job_id: 41, artifact_id: 'canonical-summary', status: 'queued' });
+  let release!: (status: unknown) => void;
+  io.output.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }] }));
+  let pending!: Promise<void>;
+  act(() => { pending = hook.result.current.handleGenerateOutput('summary'); });
+  await waitFor(() => expect(io.output).toHaveBeenCalledTimes(1));
+  hook.unmount();
+  await act(async () => { release({ status: 'processing' }); await pending; });
+  expect(io.cancel).not.toHaveBeenCalled();
+  expect(io.state.generatedArtifacts[0]).toMatchObject({ status: 'generating', workspaceArtifactId: 'canonical-summary',
+    producerMetadata: { job_id: 41, source_ids: ['source-1'] }, errorMessage: expect.stringContaining('Check saved generation progress') });
+  expect(io.state.generatedArtifacts[0].errorMessage).not.toContain('canceled');
 });

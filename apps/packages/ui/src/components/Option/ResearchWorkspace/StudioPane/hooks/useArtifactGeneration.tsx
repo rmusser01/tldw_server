@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from "react"
 import { hasResearchWorkspaceMigrationTombstone, useWorkspaceStore } from "@/store/workspace"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
-import { readWorkspaceArtifactClientPayload, getStoredWorkspaceAudioRef, bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
+import { readWorkspaceArtifactClientPayload, getStoredWorkspaceAudioRef, bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin, hasWorkspaceArtifactOriginEvidence, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
-import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
-import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace, loadWorkspaceArtifacts } from "@/services/workspace-artifact-persistence"
+import { requestScopeFields, type ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
+import { mapServerArtifactToLocal } from "@/store/workspace-api"
 import type { MessageInstance } from "antd/es/message/interface"
 import { tldwClient, type VisualStyleRecord } from "@/services/tldw/TldwApiClient"
 import type {
@@ -1384,6 +1385,13 @@ const toGeneratedArtifactFromWorkspaceArtifact = (
   }
 }
 
+class SavedOutputStatusUnavailableError extends Error {
+  constructor() {
+    super("Saved generation status is temporarily unavailable. Check saved generation progress to reconnect to the existing job.")
+    this.name = "SavedOutputStatusUnavailableError"
+  }
+}
+
 const generateBackendMediaOutput = async (
   type: BackendMediaOutputType,
   options: SourceContentGenerationOptions & {
@@ -1418,9 +1426,35 @@ const generateBackendMediaOutput = async (
   const { visualStyleId } = parseSlidesVisualStyleValue(
     options.slidesVisualStyleValue || ""
   )
+  const readStatus = async (jobId: number): Promise<ResearchWorkspaceOutputStatusResponse> => {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      throwIfAborted(options.abortSignal)
+      try {
+        return await tldwClient.getWorkspaceOutputStatus(workspaceId, jobId,
+          { signal: options.abortSignal, requestScope: options.requestScope })
+      } catch (error) {
+        throwIfAborted(options.abortSignal)
+        const status = error && typeof error === "object" ? (error as { status?: unknown }).status : undefined
+        if (status === 401 || status === 403 || status === 404 || attempt === 2) {
+          if (["summary", "report", "compare_sources"].includes(type)) throw new SavedOutputStatusUnavailableError()
+          throw error
+        }
+        await waitForMediaOutputPoll(MEDIA_OUTPUT_POLL_INTERVAL_MS * (2 ** attempt), options.abortSignal)
+      }
+    }
+    throw new SavedOutputStatusUnavailableError()
+  }
+  const completedResult = (status: ResearchWorkspaceOutputStatusResponse) => {
+    if (!status.artifact) throw new Error("Media output completed without an artifact.")
+    if (status.artifact.workspace_id !== workspaceId ||
+        !status.artifact.id || !Number.isSafeInteger(status.artifact.version) || status.artifact.version < 1)
+      throw new Error("Media output has an invalid workspace identity.")
+    return toGeneratedArtifactFromWorkspaceArtifact(status.artifact, type)
+  }
   const previousJob = options.resumeArtifact?.producerMetadata?.job_id
-  const existingStatus = typeof previousJob === "number"
-    ? await tldwClient.getWorkspaceOutputStatus(workspaceId, previousJob, { signal: options.abortSignal, requestScope: options.requestScope }) : null
+  const existingStatus = typeof previousJob === "number" ? await readStatus(previousJob) : null
+  if (existingStatus?.status === "completed" && ["complete", "completed"].includes(existingStatus.artifact?.status ?? ""))
+    return completedResult(existingStatus)
   const submitResponse = existingStatus && ["queued", "processing"].includes(existingStatus.status) ? existingStatus : await tldwClient.submitWorkspaceOutput(workspaceId, {
     artifact_type: type,
     source_ids: sourceIds,
@@ -1454,22 +1488,10 @@ const generateBackendMediaOutput = async (
   const timeout = ["summary", "compare_sources", "report"].includes(type) ? 2 * 60 * 60 * 1000 : MEDIA_OUTPUT_POLL_TIMEOUT_MS
   while (Date.now() - startedAt < timeout) {
     throwIfAborted(options.abortSignal)
-    const status = await tldwClient.getWorkspaceOutputStatus(
-      workspaceId,
-      submitResponse.job_id,
-      { signal: options.abortSignal, requestScope: options.requestScope }
-    )
+    const status = await readStatus(submitResponse.job_id)
     options.onProgress?.(status)
 
-    if (status.status === "completed") {
-      if (!status.artifact) {
-        throw new Error("Media output completed without an artifact.")
-      }
-      if (status.artifact.workspace_id !== workspaceId ||
-          !status.artifact.id || !Number.isSafeInteger(status.artifact.version) ||
-          status.artifact.version < 1) throw new Error("Media output has an invalid workspace identity.")
-      return toGeneratedArtifactFromWorkspaceArtifact(status.artifact, type)
-    }
+    if (status.status === "completed") return completedResult(status)
 
     if (status.status === "failed") {
       if (status.artifact?.content && ["summary", "compare_sources", "report"].includes(type))
@@ -1487,6 +1509,7 @@ const generateBackendMediaOutput = async (
     )
   }
 
+  if (["summary", "report", "compare_sources"].includes(type)) throw new SavedOutputStatusUnavailableError()
   throw new Error("Media output generation timed out.")
 }
 
@@ -3287,14 +3310,20 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
   const cumulativeUsage = React.useMemo(() => {
     return generatedArtifacts.reduce(
       (acc, artifact) => {
-        const tokens = artifact.totalTokens || artifact.estimatedTokens || 0
-        const cost = artifact.totalCostUsd || artifact.estimatedCostUsd || 0
+        const sectionJob = ["summary", "report", "compare_sources"].includes(artifact.type) &&
+          artifact.producerMetadata?.origin === "research_workspace_output_job"
+        if (sectionJob && (artifact.totalTokens === undefined || artifact.totalCostUsd === undefined))
+          return { ...acc, unmeasuredArtifacts: acc.unmeasuredArtifacts + 1 }
+        const tokens = artifact.totalTokens ?? artifact.estimatedTokens ?? 0
+        const cost = artifact.totalCostUsd ?? artifact.estimatedCostUsd ?? 0
         return {
+          ...acc,
           tokens: acc.tokens + tokens,
-          costUsd: acc.costUsd + cost
+          costUsd: acc.costUsd + cost,
+          includedArtifacts: acc.includedArtifacts + 1
         }
       },
-      { tokens: 0, costUsd: 0 }
+      { tokens: 0, costUsd: 0, includedArtifacts: 0, unmeasuredArtifacts: 0 }
     )
   }, [generatedArtifacts])
 
@@ -3333,7 +3362,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         ? generatedArtifacts.find(entry => entry.id === options.targetArtifactId &&
           entry.producerMetadata?.origin === "research_workspace_output_job" && entry.workspaceArtifactId) : undefined
       const savedSourceIds = resumeCandidate?.producerMetadata?.source_ids
-      const resumeSourceIds = Array.isArray(savedSourceIds) && savedSourceIds.length > 0 &&
+      let resumeSourceIds = Array.isArray(savedSourceIds) && savedSourceIds.length > 0 &&
         savedSourceIds.every(id => typeof id === "string") ? savedSourceIds as string[] : null
       const resumingSectionOutput = Boolean(resumeSourceIds)
       if (!hasSelectedSources && !resumingSectionOutput) return
@@ -3374,6 +3403,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
       let releaseScope: (() => void) | undefined
       let requestScope: ServicePromptRequestScope | undefined
       let operationSignal = activeAbort.signal
+      let verifyRetryUnchanged: (() => void) | undefined
       const isCurrent = () => generationAbortRef.current === activeAbort &&
         currentWorkspaceRef.current === workspaceId &&
         useWorkspaceStore.getState().workspaceId === workspaceId &&
@@ -3411,12 +3441,40 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             operationArtifacts = operationArtifacts.filter(artifact =>
               hasWorkspaceArtifactOrigin(artifact, scope!.scopeKey, workspaceId))
             const previous = generatedArtifacts.find(entry => entry.id === options.targetArtifactId)
-            if (previous && !hasWorkspaceArtifactOrigin(previous, scope.scopeKey, workspaceId))
-              throw new Error("Reload this saved output before replacing it.")
             requestScope = scope.requestScope
             operationSignal = AbortSignal.any([
               activeAbort.signal, scope.scopeSignal, scope.scopeInvalidatedSignal,
             ])
+            if (previous && !hasWorkspaceArtifactOrigin(previous, scope.scopeKey, workspaceId)) {
+              if (previous !== resumeCandidate || hasWorkspaceArtifactOriginEvidence(previous))
+                throw new Error("Reload this saved output before replacing it.")
+              // JSON hydration drops runtime authority; re-read it from the current authenticated workspace.
+              const cachedPayload = workspaceArtifactDraftPayload(previous)
+              const rows = await loadWorkspaceArtifacts(workspaceId, {
+                ...requestScopeFields(requestScope), abortSignal: operationSignal,
+              })
+              assertCurrent()
+              verifyRetryUnchanged = () => {
+                const current = useWorkspaceStore.getState().generatedArtifacts.find(entry => entry.id === previous.id)
+                if (!current || !sameWorkspaceArtifactPayload(workspaceArtifactDraftPayload(current), cachedPayload))
+                  throw new Error("This output changed while reloading. Retry from the current saved output.")
+              }
+              const matches = Array.isArray(rows) ? rows.filter(row => row.id === previous.workspaceArtifactId) : []
+              const row = matches[0]
+              if (!Array.isArray(rows) || rows.some(entry => entry.workspace_id !== workspaceId) ||
+                  matches.length !== 1 || row.artifact_type !== type ||
+                  !Number.isSafeInteger(row.version) || row.version < 1 ||
+                  row.producer_metadata?.origin !== "research_workspace_output_job" ||
+                  typeof row.producer_metadata.job_id !== "number")
+                throw new Error("The saved output is no longer available in this workspace.")
+              const sourceIds = row.producer_metadata.source_ids
+              if (!Array.isArray(sourceIds) || !sourceIds.length || sourceIds.some(id => typeof id !== "string"))
+                throw new Error("The saved output has no valid source selection.")
+              resumeSourceIds = sourceIds as string[]
+              const restored = bindWorkspaceArtifactOrigin(
+                { ...mapServerArtifactToLocal(row), id: previous.id }, scope.scopeKey, workspaceId)
+              operationArtifacts.push(restored)
+            }
             const canonicalSources = await tldwClient.getWorkspaceSources(workspaceId, {
               signal: operationSignal, requestScope,
             })
@@ -3472,13 +3530,16 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           options.mode === "replace" && Boolean(options.targetArtifactId) &&
           type !== "video_overview" && type !== "infographic"
 
+        verifyRetryUnchanged?.()
         if (shouldReplaceExisting) {
-          const existingArtifact = generatedArtifacts.find(
+          const existingArtifact = operationArtifacts.find(
             (entry) => entry.id === options.targetArtifactId
           )
           if (existingArtifact) {
             previousArtifact = existingArtifact
             updateArtifactStatus(existingArtifact.id, "generating", {
+              ...existingArtifact,
+              status: "generating",
               errorMessage: undefined,
               ...templateMetadata
             })
@@ -3512,10 +3573,19 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               currentWorkspaceRef.current !== workspaceId ||
               useWorkspaceStore.getState().workspaceId !== workspaceId ||
               scope?.scopeInvalidatedSignal.aborted || accountRetired) return
-          updateArtifactStatus(artifact.id, previousArtifact?.status ?? "failed", {
-            ...(previousArtifact ?? {}),
-            errorMessage: t("playground:studio.generateCancelled", "Generation canceled before completion.")
-          })
+          const checkpoint = useWorkspaceStore.getState().generatedArtifacts.find(entry => entry.id === artifact!.id)
+          if (outputJobRef.current && checkpoint?.producerMetadata?.job_id === outputJobRef.current.jobId) {
+            updateArtifactStatus(artifact.id, "generating", {
+              ...checkpoint,
+              status: "generating",
+              errorMessage: "Saved generation is retained. Check saved generation progress to reconnect."
+            })
+          } else {
+            updateArtifactStatus(artifact.id, previousArtifact?.status ?? "failed", {
+              ...(previousArtifact ?? {}),
+              errorMessage: t("playground:studio.generateCancelled", "Generation canceled before completion.")
+            })
+          }
         }
 
         let result: GenerationResult = {}
@@ -3556,7 +3626,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             outputJobRef.current = { workspaceId: workspaceId!, jobId: job.job_id, requestScope }
             if (artifact) updateArtifactStatus(artifact.id, "generating", {
               workspaceArtifactId: job.artifact_id,
-              producerMetadata: { ...previousArtifact?.producerMetadata, origin: "research_workspace_output_job", job_id: job.job_id },
+              producerMetadata: { ...previousArtifact?.producerMetadata, origin: "research_workspace_output_job", job_id: job.job_id,
+                source_ids: previousArtifact?.producerMetadata?.source_ids ?? operationSources.map(source => source.id) },
             })
           },
         }
@@ -3882,19 +3953,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           version: result.version,
           completedAt: result.completedAt,
           sourceCoverage: result.sourceCoverage,
-          totalTokens:
-            result.totalTokens ||
-            (result.content
-              ? Math.max(1, Math.round(result.content.length / 4))
-              : estimatedTokens),
-          totalCostUsd:
-            result.totalCostUsd ||
-            estimateGenerationCostUsd(
-              result.totalTokens ||
-                (result.content
-                  ? Math.max(1, Math.round(result.content.length / 4))
-                  : estimatedTokens)
-            ),
+          totalTokens: result.totalTokens,
+          totalCostUsd: result.totalCostUsd,
           data: result.data,
           ...(result.producerMetadata
             ? {
@@ -3956,13 +4016,14 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
             useWorkspaceStore.getState().workspaceId !== workspaceId ||
             scope?.scopeInvalidatedSignal.aborted || accountRetired) return
         const generationWasAborted = activeAbort.signal.aborted || isAbortLikeError(error)
+        const statusUnavailable = error instanceof SavedOutputStatusUnavailableError
         const sourceCoverage = isLiteratureSourceCoverageError(error)
           ? error.sourceCoverage
           : undefined
         if (artifact) {
           const checkpoint = useWorkspaceStore.getState().generatedArtifacts.find(entry => entry.id === artifact!.id)
           const sectionCheckpoint = ["summary", "report", "compare_sources"].includes(type) && checkpoint?.producerMetadata?.job_id
-          const failureStatus = sectionCheckpoint ? "failed" : previousArtifact?.status ?? "failed"
+          const failureStatus = statusUnavailable ? "generating" : sectionCheckpoint ? "failed" : previousArtifact?.status ?? "failed"
           updateArtifactStatus(artifact.id, failureStatus, {
             ...(sectionCheckpoint ? checkpoint : previousArtifact ?? { sourceCoverage }),
             status: failureStatus,
@@ -3977,7 +4038,9 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           })
         }
 
-        if (generationWasAborted) {
+        if (statusUnavailable) {
+          messageApi.warning(error.message)
+        } else if (generationWasAborted) {
           messageApi.info(
             t("playground:studio.generateCancelledToast", "Generation canceled")
           )
