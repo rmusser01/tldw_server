@@ -854,3 +854,44 @@ it("reloads canonical metadata after a successful deliberate selection unmounts 
   usePlaygroundSessionStore.getState().clearSession()
   vi.useRealTimers()
 })
+
+it("does not automatically retry a missing saved chat after its first history capture", async () => {
+  vi.useFakeTimers()
+  const previousCapture = mocks.captureHistorySnapshot.getMockImplementation()
+  const previousStore = { ...mocks.store }
+  vi.clearAllMocks()
+  usePlaygroundSessionStore.getState().clearSession()
+  Object.assign(mocks.store, {
+    serverChatId: "trashed-chat",
+    serverChatMetaLoaded: false,
+    temporaryChat: false
+  })
+  mocks.captureHistorySnapshot.mockRejectedValue(Object.assign(new Error("Chat not found"), { status: 404 }))
+  const select = () => usePlaygroundSessionStore.getState().requestServerChatSelection("trashed-chat", () => false)
+  select()
+  const mounted = renderHook(() => {
+    const control = useHistorySelection()
+    mocks.selection = control
+    useServerChatLoader({ ensureServerChatHistoryId: vi.fn(), notification: { error: vi.fn() }, t: ((key: string) => key) as TFunction })
+  })
+  try {
+    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+    expect(mocks.captureHistorySnapshot).toHaveBeenCalledTimes(1)
+
+    mounted.rerender()
+    await act(async () => { await vi.advanceTimersByTimeAsync(900) })
+    expect(mocks.captureHistorySnapshot).toHaveBeenCalledTimes(1)
+
+    act(select)
+    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+    expect(mocks.captureHistorySnapshot).toHaveBeenCalledTimes(2)
+  } finally {
+    mounted.unmount()
+    mocks.selection = null
+    Object.assign(mocks.store, previousStore)
+    mocks.captureHistorySnapshot.mockReset()
+    if (previousCapture) mocks.captureHistorySnapshot.mockImplementation(previousCapture)
+    usePlaygroundSessionStore.getState().clearSession()
+    vi.useRealTimers()
+  }
+})

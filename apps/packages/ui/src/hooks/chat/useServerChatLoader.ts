@@ -739,6 +739,15 @@ export const useServerChatLoader = ({
     if (!serverChatId || assistantMeta?.isLoading) return
     const deliberateSelection = selectionIntent?.chatId === serverChatId &&
       selectionIntent !== handledSelectionIntent.current
+    // A failed history capture is settled for this chat until the user reopens it.
+    if (!deliberateSelection) {
+      const control = selectionRef.current
+      if (control?.canAutomaticallyLoad?.() === false) return
+      const selected = control?.getCurrent()
+      if (selected?.status === "unsupported_history_capability" &&
+          selected.owner?.kind === "native" &&
+          selected.owner.conversation_id === serverChatId) return
+    }
     if (
       !deliberateSelection &&
       shouldSkipLoadedServerChatReload({
