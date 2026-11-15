@@ -72,7 +72,7 @@ async def test_process_pdf_task_attaches_structured_ocr_and_preserves_backend_me
 
     monkeypatch.setattr(pdf_lib, "_get_ocr_backend", _fake_get_backend)
     monkeypatch.setattr(pdf_lib, "_ocr_pdf_pages", _fake_ocr_pdf_pages)
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "parser text")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "parser text")
     monkeypatch.setenv("OCR_PAGE_CONCURRENCY", "8")
 
     result = await pdf_lib.process_pdf_task(
@@ -120,7 +120,7 @@ async def test_process_pdf_task_preserves_parser_text_when_ocr_not_triggered(
 
     monkeypatch.setattr(pdf_lib, "_get_ocr_backend", _fake_get_backend)
     monkeypatch.setattr(pdf_lib, "_ocr_pdf_pages", _fake_ocr_pdf_pages)
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "parser text is already long enough")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "parser text is already long enough")
 
     result = await pdf_lib.process_pdf_task(
         file_bytes=_build_minimal_pdf_bytes(),
@@ -164,7 +164,7 @@ async def test_process_pdf_task_ignores_invalid_backend_concurrency_cap(
 
     monkeypatch.setattr(pdf_lib, "_get_ocr_backend", _fake_get_backend)
     monkeypatch.setattr(pdf_lib, "_ocr_pdf_pages", _fake_ocr_pdf_pages)
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "")
     monkeypatch.setenv("OCR_PAGE_CONCURRENCY", "4")
 
     result = await pdf_lib.process_pdf_task(
@@ -211,7 +211,7 @@ async def test_process_pdf_task_filters_internal_backend_details_from_output(mon
         "_ocr_pdf_pages",
         lambda **kwargs: ("OCR PAGE TEXT", 1, 1, [{"text": "OCR PAGE TEXT", "raw": {"page": 1}}]),
     )
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "parser text")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "parser text")
     monkeypatch.setenv("OCR_PAGE_CONCURRENCY", "4")
 
     result = await pdf_lib.process_pdf_task(
@@ -261,7 +261,7 @@ async def test_process_pdf_task_appends_ocr_text_when_append_branch_is_taken(
 
     monkeypatch.setattr(pdf_lib, "_get_ocr_backend", _fake_get_backend)
     monkeypatch.setattr(pdf_lib, "_ocr_pdf_pages", _fake_ocr_pdf_pages)
-    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path: "parser text")
+    monkeypatch.setattr(pdf_lib, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "parser text")
     monkeypatch.setattr(
         pdf_lib,
         "_should_replace_ocr_content",

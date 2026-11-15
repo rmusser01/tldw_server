@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.endpoints.media import navigation as navigation_mod
+from tldw_Server_API.app.core.Media import navigation as navigation_core
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 from tldw_Server_API.app.main import app
 
@@ -80,16 +81,16 @@ async def test_navigation_prefers_pdf_outline(mock_user, mock_db, mock_storage):
         SimpleNamespace(level=2, title="Section 1.1", page=3),
     ]
 
-    with patch.object(
-        navigation_mod,
+    with patch.object(navigation_core, "get_document_version", return_value=None), patch.object(
+        navigation_core,
         "get_storage_backend",
         return_value=mock_storage,
     ), patch.object(
-        navigation_mod,
+        navigation_core,
         "_check_pymupdf_available",
         return_value=True,
     ), patch.object(
-        navigation_mod,
+        navigation_core,
         "_extract_pdf_outline",
         return_value=(outline_entries, 12),
     ), patch.object(
@@ -289,7 +290,7 @@ async def test_navigation_falls_back_to_transcript_segments(mock_user, mock_db):
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(navigation_mod, "get_media_transcripts", return_value=[{"transcription": json.dumps(transcript_payload)}]), patch.object(
+    with patch.object(navigation_core, "get_media_transcripts", return_value=[{"transcription": json.dumps(transcript_payload)}]), patch.object(
         navigation_mod,
         "get_cached_response",
         return_value=None,
@@ -350,8 +351,8 @@ async def test_navigation_generated_fallback_is_opt_in(mock_user, mock_db):
         "Second chapter body."
     )
 
-    with patch.object(navigation_mod, "get_media_transcripts", return_value=[]), patch.object(
-        navigation_mod,
+    with patch.object(navigation_core, "get_media_transcripts", return_value=[]), patch.object(
+        navigation_core,
         "get_document_version",
         return_value={"content": generated_source_text},
     ), patch.object(
@@ -436,16 +437,16 @@ async def test_navigation_prefers_generated_when_pdf_outline_is_sparse(mock_user
         "More details."
     )
 
-    with patch.object(navigation_mod, "get_storage_backend", return_value=mock_storage), patch.object(
-        navigation_mod,
+    with patch.object(navigation_core, "get_storage_backend", return_value=mock_storage), patch.object(
+        navigation_core,
         "_check_pymupdf_available",
         return_value=True,
     ), patch.object(
-        navigation_mod,
+        navigation_core,
         "_extract_pdf_outline",
         return_value=(sparse_outline_entries, 20),
     ), patch.object(
-        navigation_mod,
+        navigation_core,
         "get_document_version",
         return_value={"content": generated_source_text},
     ), patch.object(
@@ -506,12 +507,12 @@ async def test_navigation_keeps_sparse_pdf_outline_when_no_fallback_enabled(mock
         SimpleNamespace(level=1, title="Contents", page=2),
     ]
 
-    with patch.object(navigation_mod, "get_storage_backend", return_value=mock_storage), patch.object(
-        navigation_mod,
+    with patch.object(navigation_core, "get_storage_backend", return_value=mock_storage), patch.object(
+        navigation_core,
         "_check_pymupdf_available",
         return_value=True,
     ), patch.object(
-        navigation_mod,
+        navigation_core,
         "_extract_pdf_outline",
         return_value=(sparse_outline_entries, 20),
     ), patch.object(
@@ -593,7 +594,7 @@ async def test_navigation_prefers_generated_toc_when_contents_block_exists(mock_
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
 
-    with patch.object(navigation_mod, "get_document_version", return_value={"content": toc_content}), patch.object(
+    with patch.object(navigation_core, "get_document_version", return_value={"content": toc_content}), patch.object(
         navigation_mod,
         "get_cached_response",
         return_value=None,
@@ -631,7 +632,7 @@ def test_generated_toc_parser_extracts_hierarchical_page_nodes():
     db = MagicMock()
     media = {"type": "pdf", "content": content}
 
-    with patch.object(navigation_mod, "_get_media_text", return_value=content):
+    with patch.object(navigation_core, "_get_media_text", return_value=content):
         nodes = navigation_mod._extract_generated_toc_nodes(media_id=42, db=db, media=media)
 
     assert [node["title"] for node in nodes[:4]] == [
@@ -660,7 +661,7 @@ def test_generated_toc_parser_promotes_appendix_after_references_and_skips_short
     db = MagicMock()
     media = {"type": "pdf", "content": content}
 
-    with patch.object(navigation_mod, "_get_media_text", return_value=content):
+    with patch.object(navigation_core, "_get_media_text", return_value=content):
         nodes = navigation_mod._extract_generated_toc_nodes(media_id=77, db=db, media=media)
 
     titles = [node["title"] for node in nodes]

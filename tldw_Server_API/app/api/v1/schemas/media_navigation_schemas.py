@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-
 
 MEDIA_NAVIGATION_FORMAT_VALUES = ("auto", "plain", "markdown", "html")
 MediaNavigationFormat = Literal["auto", "plain", "markdown", "html"]
@@ -28,8 +27,7 @@ def coerce_media_navigation_format(
         return default
     if normalized not in MEDIA_NAVIGATION_FORMAT_VALUES:
         raise ValueError(
-            f"Unsupported media navigation format '{value}'. "
-            f"Expected one of {MEDIA_NAVIGATION_FORMAT_VALUES}."
+            f"Unsupported media navigation format '{value}'. " f"Expected one of {MEDIA_NAVIGATION_FORMAT_VALUES}."
         )  # noqa: TRY003
     return cast(MediaNavigationFormat, normalized)
 
@@ -63,13 +61,14 @@ class MediaNavigationQueryParams(BaseModel):
         le=2000,
         description="Maximum number of nodes to return before truncation.",
     )
-    parent_id: Optional[str] = Field(
+    parent_id: str | None = Field(
         None,
         description="Optional parent node id for lazy child loading.",
     )
 
 
 class MediaNavigationContentQueryParams(BaseModel):
+    navigation_version: str | None = Field(None, min_length=1, max_length=200)
     format: MediaNavigationFormat = Field(
         "auto",
         description="Requested content format (canonical values only).",
@@ -87,11 +86,11 @@ class MediaNavigationContentQueryParams(BaseModel):
 
 class MediaNavigationNode(BaseModel):
     id: str = Field(..., min_length=1, description="Node identifier.")
-    parent_id: Optional[str] = Field(None, description="Parent node id for hierarchy.")
+    parent_id: str | None = Field(None, description="Parent node id for hierarchy.")
     level: int = Field(..., ge=0, description="Hierarchy level.")
     title: str = Field(..., min_length=1, description="Display title.")
     order: int = Field(..., ge=0, description="Sibling display order.")
-    path_label: Optional[str] = Field(
+    path_label: str | None = Field(
         None,
         description="Optional numeric path label (for example: 12.5).",
     )
@@ -99,20 +98,20 @@ class MediaNavigationNode(BaseModel):
         ...,
         description="Target coordinate type.",
     )
-    target_start: Optional[float] = Field(
+    target_start: float | None = Field(
         None,
         description="Type-specific target start coordinate.",
     )
-    target_end: Optional[float] = Field(
+    target_end: float | None = Field(
         None,
         description="Type-specific target end coordinate.",
     )
-    target_href: Optional[str] = Field(
+    target_href: str | None = Field(
         None,
         description="Internal href target (required for href target_type).",
     )
     source: str = Field(..., min_length=1, description="Provenance source identifier.")
-    confidence: Optional[float] = Field(
+    confidence: float | None = Field(
         None,
         ge=0.0,
         le=1.0,
@@ -125,7 +124,7 @@ class MediaNavigationNode(BaseModel):
         return coerce_media_navigation_target_type(value)
 
     @model_validator(mode="after")
-    def _validate_target_shape(self) -> "MediaNavigationNode":
+    def _validate_target_shape(self) -> MediaNavigationNode:
         if self.target_type == "char_range":
             if self.target_start is None or self.target_end is None:
                 raise ValueError("char_range nodes require target_start and target_end")  # noqa: TRY003
@@ -186,9 +185,9 @@ class MediaNavigationResponse(BaseModel):
 
 class MediaNavigationTarget(BaseModel):
     target_type: MediaNavigationTargetType
-    target_start: Optional[float] = None
-    target_end: Optional[float] = None
-    target_href: Optional[str] = None
+    target_start: float | None = None
+    target_end: float | None = None
+    target_href: str | None = None
 
     @field_validator("target_type", mode="before")
     @classmethod
@@ -203,8 +202,13 @@ class MediaNavigationContentResponse(BaseModel):
     content_format: MediaNavigationFormat
     available_formats: list[MediaNavigationFormat] = Field(default_factory=list)
     content: str
-    alternate_content: Optional[Dict[MediaNavigationFormat, str]] = None
+    alternate_content: dict[MediaNavigationFormat, str] | None = None
     target: MediaNavigationTarget
+    navigation_version: str | None = None
+    resolved_start_char: int | None = Field(None, ge=0)
+    resolved_end_char: int | None = Field(None, ge=0)
+    page_spans: list[dict[str, Any]] = Field(default_factory=list)
+    coverage_status: Literal["exact", "unavailable"] = "unavailable"
 
     @field_validator("content_format", mode="before")
     @classmethod

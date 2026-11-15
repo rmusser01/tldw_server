@@ -14,8 +14,8 @@ async def test_pdf_analysis_empty_chunk_responses_do_not_crash(
         PDF_Processing_Lib as pdf_mod,
     )
 
-    monkeypatch.setattr(pdf_mod, "pymupdf4llm_parse_pdf", lambda path: "Some extracted content")
-    monkeypatch.setattr(pdf_mod, "extract_metadata_from_pdf", lambda path: {})
+    monkeypatch.setattr(pdf_mod, "pymupdf4llm_parse_pdf", lambda path, **kwargs: "Some extracted content")
+    monkeypatch.setattr(pdf_mod, "extract_metadata_from_pdf", lambda path, **kwargs: {})
     monkeypatch.setattr(pdf_mod, "analyze", lambda **kwargs: "")
 
     class _FakePdfDoc:

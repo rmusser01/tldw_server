@@ -475,8 +475,10 @@ class TestExtractPdfOutline:
             assert entries[2].page == 1
 
     def test_extract_sanitizes_open_failure_log(self, monkeypatch):
+        from tldw_Server_API.app.core.Media import document_outline as outline_core
+
         logger_stub = _LoggerStub()
-        monkeypatch.setattr(outline_endpoint, "logger", logger_stub, raising=True)
+        monkeypatch.setattr(outline_core, "logger", logger_stub, raising=True)
 
         with patch(
             "pymupdf.open",

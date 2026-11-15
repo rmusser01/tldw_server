@@ -15,7 +15,7 @@ Extract existing original retention into one shared orchestration helper. Call i
 Native PDF extraction uses per-page Markdown, normalizes each page, joins deterministically and computes offsets against the final stored string. Optional safe metadata:
 
 ```json
-{"page_count":2,"page_map":[{"page_number":1,"start_char":0,"end_char":120,"printed_page_label":"i"},{"page_number":2,"start_char":122,"end_char":450}]}
+{"page_count":2,"page_map_content_hash":"<SHA-256 of exact stored UTF-8 text>","page_map":[{"page_number":1,"start_char":0,"end_char":120,"printed_page_label":"i"},{"page_number":2,"start_char":122,"end_char":450}]}
 ```
 
 Physical pages are one-based; character ranges are inclusive/exclusive Python string positions. Preserve blank pages. Printed labels require evidence from the PDF, never a guessed constant offset. OCR/alternative parser replacement must rebuild provenance or explicitly omit it. Existing imports without a map require re-extraction for reliable locations.
