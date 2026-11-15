@@ -240,6 +240,8 @@ export type RegenerateMode = "replace" | "new_version"
 
 export type ArtifactGenerationOptions = {
   mode?: RegenerateMode
+  regenerateCompleted?: boolean
+  reconnectOnly?: boolean
   targetArtifactId?: string
   templateId?: WorkProductTemplateId
 }
@@ -588,6 +590,8 @@ type SourceContentGenerationOptions = {
   audioSettings?: AudioGenerationSettings
   selectedSections?: ResearchWorkspaceSectionSelection[]
   resumeArtifact?: GeneratedArtifact
+  regenerateCompleted?: boolean
+  reconnectOnly?: boolean
   onProgress?: (status: ResearchWorkspaceOutputStatusResponse) => void
   onSubmitted?: (job: { job_id: number; artifact_id: string }) => void
   mediaIds: number[]
@@ -608,6 +612,8 @@ type SummaryGenerationOptions = SourceContentGenerationOptions & {
   audioSettings: AudioGenerationSettings
   selectedSections?: ResearchWorkspaceSectionSelection[]
   resumeArtifact?: GeneratedArtifact
+  regenerateCompleted?: boolean
+  reconnectOnly?: boolean
   onProgress?: (status: ResearchWorkspaceOutputStatusResponse) => void
   onSubmitted?: (job: { job_id: number; artifact_id: string }) => void
 }
@@ -1403,6 +1409,8 @@ const generateBackendMediaOutput = async (
     selectedSections?: ResearchWorkspaceSectionSelection[]
     summaryInstruction?: string
     resumeArtifact?: GeneratedArtifact
+    regenerateCompleted?: boolean
+    reconnectOnly?: boolean
     onSubmitted?: (job: { job_id: number; artifact_id: string }) => void
   }
 ): Promise<GenerationResult> => {
@@ -1453,7 +1461,12 @@ const generateBackendMediaOutput = async (
   }
   const previousJob = options.resumeArtifact?.producerMetadata?.job_id
   const existingStatus = typeof previousJob === "number" ? await readStatus(previousJob) : null
-  if (existingStatus?.status === "completed" && ["complete", "completed"].includes(existingStatus.artifact?.status ?? ""))
+  if (options.reconnectOnly) {
+    if (!existingStatus) throw new SavedOutputStatusUnavailableError()
+    if (["completed", "failed", "cancelled"].includes(existingStatus.status)) return completedResult(existingStatus)
+    if (!["queued", "processing"].includes(existingStatus.status)) throw new SavedOutputStatusUnavailableError()
+  }
+  if (!options.regenerateCompleted && existingStatus?.status === "completed" && ["complete", "completed"].includes(existingStatus.artifact?.status ?? ""))
     return completedResult(existingStatus)
   const submitResponse = existingStatus && ["queued", "processing"].includes(existingStatus.status) ? existingStatus : await tldwClient.submitWorkspaceOutput(workspaceId, {
     artifact_type: type,
@@ -3620,6 +3633,8 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           workspaceId, workspaceName, audioSettings, selectedSections: previousSections ?? selectedSections,
           summaryInstruction: resolvedSummaryInstruction,
           resumeArtifact: previousArtifact,
+          regenerateCompleted: options.regenerateCompleted === true,
+          reconnectOnly: options.reconnectOnly === true,
           onProgress: onSectionProgress,
           onSubmitted: (job: { job_id: number; artifact_id: string }) => {
             assertCurrent()

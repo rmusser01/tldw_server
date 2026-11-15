@@ -756,3 +756,48 @@ it('retains a submitted section job and its checkpoint when Studio unmounts with
     producerMetadata: { job_id: 41, source_ids: ['source-1'] }, errorMessage: expect.stringContaining('Check saved generation progress') });
   expect(io.state.generatedArtifacts[0].errorMessage).not.toContain('canceled');
 });
+
+
+it('explicitly regenerates a completed section overview using its saved checkpoint', async () => {
+  const settings = { sections: [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }],
+    provider: 'deepseek', model: 'saved-model', max_tokens: 8192, summary_instruction: 'Saved instruction' };
+  const row = { id: 'saved-overview', workspace_id: 'owned', artifact_type: 'summary', title: 'Complete chapters',
+    status: 'complete', content: 'Old overview', version: 2, created_at: new Date().toISOString(),
+    producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings }
+  } as WorkspaceArtifactApiResponse;
+  stored.push(row);
+  const original = bindWorkspaceArtifactOrigin(mapServerArtifactToLocal(row), 'server:alice', 'owned');
+  io.state.generatedArtifacts = [original];
+  io.submit.mockResolvedValue({ job_id: 42, artifact_id: row.id, status: 'queued' });
+  io.output.mockResolvedValueOnce({ job_id: 41, status: 'completed', artifact: row })
+    .mockResolvedValue({ job_id: 42, status: 'completed', artifact: { ...row, version: 3, content: 'Revised overview' } });
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), hasSelectedSources: false,
+    selectedSources: [], selectedMediaIds: [], selectedMediaCount: 0 }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('summary', {
+    mode: 'replace', targetArtifactId: original.id, regenerateCompleted: true
+  }); });
+  expect(io.submit).toHaveBeenCalledWith('owned', expect.objectContaining({
+    resume_artifact_id: row.id, source_ids: ['source-1'], settings: expect.objectContaining(settings)
+  }), expect.anything());
+  expect(io.state.generatedArtifacts[0]).toMatchObject({ content: 'Revised overview', workspaceArtifactId: row.id });
+});
+
+it.each(['completed', 'failed', 'cancelled'])('checks a terminal %s saved job without submitting a retry', async (jobStatus) => {
+  const row = { id: 'saved-partial', workspace_id: 'owned', artifact_type: 'summary', title: 'Saved chapters',
+    status: 'failed', content: 'Completed chapter evidence', version: 2, created_at: new Date().toISOString(),
+    producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'],
+      settings: { sections: [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }] } }
+  } as WorkspaceArtifactApiResponse;
+  stored.push(row);
+  const original = bindWorkspaceArtifactOrigin(mapServerArtifactToLocal(row), 'server:alice', 'owned');
+  io.state.generatedArtifacts = [{ ...original, status: 'generating' }];
+  io.output.mockResolvedValue({ job_id: 41, status: jobStatus, artifact: row });
+  io.submit.mockRejectedValue(new Error('A status check must never submit'));
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), hasSelectedSources: false,
+    selectedSources: [], selectedMediaIds: [], selectedMediaCount: 0 }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('summary', {
+    mode: 'replace', targetArtifactId: original.id, reconnectOnly: true
+  }); });
+  expect(io.submit).not.toHaveBeenCalled();
+  expect(io.state.generatedArtifacts[0]).toMatchObject({ status: 'failed', content: row.content, workspaceArtifactId: row.id });
+});

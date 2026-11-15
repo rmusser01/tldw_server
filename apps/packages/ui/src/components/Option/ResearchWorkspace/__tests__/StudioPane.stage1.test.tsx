@@ -2,7 +2,8 @@ import React from "react"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
-import type { AudioGenerationSettings, WorkspaceSource } from "@/types/workspace"
+import { HashRouter, MemoryRouter } from "react-router-dom"
+import type { AudioGenerationSettings, GeneratedArtifact, WorkspaceSource } from "@/types/workspace"
 import { StudioPane } from "../StudioPane"
 import { buildUnknownResearchWorkspaceCapabilities } from "../research-workspace-capabilities"
 import { createGroundedClaimVerification } from "./studio-test-fixtures"
@@ -351,6 +352,30 @@ const renderStudioPane = (props: React.ComponentProps<typeof StudioPane> = {}) =
   }
   expandGeneratedOutputsSection()
   return renderResult
+}
+
+const sectionReaderArtifact = (): GeneratedArtifact => ({
+  id: "section-reader", type: "summary", title: "Complete chapter summaries", status: "completed",
+  content: "RAW_FULL_EXPORT_WITH_ALL_EVIDENCE", createdAt: new Date("2026-11-15T00:00:00Z"),
+  sourceLineage: [{ sourceId: "technical-source-uuid", mediaId: 42 }],
+  data: { sectionAnalysis: { schemaVersion: 1, title: "Section summaries", synthesis: "Readable whole-book overview.",
+    sections: Array.from({ length: 30 }, (_, index) => ({
+      title: `Chapter ${index + 1}`, source_id: "source-1", media_id: 42, status: "completed",
+      content: `Readable summary for chapter ${index + 1}.`,
+      page_spans: [{ page_number: index + 34, printed_page_label: String(index + 1) }],
+      batches: [{ status: "completed", evidence: [{ id: `E${index + 1}.1.1`, claim: `Supported claim ${index + 1}`,
+        quote: `Exact source quote ${index + 1}`, author: "Named author", limitations: "Proposal, not enacted policy.",
+        page_spans: [{ page_number: index + 34, printed_page_label: String(index + 1) }] }] }]
+    })) } }
+})
+
+const openReader = async (artifact: GeneratedArtifact, extensionRouter = false) => {
+  workspaceStoreState.generatedArtifacts = [artifact]
+  const Router = extensionRouter ? HashRouter : MemoryRouter
+  render(<Router><StudioPane /></Router>)
+  expandGeneratedOutputsSection()
+  fireEvent.click(screen.getByRole("button", { name: "View" }))
+  return within(await screen.findByRole("dialog"))
 }
 
 describe("StudioPane Stage 1 generation lifecycle control", () => {
@@ -2216,6 +2241,96 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     })
 
     expect(mockRagSearch).not.toHaveBeenCalled()
+  })
+
+  it("opens complete section outputs with an overview and all chapter titles without dumping raw evidence", async () => {
+    const dialog = await openReader(sectionReaderArtifact())
+    expect(await dialog.findByText("Readable whole-book overview.")).toBeInTheDocument()
+    expect(within(dialog.getByRole("combobox", { name: "Chapter or section" })).getAllByRole("option")).toHaveLength(31)
+    expect(dialog.queryByText("RAW_FULL_EXPORT_WITH_ALL_EVIDENCE")).not.toBeInTheDocument()
+    expect(dialog.queryByText("Exact source quote 1")).not.toBeInTheDocument()
+    expect(dialog.queryByText("technical-source-uuid")).not.toBeInTheDocument()
+    fireEvent.change(dialog.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "29" } })
+    expect(await dialog.findByText("Readable summary for chapter 30.")).toBeInTheDocument()
+    expect(dialog.queryByText("Readable summary for chapter 1.")).not.toBeInTheDocument()
+  })
+
+  it("reveals only selected chapter evidence with exact page links and leaves the stored artifact unchanged", async () => {
+    const artifact = sectionReaderArtifact()
+    const before = JSON.stringify(artifact)
+    const dialog = await openReader(artifact)
+    fireEvent.change(await dialog.findByRole("combobox", { name: "Chapter or section" }), { target: { value: "0" } })
+    fireEvent.click(dialog.getByRole("button", { name: /Show evidence/ }))
+    expect(dialog.getByText("Exact source quote 1")).toBeInTheDocument()
+    expect(dialog.queryByText("Exact source quote 2")).not.toBeInTheDocument()
+    expect(dialog.getAllByRole("link", { name: "Printed 1 · PDF 34" })[0]).toHaveAttribute("href", "/document-workspace?open=42&page=34")
+    expect(dialog.getByText("Proposal, not enacted policy.")).toBeInTheDocument()
+    fireEvent.click(dialog.getByRole("button", { name: "Technical details" }))
+    expect(dialog.getAllByText("technical-source-uuid").length).toBeGreaterThan(0)
+    expect(JSON.stringify(artifact)).toBe(before)
+  })
+
+  it("reads restored section metadata while honestly displaying incomplete coverage", async () => {
+    const artifact = sectionReaderArtifact()
+    const analysis = artifact.data!.sectionAnalysis as { synthesis?: string; sections: Array<{ status: string; content?: string; error?: string }> }
+    delete analysis.synthesis
+    analysis.sections[0].status = "failed"
+    delete analysis.sections[0].content
+    analysis.sections[0].error = "The selected portion needs retry."
+    artifact.versionMetadata = { workspaceClient: { schemaVersion: 1, data: artifact.data } }
+    artifact.data = undefined
+    const dialog = await openReader(artifact)
+    expect(await dialog.findByText("29 of 30 sections completed")).toBeInTheDocument()
+    expect(dialog.getByText("Overview is not available yet.")).toBeInTheDocument()
+    fireEvent.change(dialog.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "0" } })
+    expect(dialog.getByText("The selected portion needs retry.")).toBeInTheDocument()
+    expect(dialog.getByText("This section has no completed summary yet. Saved evidence remains available below.")).toBeInTheDocument()
+  })
+
+  it("lets readers view retained chapters when only the final overview failed", async () => {
+    const artifact = sectionReaderArtifact()
+    artifact.status = "failed"
+    artifact.errorMessage = "The overview could not be completed."
+    const analysis = artifact.data!.sectionAnalysis as { synthesis?: string; synthesis_error?: string }
+    delete analysis.synthesis
+    analysis.synthesis_error = artifact.errorMessage
+    const dialog = await openReader(artifact)
+    expect(dialog.getByText("30 of 30 sections completed")).toBeInTheDocument()
+    expect(dialog.getByText("The overview could not be completed.")).toBeInTheDocument()
+    fireEvent.change(dialog.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "29" } })
+    expect(await dialog.findByText("Readable summary for chapter 30.")).toBeInTheDocument()
+  })
+
+  it("labels a retained overview from an earlier attempt when synthesis failed", async () => {
+    const artifact = sectionReaderArtifact()
+    const analysis = artifact.data!.sectionAnalysis as { synthesis_error?: string }
+    analysis.synthesis_error = "The latest overview could not be completed."
+    const dialog = await openReader(artifact)
+    expect(await dialog.findByText("Readable whole-book overview.")).toBeInTheDocument()
+    expect(dialog.getByText("The overview below is from an earlier attempt. Completed chapters and evidence remain available.")).toBeInTheDocument()
+  })
+
+  it("uses the extension router for authenticated PDF page links", async () => {
+    const dialog = await openReader(sectionReaderArtifact(), true)
+    fireEvent.change(dialog.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "0" } })
+    expect(dialog.getByRole("link", { name: "Printed 1 · PDF 34" })).toHaveAttribute("href", "#/document-workspace?open=42&page=34")
+  })
+
+  it("keeps in-flight section outputs and failed legacy outputs out of the reader", () => {
+    workspaceStoreState.generatedArtifacts = [
+      { ...sectionReaderArtifact(), status: "generating" },
+      { id: "failed-legacy", type: "summary", title: "Failed legacy", status: "failed", content: "Incomplete text", createdAt: new Date() }
+    ]
+    renderStudioPane()
+    expandGeneratedOutputsSection()
+    expect(screen.queryByRole("button", { name: "View" })).not.toBeInTheDocument()
+  })
+
+  it.each([undefined, { schemaVersion: 2, sections: [] }, { schemaVersion: 1, sections: [null] }])("keeps legacy or unsupported section payloads in their existing viewer: %j", async sectionAnalysis => {
+    const dialog = await openReader({ id: "legacy-reader", type: "summary", title: "Legacy summary", status: "completed",
+      content: "Legacy complete content", data: { sectionAnalysis }, createdAt: new Date() })
+    expect(dialog.getByText("Legacy complete content")).toBeInTheDocument()
+    expect(dialog.queryByRole("combobox", { name: "Chapter or section" })).not.toBeInTheDocument()
   })
 
   it("confirms before deleting a generated artifact", () => {

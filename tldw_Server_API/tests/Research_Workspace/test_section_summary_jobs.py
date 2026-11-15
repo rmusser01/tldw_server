@@ -881,7 +881,7 @@ async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves
         return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
 
     monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
-    options = args(request().settings.model_copy(update={"sections": [], "max_tokens": output_budget}))
+    options = args(request().settings.model_copy(update={"sections": [], "max_tokens": output_budget, "summary_instruction": "Final-only detailed report request"}))
     await mod.process_section_summary(**options)
     assert [call["max_tokens"] for call in calls] == [
         output_budget,
@@ -891,7 +891,14 @@ async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves
         output_budget,
         output_budget,
     ]
+    reduction_prompt = calls[2]["messages_payload"][0]["content"]
+    assert "Final-only detailed report request" not in reduction_prompt
+    assert "AUTHORITATIVE COVERAGE" not in reduction_prompt
+    assert "600–1200" not in reduction_prompt
+    assert "Compress only the supplied portions" in reduction_prompt
+    assert "Final-only detailed report request" in calls[-1]["messages_payload"][0]["content"]
     assert "at most 250 words" in calls[2]["system_message"]
+    assert "concrete policy proposals and opposing policy stances" in calls[2]["system_message"]
     assert options["workspace_db"].row["status"] == "complete"
     calls.clear()
     await mod.process_section_summary(**options)
@@ -938,7 +945,8 @@ async def test_nonreducing_synthesis_stops_without_accepting_or_discarding_saved
 
 
 @pytest.mark.asyncio
-async def test_combined_synthesis_progress_reports_completed_and_failed_sections(monkeypatch):
+@pytest.mark.parametrize("partial", [False, True])
+async def test_combined_synthesis_progress_reports_completed_and_failed_sections(monkeypatch, partial):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
 
@@ -975,19 +983,21 @@ async def test_combined_synthesis_progress_reports_completed_and_failed_sections
     )
     progress = SimpleNamespace(message="")
     final_progress = []
+    final_prompts = []
 
     async def chat(**kwargs):
         prompt = kwargs["messages_payload"][0]["content"]
         if "SOURCE:" in prompt:
             content = (
                 "invalid JSON"
-                if "Bravo" in prompt
+                if partial and "Bravo" in prompt
                 else json.dumps({"summary": "Alpha", "evidence": [{"claim": "Claim", "source_span_ids": ["P1"]}]})
             )
         else:
             content = "Alpha [E1.1.1]."
             if "Synthesize the completed" in prompt:
                 final_progress.append(progress.message)
+                final_prompts.append(prompt)
         return {"choices": [{"message": {"content": content}}]}
 
     monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
@@ -996,8 +1006,24 @@ async def test_combined_synthesis_progress_reports_completed_and_failed_sections
     options = args(settings)
     await mod.process_section_summary(**options, progress=progress)
     assert len(final_progress) == 1
-    assert "Combining 1 of 2 reviewed sections" in final_progress[0]
-    assert "1 section needs retry" in final_progress[0]
+    assert f"Combining {1 if partial else 2} of 2 reviewed sections" in final_progress[0]
+    assert ("1 section needs retry" in final_progress[0]) is partial
+    prompt = final_prompts[0]
+    assert "AUTHORITATIVE COVERAGE: " in prompt
+    coverage = json.loads(prompt.split("AUTHORITATIVE COVERAGE: ")[1].split("\n")[0])
+    assert coverage == {
+        "selected_sections": 2,
+        "completed_sections": 1 if partial else 2,
+        "failed_sections": 1 if partial else 0,
+        "unread_sections": 0,
+        "completed_portions": 1 if partial else 2,
+        "failed_portions": 1 if partial else 0,
+        "unread_portions": 0,
+    }
+    assert "600–1200 words" in prompt
+    assert "Unless a different length is requested" in prompt
+    assert "what each side supports or opposes" in prompt
+    assert "Do not infer unread or truncated selected material from intermediate summaries" in prompt
 
 
 @pytest.mark.asyncio

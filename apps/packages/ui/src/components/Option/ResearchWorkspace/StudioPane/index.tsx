@@ -1,4 +1,5 @@
 import { SectionScopePicker } from "./SectionScopePicker"
+import { getSectionAnalysis, SectionAnalysisArtifactViewer } from "./SectionAnalysisArtifactViewer"
 import type { ResearchWorkspaceSectionSelection } from "@/services/tldw/domains/workspace-api"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React, { Suspense, useState, useEffect, useRef } from "react"
@@ -1790,6 +1791,16 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
       return
     }
 
+    const sectionAnalysis = getSectionAnalysis(artifact)
+    if (sectionAnalysis) {
+      openArtifactViewer({
+        title: artifact.title,
+        content: <SectionAnalysisArtifactViewer artifact={artifact} analysis={sectionAnalysis} sources={workspaceSources} />,
+        ...responsiveModalProps(960)
+      })
+      return
+    }
+
     if (artifact.content || hasTraceableArtifactMetadata(artifact)) {
       openArtifactViewer({
         title: artifact.title,
@@ -2989,6 +3000,21 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   "playground:studio.retryFailedOutput",
                   "Retry"
                 )
+                const canViewRetainedSections = artifact.status === "failed" &&
+                  Boolean(artifact.content && getSectionAnalysis(artifact))
+                const viewAction = (artifact.content || artifact.audioUrl || hasTraceableArtifactMetadata(artifact)) && (
+                  <Tooltip title={t("common:view", "View")}>
+                    <button
+                      type="button"
+                      onClick={() => handleViewArtifact(artifact)}
+                      onKeyDown={handleIconButtonKeyDown}
+                      className="rounded p-1 text-text-muted hover:bg-surface2 hover:text-text"
+                      aria-label={t("common:view", "View")}
+                    >
+                      <Eye className="h-4 w-4" />
+                    </button>
+                  </Tooltip>
+                )
 
                 return (
                   <div
@@ -3017,6 +3043,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                     void handleCapabilityAwareGenerateOutput(artifact.type, {
                                       mode: "replace",
                                       targetArtifactId: artifact.id,
+                                      reconnectOnly: artifact.status === "generating",
                                       templateId: artifact.templateId
                                     })
                                   }}
@@ -3082,6 +3109,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                         )}
                       </div>
                     </div>
+                    {canViewRetainedSections && <div className="mt-2">{viewAction}</div>}
                     {artifact.status === "completed" && (
                       <div className="mt-2 space-y-1.5">
                         <div
@@ -3093,21 +3121,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                           )}
                           className="flex flex-wrap items-center gap-1 rounded border border-border/70 bg-surface/70 px-1.5 py-1"
                         >
-                          {(artifact.content ||
-                            artifact.audioUrl ||
-                            hasTraceableArtifactMetadata(artifact)) && (
-                            <Tooltip title={t("common:view", "View")}>
-                              <button
-                                type="button"
-                                onClick={() => handleViewArtifact(artifact)}
-                                onKeyDown={handleIconButtonKeyDown}
-                                className="rounded p-1 text-text-muted hover:bg-surface2 hover:text-text"
-                                aria-label={t("common:view", "View")}
-                              >
-                                <Eye className="h-4 w-4" />
-                              </button>
-                            </Tooltip>
-                          )}
+                          {viewAction}
                           {(artifact.type === "flashcards" || artifact.type === "quiz") && (
                             <Tooltip title={t("common:edit", "Edit")}>
                               <button
@@ -3171,6 +3185,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                   key === "replace" ? "replace" : "new_version"
                                 void handleCapabilityAwareGenerateOutput(artifact.type, {
                                   mode,
+                                  regenerateCompleted: mode === "replace" && artifact.status === "completed",
                                   targetArtifactId: artifact.id,
                                   templateId: artifact.templateId
                                 })
