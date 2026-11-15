@@ -21,7 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import (
     get_media_db_for_user,
     try_get_media_db_for_user,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.media_request_models import SearchRequest
 from tldw_Server_API.app.api.v1.schemas.media_response_models import (
     MediaListItem,

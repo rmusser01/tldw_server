@@ -38,10 +38,12 @@ from __future__ import annotations
 
 import ast
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
+
+from tldw_Server_API.tests.lint import _moved_endpoint_code
 
 pytestmark = pytest.mark.unit
 
@@ -125,24 +127,32 @@ def count_bearer_parses(tree: ast.AST) -> int:
     return found
 
 
-def _counts(root: Path, needle: str, counter: Callable[[ast.AST], int]) -> dict[str, int]:
+def _scan_files() -> list[Path]:
+    return _moved_endpoint_code.scan_files(ENDPOINTS_ROOT)
+
+
+def _display(path: Path) -> str:
+    return _moved_endpoint_code.display(path)
+
+
+def _counts(paths: Iterable[Path], needle: str, counter: Callable[[ast.AST], int]) -> dict[str, int]:
     counts: dict[str, int] = {}
-    for path in sorted(root.rglob("*.py")):
+    for path in paths:
         source = path.read_text(encoding="utf-8")
         if needle not in source.lower():  # cheap prefilter; the AST decides
             continue
         found = counter(ast.parse(source, filename=str(path)))
         if found:
-            counts[path.relative_to(REPO_ROOT).as_posix()] = found
+            counts[_display(path)] = found
     return counts
 
 
 def current_looks_like_jwt() -> dict[str, int]:
-    return _counts(APP_ROOT, "_looks_like_jwt", count_looks_like_jwt)
+    return _counts(sorted(APP_ROOT.rglob("*.py")), "_looks_like_jwt", count_looks_like_jwt)
 
 
 def current_bearer_parses() -> dict[str, int]:
-    return _counts(ENDPOINTS_ROOT, "bearer", count_bearer_parses)
+    return _counts(_scan_files(), "bearer", count_bearer_parses)
 
 
 def allowed(name: str, baseline: dict[str, int], bumps: dict[tuple[str, str], tuple[int, str]]) -> dict[str, int]:
@@ -262,7 +272,7 @@ def test_only_audio_tells_the_core_it_enforces_token_scope() -> None:
     """Self-test included: both ways of setting the mark count, reading it does not (TASK-13950.73)."""
     seeded = ast.parse(f"ws.state.{SCOPE_MARK} = True\nsetattr(ws.state, '{SCOPE_MARK}', True)\nx = ws.state.{SCOPE_MARK}\n")
     assert count_scope_marks(seeded) == 2
-    assert set(_counts(APP_ROOT, SCOPE_MARK, count_scope_marks)) == SCOPE_MARK_SETTERS
+    assert set(_counts(sorted(APP_ROOT.rglob("*.py")), SCOPE_MARK, count_scope_marks)) == SCOPE_MARK_SETTERS
 
 
 def test_looks_like_jwt_copies_only_decrease() -> None:
@@ -345,7 +355,7 @@ def test_the_ratchet_asks_for_a_lower_seed_after_a_migration() -> None:
 
 
 def test_only_routes_with_shipped_query_clients_use_the_query_shim() -> None:
-    problems = query_shim_problems(set(_counts(APP_ROOT, QUERY_SHIM, count_query_shim_references)))
+    problems = query_shim_problems(set(_counts(sorted(APP_ROOT.rglob("*.py")), QUERY_SHIM, count_query_shim_references)))
     assert not problems, "\n".join(problems)
 
 
@@ -379,6 +389,16 @@ def test_configuration_comparisons_docstrings_and_comments_are_not_counted() -> 
     )
     assert count_bearer_parses(tree) == 0
     assert count_looks_like_jwt(tree) == 0
+
+
+def test_bearer_ratchet_flags_a_violation_in_code_moved_out_of_endpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seeded = tmp_path / "api" / "v1" / "utils" / "chatops" / "seeded.py"
+    seeded.parent.mkdir(parents=True)
+    seeded.write_text("def f(header):\n    return header.startswith('Bearer ')\n", encoding="utf-8")
+    monkeypatch.setattr(_moved_endpoint_code, "moved_files", lambda *_args: [seeded])
+    assert current_bearer_parses().get(str(seeded)) == 1  # nosec B101
 
 
 if __name__ == "__main__":
