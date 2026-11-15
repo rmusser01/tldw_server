@@ -32,6 +32,7 @@ Signed-in hosted UAT: Media/Prompts first anchors absent in deployed variants, K
 Candidate verification: 119 web-shell, registry, prompt, locale and Joyride tests passed, plus 12 offline demo unit tests. Browser fixtures opened the corrected Media and Prompts tours and kept the first Settings target visible at 320 px. Beta UAT verified Not now survives reload and Flashcards remains in Help.
 Signed-in Team UAT reproduced HTTP 500. The production response model rejects a synthetic PostgreSQL datetime at added_at; retain the API string result with explicit normalization.
 Signed-in beta UAT identified the Notes auto-tour and PostgreSQL timestamp failure. The fix preserves first-visit dismissal and Notes Help replay. Targeted frontend checks and all three schema regression cases passed.
+Public PR #3473. Signed-in owner UAT also exposed an invitation list 500 after recovering the member list. The repository uses naive UTC parameters for PostgreSQL TIMESTAMP in list, create, and expiry cleanup. Eight focused backend cases passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

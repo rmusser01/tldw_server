@@ -104,6 +104,10 @@ class _PostgresConnForListInvites:
         self.fetchrow_calls: list[tuple[str, tuple[Any, ...]]] = []
         self.fetch_calls: list[tuple[str, tuple[Any, ...]]] = []
 
+    async def execute(self, query: str, cutoff: datetime) -> str:
+        assert cutoff.tzinfo is None
+        return "UPDATE 1" if query.startswith("UPDATE") else "DELETE 1"
+
     async def fetchrow(self, query: str, *params: Any) -> tuple[int]:
         lower_q = str(query).lower()
         if "?" in lower_q:
@@ -167,6 +171,7 @@ async def test_create_invite_postgres_backend_selection_uses_fetchrow():
     assert "values ($1, $2, $3" in query.lower()
     assert "returning id, code" in query.lower()
     assert params and isinstance(params[0], str) and params[0].startswith("INV-")
+    assert params[5].tzinfo is None
 
 
 @pytest.mark.asyncio
@@ -187,12 +192,21 @@ async def test_list_org_invites_postgres_uses_numbered_limit_offset_placeholders
     assert len(count_params) == 2
     assert count_params[0] == 5
     assert isinstance(count_params[1], datetime)
+    assert count_params[1].tzinfo is None
 
     select_query, select_params = conn.fetch_calls[0]
     normalized_select = " ".join(select_query.lower().split())
     assert "limit $3 offset $4" in normalized_select
     assert len(select_params) == 4
     assert select_params[0] == 5
-    assert isinstance(select_params[1], datetime)
+    assert select_params[1] == count_params[1]
     assert select_params[2] == 25
     assert select_params[3] == 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("deactivate_only", [True, False])
+async def test_cleanup_expired_invites_postgres_accepts_naive_utc_cutoff(deactivate_only):
+    repo = AuthnzOrgInvitesRepo(db_pool=_PoolStub(_PostgresConnForListInvites(), postgres=True))
+
+    assert await repo.cleanup_expired_invites(deactivate_only=deactivate_only) == 1
