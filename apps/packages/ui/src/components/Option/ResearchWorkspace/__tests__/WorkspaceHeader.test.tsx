@@ -3341,7 +3341,10 @@ describe("WorkspaceHeader workspace browser modal", () => {
     const beforeRetry = retryState()
     fireEvent.click(retryButton)
     try {
-      await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
+      // The receipt reconcile settles asynchronously (up to one status-poll
+      // cycle); CI's contended runners exceed waitFor's 1s default (2/2 CI
+      // failures, 0/15 locally), so give the deadline real headroom.
+      await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1), { timeout: 10000 })
     } catch (error) {
       const afterRetry = retryState()
       console.error("[WorkspaceHeader ACP receipt retry diagnostic]", {
