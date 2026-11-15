@@ -20,7 +20,6 @@ import {
 import type { NotesStudioHandwritingMode, NotesStudioTemplateType } from './notes-studio-types'
 import type { NoteListItem } from './types'
 
-export const NOTES_TUTORIAL_SHOWN_STORAGE_KEY = 'notes-tutorial-shown'
 export const notesUiStorage = createSafeStorage({ area: 'local' })
 
 /**

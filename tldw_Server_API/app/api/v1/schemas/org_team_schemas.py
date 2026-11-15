@@ -145,6 +145,11 @@ class OrgMemberListItem(BaseModel):
     status: str | None = None
     added_at: str | None = None
 
+    @field_validator("added_at", mode="before")
+    @classmethod
+    def serialize_added_at(cls, value: object) -> object:
+        return value.isoformat() if isinstance(value, datetime) else value
+
 
 class OrgMembershipItem(BaseModel):
     org_id: int

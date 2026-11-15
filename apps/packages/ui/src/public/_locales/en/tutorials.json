@@ -395,62 +395,26 @@
   "notes_basics_label": {
     "message": "Notes Basics"
   },
-  "notes_basics_description": {
-    "message": "Organize notes, apply filters, and edit content with split list/editor workflow"
-  },
-  "notes_basics_listTitle": {
-    "message": "Notes List"
-  },
-  "notes_basics_listContent": {
-    "message": "Browse and select notes from the sidebar to load them in the editor."
-  },
-  "notes_basics_modeTitle": {
-    "message": "Active and Trash Views"
-  },
-  "notes_basics_modeContent": {
-    "message": "Switch between active notes and trash to recover or permanently remove entries."
-  },
-  "notes_basics_filtersTitle": {
-    "message": "Sort notes"
-  },
-  "notes_basics_filtersContent": {
-    "message": "Sort the list by date or title. Use Filters below it to narrow the list by tag."
-  },
-  "notes_basics_editorTitle": {
-    "message": "Editor Workspace"
-  },
-  "notes_basics_editorContent": {
-    "message": "Edit note content, references, and metadata in the main editor panel."
-  },
-  "notes_basics_saveTitle": {
-    "message": "Save and Actions"
-  },
-  "notes_basics_saveContent": {
-    "message": "Save updates, duplicate notes, export content, and run helper actions from the header."
-  },
-  "notes_basics_tagsTitle": {
-    "message": "Tags"
-  },
-  "notes_basics_tagsContent": {
-    "message": "Add tags to organize your notes. Use the filter in the sidebar to find notes by tag."
-  },
-  "notes_basics_connectionsTitle": {
-    "message": "Note Connections"
-  },
-  "notes_basics_connectionsContent": {
-    "message": "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here."
-  },
-  "notes_basics_organizeTitle": {
-    "message": "Saved filters"
-  },
-  "notes_basics_organizeContent": {
-    "message": "Save tag filters here to reuse them. To group notes by hand, choose the Collection view."
+  "notes_basics_quickStartDescription": {
+    "message": "Learn to create, edit, and save a note."
   },
   "notes_basics_createTitle": {
     "message": "Create a note"
   },
-  "notes_basics_createContent": {
-    "message": "Click + to start a note. To see this tour again, press ? and choose Restart tutorial."
+  "notes_basics_quickStartCreate": {
+    "message": "Choose + or Create note. If the notes list is closed, open it first. Add a title and text, then choose Save."
+  },
+  "notes_basics_quickStartEditTitle": {
+    "message": "Add a title and text"
+  },
+  "notes_basics_quickStartEdit": {
+    "message": "Give your note a title you can recognize later, then add your text in the editor below."
+  },
+  "notes_basics_quickStartSaveTitle": {
+    "message": "Save your note"
+  },
+  "notes_basics_quickStartSave": {
+    "message": "Choose Save to keep your note. You can also use Ctrl+S or ⌘S."
   },
   "flashcards_basics_label": {
     "message": "Flashcards Basics"

@@ -1669,6 +1669,21 @@ describe('WebLayout chat tour rendered outcome', () => {
     expect(useTutorialStore.getState().hasSeenPromptForPage('/chat')).toBe(true);
   });
 
+  it('offers Notes help and preserves the choice to dismiss it', async () => {
+    routerState.location.pathname = '/notes';
+    render(
+      <OptionLayout>
+        <button data-testid="notes-new-note-button">New note</button>
+      </OptionLayout>
+    );
+
+    expect(await screen.findByText('New to this page?', {}, { timeout: 4_000 })).toBeInTheDocument();
+    expect(useTutorialStore.getState().activeTutorialId).toBeFalsy();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(useTutorialStore.getState().hasSeenPromptForPage('/notes')).toBe(true);
+    expect(useTutorialStore.getState().activeTutorialId).toBeFalsy();
+  });
+
   it('offers Settings help even when the page uses its own header', async () => {
     routerState.location.pathname = '/settings/preferences';
     render(

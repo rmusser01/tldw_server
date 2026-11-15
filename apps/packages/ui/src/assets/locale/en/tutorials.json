@@ -178,25 +178,13 @@
   "notes": {
     "basics": {
       "label": "Notes Basics",
-      "description": "Organize notes, apply filters, and edit content with split list/editor workflow",
-      "listTitle": "Notes List",
-      "listContent": "Browse and select notes from the sidebar to load them in the editor.",
-      "modeTitle": "Active and Trash Views",
-      "modeContent": "Switch between active notes and trash to recover or permanently remove entries.",
-      "filtersTitle": "Sort notes",
-      "filtersContent": "Sort the list by date or title. Use Filters below it to narrow the list by tag.",
-      "editorTitle": "Editor Workspace",
-      "editorContent": "Edit note content, references, and metadata in the main editor panel.",
-      "saveTitle": "Save and Actions",
-      "saveContent": "Save updates, duplicate notes, export content, and run helper actions from the header.",
-      "tagsTitle": "Tags",
-      "tagsContent": "Add tags to organize your notes. Use the filter in the sidebar to find notes by tag.",
-      "connectionsTitle": "Note Connections",
-      "connectionsContent": "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here.",
-      "organizeTitle": "Saved filters",
-      "organizeContent": "Save tag filters here to reuse them. To group notes by hand, choose the Collection view.",
+      "quickStartDescription": "Learn to create, edit, and save a note.",
       "createTitle": "Create a note",
-      "createContent": "Click + to start a note. To see this tour again, press ? and choose Restart tutorial."
+      "quickStartCreate": "Choose + or Create note. If the notes list is closed, open it first. Add a title and text, then choose Save.",
+      "quickStartEditTitle": "Add a title and text",
+      "quickStartEdit": "Give your note a title you can recognize later, then add your text in the editor below.",
+      "quickStartSaveTitle": "Save your note",
+      "quickStartSave": "Choose Save to keep your note. You can also use Ctrl+S or ⌘S."
     }
   },
   "flashcards": {

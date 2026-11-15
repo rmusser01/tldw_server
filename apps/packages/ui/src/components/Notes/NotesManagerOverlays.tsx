@@ -16,11 +16,7 @@ import type {
   KeywordRenameDraft,
   PendingImportFile,
 } from "./notes-manager-types"
-import {
-  NOTES_TUTORIAL_SHOWN_STORAGE_KEY,
-  notesUiStorage,
-  toKeywordTestIdSegment
-} from "./notes-manager-utils"
+import { toKeywordTestIdSegment } from "./notes-manager-utils"
 
 type KeywordState = {
   keywordSuggestionOptions: string[]
@@ -110,9 +106,6 @@ const NotesTutorialRestart: React.FC<{
           !startTutorial("notes-basics", getFocusTarget())
         )
           return
-        void notesUiStorage
-          .remove(NOTES_TUTORIAL_SHOWN_STORAGE_KEY)
-          .catch(() => undefined)
         beforeStart()
         close()
       }}>

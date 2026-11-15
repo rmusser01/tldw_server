@@ -17,7 +17,9 @@ Offer the existing first-visit prompt on eligible web pages and add Settings and
 <!-- AC:BEGIN -->
 - [x] #1 Fresh web sessions see the first-visit prompt on eligible pages and can start a tour.
 - [x] #2 Settings and Collections tours work on desktop and mobile.
-- [x] #3 Notes and Research Workspace retain their page-owned first-visit guides.
+- [x] #3 Notes offers a short optional create/edit/save walkthrough and never starts by itself.
+- [x] #4 Organization members serialize PostgreSQL timestamps without changing the string response contract.
+- [x] #5 Research Workspace keeps its page-owned first-visit guide.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -28,6 +30,8 @@ Red: web Chat and Settings prompt tests and three registry cases reproduced abse
 Code review caught early prompts on loading pages and trailing-slash URLs. Added failing cases first, then deferred new prompts until their first target mounts and honored page-owned guides using canonical routes. Final connected focused Vitest suite: 126 passed.
 Signed-in hosted UAT: Media/Prompts first anchors absent in deployed variants, Knowledge skips unavailable secondary targets, handheld Settings spotlight can leave view, and generic offers hide the task. Follow-up aligns tours to actual stable controls and shows task descriptions before Start.
 Candidate verification: 119 web-shell, registry, prompt, locale and Joyride tests passed, plus 12 offline demo unit tests. Browser fixtures opened the corrected Media and Prompts tours and kept the first Settings target visible at 320 px. Beta UAT verified Not now survives reload and Flashcards remains in Help.
+Signed-in Team UAT reproduced HTTP 500. The production response model rejects a synthetic PostgreSQL datetime at added_at; retain the API string result with explicit normalization.
+Signed-in beta UAT identified the Notes auto-tour and PostgreSQL timestamp failure. The fix preserves first-visit dismissal and Notes Help replay. Targeted frontend checks and all three schema regression cases passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
