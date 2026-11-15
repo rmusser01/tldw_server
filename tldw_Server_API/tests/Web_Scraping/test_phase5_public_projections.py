@@ -7,6 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.Web_Scraping.jobs import projections
 from tldw_Server_API.app.core.Web_Scraping.jobs.models import ScrapingJob
+from tldw_Server_API.app.services import enhanced_web_scraping_service as services
 from tldw_Server_API.app.services.enhanced_web_scraping_service import WebScrapingService
 
 pytestmark = pytest.mark.unit
@@ -143,7 +144,7 @@ async def test_progress_endpoint_projects_after_owner_lookup(monkeypatch):
         return {"current_url": URL, "processed_urls": 2, "options": {"cookie": "sentinel-cookie"}}
 
     svc = SimpleNamespace(_initialized=True, scraper=SimpleNamespace(get_progress=progress))
-    monkeypatch.setattr(endpoints, "get_web_scraping_service", lambda: svc)
+    monkeypatch.setattr(services, "get_web_scraping_service", lambda: svc)
     result = await endpoints.get_scraping_progress("task", SimpleNamespace(id=7))
     assert result["progress"] == {"current_url": "https://example.com/article", "processed_urls": 2}
 

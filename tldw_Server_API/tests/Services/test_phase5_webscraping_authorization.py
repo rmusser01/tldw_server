@@ -26,7 +26,7 @@ async def test_claimed_admin_in_options_cannot_control_lifecycle(monkeypatch, co
     def forbidden_accessor():
         pytest.fail("Unauthorized lifecycle command reached the singleton accessor")
 
-    monkeypatch.setattr(endpoints, "get_web_scraping_service", forbidden_accessor)
+    monkeypatch.setattr(services, "get_web_scraping_service", forbidden_accessor)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             f"/web-scraping/service/{command}",
@@ -58,7 +58,7 @@ async def test_verified_platform_admin_can_control_lifecycle(monkeypatch, claims
         return None
 
     monkeypatch.setattr(services, "create_enhanced_scraper", factory)
-    monkeypatch.setattr(endpoints, "get_web_scraping_service", lambda: svc)
+    monkeypatch.setattr(services, "get_web_scraping_service", lambda: svc)
     monkeypatch.setattr(svc, "get_service_status", lambda: {"initialized": svc._initialized})
     await svc.initialize()
     app = FastAPI()

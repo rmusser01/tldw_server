@@ -26,9 +26,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     attach_chunking_plan_to_result,
 )
 from tldw_Server_API.app.core.Web_Scraping.summary_prompts import resolve_web_summary_overrides
-from tldw_Server_API.app.services.web_scraping_service import (
-    ingest_web_content_orchestrate,
-)
+from tldw_Server_API.app.services import web_scraping_service
 
 router = APIRouter()
 
@@ -89,7 +87,7 @@ async def ingest_web_content(
             system_prompt=request.system_prompt,
             custom_prompt=request.custom_prompt,
         )
-        helper_results = await ingest_web_content_orchestrate(
+        helper_results = await web_scraping_service.ingest_web_content_orchestrate(
             request=request,
             db=db,
             usage_log=usage_log,

@@ -5,6 +5,7 @@ from fastapi import HTTPException
 
 import tldw_Server_API.app.api.v1.endpoints.web_scraping as web_scraping_endpoints
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
+from tldw_Server_API.app.services import enhanced_web_scraping_service
 
 
 @pytest.fixture
@@ -29,7 +30,7 @@ async def test_get_scraping_job_status_preserves_http_exception(monkeypatch):
             raise HTTPException(status_code=404, detail="missing")
 
     monkeypatch.setattr(
-        web_scraping_endpoints,
+        enhanced_web_scraping_service,
         "get_web_scraping_service",
         lambda: _Service(),
         raising=True,
@@ -53,7 +54,7 @@ async def test_cancel_scraping_job_preserves_http_exception(monkeypatch):
             raise HTTPException(status_code=403, detail="forbidden")
 
     monkeypatch.setattr(
-        web_scraping_endpoints,
+        enhanced_web_scraping_service,
         "get_web_scraping_service",
         lambda: _Service(),
         raising=True,
@@ -153,7 +154,7 @@ async def test_web_scraping_management_handlers_sanitize_non_http_exceptions(
     monkeypatch.setattr(web_scraping_endpoints, "logger", logger, raising=True)
 
     monkeypatch.setattr(
-        web_scraping_endpoints,
+        enhanced_web_scraping_service,
         "get_web_scraping_service",
         _raise_service_error,
         raising=True,

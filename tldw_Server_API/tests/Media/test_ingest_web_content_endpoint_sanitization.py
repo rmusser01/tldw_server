@@ -5,6 +5,7 @@ from fastapi import BackgroundTasks, HTTPException, Request
 
 from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content as ingest_endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest, ScrapeMethod
+from tldw_Server_API.app.services import web_scraping_service
 
 pytestmark = pytest.mark.unit
 
@@ -50,7 +51,7 @@ async def test_ingest_web_content_sanitizes_orchestration_failure_log(monkeypatc
 
     monkeypatch.setattr(ingest_endpoint, "logger", logger_stub, raising=True)
     monkeypatch.setattr(
-        ingest_endpoint,
+        web_scraping_service,
         "ingest_web_content_orchestrate",
         _raise_orchestration_failure,
         raising=True,
@@ -214,7 +215,7 @@ async def test_public_extraction_route_authorization_and_optional_legacy_token(
         calls.append(kwargs)
         return [{"url": "https://example.com/a", "content": "article", "extraction_successful": True}]
 
-    monkeypatch.setattr(ingest_endpoint, "ingest_web_content_orchestrate", orchestrate)
+    monkeypatch.setattr(web_scraping_service, "ingest_web_content_orchestrate", orchestrate)
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
             "/ingest-web-content",
