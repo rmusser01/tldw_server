@@ -3,6 +3,7 @@ import { buildQuery } from "@/services/resource-client"
 import { resolveBrowserRequestTransport } from "@/services/tldw/request-core"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { AllowedPath } from "@/services/tldw/openapi-guard"
+import { parseHttpOrigin } from "@/utils/absolute-url-guard"
 import type { LegacyAudiobookProjectMigrationPayload } from "@/db/dexie/audiobook-projects"
 
 import { normalizeTtsProvidersResponse } from "@/services/tldw/audio-providers"
@@ -386,7 +387,9 @@ export const getAudioStudioArtifactMediaPath = (
 }
 
 const isAbsoluteHttpUrl = (value: string | null | undefined): value is string =>
-  typeof value === "string" && /^https?:\/\//i.test(value)
+  typeof value === "string" && /^https?:\/\//i.test(value) && parseHttpOrigin(value) !== null
+
+const MEDIA_TICKET_PATH = /^\/api\/v1\/audio-studio\/media-tickets\/[\w-]+$/
 
 const resolveAudioStudioTicketBrowserUrl = async (
   ticket: AudioStudioMediaTicketResponse, options?: AudioStudioRequestOptions
@@ -394,11 +397,16 @@ const resolveAudioStudioTicketBrowserUrl = async (
   if (isAbsoluteHttpUrl(ticket.ticket_url)) {
     return ticket.ticket_url
   }
+  const path = ticket.ticket_path
+  if (typeof path !== "string" || !MEDIA_TICKET_PATH.test(path)) {
+    throw new Error("Invalid Audio Studio media ticket path")
+  }
   const config = options?.requestScope?.config ?? await tldwClient.getConfig().catch(() => null)
-  return resolveBrowserRequestTransport({
-    config,
-    path: ticket.ticket_path
-  }).url
+  const { kind, url } = resolveBrowserRequestTransport({ config, path })
+  if (kind === "absolute" && url !== path && !isAbsoluteHttpUrl(url)) {
+    throw new Error("Invalid Audio Studio media ticket URL")
+  }
+  return url
 }
 
 export const mintAudioStudioArtifactMediaTicket = async (

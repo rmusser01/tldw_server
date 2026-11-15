@@ -1796,7 +1796,7 @@ _swagger_ui_params = {
 
 app = FastAPI(
     title="tldw API",
-    version="0.1.46",
+    version="0.1.47",
     description=APP_DESCRIPTION,
     terms_of_service="https://github.com/rmusser01/tldw_server",
     contact={
