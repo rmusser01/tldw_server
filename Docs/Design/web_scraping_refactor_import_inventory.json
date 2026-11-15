@@ -1761,14 +1761,6 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJob",
-        "line": 91,
-        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
-        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
-        "target_name": "enhanced_web_scraping"
-      },
-      {
-        "import_kind": "from",
-        "imported_name": "ScrapingJobQueue",
         "line": 92,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
@@ -1776,8 +1768,16 @@
       },
       {
         "import_kind": "from",
+        "imported_name": "ScrapingJobQueue",
+        "line": 93,
+        "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
+        "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
+        "target_name": "enhanced_web_scraping"
+      },
+      {
+        "import_kind": "from",
         "imported_name": "ScrapingJob",
-        "line": 115,
+        "line": 116,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
         "target_name": "enhanced_web_scraping"
@@ -1785,7 +1785,7 @@
       {
         "import_kind": "from",
         "imported_name": "ScrapingJobQueue",
-        "line": 188,
+        "line": 189,
         "module": "tldw_Server_API.app.core.Web_Scraping.enhanced_web_scraping",
         "path": "tldw_Server_API/tests/Web_Scraping/test_phase5_public_projections.py",
         "target_name": "enhanced_web_scraping"
