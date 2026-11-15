@@ -28,7 +28,7 @@ import contextlib
 
 from tldw_Server_API.app.api.v1.API_Deps.backpressure import guard_backpressure_and_quota
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_page_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_page_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.paper_search_schemas import (
     BioRxivFunderPaper,
     BioRxivFunderSearchRequestForm,

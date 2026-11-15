@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, require_api_key_scope
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.storage_helpers import _to_generated_file
 from tldw_Server_API.app.api.v1.schemas.storage_schemas import (
     PermanentDeleteResponse,

@@ -56,7 +56,7 @@ from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import (
     enforce_llm_quota,
     enforce_llm_quota_if_the_router_was_refused,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.endpoints.chat_import_transport import ChatImportRoute
 from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport import WorkspaceStartupRoute
 
