@@ -99,4 +99,9 @@ PR-specific summary waiver recorded; no unapproved check bypass or unrelated cle
    the actual merge on GitHub. Status: in progress. The 48 native tests pass
    on Playwright 1.65.2 and 1.58.0. The older-version run also passed 194
    other cases with only the stale generated inventory failing before refresh.
-   Ruff and scoped production Bandit pass. Chat and hosted CI remain open.
+   The refreshed inventory passed all 12 tests. The updated dev backend gate
+   found nine endpoint-module patches over its existing ceilings. Moved the
+   stubs to service collaborators; the legacy media shim and assertions are
+   unchanged. The focused endpoint/ratchet run passed 137 cases, independent
+   review approved, and production Bandit found no issues. Chat and hosted CI
+   remain open.

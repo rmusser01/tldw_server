@@ -6,7 +6,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi import BackgroundTasks, HTTPException, Request
 
-from tldw_Server_API.app.api.v1.endpoints import media
 from tldw_Server_API.app.api.v1.endpoints.media import ingest_web_content as endpoint
 from tldw_Server_API.app.api.v1.schemas.media_request_models import IngestWebContentRequest
 from tldw_Server_API.app.core.Web_Scraping.contracts.execution import CrawlReport
@@ -29,7 +28,9 @@ async def test_ingestion_receipt_preserves_outcome_and_releases_ephemeral(monkey
     async def scrape_task(**kwargs):
         return {"ephemeral_id": result_id, "crawl_outcome": PARTIAL} if stored else envelope
 
-    monkeypatch.setattr(media, "process_web_scraping_task", scrape_task)
+    monkeypatch.setattr(
+        service, "get_web_scraping_service", lambda: SimpleNamespace(process_web_scraping_task=scrape_task)
+    )
     result = await endpoint.ingest_web_content(
         IngestWebContentRequest(
             urls=["https://example.com"], scrape_method=method, perform_analysis=False, perform_chunking=False
@@ -53,7 +54,9 @@ async def test_failed_empty_ingestion_never_becomes_warning(monkeypatch):
             "crawl_outcome": {"state": "failed", "stop_reason": "policy_denied", "has_partial_results": False},
         }
 
-    monkeypatch.setattr(media, "process_web_scraping_task", scrape_task)
+    monkeypatch.setattr(
+        service, "get_web_scraping_service", lambda: SimpleNamespace(process_web_scraping_task=scrape_task)
+    )
     with pytest.raises(HTTPException) as error:
         await service.ingest_web_content_orchestrate(
             IngestWebContentRequest(
@@ -72,7 +75,9 @@ async def test_completed_empty_ingestion_keeps_terminal_outcome(monkeypatch):
             "crawl_outcome": {"state": "completed", "stop_reason": "frontier_exhausted", "has_partial_results": False},
         }
 
-    monkeypatch.setattr(media, "process_web_scraping_task", scrape_task)
+    monkeypatch.setattr(
+        service, "get_web_scraping_service", lambda: SimpleNamespace(process_web_scraping_task=scrape_task)
+    )
     result = await endpoint.ingest_web_content(
         IngestWebContentRequest(
             urls=["https://example.com"],
@@ -161,7 +166,7 @@ async def test_endpoint_reads_aggregate_before_normalizing_articles(monkeypatch)
     async def ingest(**kwargs):
         return Articles([{"content": "Body", "extraction_successful": True}])
 
-    monkeypatch.setattr(endpoint, "ingest_web_content_orchestrate", ingest)
+    monkeypatch.setattr(service, "ingest_web_content_orchestrate", ingest)
     result = await endpoint.ingest_web_content(
         IngestWebContentRequest(urls=["https://example.com"], perform_analysis=False, perform_chunking=False),
         Request({"type": "http"}),
@@ -179,7 +184,9 @@ async def test_expired_receipt_keeps_aggregate_outcome_in_sanitized_http_failure
     async def scrape_task(**kwargs):
         return {"ephemeral_id": result_id, "crawl_outcome": PARTIAL}
 
-    monkeypatch.setattr(media, "process_web_scraping_task", scrape_task)
+    monkeypatch.setattr(
+        service, "get_web_scraping_service", lambda: SimpleNamespace(process_web_scraping_task=scrape_task)
+    )
     with pytest.raises(HTTPException) as error:
         await endpoint.ingest_web_content(
             IngestWebContentRequest(
@@ -206,7 +213,9 @@ async def test_nested_receipt_failure_keeps_outcome_in_http_response(monkeypatch
     async def scrape_task(**kwargs):
         return {"ephemeral_id": result_id, "crawl_outcome": dict(PARTIAL)}
 
-    monkeypatch.setattr(media, "process_web_scraping_task", scrape_task)
+    monkeypatch.setattr(
+        service, "get_web_scraping_service", lambda: SimpleNamespace(process_web_scraping_task=scrape_task)
+    )
     try:
         response = client.post(
             "/api/v1/media/ingest-web-content",
