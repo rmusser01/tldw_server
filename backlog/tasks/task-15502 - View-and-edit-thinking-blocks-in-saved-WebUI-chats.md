@@ -32,6 +32,8 @@ Verified 813 UI tests and the WebUI typecheck. Backend sweep passed 86 checks, t
 Renumbered before opening the PR because open PR #3474 already reserved TASK-15501.
 Merge preflight reproduced OpenAPI fingerprint drift and existing function-size ceilings. Refresh the generated API contract and relocate the new history logic within the existing persistence helpers.
 Also verified the merge preflight after regenerating the OpenAPI fingerprint and types, fitting the persistence changes within existing function ceilings, and moving the size-limit test to the core persistence helper. Existing OpenAPI path union is unchanged. Passed 17 function/backlog checks, 82 contract checks, 45 streaming and settlement tests before the fixture relocation, and all 3 focused native and size-limit tests afterward. Bandit reported zero findings in the touched production files.
+GitHub frontend-required exposed a full-module reasoning mock in the mounted native editor tests. Update the fixture to preserve real decoder exports and rerun the shared UI tests.
+The coverage shard had six editor mock failures. Local reproduction also found one legacy streaming test whose mock hid the encoder. Both fixtures now keep the real codec exports. All 354 focused shared UI tests passed under Node 20.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
