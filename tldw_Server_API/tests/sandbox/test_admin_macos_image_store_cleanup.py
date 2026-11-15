@@ -163,7 +163,7 @@ def test_admin_macos_image_store_cleanup_defaults_to_dry_run(monkeypatch) -> Non
             action_status="planned",
         )
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
@@ -182,7 +182,7 @@ def test_admin_macos_image_store_cleanup_dry_run_false_passes_through(monkeypatc
         seen_kwargs.update(kwargs)
         return _cleanup_payload(dry_run=kwargs["dry_run"], action_status="deleted")
 
-    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(cleanup_macos_image_store=_cleanup), raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", SimpleNamespace(cleanup_macos_image_store=_cleanup))
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
     with TestClient(app) as client:
@@ -206,7 +206,7 @@ def test_admin_macos_image_store_cleanup_filter_fields_pass_through(monkeypatch)
         seen_kwargs.update(kwargs)
         return _cleanup_payload(dry_run=bool(kwargs["dry_run"]), action_status="planned")
 
-    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(cleanup_macos_image_store=_cleanup), raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", SimpleNamespace(cleanup_macos_image_store=_cleanup))
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
     with TestClient(app) as client:
@@ -230,7 +230,7 @@ def test_admin_macos_image_store_cleanup_maps_confirmation_error(monkeypatch) ->
             400,
         )
 
-    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(cleanup_macos_image_store=_cleanup), raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", SimpleNamespace(cleanup_macos_image_store=_cleanup))
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
     with TestClient(app) as client:
@@ -242,7 +242,7 @@ def test_admin_macos_image_store_cleanup_maps_confirmation_error(monkeypatch) ->
 
 def test_admin_macos_image_store_cleanup_requires_admin(monkeypatch) -> None:
     fake_service = SimpleNamespace(cleanup_macos_image_store=lambda **kwargs: _cleanup_payload(dry_run=True, action_status="planned"))
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
     app = _build_app_with_overrides(_make_principal(is_admin=False))
 
     with TestClient(app) as client:

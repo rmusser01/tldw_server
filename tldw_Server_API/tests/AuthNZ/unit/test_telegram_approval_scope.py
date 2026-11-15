@@ -162,4 +162,3 @@ async def test_telegram_approval_callback_data_changes_when_scope_payload_change
     assert first_pending is not None
     assert second_pending is not None
     assert first_pending["scope_key"] != second_pending["scope_key"]
-

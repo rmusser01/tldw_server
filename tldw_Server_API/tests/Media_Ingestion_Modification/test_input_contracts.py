@@ -21,4 +21,3 @@ def test_validate_media_inputs_delegates_to_provided_callable():
         None,
     )
     assert calls == [("video", ["https://example.com"], None)]
-

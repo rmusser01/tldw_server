@@ -59,7 +59,12 @@ if "transformers" not in sys.modules:
     sys.modules["transformers"] = _fake_tf
 
 
-@pytest.fixture(scope="session", autouse=True)
+# Module scope: a session fixture tore down only at the end of the whole run
+# (package scope is session too, as this directory has no __init__.py). Every
+# test that ran after a Watchlists module in the same process saw the full-app
+# env and a re-imported app.main, while modules that imported ``app`` at
+# collection overrode dependencies on an old app object no client used.
+@pytest.fixture(scope="module", autouse=True)
 def enable_full_app_for_watchlists():
     orig_minimal = os.getenv("MINIMAL_TEST_APP")
     orig_disable = os.getenv("ROUTES_DISABLE")

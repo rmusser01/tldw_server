@@ -13,6 +13,7 @@ import tldw_Server_API.app.core.Ingestion_Media_Processing.Email.Email_Processin
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
+    admit_media_analysis,
     get_process_emails_form,
     media_analysis_requested,
 )
@@ -21,7 +22,6 @@ from tldw_Server_API.app.api.v1.API_Deps.media_route_deps import (
 )
 from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.storage_quota_guard import guard_storage_quota
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ProcessEmailsForm
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
@@ -96,7 +96,7 @@ async def process_emails_endpoint(
 
     if media_analysis_requested(form_data):
         # Usage quotas (LLM usage accounting spec §4a), before any download or processing.
-        await enforce_llm_quota(current_user.id)
+        await admit_media_analysis(current_user.id, form_data)
 
     system_prompt = form_data.system_prompt
     if form_data.perform_analysis and form_data.api_name and system_prompt is None:
