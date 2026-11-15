@@ -64,7 +64,7 @@ PYTHONPATH=tools/backlog-py/src python -m backlog_py --cwd . task create \
   --ac "test_media_llm_quota.py builds no fixture bytes at import time"
 ```
 
-- [ ] **Step 3: Copy the plan and commit.** Copy this file to `Docs/superpowers/plans/2026-11-14-own-key-media-analysis-minors.md`, replacing `15500` with the id.
+- [ ] **Step 3: Copy the plan and commit.** Copy this file to `Docs/superpowers/plans/2026-11-14-own-key-media-analysis-minors.md`, with its task-id placeholder replaced by the id.
 
 ```bash
 git add -A backlog/tasks Docs/superpowers/plans/2026-11-14-own-key-media-analysis-minors.md
