@@ -354,7 +354,12 @@ class ContentFilter:
         # Check content categories
         category_matches = 0
         for _category, keywords in self.content_categories.items():
-            if any(keyword in text_lower for keyword in keywords):
+            # Match words and ordinary inflections, not unrelated derivatives
+            # such as "accountable" or "accountability" for financial "account".
+            if any(
+                re.search(r"\b" + re.escape(keyword) + r"(?:s|es|d|ed|ing|ly)?\b", text_lower)
+                for keyword in keywords
+            ):
                 category_matches += 1
 
         if category_matches >= 2:
