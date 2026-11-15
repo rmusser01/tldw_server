@@ -1,6 +1,6 @@
 import { WORKSPACE_RAG_SOURCES_KEY, restoreWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { readSavedRoleplayPresentation } from "@/services/tldw/roleplay-resume"
-import { useHistorySelectionContext } from "./useHistorySelection"
+import { useHistorySelectionContext, type HistorySelectionController } from "./useHistorySelection"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
 import { waitForChatPromotion } from "@/services/pending-chat-promotion"
@@ -85,6 +85,12 @@ type FetchServerChatMessagesPage = (
 const SERVER_CHAT_MESSAGES_FETCH_LIMIT = 200
 const SERVER_CHAT_MESSAGES_FETCH_MAX_PAGES = 100
 const SERVER_CHAT_IMAGES_MAX_ENCODED_CHARS = 64 * 1024 * 1024
+
+const nativeHistoryUnavailableForChat = (
+  selection: ReturnType<HistorySelectionController["getCurrent"]> | undefined,
+  chatId: string
+) => selection?.status === "unsupported_history_capability" && !selection.capture &&
+  selection.owner?.kind === "native" && selection.owner.conversation_id === chatId
 
 const toServerMessageId = (message: Message): string | null => {
   if (typeof message.serverMessageId !== "string") return null
@@ -743,10 +749,7 @@ export const useServerChatLoader = ({
     if (!deliberateSelection) {
       const control = selectionRef.current
       if (control?.canAutomaticallyLoad?.() === false) return
-      const selected = control?.getCurrent()
-      if (selected?.status === "unsupported_history_capability" &&
-          selected.owner?.kind === "native" &&
-          selected.owner.conversation_id === serverChatId) return
+      if (nativeHistoryUnavailableForChat(control?.getCurrent(), serverChatId)) return
     }
     if (
       !deliberateSelection &&
@@ -834,6 +837,16 @@ export const useServerChatLoader = ({
         await control.open({ kind: "unavailable", code })
       }
 
+      const recordFailedNativeCapture = () => {
+        const control = selectionRef.current
+        const selected = control?.getCurrent()
+        if (!selected?.error || control?.canAutomaticallyLoad?.() === false ||
+            !nativeHistoryUnavailableForChat(selected, serverChatId) || !canCommitCurrentLoad()) return false
+        setServerChatLoadState("failed")
+        setServerChatLoadError(selected.error)
+        return true
+      }
+
       const loadServerChat = async () => {
         let didLoadSuccessfully = false
         let snapshot: ServicePromptSnapshot | undefined
@@ -853,6 +866,7 @@ export const useServerChatLoader = ({
                 useStoreMessageOption.getState().serverChatId === serverChatId
             }, null, receipt => { accepted = selectionIntent?.onLoaded?.(receipt) ?? true })) return
             selectionCurrent = control?.fence() || (() => true)
+            if (recordFailedNativeCapture()) return
             const selected = control?.getCurrent()
             if (!accepted && selected?.owner?.kind === "native" && selected.owner.conversation_id === serverChatId && selected.view) {
               accepted = selectionIntent?.onLoaded?.({ owner: selected.owner, view: selected.view }) ?? false
@@ -890,6 +904,7 @@ export const useServerChatLoader = ({
             if (control?.settingsMode?.(serverChatId, scope) === "pending") {
               if (!await control.loadConversation({serverChatId, scope, temporary: temporaryChat})) return
               selectionCurrent = control.fence()
+              if (recordFailedNativeCapture()) return
             }
             if (control?.settingsMode?.(serverChatId, scope) === "pending") return
           }

@@ -544,9 +544,13 @@ it("holds native fork owner qualification before any ambient settings import and
   vi.useRealTimers()
 })
 
-it("real qualified ordinary legacy controller lets the loader hydrate settings before ancestry review", async () => {
+it.each(["legacy_review_required", "unsupported_history_capability"])("a qualified read-only %s capture still loads the chat", async (status) => {
   vi.useFakeTimers()
   vi.clearAllMocks()
+  const capture = mocks.captureHistorySnapshot.getMockImplementation()!
+  mocks.captureHistorySnapshot.mockImplementationOnce(async (...args) => ({
+    ...await capture(...args), status, code: status
+  }))
   mocks.store.serverChatId = "legacy"
   mocks.store.serverChatAssistantKind = null
   mocks.store.serverChatCharacterId = null
@@ -577,7 +581,7 @@ it("real qualified ordinary legacy controller lets the loader hydrate settings b
   await act(async () => {
     await vi.advanceTimersByTimeAsync(300)
   })
-  expect(mounted.result.current.status).toBe("legacy_review_required")
+  expect(mounted.result.current.status).toBe(status)
   expect(mocks.syncChatSettingsForServerChat).toHaveBeenCalledWith({
     historyId: null,
     serverChatId: "legacy",
