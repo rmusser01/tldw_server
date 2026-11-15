@@ -65,7 +65,7 @@ def test_artifacts_list_perf_large_tree(tmp_path: Path, monkeypatch) -> None:
         run_id = r.json()["id"]
 
         # Seed a moderately large nested tree of artifacts
-        from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+        from tldw_Server_API.app.core.Sandbox import default_service
 
         files: dict[str, bytes] = {}
         # 300 small files across 6 directories
@@ -73,10 +73,10 @@ def test_artifacts_list_perf_large_tree(tmp_path: Path, monkeypatch) -> None:
             sub = f"d{i // 50}"
             rel = f"{sub}/file_{i}.txt"
             files[rel] = f"payload-{i}".encode()
-        sb._service._orch.store_artifacts(run_id, files)  # type: ignore[attr-defined]
+        default_service.sandbox_service._orch.store_artifacts(run_id, files)  # type: ignore[attr-defined]
 
         # Keep periodic janitor work out of the cached-listing measurement.
-        sb._service._orch._maybe_prune_expired_artifacts()  # type: ignore[attr-defined]
+        default_service.sandbox_service._orch._maybe_prune_expired_artifacts()  # type: ignore[attr-defined]
         # List artifacts and assert it completes quickly and returns full set
         t0 = time.perf_counter()
         lr = client.get(f"/api/v1/sandbox/runs/{run_id}/artifacts")
@@ -103,10 +103,10 @@ def test_artifacts_list_uses_cached_sizes_before_filesystem_walk(tmp_path: Path,
         assert r.status_code == 200
         run_id = r.json()["id"]
 
-        from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+        from tldw_Server_API.app.core.Sandbox import default_service
         from tldw_Server_API.app.core.Sandbox import orchestrator as orchestrator_module
 
-        sb._service._orch.store_artifacts(  # type: ignore[attr-defined]
+        default_service.sandbox_service._orch.store_artifacts(  # type: ignore[attr-defined]
             run_id,
             {
                 "nested/out.txt": b"hello",

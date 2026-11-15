@@ -120,7 +120,7 @@ def test_admin_reconciliation_repair_defaults_to_dry_run(monkeypatch) -> None:
             action_status="planned",
         )
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
@@ -139,7 +139,7 @@ def test_admin_reconciliation_repair_dry_run_false_passes_through(monkeypatch) -
         seen_kwargs.update(kwargs)
         return _repair_payload(dry_run=kwargs["dry_run"], action_status="deleted")
 
-    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(repair_macos_reconciliation=_repair), raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", SimpleNamespace(repair_macos_reconciliation=_repair))
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
@@ -168,7 +168,7 @@ def test_admin_reconciliation_repair_runs_service_in_thread(monkeypatch) -> None
             action_status="planned",
         )
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
     monkeypatch.setattr(sandbox_mod.asyncio, "to_thread", _fake_to_thread)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
@@ -191,7 +191,7 @@ def test_admin_reconciliation_repair_orphan_termination_passes_through(
         seen_kwargs.update(kwargs)
         return _repair_payload(dry_run=bool(kwargs["dry_run"]), action_status="planned")
 
-    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(repair_macos_reconciliation=_repair), raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", SimpleNamespace(repair_macos_reconciliation=_repair))
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
@@ -209,7 +209,7 @@ def test_admin_reconciliation_repair_maps_service_unavailable_error(monkeypatch)
     def _repair(**kwargs) -> dict[str, object]:
         raise service_mod.SandboxReconciliationRepairError("macos_virtualization_helper_unavailable", 503)
 
-    monkeypatch.setattr(sandbox_mod, "_service", SimpleNamespace(repair_macos_reconciliation=_repair), raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", SimpleNamespace(repair_macos_reconciliation=_repair))
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
@@ -225,7 +225,7 @@ def test_admin_reconciliation_repair_maps_service_unavailable_error(monkeypatch)
 
 def test_admin_reconciliation_repair_requires_admin(monkeypatch) -> None:
     fake_service = SimpleNamespace(repair_macos_reconciliation=lambda **kwargs: _repair_payload(dry_run=True, action_status="planned"))
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(_make_principal(is_admin=False))
 

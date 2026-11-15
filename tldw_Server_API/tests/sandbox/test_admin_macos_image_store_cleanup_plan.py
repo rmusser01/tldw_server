@@ -147,7 +147,7 @@ def test_admin_macos_image_store_cleanup_plan_endpoint_returns_structured_payloa
             "reasons": [],
         }
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 
@@ -163,7 +163,7 @@ def test_admin_macos_image_store_cleanup_plan_endpoint_returns_structured_payloa
 
 def test_admin_macos_image_store_cleanup_plan_requires_admin(monkeypatch) -> None:
     fake_service = SimpleNamespace(plan_macos_image_store_cleanup=lambda: {})
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(_make_principal(is_admin=False))
 
