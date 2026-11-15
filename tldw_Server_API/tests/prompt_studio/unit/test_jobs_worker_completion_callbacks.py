@@ -9,6 +9,7 @@ import pytest
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio import (
     optimization_engine as optimization_engine_module,
 )
+from tldw_Server_API.app.core.Prompt_Management.prompt_studio import ws_connections
 from tldw_Server_API.app.core.Prompt_Management.prompt_studio.services import (
     jobs_worker,
 )
@@ -472,12 +473,7 @@ async def test_mcts_broadcaster_checks_expected_uuid_on_latest_row(
         async def broadcast_event(self, **kwargs: Any) -> None:
             events.append(dict(kwargs))
 
-    monkeypatch.setattr(
-        optimization_engine_module.mcts_optimizer_module,
-        "ws_connection_manager",
-        object(),
-        raising=True,
-    )
+    monkeypatch.setattr(ws_connections, "current", lambda: object())
     monkeypatch.setattr(
         optimization_engine_module.mcts_optimizer_module,
         "EventBroadcaster",

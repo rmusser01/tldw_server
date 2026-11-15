@@ -97,10 +97,11 @@ def test_session_upload_creates_workspace(monkeypatch) -> None:
 @pytest.mark.asyncio
 async def test_upload_files_streams_plain_upload_without_unbounded_read(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb._service, "get_session_workspace_path", lambda session_id: str(tmp_path))
-    monkeypatch.setattr(sb._service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service, "get_session_workspace_path", lambda session_id: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
 
     upload = UploadFile(filename="hello.txt", file=io.BytesIO(b"hello world"))
     original_read = upload.file.read
@@ -128,10 +129,11 @@ async def test_upload_files_streams_plain_upload_without_unbounded_read(monkeypa
 @pytest.mark.asyncio
 async def test_upload_files_offloads_filesystem_work_to_threads(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb._service, "get_session_workspace_path", lambda session_id: str(tmp_path))
-    monkeypatch.setattr(sb._service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service, "get_session_workspace_path", lambda session_id: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
 
     upload = UploadFile(filename="threaded.txt", file=io.BytesIO(b"threaded upload"))
     original_to_thread = sb.asyncio.to_thread
@@ -161,10 +163,11 @@ async def test_upload_files_offloads_filesystem_work_to_threads(monkeypatch, tmp
 @pytest.mark.asyncio
 async def test_upload_files_streams_tar_members_without_full_member_read(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb._service, "get_session_workspace_path", lambda session_id: str(tmp_path))
-    monkeypatch.setattr(sb._service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service, "get_session_workspace_path", lambda session_id: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
 
     tar_buffer = io.BytesIO()
     with tarfile.open(fileobj=tar_buffer, mode="w:gz") as tf:
@@ -212,10 +215,11 @@ async def test_upload_files_streams_tar_members_without_full_member_read(monkeyp
 @pytest.mark.asyncio
 async def test_upload_files_streams_zip_members_without_zipfile_read(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb._service, "get_session_workspace_path", lambda session_id: str(tmp_path))
-    monkeypatch.setattr(sb._service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service, "get_session_workspace_path", lambda session_id: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
 
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, "w") as zf:
@@ -243,10 +247,11 @@ async def test_upload_files_streams_zip_members_without_zipfile_read(monkeypatch
 @pytest.mark.asyncio
 async def test_upload_files_enforces_cap_against_existing_workspace_bytes(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb._service, "get_session_workspace_path", lambda session_id: str(tmp_path))
-    monkeypatch.setattr(sb._service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service, "get_session_workspace_path", lambda session_id: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
     monkeypatch.setenv("SANDBOX_WORKSPACE_CAP_MB", "1")
 
     first = UploadFile(filename="first.bin", file=io.BytesIO(b"a" * (700 * 1024)))
@@ -278,10 +283,11 @@ async def test_upload_files_enforces_cap_against_existing_workspace_bytes(monkey
 @pytest.mark.asyncio
 async def test_upload_files_offloads_blocking_workspace_filesystem_calls(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb._service, "get_session_workspace_path", lambda session_id: str(tmp_path))
-    monkeypatch.setattr(sb._service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service, "get_session_workspace_path", lambda session_id: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
 
     workspace_root = os.path.abspath(str(tmp_path))
     main_thread_id = threading.get_ident()
@@ -355,10 +361,11 @@ async def test_upload_files_offloads_blocking_workspace_filesystem_calls(monkeyp
 @pytest.mark.asyncio
 async def test_concurrent_uploads_are_serialized_per_session(monkeypatch, tmp_path) -> None:
     from tldw_Server_API.app.api.v1.endpoints import sandbox as sb
+    from tldw_Server_API.app.core.Sandbox import default_service
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb._service, "get_session_workspace_path", lambda session_id: str(tmp_path))
-    monkeypatch.setattr(sb._service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service, "get_session_workspace_path", lambda session_id: str(tmp_path))
+    monkeypatch.setattr(default_service.sandbox_service._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
     monkeypatch.setenv("SANDBOX_WORKSPACE_CAP_MB", "1")
 
     first = UploadFile(filename="first.bin", file=io.BytesIO(b"a" * (700 * 1024)))
@@ -431,7 +438,7 @@ async def test_create_snapshot_waits_for_shared_workspace_lock_even_when_upload_
 
     svc = SandboxService()
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb, "_service", svc)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", svc)
     monkeypatch.setattr(svc, "get_session_workspace_path", lambda session_id: str(tmp_path))
     monkeypatch.setattr(svc._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(tmp_path))
     monkeypatch.setattr(svc._snapshots, "enforce_quota", lambda *args, **kwargs: [])
@@ -508,7 +515,7 @@ async def test_destroy_session_waits_for_shared_workspace_lock_during_upload(
     workspace_root.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb, "_service", svc)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", svc)
     monkeypatch.setattr(svc, "get_session_workspace_path", lambda session_id: str(workspace_root))
     monkeypatch.setattr(svc._orch, "get_session_workspace_path", lambda session_id, **kwargs: str(workspace_root))
     monkeypatch.setattr(svc._snapshots, "cleanup_session_snapshots", lambda session_id: None)
@@ -584,7 +591,7 @@ async def test_upload_files_returns_404_if_session_is_deleted_while_waiting_for_
     state = {"exists": True}
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb, "_service", svc)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", svc)
     monkeypatch.setattr(
         svc._orch,
         "get_session_workspace_path",
@@ -672,7 +679,7 @@ async def test_upload_files_does_not_recreate_deleted_session_root_across_servic
         return str(workspace_root) if state["exists"] else None
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb, "_service", svc_upload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", svc_upload)
     monkeypatch.setattr(svc_delete._orch, "get_session_workspace_path", _workspace_lookup)
     monkeypatch.setattr(svc_upload._orch, "get_session_workspace_path", _workspace_lookup)
 
@@ -769,7 +776,7 @@ async def test_upload_files_rejects_stale_cached_workspace_when_store_lookup_fai
     workspace_root.mkdir(parents=True, exist_ok=True)
 
     monkeypatch.setattr(sb, "_require_session_owner", lambda session_id, current_user: "1")
-    monkeypatch.setattr(sb, "_service", svc_upload)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", svc_upload)
     monkeypatch.setattr(svc_delete._orch, "get_session_workspace_path", lambda _sid, **kwargs: str(workspace_root))
     monkeypatch.setattr(svc_upload._orch, "_prune_expired_sessions", lambda: None)
 

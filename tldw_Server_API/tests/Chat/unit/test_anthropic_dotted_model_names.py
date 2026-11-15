@@ -187,7 +187,7 @@ def test_the_messages_native_payload_sends_the_dashed_api_id_to_anthropic_only()
 )
 def test_the_listed_dashed_names_keep_their_capability_metadata_and_router_rank(listed, saved, quality_rank) -> None:
     """Renaming the picker entries to API IDs must not drop tool and vision support or the router rank (review I-A)."""
-    from tldw_Server_API.app.api.v1.endpoints.llm_providers import get_model_metadata
+    from tldw_Server_API.app.core.LLM_Calls.model_metadata import get_model_metadata
 
     shown = get_model_metadata("anthropic", listed)
     stored = get_model_metadata("anthropic", saved)
