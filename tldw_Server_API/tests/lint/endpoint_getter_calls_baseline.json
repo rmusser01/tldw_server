@@ -1,6 +1,4 @@
 {
-  "api/v1/endpoints/_chatops/ingress.py": {"calls": 1, "reason": null},
-  "api/v1/endpoints/_chatops/oauth_admin.py": {"calls": 9, "reason": null},
   "api/v1/endpoints/acp_multiplex.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/acp_schedules.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/admin/__init__.py": {"calls": 1, "reason": null},
@@ -43,7 +41,6 @@
   "api/v1/endpoints/config_info.py": {"calls": 2, "reason": null},
   "api/v1/endpoints/control_plane.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/discord.py": {"calls": 2, "reason": null},
-  "api/v1/endpoints/discord_support.py": {"calls": 2, "reason": null},
   "api/v1/endpoints/embeddings_v5_production_enhanced.py": {"calls": 3, "reason": null},
   "api/v1/endpoints/evaluations/evaluations_auth.py": {"calls": 2, "reason": null},
   "api/v1/endpoints/evaluations/evaluations_benchmarks.py": {"calls": 3, "reason": null},
@@ -92,12 +89,10 @@
   "api/v1/endpoints/sharing.py": {"calls": 4, "reason": null},
   "api/v1/endpoints/skills.py": {"calls": 1, "reason": "get_default_provider() is a call-time config read, not a service; TASK-13950.14 moved it here from an import-time DEFAULT_LLM_PROVIDER import"},
   "api/v1/endpoints/slack.py": {"calls": 2, "reason": null},
-  "api/v1/endpoints/slack_support.py": {"calls": 2, "reason": null},
   "api/v1/endpoints/slides.py": {"calls": 3, "reason": "get_default_provider() is a call-time config read, not a service; TASK-13950.14 moved it here from an import-time DEFAULT_LLM_PROVIDER import"},
   "api/v1/endpoints/storage.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/storage_admin_quotas.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/storage_download.py": {"calls": 1, "reason": null},
-  "api/v1/endpoints/telegram_support.py": {"calls": 14, "reason": null},
   "api/v1/endpoints/user_keys.py": {"calls": 4, "reason": null},
   "api/v1/endpoints/users.py": {"calls": 10, "reason": null},
   "api/v1/endpoints/visual_identities.py": {"calls": 1, "reason": null},
@@ -109,5 +104,10 @@
   "api/v1/endpoints/workflows.py": {"calls": 4, "reason": null},
   "api/v1/endpoints/workspaces.py": {"calls": 1, "reason": null},
   "api/v1/endpoints/writing_manuscripts.py": {"calls": 1, "reason": null},
-  "api/v1/utils/cache.py": {"calls": 3, "reason": "TASK-13950.20: the counter now also counts first-party module-attribute getter calls and the api/v1/utils modules"}
+  "api/v1/utils/cache.py": {"calls": 3, "reason": "TASK-13950.20: the counter now also counts first-party module-attribute getter calls and the api/v1/utils modules"},
+  "api/v1/utils/chatops/discord_support.py": {"calls": 2, "reason": "moved from api/v1/endpoints/discord_support.py (TASK-13950.20, PR B2)"},
+  "api/v1/utils/chatops/ingress.py": {"calls": 1, "reason": "moved from api/v1/endpoints/_chatops/ingress.py (TASK-13950.20, PR B2)"},
+  "api/v1/utils/chatops/oauth_admin.py": {"calls": 9, "reason": "moved from api/v1/endpoints/_chatops/oauth_admin.py (TASK-13950.20, PR B2)"},
+  "api/v1/utils/chatops/slack_support.py": {"calls": 2, "reason": "moved from api/v1/endpoints/slack_support.py (TASK-13950.20, PR B2)"},
+  "api/v1/utils/chatops/telegram_support.py": {"calls": 14, "reason": "moved from api/v1/endpoints/telegram_support.py (TASK-13950.20, PR B2)"}
 }

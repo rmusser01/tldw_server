@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as sessions
-from tldw_Server_API.app.api.v1.endpoints.workspace_chat_startup_transport import WorkspaceStartupRoute
+from tldw_Server_API.app.api.v1.utils.workspace_chat_startup_transport import WorkspaceStartupRoute
 from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import ChatSessionCreate
 from tldw_Server_API.app.core import feature_flags
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter

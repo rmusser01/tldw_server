@@ -39,11 +39,11 @@ from tldw_Server_API.app.api.v1.API_Deps.validations_deps import (
     file_validator_instance,
 )
 from tldw_Server_API.app.api.v1.endpoints import media as media_mod
-from tldw_Server_API.app.api.v1.endpoints.media.deprecation_signals import (
+from tldw_Server_API.app.api.v1.utils.media_deprecation_signals import (
     apply_media_legacy_headers,
     build_media_legacy_signal,
 )
-from tldw_Server_API.app.api.v1.endpoints.media.input_contracts import (
+from tldw_Server_API.app.api.v1.utils.media_input_contracts import (
     normalize_urls_field,
     validate_media_inputs,
 )

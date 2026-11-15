@@ -8,7 +8,7 @@ from fastapi import Request
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import (
     _register_telegram_actor_link_for_tests,
     _reset_telegram_link_state_for_tests,
     _reset_telegram_webhook_state_for_tests,

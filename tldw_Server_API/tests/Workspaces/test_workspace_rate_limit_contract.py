@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_ep
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT_RESOURCE,
     WORKSPACES_RATE_LIMIT_POLICY,
     WORKSPACES_READ_RATE_LIMIT_RESOURCE,

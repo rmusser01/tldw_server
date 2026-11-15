@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user
-from tldw_Server_API.app.api.v1.endpoints.sandbox_service import sandbox_service
+from tldw_Server_API.app.core.Sandbox.default_service import sandbox_service
 from tldw_Server_API.app.api.v1.schemas.sandbox_schemas import (
     SandboxRunStatusReasonDetails,
     SandboxWorkspaceDiagnosticState,

@@ -23,4 +23,3 @@ def validate_media_inputs(
     """Validate endpoint inputs via the shared compatibility validator."""
 
     validate_inputs_fn(media_type, urls, files)
-

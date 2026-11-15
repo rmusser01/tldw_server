@@ -17,7 +17,22 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
-MOVED_OUT_OF_ENDPOINTS: tuple[str, ...] = ("tldw_Server_API/app/api/v1/utils/pagination.py",)
+MOVED_OUT_OF_ENDPOINTS: tuple[str, ...] = (
+    "tldw_Server_API/app/api/v1/utils/pagination.py",
+    "tldw_Server_API/app/api/v1/utils/chatops",
+    "tldw_Server_API/app/api/v1/utils/chat_import_transport.py",
+    "tldw_Server_API/app/api/v1/utils/in_memory_limits.py",
+    "tldw_Server_API/app/api/v1/utils/kanban.py",
+    "tldw_Server_API/app/api/v1/utils/media_deprecation_signals.py",
+    "tldw_Server_API/app/api/v1/utils/media_input_contracts.py",
+    "tldw_Server_API/app/api/v1/utils/media_navigation_policy.py",
+    "tldw_Server_API/app/api/v1/utils/notes_sync_errors.py",
+    "tldw_Server_API/app/api/v1/utils/prompt_studio_resource_binding.py",
+    "tldw_Server_API/app/api/v1/utils/storage_helpers.py",
+    "tldw_Server_API/app/api/v1/utils/workspace_chat_startup_transport.py",
+    "tldw_Server_API/app/api/v1/utils/workspaces_rate_limit_policy.py",
+    "tldw_Server_API/app/core/Sandbox/default_service.py",
+)
 
 
 def moved_files(repo_root: Path = REPO_ROOT) -> list[Path]:

@@ -118,6 +118,14 @@ def test_api_schema_change_enables_e2e() -> None:
     assert flags["e2e_changed"] is True
 
 
+def test_moved_endpoint_code_still_enables_e2e() -> None:
+    for path in (
+        "tldw_Server_API/app/api/v1/utils/chatops/ingress.py",
+        "tldw_Server_API/app/core/Sandbox/default_service.py",
+    ):
+        assert classify_paths([path])["e2e_changed"] is True
+
+
 def test_backlog_py_change_runs_backend_gate_without_coverage() -> None:
     """The task editor's tests and the backlog task-format ratchet run in backend-required."""
     flags = classify_paths(["tools/backlog-py/src/backlog_py/markdown/task_parser.py"])
