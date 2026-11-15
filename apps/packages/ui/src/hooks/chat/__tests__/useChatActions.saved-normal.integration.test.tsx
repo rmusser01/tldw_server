@@ -32,6 +32,7 @@ import { useComposerQueue } from "@/components/Chat/composer/hooks/useComposerQu
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { resolveServicePromptScope } from "@/services/service-prompts"
+import { generateHistory } from "@/utils/generate-history"
 
 const mocks = vi.hoisted(() => {
   // Creation-ordered deterministic ids (TASK-13523, W3 Task 7). The
@@ -64,6 +65,7 @@ const mocks = vi.hoisted(() => {
   ocr: vi.fn(),
   realFormatter: false,
   realPersistence: false,
+  greetingEnabled: undefined as boolean | undefined,
   ragSearch: vi.fn(),
   streamMessage: vi.fn(),
   saveHistory: vi.fn(),
@@ -294,7 +296,7 @@ vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
     // Keep the real hook's draft subscriptions while isolating settings storage.
     useStoreMessageOption((state) => state.chatDraftAddress)
     useStoreMessageOption((state) => state.chatDraftRevision)
-    return { settings: {}, updateSettings: vi.fn() }
+    return { settings: { greetingEnabled: mocks.greetingEnabled }, updateSettings: vi.fn() }
   }
 }))
 vi.mock("@/hooks/playground", () => ({
@@ -988,6 +990,7 @@ describe("saved normal Chat pipeline with autosave", () => {
     mocks.withLoader = false
     mocks.realFormatter = false
     mocks.realPersistence = false
+    mocks.greetingEnabled = undefined
     mocks.realProviderResolution = false
     mocks.injectActor.mockImplementation(async history => history)
     mocks.getModels.mockResolvedValue([])
@@ -1071,6 +1074,60 @@ describe("saved normal Chat pipeline with autosave", () => {
         }
       }
     })
+  })
+
+  it.each([false, true])("preserves imported request history when the workspace restores after hook mount (StrictMode=%s)", async strict => {
+    const restoredMessages: Message[] = [
+      { id: "import-user", role: "user", isBot: false, name: "You", message: "Remember the Education proposal.", sources: [], images: [] },
+      { id: "import-answer", role: "assistant", isBot: true, name: "Assistant", message: "The proposal is on printed page 319.", sources: [], images: [] }
+    ]
+    const restoredHistory = restoredMessages.map(row => ({ role: row.role!, content: row.message }))
+    const hook = renderHook(() => {
+      const state = useStoreMessageOption()
+      const actions = useChatActions({ ...createHookOptions(), ...state })
+      const restored = React.useRef(false)
+      // ChatPane restores its workspace once; StrictMode replays the child hook's effects.
+      React.useEffect(() => {
+        if (restored.current) return
+        restored.current = true
+        const current = useStoreMessageOption.getState()
+        current.setMessages(restoredMessages)
+        current.setHistory(restoredHistory)
+        current.setHistoryId("imported-local-history", { preserveServerChatId: true })
+        current.setServerChatId(null)
+      }, [])
+      return { state, actions }
+    }, { wrapper: strict ? React.StrictMode : React.Fragment })
+    await waitFor(() => expect(hook.result.current.state.messages).toEqual(restoredMessages))
+    expect(hook.result.current.state.history).toEqual(restoredHistory)
+    expect(hook.result.current.state.serverChatId).toBeNull()
+    expect(mocks.createChat).not.toHaveBeenCalled()
+    // Both ordinary Chat and RAG format this restored history for inference.
+    const inferenceMessages = generateHistory(hook.result.current.state.history, hook.result.current.state.selectedModel!)
+    expect(JSON.stringify(inferenceMessages)).toContain(restoredMessages[0].message)
+    expect(JSON.stringify(inferenceMessages)).toContain(restoredMessages[1].message)
+    hook.unmount()
+  })
+
+  it("still projects greeting settings on mount and after explicit changes", async () => {
+    const greeting: Message = { id: "greeting", role: "assistant", isBot: true, name: "Assistant", message: "Welcome", messageType: "character:greeting", sources: [], images: [] }
+    const question: Message = { id: "question", role: "user", isBot: false, name: "You", message: "Keep my question", sources: [], images: [] }
+    useStoreMessageOption.setState({ messages: [greeting, question] })
+    mocks.greetingEnabled = false
+    const hook = renderHook(() => {
+      const state = useStoreMessageOption()
+      useChatActions({ ...createHookOptions(), ...state })
+      return state
+    }, { wrapper: React.StrictMode })
+    await waitFor(() => expect(hook.result.current.history.map(row => row.content)).toEqual([question.message]))
+    mocks.greetingEnabled = true
+    hook.rerender()
+    await waitFor(() => expect(hook.result.current.history.map(row => row.content)).toEqual([greeting.message, question.message]))
+    mocks.greetingEnabled = false
+    hook.rerender()
+    await waitFor(() => expect(hook.result.current.history.map(row => row.content)).toEqual([question.message]))
+    expect(hook.result.current.messages).toEqual([greeting, question])
+    hook.unmount()
   })
 
   it("publishes a current Temporary full-chat reply after an address-only draft change", async () => {

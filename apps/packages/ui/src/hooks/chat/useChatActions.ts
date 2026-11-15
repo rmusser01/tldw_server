@@ -3374,7 +3374,17 @@ export const useChatActions = ({
     []
   )
 
+  const lastGreetingHistoryProjection = React.useRef<{
+    messages: Message[]
+    greetingEnabled: boolean
+  } | null>(null)
   React.useEffect(() => {
+    const previous = lastGreetingHistoryProjection.current
+    const source = messagesRef.current
+    // A workspace may restore its transcript between StrictMode effect replays.
+    // Do not overwrite that restored history with the same stale mount projection.
+    if (previous?.messages === source && previous.greetingEnabled === greetingEnabled) return
+    lastGreetingHistoryProjection.current = { messages: source, greetingEnabled }
     refreshHistoryFromMessages()
   }, [greetingEnabled, refreshHistoryFromMessages])
 
