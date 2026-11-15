@@ -105,6 +105,8 @@ import { sttTutorials } from "./definitions/stt"
 import { watchlistsTutorials } from "./definitions/watchlists"
 import { monitoringTutorials } from "./definitions/monitoring"
 import { documentWorkspaceTutorials } from "./definitions/document-workspace"
+import { settingsTutorials } from "./definitions/settings"
+import { collectionsTutorials } from "./definitions/collections"
 
 /**
  * Central registry of all available tutorials
@@ -128,7 +130,9 @@ export const TUTORIAL_REGISTRY: TutorialDefinition[] = [
   ...ttsTutorials,
   ...sttTutorials,
   ...watchlistsTutorials,
-  ...monitoringTutorials
+  ...monitoringTutorials,
+  ...settingsTutorials,
+  ...collectionsTutorials
 ]
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -179,6 +183,7 @@ const LEGACY_ROUTE_ALIASES: Record<string, string> = {
 }
 
 const PREFIX_ROUTE_ALIASES: Array<{ pattern: RegExp; canonical: string }> = [
+  { pattern: /^\/settings\/.+$/i, canonical: "/settings" },
   { pattern: /^\/knowledge\/thread(?:\/.*)?$/i, canonical: "/knowledge" },
   { pattern: /^\/knowledge\/shared(?:\/.*)?$/i, canonical: "/knowledge" }
 ]

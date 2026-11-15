@@ -29,9 +29,6 @@ type TutorialRouteOptions = {
   completedTutorialIds?: readonly string[]
 }
 
-const hasTutorialsForRouteMock = vi.fn<
-  (route: string, options?: TutorialRouteOptions) => boolean
->(() => true)
 const getPrimaryTutorialForRouteMock = vi.fn<
   (
     route: string,
@@ -87,9 +84,8 @@ vi.mock("@/store/tutorials", () => ({
   )
 }))
 
-vi.mock("@/tutorials", () => ({
-  hasTutorialsForRoute: (route: string, options?: TutorialRouteOptions) =>
-    hasTutorialsForRouteMock(route, options),
+vi.mock("@/tutorials", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/tutorials")>()),
   getPrimaryTutorialForRoute: (route: string, options?: TutorialRouteOptions) =>
     getPrimaryTutorialForRouteMock(route, options)
 }))
@@ -244,10 +240,6 @@ describe("TutorialPrompt behavior", () => {
     const expectedOptions = {
       completedTutorialIds: ["getting-started"]
     }
-    expect(hasTutorialsForRouteMock).toHaveBeenCalledWith(
-      "/knowledge",
-      expectedOptions
-    )
     expect(getPrimaryTutorialForRouteMock).toHaveBeenCalledWith(
       "/knowledge",
       expectedOptions

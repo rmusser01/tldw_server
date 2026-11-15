@@ -688,5 +688,41 @@
   },
   "playground_basics_newChatContentV2": {
     "message": "Start a new conversation from the sidebar or with the New chat shortcut listed in keyboard help. Saved conversations can be reopened with Find conversations. A Temporary conversation asks before you discard it."
+  },
+  "settings_basics_label": {
+    "message": "Settings Basics"
+  },
+  "settings_basics_description": {
+    "message": "Find the settings you need and see what each section controls."
+  },
+  "settings_basics_overviewTitle": {
+    "message": "Settings by section"
+  },
+  "settings_basics_overviewContent": {
+    "message": "Settings are grouped by task. The heading and current section show which settings you are editing."
+  },
+  "settings_basics_navigationTitle": {
+    "message": "Find a setting"
+  },
+  "settings_basics_navigationContent": {
+    "message": "Search for a section on desktop, or choose a section from the Settings menu on mobile."
+  },
+  "collections_basics_label": {
+    "message": "Collections Basics"
+  },
+  "collections_basics_description": {
+    "message": "Organize saved articles, highlights, and reading digests."
+  },
+  "collections_basics_overviewTitle": {
+    "message": "Your saved reading"
+  },
+  "collections_basics_overviewContent": {
+    "message": "Collections keeps your reading list, highlights, templates, and digest schedules together."
+  },
+  "collections_basics_tabsTitle": {
+    "message": "Choose a tool"
+  },
+  "collections_basics_tabsContent": {
+    "message": "Use Reading List to manage articles, Highlights to revisit passages, or Import/Export to move your reading list."
   }
 }
