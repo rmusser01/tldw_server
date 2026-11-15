@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next"
 import { notification, Button, Space } from "antd"
 import { GraduationCap } from "lucide-react"
 import { useTutorialStore } from "@/store/tutorials"
-import { getPrimaryTutorialForRoute, hasTutorialsForRoute } from "@/tutorials"
+import { getPrimaryTutorialForRoute, normalizeTutorialRoute } from "@/tutorials"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -64,7 +64,7 @@ export const TutorialPrompt: React.FC = () => {
     // Keep the prompt's original source; unrelated renders must not cancel its delay.
     const launchTutorial = launcherRef.current
     let active = true
-    const pageKey = location.pathname
+    const pageKey = normalizeTutorialRoute(location.pathname)
     const tutorialLookupOptions = {
       completedTutorialIds: completedTutorials
     }
@@ -95,11 +95,6 @@ export const TutorialPrompt: React.FC = () => {
       return
     }
 
-    // Skip if page has no tutorials
-    if (!hasTutorialsForRoute(pageKey, tutorialLookupOptions)) {
-      return
-    }
-
     // Skip if user has already seen the prompt for this page
     if (hasSeenPromptForPage(pageKey)) {
       return
@@ -110,7 +105,7 @@ export const TutorialPrompt: React.FC = () => {
       pageKey,
       tutorialLookupOptions
     )
-    if (!primaryTutorial) {
+    if (!primaryTutorial || completedTutorials.includes(primaryTutorial.id)) {
       return
     }
 

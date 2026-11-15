@@ -1661,6 +1661,22 @@ describe('WebLayout chat tour rendered outcome', () => {
     expect(await screen.findByRole('dialog', { name: 'Page Help' })).toBeVisible();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
   });
+  it('offers the first-visit Chat tutorial and records that it was seen', async () => {
+    render(<OptionLayout><PlaygroundEmpty /></OptionLayout>);
+    expect(await screen.findByText('New to this page?', {}, { timeout: 4_000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Start tour' }));
+    expect(useTutorialStore.getState().activeTutorialId).toBe('playground-basics');
+    expect(useTutorialStore.getState().hasSeenPromptForPage('/chat')).toBe(true);
+  });
+
+  it('offers Settings help even when the page uses its own header', async () => {
+    routerState.location.pathname = '/settings/preferences';
+    render(<OptionLayout hideHeader><h1 id="settings-route-heading">Preferences</h1></OptionLayout>);
+    expect(await screen.findByText('New to this page?', {}, { timeout: 4_000 })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(useTutorialStore.getState().hasSeenPromptForPage('/settings')).toBe(true);
+  });
+
   it('starts the registered chat tutorial from its actual help control', async () => {
     render(
       <OptionLayout>

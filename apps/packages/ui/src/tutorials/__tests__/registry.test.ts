@@ -24,6 +24,14 @@ afterEach(() => {
 })
 
 describe("tutorial registry route matching", () => {
+  it.each([
+    ["/settings", "settings-basics"],
+    ["/settings/preferences", "settings-basics"],
+    ["/collections", "collections-basics"]
+  ])("offers a basics walkthrough on %s", (route, tutorialId) => {
+    expect(getPrimaryTutorialForRoute(route)?.id).toBe(tutorialId)
+  })
+
   it("matches playground tutorials on canonical /chat route", () => {
     const tutorials = getTutorialsForRoute("/chat")
 

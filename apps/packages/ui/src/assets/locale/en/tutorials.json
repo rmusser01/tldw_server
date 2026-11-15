@@ -302,5 +302,25 @@
       "historyTitle": "Alert History",
       "historyContent": "When alerts trigger, they appear here. You can assign alerts to yourself, snooze them, or escalate to critical."
     }
+  },
+  "settings": {
+    "basics": {
+      "label": "Settings Basics",
+      "description": "Find the settings you need and see what each section controls.",
+      "overviewTitle": "Settings by section",
+      "overviewContent": "Settings are grouped by task. The heading and current section show which settings you are editing.",
+      "navigationTitle": "Find a setting",
+      "navigationContent": "Search for a section on desktop, or choose a section from the Settings menu on mobile."
+    }
+  },
+  "collections": {
+    "basics": {
+      "label": "Collections Basics",
+      "description": "Organize saved articles, highlights, and reading digests.",
+      "overviewTitle": "Your saved reading",
+      "overviewContent": "Collections keeps your reading list, highlights, templates, and digest schedules together.",
+      "tabsTitle": "Choose a tool",
+      "tabsContent": "Use Reading List to manage articles, Highlights to revisit passages, or Import/Export to move your reading list."
+    }
   }
 }
