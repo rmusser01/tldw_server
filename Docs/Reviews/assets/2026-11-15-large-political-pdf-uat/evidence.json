@@ -1,0 +1,164 @@
+{
+  "task": "TASK-15504",
+  "date": "2026-11-15",
+  "baseline": "3451c811d0",
+  "scope": "Agent-operated browser walkthrough and separate controlled API diagnostics, not participant UAT or a complete answer-quality benchmark",
+  "document": {
+    "url": "https://static.heritage.org/project2025/2025_MandateForLeadership_FULL.pdf",
+    "bytes": 4721064,
+    "sha256": "7f2e97507370bbadb109034ecda0085c5a2e5f3837cfb843da272c3a41523c4c",
+    "pdf_pages": 922,
+    "pages_with_native_text": 921,
+    "stored_characters": 2620160,
+    "stored_words": 344792,
+    "derived_outline_items": 95
+  },
+  "ingest": {
+    "server_elapsed_seconds": 112,
+    "ui_elapsed": "1:56",
+    "analysis_enabled": false,
+    "vector_embeddings_requested": false,
+    "auto_chunking_goal": "balanced",
+    "chunking_status": "completed",
+    "has_original_file": false,
+    "original_file_http_status": 404
+  },
+  "knowledge_qa": {
+    "selected_media_ids": [
+      1
+    ],
+    "question": "What does this document propose for the Department of Education? Cite the relevant pages and distinguish proposals from enacted policy.",
+    "stream_events": [
+      "clarification",
+      "delta",
+      "complete"
+    ],
+    "retrieval_ran": false,
+    "ui_outcome": "Search complete. 0 sources found."
+  },
+  "studio": {
+    "source_characters_sent": 6000,
+    "user_message_characters": 6148,
+    "default_max_tokens": 800,
+    "browser_initial_status": 502,
+    "browser_successful_artifact": false,
+    "subsequent_browser_failures": [
+      "media timeout",
+      "provider credential-store temporarily unavailable (503)"
+    ]
+  },
+  "research_chat": {
+    "fts_level": "chunk",
+    "successful_browser_answer": false,
+    "observation": "No provider completion dispatched; no answer after over100seconds; exact cause not isolated."
+  },
+  "api_diagnostics": {
+    "label": "Separate diagnostics, not browser passes",
+    "default_retrieval": {
+      "status": "whole_document_hits_not_focused_passages",
+      "questions": [
+        "Q1",
+        "Q3",
+        "Q6",
+        "Q7"
+      ],
+      "latency_seconds": [
+        37.347,
+        17.998,
+        17.862,
+        58.809
+      ],
+      "page_metadata_available": false,
+      "scope": "Only media1 returned. Full text contains expected source material, but document-level retrieval does not establish a usable focused generation context.",
+      "sanitized_saved_characters_per_hit": 2619758,
+      "document_characters_before_evidence_redaction": 2620191,
+      "count_note": "Media content2620160 plus filename/newline31; saved diagnostic redaction also matched14 public-URL substrings. The smaller saved count is not an ingestion loss."
+    },
+    "controlled_Q1": {
+      "status": "partial_evidence_coverage",
+      "documents": 10,
+      "total_excerpt_characters": 6154,
+      "department_elimination_supported": true,
+      "family_control_partially_supported": true,
+      "state_local_funding_and_education_savings_accounts_supported": false,
+      "expected_mission_passage_retrieved": false,
+      "page_metadata_available": false,
+      "retrieval_mode": "late_chunk",
+      "returned_chunk_ids": [
+        "late_chunk:1:4846",
+        "late_chunk:1:4086",
+        "late_chunk:1:4838",
+        "late_chunk:1:4960",
+        "late_chunk:1:4671",
+        "late_chunk:1:4672",
+        "late_chunk:1:8705",
+        "late_chunk:1:4091",
+        "late_chunk:1:1066",
+        "late_chunk:1:4125"
+      ],
+      "notes": "Rank2 provides shuttering proposal and parent responsiveness from section introduction; misses chapter mission on printed319/PDF352, education savings accounts, and funding allocation. Four of ten excerpts concern Labor, Energy, climate-science, or Agriculture. Returned offsets/section_path but no page numbers. request timeout_seconds60 did not stop the response taking84.979s. query_expansion_retrieval63.384s contributed most processing time.",
+      "question": "What does the Education chapter propose for the federal Department of Education, and who should control elementary and secondary school funding? Cite the printed page and PDF page."
+    },
+    "generation_diagnostics": {
+      "label": "Controlled API diagnostics using cached excerpts/original captured prompt; not browser UAT or end-to-end RAG success",
+      "cached_Q1": {
+        "http_status": 200,
+        "latency_seconds": 5.648,
+        "faithfulness": "Pass for supplied excerpts: cites Source2, attributes department closure to book/Burke, explicitly declines missing funding detail and page numbers.",
+        "answer_completeness": "Partial: retrieval omitted the mission passage, so core funding question and printed/PDF citations remain unanswered.",
+        "prompt_tokens": 1574,
+        "completion_tokens": 682,
+        "reasoning_tokens": 547
+      },
+      "studio_summary_4096": {
+        "http_status": 200,
+        "latency_seconds": 7.096,
+        "scope": "Exact captured Studio summary messages; max_tokens raised800\u21924096, stream=false,save_to_db=false.",
+        "faithfulness": "Mostly grounded: explicitly identifies front matter/TOC only and source truncated at chapter27; does not claim substantive chapter coverage.",
+        "coverage": "Fails full-book summary requirement because captured prompt only provides first6000characters. It enumerates sections/early chapter titles, not 922-page chapter contents.",
+        "prompt_tokens": 1098,
+        "completion_tokens": 996,
+        "reasoning_tokens": 539
+      },
+      "substantive_generations_completed": 2,
+      "not_completed": "Opposing Ex-Im, late FTC, and negative enactment answer-generation tests not run. No additional retrieval after parent pause. No false claim these passed."
+    },
+    "load_caveat": "Default retrieval requests were sequential. ControlledQ1 and canceledQ3 may overlap parent browser UAT; observed latencies are not clean single-user benchmarks."
+  },
+  "persistence": {
+    "source_selection_survived_refresh": true,
+    "source_annotation_survived_refresh": true,
+    "annotation_contract": "browser-local",
+    "workspace_export_zip_entries": [
+      "manifest.json",
+      "workspace.json"
+    ],
+    "workspace_export_source_present": true,
+    "workspace_export_source_annotation_present": false,
+    "export_import_roundtrip_tested": false
+  },
+  "mobile": {
+    "width": 390,
+    "height": 844,
+    "document_scroll_width": 390,
+    "tabs": [
+      "Sources",
+      "Chat",
+      "Studio"
+    ],
+    "full_accessibility_audit": false
+  },
+  "existing_tests": {
+    "pdf_normalization_and_upload": 29,
+    "media_jobs_worker": 24,
+    "frontend_query_length_and_provenance": 69,
+    "total_passed": 122
+  },
+  "limitations": [
+    "Original retention and summary coverage failed.",
+    "No complete browser answer-to-brief export.",
+    "No full question benchmark, chapter coverage, vector indexing or cross-device restore.",
+    "Some retrieval timing overlaps browser diagnostics.",
+    "Runtime-only React singleton alias used to work around mixed local dependency install."
+  ]
+}
