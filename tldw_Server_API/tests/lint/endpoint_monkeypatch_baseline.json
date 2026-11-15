@@ -124,7 +124,7 @@
   "api/v1/endpoints/media/reading_progress.py": {"monkeypatch": 2, "other": 0, "reason": null},
   "api/v1/endpoints/media/reprocess.py": {"monkeypatch": 21, "other": 0, "reason": null},
   "api/v1/endpoints/media/versions.py": {"monkeypatch": 18, "other": 0, "reason": null},
-  "api/v1/endpoints/media_embeddings.py": {"monkeypatch": 103, "other": 0, "reason": null},
+  "api/v1/endpoints/media_embeddings.py": {"monkeypatch": 37, "other": 0, "reason": null},
   "api/v1/endpoints/meetings.py": {"monkeypatch": 1, "other": 0, "reason": null},
   "api/v1/endpoints/messages.py": {"monkeypatch": 129, "other": 0, "reason": null},
   "api/v1/endpoints/metrics.py": {"monkeypatch": 11, "other": 0, "reason": null},

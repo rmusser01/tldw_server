@@ -9,7 +9,7 @@ from loguru import logger
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, RequirePermission, User
 
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.endpoints import media_embeddings as embeddings_endpoint
+from tldw_Server_API.app.core.Embeddings import ChromaDB_Library, media_embeddings as _media_embeddings
 from tldw_Server_API.app.api.v1.schemas.media_request_models import ReprocessMediaRequest
 from tldw_Server_API.app.api.v1.schemas.media_response_models import ReprocessMediaResponse
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
@@ -116,9 +116,9 @@ async def _mark_embeddings_complete_with_retry(*, db: MediaDatabase, media_id: i
 
 
 def _delete_embeddings_for_media(media_id: int, user_id: str) -> None:
-    manager = embeddings_endpoint.ChromaDBManager(
+    manager = ChromaDB_Library.ChromaDBManager(
         user_id=user_id,
-        user_embedding_config=embeddings_endpoint._user_embedding_config(),
+        user_embedding_config=_media_embeddings._user_embedding_config(),
     )
     collection_name = f"user_{user_id}_media_embeddings"
     collection = manager.get_or_create_collection(collection_name)
@@ -151,13 +151,13 @@ async def _generate_embeddings(
     try:
         embedding_model = request.embedding_model or settings.get(
             "embedding_model",
-            embeddings_endpoint.DEFAULT_EMBEDDING_MODEL,
+            _media_embeddings.DEFAULT_EMBEDDING_MODEL,
         )
         embedding_provider = request.embedding_provider or settings.get(
             "embedding_provider",
-            embeddings_endpoint.DEFAULT_EMBEDDING_PROVIDER,
+            _media_embeddings.DEFAULT_EMBEDDING_PROVIDER,
         )
-        result = await embeddings_endpoint.generate_embeddings_for_media(
+        result = await _media_embeddings.generate_embeddings_for_media(
             media_id=media_id,
             media_content=media_payload,
             embedding_model=embedding_model,
