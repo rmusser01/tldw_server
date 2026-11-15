@@ -41,12 +41,7 @@ const errorCopy = (
   )
 }
 
-const safeDiagnosticsHref = (value: string | null | undefined): string | null => {
-  const href = value?.trim()
-  if (!href) return null
-  if (href.startsWith("/") && !href.startsWith("//")) return href
-  return null
-}
+const RUNTIME_CONFIG_HREF = "/admin/runtime-config"
 
 const RunRow: React.FC<{ run: SandboxWorkspaceDiagnosticsRunSummary }> = ({
   run
@@ -104,10 +99,8 @@ export const WorkspaceSandboxDiagnosticsPanel: React.FC<
     }
   }, [workspaceId])
 
-  const runtimeConfigHref =
-    state.status === "ready"
-      ? safeDiagnosticsHref(state.data.links.runtime_config)
-      : null
+  const hasRuntimeConfigLink =
+    state.status === "ready" && state.data.links?.runtime_config === RUNTIME_CONFIG_HREF
   const sandboxDiagnosticsLabel = t(
     "playground:workspace.sandboxDiagnostics",
     "Sandbox diagnostics"
@@ -187,9 +180,9 @@ export const WorkspaceSandboxDiagnosticsPanel: React.FC<
                   "Recent workspace runs"
                 )}
               </span>
-              {runtimeConfigHref && (
+              {hasRuntimeConfigLink && (
                 <a
-                  href={runtimeConfigHref}
+                  href={RUNTIME_CONFIG_HREF}
                   className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] font-semibold text-text-muted hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-current"
                 >
                   {t(

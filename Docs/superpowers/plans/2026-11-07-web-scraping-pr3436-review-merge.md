@@ -79,3 +79,24 @@ PR-specific summary waiver recorded; no unapproved check bypass or unrelated cle
   The initial concurrent native run had seven failures; it is not counted
   as a pass. The task-format test must be rerun on the committed tree.
 - GitHub must re-run the gates on the new head before merge.
+
+## November 14 CI Follow-Up
+
+1. Integrate dev `15793ad67a` without rewriting the reviewed PR history.
+   Status: complete; merged locally with no conflicts.
+2. Restore native subresource dispatch on CI's Playwright 1.65.2 and Chrome
+   159. Keep HTTP profiles, caller credentials, and the existing guard,
+   transfer accounting, and cleanup. Test: the native fixture must load
+   child resources with Chromium's request-specific fetch metadata.
+   Status: complete. All nine hosted failures reproduced; local A/B isolated
+   the context-wide navigation metadata overrides. The shared filter gives
+   Chromium ownership of fetch metadata and retains cross-origin credential
+   stripping. Both the native header and mocked policy regressions were red
+   before the fix. Independent review approved the final delta.
+3. Verify both supported test environments, request independent review,
+   then publish. Retry the unchanged Chat shard on the updated head before
+   deciding whether it needs a separate change. Verify required checks and
+   the actual merge on GitHub. Status: in progress. The 48 native tests pass
+   on Playwright 1.65.2 and 1.58.0. The older-version run also passed 194
+   other cases with only the stale generated inventory failing before refresh.
+   Ruff and scoped production Bandit pass. Chat and hosted CI remain open.

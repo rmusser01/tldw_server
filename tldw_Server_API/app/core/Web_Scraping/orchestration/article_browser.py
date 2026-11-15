@@ -350,6 +350,12 @@ def _http_url_is_valid(url: str) -> bool:
     return _http_policy_url(url) is not None
 
 
+def _is_context_header(name: str) -> bool:
+    name = name.lower()
+    # Cookies are scoped separately. Chromium generates fetch metadata per request.
+    return name != "cookie" and not name.startswith("sec-fetch-")
+
+
 def _uncancel_task(task: Any) -> None:
     uncancel = getattr(task, "uncancel", None)
     if callable(uncancel):
@@ -746,7 +752,11 @@ class _BrowserRequestPolicy:
         self._enhanced = headers is not None
         headers = headers or {}
         self._origin = http_client._url_origin(url)
-        self._headers = {k: v for k, v in headers.items() if k.lower() not in {"cookie", "host", "proxy-authorization"}}
+        self._headers = {
+            k: v
+            for k, v in headers.items()
+            if _is_context_header(k) and k.lower() not in {"host", "proxy-authorization"}
+        }
         self._raw_cookie = next((value for key, value in headers.items() if key.lower() == "cookie"), None)
         self._browser = browser
         self._outcome = outcome
@@ -1508,7 +1518,7 @@ class GuardedArticleBrowser:
                 **(
                     {
                         "extra_http_headers": {
-                            key: value for key, value in profile.extra_headers.items() if key.lower() != "cookie"
+                            key: value for key, value in profile.extra_headers.items() if _is_context_header(key)
                         }
                     }
                     if profile.extra_headers is not None

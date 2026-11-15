@@ -2,6 +2,22 @@
 
 Published release notes entry point.
 
+## 0.1.47 - 2026-11-12
+
+Includes Agent Tasks execution, semantic Notes search, a more responsive Chat
+interface, and improvements to model usage, authentication and PostgreSQL
+reliability. Python 3.12 or newer is required. Review the
+[upgrade notes in the changelog](https://github.com/rmusser01/tldw_server/blob/v0.1.47/CHANGELOG.md)
+before upgrading. See the
+[full change inventory](https://github.com/rmusser01/tldw_server/blob/v0.1.47/Docs/Development/releases/0.1.47-change-inventory.md)
+for the release cutoff.
+
+## 0.1.46 - 2026-10-01
+
+Includes Ambient Persona Buddy, workspace Persona startup improvements, authenticated
+Email uploads, and chat and PostgreSQL reliability fixes. See the
+[0.1.46 changelog](https://github.com/rmusser01/tldw_server/blob/v0.1.46/CHANGELOG.md).
+
 ## 0.1.45 - 2026-09-27
 
 Patch release rolling up three changes merged after 0.1.44. [Complete inventory](https://github.com/rmusser01/tldw_server/blob/main/Docs/Development/releases/0.1.45-change-inventory.md).

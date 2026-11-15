@@ -596,6 +596,11 @@ async def test_native_enhanced_settings_and_guarded_dispatch(path):
             assert ("sid=explicit" in final.get("cookie", "")) is (path == "/cross")
         else:
             assert {"/frame", "/frame-image", "/image", "/worker-fetch", "/popup"} <= {p for _, p, _ in seen}
+            image = next(h for _, p, h in seen if p == "/image")
+            assert image.get("sec-fetch-dest") == "image"
+            assert image.get("sec-fetch-mode") == "no-cors"
+            frame = next(h for _, p, h in seen if p == "/frame")
+            assert frame.get("sec-fetch-dest") == "iframe"
             assert all(
                 any(url.endswith(p) for url in checks) for p in ("/frame", "/frame-image", "/image", "/worker-fetch")
             )
