@@ -76,6 +76,21 @@ class TestRetrievalConfig:
 
 @pytest.mark.unit
 class TestMediaDBRetriever:
+    def test_postgres_natural_fallback_uses_original_terms_for_english_stemming(self, monkeypatch):
+        retriever = MediaDBRetriever.__new__(MediaDBRetriever)
+        retriever.media_db = SimpleNamespace(backend_type=BackendType.POSTGRESQL)
+        retriever.config = RetrievalConfig(use_fts=True, use_vector=False, fts_level="chunk")
+        queries = []
+        evidence = Document(id="source", content="The office was eliminated.", metadata={})
+
+        def retrieve(query, *args, **kwargs):
+            queries.append(query)
+            return ([], 0) if len(queries) == 1 else ([evidence], 1)
+
+        monkeypatch.setattr(retriever, "_retrieve_chunk_fts_with_stats", retrieve)
+        assert retriever._retrieve_sync("Does this document propose eliminating?") == [evidence]
+        assert queries[-1] == "eliminating"
+
     def test_same_length_edited_media_does_not_reuse_old_page_map(self, tmp_path):
         retriever = MediaDBRetriever(str(tmp_path / "unused.db"), config=RetrievalConfig(use_vector=False))
         original = "Alpha\n\nBravo"
@@ -197,6 +212,127 @@ class TestMediaDBRetriever:
         control = await retriever.retrieve("Education", allowed_media_ids=[media_id])
         assert docs and docs[0].id == control[0].id
         assert docs[0].content == content
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("topic", ["Department of Education", "Financial Regulatory Agencies"])
+    @pytest.mark.parametrize("question_mark", ["?", ""])
+    async def test_natural_question_prefers_substantive_late_topic_passages_over_instructions_and_headers(
+        self, tmp_path, topic, question_mark,
+    ):
+        db = _create_media_db(tmp_path)
+        passages = [
+            "incorporated into the defense strategy instead of being relegated to a supporting document.",
+            "Give a concise neutral answer and cite the supporting passages with page numbers.",
+            "This chapter includes proposals to change programs enacted into law.",
+        ] + ["Unrelated introductory material." for _ in range(160)]
+        passages += [topic] * 12
+        evidence = (
+            f"The {topic} chapter recommends transferring the department's major programs to state administration. "
+            "Existing grants would be consolidated, with a transition period for current recipients. "
+            "The proposed budget changes would require legislative approval and would not immediately change enacted law."
+        )
+        passages += [evidence]
+        chunks = []
+        offset = 0
+        for index, text in enumerate(passages):
+            chunks.append({
+                "text": text, "start_char": offset, "end_char": offset + len(text), "chunk_type": "text",
+                "metadata": {"ancestry_titles": [topic if index >= 163 else "Defense"], "page_number": index + 1},
+            })
+            offset += len(text) + 2
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Collected policy proposals", media_type="document", content="\n\n".join(passages),
+            keywords=[], chunks=chunks,
+        )
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk", max_results=3, min_score=0.2), media_db=db)
+        docs = await retriever.retrieve(
+            f"According to the {topic} chapter, what does this document propose doing with the department and its major programs{question_mark} "
+            "Give a concise neutral answer, distinguish proposals from enacted law, and cite the supporting passages with page numbers.",
+            allowed_media_ids=[media_id],
+        )
+        assert docs and docs[0].content == evidence
+        assert docs[0].metadata["page_number"] == len(passages)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("question_word,source_word", [
+        ("eliminating", "eliminated"), ("consolidating", "consolidated"),
+        ("transferring", "transferred"), ("expanding", "expanded"),
+        ("eliminate", "eliminating"),
+    ])
+    async def test_natural_chunk_search_matches_common_inflections(self, tmp_path, question_word, source_word):
+        db = _create_media_db(tmp_path)
+        evidence = f"The regional offices should be {source_word}."
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Regional policy", media_type="document", content=evidence, keywords=[],
+            chunks=[{"text": evidence, "start_char": 0, "end_char": len(evidence), "chunk_type": "text"}],
+        )
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk", max_results=3, min_score=0.2), media_db=db)
+        docs = await retriever.retrieve(f"Does this document propose {question_word}?", allowed_media_ids=[media_id])
+        assert docs and docs[0].content == evidence
+        assert await retriever.retrieve(f'"{question_word}"', allowed_media_ids=[media_id]) == []
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("directive", [
+        "Quote the opening proposal exactly and cite its printed page and physical PDF page. "
+        "This is a question about what the document proposes, not whether the proposal became law.",
+        "Cite its printed page and physical PDF page. Include the original wording.",
+    ])
+    async def test_quote_and_citation_directives_do_not_hide_short_opening_proposal(self, tmp_path, directive):
+        db = _create_media_db(tmp_path)
+        evidence = "The federal Department of Labor should be eliminated."
+        passages = ["Department of Labor"] * 12 + [
+            "The opening question is whether a proposal became law. Quote exactly the printed page and physical page.",
+            evidence,
+        ]
+        chunks, offset = [], 0
+        for index, text in enumerate(passages):
+            chunks.append({"text": text, "start_char": offset, "end_char": offset + len(text), "chunk_type": "text",
+                           "metadata": {"ancestry_titles": ["Department of Labor"], "page_number": index + 1}})
+            offset += len(text) + 2
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Collected proposals", media_type="document", content="\n\n".join(passages), keywords=[], chunks=chunks,
+        )
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk", max_results=3, min_score=0.2), media_db=db)
+        docs = await retriever.retrieve(
+            f"Does chapter 11 propose eliminating the federal Department of Labor? {directive}",
+            allowed_media_ids=[media_id],
+        )
+        assert docs and docs[0].content == evidence
+        assert docs[0].metadata["page_number"] == len(passages)
+
+    @pytest.mark.asyncio
+    async def test_named_chapter_finds_abbreviated_body_after_repeated_page_headers(self, tmp_path):
+        db = _create_media_db(tmp_path)
+        title = "National Science Board"
+        evidence = (
+            "The NSB should publish independent research assessments and disclose conflicts of interest. "
+            "Its review process should allow public comment before adopting research priorities. "
+            "Annual reports should explain the evidence supporting each recommendation and identify uncertainty."
+        )
+        passages = [title] * 24 + [evidence]
+        offset, chunks = 0, []
+        for index, text in enumerate(passages):
+            chunks.append({"text": text, "start_char": offset, "end_char": offset + len(text), "chunk_type": "text",
+                "metadata": {"ancestry_titles": [title], "page_number": index + 1}})
+            offset += len(text) + 2
+        media_id, _, _ = db.add_media_with_keywords(
+            title="Collected proposals", media_type="document", content="\n\n".join(passages), keywords=[], chunks=chunks,
+        )
+        outside_id, _, _ = db.add_media_with_keywords(
+            title="Outside selected source", media_type="document", content=evidence, keywords=[],
+            chunks=[{"text": evidence, "start_char": 0, "end_char": len(evidence), "chunk_type": "text"}],
+        )
+        retriever = MediaDBRetriever(str(db.db_path), config=RetrievalConfig(
+            use_fts=True, use_vector=False, fts_level="chunk", max_results=3, min_score=0.2), media_db=db)
+        docs = await retriever.retrieve(
+            f"According to the {title} chapter, what changes does this document propose? Give a concise answer and cite supporting passages.",
+            allowed_media_ids=[media_id],
+        )
+        assert docs[0].content == evidence
+        assert all(doc.metadata["media_id"] != str(outside_id) for doc in docs)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("query", ['"Department of Education"', 'Education AND funding', 'Educat*'])

@@ -57,6 +57,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import (
 from tldw_Server_API.app.core.DB_Management.media_db.services import (
     media_details_service,
 )
+from tldw_Server_API.app.core.DB_Management.scope_context import get_scope
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.Sharing.clone_models import MediaCloneSnapshot
@@ -174,14 +175,31 @@ def get_media_by_id(
     *,
     include_deleted: bool = False,
     include_trash: bool = False,
+    respect_scope: bool = False,
 ) -> dict[str, Any] | None:
-    """Return a media record by ID through the package-level read contract."""
+    """Return a media record, optionally rechecking current SQLite visibility.
+
+    PostgreSQL continues to enforce its connection's RLS scope. Scoped lookups
+    deny missing authority; custom readers must implement get_scoped_media_by_id.
+    """
     db_instance = unwrap_media_database_like(db)
     if is_media_database_like(db_instance):
         return MediaLookupRepository.from_legacy_db(db_instance).by_id(
             media_id,
             include_deleted=include_deleted,
             include_trash=include_trash,
+            respect_scope=respect_scope,
+        )
+    if respect_scope:
+        if get_scope() is None:
+            return None
+        reader = _require_read_method(
+            db,
+            "get_scoped_media_by_id",
+            error_message="db must expose the scoped Media DB read contract.",
+        )
+        return reader.get_scoped_media_by_id(
+            media_id, include_deleted=include_deleted, include_trash=include_trash
         )
     reader = _require_read_method(
         db,

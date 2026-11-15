@@ -234,9 +234,12 @@ _MEDIA_FALLBACK_STOP_WORDS = {
     "be",
     "by",
     "can",
+    "chapter",
     "did",
     "do",
     "does",
+    "document",
+    "doing",
     "during",
     "each",
     "explain",
@@ -252,10 +255,13 @@ _MEDIA_FALLBACK_STOP_WORDS = {
     "its",
     "mention",
     "mentions",
+    "major",
     "new",
     "of",
     "on",
     "or",
+    "propose",
+    "proposes",
     "issue",
     "issues",
     "reveal",
@@ -286,6 +292,16 @@ _MEDIA_FALLBACK_STOP_WORDS = {
     "with",
 }
 
+_MEDIA_ANSWER_DIRECTIVE_RE = re.compile(
+    r"\b(?:give|provide|return|write)\s+"
+    r"(?:(?:a|an|the|brief|concise|short|detailed|neutral|factual|balanced|clear)\s+){0,6}"
+    r"(?:answer|response|summary|explanation)\b|"
+    r"\b(?:cite|include)\s+(?:the\s+)?(?:supporting\s+)?(?:passages|sources|citations|page\s+numbers)\b|"
+    r"[.!?;]\s+(?:quote|cite)\b",
+    re.IGNORECASE,
+)
+_MEDIA_NAMED_CHAPTER_RE = re.compile(r"\b((?:[A-Z][a-z]+\s+){2,5}[A-Z][a-z]+)\s+(?:chapter|section)\b")
+
 
 def _has_explicit_fts_syntax(query: str) -> bool:
     """Keep deliberate phrases, operators, scopes and prefixes strict."""
@@ -302,6 +318,11 @@ def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3
     if not raw_text:
         return None
 
+    # Presentation instructions are not source-search facets. Spell correction
+    # may remove '?' punctuation, so recognize the imperative clause itself.
+    directive = _MEDIA_ANSWER_DIRECTIVE_RE.search(raw_text)
+    if directive and directive.start() > 0:
+        raw_text = raw_text[:directive.start()]
     candidates = re.findall(r"[A-Za-z0-9']+", raw_text.lower())
     filtered_terms: list[str] = []
     seen: set[str] = set()
@@ -311,6 +332,15 @@ def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3
             continue
         seen.add(normalized)
         filtered_terms.append(normalized)
+
+    # Named organizations often use their initials in body paragraphs while
+    # repeating the full name in page headers. This is an additional bounded
+    # search term, never a replacement for the supplied name.
+    for match in _MEDIA_NAMED_CHAPTER_RE.finditer(raw_text):
+        initials = "".join(word[0] for word in match[1].split()).lower()
+        if initials not in seen:
+            seen.add(initials)
+            filtered_terms.append(initials)
 
     if not filtered_terms:
         return None
@@ -394,6 +424,52 @@ def _score_media_chunk_text(
             total_occurrences += 0.03
 
     return (matched_score / max(len(query_terms), 1)) + min(total_occurrences, 0.25)
+
+
+def _natural_media_term_root(term: str) -> str:
+    """Normalize common English inflections without broad fuzzy substring matches."""
+    root = term
+    if len(term) >= 7 and term.endswith("ing"):
+        root = term[:-3]
+    elif len(term) >= 6 and term.endswith("ed"):
+        root = term[:-2]
+    elif len(term) >= 6 and (
+        term.endswith("e") or (term.endswith("s") and not term.endswith(("ss", "us", "is")))
+    ):
+        root = term[:-1]
+    if term.endswith(("ing", "ed")) and len(root) >= 5 and root[-1] == root[-2] and root[-1] in "bdgmnprt":
+        root = root[:-1]
+    return root
+
+
+def _natural_media_chunk_query(terms: list[str]) -> str:
+    """Use bounded trusted prefixes for inflections on the unstemmed chunk index."""
+    return " OR ".join(
+        root + "*" if root != term else term
+        for term in terms
+        for root in [_natural_media_term_root(term)]
+    )
+
+
+def _score_natural_media_chunk(content: str, metadata: dict[str, Any], terms: list[str], bm25_score: float) -> float:
+    """Rank a bounded candidate pool by topic coverage and usable passage text."""
+    # Repeated terms inside link targets must not outweigh the visible evidence.
+    visible_text = re.sub(r"https?://\S+", "", content)
+    words = re.findall(r"[A-Za-z0-9']+", visible_text.lower())
+    body_terms = {_natural_media_term_root(word) for word in words}
+    ancestry = metadata.get("ancestry_titles")
+    section = " ".join(item for item in ancestry if isinstance(item, str)) if isinstance(ancestry, list) else ""
+    section += " " + str(metadata.get("section_title") or "")
+    section_terms = {_natural_media_term_root(word) for word in re.findall(r"[A-Za-z0-9']+", section.lower())}
+    query_terms = {_natural_media_term_root(term) for term in terms}
+    denominator = max(len(query_terms), 1)
+    coverage = len(query_terms & (body_terms | section_terms)) / denominator
+    body_coverage = len(query_terms & body_terms) / denominator
+    section_coverage = len(query_terms & section_terms) / denominator
+    return (
+        0.5 * coverage + 0.2 * body_coverage + 0.15 * section_coverage
+        + 0.1 * min(len(words) / 60, 1) + 0.05 * bm25_score
+    )
 
 
 _SQL_INPUT_PREFIX_RE = re.compile(
@@ -1326,8 +1402,17 @@ class MediaDBRetriever(BaseRetriever):
                         query, max_terms=32 if kwargs.get("allowed_media_ids") else 8,
                     )
                     if term_query:
+                        fallback_terms = _extract_media_query_terms(term_query, max_terms=32)
+                        # PostgreSQL already stems its English tsvector; its
+                        # tsquery parser does not accept a lone SQLite prefix.
+                        candidate_query = (
+                            _natural_media_chunk_query(fallback_terms)
+                            if getattr(self.media_db, "backend_type", None) == BackendType.SQLITE
+                            else term_query
+                        )
                         chunk_documents, chunk_raw_count = self._retrieve_chunk_fts_with_stats(
-                            term_query, media_type, **kwargs,
+                            candidate_query, media_type,
+                            _fallback_query_terms=fallback_terms, **kwargs,
                         )
                         if cancelled is not None and cancelled.is_set():
                             return []
@@ -1633,6 +1718,10 @@ class MediaDBRetriever(BaseRetriever):
         if self.media_db is None:
             return [], 0
 
+        fallback_terms = kwargs.get("_fallback_query_terms")
+        # Rerank only natural-question fallback. Explicit FTS expressions retain
+        # their exact matching and scoring policy, including score thresholds.
+        candidate_limit = min(128, max(32, self.config.max_results * 8)) if fallback_terms else self.config.max_results
         backend_type = getattr(self.media_db, "backend_type", None)
         if backend_type == BackendType.SQLITE:
             # Ensure FTS virtual table exists; rebuild if empty to prime content
@@ -1730,7 +1819,7 @@ class MediaDBRetriever(BaseRetriever):
             sql += " ORDER BY rank ASC LIMIT ?"
         else:
             sql += " ORDER BY rank DESC LIMIT ?"
-        params.append(self.config.max_results)
+        params.append(candidate_limit)
 
         try:
             execute_query = getattr(self.media_db, "execute_query", None)
@@ -1766,7 +1855,7 @@ class MediaDBRetriever(BaseRetriever):
 
         min_score = float(self.config.min_score or 0.0)
         for row, score_val in zip(row_maps, norm_scores):
-            if float(score_val) < min_score:
+            if not fallback_terms and float(score_val) < min_score:
                 continue
 
             md: dict[str, Any] = {}
@@ -1835,6 +1924,10 @@ class MediaDBRetriever(BaseRetriever):
             })
             chunk_uuid = str(row.get("chunk_uuid"))
             content_text = row.get("chunk_text") or ""
+            if fallback_terms:
+                score_val = _score_natural_media_chunk(content_text, md, fallback_terms, float(score_val))
+                if score_val < min_score:
+                    continue
 
             doc = Document(
                 id=chunk_uuid,
@@ -1849,6 +1942,9 @@ class MediaDBRetriever(BaseRetriever):
             _apply_location_metadata(doc)
             docs.append(doc)
 
+        if fallback_terms:
+            docs.sort(key=lambda doc: doc.score, reverse=True)
+            docs = docs[:self.config.max_results]
         return docs, len(rows)
 
     def _retrieve_via_backend(
