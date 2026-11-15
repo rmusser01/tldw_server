@@ -37,6 +37,8 @@ PR #3473 CI reproduced the mobile parity guard failure against an unchanged dev 
 Verified all three local Playground CI suites (52 composer, 15 device matrix, and 63 accessibility tests), plus four sticky-composer integration tests.
 Local WebUI gate reproduction found the lazy TutorialPrompt default import breaking command palette and loader focus mocks that already match the shared layout named export. Use the same named export in WebLayout.
 All 20 layout integration tests passed with Node 20 after matching the named export. The remaining local WebUI failures also reproduce on untouched dev and the affected suites passed in Linux required frontend CI job 132613158739. Its independent shared-UI shard failure is the already-fixed stale Composer pill assertion.
+After rebasing onto 6ec6241b0e, the real-server UX smoke exposed the Chat first-visit offer covering the mobile MCP dialog footer. The GitHub failure screenshot confirms the overlay received the Close press. Keep modal dialogs above tour offers and defer new offers while a modal is visible.
+Browser-verified the modal fix at 390 × 844 and 390 × 600 with the real MCP dialog. An existing prompt no longer intercepts Close before or after 150 tool rows arrive mid-press. A new prompt waits for the modal to close. 98 focused Node 20 tests and WebUI typecheck passed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

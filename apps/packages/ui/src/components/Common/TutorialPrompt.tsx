@@ -7,10 +7,11 @@ import { useStartTutorial } from "@/hooks/useStartTutorial"
 import React, { useEffect, useLayoutEffect, useRef } from "react"
 import { useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { notification, Button, Space } from "antd"
+import { Button, ConfigProvider, notification, Space, theme } from "antd"
 import { GraduationCap } from "lucide-react"
 import { useTutorialStore } from "@/store/tutorials"
 import { getPrimaryTutorialForRoute, normalizeTutorialRoute } from "@/tutorials"
+import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -34,6 +35,7 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
 }) => {
   const { t } = useTranslation(["tutorials", "common"])
   const location = useLocation()
+  const { token } = theme.useToken()
   const [api, contextHolder] = notification.useNotification()
   const timeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
     null
@@ -67,7 +69,7 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
     const launchTutorial = launcherRef.current
     let active = true
     const pageKey = normalizeTutorialRoute(location.pathname)
-    let targetObserver: MutationObserver | undefined
+    let promptObserver: MutationObserver | undefined
     const tutorialLookupOptions = {
       completedTutorialIds: completedTutorials
     }
@@ -127,8 +129,23 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
       ? primaryTutorial.steps[0]?.target
       : undefined
     const showPrompt = () => {
-      if (!active || (firstTarget && !document.querySelector(firstTarget))) return
-      targetObserver?.disconnect()
+      if (!active) return
+      const modalOpen = Array.from(
+        document.querySelectorAll<HTMLElement>('[aria-modal="true"]')
+      ).some((dialog) => !isHiddenBySelfOrAncestor(dialog))
+      if (modalOpen || (firstTarget && !document.querySelector(firstTarget))) {
+        if (!promptObserver) {
+          promptObserver = new MutationObserver(showPrompt)
+          promptObserver.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ["aria-hidden", "aria-modal", "class", "hidden", "style"]
+          })
+        }
+        return
+      }
+      promptObserver?.disconnect()
       shownRef.current.add(pageKey)
       lastPromptShownAtRef.current = Date.now()
       activePromptPageRef.current = pageKey
@@ -203,17 +220,11 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
       })
     }
 
-    timeoutRef.current = globalThis.setTimeout(() => {
-      if (firstTarget) {
-        targetObserver = new MutationObserver(showPrompt)
-        targetObserver.observe(document.body, { childList: true, subtree: true })
-      }
-      showPrompt()
-    }, delayMs)
+    timeoutRef.current = globalThis.setTimeout(showPrompt, delayMs)
 
     return () => {
       active = false
-      targetObserver?.disconnect()
+      promptObserver?.disconnect()
       if (timeoutRef.current) {
         window.clearTimeout(timeoutRef.current)
         timeoutRef.current = null
@@ -237,7 +248,16 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
     markPromptSeen
   ])
 
-  return contextHolder
+  // A dialog can open after its page's offer is already visible.
+  return (
+    <ConfigProvider
+      theme={{
+        components: { Notification: { zIndexPopup: token.zIndexPopupBase - 1 } }
+      }}
+    >
+      {contextHolder}
+    </ConfigProvider>
+  )
 }
 
 export default TutorialPrompt

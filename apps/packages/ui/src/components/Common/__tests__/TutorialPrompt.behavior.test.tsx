@@ -65,6 +65,8 @@ const notificationApi = { info: infoMock, destroy: destroyMock }
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: translate }) }))
 
 vi.mock("antd", () => ({
+  ConfigProvider: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  theme: { useToken: () => ({ token: { zIndexPopupBase: 1000 } }) },
   notification: {
     useNotification: () => [
       notificationApi,
@@ -193,6 +195,25 @@ describe("TutorialPrompt behavior", () => {
   afterEach(() => {
     startTutorialMock.mock.calls.forEach((call) => call[1]?.dispose?.())
     vi.useRealTimers()
+  })
+
+  it("waits for an open modal to close before offering its walkthrough", async () => {
+    const content = (open: boolean) => (
+      <MemoryRouter initialEntries={["/chat"]}>
+        <TutorialPrompt />
+        <div hidden={!open}>
+          <div role="dialog" aria-modal="true">MCP tool settings</div>
+        </div>
+      </MemoryRouter>
+    )
+    const view = render(content(true))
+
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+    expect(markPromptSeenMock).not.toHaveBeenCalled()
+
+    await act(async () => view.rerender(content(false)))
+    expect(infoMock).toHaveBeenCalledOnce()
   })
 
   it("waits for async page content before offering its walkthrough", async () => {
