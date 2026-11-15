@@ -87,6 +87,7 @@ beforeEach(() => {
     requestScope: { config: { serverUrl: 'https://owned.test' }, userId: 'alice' },
     scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal, release: vi.fn(),
   }));
+  io.sources.mockReset();
   io.sources.mockResolvedValue([{ id: 'source-1', workspace_id: 'owned', media_id: 101, title: 'Rowan Observatory' }]);
   io.media.mockResolvedValue({ content: 'Selene is at Rowan Observatory. Tours start Friday at 18:00.' });
   io.complete.mockResolvedValue({ text: async () => JSON.stringify({ choices: [{ message: { content: 'Selene tours start Friday at 18:00.' } }] }) });
@@ -800,4 +801,56 @@ it.each(['completed', 'failed', 'cancelled'])('checks a terminal %s saved job wi
   }); });
   expect(io.submit).not.toHaveBeenCalled();
   expect(io.state.generatedArtifacts[0]).toMatchObject({ status: 'failed', content: row.content, workspaceArtifactId: row.id });
+});
+
+it.each(['valid', 'edit', 'delete', 'foreign-origin'])('reloads cold new-version authority safely with %s target', async (change) => {
+  const oldSettings = { sections: [{ source_id: 'source-1', node_id: 'old', navigation_version: 'v1' }], provider: 'deepseek', model: 'old-model' };
+  const sections = ['new-a', 'new-b'].map(node_id => ({ source_id: 'source-1', node_id, navigation_version: 'v2' }));
+  const row = { id: 'old-canonical', workspace_id: 'owned', artifact_type: 'compare_sources', title: 'Old comparison',
+    status: 'complete', content: 'Original comparison', version: 2, created_at: new Date().toISOString(),
+    producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings: oldSettings }
+  } as WorkspaceArtifactApiResponse;
+  stored.push(row);
+  const original = mapServerArtifactToLocal(row);
+  if (change === 'foreign-origin') bindWorkspaceArtifactOrigin(original, 'server:bob', 'owned');
+  io.state.generatedArtifacts = [original];
+  let release!: (rows: unknown[]) => void;
+  if (change === 'edit' || change === 'delete') io.sources.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  io.submit.mockResolvedValue({ job_id: 42, artifact_id: 'new-canonical', status: 'queued' });
+  io.output.mockResolvedValue({ job_id: 42, status: 'completed', artifact: { ...row, id: 'new-canonical', version: 1, content: 'New comparison' } });
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: sections }));
+  let pending!: Promise<void>;
+  act(() => { pending = hook.result.current.handleGenerateOutput('compare_sources', { mode: 'new_version', targetArtifactId: original.id }); });
+  if (change === 'edit' || change === 'delete') {
+    await waitFor(() => expect(io.sources).toHaveBeenCalledTimes(1));
+    io.state.generatedArtifacts = change === 'delete' ? [] : [{ ...original, content: 'New user edit' }];
+    await act(async () => { release([{ id: 'source-1', workspace_id: 'owned', media_id: 101, title: 'Rowan' }]); await pending; });
+  } else await act(async () => { await pending; });
+  if (change === 'valid') {
+    expect(io.submit).toHaveBeenCalledWith('owned', expect.objectContaining({ artifact_type: 'compare_sources', source_ids: ['source-1'],
+      settings: expect.objectContaining({ sections, provider: 'llamacpp', model: 'local-model' }) }), expect.anything());
+    expect(io.submit.mock.calls[0][1]).not.toHaveProperty('resume_artifact_id');
+    expect(io.state.generatedArtifacts.find(item => item.id === original.id)).toEqual(original);
+    expect(io.state.generatedArtifacts.some(item => item.content === 'New comparison')).toBe(true);
+  } else {
+    expect(io.submit).not.toHaveBeenCalled();
+    expect(io.state.generatedArtifacts).toEqual(change === 'delete' ? [] : change === 'edit' ? [{ ...original, content: 'New user edit' }] : [original]);
+  }
+});
+
+it.each([false, true])('shows new-version recovery for a changed section checkpoint with save retry %s', async (retrySave) => {
+  const row = { id: 'changed-checkpoint', workspace_id: 'owned', artifact_type: 'summary', title: 'Saved evidence',
+    status: 'failed', content: 'Original completed evidence', version: 3, created_at: new Date().toISOString(),
+    producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'], settings: {}, error: 'section_checkpoint_changed' }
+  } as WorkspaceArtifactApiResponse;
+  stored.push(row);
+  const original = bindWorkspaceArtifactOrigin(mapServerArtifactToLocal(row), 'server:alice', 'owned');
+  io.state.generatedArtifacts = [{ ...original, status: 'generating' }];
+  io.output.mockResolvedValue({ job_id: 41, status: 'failed', error: 'section_checkpoint_changed', artifact: row });
+  if (retrySave) io.request.mockRejectedValueOnce(new Error('Metadata save offline'));
+  const hook = renderHook(() => useArtifactGeneration(deps()));
+  await act(async () => { await hook.result.current.handleGenerateOutput('summary', { mode: 'replace', targetArtifactId: original.id, reconnectOnly: true }); });
+  if (retrySave) await act(async () => { await hook.result.current.handleRetryArtifactSave(); });
+  expect(io.submit).not.toHaveBeenCalled();
+  expect(io.state.generatedArtifacts[0]).toMatchObject({ status: 'failed', content: row.content, errorMessage: expect.stringContaining('Create new version') });
 });

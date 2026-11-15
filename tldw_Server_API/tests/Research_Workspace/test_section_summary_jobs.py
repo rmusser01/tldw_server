@@ -230,7 +230,6 @@ def test_cancellation_rejects_other_owner_before_mutation():
 
 @pytest.mark.asyncio
 async def test_cancellation_retains_checkpoint_without_stopping_worker(monkeypatch):
-    from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerTerminalOutcome
     from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
     from tldw_Server_API.app.core.Research_Workspace.output_jobs import process_research_workspace_output_payload
 
@@ -246,15 +245,18 @@ async def test_cancellation_retains_checkpoint_without_stopping_worker(monkeypat
     monkeypatch.setattr(output_jobs, "ProviderCredentialRuntime", lambda **kwargs: runtime)
     monkeypatch.setattr(output_jobs, "list_active_team_memberships_for_user", AsyncMock(return_value=[]))
     monkeypatch.setattr(output_jobs, "list_org_memberships_for_user", AsyncMock(return_value=[]))
+    jobs = MagicMock(finalize_cancelled=MagicMock(return_value=True))
     result = await process_research_workspace_output_payload(
-        job={"id": 7},
+        job={"id": 7, "uuid": "original", "worker_id": "worker", "lease_id": "lease"},
         payload={"workspace_id": "ws", "artifact_id": "a", "artifact_type": "summary"},
         workspace_db=Workspace(),
         media_db=object(),
         user_id=1,
-        job_manager=Jobs(),
+        job_manager=jobs,
     )
-    assert isinstance(result, WorkerTerminalOutcome) and result.status == "cancelled"
+    assert result == {"artifact_id": "a", "cancelled": True}
+    jobs.finalize_cancelled.assert_called_once_with(7, expected_uuid="original", worker_id="worker", lease_id="lease",
+        reason="Section output cancelled; completed sections retained")
 
 
 @pytest.mark.asyncio
@@ -1103,3 +1105,86 @@ async def test_comparison_uses_exact_child_boundaries_and_keeps_shared_reference
     assert "Author B supports retention" in prompts[1] and "Author A" not in prompts[1]
     assert "Shared citations" in prompts[1]
     assert options["workspace_db"].row["status"] == "complete"
+
+
+@pytest.mark.asyncio
+async def test_changed_section_checkpoint_returns_typed_terminal_failure_and_preserves_evidence(monkeypatch):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from tldw_Server_API.app.core.Research_Workspace import output_jobs, section_summaries
+
+    workspace = Workspace()
+    checkpoint = {"sections": [{"content": "Original completed evidence", "batches": [{"status": "completed"}]}]}
+    producer = {"origin": "research_workspace_output_job", "job_id": 6, "source_ids": ["source"], "settings": {"sections": []}}
+    workspace.row.update(status="generating", content="Original completed evidence", content_type="text/markdown",
+                         producer_metadata=copy.deepcopy(producer), version_metadata={"workspaceClient": {"data": {"sectionAnalysis": checkpoint}}})
+    runtime = MagicMock(resolve=AsyncMock(return_value=object()), close=AsyncMock())
+    monkeypatch.setattr(output_jobs, "ProviderCredentialRuntime", lambda **kwargs: runtime)
+    monkeypatch.setattr(output_jobs, "list_active_team_memberships_for_user", AsyncMock(return_value=[]))
+    monkeypatch.setattr(output_jobs, "list_org_memberships_for_user", AsyncMock(return_value=[]))
+    monkeypatch.setattr(section_summaries, "process_section_summary", AsyncMock(side_effect=ResearchWorkspaceOutputJobError("section_checkpoint_changed", status_code=409)))
+    with pytest.raises(ResearchWorkspaceOutputJobError, match="section_checkpoint_changed") as error:
+        await output_jobs.process_research_workspace_output_payload(
+            job={"id": 7}, payload={"workspace_id": "ws", "artifact_id": "summary-1", "artifact_type": "summary"},
+            workspace_db=workspace, media_db=object(), user_id=1, job_manager=Jobs(),
+        )
+    assert error.value.failure_code == "section_checkpoint_changed" and error.value.retryable is False
+    assert workspace.row["status"] == "failed" and workspace.row["content_type"] == "text/markdown"
+    assert workspace.row["content"] == "Original completed evidence"
+    assert workspace.row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"] == checkpoint
+    assert workspace.row["producer_metadata"] == {**producer, "job_id": 7, "artifact_type": "summary", "error": "section_checkpoint_changed"}
+    runtime.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancelled", [False, True], ids=["changed-checkpoint", "cancelled"])
+async def test_research_section_job_terminalizes_through_real_worker_sdk(monkeypatch, tmp_path, cancelled):
+    """Research jobs must use generic lease-fenced finalization without provider calls."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+    from tldw_Server_API.app.core.Research_Workspace import output_jobs, section_summaries
+
+    workspace = Workspace()
+    checkpoint = {"fingerprint": "old-boundaries", "sections": [{"status": "completed", "batches": [{"status": "completed"}]}]}
+    workspace.row.update(status="generating", content="Original completed evidence", content_type="text/markdown")
+    if not cancelled:
+        workspace.row["version_metadata"] = {"workspaceClient": {"data": {"sectionAnalysis": copy.deepcopy(checkpoint)}}}
+    runtime = MagicMock(resolve=AsyncMock(return_value=object()), close=AsyncMock())
+    monkeypatch.setattr(output_jobs, "ProviderCredentialRuntime", lambda **kwargs: runtime)
+    monkeypatch.setattr(output_jobs, "list_active_team_memberships_for_user", AsyncMock(return_value=[]))
+    monkeypatch.setattr(output_jobs, "list_org_memberships_for_user", AsyncMock(return_value=[]))
+    monkeypatch.setattr(section_summaries, "load_navigation_sections", AsyncMock(return_value={
+        "content": "Exact source evidence.", "navigation_version": "v1", "page_map": [], "nodes": [],
+    }))
+    provider = AsyncMock()
+    monkeypatch.setattr(section_summaries, "perform_chat_api_call_async", provider)
+    manager = JobManager(tmp_path / "research-output-sdk.db")
+    payload = {"workspace_id": "ws", "artifact_id": "summary-1", "artifact_type": "summary",
+               "source_ids": ["source"], "settings": {"provider": "deepseek", "model": "deepseek-flash"}}
+    created = manager.create_job(domain="research_workspace", queue="default", job_type="research_workspace_output",
+                                 payload=payload, owner_user_id="1", max_retries=3)
+    sdk = WorkerSDK(manager, WorkerConfig(domain="research_workspace", queue="default",
+                    worker_id="research-test", retry_on_exception=True, bind_completion_token=True))
+
+    async def handler(job):
+        sdk.stop()
+        if cancelled:
+            manager.cancel_job(job["id"], expected_uuid=job["uuid"], reason="User cancellation")
+        return await output_jobs.process_research_workspace_output_payload(job=job, payload=payload,
+            workspace_db=workspace, media_db=object(), user_id=1, job_manager=manager)
+
+    await asyncio.wait_for(sdk.run(handler=handler), timeout=5)
+    stored = manager.get_job(created["id"])
+    assert stored["status"] == ("cancelled" if cancelled else "failed")
+    if not cancelled:
+        assert stored["error_code"] == "section_checkpoint_changed"
+        assert workspace.row["content"] == "Original completed evidence"
+        assert workspace.row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"] == checkpoint
+    else:
+        assert workspace.row["producer_metadata"]["job_status"] == "cancelled"
+    assert workspace.row["status"] == "failed"
+    provider.assert_not_awaited()
+    runtime.close.assert_awaited_once()

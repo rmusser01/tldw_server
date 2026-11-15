@@ -289,6 +289,7 @@ type GenerationResult = {
   totalCostUsd?: number
   data?: Record<string, unknown>
   partial?: boolean
+  recoveryMessage?: string
   sourceCoverage?: ArtifactSourceCoverage
 }
 
@@ -1366,6 +1367,9 @@ const toGeneratedArtifactFromWorkspaceArtifact = (
   return {
     ...readWorkspaceArtifactClientPayload(response.version_metadata),
     partial: status === "failed",
+    recoveryMessage: status === "failed" && response.producer_metadata?.error === "section_checkpoint_changed"
+      ? "Section boundaries or source settings changed. Create new version to use the current selection; the original completed evidence is retained."
+      : undefined,
     workspaceArtifactId: response.id,
     workspaceArtifactVersion: response.version,
     serverId,
@@ -2939,7 +2943,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         workspaceId: pending.workspaceId, scope: pending.scope, isCurrent, updateOnly: pending.updateOnly,
       })
       if (!isCurrent()) return
-      updateArtifactStatus(saved.id, saved.status, { ...saved, errorMessage: undefined })
+      updateArtifactStatus(saved.id, saved.status, { ...saved, errorMessage: pending.artifact.status === "failed" ? pending.artifact.errorMessage : undefined })
       pendingSaveRef.current = null
       setUnsavedArtifact(null)
       pending.release()
@@ -3371,9 +3375,10 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         return
       }
       setRecentOutputTypes(recordRecentOutputType(type))
-      const resumeCandidate = options.mode === "replace" && ["summary", "report", "compare_sources"].includes(type)
-        ? generatedArtifacts.find(entry => entry.id === options.targetArtifactId &&
+      const canonicalSectionTarget = ["replace", "new_version"].includes(options.mode || "") && ["summary", "report", "compare_sources"].includes(type)
+        ? generatedArtifacts.find(entry => entry.id === options.targetArtifactId && entry.type === type &&
           entry.producerMetadata?.origin === "research_workspace_output_job" && entry.workspaceArtifactId) : undefined
+      const resumeCandidate = options.mode === "replace" ? canonicalSectionTarget : undefined
       const savedSourceIds = resumeCandidate?.producerMetadata?.source_ids
       let resumeSourceIds = Array.isArray(savedSourceIds) && savedSourceIds.length > 0 &&
         savedSourceIds.every(id => typeof id === "string") ? savedSourceIds as string[] : null
@@ -3459,7 +3464,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               activeAbort.signal, scope.scopeSignal, scope.scopeInvalidatedSignal,
             ])
             if (previous && !hasWorkspaceArtifactOrigin(previous, scope.scopeKey, workspaceId)) {
-              if (previous !== resumeCandidate || hasWorkspaceArtifactOriginEvidence(previous))
+              if (previous !== canonicalSectionTarget || hasWorkspaceArtifactOriginEvidence(previous))
                 throw new Error("Reload this saved output before replacing it.")
               // JSON hydration drops runtime authority; re-read it from the current authenticated workspace.
               const cachedPayload = workspaceArtifactDraftPayload(previous)
@@ -3483,7 +3488,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               const sourceIds = row.producer_metadata.source_ids
               if (!Array.isArray(sourceIds) || !sourceIds.length || sourceIds.some(id => typeof id !== "string"))
                 throw new Error("The saved output has no valid source selection.")
-              resumeSourceIds = sourceIds as string[]
+              if (options.mode === "replace") resumeSourceIds = sourceIds as string[]
               const restored = bindWorkspaceArtifactOrigin(
                 { ...mapServerArtifactToLocal(row), id: previous.id }, scope.scopeKey, workspaceId)
               operationArtifacts.push(restored)
@@ -3950,7 +3955,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         })
 
         const completed: GeneratedArtifact = { ...artifact, status: result.partial ? "failed" : "completed",
-          errorMessage: result.partial ? "Some sections are incomplete. Retry to continue from saved portions." : undefined,
+          errorMessage: result.partial ? result.recoveryMessage || "Some sections are incomplete. Retry to continue from saved portions." : undefined,
           workspaceArtifactId: result.workspaceArtifactId ?? artifact.workspaceArtifactId,
           workspaceArtifactVersion: result.workspaceArtifactVersion ?? artifact.workspaceArtifactVersion,
           serverId: result.serverId,
@@ -4000,7 +4005,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
               updateOnly: result.workspaceArtifactId ? "client" : undefined,
             })
             if (!saveIsCurrent()) return
-            updateArtifactStatus(saved.id, saved.status, { ...saved, errorMessage: undefined })
+            updateArtifactStatus(saved.id, saved.status, { ...saved, errorMessage: result.partial ? completed.errorMessage : undefined })
           } catch {
             if (!isCurrent() || !isVisibleArtifactDraft(completed)) return
             pendingSaveRef.current = {
@@ -4019,7 +4024,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           }
         }
 
-        if (result.partial) { messageApi.warning("Partial output saved. Retry incomplete sections to finish."); return }
+        if (result.partial) { messageApi.warning(completed.errorMessage || "Partial output saved. Retry incomplete sections to finish."); return }
         messageApi.success(
           t("playground:studio.generateSuccess", "{{type}} generated successfully", {
             type: outputButtons.find((b) => b.type === type)?.label || type

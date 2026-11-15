@@ -436,7 +436,6 @@ async def process_research_workspace_output_payload(
 
     job_id = _validated_research_workspace_output_job_id(job)
     if artifact_type in {"summary", "compare_sources", "report"}:
-        from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerTerminalOutcome
         from tldw_Server_API.app.core.Research_Workspace.section_summaries import (
             SectionSummaryCancelled,
             process_section_summary,
@@ -459,7 +458,21 @@ async def process_research_workspace_output_payload(
                 provider_credentials=credentials,
                 on_provider_success=lambda: mark_provider_credential_used(runtime, credentials))
         except SectionSummaryCancelled:
-            return WorkerTerminalOutcome("cancelled", "section_output_cancelled", "Completed sections retained")
+            # Use the generic Jobs cancellation path with the acquired identity.
+            # WorkerTerminalOutcome currently resolves Slides-specific identities.
+            if not job_manager.finalize_cancelled(
+                job_id, expected_uuid=str(job.get("uuid") or ""),
+                worker_id=job.get("worker_id"), lease_id=job.get("lease_id"),
+                reason="Section output cancelled; completed sections retained",
+            ):
+                raise ResearchWorkspaceOutputJobError("section_cancel_finalization_failed", retryable=False) from None
+            return {"artifact_id": artifact_id, "cancelled": True}
+        except ResearchWorkspaceOutputJobError as exc:
+            _try_mark_workspace_output_artifact_failed(
+                workspace_db=workspace_db, workspace_id=workspace_id, artifact_id=artifact_id,
+                artifact_type=artifact_type, job_id=job_id, error_code=exc.public_code,
+            )
+            raise
         finally:
             await runtime.close()
     if artifact_type == "video_overview":
@@ -1477,14 +1490,18 @@ def _mark_workspace_output_artifact_failed(
 ) -> None:
     """Persist the failed status and public error code on a workspace artifact."""
     public_code = _safe_public_error_code(error_code)
+    section_output = artifact_type in {"summary", "report", "compare_sources"}
+    existing = workspace_db.get_workspace_artifact(workspace_id, artifact_id) if section_output else None
+    producer = dict((existing or {}).get("producer_metadata") or {}) if section_output else {}
     _update_workspace_output_artifact(
         workspace_db=workspace_db,
         workspace_id=workspace_id,
         artifact_id=artifact_id,
         updates={
             "status": "failed",
-            "content_type": "image/png" if artifact_type == "infographic" else "video/mp4",
+            "content_type": "text/markdown" if section_output else "image/png" if artifact_type == "infographic" else "video/mp4",
             "producer_metadata": {
+                **producer,
                 "origin": "research_workspace_output_job",
                 "job_id": job_id,
                 "artifact_type": artifact_type,
