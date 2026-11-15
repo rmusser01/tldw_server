@@ -677,3 +677,17 @@ leave motion and removal assertions remain. All 44 affected file tests passed
 locally after the change. No runtime, workflow, timeout, or license policy
 changes and no new ADR. Logs: `/private/tmp/pr3404-source-escape-*.log`.
 The task stays In Progress until fresh required CI and a verified merge.
+
+## November 15 WorkspaceHeader ACP Save Retry
+
+Required shard 5/8 on `556ed73566` failed the inherited late-save receipt
+test (job `132832561209`). It clicked Retry when the native button was
+enabled but Ant Design still marked it loading and suppressed the click.
+The existing diagnostic observed no additional artifact GET or POST. The
+base replays passed but did not satisfy the ratchet comparison.
+
+The requester approved a test-only fix. The test waits for the same button
+to be enabled and no longer loading before clicking it. The late receipt,
+single POST, artifact identity, and version assertions remain. All 79 tests
+in the file passed locally; this does not replace fresh required CI.
+No runtime, timeout, workflow, or policy changes; no new ADR required.
