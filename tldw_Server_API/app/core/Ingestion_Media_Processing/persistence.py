@@ -4860,6 +4860,20 @@ async def process_batch_media(
     return final_standardized_results
 
 
+PDF_SAVE_PROGRESS_PERCENT = 85
+
+
+def _mark_document_processing_cancelled(result: dict[str, Any]) -> None:
+    result.update(
+        status="Cancelled",
+        error="Cancelled by user",
+        db_message="DB operation skipped (cancelled).",
+        db_id=None,
+        media_uuid=None,
+        warnings=result.get("warnings") or None,
+    )
+
+
 async def process_document_like_item(
     item_input_ref: str,
     processing_source: str,
@@ -4880,6 +4894,7 @@ async def process_document_like_item(
     *,
     file_validator: Any | None = None,
     process_document_content: Callable[..., Any] | None = None,
+    pdf_progress_callback: Callable[[float, str], bool] | None = None,
 ) -> dict[str, Any]:
     """
     Core helper that handles download/prep, processing, and DB persistence for
@@ -4915,6 +4930,14 @@ async def process_document_like_item(
         "message": None,
     }
     claims_context: dict[str, Any] | None = None
+
+    def is_cancelled() -> bool:
+        if final_result.get("status") == "Cancelled":
+            return True
+        if cancel_check is not None:
+            with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
+                return bool(cancel_check())
+        return False
 
     # --- 2. Download/Prepare File ---
     file_bytes: bytes | None = None
@@ -5238,6 +5261,8 @@ async def process_document_like_item(
                 "chunk_method": (chunk_options or {}).get("method"),
                 "max_chunk_size": (chunk_options or {}).get("max_size"),
                 "chunk_overlap": (chunk_options or {}).get("overlap"),
+                "cancel_check": cancel_check,
+                "progress_callback": pdf_progress_callback,
             }
             common_args.pop("chunk_options", None)
 
@@ -5547,23 +5572,9 @@ async def process_document_like_item(
     final_result["input_ref"] = item_input_ref
     final_result["media_type"] = media_type
 
-    if cancel_check is not None:
-        try:
-            if cancel_check():
-                final_result.update(
-                    {
-                        "status": "Cancelled",
-                        "error": "Cancelled by user",
-                        "db_message": "DB operation skipped (cancelled).",
-                        "db_id": None,
-                        "media_uuid": None,
-                    },
-                )
-                if not final_result.get("warnings"):
-                    final_result["warnings"] = None
-                return final_result
-        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-            pass
+    if is_cancelled():
+        _mark_document_processing_cancelled(final_result)
+        return final_result
 
     _enforce_metadata_contract_on_result(
         result=final_result,
@@ -5598,6 +5609,9 @@ async def process_document_like_item(
                 f"Claim extraction failed: {claims_err}",
             )
             claims_context = None
+        if is_cancelled():
+            _mark_document_processing_cancelled(final_result)
+            return final_result
         await persist_doc_item_and_children(
             final_result=final_result,
             form_data=form_data,
@@ -5611,6 +5625,7 @@ async def process_document_like_item(
             email_tenant_id=email_tenant_id,
             loop=loop,
             claims_context=claims_context,
+            pdf_progress_callback=pdf_progress_callback,
         )
     else:
         final_result["db_message"] = "DB operation skipped (processing failed)."
@@ -5660,6 +5675,7 @@ async def persist_doc_item_and_children(
     loop: Any,
     claims_context: dict[str, Any] | None,
     email_tenant_id: str | None = None,
+    pdf_progress_callback: Callable[[float, str], bool] | None = None,
 ) -> None:
     """
     Persist a single document/email item (and any children) produced by the /add
@@ -5873,6 +5889,10 @@ async def persist_doc_item_and_children(
             def _db_worker() -> Any:
                 def _persist_document(worker_db: MediaDatabase) -> Any:
                     media_writer = _resolve_media_writer(worker_db)
+                    if pdf_progress_callback is not None and not pdf_progress_callback(
+                        PDF_SAVE_PROGRESS_PERCENT, "Saving media",
+                    ):
+                        return None
                     media_id_local, media_uuid_local, db_message_local = media_writer.add_media_with_keywords(
                         **db_add_kwargs
                     )
@@ -5934,6 +5954,9 @@ async def persist_doc_item_and_children(
                 contextvars.copy_context().run,
                 _db_worker,
             )
+            if db_worker_result is None and pdf_progress_callback is not None:
+                _mark_document_processing_cancelled(final_result)
+                return
             if isinstance(db_worker_result, tuple) and len(db_worker_result) == 4:
                 (
                     media_id_result,

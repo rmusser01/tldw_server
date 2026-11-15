@@ -42,7 +42,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import (
     TempDirManager,
     save_uploaded_files,
 )
-from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import PDF_SAVE_PROGRESS_PERCENT
+from tldw_Server_API.app.core.Jobs.manager import JobCancellationTooLate, JobManager
 from tldw_Server_API.app.core.Logging.log_context import ensure_request_id, ensure_traceparent
 from tldw_Server_API.app.core.Streaming.streams import SSEStream
 from tldw_Server_API.app.core.exceptions import BadRequestError
@@ -1031,6 +1032,19 @@ async def stream_media_ingest_job_events(
     )
 
 
+def _cancel_ingest_job(jm: JobManager, job: dict[str, Any], reason: str | None) -> bool:
+    payload = _normalize_payload(job.get("payload"))
+    options = _normalize_payload(payload.get("options"))
+    media_type = str(options.get("media_type") or payload.get("media_type") or "").lower()
+    return jm.cancel_job(
+        int(job["id"]),
+        reason=reason,
+        expected_uuid=str(job.get("uuid") or ""),
+        expected_domain="media_ingest",
+        cancel_before_progress=PDF_SAVE_PROGRESS_PERCENT if media_type == "pdf" else None,
+    )
+
+
 @router.delete(
     "/ingest/jobs/{job_id}",
     response_model=CancelMediaIngestJobResponse,
@@ -1057,7 +1071,10 @@ async def cancel_media_ingest_job(
     if status_val in {"completed", "failed", "cancelled", "quarantined"}:
         raise HTTPException(status_code=400, detail="Cannot cancel terminal job")
 
-    ok = jm.cancel_job(int(job_id), reason=reason)
+    try:
+        ok = _cancel_ingest_job(jm, job, reason)
+    except JobCancellationTooLate as exc:
+        raise HTTPException(status_code=409, detail="This upload is already saving.") from exc
     if not ok:
         raise HTTPException(status_code=400, detail="Cancellation failed")
 
@@ -1107,6 +1124,7 @@ async def cancel_media_ingest_jobs_batch(
     cancelled = 0
     already_terminal = 0
     failed = 0
+    finishing = 0
 
     for job in matched_jobs:
         raw_job_id = job.get("id")
@@ -1118,8 +1136,13 @@ async def cancel_media_ingest_jobs_batch(
         if status_value in _TERMINAL_MEDIA_INGEST_JOB_STATUSES:
             already_terminal += 1
             continue
-        if jm.cancel_job(job_id, reason=reason):
-            cancelled += 1
+        try:
+            if _cancel_ingest_job(jm, job, reason):
+                cancelled += 1
+                continue
+        except JobCancellationTooLate:
+            finishing += 1
+            failed += 1
             continue
 
         refreshed = jm.get_job(job_id) or {}
@@ -1135,6 +1158,8 @@ async def cancel_media_ingest_jobs_batch(
         message = "All jobs already terminal"
     else:
         message = "No jobs were cancelled"
+    if finishing:
+        message = f"{message}. {finishing} job(s) were already saving."
 
     return CancelMediaIngestBatchResponse(
         success=failed == 0,

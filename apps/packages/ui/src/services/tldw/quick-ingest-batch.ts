@@ -1,5 +1,11 @@
 import { browser } from "wxt/browser";
-import { assertQuickIngestRequestCurrent, scopedQuickIngestRequest, scopedQuickIngestUpload, type QuickIngestRequestContext } from "./quick-ingest-request-scope";
+import {
+  assertQuickIngestRequestCurrent,
+  requestQuickIngestJobCancellation,
+  scopedQuickIngestRequest,
+  scopedQuickIngestUpload,
+  type QuickIngestRequestContext,
+} from "./quick-ingest-request-scope";
 import {
   getProcessPathForType,
   inferIngestTypeFromUrl,
@@ -16,6 +22,7 @@ import {
 import {
   createIngestJobsTracker,
   pollSingleIngestJob,
+  type IngestJobProgress,
   requireSubmittedIngestJobs,
 } from "@/services/tldw/ingest-jobs-orchestrator";
 import {
@@ -100,6 +107,10 @@ type QuickIngestBatchInput = QuickIngestRequestContext & {
   autoApplyTemplate?: boolean;
   __quickIngestSessionId?: string;
   onTrackingMetadata?: (tracking: PersistedQuickIngestTracking) => void;
+  onJobProgress?: (itemId: string, progress: IngestJobProgress) => void;
+  onItemResult?: (result: QuickIngestBatchResult) => void;
+  confirmCancellation?: boolean;
+  onCancellationRequestFailed?: () => void;
 };
 
 type QuickIngestBatchResult = {
@@ -154,7 +165,9 @@ export type QuickIngestCancelInput = QuickIngestRequestContext & {
   sessionId: string;
   reason?: string;
   batchIds?: string[];
+  jobIds?: number[];
   tracking?: PersistedQuickIngestTracking;
+  confirmCancellation?: boolean;
 };
 
 export type QuickIngestCancelResponse = {
@@ -256,6 +269,29 @@ const isDirectSessionCancelled = (sessionId: string | undefined) => {
   const normalizedSessionId = String(sessionId || "").trim();
   if (!normalizedSessionId) return false;
   return directQuickIngestCancelledSessions.has(normalizedSessionId);
+};
+
+const requestDirectBatchCancellation = async (
+  context: QuickIngestRequestContext,
+  batchId: string,
+  reason: string,
+): Promise<boolean> => {
+  try {
+    const response = await scopedQuickIngestRequest<{
+      ok: boolean;
+      data?: { success?: boolean };
+    }>(context, {
+      path: `/api/v1/media/ingest/jobs/cancel?batch_id=${encodeURIComponent(batchId)}&reason=${encodeURIComponent(reason)}`,
+      method: "POST",
+      timeoutMs: 10_000,
+      returnResponse: true,
+      ...DIRECT_QUICK_INGEST_TRANSPORT,
+    });
+    return response?.ok === true && response.data?.success === true;
+  } catch (error) {
+    assertQuickIngestRequestCurrent(context, error);
+    return false;
+  }
 };
 
 const cancelDirectSessionBatches = async (
@@ -791,49 +827,54 @@ const runDirectQuickIngestBatch = async (
     String(input.__quickIngestSessionId || "").trim() || undefined;
 
   const out: QuickIngestBatchResult[] = [];
+  const recordResult = (result: QuickIngestBatchResult) => {
+    out.push(result);
+    input.onItemResult?.(result);
+  };
   let conferencePlan: PlannedConferenceCollection | null = null;
-  if (shouldStoreRemote) {
-    try {
-      conferencePlan = await createPlannedConferenceCollection(input, entries);
-    } catch (error) {
-      assertQuickIngestRequestCurrent(input, error);
-      if (input.conferenceRetry) throw error;
-      console.warn("[tldw] Conference collection planning failed", error);
-    }
-  }
 
-  const pollIngestJobStatus = async (
-    jobId: number,
-    timeoutMs: number,
-  ): Promise<{ ok: boolean; data?: any; error?: string }> => {
-    const pollResult = await pollSingleIngestJob({
+  const shouldReconcileCancellation = () =>
+    Boolean(input.confirmCancellation && isDirectSessionCancelled(directSessionId));
+
+  const pollIngestJobStatus = async (jobId: number, itemId: string, batchId: string) => {
+    // Cancel All can run while the upload is still returning its batch id.
+    if (shouldReconcileCancellation() &&
+      !(await requestDirectBatchCancellation(input, batchId, "user_cancelled"))) {
+      input.onCancellationRequestFailed?.();
+    }
+    return pollSingleIngestJob({
       jobId,
-      timeoutMs,
+      timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
       pollIntervalMs: DIRECT_REMOTE_POLL_INTERVAL_MS,
-      fetchJob: async (trackedJobId) =>
-        (await scopedQuickIngestRequest<any>(input, {
-          path: `/api/v1/media/ingest/jobs/${trackedJobId}`,
-          method: "GET",
-          timeoutMs: DIRECT_REMOTE_POLL_INTERVAL_MS + 3000,
-          returnResponse: true,
-          ...DIRECT_QUICK_INGEST_TRANSPORT,
-        })) as
-          | { ok: boolean; status?: number; data?: any; error?: string }
-          | undefined,
-      isCancelled: () => isDirectSessionCancelled(directSessionId),
+      fetchJob: async (trackedJobId) => {
+        try {
+          const response = await scopedQuickIngestRequest<{
+            ok: boolean; status?: number; data?: any; error?: string;
+          } | undefined>(input, {
+            path: `/api/v1/media/ingest/jobs/${trackedJobId}`,
+            method: "GET",
+            timeoutMs: DIRECT_REMOTE_POLL_INTERVAL_MS + 3000,
+            returnResponse: true,
+            ...DIRECT_QUICK_INGEST_TRANSPORT,
+          });
+          if (!response?.ok && shouldReconcileCancellation()) {
+            input.onCancellationRequestFailed?.();
+          }
+          return response;
+        } catch (error) {
+          assertQuickIngestRequestCurrent(input, error);
+          if (!shouldReconcileCancellation()) throw error;
+          input.onCancellationRequestFailed?.();
+          return undefined;
+        }
+      },
+      onProgress: (progress) => input.onJobProgress?.(itemId, progress),
+      keepWaitingOnTimeout: shouldReconcileCancellation,
+      isCancelled: () => !input.confirmCancellation && isDirectSessionCancelled(directSessionId),
       onCancel: async () => {
         await cancelDirectSessionBatches(input, directSessionId, "user_cancelled");
       },
     });
-
-    if (pollResult.terminalStatus === "completed") {
-      return { ok: true, data: pollResult.data };
-    }
-    return {
-      ok: false,
-      error: String(pollResult.error || "Ingest failed"),
-      data: pollResult.data,
-    };
   };
 
   try {
@@ -843,6 +884,16 @@ const runDirectQuickIngestBatch = async (
         directSessionId,
         createIngestJobsTracker<{ sourceId: string }>(),
       );
+    }
+
+    if (shouldStoreRemote) {
+      try {
+        conferencePlan = await createPlannedConferenceCollection(input, entries);
+      } catch (error) {
+        assertQuickIngestRequestCurrent(input, error);
+        if (input.conferenceRetry) throw error;
+        console.warn("[tldw] Conference collection planning failed", error);
+      }
     }
 
     for (const entry of entries) {
@@ -878,7 +929,7 @@ const runDirectQuickIngestBatch = async (
             status: duplicatePolicyResolution.plannedStatus,
             retry_count: 0,
           });
-          out.push({
+          recordResult({
             id: entry.id,
             status: "ok",
             outcome: "skipped",
@@ -988,11 +1039,27 @@ const runDirectQuickIngestBatch = async (
               durableMode: plannedConferenceItem ? "durable_collection" : undefined,
               startedAt: Date.now(),
             });
-            const pollResult = await pollIngestJobStatus(
-              firstJobId,
-              DIRECT_INGEST_TIMEOUT_MS,
-            );
-            if (!pollResult.ok) {
+            const pollResult = await pollIngestJobStatus(firstJobId, entry.id, batchId);
+            if (pollResult.terminalStatus === "cancelled") {
+              await patchConferenceCollectionItem(input, plannedConferenceItem, {
+                status: "cancelled",
+                latest_job_id: String(firstJobId),
+                error_summary: pollResult.error,
+              });
+              recordResult({
+                id: entry.id,
+                status: "error",
+                outcome: "cancelled",
+                url,
+                type: resolvedType,
+                error: pollResult.error,
+                collectionItemId: plannedConferenceItem?.itemId ?? null,
+                retryAttempt: plannedConferenceItem?.retryAttempt ?? null,
+                idempotencyKey: plannedConferenceItem?.idempotencyKey ?? null,
+              });
+              continue;
+            }
+            if (pollResult.terminalStatus !== "completed") {
               throw new Error(String(pollResult.error || "Ingest failed"));
             }
             data = pollResult.data;
@@ -1021,6 +1088,7 @@ const runDirectQuickIngestBatch = async (
             if (!shouldFallbackToPersistentAdd(error)) {
               throw error;
             }
+            if (shouldReconcileCancellation()) break;
             await patchConferenceCollectionItem(input, plannedConferenceItem, {
               status: jobSubmitted ? "failed" : "submit_failed",
               latest_job_id:
@@ -1085,7 +1153,7 @@ const runDirectQuickIngestBatch = async (
           }
         }
 
-        out.push({
+        recordResult({
           id: entry.id,
           status: resultError ? "error" : "ok",
           outcome: resultError ? "failed" : resultOutcome,
@@ -1113,7 +1181,7 @@ const runDirectQuickIngestBatch = async (
               ? error.message
               : String(error || "Request failed"),
         });
-        out.push({
+        recordResult({
           id: entry.id,
           status: "error",
           outcome,
@@ -1185,15 +1253,23 @@ const runDirectQuickIngestBatch = async (
               startedAt: Date.now(),
             });
             const firstJobId = jobIds[0];
-            const pollResult = await pollIngestJobStatus(
-              firstJobId,
-              DIRECT_INGEST_TIMEOUT_MS,
-            );
-            if (!pollResult.ok) {
+            const pollResult = await pollIngestJobStatus(firstJobId, id, batchId);
+            if (pollResult.terminalStatus === "cancelled") {
+              recordResult({
+                id,
+                status: "error",
+                outcome: "cancelled",
+                fileName,
+                type: mediaType,
+                error: pollResult.error,
+              });
+              continue;
+            }
+            if (pollResult.terminalStatus !== "completed") {
               throw new Error(String(pollResult.error || "Upload failed"));
             }
             const isDuplicate = isDbMessageDuplicate(pollResult.data);
-            out.push({
+            recordResult({
               id,
               status: "ok",
               outcome: isDuplicate ? ("skipped" as const) : undefined,
@@ -1209,12 +1285,13 @@ const runDirectQuickIngestBatch = async (
             if (!shouldFallbackToPersistentAdd(error)) {
               throw error;
             }
+            if (shouldReconcileCancellation()) break;
             const data = await submitPersistentAdd(input, {
               fields,
               file: uploadFile,
             });
             const fallbackDuplicate = isDbMessageDuplicate(data);
-            out.push({
+            recordResult({
               id,
               status: "ok",
               outcome: fallbackDuplicate ? ("skipped" as const) : undefined,
@@ -1240,7 +1317,7 @@ const runDirectQuickIngestBatch = async (
         });
 
         const directDuplicate = isDbMessageDuplicate(data);
-        out.push({
+        recordResult({
           id,
           status: "ok",
           outcome: directDuplicate ? ("skipped" as const) : undefined,
@@ -1253,7 +1330,7 @@ const runDirectQuickIngestBatch = async (
         });
       } catch (error) {
       assertQuickIngestRequestCurrent(input, error);
-        out.push({
+        recordResult({
           id,
           status: "error",
           fileName,
@@ -1274,7 +1351,16 @@ const runDirectQuickIngestBatch = async (
 };
 
 const runtimePayload = (input: QuickIngestBatchInput) => {
-  const { signal: _signal, assertCurrent: _assertCurrent, onTrackingMetadata: _tracking, ...payload } = input;
+  const {
+    signal: _signal,
+    assertCurrent: _assertCurrent,
+    onTrackingMetadata: _tracking,
+    onJobProgress: _progress,
+    onItemResult: _result,
+    onCancellationRequestFailed: _cancelFailure,
+    confirmCancellation: _confirmCancellation,
+    ...payload
+  } = input;
   return payload;
 };
 
@@ -1360,6 +1446,27 @@ export const cancelQuickIngestSession = async (
       // Fall through to the direct cancellation path when runtime messaging
       // stops responding in packaged extension contexts.
     }
+  }
+
+  if (input.confirmCancellation) {
+    const tracker = directQuickIngestSessionTrackers.get(sessionId);
+    if (tracker) directQuickIngestCancelledSessions.add(sessionId);
+    const batchIds = normalizeBatchIds([
+      ...(tracker?.getBatchIds() || []),
+      ...(input.batchIds || []),
+      tracking?.batchId || "",
+      ...(tracking?.batchIds || []),
+    ]);
+    const requests = batchIds.length > 0
+      ? batchIds.map(batchId =>
+          requestDirectBatchCancellation(input, batchId, input.reason || "user_cancelled"),
+        )
+      : (input.jobIds || []).map(jobId => requestQuickIngestJobCancellation(input, jobId));
+    const confirmed = await Promise.allSettled(requests);
+    assertQuickIngestRequestCurrent(input);
+    return {
+      ok: confirmed.every(result => result.status === "fulfilled" && result.value),
+    };
   }
 
   directQuickIngestCancelledSessions.add(sessionId);

@@ -198,6 +198,10 @@ OWNER_SCOPE_ACTIVE_LIMIT_EXCEEDED = "jobs_owner_scope_active_limit_exceeded"
 OWNER_SCOPE_ADMISSION_LIMIT_EXCEEDED = "jobs_owner_scope_admission_limit_exceeded"
 
 
+class JobCancellationTooLate(Exception):
+    """An irreversible job phase has already been admitted."""
+
+
 @dataclass(frozen=True, slots=True)
 class OwnerScopeAdmissionPolicy:
     """Atomic active-work and rolling-admission limits for one owner/job scope."""
@@ -7143,54 +7147,92 @@ class JobManager:
         finally:
             conn.close()
 
+    def _live_lease_condition(self, placeholder: str) -> str:
+        deadline = (
+            "leased_until > clock_timestamp()"
+            if self.backend == "postgres"
+            else "JULIANDAY(leased_until) > JULIANDAY('now')"
+        )
+        return (
+            "status = 'processing' AND cancel_requested_at IS NULL "
+            f"AND lease_id = {placeholder} AND {deadline}"
+        )
+
+    def owns_live_lease(self, job_id: int, lease_id: str) -> bool:
+        """Read whether this exact lease can still admit work."""
+        if not lease_id:
+            return False
+        postgres = self.backend == "postgres"
+        placeholder = "%s" if postgres else "?"
+        where = self._live_lease_condition(placeholder)
+        statement = f"SELECT 1 FROM jobs WHERE id = {placeholder} AND {where}"  # nosec B608
+        conn = self._connect()
+        try:
+            if postgres:
+                with self._pg_cursor(conn) as cur:
+                    cur.execute(statement, (int(job_id), lease_id))
+                    return cur.fetchone() is not None
+            return conn.execute(statement, (int(job_id), lease_id)).fetchone() is not None
+        finally:
+            conn.close()
+
     def update_job_progress(
         self,
         job_id: int,
         *,
         progress_percent: float | None = None,
         progress_message: str | None = None,
+        lease_id: str | None = None,
+        preserve_progress_at: float | None = None,
     ) -> bool:
-        """Update progress fields on a job without touching lease state."""
-        if progress_percent is None and progress_message is None:
+        """Update progress without renewing the lease or rolling back an admitted phase."""
+        if lease_id == "" or (progress_percent is None and progress_message is None):
             return False
         if progress_percent is not None:
             progress_percent = max(0.0, min(100.0, float(progress_percent)))
+        if progress_message is not None:
+            progress_message = str(progress_message)
+
+        postgres = self.backend == "postgres"
+        placeholder = "%s" if postgres else "?"
+        updated_at = "NOW()" if postgres else "DATETIME('now')"
+        preserve = (
+            preserve_progress_at is not None
+            and (progress_percent is None or progress_percent < preserve_progress_at)
+        )
+        sets = []
+        params: list[Any] = []
+        for field, value in (("progress_percent", progress_percent), ("progress_message", progress_message)):
+            if value is None:
+                continue
+            if preserve:
+                sets.append(
+                    f"{field} = CASE WHEN progress_percent >= {placeholder} THEN {field} ELSE {placeholder} END"
+                )
+                params.append(preserve_progress_at)
+            else:
+                sets.append(f"{field} = {placeholder}")
+            params.append(value)
+        params.append(int(job_id))
+        where = f"id = {placeholder}"
+        if lease_id is not None:
+            where += f" AND {self._live_lease_condition(placeholder)}"
+            params.append(lease_id)
+        statement = f"UPDATE jobs SET {', '.join(sets)}, updated_at = {updated_at} WHERE {where}"  # nosec B608
+
         conn = self._connect()
         try:
-            if self.backend == "postgres":
+            if postgres:
                 with conn, self._pg_cursor(conn) as cur:
-                    sets: list[str] = []
-                    params: list[Any] = []
-                    if progress_percent is not None:
-                        sets.append("progress_percent = %s")
-                        params.append(float(progress_percent))
-                    if progress_message is not None:
-                        sets.append("progress_message = %s")
-                        params.append(str(progress_message))
-                    if not sets:
-                        return False
-                    params.append(int(job_id))
-                    cur.execute(
-                        f"UPDATE jobs SET {', '.join(sets)}, updated_at = NOW() WHERE id = %s",  # nosec B608
-                        tuple(params),
-                    )
+                    if lease_id is not None:
+                        # Evaluate expiration only after competing row writers release their lock.
+                        cur.execute("SELECT id FROM jobs WHERE id = %s AND lease_id = %s FOR UPDATE", (job_id, lease_id))
+                    cur.execute(statement, tuple(params))
                     return cur.rowcount > 0
-            else:
-                with conn:
-                    sets2: list[str] = []
-                    params2: list[Any] = []
-                    if progress_percent is not None:
-                        sets2.append("progress_percent = ?")
-                        params2.append(float(progress_percent))
-                    if progress_message is not None:
-                        sets2.append("progress_message = ?")
-                        params2.append(str(progress_message))
-                    if not sets2:
-                        return False
-                    params2.append(int(job_id))
-                    sql = f"UPDATE jobs SET {', '.join(sets2)}, updated_at = DATETIME('now') WHERE id = ?"  # nosec B608
-                    cur2 = conn.execute(sql, tuple(params2))
-                    return (cur2.rowcount or 0) > 0
+            with conn:
+                if lease_id is not None:
+                    conn.execute("BEGIN IMMEDIATE")
+                return conn.execute(statement, tuple(params)).rowcount > 0
         finally:
             conn.close()
 
@@ -8965,6 +9007,7 @@ class JobManager:
         expected_job_type: str | None = None,
         cascade_dependents: bool = True,
         queued_only: bool = False,
+        cancel_before_progress: float | None = None,
     ) -> bool:
         """Request cancellation or cancel queued jobs immediately.
 
@@ -8974,6 +9017,7 @@ class JobManager:
         so reconciliation remains bounded.
 
         queued_only also compares queued status under the cancellation row lock.
+        cancel_before_progress rejects an irreversible phase under that same lock.
         Emits gauge updates on successful cancellation for the job's domain/queue/job_type.
         """
         conn = self._connect()
@@ -9001,6 +9045,13 @@ class JobManager:
             if queued_only:
                 clauses.append("status = 'queued'")
             return " AND ".join(clauses), values
+
+        def _check_cancellable_progress(row: dict[str, Any]) -> None:
+            if (
+                cancel_before_progress is not None
+                and float(row.get("progress_percent") or 0) >= cancel_before_progress
+            ):
+                raise JobCancellationTooLate()
 
         def _event_job(row: dict[str, Any]) -> dict[str, Any]:
             return {
@@ -9058,7 +9109,7 @@ class JobManager:
                         # identity_sql contains only fixed column predicates; all values stay parameterized.
                         cur.execute(
                             "SELECT id, domain, queue, job_type, uuid, owner_user_id, request_id, "  # nosec B608
-                            "trace_id, status, available_at FROM jobs WHERE "
+                            "trace_id, status, progress_percent, available_at FROM jobs WHERE "
                             + identity_sql
                             + " FOR UPDATE",
                             tuple(identity_params),
@@ -9066,6 +9117,7 @@ class JobManager:
                         selected = cur.fetchone()
                         if selected and str(selected.get("status")) in {"queued", "processing"}:
                             row = dict(selected)
+                            _check_cancellable_progress(row)
                             previous_status = str(row["status"])
                             cur.execute(
                                 "UPDATE jobs SET status = 'cancelled', cancelled_at = NOW(), "  # nosec B608
@@ -9116,12 +9168,13 @@ class JobManager:
                             logger.info(f"[JM TEST MUT] cancel_job enter job_id={job_id} backend=sqlite")
                     selected = conn.execute(
                         "SELECT id, domain, queue, job_type, uuid, owner_user_id, request_id, "
-                        "trace_id, status, available_at FROM jobs WHERE "
+                        "trace_id, status, progress_percent, available_at FROM jobs WHERE "
                         + identity_sql,  # nosec B608
                         tuple(identity_params),
                     ).fetchone()
                     if selected and str(selected["status"]) in {"queued", "processing"}:
                         row = dict(selected)
+                        _check_cancellable_progress(row)
                         previous_status = str(row["status"])
                         cursor = conn.execute(
                             "UPDATE jobs SET status = 'cancelled', "  # nosec B608

@@ -47,3 +47,43 @@ async def test_pdf_analysis_empty_chunk_responses_do_not_crash(
     assert out.get("status") in ("Success", "Warning"), out
     assert out.get("analysis") is None
     assert out["chunks"][0]["metadata"]["analysis"] is None
+
+
+@pytest.mark.asyncio
+async def test_pdf_cancellation_skips_pending_ocr_pages(monkeypatch, tmp_path):
+    from threading import Event
+
+    import pymupdf
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import PDF_Processing_Lib as pdf
+
+    source = tmp_path / "scans.pdf"
+    with pymupdf.open() as doc:
+        for _ in range(3):
+            doc.new_page(width=72, height=72)
+        doc.save(source)
+
+    cancelled = Event()
+    calls = []
+
+    class OCR:
+        def ocr_image(self, *_args):
+            calls.append("ocr")
+            cancelled.set()
+            return "Scanned text"
+
+    monkeypatch.setattr(pdf, "pymupdf4llm_parse_pdf", lambda _: "")
+    monkeypatch.setattr(pdf, "_get_ocr_backend", lambda _: OCR())
+    monkeypatch.setenv("OCR_PAGE_CONCURRENCY", "1")
+
+    result = await pdf.process_pdf_task(
+        file_bytes=source.read_bytes(),
+        filename=source.name,
+        enable_ocr=True,
+        ocr_mode="always",
+        ocr_dpi=72,
+        cancel_check=cancelled.is_set,
+    )
+
+    assert result["status"] == "Cancelled"
+    assert calls == ["ocr"]

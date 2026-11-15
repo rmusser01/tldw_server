@@ -16,6 +16,7 @@ import {
   extractCompletedIngestJobMediaId,
   extractCompletedIngestJobWarning,
 } from "@/services/tldw/ingest-job-results"
+import type { IngestJobProgress } from "@/services/tldw/ingest-jobs-orchestrator"
 import { quickIngestAuthority, useQuickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 import {
   cancelQuickIngestSession,
@@ -23,6 +24,7 @@ import {
   startQuickIngestSession,
   submitQuickIngestBatch,
 } from "@/services/tldw/quick-ingest-batch"
+import { requestQuickIngestJobCancellation } from "@/services/tldw/quick-ingest-request-scope"
 import { reattachQuickIngestSession } from "@/services/tldw/quick-ingest-session-reattach"
 import { useConnectionStore } from "@/store/connection"
 import { useQuickIngestStore } from "@/store/quick-ingest"
@@ -281,6 +283,21 @@ const mergeWizardResults = (
   }
   return Array.from(merged.values())
 }
+
+const preserveConfirmedCancellation = (
+  result: WizardResultItem,
+  cancelledItemIds: ReadonlySet<string>
+): WizardResultItem => cancelledItemIds.has(result.id)
+  ? {
+      ...result,
+      status: "error",
+      outcome: "cancelled",
+      error: "Cancelled by user.",
+      mediaId: null,
+      persisted: false,
+      warning: undefined,
+    }
+  : result
 
 const buildTerminalProgress = (
   previous: ItemProgress,
@@ -807,10 +824,29 @@ const buildResultsFromReattachedJobs = (
     }
   })
 
+const buildTrackedItemProgress = (
+  id: string,
+  job: IngestJobProgress & { result?: unknown; error?: string }
+): ItemProgress => {
+  const status = mapReattachedJobStatusToProgress(job.status, job.result)
+  const terminal = status === "complete" || status === "failed" || status === "cancelled"
+  return {
+    id,
+    status,
+    progressPercent: terminal ? 100 : job.progressPercent ?? 0,
+    currentStage: terminal ? "" : job.progressMessage || "",
+    estimatedRemaining: 0,
+    error: status === "failed"
+      ? job.error || extractCompletedIngestJobError(job.result) || "Failed"
+      : undefined,
+  }
+}
+
 const buildProgressFromReattachedJobs = (
   items: WizardQueueItem[],
   jobs: ReattachedQuickIngestJob[],
-  tracking?: PersistedQuickIngestTracking
+  tracking: PersistedQuickIngestTracking | undefined,
+  cancelledItems: ReadonlySet<string>
 ): ItemProgress[] =>
   jobs.map((job, index) => {
     const item = resolveQueueItemForReattachedJob(
@@ -820,28 +856,8 @@ const buildProgressFromReattachedJobs = (
       job.jobId,
       index
     )
-    const status = mapReattachedJobStatusToProgress(job.status, job.result)
-    const progressPercent =
-      status === "complete" || status === "failed" || status === "cancelled"
-        ? 100
-        : 0
-    return {
-      id: item?.id || `reattached-${job.jobId}`,
-      status,
-      progressPercent,
-      currentStage:
-        status === "failed"
-          ? job.error ||
-            extractCompletedIngestJobError(job.result) ||
-            "Failed"
-          : status === "complete"
-            ? "Complete"
-            : status === "cancelled"
-              ? "Cancelled"
-              : String(job.status || "Processing"),
-      estimatedRemaining: 0,
-      error: status === "failed" ? job.error : undefined,
-    }
+    const id = item?.id || `reattached-${job.jobId}`
+    return buildTrackedItemProgress(id, cancelledItems.has(id) ? { status: "cancelled" } : job)
   })
 
 const buildQuickIngestPayload = async (
@@ -940,6 +956,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     restore,
     skipToProcessing,
     updateItemProgress,
+    cancelItem,
     updateProcessingState,
     setResults,
     setQueueItems,
@@ -958,6 +975,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const runStartedAtRef = useRef<number | null>(null)
   const cancelledSessionIdsRef = useRef<Set<string>>(new Set())
   const cancelRequestedRef = useRef(false)
+  const cancelledItemIdsRef = useRef(new Set<string>())
+  const remoteDirectSessionIdRef = useRef<string | null>(null)
+  const remoteCancelRequestedRef = useRef(false)
+  const [cancelAllState, setCancelAllState] = useState<"pending" | "failed" | null>(null)
   const [retryIds, setRetryIds] = useState<string[] | null>(() =>
     currentStep === 4 && processingState.perItemProgress.length
       ? processingState.perItemProgress.map(item => item.id)
@@ -974,6 +995,20 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     () => resolveTrackedQueueItems(queueItems, session.tracking),
     [queueItems, session.tracking]
   )
+  const trackedJobIdsByItem = useMemo(() => {
+    const tracking = session.tracking
+    const result = new Map<string, number[]>()
+    if (tracking?.mode === "webui-direct") {
+      normalizeTrackedJobIds(tracking).forEach((jobId, index) => {
+        const item = resolveQueueItemForReattachedJob(queueItems, tracking, undefined, jobId, index)
+        if (!item) return
+        const jobIds = result.get(item.id) ?? []
+        jobIds.push(jobId)
+        result.set(item.id, jobIds)
+      })
+    }
+    return result
+  }, [queueItems, session.tracking])
   const initialTrackedQueueItemsRef = useRef(trackedQueueItems)
   const initialCurrentStepRef = useRef(currentStep)
   const initialElapsedRef = useRef(state.processingState.elapsed)
@@ -1145,7 +1180,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     const reattachQueueItems = initialTrackedQueueItemsRef.current
     // Recovery polls must not race the live executor's complete mixed result set.
     // A freshly mounted/reloaded session has no local run and may reattach.
-    if (hasStartedRunRef.current) return
+    if (hasStartedRunRef.current || cancelRequestedRef.current) return
     if (!persistedReattachSignature || !persistedTracking) return
     if (activeReattachSignatureRef.current === persistedReattachSignature) return
     activeReattachSignatureRef.current = persistedReattachSignature
@@ -1161,16 +1196,32 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     }
 
     let cancelled = false
+    const scheduleNextPoll = () => {
+      persistedReattachTimerRef.current = window.setTimeout(() => {
+        void pollPersistedTracking().catch(() => { /* Owner changes abandon client polling. */ })
+      }, PERSISTED_REATTACH_POLL_INTERVAL_MS)
+    }
     const pollPersistedTracking = async () => {
       const currentTracking = persistedTrackingRef.current || persistedTracking
+      const confirmedCount = cancelledItemIdsRef.current.size
       const snapshot = await reattachQuickIngestSession(currentTracking, operation)
-      if (cancelled || !operation.isCurrent()) return
+      if (cancelled || cancelRequestedRef.current || !operation.isCurrent()) return
+      if (confirmedCount !== cancelledItemIdsRef.current.size) {
+        scheduleNextPoll()
+        return
+      }
+      if (snapshot.lifecycle === "interrupted" && remoteCancelRequestedRef.current) {
+        setCancelAllState("failed")
+        scheduleNextPoll()
+        return
+      }
 
       const latestTracking = persistedTrackingRef.current || currentTracking
       const perItemProgress = buildProgressFromReattachedJobs(
         reattachQueueItems,
         snapshot.jobs,
-        latestTracking
+        latestTracking,
+        cancelledItemIdsRef.current
       )
       const elapsed =
         typeof startedAt === "number" && Number.isFinite(startedAt)
@@ -1184,9 +1235,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           elapsed,
           estimatedRemaining: 0,
         })
-        persistedReattachTimerRef.current = window.setTimeout(() => {
-          void pollPersistedTracking().catch(() => { /* Owner changes abandon client polling. */ })
-        }, PERSISTED_REATTACH_POLL_INTERVAL_MS)
+        scheduleNextPoll()
         return
       }
 
@@ -1204,7 +1253,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
               latestTracking.retryItems
             )
 
-      const mergedResults = mergeWizardResults(resultsRef.current, reattachedResults)
+      const confirmedResults = reattachedResults.map((result) =>
+        preserveConfirmedCancellation(result, cancelledItemIdsRef.current)
+      )
+      const mergedResults = mergeWizardResults(resultsRef.current, confirmedResults)
       resultsRef.current = mergedResults
       setResults(mergedResults)
       updateProcessingState({
@@ -1254,13 +1306,16 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
 
   const applyResults = useCallback(
     (incoming: WizardResultItem[]) => {
-      const next = mergeWizardResults(resultsRef.current, incoming)
+      const confirmedResults = incoming.map((result) =>
+        preserveConfirmedCancellation(result, cancelledItemIdsRef.current)
+      )
+      const next = mergeWizardResults(resultsRef.current, confirmedResults)
       resultsRef.current = next
       setResults(next)
       const progressMap = new Map(
         processingState.perItemProgress.map((item) => [item.id, item])
       )
-      for (const result of incoming) {
+      for (const result of confirmedResults) {
         const previous = progressMap.get(result.id)
         if (!previous) continue
         updateItemProgress(buildTerminalProgress(previous, result))
@@ -1314,7 +1369,29 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   )
 
   const handleCancelAll = useCallback(() => {
-    if (!operation.isCurrent() || cancelRequestedRef.current) return
+    if (!operation.isCurrent() || cancelRequestedRef.current || cancelAllState === "pending") return
+    const tracking = persistedTrackingRef.current
+    const sessionId = String(activeSessionIdRef.current || tracking?.sessionId || "").trim()
+    const tracksRemoteJobs = Boolean(sessionId && remoteDirectSessionIdRef.current === sessionId) ||
+      (tracking?.mode === "webui-direct" && Boolean(tracking.jobIds?.length))
+    if (tracksRemoteJobs) {
+      remoteCancelRequestedRef.current = true
+      setCancelAllState("pending")
+      const reportFailure = () => {
+        if (operation.isCurrent()) setCancelAllState("failed")
+      }
+      void cancelQuickIngestSession({
+        requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
+        sessionId: sessionId || session.id,
+        batchIds: resolveTrackingBatchIds(tracking),
+        jobIds: normalizeTrackedJobIds(tracking),
+        reason: "user_cancelled",
+        confirmCancellation: true,
+      }).then((response) => {
+        if (!response?.ok) reportFailure()
+      }, reportFailure)
+      return
+    }
     cancelRequestedRef.current = true
 
     if (persistedReattachTimerRef.current != null) {
@@ -1322,22 +1399,34 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       persistedReattachTimerRef.current = null
     }
 
-    const persistedTracking = persistedTrackingRef.current
-    const sessionId = String(
-      activeSessionIdRef.current || persistedTracking?.sessionId || ""
-    ).trim()
     if (sessionId) {
       cancelledSessionIdsRef.current.add(sessionId)
       cancelQuickIngestSessionBestEffort({
         requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
         sessionId,
-        batchIds: resolveTrackingBatchIds(persistedTracking),
+        batchIds: resolveTrackingBatchIds(tracking),
         reason: "user_cancelled",
       })
     }
 
     finalizeFailure("Cancelled by user.", "cancelled")
-  }, [finalizeFailure, operation])
+  }, [cancelAllState, finalizeFailure, operation, session.id])
+
+  const handleCancelItem = useCallback(async (itemId: string) => {
+    const sessionId = activeSessionIdRef.current
+    const jobIds = trackedJobIdsByItem.get(itemId)
+    if (!jobIds?.length || !operation.isCurrent() || cancelRequestedRef.current) return false
+
+    const settled = await Promise.allSettled(
+      jobIds.map((jobId) => requestQuickIngestJobCancellation(operation, jobId))
+    )
+    const confirmed = settled.every((result) => result.status === "fulfilled" && result.value)
+    if (confirmed && operation.isCurrent() && sessionId === activeSessionIdRef.current && !cancelRequestedRef.current) {
+      cancelledItemIdsRef.current.add(itemId)
+      cancelItem(itemId)
+    }
+    return confirmed
+  }, [cancelItem, operation, trackedJobIdsByItem])
 
   const markRunActive = useCallback(() => {
     runStartedAtRef.current = Date.now()
@@ -1422,6 +1511,10 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   const startRun = useCallback(async () => {
     if (!operation.isCurrent() || hasStartedRunRef.current || validQueueItems.length === 0) return
     hasStartedRunRef.current = true
+    cancelledItemIdsRef.current.clear()
+    remoteCancelRequestedRef.current = false
+    remoteDirectSessionIdRef.current = null
+    setCancelAllState(null)
     const attemptedIds = new Set(validQueueItems.map((item) => item.id))
     const retained = resultsRef.current.filter(
       (item) => !attemptedIds.has(item.id) || item.status === "ok"
@@ -1528,12 +1621,27 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         return
       }
 
+      const confirmCancellation = requestPayload.storeRemote && !requestPayload.processOnly
+      if (confirmCancellation) remoteDirectSessionIdRef.current = sessionId
       const response = await submitQuickIngestBatch({
         ...requestPayload,
+        confirmCancellation,
+        onCancellationRequestFailed: () => {
+          if (operation.isCurrent() && sessionId === activeSessionIdRef.current) setCancelAllState("failed")
+        },
         requestScope: operation.requestScope, signal: operation.signal, assertCurrent: operation.assertCurrent,
         __quickIngestSessionId: sessionId,
+        onJobProgress: (itemId, progress) => {
+          if (!operation.isCurrent() || cancelRequestedRef.current || cancelledItemIdsRef.current.has(itemId)) return
+          updateItemProgress(buildTrackedItemProgress(itemId, progress))
+        },
+        onItemResult: (item) => {
+          if (!operation.isCurrent() || cancelRequestedRef.current) return
+          const result = normalizeWizardResult(item)
+          if (result) applyResults([result])
+        },
         onTrackingMetadata: (tracking) => {
-          if (!operation.isCurrent()) return
+          if (!operation.isCurrent() || cancelRequestedRef.current) return
           markProcessingTracking({
             ...tracking,
             sessionId,
@@ -1564,6 +1672,24 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         .map((item) => normalizeWizardResult(item))
         .filter((item): item is WizardResultItem => Boolean(item))
 
+      if (remoteCancelRequestedRef.current) {
+        const resolvedIds = new Set(normalizedResults.map((item) => item.id))
+        const stoppedResults = [
+          ...normalizedResults,
+          ...buildFailureResults(
+            validQueueItems.filter((item) => !resolvedIds.has(item.id)),
+            "Cancelled by user.",
+            "cancelled",
+            retryRequestsRef.current
+          ),
+        ]
+        finalizeRun(
+          stoppedResults.every((item) => item.outcome === "cancelled") ? "cancelled" : "complete",
+          stoppedResults
+        )
+        return
+      }
+
       if (normalizedResults.length === 0) {
         finalizeFailure("Ingest request finished without item results.", "failed")
         return
@@ -1578,9 +1704,11 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       )
     }
   }, [
+    applyResults,
     finalizeFailure,
     finalizeRun,
     setResults,
+    updateItemProgress,
     markRunActive,
     presetConfig.advancedValues,
     presetConfig.common,
@@ -1978,7 +2106,13 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
         )
       case 4:
         return (
-          <ProcessingStep onCancelAll={handleCancelAll} onMinimize={onClose} />
+          <ProcessingStep
+            onCancelAll={handleCancelAll}
+            cancelAllState={cancelAllState}
+            onCancelItem={handleCancelItem}
+            trackedJobIdsByItem={trackedJobIdsByItem}
+            onMinimize={onClose}
+          />
         )
       case 5:
         return (
@@ -2016,6 +2150,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     navigationError,
     qi,
     handleCancelAll,
+    cancelAllState,
+    handleCancelItem,
+    trackedJobIdsByItem,
     handleOpenMedia,
     handleOpenCollection,
     handleRetryItems,

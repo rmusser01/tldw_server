@@ -42,6 +42,41 @@ const startQuickIngestSession = (input: Parameters<typeof startBatch>[0]) => sta
 const cancelQuickIngestSession = (input: Parameters<typeof cancelBatch>[0]) => cancelBatch({ requestScope, ...input })
 
 describe("submitQuickIngestBatch", () => {
+  it("reports backend progress and preserves a server-cancelled file without another upload", async () => {
+    vi.useFakeTimers()
+    try {
+      mocks.bgUpload.mockResolvedValue({ batch_id: "pdf-batch", jobs: [{ id: 77 }] })
+      mocks.bgRequest
+        .mockResolvedValueOnce({ ok: true, data: { status: "running", progress_percent: 12, progress_message: "Extracting PDF text" } })
+        .mockResolvedValueOnce({ ok: true, data: { status: "running", progress_percent: 45, progress_message: "Analyzing chunk 1 of 2" } })
+        .mockResolvedValueOnce({ ok: true, data: { status: "cancelled", cancellation_reason: "user_cancelled" } })
+      const onJobProgress = vi.fn()
+      const onItemResult = vi.fn()
+
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "pdf", name: "paper.pdf", type: "application/pdf", data: [1] }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: "qi-direct-pdf",
+        onJobProgress,
+        onItemResult,
+      })
+      await vi.advanceTimersByTimeAsync(2_500)
+      const result = await run
+
+      expect(onJobProgress.mock.calls).toEqual([
+        ["pdf", { status: "running", progressPercent: 12, progressMessage: "Extracting PDF text" }],
+        ["pdf", { status: "running", progressPercent: 45, progressMessage: "Analyzing chunk 1 of 2" }],
+      ])
+      expect(result.results).toEqual([expect.objectContaining({ id: "pdf", status: "error", outcome: "cancelled" })])
+      expect(onItemResult).toHaveBeenCalledWith(result.results?.[0])
+      expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("keeps conference retry identities on the shared executor in a legacy messaging runtime", async () => {
     mocks.runtimeId = "legacy-extension"
     mocks.manifestVersion = 2
@@ -1062,6 +1097,57 @@ describe("submitQuickIngestBatch", () => {
       id: "entry-cancel-1",
       status: "error"
     })
+  })
+
+  it("cancels a reopened hosted job when its tracking has no batch id", async () => {
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { success: true, status: "cancelled" } })
+    expect(await cancelQuickIngestSession({
+      sessionId: "qi-direct-reopened", jobIds: [77], confirmCancellation: true,
+    })).toEqual({ ok: true })
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/media/ingest/jobs/77?reason=user_cancelled", method: "DELETE", preferDirect: true,
+    }))
+  })
+
+  it("cancels a late hosted upload and waits for its real status after a failed cancel request", async () => {
+    vi.useFakeTimers()
+    try {
+      let acknowledgeUpload!: (value: unknown) => void
+      mocks.bgUpload.mockReturnValue(new Promise(resolve => { acknowledgeUpload = resolve }))
+      mocks.bgRequest
+        .mockResolvedValueOnce({ ok: false, status: 503 })
+        .mockResolvedValueOnce({ ok: true, data: { status: "running" } })
+        .mockResolvedValueOnce({ ok: true, data: { status: "cancelled" } })
+      const sessionId = "qi-direct-late-hosted"
+      const onCancellationRequestFailed = vi.fn()
+      const onItemResult = vi.fn()
+      const run = submitQuickIngestBatch({
+        entries: [],
+        files: [{ id: "one", name: "one.pdf", data: [1] }, { id: "two", name: "two.pdf", data: [2] }],
+        storeRemote: true,
+        processOnly: false,
+        __quickIngestSessionId: sessionId,
+        confirmCancellation: true,
+        onCancellationRequestFailed,
+        onItemResult,
+      })
+      await vi.waitFor(() => expect(mocks.bgUpload).toHaveBeenCalledTimes(1))
+      await cancelQuickIngestSession({ sessionId, confirmCancellation: true })
+      acknowledgeUpload({ batch_id: "late-pdf-batch", jobs: [{ id: 77 }] })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+        path: expect.stringContaining("/api/v1/media/ingest/jobs/cancel?batch_id=late-pdf-batch"),
+        method: "POST",
+      }))
+      expect(onCancellationRequestFailed).toHaveBeenCalledOnce()
+      expect(onItemResult).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1_200)
+      expect((await run).results).toEqual([expect.objectContaining({ id: "one", outcome: "cancelled" })])
+      expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("stops submitting later direct items once the session is cancelled", async () => {

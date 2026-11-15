@@ -13,12 +13,13 @@
 ####################
 # Import necessary libraries
 import asyncio
+import contextvars
 import gc
 import importlib.util
 import re
 import sys
 from datetime import datetime
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 #
 # Import External Libs
@@ -54,6 +55,10 @@ _PDF_NONCRITICAL_EXCEPTIONS = (
     UnicodeDecodeError,
     ValueError,
 )
+
+class _PDFProcessingCancelled(Exception):
+    """Stop before entering another PDF processing step."""
+
 
 try:
     # Optional VLM module (vision backends)
@@ -505,6 +510,8 @@ def process_pdf(
     vlm_detect_tables_only: bool = True,
     vlm_max_pages: Optional[int] = None,
     base_dir: Optional[Path] = None,
+    cancel_check: Callable[[], bool] | None = None,
+    progress_callback: Callable[[float, str], bool] | None = None,
     # write_to_temp_file: bool = False # This param seems unused/obsolete now
 ) -> dict[str, Any] | None:
     """
@@ -588,6 +595,13 @@ def process_pdf(
     path_for_processing: Optional[str] = None
     content: Optional[str] = None
 
+    def checkpoint(percent: float | None = None, message: str = "") -> None:
+        if progress_callback is not None and percent is not None:
+            if not progress_callback(percent, message):
+                raise _PDFProcessingCancelled()
+        elif cancel_check is not None and cancel_check():
+            raise _PDFProcessingCancelled()
+
     try:
         # --- Step 0: Handle Input Type and Ensure File Path for Processing ---
         if isinstance(file_input, bytes):
@@ -630,6 +644,7 @@ def process_pdf(
         else:
             raise TypeError(f"Unsupported file_input type: {type(file_input)}")
 
+        checkpoint(20, "Extracting PDF text")
         # --- Step 1: Extract Text (Now always uses path_for_processing) ---
         if not path_for_processing: # Should not happen, but defensive check
              raise RuntimeError("Internal logic error: path_for_processing not set")
@@ -659,6 +674,7 @@ def process_pdf(
                     try:
                         content = docling_parse_pdf(path_for_processing)
                     except _PDF_NONCRITICAL_EXCEPTIONS as docling_exc:
+                        checkpoint()
                         logging.warning(
                             "Docling parser failed for %s (%s); falling back to pymupdf4llm",
                             filename,
@@ -673,6 +689,7 @@ def process_pdf(
                 result["parser_used"] = "pymupdf4llm"
                 content = pymupdf4llm_parse_pdf(path_for_processing) # Fallback also uses path
 
+            checkpoint()
             result["content"] = content
             if content is not None: # Check if extraction actually yielded content
                  logging.info(f"Text extracted successfully for {filename} using {result['parser_used']}.")
@@ -691,6 +708,7 @@ def process_pdf(
                         should_ocr = True
 
                 if should_ocr:
+                    checkpoint(28, "Running PDF OCR")
                     requested_backend = (ocr_backend or "").strip().lower()
                     if requested_backend == "mineru":
                         mineru_warnings: list[str] = []
@@ -700,6 +718,7 @@ def process_pdf(
                             mineru_warnings.append("MinerU ignores ocr_dpi in v1")
 
                         try:
+                            checkpoint()
                             mineru_result = _run_mineru_document_ocr(
                                 pdf_path=Path(path_for_processing),
                                 output_format=ocr_output_format,
@@ -792,6 +811,7 @@ def process_pdf(
                                 backend_page_concurrency,
                             )
 
+                            checkpoint()
                             ocr_text, page_count, ocr_pages, structured_pages = _ocr_pdf_pages(
                                 pdf_path=path_for_processing,
                                 lang=ocr_lang or "eng",
@@ -802,6 +822,7 @@ def process_pdf(
                                 concurrency=effective_page_concurrency,
                                 output_format=ocr_output_format,
                                 prompt_preset=ocr_prompt_preset,
+                                cancellation_checkpoint=checkpoint if cancel_check is not None else None,
                             )
                             result.setdefault("analysis_details", {})
                             details = {
@@ -904,6 +925,7 @@ def process_pdf(
              # Don't raise here
 
 
+        checkpoint()
         # --- Step 2: Extract Metadata ---
         # Metadata extraction should work even if text extraction failed.
         try:
@@ -974,6 +996,7 @@ def process_pdf(
              }
 
 
+        checkpoint()
         # --- Step 2.5: VLM (Vision) Analysis / Detections ---
         try:
             if enable_vlm:
@@ -1087,6 +1110,7 @@ def process_pdf(
             result["warnings"].append(f"VLM processing error: {vlm_err}")
 
 
+        checkpoint(35, "Normalizing PDF text")
         # Normalize the final extracted text (including OCR merge) before chunking.
         final_content = result.get("content")
         if isinstance(final_content, str):
@@ -1114,6 +1138,7 @@ def process_pdf(
         processed_chunks = None
         # Only proceed if text extraction was successful
         if content and perform_chunking:
+            checkpoint(40, "Chunking PDF text")
             if chunk_options is None:
                 # Provide sensible defaults if none are passed
                 chunk_options = {'method': 'sentences', 'max_size': 500, 'overlap': 100}
@@ -1154,7 +1179,8 @@ def process_pdf(
 
         # --- Step 4: Summarization / Analysis ---
         # Use path_for_processing for logging context if needed
-        logging.debug(f"PROCESS_PDF: Checking condition -> perform_analysis={perform_analysis}, api_name='{api_name}', api_key='{api_key}', chunks_exist={bool(processed_chunks)}") # Keep this log
+        checkpoint()
+        logging.debug(f"PROCESS_PDF: Checking condition -> perform_analysis={perform_analysis}, api_name='{api_name}', chunks_exist={bool(processed_chunks)}")
         # Allow analysis to proceed without explicit api_key (resolved from server config)
         if perform_analysis and api_name and processed_chunks:
             logging.info(f"Summarization enabled for {len(processed_chunks)} chunks of {filename} using API: {api_name}.")
@@ -1164,6 +1190,7 @@ def process_pdf(
             chunk_summaries = []  # Store summaries of individual chunks
             summarized_chunks_for_result = [] # Store chunk data including the generated analysis
 
+            chunk_count = len(processed_chunks)
             # Iterate through each chunk generated earlier
             for i, chunk in enumerate(processed_chunks):
                 chunk_text = chunk.get('text', '') # Get the text content of the chunk
@@ -1171,6 +1198,7 @@ def process_pdf(
 
                 # Only summarize if the chunk has actual text content
                 if chunk_text:
+                    checkpoint(50 + 25 * i / chunk_count, f"Analyzing chunk {i + 1} of {chunk_count}")
                     try:
                         # Call the external summarization library function
                         analysis_text = analyze(
@@ -1217,6 +1245,7 @@ def process_pdf(
             # --- Combine chunk summaries (optional recursive step) ---
             if chunk_summaries: # Proceed only if at least one chunk was successfully summarized
                 if summarize_recursively and len(chunk_summaries) > 1:
+                    checkpoint(77, "Combining PDF analysis")
                     # If recursive summarization is enabled and there are multiple chunk summaries
                     logging.info(f"Performing recursive summarization on {len(chunk_summaries)} chunk summaries for {filename}.")
                     # Join the individual chunk summaries into one large text block
@@ -1275,6 +1304,7 @@ def process_pdf(
             logging.warning(f"Summarization skipped for {filename} due to an unknown condition.")
 
 
+        checkpoint()
         # --- Step 5: Determine Final Status (Based on content and warnings) ---
         # Check if critical step (text extraction) failed. Check warnings for specific errors.
         extraction_failed = not content and any("Text extraction failed" in w for w in result["warnings"])
@@ -1296,6 +1326,9 @@ def process_pdf(
              logging.info(f"Setting status to Success for {filename}.")
 
     # --- Main Exception Handler ---
+    except _PDFProcessingCancelled:
+        result["status"] = "Cancelled"
+        result["error"] = "PDF processing cancelled."
     except FileNotFoundError as fnf_err:
         logging.error(f"File not found error for {filename}: {fnf_err}", exc_info=True)
         result["status"] = "Error"
@@ -1473,6 +1506,8 @@ async def process_pdf_task(
     vlm_backend: Optional[str] = None,
     vlm_detect_tables_only: bool = True,
     vlm_max_pages: Optional[int] = None,
+    cancel_check: Callable[[], bool] | None = None,
+    progress_callback: Callable[[float, str], bool] | None = None,
 ) -> dict[str, Any]:
     """
     Async wrapper task to process a single PDF (provided as bytes)
@@ -1522,6 +1557,8 @@ async def process_pdf_task(
             vlm_backend=vlm_backend,
             vlm_detect_tables_only=vlm_detect_tables_only,
             vlm_max_pages=vlm_max_pages,
+            cancel_check=cancel_check,
+            progress_callback=progress_callback,
             # No need to pass write_to_temp_file
         )
 
@@ -1559,6 +1596,7 @@ def _ocr_pdf_pages(
     concurrency: int = 1,
     output_format: Optional[str] = None,
     prompt_preset: Optional[str] = None,
+    cancellation_checkpoint: Callable[[], None] | None = None,
 ) -> tuple[str, int, int, Optional[list[dict[str, Any]]]]:
     """
     Render PDF pages to images and run OCR.
@@ -1606,8 +1644,15 @@ def _ocr_pdf_pages(
         futures = []
         idx_map = {}
 
+        def run_ocr(ocr: Callable[..., Any], *args: Any) -> Any:
+            if cancellation_checkpoint is not None:
+                cancellation_checkpoint()
+            return ocr(*args)
+
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             for idx, page in enumerate(doc, start=1):
+                if cancellation_checkpoint is not None:
+                    cancellation_checkpoint()
                 do_ocr = True
                 if per_page_check:
                     try:
@@ -1637,11 +1682,14 @@ def _ocr_pdf_pages(
                             try:
                                 return backend.ocr_image_structured(b, lang, output_format, prompt_preset)
                             except TypeError:
+                                if cancellation_checkpoint is not None:
+                                    cancellation_checkpoint()
                                 return backend.ocr_image_structured(b, lang)
 
-                        fut = pool.submit(_call_structured, img_bytes)
+                        ocr, args = _call_structured, (img_bytes,)
                     else:
-                        fut = pool.submit(backend.ocr_image, img_bytes, lang)
+                        ocr, args = backend.ocr_image, (img_bytes, lang)
+                    fut = pool.submit(contextvars.copy_context().run, run_ocr, ocr, *args)
                     futures.append(fut)
                     idx_map[fut] = idx
 

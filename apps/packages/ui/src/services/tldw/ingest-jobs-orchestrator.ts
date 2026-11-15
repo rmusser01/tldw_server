@@ -11,6 +11,28 @@ export const TERMINAL_INGEST_JOB_STATUSES = new Set([
   "quarantined"
 ])
 
+export type IngestJobProgress = {
+  status: string
+  progressPercent?: number
+  progressMessage?: string
+}
+
+export const readIngestJobProgress = (data?: {
+  status?: unknown
+  progress_percent?: unknown
+  progress_message?: unknown
+}): IngestJobProgress => {
+  const percent = data?.progress_percent
+  const message = data?.progress_message
+  return {
+    status: String(data?.status || "").trim().toLowerCase(),
+    progressPercent: typeof percent === "number" && Number.isFinite(percent) && percent >= 0 && percent <= 100
+      ? percent
+      : undefined,
+    progressMessage: typeof message === "string" ? message.trim() || undefined : undefined,
+  }
+}
+
 export type IngestJobStatusResponse = {
   ok: boolean
   status?: number
@@ -428,6 +450,8 @@ type PollSingleIngestJobOptions = {
   pollIntervalMs?: number
   isCancelled: () => boolean
   onCancel: () => Promise<void> | void
+  onProgress?: (progress: IngestJobProgress) => void
+  keepWaitingOnTimeout?: () => boolean
   onRequestError?: (
     response: IngestJobStatusResponse | undefined
   ) =>
@@ -444,7 +468,7 @@ export const pollSingleIngestJob = async (
   const pollIntervalMs = Math.max(1, Number(options.pollIntervalMs || 1200))
   const deadline = Date.now() + Math.max(10_000, Number(options.timeoutMs || 0))
 
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline || options.keepWaitingOnTimeout?.()) {
     if (options.isCancelled()) {
       await options.onCancel()
       return {
@@ -467,8 +491,10 @@ export const pollSingleIngestJob = async (
       continue
     }
 
-    const status = String(response.data?.status || "").toLowerCase()
+    const progress = readIngestJobProgress(response.data)
+    const { status } = progress
     if (!TERMINAL_INGEST_JOB_STATUSES.has(status)) {
+      if (status && !options.isCancelled()) options.onProgress?.(progress)
       await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
       continue
     }

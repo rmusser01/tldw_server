@@ -796,3 +796,56 @@ def test_submit_media_ingest_jobs_routes_heavy_request_to_heavy_queue_when_route
 
     assert resp.status_code == 200, resp.text
     assert captured == ["media-heavy"]
+
+
+def test_media_ingest_cancel_refuses_pdf_saves_in_progress(media_ingest_jobs_client):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    headers = {"X-API-KEY": "test-api-key-12345"}
+    jm = JobManager()
+    batch_id = "pdf-save"
+    jobs = [
+        jm.create_job(
+            domain="media_ingest",
+            queue="default",
+            job_type="media_ingest_item",
+            owner_user_id="1",
+            batch_group=batch_id,
+            payload={"batch_id": batch_id, "media_type": "pdf", "options": {"media_type": "pdf"}},
+        )
+        for _ in range(3)
+    ]
+    acquired = jm.acquire_next_job(domain="media_ingest", queue="default", worker_id="test-worker", lease_seconds=120)
+    assert acquired is not None
+    saving_id = acquired["id"]
+    queued, batched = [job for job in jobs if job["id"] != saving_id]
+
+    assert jm.update_job_progress(saving_id, progress_percent=85, progress_message="Saving media")
+    saving = media_ingest_jobs_client.delete(f"/api/v1/media/ingest/jobs/{saving_id}", headers=headers)
+    assert saving.status_code == 409, saving.text
+    assert "already saving" in saving.json()["detail"]
+    assert jm.get_job(saving_id)["status"] == "processing"
+
+    assert jm.release_job(saving_id, worker_id="test-worker", lease_id=acquired["lease_id"], enforce=True)
+    queued_save = media_ingest_jobs_client.delete(f"/api/v1/media/ingest/jobs/{saving_id}", headers=headers)
+    assert queued_save.status_code == 409, queued_save.text
+    retried = jm.acquire_next_job(domain="media_ingest", queue="default", worker_id="retry", lease_seconds=120)
+    assert retried is not None and retried["id"] == saving_id
+    assert jm.update_job_progress(
+        saving_id, progress_percent=5, progress_message="prepare",
+        lease_id=retried["lease_id"], preserve_progress_at=85,
+    )
+    assert jm.get_job(saving_id)["progress_message"] == "Saving media"
+    assert jm.update_job_progress(saving_id, progress_percent=100, progress_message="completed")
+    before_save = media_ingest_jobs_client.delete(f"/api/v1/media/ingest/jobs/{queued['id']}", headers=headers)
+    assert before_save.status_code == 200, before_save.text
+    assert before_save.json()["status"] == "cancelled"
+
+    batch = media_ingest_jobs_client.post(f"/api/v1/media/ingest/jobs/cancel?batch_id={batch_id}", headers=headers)
+    assert batch.status_code == 200, batch.text
+    assert batch.json()["success"] is False
+    assert batch.json()["cancelled"] == 1
+    assert batch.json()["failed"] == 1
+    assert "already saving" in batch.json()["message"]
+    assert jm.get_job(saving_id)["status"] == "processing"
+    assert jm.get_job(batched["id"])["status"] == "cancelled"

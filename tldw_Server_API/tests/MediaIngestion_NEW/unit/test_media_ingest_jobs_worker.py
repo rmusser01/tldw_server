@@ -1174,3 +1174,162 @@ async def test_media_worker_applies_staged_file_daily_quota(monkeypatch, tmp_pat
         assert len(processed) == (2 if case == "admitted" else 1)  # nosec B101 - Existing legitimate processing path.
     expected = [] if case == "url" else [("3", 5, "media-ingestion-job:3:" + job["uuid"])] * (2 if case == "admitted" else 1)
     assert calls == expected  # nosec B101 - Actual staged size, owner and stable retry receipt.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "stop_at", [None, "extract", "analysis", "claims", "save", "retry", "expired_extract", "expired_analysis"],
+)
+async def test_pdf_ingest_worker_reports_progress_and_stops_at_cancellation(monkeypatch, tmp_path, stop_at):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    import pymupdf
+
+    import tldw_Server_API.app.core.Chunking as chunking
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF import PDF_Processing_Lib as pdf
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+    monkeypatch.delenv("JOBS_DB_URL", raising=False)
+    monkeypatch.setattr(worker, "_enforce_and_record_media_bytes", AsyncMock())
+    monkeypatch.setattr(worker, "_admit_or_refuse_analysis", AsyncMock(return_value=None))
+    monkeypatch.setattr(worker, "_create_db", lambda _: SimpleNamespace(
+        db_path_str=str(tmp_path / "media.db"), client_id="1", close_connection=lambda: None,
+    ))
+
+    staging_dir = tmp_path / "staged"
+    staging_dir.mkdir()
+    source = staging_dir / "paper.pdf"
+    with pymupdf.open() as doc:
+        doc.new_page()
+        doc.save(source)
+
+    jm = JobManager()
+    row = jm.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        owner_user_id="1",
+        payload={
+            "source": str(source),
+            "source_kind": "file",
+            "input_ref": source.name,
+            "temp_dir": str(staging_dir),
+            "cleanup_temp_dir": True,
+            "options": {
+                "media_type": "pdf",
+                "api_name": "openai",
+                "perform_chunking": True,
+                "perform_analysis": True,
+                "summarize_recursively": True,
+                "generate_embeddings": False,
+            },
+        },
+    )
+    job_id = int(row["id"])
+    acquire = dict(domain="media_ingest", queue="default", lease_seconds=120)
+    job = jm.acquire_next_job(**acquire, worker_id="pdf-worker")
+    assert job and job["id"] == job_id
+    calls = []
+    progress = []
+
+    def observe(stage):
+        calls.append(stage)
+        row = jm.get_job(job_id)
+        progress.append((row["progress_percent"], row["progress_message"]))
+
+    def cancel():
+        assert jm.cancel_job(job_id, reason="user cancelled")
+
+    def expire_lease():
+        conn = jm._connect()
+        try:
+            with conn:
+                conn.execute("UPDATE jobs SET leased_until = DATETIME('now', '-1 second') WHERE id = ?", (job_id,))
+        finally:
+            conn.close()
+
+    def parse(_path):
+        observe("extract")
+        if stop_at == "extract":
+            cancel()
+        if stop_at == "expired_extract":
+            expire_lease()
+        return "Extracted content from the PDF."
+
+    def split(_content, _options):
+        observe("chunk")
+        return [{"text": f"Chunk {i}", "metadata": {}} for i in range(1, 4)]
+
+    def analyze(**kwargs):
+        observe(kwargs["input_data"])
+        if kwargs["input_data"] == "Chunk 1":
+            if stop_at == "analysis":
+                cancel()
+            if stop_at == "expired_analysis":
+                expire_lease()
+            if stop_at == "retry":
+                assert jm.release_job(job_id, worker_id="pdf-worker", lease_id=job["lease_id"], enforce=True)
+                retry = jm.acquire_next_job(**acquire, worker_id="replacement")
+                assert retry and retry["id"] == job_id
+                assert jm.update_job_progress(job_id, progress_percent=5, progress_message="replacement")
+        return "Summary"
+
+    async def claims(*_args):
+        if stop_at == "claims":
+            cancel()
+
+    def open_db_session(*, operation, **_kwargs):
+        if stop_at == "save":
+            cancel()
+        return operation(None)
+
+    def save(**_kwargs):
+        observe("save")
+        return 123, "media-uuid-123", "Media saved"
+
+    monkeypatch.setattr(pdf, "pymupdf4llm_parse_pdf", parse)
+    monkeypatch.setattr(chunking, "improved_chunking_process", split)
+    monkeypatch.setattr(pdf, "analyze", analyze)
+    monkeypatch.setattr(persistence, "extract_claims_if_requested", claims)
+    monkeypatch.setattr(persistence, "_with_media_db_session", open_db_session)
+    monkeypatch.setattr(persistence, "_resolve_media_writer", lambda _: SimpleNamespace(add_media_with_keywords=save))
+    monkeypatch.setattr(persistence, "_enforce_chunk_consistency_after_persist", AsyncMock())
+
+    result = await worker._handle_job(job, jm, worker._ProgressState())
+    updated = jm.get_job(job_id)
+
+    if stop_at:
+        assert result == {}
+        assert "save" not in calls
+        if stop_at in {"extract", "expired_extract"}:
+            assert calls == ["extract"]
+        if stop_at in {"analysis", "retry", "expired_analysis"}:
+            assert calls == ["extract", "chunk", "Chunk 1"]
+        if stop_at == "retry":
+            assert updated["progress_message"] == "replacement"
+            assert source.is_file()
+        elif stop_at.startswith("expired_"):
+            assert updated["status"] == "queued"
+            assert updated["progress_message"] == progress[-1][1]
+            assert source.is_file()
+        else:
+            assert updated["status"] == "cancelled"
+    else:
+        assert result["media_id"] == 123
+        assert [message for _, message in progress] == [
+            "Extracting PDF text",
+            "Chunking PDF text",
+            "Analyzing chunk 1 of 3",
+            "Analyzing chunk 2 of 3",
+            "Analyzing chunk 3 of 3",
+            "Combining PDF analysis",
+            "Saving media",
+        ]
+        percentages = [percent for percent, _ in progress]
+        assert percentages == sorted(percentages)
+        assert len(set(percentages)) == len(percentages)
+        assert updated["progress_percent"] == 100
