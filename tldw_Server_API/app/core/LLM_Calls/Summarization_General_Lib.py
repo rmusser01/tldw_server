@@ -57,6 +57,7 @@ from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime i
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
     ProviderCallCredentials,
 )
+from tldw_Server_API.app.core.Usage.llm_call_context import scoped_provider_credentials
 from tldw_Server_API.app.core.Utils.Utils import logging
 
 #
@@ -554,6 +555,9 @@ def _dispatch_to_api(
     try:
         api_name_lower = api_name.lower()
         logging.debug(f"Dispatching to API: {api_name_lower}")
+        if provider_credentials is None and not api_key and app_config is None and not credentials_resolved:
+            # A request or job that runs on the user's own key carries its handle (TASK-15426).
+            provider_credentials = scoped_provider_credentials(_adapter_provider_name(api_name_lower))
 
         adapter_result = _summarize_via_adapter(
             api_name=api_name_lower,
