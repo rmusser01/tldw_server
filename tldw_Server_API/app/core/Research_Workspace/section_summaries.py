@@ -454,7 +454,13 @@ async def process_section_summary(
                     + (
                         "Return valid JSON only."
                         if structured
-                        else "Use the existing evidence IDs in square brackets. Do not invent citations."
+                        else (
+                            "Use the existing evidence IDs in square brackets. Do not invent citations. "
+                            "Missing or empty author labels and reference-only ranges are not evidence of another contributor "
+                            "and are not grounds to deny the chapter byline. Describe source-supported substantive commentary "
+                            "in endnotes as chapter endnotes, without forcing an author assignment. "
+                            "Keep actual quoted or cited voices distinct."
+                        )
                     )
                     + (
                         " This is an intermediate compression step, not the final requested report. "

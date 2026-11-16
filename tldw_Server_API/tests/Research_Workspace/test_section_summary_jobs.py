@@ -1536,3 +1536,50 @@ async def test_extraction_failure_diagnostics_report_parsed_uuid_ids_and_actual_
     assert row["status"] == "failed" and analysis["sections"][0]["batches"][0]["status"] == "failed"
     assert "PRIVATE EXTRACTION" not in row["content"] and "PRIVATE EXTRACTION" not in repr(logs)
     assert provider.await_count == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("needs_reduction", [False, True])
+async def test_synthesis_does_not_turn_unassigned_endnotes_into_another_contributor(monkeypatch, needs_reduction):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "# Policy\n\n**Avery Example**\n\n**ENDNOTES**\n\n" + "Source. " * 6000
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": [
+            {"id": "dsi:1", "title": "Policy", "level": 1, "target_type": "char_range", "target_start": 0, "target_end": len(source)},
+        ],
+    }))
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "Main point. " * (1500 if needs_reduction else 1), "evidence": [
+                {"claim": "Source commentary", "author": "Avery Example", "source_span_ids": ["P1"]},
+            ]})
+        else:
+            allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            content = f"The chapter endnotes discuss source commentary [{allowed[0]}]."
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings)
+    await mod.process_section_summary(**options)
+    synthesis = [call for call in calls if "SOURCE:" not in call["messages_payload"][0]["content"]]
+    assert any("intermediate compression step" in call["system_message"] for call in synthesis) is needs_reduction
+    for call in synthesis:
+        system = call["system_message"]
+        assert "Missing or empty author labels and reference-only ranges" in system
+        assert "not evidence of another contributor" in system
+        assert "not grounds to deny the chapter byline" in system
+        assert "chapter endnotes" in system and "without forcing an author assignment" in system
+        assert "quoted or cited voices distinct" in system
+    extraction = [call for call in calls if "SOURCE:" in call["messages_payload"][0]["content"]]
+    assert extraction and all("Missing or empty author labels" not in call["system_message"] for call in extraction)
+    assert "Missing or empty author labels" not in mod.build_section_extraction_prompt("Policy", "Summarize", source)[0]
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert options["workspace_db"].row["status"] == "complete"
+    assert all(evidence["author"] == "" for section in analysis["sections"] for batch in section["batches"] for evidence in batch["evidence"])
