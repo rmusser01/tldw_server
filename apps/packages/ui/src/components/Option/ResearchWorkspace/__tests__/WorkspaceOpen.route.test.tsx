@@ -109,6 +109,7 @@ import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServe
 import { WorkspacesManagerPage } from "../../Workspaces/WorkspacesManagerPage";
 import { ResearchWorkspaceRouteGate } from "../ResearchWorkspaceRouteGate";
 import { readSavedResearchWorkspaceChatReference } from "@/store/workspace-migration";
+import { claimTextHash, type ClaimVerification } from "@/utils/claim-verification";
 
 const TARGET = "workspace-A";
 const PREVIOUS = "workspace-B";
@@ -759,7 +760,7 @@ it("does not treat an invalid Deep Research flag as an ordinary Open bypass", as
 });
 
 
-const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocalParent = false) => {
+const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocalParent = false, verification?: ClaimVerification) => {
   prepare(true);
   useWorkspaceStore.getState().switchWorkspace(TARGET);
   const { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } = await import("@/db/dexie/server-chat-mirror");
@@ -773,7 +774,8 @@ const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocal
   if (cited) Object.assign(serverMessages[1], { metadata_extra: { workspace_rag_sources_v1: {
     origin: "knowledge_qa", sources: [{ originalId: 42, mediaId: 42, title: "Rowan",
       excerpt: "Selene is the telescope.", type: "text", sourceType: "file" }],
-  } } });
+  }, ...(verification ? { claim_verification: verification } : {}) } });
+  if (verification) serverMessages[1].content = verification.findings[0].text;
   const messages = mapServerChatMessagesToPlaygroundMessages({ serverMessages, assistantName: "AI", characterId: null })
     .map((row, index) => ({ ...row, id: index ? "local-answer" : "local-user",
       name: index ? "Qwen" : "You", createdAt: index + 17, modelId: index ? "local-qwen" : undefined,
@@ -807,6 +809,34 @@ const prepareOwnedMirror = async (legacyParent = false, cited = false, nullLocal
         : reply(request));
   return { historyId, messages, save, serverMessages };
 };
+
+it.each(["matching", "missing", "changed"])("preserves saved citation checks through canonical reload with %s report metadata", async condition => {
+  const text = "The chapter proposes abolishing the agency [1, PDF p. 872; printed p. 839].";
+  const verification: ClaimVerification = { version: 1, text_sha256: claimTextHash(text), verdict: "unverified", provider: "openai", model: "saved-model",
+    coverage: { total: 1, evaluated: 0, supported: 0, uncovered: 1, complete: false },
+    findings: [{ id: "claim-1", text, start: 0, end: text.length, evidence_ids: ["1", "PDF p. 872; printed p. 839"], status: "not_checked", reason: "citation_not_resolved" }],
+    evidence: { "1": { text_sha256: "a".repeat(64), source_id: "source-A", media_id: 42, start_char: 10, end_char: 34 } },
+    limits: { max_units: 256, max_text_chars: 100000, max_evidence_chars: 16000, concurrency: 4, timeout_seconds: 120 }, context: { workspace_id: TARGET } };
+  const { serverMessages } = await prepareOwnedMirror(false, true, false, verification);
+  const session = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  const rows = structuredClone([...mirror.messages]);
+  if (condition !== "matching") {
+    const metadata = (serverMessages[1] as unknown as { metadata_extra: Record<string, unknown> }).metadata_extra;
+    if (condition === "missing") delete metadata.claim_verification;
+    else metadata.claim_verification = { ...verification, context: { changed: true } };
+  }
+  mirror.transactions = [];
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  if (condition === "matching") await screen.findByTestId("opened-sources");
+  else {
+    await screen.findByRole("alert");
+    expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+  }
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(session);
+  expect(session?.messages[1].metadataExtra?.claim_verification).toEqual(verification);
+  expect([...mirror.messages]).toEqual(rows);
+  expect(mirror.transactions.every(mode => mode === "r")).toBe(true);
+});
 
 it("opens the producer's acknowledged Workspace mirror after cold persistence without changing its session or rows", async () => {
   const { historyId } = await prepareOwnedMirror();

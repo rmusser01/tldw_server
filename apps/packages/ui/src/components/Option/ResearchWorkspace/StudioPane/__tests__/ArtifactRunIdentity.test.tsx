@@ -128,7 +128,7 @@ describe("saved output identity", () => {
 describe("long-document waiting guidance", () => {
   it("qualifies the measured example without presenting an ETA or cost estimate", () => {
     show(<LongDocumentWaitingGuidance />)
-    expect(screen.getByText(/922-page.*30-chapter.*52–62 minutes/)).toHaveTextContent("observed")
+    expect(screen.getByText(/922-page.*30-chapter.*52–62 minutes/)).toHaveTextContent("In observed 922-page, 30-chapter runs before citation checks were added, generation took 52–62 minutes.")
     expect(screen.getByText(/not an estimate for this run/)).toHaveTextContent("model")
     expect(screen.getByText(/Progress is saved after each portion/)).toBeInTheDocument()
     expect(screen.getByText(/Read completed chapters while the remaining sections/)).toBeInTheDocument()

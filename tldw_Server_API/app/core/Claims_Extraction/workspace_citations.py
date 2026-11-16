@@ -13,18 +13,32 @@ from tldw_Server_API.app.core.Research_Workspace.section_attribution import (
 
 
 def _attribution_context(snapshot: dict[str, Any], source: dict[str, Any], start: int, end: int) -> str:
-    """Carry only a uniquely enclosing verified section's literal attribution text."""
-    candidates = []
+    """Carry the uniquely most-specific verified enclosing section's literal context."""
     nodes = snapshot.get("nodes") or []
-    for node in nodes:
-        if node.get("parent_id"):
-            continue
-        span = resolve_navigation_span(node, nodes, snapshot.get("page_map"), len(snapshot["content"]), content=snapshot["content"])
-        if span and span[0] <= start < end <= span[1]:
-            candidates.append((node, span))
-    if len(candidates) != 1:
+    by_id = {node.get("id"): node for node in nodes}
+    if len(by_id) != len(nodes):
         return ""
-    node, (left, right) = candidates[0]
+    spans = {node["id"]: resolve_navigation_span(node, nodes, snapshot.get("page_map"),
+        len(snapshot["content"]), content=snapshot["content"]) for node in nodes}
+    candidates = [node for node in nodes if (span := spans[node["id"]]) and span[0] <= start < end <= span[1]]
+    selected = []
+    for node in candidates:
+        ancestors = {node["id"]}
+        current = node
+        while parent_id := current.get("parent_id"):
+            parent, parent_span = by_id.get(parent_id), spans.get(parent_id)
+            child_span = spans[current["id"]]
+            if (parent is None or parent_id in ancestors or not parent_span or not child_span
+                or not parent_span[0] <= child_span[0] < child_span[1] <= parent_span[1]):
+                return ""  # A broken or overlapping hierarchy supplies no attribution authority.
+            ancestors.add(parent_id)
+            current = parent
+        if all(candidate["id"] in ancestors for candidate in candidates):
+            selected.append(node)
+    if len(selected) != 1:
+        return ""
+    node = selected[0]
+    left, right = spans[node["id"]]
     section = {"source_id": source["id"], "media_id": source["media_id"], "node_id": node["id"],
         "title": node.get("title", ""), "navigation_version": snapshot["navigation_version"],
         "start_char": left, "end_char": right}

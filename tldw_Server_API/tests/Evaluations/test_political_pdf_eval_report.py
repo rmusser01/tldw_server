@@ -511,3 +511,22 @@ def test_offline_strict_receipt_binds_the_requested_verifier_identity(run_dir, f
     metrics = _report(run_dir)["operations"][0]["attempts"][0]["metrics"]["strict_verification"]
     assert metrics["integrity_valid"] is False
     assert metrics["all_claims_supported"] is False
+
+
+@pytest.mark.parametrize("annotation,accepted", [
+    ("1, PDF p. 872; printed p. 839", True),
+    ("1, unrelated-source-id", False),
+    ("1, PDF p. unknown; printed p. 839", False),
+    ("1, PDF p. 0; printed p. 839", False),
+])
+def test_page_annotated_citation_keeps_location_separate_from_evidence_identity(annotation, accepted):
+    import hashlib
+
+    from Helper_Scripts.Evals.political_pdf_eval_report import verification_metrics
+    text = f"A source proposal [{annotation}]"
+    report = _strict_report(text)
+    report["findings"][0]["evidence_ids"] = ["1"]
+    report["evidence"] = {"1": {"text_sha256": hashlib.sha256(b"Exact source.").hexdigest()}}
+    checks = verification_metrics(report, text, {"1": "Exact source."})
+    assert checks["integrity_valid"] is accepted
+    assert checks["all_claims_supported"] is accepted

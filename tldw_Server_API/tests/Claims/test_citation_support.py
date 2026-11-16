@@ -167,12 +167,99 @@ async def test_concurrency_and_caps_keep_unchecked_units_visible(monkeypatch):
         active -= 1
         return response()
 
-    report = await verify_cited_text("\n\n".join(f"Claim {i}. [P1]" for i in range(7)),
+    text = "\n\n".join(f"Claim {i}. [P1]" for i in range(7))
+    report = await verify_cited_text(text,
         {"P1": {"text": "All claims"}}, provider="openai", model="capacity-test", analyze_fn=analyze)
     assert peak == 4
-    assert [row["status"] for row in report["findings"]] == ["supported"] * 5 + ["not_checked"] * 2
-    assert report["coverage"] == {"total": 7, "evaluated": 5, "supported": 5, "uncovered": 2, "complete": False}
+    assert [row["status"] for row in report["findings"]] == ["supported"] * 5 + ["not_checked"]
+    assert report["coverage"] == {"total": 6, "evaluated": 5, "supported": 5, "uncovered": 1, "complete": False}
+    tail = report["findings"][-1]
+    assert tail["text"] == text[report["findings"][-2]["end"]:] and tail["evidence_ids"] == []
     assert report["verdict"] == "unverified"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["x\n\n" * 20_000, " 𐐀 \n\n" * 20_000, "x\n\n" * 33_333 + "x"])
+async def test_allowed_large_text_has_bounded_tasks_and_a_persistable_exact_overflow_tail(text, monkeypatch):
+    from tldw_Server_API.app.core.Claims_Extraction import citation_support
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import validate_claim_verification
+
+    created = []
+    create_task = asyncio.create_task
+
+    def capture_task(coroutine):
+        task = create_task(coroutine)
+        created.append(task)
+        return task
+
+    monkeypatch.setattr(citation_support.asyncio, "create_task", capture_task)
+    report = await verify_cited_text(text, {}, provider="openai", model="bounded-test")
+    assert len(created) <= 257 and len(report["findings"]) <= 257
+    assert validate_claim_verification(report) is report
+    assert report["verdict"] != "supported" and report["coverage"]["complete"] is False
+    tail = report["findings"][-1]
+    assert tail["status"] == "not_checked" and tail["reason"] == "text_or_unit_limit"
+    assert tail["evidence_ids"] == [] and tail["end"] == len(text)
+    assert tail["text"] == text[tail["start"]:] and tail["start"] == report["findings"][-2]["end"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("maximum", [0, 1])
+async def test_zero_or_one_unit_limit_preserves_all_remaining_text_without_more_judging(maximum, monkeypatch):
+    from tldw_Server_API.app.core.Claims_Extraction import citation_support
+
+    monkeypatch.setitem(citation_support.LIMITS, "max_units", maximum)
+    seen = []
+
+    async def analyze(*args, **kwargs):
+        seen.append(args[1])
+        return response()
+
+    text = " \nFirst [P1].\n\nSecond [P1].\n\nThird [P1]. \n"
+    report = await verify_cited_text(text, {"P1": {"text": "Exact source"}},
+        provider="openai", model="zero-one-test", analyze_fn=analyze)
+    assert len(seen) == maximum and len(report["findings"]) == maximum + 1
+    tail = report["findings"][-1]
+    start = report["findings"][0]["end"] if maximum else 0
+    assert tail == {"id": f"claim-{maximum + 1}", "text": text[start:], "start": start,
+                    "end": len(text), "evidence_ids": [], "status": "not_checked", "reason": "text_or_unit_limit"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("overflow", ["rationales", "provenance", "context"])
+async def test_report_byte_overflow_replaces_judgments_with_one_exact_unchecked_text(overflow):
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import validate_claim_verification
+    from tldw_Server_API.app.core.Media.page_provenance import page_spans_for_range, validate_page_map
+
+    text = "\n\n".join(f"Policy {i} [P1]" for i in range(256)) if overflow == "rationales" else "Policy [P1]"
+    evidence = {"P1": {"text": "Policy"}}
+    context = {"workspace_id": "owned-workspace"}
+    if overflow == "provenance":
+        page_map = validate_page_map([{"page_number": 1, "start_char": 0, "end_char": 6,
+                                       "printed_page_label": "𐐀" * 500_000}], 6)
+        evidence["P1"]["page_spans"] = page_spans_for_range(page_map, 0, 6)
+    if overflow == "context":
+        context["padding"] = "𐐀" * 500_000
+
+    async def analyze(*args, **kwargs):
+        rationale = "𐐀" * 2048 if overflow == "rationales" else "Exact support."
+        return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({
+            "label": "supported", "confidence": 0.95, "rationale": rationale}, ensure_ascii=False)}}]}
+
+    report = await verify_cited_text(text, evidence, provider="openai", model="size-test", analyze_fn=analyze, context=context)
+    assert report["findings"] == [{"id": "claim-1", "text": text, "start": 0, "end": len(text),
+        "evidence_ids": [], "status": "not_checked", "reason": "report_size_limit"}]
+    assert report["coverage"] == {"total": 1, "evaluated": 0, "supported": 0, "uncovered": 1, "complete": False}
+    assert report["verdict"] == "unverified" and report["evidence"] == {}
+    assert report["text_sha256"] == hashlib.sha256(text.encode()).hexdigest()
+    assert report["context"] == ({"unavailable_reason": "report_size_limit"} if overflow == "context" else context)
+    assert validate_claim_verification(report) is report
+
+
+@pytest.mark.asyncio
+async def test_core_text_too_large_for_lossless_receipt_raises_instead_of_truncating():
+    with pytest.raises(ValueError, match="report_size_limit"):
+        await verify_cited_text("𐐀" * 500_001, {}, provider="openai", model="size-test")
 
 
 @pytest.mark.asyncio
@@ -235,10 +322,12 @@ def test_splitter_preserves_every_nonwhitespace_character_and_offsets():
 
     from tldw_Server_API.app.core.Claims_Extraction.citation_support import _units
 
-    @given(st.lists(st.text(alphabet="abc XYZé🌙", min_size=1, max_size=30).filter(lambda value: value.strip()), min_size=1, max_size=8))
-    def check(parts):
+    @given(st.lists(st.text(alphabet="abc XYZé🌙", min_size=1, max_size=30).filter(lambda value: value.strip()), min_size=1, max_size=8),
+           st.one_of(st.none(), st.integers(min_value=0, max_value=8)))
+    def check(parts, maximum):
         text = "\n\n".join(part + " [P1]" for part in parts)
-        units = _units(text)
+        units = _units(text, maximum)
+        assert maximum is None or len(units) <= maximum + 1
         covered = set()
         for unit in units:
             assert unit["text"] == text[unit["start"]:unit["end"]]
@@ -283,3 +372,70 @@ async def test_late_sync_adapter_awaitable_is_closed_after_total_deadline(monkey
         release.set()
         for pending in returned:
             pending.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("separator", [", ", ",", "; ", ";\n", ",\n", "\n, "])
+async def test_punctuated_adjacent_citations_verify_jointly_without_citation_only_units(separator):
+    seen = []
+
+    async def analyze(*args, **kwargs):
+        seen.append((args[1], args[2]))
+        return response()
+
+    text = f"The combined proposition ([P1]{separator}[P2])."
+    report = await verify_cited_text(text, {"P1": {"text": "First supporting fact."}, "P2": {"text": "Second supporting fact."}},
+        provider="openai", model="punctuation-test", analyze_fn=analyze)
+    assert report["coverage"] == {"total": 1, "evaluated": 1, "supported": 1, "uncovered": 0, "complete": True}
+    assert report["findings"][0]["evidence_ids"] == ["P1", "P2"]
+    assert len(seen) == 1 and "First supporting fact." in seen[0][1] and "Second supporting fact." in seen[0][1]
+    assert seen[0][0] == text[:-2]
+
+
+@pytest.mark.parametrize("separator", [". ", ": ", "–", "-", ",, ", "\n\n", "\n- ", " and ", ", another claim "])
+def test_adjacent_citation_group_does_not_cross_claim_or_range_boundaries(separator):
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import _units
+
+    units = _units(f"First claim [P1]{separator}[P2]")
+    assert units[0]["evidence_ids"] == ["P1"]
+    assert len(units) == 2 and units[1]["evidence_ids"] == ["P2"]
+
+
+@pytest.mark.asyncio
+async def test_punctuated_citations_alone_still_do_not_form_a_claim():
+    report = await verify_cited_text("([P1], [P2])", {"P1": {"text": "First."}, "P2": {"text": "Second."}},
+        provider="openai", model="punctuation-test")
+    assert report["findings"] == [{"id": "claim-1", "text": "([P1], [P2]", "start": 0, "end": 11,
+        "evidence_ids": ["P1", "P2"], "status": "not_checked", "reason": "citation_without_claim"}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("citation", [
+    "[1, PDF p. 872; printed p. 839]", "[Source 1, PDF p. 872]",
+    "[1, PDF pp. 871–872; printed pp. 838-839]", "[1, PDF pp. 871 - 872]",
+])
+async def test_numeric_pdf_location_annotation_is_not_an_extra_evidence_id(citation):
+    seen = []
+
+    async def analyze(*args, **kwargs):
+        seen.append(args[1])
+        return response()
+
+    text = "The source supports this proposal " + citation
+    report = await verify_cited_text(text, {"1": {"text": "Exact supporting source"}},
+        provider="openai", model="page-label-test", analyze_fn=analyze)
+    assert report["verdict"] == "supported" and report["findings"][0]["evidence_ids"] == ["1"]
+    assert seen == [text] and report["findings"][0]["text"] == text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("citation", [
+    "[1, PDF p. unknown]", "[1, PDF p. 0]", "[1, PDF p. 872; another source]",
+    "[1, PDF p. 872, P2]", "[P1, PDF p. 872]", "[1, arbitrary locator]",
+])
+async def test_unknown_annotation_or_identifier_never_silently_authorizes_support(citation):
+    report = await verify_cited_text("Claim " + citation, {"1": {"text": "Source"}, "P1": {"text": "Source"}},
+        provider="openai", model="invalid-label-test")
+    assert report["findings"][0]["status"] == "not_checked"
+    assert report["findings"][0]["reason"] == "citation_not_resolved"
+    assert len(report["findings"][0]["evidence_ids"]) > 1

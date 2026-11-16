@@ -34,7 +34,7 @@ export function ArtifactRunIdentity({ artifact }: { artifact: GeneratedArtifact 
 export function LongDocumentWaitingGuidance() {
   const { t } = useTranslation("playground")
   return <div className="space-y-1 text-xs text-text-muted">
-    <p>{t("studio.longDocumentWaiting.example", "In observed 922-page, 30-chapter runs, generation took 52–62 minutes.")}</p>
+    <p>{t("studio.longDocumentWaiting.example", "In observed 922-page, 30-chapter runs before citation checks were added, generation took 52–62 minutes.")}</p>
     <p>{t("studio.longDocumentWaiting.variation", "This is not an estimate for this run. Duration varies with document length, selected sections, model and settings. Progress is saved after each portion.")}</p>
     <p>{t("studio.longDocumentWaiting.readCompleted", "Read completed chapters while the remaining sections are being generated.")}</p>
     <p>{t("studio.longDocumentWaiting.usage", "Token usage and cost are unavailable for these saved jobs.")}</p>

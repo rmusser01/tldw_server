@@ -1,6 +1,7 @@
 """Workspace message creation must retain bounded citations atomically."""
 
 from copy import deepcopy
+from hashlib import sha256
 from types import SimpleNamespace
 
 import pytest
@@ -58,6 +59,60 @@ def citation_payload():
             }
         },
     }
+
+
+def unchecked_report():
+    return {
+        "version": 1, "text_sha256": "a" * 64, "verdict": "unverified",
+        "provider": None, "model": None,
+        "coverage": {"total": 0, "evaluated": 0, "supported": 0, "uncovered": 0, "complete": False},
+        "findings": [], "evidence": {}, "limits": {},
+        "context": {"unavailable_reason": "Citation checker unavailable."},
+    }
+
+
+@pytest.mark.parametrize("with_sources", [False, True])
+@pytest.mark.parametrize("supported", [False, True])
+def test_workspace_claim_check_survives_real_create_and_reload(message_api, with_sources, supported):
+    client, db, chat, scope = message_api
+    payload = citation_payload()
+    payload["id"] = "strict-claims-saved-answer"
+    if not with_sources:
+        payload["metadata_extra"] = {}
+    payload["metadata_extra"]["claim_verification"] = unchecked_report()
+    if supported:
+        text = payload["content"]
+        payload["metadata_extra"]["claim_verification"].update(
+            text_sha256=sha256(text.encode()).hexdigest(), verdict="supported", provider="openai", model="test-model",
+            coverage={"total": 1, "evaluated": 1, "supported": 1, "uncovered": 0, "complete": True},
+            findings=[{"id": "claim-1", "text": text, "start": 0, "end": len(text), "evidence_ids": ["1"],
+                       "status": "supported", "reason": "The passage names Selene."}],
+            evidence={"1": {"text_sha256": sha256(b"The telescope is named Selene.").hexdigest(), "media_id": 1}},
+            context={},
+        )
+    response = client.post(f"/api/v1/chats/{chat}/messages", params=scope, json=payload)
+    assert response.status_code == 201
+    saved = client.get(f"/api/v1/chats/{chat}/messages", params={**scope, "include_metadata": True})
+    assert saved.json()["messages"][0]["metadata_extra"] == payload["metadata_extra"]
+    assert db.count_messages_for_conversation(chat) == 1
+
+
+@pytest.mark.parametrize("mutation", ["missing_report", "false_import_marker", "invalid_report", "role"])
+def test_invalid_claim_metadata_is_refused_without_writing(message_api, mutation):
+    client, db, chat, scope = message_api
+    payload = {"role": "assistant", "content": "Saved answer.",
+               "metadata_extra": {"claim_verification": unchecked_report(), "claim_verification_imported": True}}
+    if mutation == "missing_report":
+        del payload["metadata_extra"]["claim_verification"]
+    elif mutation == "false_import_marker":
+        payload["metadata_extra"]["claim_verification_imported"] = False
+    elif mutation == "invalid_report":
+        payload["metadata_extra"]["claim_verification"]["verdict"] = "supported"
+    else:
+        payload["role"] = "user"
+    response = client.post(f"/api/v1/chats/{chat}/messages", params=scope, json=payload)
+    assert response.status_code == 422
+    assert db.count_messages_for_conversation(chat) == 0
 
 
 @pytest.mark.parametrize("with_page_spans", [False, True])
@@ -158,8 +213,9 @@ def test_rejects_invalid_citations_without_writing(message_api, mutation):
     assert db.count_messages_for_conversation(chat) == 0  # nosec B101 -- pytest behavior assertion.
 
 
+@pytest.mark.parametrize("claim_only", [False, True])
 @pytest.mark.parametrize("refusal", ["global", "foreign_workspace", "foreign_user", "sync"])
-def test_citations_do_not_bypass_scope_or_sync(message_api, monkeypatch, refusal):
+def test_citations_do_not_bypass_scope_or_sync(message_api, monkeypatch, refusal, claim_only):
     client, db, chat, scope = message_api
     if refusal == "global":
         chat = db.add_conversation({"title": "Global"})
@@ -170,7 +226,10 @@ def test_citations_do_not_bypass_scope_or_sync(message_api, monkeypatch, refusal
         client.app.dependency_overrides[character_messages.get_request_user] = lambda: SimpleNamespace(id=2)
     else:
         monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: object())
-    response = client.post(f"/api/v1/chats/{chat}/messages", params=scope, json=citation_payload())
+    payload = citation_payload()
+    if claim_only:
+        payload["metadata_extra"] = {"claim_verification": unchecked_report()}
+    response = client.post(f"/api/v1/chats/{chat}/messages", params=scope, json=payload)
     assert response.status_code == {"global": 400, "foreign_workspace": 404, "foreign_user": 403, "sync": 400}[refusal]  # nosec B101 -- pytest behavior assertion.
     assert db.count_messages_for_conversation(chat) == 0  # nosec B101 -- pytest behavior assertion.
 
@@ -190,7 +249,8 @@ def history_snapshot(db, chat):
     return db.get_conversation_history_snapshot(chat, owner_client_id="1", owner_key=owner)
 
 
-def test_versioned_citations_replay_and_changed_intent_conflict(message_api):
+@pytest.mark.parametrize("changed_field", ["citation", "claim_verification"])
+def test_versioned_citations_replay_and_changed_intent_conflict(message_api, changed_field):
     client, db, chat, scope = message_api
     snapshot = snapshot_to_wire(history_snapshot(db, chat))
     selection = resolve_history_selection(
@@ -232,13 +292,17 @@ def test_versioned_citations_replay_and_changed_intent_conflict(message_api):
             )
         },
     }
+    payload["metadata_extra"]["claim_verification"] = unchecked_report()
     for _ in range(2):
         saved = client.post(f"/api/v1/chats/{chat}/messages", params=scope, json=payload)
         assert saved.status_code == 201  # nosec B101 -- pytest behavior assertion.
     assert db.count_messages_for_conversation(chat) == 2  # nosec B101 -- pytest behavior assertion.
     assert db.get_message_metadata("workspace-answer")["extra"] == payload["metadata_extra"]  # nosec B101 -- pytest behavior assertion.
     changed = deepcopy(payload)
-    changed["metadata_extra"]["workspace_rag_sources_v1"]["sources"][0]["excerpt"] = "Changed citation."
+    if changed_field == "citation":
+        changed["metadata_extra"]["workspace_rag_sources_v1"]["sources"][0]["excerpt"] = "Changed citation."
+    else:
+        changed["metadata_extra"]["claim_verification"]["context"]["unavailable_reason"] = "Changed report."
     conflict = client.post(f"/api/v1/chats/{chat}/messages", params=scope, json=changed)
     assert conflict.status_code == 409  # nosec B101 -- pytest behavior assertion.
     assert db.get_message_metadata("workspace-answer")["extra"] == payload["metadata_extra"]  # nosec B101 -- pytest behavior assertion.

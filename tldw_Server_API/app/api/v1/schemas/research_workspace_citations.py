@@ -1,8 +1,16 @@
 """Bounded public contracts for strict, citation-bound source support checks."""
 
-from typing import Any, Literal
-
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import (
+    CitationSupportCoverage as CitationSupportCoverage,
+)
+from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import (
+    CitationSupportFinding as CitationSupportFinding,
+)
+from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import (
+    CitationSupportReport as CitationSupportReport,
+)
 
 
 class WorkspaceCitationLocator(BaseModel):
@@ -39,34 +47,3 @@ class ResearchWorkspaceCitationVerifyRequest(BaseModel):
         if sum(len(item.quote) for item in self.evidence) > 100_000:
             raise ValueError("Total citation locator text exceeds 100000 characters")
         return self
-
-
-class CitationSupportFinding(BaseModel):
-    id: str
-    text: str
-    start: int
-    end: int
-    evidence_ids: list[str]
-    status: Literal["supported", "unsupported", "contradicted", "uncited", "not_checked", "error"]
-    reason: str
-
-
-class CitationSupportCoverage(BaseModel):
-    total: int
-    evaluated: int
-    supported: int
-    uncovered: int
-    complete: bool
-
-
-class CitationSupportReport(BaseModel):
-    version: Literal[1]
-    text_sha256: str
-    verdict: Literal["supported", "needs_revision", "unverified"]
-    provider: str
-    model: str
-    coverage: CitationSupportCoverage
-    findings: list[CitationSupportFinding]
-    evidence: dict[str, dict[str, Any]]
-    limits: dict[str, int | float]
-    context: dict[str, Any]

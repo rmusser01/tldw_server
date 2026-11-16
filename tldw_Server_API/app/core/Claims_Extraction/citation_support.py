@@ -9,18 +9,20 @@ import json
 import math
 import re
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
 
 from .analyze_types import ClaimsAnalyzeCallable
+from .citation_support_types import MAX_CLAIM_VERIFICATION_BYTES
+from .citation_syntax import CITATION_RUN, extract_citation_ids
 from .claims_engine import Claim, HybridClaimVerifier
 
 LIMITS = {"max_units": 256, "max_text_chars": 100_000, "max_evidence_chars": 16_000,
           "concurrency": 4, "timeout_seconds": 120, "total_timeout_seconds": 120}
 _PARAGRAPH = re.compile(r"\S[\s\S]*?(?=\n[ \t]*\n|\n[ \t]*(?:[-*+] |\d+[.)] )|\Z)")
-_CITATIONS = re.compile(r"\[[^\]\n]+\](?:[ \t]*(?:\r?\n[ \t]*)?\[[^\]\n]+\])*")
+_CITATIONS = CITATION_RUN
 _ID = re.compile(r"(?:E\d+(?:\.\d+)+|P\d+|\d+)\Z")
 _PROVENANCE = ("source_id", "media_id", "start_char", "end_char", "navigation_version", "page_spans")
 
@@ -39,24 +41,31 @@ def _unit(text: str, start: int, end: int, ids: list[str]) -> dict[str, Any] | N
     return {"text": text[start:end], "start": start, "end": end, "evidence_ids": ids}
 
 
-def _units(text: str) -> list[dict[str, Any]]:
+def _iter_units(text: str) -> Iterator[dict[str, Any]]:
     """Keep paragraph/bullet boundaries and literal IDs; never infer range interiors."""
-    units = []
     for paragraph in _PARAGRAPH.finditer(text):
         cursor = paragraph.start()
         for match in _CITATIONS.finditer(text, paragraph.start(), paragraph.end()):
-            ids = []
-            for group in re.findall(r"\[([^\]]+)\]", match[0]):
-                ids.extend(token.strip().removeprefix("Source ") for token in group.split(","))
-            item = _unit(text, cursor, match.end(), list(dict.fromkeys(ids)))
+            item = _unit(text, cursor, match.end(), extract_citation_ids(match[0]))
             if item:
-                units.append(item)
+                yield item
             cursor = match.end()
         tail = _unit(text, cursor, paragraph.end(), [])
         if tail:
-            units.append(tail)
-    for index, item in enumerate(units, 1):
+            yield tail
+
+
+def _units(text: str, max_units: int | None = None) -> list[dict[str, Any]]:
+    """Bound parsed units while retaining the entire overflow tail as unchecked."""
+    units = []
+    for index, item in enumerate(_iter_units(text), 1):
+        if max_units is not None and index > max_units:
+            start = units[-1]["end"] if units else 0
+            units.append({"id": f"claim-{index}", "text": text[start:], "start": start,
+                          "end": len(text), "evidence_ids": []})
+            break
         item["id"] = f"claim-{index}"
+        units.append(item)
     return units
 
 
@@ -201,6 +210,26 @@ def _receipt_evidence(evidence: Mapping[str, Any], findings: list[dict[str, Any]
     return receipts
 
 
+def _bounded_report(report: dict[str, Any], text: str) -> dict[str, Any]:
+    """Never return apparent support whose complete provenance cannot be retained."""
+    def fits(value: dict[str, Any]) -> bool:
+        return len(json.dumps(value, ensure_ascii=False, allow_nan=False,
+                              separators=(",", ":")).encode("utf-8")) <= MAX_CLAIM_VERIFICATION_BYTES
+
+    if fits(report):
+        return report
+    fallback = {**report, "verdict": "unverified", "evidence": {},
+        "coverage": {"total": 1, "evaluated": 0, "supported": 0, "uncovered": 1, "complete": False},
+        "findings": [{"id": "claim-1", "text": text, "start": 0, "end": len(text),
+                      "evidence_ids": [], "status": "not_checked", "reason": "report_size_limit"}]}
+    if fits(fallback):
+        return fallback
+    fallback["context"] = {"unavailable_reason": "report_size_limit"}
+    if fits(fallback):
+        return fallback
+    raise ValueError("verification_report_size_limit")
+
+
 async def verify_cited_text(
     text: str, evidence_by_id: Mapping[str, Any], *, provider: str, model: str,
     analyze_fn: ClaimsAnalyzeCallable | None = None, context: Mapping[str, Any] | None = None,
@@ -208,7 +237,7 @@ async def verify_cited_text(
     """Return portable findings without rewriting the draft or searching uncited sources."""
     if not isinstance(text, str):
         raise ValueError("verification_text_required")
-    units = _units(text) if len(text) <= LIMITS["max_text_chars"] else [
+    units = _units(text, LIMITS["max_units"]) if len(text) <= LIMITS["max_text_chars"] else [
         {"id": "claim-1", "text": text, "start": 0, "end": len(text), "evidence_ids": [], "limit": True}]
     semaphore = asyncio.Semaphore(LIMITS["concurrency"])
 
@@ -246,8 +275,9 @@ async def verify_cited_text(
     verdict = "supported" if complete and supported == len(findings) else "unverified"
     if any(row["status"] in {"unsupported", "contradicted", "uncited"} for row in findings):
         verdict = "needs_revision"
-    return {"version": 1, "text_sha256": _sha(text), "verdict": verdict, "provider": provider, "model": model,
+    report = {"version": 1, "text_sha256": _sha(text), "verdict": verdict, "provider": provider, "model": model,
         "coverage": {"total": len(findings), "evaluated": evaluated, "supported": supported,
             "uncovered": len(findings) - evaluated, "complete": complete},
         "findings": findings, "evidence": _receipt_evidence(evidence_by_id, findings),
         "limits": dict(LIMITS), "context": dict(context or {})}
+    return _bounded_report(report, text)

@@ -1,0 +1,45 @@
+# Political PDF strict Claims retest
+
+PR [#3480](https://github.com/rmusser01/tldw_server/pull/3480), against `dev`; TASK-15505.16–18. [Design](../Design/POLITICAL_PDF_STRICT_CLAIMS_2026_11_16.md); proposed [ADR-096](../ADR/096-research-citation-bound-claims-verification.md). Existing Jobs, provider accounting, owned-source and evaluation contracts remain governing.
+
+**Qualification is in progress.** The first implementation is committed at `3703cca154`. Its immutable Luna controls and QA matrix have finished. Fresh all-chapter Job 48 stopped with partial output after provider failures; final browser/export/restore qualification and hosted CI are still pending. Later repair evidence must be identified separately from these first responses.
+
+## Source and interpretation
+
+The same 922-page PDF is reused, SHA-256 `7f2e97507370bbadb109034ecda0085c5a2e5f3837cfb843da272c3a41523c4c`, canonical Media 1, navigation `media_1:v4:ec5d2af126`. This run rechecks the existing source identity; it does not represent a fresh ingestion. Generation and verification both request OpenAI `gpt-6-luna`.
+
+Claims now checks extracted claims, chapter prose, overview prose and finalized workspace answers against their actual cited passages. Saved reports distinguish support, contradiction, missing support, uncited text and unavailable checks. They remain separate from a person's review decision. A statement can be true elsewhere in the PDF yet unsupported by its displayed citation. Neither a completed Job nor the automated support count establishes factual accuracy or VIP acceptance.
+
+Human labels remain null. Source-audited regression expectations and the reviews below are agent judgments, not a calibrated benchmark.
+
+## First retained live evidence
+
+- Eight fixed controls all produced the expected outcomes: two faithful claims supported; four attribution/wording/condition errors contradicted; an unrelated citation unsupported; an uncited claim left for review. Exact source offsets and evidence hashes were independently checked.
+- All 26 QA generations and 26 verifier responses were retained. Report integrity and canonical quote bindings passed throughout, with no unknown POST outcome, provider failure or verification deadline failure. Automated counts were 112 text units: 73 supported, 34 unsupported, four uncited and one citation-only unit. Five whole answers were supported and 21 needed review. These counts include integration limitations described below and are not an accuracy rate.
+- All 39 retrieval operations preserved source scope without pipeline errors. The R02 hybrid query missed expected physical page 909; its answer is a context-limited case. Expected-page retrieval alone does not establish coverage of every relevant fact.
+- Job 48 selected 30 chapters and 117 portions, but stopped after two consecutive generation provider failures. Seven chapters completed (1–4 and 6–8), DHS remained failed and later chapters unread; no overview was generated. Six Media chapter verification units also reported provider failure. The terminal Jobs status is completed while its result explicitly says partial and its artifact is failed; this is not a completed document analysis. Provider diagnosis and a controlled checkpoint retry remain pending.
+- The first DHS failure is a valid 245-character response explaining that its final portion contains endnotes, with an empty evidence list. The current nonempty-evidence extraction contract rejects it. Its original response and SHA are retained; this is not evidence of malformed JSON or a transport failure.
+
+Bounded chapter source review confirms useful catches, including a reversed DOJ/HHS assignment, an incorrect expansion of PADs, and policy paragraphs citing too little of the evidence available in their chapter. The Defense NGI extraction correctly retains buying at least 64 compared with the cited plan for 20. Review also identifies potentially overly strict judgments, including rejection of a proposal paraphrase and an author-note statement whose source context is present. These findings require interpretation; no automatic correction or human acceptance is inferred.
+
+Original receipts are under `.artifacts/political-pdf-evals/luna-strict-{regressions,qa,summary}-20261116`. Each run retains its own manifest, operation ledger and request/response files. A subsequent verifier-only replay must retain the same answer text and evidence, bind its parent hashes and record its new verifier/evaluator revision. It must not regenerate answers or silently retry an unknown paid outcome.
+
+## NN/g follow-through
+
+These findings extend the [existing UX ledger](POLITICAL_PDF_NNG_COMPLETION_2026_11_16.md), using [NN/g's usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/). Repair implementation and local regression evidence are recorded here; final live confirmation remains pending.
+
+| Finding | Heuristic / severity | Repair and qualification |
+|---|---|---|
+| UX-PDF-73: normal citation syntax becomes unresolved evidence | H2 match; H5 error prevention / 2 | Comma/semicolon-separated adjacent citations stay one evidence group. The exact numeric PDF-location form resolves its numeric ID; arbitrary suffixes and ranges of evidence IDs remain unresolved. Python verification/evaluation and frontend receipt reading share tested grammar behavior. First failed receipts are preserved. |
+| UX-PDF-74: QA loses chapter/contributor context | H2 match; H5 error prevention / 3 | The resolver selects the unique most-specific verified enclosing node with valid ancestry, retaining ambiguity refusals. Exact EXIM source replay separates de Rugy and Hazelton contexts instead of supplying the oversized parent section. |
+| UX-PDF-75: a saved Claims report disappears and prevents reopening | H1 status; H3 control; H5 prevention / 3 | Message creation had stripped the report while canonical import rejected it. Both now retain the bounded historical report and import marker through the existing metadata contract. Scope/role/sync restrictions and local-work protection remain. Real API create/import and real store/IDB reload tests cover retention, altered-report conflicts and refusal of malformed metadata. |
+| UX-PDF-76: fragmented answers can create an unsavable report | H1 status; H9 recovery / 2 | At most 256 checked units plus one exact unchecked tail are emitted. A report exceeding the shared byte cap retains the complete draft as an explicitly unverified fallback. A limit notice is visible without opening the findings list; complete text remains in portable exports. |
+| UX-PDF-77: the historical timing example excludes new verification work | H1 status / 2 | The 52–62-minute historical observation is explicitly identified as preceding citation-support checks. It remains an observation, not an ETA for this run. |
+
+UX-PDF-66 remains a semantic-quality finding: strict checks now expose errors and insufficient citations, but do not make every generated statement correct. Human calibration and VIP acceptance remain pending.
+
+## Local qualification and delivery limits
+
+Counts overlap and must not be added together. The initial release passed 274 independently run backend/evaluation/ratchet cases and 76 frontend contract/export cases, alongside the focused implementation suites. The follow-up parser/context release passed 266 connected cases; the final producer/report-contract release passed 274. The offline evaluator alignment passed 116. The persistence run passed 292 cases with 198 existing fixture skips; its one new assertion was corrected to account for already retained generation metadata, and the corrected import test passed with one PostgreSQL availability skip. Final focused message/metadata checks passed 16 with eight PostgreSQL availability skips. The repository fixture reports PostgreSQL unavailable; no alternate database setup or disabled test is used.
+
+Frontend route, receipt and portable-report checks, final hooks, current-head hosted CI and the live export/restore results will be recorded after the remaining qualification. Touched production scope has passed Ruff/Bandit checks and independent review; final integration must retain those checks. No merge or deployment is authorized or performed by this retest. The requester's existing PR Change summary is preserved.

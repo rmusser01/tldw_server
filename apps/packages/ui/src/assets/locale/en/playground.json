@@ -1174,7 +1174,7 @@
       "sections_other": "{{count}} selected sections"
     },
     "longDocumentWaiting": {
-      "example": "In observed 922-page, 30-chapter runs, generation took 52–62 minutes.",
+      "example": "In observed 922-page, 30-chapter runs before citation checks were added, generation took 52–62 minutes.",
       "variation": "This is not an estimate for this run. Duration varies with document length, selected sections, model and settings. Progress is saved after each portion.",
       "readCompleted": "Read completed chapters while the remaining sections are being generated.",
       "usage": "Token usage and cost are unavailable for these saved jobs."
@@ -1891,7 +1891,8 @@
       "judge_provider_failed": "The citation checking provider could not complete the request.",
       "judge_response_invalid": "The checker returned an unusable response; this claim is not verified.",
       "judge_completion_unconfirmed": "The checker's response was incomplete; this claim is not verified.",
-      "semantic_judgment_unavailable": "No usable citation-support judgment was returned."
+      "semantic_judgment_unavailable": "No usable citation-support judgment was returned.",
+      "report_size_limit": "The citation report exceeded its size limit. The draft is retained, but its citation support has not been verified."
     }
   }
 }

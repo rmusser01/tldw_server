@@ -122,8 +122,9 @@ class ChatImportMessage(BaseModel):
     metadata_extra: dict[str, Any] | None = Field(
         None,
         description=(
-            "For a workspace assistant message only: workspace_rag_sources_v1 recorded references. "
-            "Unknown fields are refused. References confer no Media access."
+            "For a workspace assistant message only: workspace_rag_sources_v1 references, "
+            "claim_verification reports and the optional claim_verification_imported historical marker. "
+            "Unknown fields are refused. Recorded assessments confer no Media access or current verification."
         ),
     )
 

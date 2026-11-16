@@ -4951,7 +4951,7 @@
     "message": "{{count}} selected sections"
   },
   "studio_longDocumentWaiting_example": {
-    "message": "In observed 922-page, 30-chapter runs, generation took 52–62 minutes."
+    "message": "In observed 922-page, 30-chapter runs before citation checks were added, generation took 52–62 minutes."
   },
   "studio_longDocumentWaiting_variation": {
     "message": "This is not an estimate for this run. Duration varies with document length, selected sections, model and settings. Progress is saved after each portion."
@@ -5087,5 +5087,8 @@
   },
   "claims_reason_semantic_judgment_unavailable": {
     "message": "No usable citation-support judgment was returned."
+  },
+  "claims_reason_report_size_limit": {
+    "message": "The citation report exceeded its size limit. The draft is retained, but its citation support has not been verified."
   }
 }

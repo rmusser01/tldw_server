@@ -16,6 +16,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from tldw_Server_API.app.core.Claims_Extraction.citation_syntax import extract_citation_ids
+
 _IDENTITY = ("stage", "case_id", "model_key", "context", "mode")
 _PATHS = ("request_path", "response_path", "artifact_path")
 _OUTPUT_NAMES = ("report.json", "report.md", "semantic-review.json")
@@ -208,7 +210,7 @@ def verification_metrics(report: Any, text: str, evidence: dict[str, str], *, ex
             counts[status] += 1
         valid_citations = isinstance(cited, list) and all(isinstance(value, str) for value in cited)
         valid &= valid_citations
-        literal_ids = [token.strip().removeprefix("Source ") for group in re.findall(r"\[([^\]\n]+)\]", finding.get("text", "") if isinstance(finding.get("text"), str) else "") for token in group.split(",")]
+        literal_ids = extract_citation_ids(finding.get("text", "") if isinstance(finding.get("text"), str) else "")
         valid &= cited == list(dict.fromkeys(literal_ids)) or (status in ("error", "not_checked") and cited == [])
         if status in ("supported", "unsupported", "contradicted"):
             valid &= bool(cited) and valid_citations and all(value in evidence and value in recorded_evidence for value in cited)

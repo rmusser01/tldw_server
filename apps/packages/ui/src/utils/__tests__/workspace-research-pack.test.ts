@@ -20,6 +20,26 @@ const chatbook = async (missing = false) => {
 }
 
 describe("complete research pack archive", () => {
+  it.each(["text_or_unit_limit", "report_size_limit"])("retains full unchecked text and its %s notice in complete and readable exports", async reason => {
+    const bundle = portableFixture()
+    const draft = "Unchecked text [1]. 🌍\n".repeat(120)
+    const report = { version: 1, text_sha256: claimTextHash(draft), verdict: "unverified", provider: "openai", model: "saved-model",
+      coverage: { total: 1, evaluated: 0, supported: 0, uncovered: 1, complete: false },
+      findings: [{ id: "tail", text: draft, start: 0, end: Array.from(draft).length, evidence_ids: [], status: "not_checked", reason }],
+      evidence: {}, limits: {}, context: {} }
+    bundle.workspace.chatSession!.messages[0].message = draft
+    bundle.workspace.chatSession!.messages[0].metadataExtra = { claim_verification: report }
+    bundle.workspace.chatSession!.history = [{ role: "assistant", content: draft }]
+    const blob = await buildCompleteResearchPack({ bundle, chatbook: await chatbook(), notes: [bundle.workspace.snapshot.currentNote], sourceWorkspaceId: "old" })
+    const zip = await JSZip.loadAsync(await readBlobBytes(blob))
+    const restored = await parseCompleteResearchPack(new File([await readBlobBytes(blob)], "checked.zip"))
+    expect(restored!.bundle.workspace.chatSession!.messages[0].metadataExtra?.claim_verification).toEqual(report)
+    expect(await zip.file("offline/chat.md")!.async("string")).toContain(draft)
+    const html = new DOMParser().parseFromString(await zip.file("offline/chat.html")!.async("string"), "text/html")
+    expect(html.body.textContent).toContain(draft)
+    expect(html.body.textContent).toContain(reason === "report_size_limit" ? "The citation report exceeded its size limit." : "This claim exceeded the check's text or claim limit")
+    expect(html.body.textContent).toContain("Citation support: Not fully checked")
+  })
   it("preserves citation findings and links in offline chapters, overview and conversation", async () => {
     const bundle = portableFixture()
     const report = (text: string) => ({ version: 1, text_sha256: claimTextHash(text), verdict: "needs_revision", provider: "openai", model: "saved-model",

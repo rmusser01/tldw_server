@@ -1298,6 +1298,28 @@ def test_workspace_import_retry_is_bound_to_scope_and_citations(client, db, muta
     assert _counts(db)["messages"] == 2
 
 
+def test_workspace_import_preserves_historical_claim_checks_and_binds_replay(client, db):
+    db.upsert_workspace("destination-workspace", "Imported research")
+    body = _workspace_import()
+    extra = body["messages"][1]["metadata_extra"]
+    extra["claim_verification"] = {
+        "version": 1, "text_sha256": "a" * 64, "verdict": "unverified",
+        "provider": None, "model": None,
+        "coverage": {"total": 0, "evaluated": 0, "supported": 0, "uncovered": 0, "complete": False},
+        "findings": [], "evidence": {}, "limits": {},
+        "context": {"unavailable_reason": "Checker unavailable for the historical draft."},
+    }
+    extra["claim_verification_imported"] = True
+    response = client.post(PATH, json=body)
+    assert response.status_code == 201, response.text
+    saved = client.get(f"{CHATS}{CHAT_ID}/messages", params={"scope_type": "workspace", "workspace_id": "destination-workspace", "include_metadata": True})
+    stored = saved.json()["messages"][1]["metadata_extra"]
+    assert {key: stored[key] for key in extra} == extra
+    assert client.post(PATH, json=body).status_code == 200
+    extra["claim_verification"]["context"]["unavailable_reason"] = "Changed historical report."
+    assert client.post(PATH, json=body).status_code == 409
+
+
 @pytest.mark.parametrize("unavailable", ["missing", "deleted", "foreign"])
 def test_workspace_import_refuses_unavailable_or_foreign_workspace(client, db, unavailable):
     if unavailable != "missing":

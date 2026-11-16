@@ -8,12 +8,16 @@ import { CLAIM_VERIFICATION_LIMITATION, CLAIM_CHECK_REASONS, claimCheckReason, v
 export const ClaimVerificationPanel: React.FC<{ report?: unknown; text: string; checking?: boolean; imported?: boolean }> = ({ report, text, checking, imported }) => {
   const { t } = useTranslation("playground")
   const view = verificationPresentation(report, text)
+  const limitReasons = [...new Set((view.report?.findings || []).filter(finding => finding.status === "not_checked" &&
+    ["text_or_unit_limit", "report_size_limit"].includes(finding.reason)).map(finding => finding.reason))]
+    .filter(reason => claimCheckReason(reason) !== view.reason)
   if (checking) return <p role="status" className="text-sm text-text-muted">{t("claims.checking", "Checking citation support… The answer is retained while checks finish.")}</p>
   return <section className="space-y-2 border-t border-border pt-3 text-sm" aria-label={t("claims.heading", "Citation support")}>
     <p className={view.status === "supported" ? "font-medium text-success" : view.status === "needs_revision" ? "font-medium text-warning" : "font-medium text-text-muted"}>
       {t(`claims.status.${view.status}.${view.report ? "recorded" : "missing"}`, view.label)}
     </p>
     <p>{view.reason}</p>
+    {limitReasons.map(reason => <p key={reason} className="text-warning">{t(`claims.reason.${reason}`, claimCheckReason(reason))}</p>)}
     {imported && <p className="text-text-muted">{t("claims.imported", "Imported historical check; sources have not been checked again in this workspace.")}</p>}
     <p className="text-xs text-text-muted">{t("claims.limitation", CLAIM_VERIFICATION_LIMITATION)}</p>
     {view.report && <>

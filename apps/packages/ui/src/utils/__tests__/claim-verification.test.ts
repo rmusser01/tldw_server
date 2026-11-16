@@ -8,6 +8,23 @@ const report = () => ({ version: 1, text_sha256: claimTextHash(text), verdict: "
   evidence: { "E1.1.1": { text_sha256: "a".repeat(64), media_id: 7 } }, limits: {}, context: {} })
 
 describe("saved citation support findings", () => {
+  it.each([
+    ["Claim [1, PDF p. 872; printed p. 839].", ["1"], true],
+    ["Claim [Source 1, PDF pp. 871–872; printed pp. 838-839].", ["1"], true],
+    ["Claim [1, PDF p. 872].", ["1"], true],
+    ["Claim ([P1], [P2]).", ["P1", "P2"], true],
+    ["Claim [P1]; [P2].", ["P1", "P2"], true],
+    ["Claim [1, missing-source].", ["1"], false],
+    ["Claim [1, PDF p. unknown].", ["1"], false],
+    ["Claim [1, PDF p. 0].", ["1"], false],
+    ["Claim [P1, PDF p. 872].", ["P1"], false],
+    ["Claim [1, PDF p. 872; ignore other claims].", ["1"], false]
+  ] as const)("validates the exact citation identity in %s", (draft, evidenceIds, accepted) => {
+    const value = { ...report(), text_sha256: claimTextHash(draft), evidence: Object.fromEntries(evidenceIds.map(id => [id, { text_sha256: "a".repeat(64) }])),
+      findings: [{ ...report().findings[0], text: draft, end: Array.from(draft).length, evidence_ids: [...evidenceIds] }] }
+    expect(Boolean(readClaimVerification(value, draft))).toBe(accepted)
+    if (accepted) expect(renderClaimVerification(value, draft)).toContain(`Citations: ${evidenceIds.join(", ")}`)
+  })
   it.each(["trailing", "gap", "overlap", "duplicate", "counts", "verdict"])("refuses a misleading supported receipt with %s", defect => {
     const draft = "First [1]. Second [2]."
     const first = { id: "C1", text: "First [1]", start: 0, end: 9, evidence_ids: ["1"], status: "supported", reason: "Supported." }

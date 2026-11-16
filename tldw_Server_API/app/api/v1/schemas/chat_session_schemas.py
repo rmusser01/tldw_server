@@ -40,7 +40,10 @@ from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
     RoleplayResumeUserAppendResponse as RoleplayResumeUserAppendResponse,
 )
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
-from tldw_Server_API.app.core.Chat.workspace_references import validate_workspace_references
+from tldw_Server_API.app.core.Chat.workspace_references import (
+    WORKSPACE_ASSISTANT_METADATA_KEYS,
+    validate_workspace_assistant_metadata,
+)
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
 
 # Core-owned since TASK-13950.15; re-exported for the API layer.
@@ -385,18 +388,19 @@ class MessageCreate(BaseModel):
     metadata_extra: dict[str, Any] | None = Field(
         None,
         description=(
-            "Recorded workspace RAG references for an assistant message. Only "
-            "workspace_rag_sources_v1 is retained; unsupported legacy fields are ignored. "
-            "References confer no Media access."
+            "Recorded workspace RAG references and citation-support reports for an assistant message. "
+            "Unsupported legacy fields are ignored. Historical assessments confer no Media access "
+            "or proof of support for an edited message."
         ),
     )
 
     @field_validator("metadata_extra", mode="before")
     @classmethod
     def _validate_workspace_references(cls, value):
-        if not isinstance(value, dict) or "workspace_rag_sources_v1" not in value:
+        if not isinstance(value, dict):
             return None
-        return {"workspace_rag_sources_v1": validate_workspace_references(value["workspace_rag_sources_v1"])}
+        supported = {key: item for key, item in value.items() if key in WORKSPACE_ASSISTANT_METADATA_KEYS}
+        return validate_workspace_assistant_metadata(supported) if supported else None
 
     @model_validator(mode="after")
     def _validate_reference_role(self) -> "MessageCreate":

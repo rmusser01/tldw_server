@@ -61,7 +61,7 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     GenerationMetadataError,
     validate_generation_metadata,
 )
-from tldw_Server_API.app.core.Chat.workspace_references import validate_workspace_references
+from tldw_Server_API.app.core.Chat.workspace_references import validate_workspace_assistant_metadata
 
 IMPORT_FINGERPRINT_SCHEMA_VERSION = 1
 IMPORT_AUTHORITY_VERSION = 1
@@ -506,18 +506,17 @@ def prepare_chat_import(
         metadata = _generation_metadata(message.get("metadata"), role=role, message_id=message_id)
         references = message.get("metadata_extra")
         if references is not None:
-            if (scope_type != "workspace" or role != "assistant" or not isinstance(references, dict)
-                    or set(references) != {"workspace_rag_sources_v1"}):
+            if scope_type != "workspace" or role != "assistant":
                 raise ChatImportError(
                     "unsupported_metadata", 422,
-                    "Only workspace assistant messages may import workspace_rag_sources_v1 references.",
+                    "Only workspace assistant messages may import references and citation-support reports.",
                     message_id=message_id,
                 )
             try:
-                references = {"workspace_rag_sources_v1": validate_workspace_references(references["workspace_rag_sources_v1"])}
+                references = validate_workspace_assistant_metadata(references)
             except ValueError:
                 raise ChatImportError(
-                    "unsupported_metadata", 422, "Workspace references are invalid or exceed their limits.",
+                    "unsupported_metadata", 422, "Workspace references or citation reports are invalid or exceed their limits.",
                     message_id=message_id,
                 ) from None
 

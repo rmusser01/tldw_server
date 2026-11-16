@@ -184,3 +184,67 @@ def test_server_attribution_context_is_scoped_to_the_cited_contribution():
     assert "Bea" in rendered and "The author alone is responsible." in rendered
     assert "Ada" not in rendered and "No individual view" not in rendered
     assert workspace_citations._attribution_context({**snapshot, "nodes": []}, {"id": "source", "media_id": 1}, start, start + 14) == ""
+
+
+def _nested_source_context_fixture():
+    text = "# Part\n## Chapter\n### First\n**Ada Example**\nFirst policy.\nAUTHOR'S NOTE: Ada alone.\n"
+    second_start = len(text)
+    text += "### Second\n**Bea Example**\nSecond policy.\nAUTHOR'S NOTE: Collective views.\nENDNOTES\nA reference.\n"
+    nodes = [
+        {"id": "part", "title": "Part", "level": 1, "parent_id": None, "target_type": "char_range", "target_start": 0, "target_end": len(text)},
+        {"id": "chapter", "title": "Chapter", "level": 2, "parent_id": "part", "target_type": "char_range", "target_start": text.index("## Chapter"), "target_end": len(text)},
+        {"id": "first", "title": "First", "level": 3, "parent_id": "chapter", "target_type": "char_range", "target_start": text.index("### First"), "target_end": second_start},
+        {"id": "second", "title": "Second", "level": 3, "parent_id": "chapter", "target_type": "char_range", "target_start": second_start, "target_end": len(text)},
+    ]
+    return {"content": text, "nodes": nodes, "navigation_version": "version", "page_map": []}
+
+
+@pytest.mark.parametrize("name,policy,note,other", [
+    ("Ada Example", "First policy.", "Ada alone.", "Bea Example"),
+    ("Bea Example", "Second policy.", "Collective views.", "Ada Example"),
+])
+def test_cited_nested_contribution_retains_its_byline_without_whole_part_omission(name, policy, note, other):
+    snapshot = _nested_source_context_fixture()
+    # A large Part has many unrelated chapters; their combined heading context
+    # exceeds the existing cap even though this cited contribution is bounded.
+    for index in range(12):
+        left = len(snapshot["content"])
+        snapshot["content"] += f"## Other chapter {index}\n" + "Unrelated body. " * 80
+        snapshot["nodes"].append({"id": f"other-{index}", "title": f"Other {index}", "level": 2,
+            "parent_id": "part", "target_type": "char_range", "target_start": left, "target_end": len(snapshot["content"])})
+    snapshot["nodes"][0]["target_end"] = len(snapshot["content"])
+    start = snapshot["content"].index(policy)
+    rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, start + len(policy))
+    assert name in rendered and note in rendered and other not in rendered
+    assert '"title": "' + ("First" if name == "Ada Example" else "Second") + '"' in rendered
+
+
+@pytest.mark.parametrize("problem", ["missing_parent", "cycle", "overlapping_sibling"])
+def test_nested_attribution_rejects_ambiguous_or_broken_ancestry(problem):
+    snapshot = _nested_source_context_fixture()
+    if problem == "missing_parent":
+        snapshot["nodes"][3]["parent_id"] = "missing"
+    elif problem == "cycle":
+        snapshot["nodes"][1]["parent_id"] = "second"
+    else:
+        second = snapshot["nodes"][3]
+        snapshot["nodes"].append({**second, "id": "overlap", "target_start": second["target_start"] + 1})
+    start = snapshot["content"].index("Second policy.")
+    assert workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, start + 14) == ""
+
+
+def test_nested_reference_does_not_inherit_body_author():
+    snapshot = _nested_source_context_fixture()
+    start = snapshot["content"].index("A reference.")
+    rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, start + 12)
+    assert '"type": "reference"' in rendered and "Bea Example" not in rendered and "Ada Example" not in rendered
+
+
+def test_quote_crossing_contributions_retains_both_bounded_contexts():
+    snapshot = _nested_source_context_fixture()
+    start = snapshot["content"].index("First policy.")
+    end = snapshot["content"].index("Second policy.") + len("Second policy.")
+    rendered = workspace_citations._attribution_context(snapshot, {"id": "source", "media_id": 1}, start, end)
+    assert "Ada Example" in rendered and "Bea Example" in rendered
+    assert '"title": "First"' in rendered and '"title": "Second"' in rendered
+    assert '"title": "Part"' not in rendered

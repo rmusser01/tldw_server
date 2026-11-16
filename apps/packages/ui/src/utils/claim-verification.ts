@@ -14,6 +14,8 @@ export type ClaimVerification = {
 }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value)
 const statuses = new Set(["supported", "unsupported", "contradicted", "uncited", "not_checked", "error"])
+// Match the server's bounded numeric location annotation; unknown suffixes remain citation IDs.
+const PDF_LOCATION_CITATION = /^(?:Source )?([1-9][0-9]*)[ \t]*,[ \t]*PDF pp?\.[ \t]*[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?(?:[ \t]*;[ \t]*printed pp?\.[ \t]*[1-9][0-9]*(?:[ \t]*[-–][ \t]*[1-9][0-9]*)?)?$/
 const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0
 export const claimTextHash = (text: string) => bytesToHex(sha256(utf8ToBytes(text)))
 
@@ -45,8 +47,11 @@ export function readClaimVerification(value: unknown, text?: string): ClaimVerif
         characters.slice(item.start, item.end).join("") !== item.text) return null
       ids.add(item.id)
       cursor = item.end
-      const cited = [...new Set(Array.from(item.text.matchAll(/\[([^\]\n]+)\]/g), (match: RegExpMatchArray) =>
-        match[1].split(",").map(id => id.trim().replace(/^Source /, ""))).flat())]
+      const cited = [...new Set(Array.from(item.text.matchAll(/\[([^\]\n]+)\]/g), (match: RegExpMatchArray) => {
+        const group = match[1].trim()
+        const located = PDF_LOCATION_CITATION.exec(group)
+        return located ? [located[1]] : group.split(",").map(id => id.trim().replace(/^Source /, ""))
+      }).flat())]
       const unavailable = ["not_checked", "error"].includes(item.status) && item.evidence_ids.length === 0
       if (!unavailable && JSON.stringify(cited) !== JSON.stringify(item.evidence_ids)) return null
     }
@@ -77,7 +82,7 @@ export function verificationPresentation(value: unknown, text: string) {
   return { report, status: completeSupport ? "supported" as const : needsReview ? "needs_revision" as const : "unverified" as const,
     label: completeSupport ? "Supported by cited evidence" : needsReview ? "Needs review" : "Not fully checked",
     reason: completeSupport ? "All recorded claims were checked against their cited evidence." : typeof report.context.unavailable_reason === "string"
-      ? report.context.unavailable_reason : "Read the findings and check the cited evidence before relying on this draft." }
+      ? claimCheckReason(report.context.unavailable_reason) : "Read the findings and check the cited evidence before relying on this draft." }
 }
 
 export const CLAIM_VERIFICATION_LIMITATION = "These checks compare the draft with its cited evidence. They do not establish real-world truth or replace your review."
@@ -88,6 +93,7 @@ export const CLAIM_CHECK_REASONS: Record<string, string> = {
   citation_source_unavailable: "The cited source is unavailable in this workspace.",
   citation_source_changed_or_unresolved: "The citation could not be matched exactly to the saved source.",
   text_or_unit_limit: "This claim exceeded the check's text or claim limit and was not checked.",
+  report_size_limit: "The citation report exceeded its size limit. The draft is retained, but its citation support has not been verified.",
   cited_evidence_limit: "The cited evidence exceeds the check's context limit.",
   citation_without_claim: "This citation has no accompanying claim to check.",
   judge_unavailable: "The citation checker is unavailable.",

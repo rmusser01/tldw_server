@@ -2871,7 +2871,7 @@ it('shows long-document timing for a saved section job instead of a per-file est
     workspaceArtifactId: 'saved-output', producerMetadata: { origin: 'research_workspace_output_job', job_id: 9 }
   }];
   renderStudioPane();
-  expect(screen.getAllByText('In observed 922-page, 30-chapter runs, generation took 52–62 minutes.')).not.toHaveLength(0);
+  expect(screen.getAllByText('In observed 922-page, 30-chapter runs before citation checks were added, generation took 52–62 minutes.')).not.toHaveLength(0);
   expect(screen.getAllByText(/This is not an estimate for this run/)).not.toHaveLength(0);
   expect(screen.queryByText(/Usually takes 10/)).not.toBeInTheDocument();
   expect(screen.queryByText(/~\d+s for/)).not.toBeInTheDocument();
