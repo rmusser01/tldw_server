@@ -26,6 +26,7 @@ Use a configurable 250 MiB document limit in Quick Ingest, allow 1 GiB audio/vid
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 432 focused frontend tests and 121 backend tests passed, with one expected backend failure. The emitted Next.js client showed a 384 MiB override. No new runtime Bandit findings. Hosted browser proof used the same upload behavior. Exact-size Chrome controls were verified on staging with generated files and AI analysis disabled. Media jobs were cancelled after upload. A lost acknowledgement can leave a just-created job running on Cancel All.
+Backend CI caught the upload settings exceeding the existing config loader size ceiling. Moved the parsing into a helper with the same defaults and override policies. The size ratchet, upload validation, config precedence, and config boundary checks passed locally with 92 tests and one expected failure. Bandit reported no findings on the new lines. The earlier app container timeout occurred during image transfer after the build and was retried on the same source.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
