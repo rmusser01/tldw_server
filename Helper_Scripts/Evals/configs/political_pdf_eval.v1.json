@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "api": {
+    "base_url": "http://127.0.0.1:8000",
+    "api_key_env": "SINGLE_USER_API_KEY",
+    "timeout_seconds": 180
+  },
+  "source": {
+    "path": "/tmp/2025_MandateForLeadership_FULL.pdf",
+    "sha256": "7f2e97507370bbadb109034ecda0085c5a2e5f3837cfb843da272c3a41523c4c",
+    "pdf_pages": 922,
+    "media_id": 1
+  },
+  "cases": "tldw_Server_API/tests/Research_Workspace/fixtures/political_pdf_claim_cases.json",
+  "workspace_id": null,
+  "retrieval": {
+    "modes": ["text", "vector", "hybrid"],
+    "top_k": 8,
+    "hybrid_alpha": 0.5
+  },
+  "models": [
+    {
+      "key": "openai-gpt-6-luna",
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "max_tokens": 8192
+    }
+  ],
+  "qa": {
+    "contexts": ["reference_pages", "retrieved"],
+    "retrieval_mode": "hybrid"
+  },
+  "summary": {
+    "artifact_type": "summary",
+    "sections": [],
+    "max_tokens": 8192,
+    "wait_seconds": 3600,
+    "summary_instruction": "Summarize supported policy proposals and distinguish opposing authors and positions."
+  }
+}
