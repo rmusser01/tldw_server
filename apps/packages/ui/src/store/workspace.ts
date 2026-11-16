@@ -1884,8 +1884,8 @@ const writeSplitWorkspacePersistence = async (
   serializedValue: string,
   indexedDbAdapter: WorkspaceIndexedDbAdapter,
   options?: {
-    /** Trust the module-level partialize records as identity anchors. */
-    trustPartializeRecords?: boolean
+    /** Identity anchors captured for this exact queued envelope. */
+    partializeRecords?: typeof workspacePersistPartializeRecords
     /**
      * "lifecycle": this pass was flushed by pagehide/beforeunload/tab-hidden.
      * Every IndexedDB await is skipped (artifact/chat offload and record
@@ -1898,7 +1898,7 @@ const writeSplitWorkspacePersistence = async (
 ): Promise<boolean> => {
   if (name !== WORKSPACE_STORAGE_KEY) return false
 
-  const recordsTrusted = options?.trustPartializeRecords === true
+  const partializeRecords = options?.partializeRecords
   const lifecycleFlush = options?.durability === "lifecycle"
   const envelope = parsePersistedWorkspaceEnvelope(serializedValue)
   if (!envelope) return false
@@ -1974,14 +1974,14 @@ const writeSplitWorkspacePersistence = async (
     const snapshotKey = buildWorkspaceSnapshotStorageKey(workspaceStorageId)
     const snapshot = migrated.workspaceSnapshots[workspaceStorageId]
     const partializeSnapshotRecord =
-      workspacePersistPartializeRecords.get(workspaceStorageId)?.snapshot
+      partializeRecords?.get(workspaceStorageId)?.snapshot
     const snapshotStamp = getWorkspacePersistStamp(workspaceStorageId).snapshot
     // Identity anchors are only meaningful when this envelope was produced by
     // the partialize call that wrote the records; otherwise fall back to the
     // (always-fresh, never-matching) parsed snapshot reference so the content
     // signature decides.
     const snapshotRawRef =
-      recordsTrusted && partializeSnapshotRecord
+      partializeSnapshotRecord
         ? partializeSnapshotRecord.rawRef
         : snapshot
     const snapshotUnchanged =
@@ -2141,10 +2141,10 @@ const writeSplitWorkspacePersistence = async (
     const chatKey = buildWorkspaceChatStorageKey(workspaceStorageId)
     const chatSession = migrated.workspaceChatSessions[workspaceStorageId]
     const partializeChatRecord =
-      workspacePersistPartializeRecords.get(workspaceStorageId)?.chat
+      partializeRecords?.get(workspaceStorageId)?.chat
     const chatStamp = getWorkspacePersistStamp(workspaceStorageId).chat
     const chatRawRef =
-      recordsTrusted && partializeChatRecord
+      partializeChatRecord
         ? partializeChatRecord.rawRef
         : chatSession
     const chatUnchanged =
@@ -2728,7 +2728,12 @@ export const createWorkspaceStorage = (
       // the caller): zustand persist runs partialize -> stringify -> setItem
       // in one synchronous sequence, so a fresh flag here means the module
       // records describe this exact value.
-      const trustPartializeRecords = workspacePersistPartializeRecordsFresh
+      // Offload awaits let later partialize calls replace the global records.
+      // Keep this envelope's identities so an older write cannot mark newer
+      // chat acknowledgements (or snapshots) as already persisted.
+      const partializeRecords = workspacePersistPartializeRecordsFresh
+        ? new Map(workspacePersistPartializeRecords)
+        : undefined
       workspacePersistPartializeRecordsFresh = false
       return enqueueWorkspacePersistWrite({
         name,
@@ -2745,7 +2750,7 @@ export const createWorkspaceStorage = (
                   jobValue,
                   indexedDbAdapter,
                   {
-                    trustPartializeRecords,
+                    partializeRecords,
                     durability: workspacePersistLifecycleFlushActive
                       ? "lifecycle"
                       : "coalesced"

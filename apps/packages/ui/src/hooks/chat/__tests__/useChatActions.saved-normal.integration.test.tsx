@@ -3619,6 +3619,32 @@ describe("saved normal Chat pipeline with autosave", () => {
       }
     });
 
+    it("publishes both RAG assistant save receipts to the live workspace after successive turns", async () => {
+      const actualModels = await vi.importActual<typeof import("@/models")>("@/models")
+      mocks.pageAssistModel.mockImplementation(actualModels.pageAssistModel)
+      mocks.realFormatter = true
+      mocks.realPersistence = true
+      mocks.ragSearch.mockResolvedValue({ documents: [{
+        content: "Visitors enter through the east gate.",
+        metadata: { media_id: 42, title: "Rowan report", type: "text" }
+      }] })
+      mocks.streamMessage.mockImplementation(async function* () {
+        yield "<think>Check the supplied source.</think>"
+        yield "Visitors use the east gate [1]."
+      })
+      const view = await mountSdkScene({ type: "workspace", workspaceId: "sdk-original-workspace" }, true)
+      act(() => useStoreMessageOption.setState({ ragMediaIds: [42], fileRetrievalEnabled: true, chatMode: "rag" }))
+      try {
+        for (let turn = 0; turn < 2; turn += 1) {
+          await act(async () => { expect(await view.send()).toMatchObject({ status: "submitted" }) })
+          const local = view.result.current.state.messages.at(-1)!
+          const canonical = mocks.serverRows.get("chat-1")!.at(-1)!
+          expect(mocks.rows.find(row => row.id === local.id)).toMatchObject({ serverMessageId: canonical.id })
+          expect(local).toMatchObject({ serverMessageId: canonical.id })
+        }
+      } finally { view.unmount() }
+    })
+
     it.each(["first", "prior-local", "duplicate-ack", "server-alias", "unknown-parent"])("S04 retains cited workspace source references through the actual SDK model and manual server save (%s)", async parentCase => {
       const actualModels =
         await vi.importActual<typeof import("@/models")>("@/models");
