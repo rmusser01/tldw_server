@@ -933,8 +933,8 @@ async def test_multi_passage_claim_keeps_every_exact_known_source_span(monkeypat
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("output_budget", [1024, 8192])
-async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves_completed_batches(
+@pytest.mark.parametrize("output_budget", [1024, 8192, 16384])
+async def test_hierarchical_reduction_honors_output_budget_and_preserves_completed_batches(
     monkeypatch, output_budget
 ):
     from unittest.mock import AsyncMock
@@ -964,8 +964,8 @@ async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves
     assert [call["max_tokens"] for call in calls] == [
         output_budget,
         output_budget,
-        min(output_budget, 2048),
-        min(output_budget, 2048),
+        output_budget,
+        output_budget,
         output_budget,
         output_budget,
     ]
@@ -983,6 +983,69 @@ async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves
     calls.clear()
     await mod.process_section_summary(**options)
     assert calls == []  # Unchanged synthesis is retained when retrying citation checks.
+
+
+@pytest.mark.asyncio
+async def test_increased_budget_recovers_reasoning_truncated_overview_without_repeating_chapters(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source, nodes = "", []
+    for index in (1, 2):
+        start = len(source)
+        source += f"# Policy {index}\n\nA source-backed proposal.\n"
+        nodes.append({"id": f"dsi:{index}", "title": f"Policy {index}", "level": 1,
+                      "target_type": "char_range", "target_start": start, "target_end": len(source)})
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": nodes,
+    }))
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "intermediate compression step" in kwargs["system_message"] and kwargs["max_tokens"] < 16384:
+            return {"choices": [{"finish_reason": "length", "message": {"content": ""}}],
+                    "usage": {"completion_tokens": kwargs["max_tokens"],
+                              "completion_tokens_details": {"reasoning_tokens": kwargs["max_tokens"]}}}
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "A proposal.", "evidence": [{
+                "claim": "A source-backed proposal", "source_span_ids": ["P1"],
+            }]})
+        else:
+            allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            prefix = "A chapter policy. " * 800 if prompt.startswith("Summarize all portions") else "Condensed policy. "
+            content = prefix + " ".join(f"[{value}]" for value in allowed)
+        return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    settings = request().settings.model_copy(update={"provider": "openai", "model": "gpt-6-luna", "max_tokens": 8192})
+    settings.sections.append(settings.sections[0].model_copy(update={"node_id": "dsi:2"}))
+    options = args(settings)
+    await mod.process_section_summary(**options)
+    failed = copy.deepcopy(options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"])
+    assert options["workspace_db"].row["status"] == "failed"
+    assert all(section["status"] == "completed" for section in failed["sections"])
+    assert failed["synthesis_error_code"] == "output_truncated"
+    failure = failed["generation_failures"][-1]
+    assert (failure["stage"], failure["reduction_round"], failure["reduction_group"], failure["response_chars"]) == (
+        "overview_synthesis", 1, 1, 0,
+    )
+    assert len(calls) == 5 and calls[-1]["max_tokens"] == 8192
+
+    calls.clear()
+    options["settings"] = settings.model_copy(update={"max_tokens": 16384})
+    await mod.process_section_summary(**options)
+    recovered = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert options["workspace_db"].row["status"] == "complete"
+    assert recovered["sections"] == failed["sections"]
+    assert recovered["generation_failures"] == failed["generation_failures"]
+    assert "synthesis_error_code" not in recovered
+    assert [call["max_tokens"] for call in calls] == [16384, 16384, 16384]
+    assert all("intermediate compression step" in call["system_message"] for call in calls[:2])
+    assert all("at most 250 words" in call["system_message"] for call in calls[:2])
+    assert calls[-1]["messages_payload"][0]["content"].startswith("Synthesize the completed")
 
 
 @pytest.mark.asyncio
@@ -1017,7 +1080,7 @@ async def test_nonreducing_synthesis_stops_without_accepting_or_discarding_saved
     await mod.process_section_summary(**options)
     analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
     assert len(calls) == (18 if slow_reduction else 4)
-    assert all(call["max_tokens"] == 2048 for call in calls[2:])
+    assert all(call["max_tokens"] == 8192 for call in calls[2:])
     assert options["workspace_db"].row["status"] == "failed"
     assert analysis["sections"][0]["error_code"] == "synthesis_not_reduced"
     assert all(batch["status"] == "completed" and batch["evidence"] for batch in analysis["sections"][0]["batches"])

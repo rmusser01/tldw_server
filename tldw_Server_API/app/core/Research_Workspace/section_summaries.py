@@ -383,7 +383,7 @@ def _section_completion_request(
         temp=settings.temperature,
         topp=settings.top_p,
         **{PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials},
-        max_tokens=min(settings.max_tokens, 2048) if reduction else settings.max_tokens,
+        max_tokens=settings.max_tokens,
         streaming=False,
         **(
             {"thinking": {"type": "disabled"}}

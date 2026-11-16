@@ -299,11 +299,28 @@ async def test_total_deadline_preserves_completed_checks_and_cancels_remaining(m
 
     monkeypatch.setitem(citation_support.LIMITS, "total_timeout_seconds", 0.03)
     cancelled = []
+    slow_started = asyncio.Event()
+    original_wait = asyncio.wait
+    observed_outer_timeouts = []
+
+    async def expire_after_fast_completion(tasks, *, timeout=None, **kwargs):
+        if timeout != 0.03:
+            return await original_wait(tasks, timeout=timeout, **kwargs)
+        observed_outer_timeouts.append(timeout)
+        # Exercise completed-result retention independently of cold config and
+        # thread startup; separate deadline tests retain real elapsed timing.
+        await asyncio.wait_for(slow_started.wait(), timeout=5)
+        done, pending = await original_wait(tasks, timeout=5, return_when=asyncio.FIRST_COMPLETED)
+        assert len(done) == len(pending) == 1
+        return done, pending
+
+    monkeypatch.setattr(citation_support.asyncio, "wait", expire_after_fast_completion)
 
     async def analyze(*args, **kwargs):
         if "Fast" in args[1]:
             return response()
         try:
+            slow_started.set()
             await asyncio.Event().wait()
         finally:
             cancelled.append(args[1])
@@ -314,6 +331,7 @@ async def test_total_deadline_preserves_completed_checks_and_cancels_remaining(m
     assert report["findings"][1]["reason"] == "verification_deadline"
     assert report["coverage"]["uncovered"] == 1 and report["verdict"] == "unverified"
     assert cancelled == ["Slow. [P1]"]
+    assert observed_outer_timeouts == [0.03]
 
 
 def test_splitter_preserves_every_nonwhitespace_character_and_offsets():
