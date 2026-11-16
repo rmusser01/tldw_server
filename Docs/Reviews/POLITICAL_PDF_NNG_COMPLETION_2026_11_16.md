@@ -23,6 +23,8 @@ The context and citation-transport repairs improved the output and made the full
 
 The retained source review still finds a Financial chapter statement denying an endnote attribution even though note 53 explicitly links the contribution. The overview also has citation-support gaps and a statement about maintaining 64 interceptors where the source proposes buying at least 64 Next Generation Interceptors. Separate agent-proposed correction overlays address reviewed passages without rewriting the original model output. These examples explain why UX-PDF-66, TASK-15505.6 and TASK-15505.12 remain open. Human labels and VIP acceptance remain unset; there is no calibrated semantic accuracy score.
 
+The subsequent [strict Claims integration and retest](POLITICAL_PDF_STRICT_CLAIMS_RETEST_2026_11_16.md) wires actual citation-support judgments into chapters, overviews and QA, preserving findings through review/export. It records its own immutable Luna responses and later NN/g findings. This improves detection and reviewability; it does not retroactively certify the original Job 46 or replace human calibration.
+
 ## Local qualification
 
 Counts overlap and must not be summed as unique coverage.

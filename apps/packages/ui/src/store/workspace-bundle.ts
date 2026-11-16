@@ -1,5 +1,6 @@
 import type { ChatHistory, Message } from "@/store/option"
 import type { SourceAnnotations } from "@/utils/source-annotations"
+import { compactWorkspaceArtifactForExport } from "./workspace-artifact-codec"
 import type {
   AudioGenerationSettings,
   GeneratedArtifact,
@@ -204,7 +205,10 @@ export const createWorkspaceExportZipBlob = async (
   )
   zip.file(
     WORKSPACE_EXPORT_BUNDLE_PAYLOAD_FILE,
-    JSON.stringify(bundle, null, 2)
+    JSON.stringify({ ...bundle, workspace: { ...bundle.workspace, snapshot: {
+      ...bundle.workspace.snapshot,
+      generatedArtifacts: bundle.workspace.snapshot.generatedArtifacts.map(compactWorkspaceArtifactForExport)
+    } } }, null, 2)
   )
 
   return zip.generateAsync({

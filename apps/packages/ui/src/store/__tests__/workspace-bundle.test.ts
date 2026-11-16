@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import JSZip from "jszip"
+import { workspaceArtifactDraftPayload } from "../workspace-artifact-codec"
 import { buildWorkspaceBundleSnapshot, hydrateWorkspaceBundleSnapshot } from "../workspace"
 import {
   LEGACY_WORKSPACE_EXPORT_BUNDLE_FORMAT,
@@ -102,6 +103,45 @@ const toSerializableBundle = (
   JSON.parse(JSON.stringify(bundle)) as WorkspaceExportBundle
 
 describe("workspace bundle zip compatibility", () => {
+  it("retains distinct in-memory dates that serialize to different saved data", async () => {
+    const bundle = createBundleFixture()
+    const artifact = bundle.workspace.snapshot.generatedArtifacts[0]
+    artifact.data = { capturedAt: new Date("2026-01-01T00:00:00Z") }
+    artifact.versionMetadata = { workspaceClient: { schemaVersion: 1, data: { capturedAt: new Date("2026-02-01T00:00:00Z") } } }
+    const blob = await createWorkspaceExportZipBlob(bundle)
+    const saved = (await parseWorkspaceImportFile(new File([blob], "dates.workspace.zip"))).workspace.snapshot.generatedArtifacts[0]
+    expect(saved.data).toEqual({ capturedAt: "2026-01-01T00:00:00.000Z" })
+    expect(saved.versionMetadata?.workspaceClient).toMatchObject({ data: { capturedAt: "2026-02-01T00:00:00.000Z" } })
+    expect(artifact.data.capturedAt).toBeInstanceOf(Date)
+  })
+  it.each(["identical", "different", "unknown version", "client only"])("elides only a known identical client data projection (%s)", async mode => {
+    const bundle = createBundleFixture()
+    const artifact = bundle.workspace.snapshot.generatedArtifacts[0]
+    const data = { sectionAnalysis: { content: "Full draft", claim_verification: { text_sha256: "a".repeat(64), evidence: { P1: { source_id: "source-1", media_id: 101 } } } } }
+    artifact.data = data
+    artifact.reviewMetadata = { savedCorrection: "Human review is retained." }
+    artifact.versionMetadata = { retainedVersionField: "retain", workspaceClient: {
+      schemaVersion: mode === "unknown version" ? 2 : 1,
+      data: mode === "different" ? { distinctHistoricalData: true } : { sectionAnalysis: { claim_verification: data.sectionAnalysis.claim_verification, content: "Full draft" } },
+      unknownClientField: "retain"
+    } }
+    if (mode === "client only") delete artifact.data
+    const before = JSON.stringify(bundle)
+    const blob = await createWorkspaceExportZipBlob(bundle)
+    const parsed = await parseWorkspaceImportFile(new File([blob], "compact.workspace.zip"))
+    const saved = parsed.workspace.snapshot.generatedArtifacts[0]
+    const client = saved.versionMetadata!.workspaceClient as Record<string, unknown>
+    expect(client).toMatchObject({ schemaVersion: mode === "unknown version" ? 2 : 1, unknownClientField: "retain" })
+    expect(saved.versionMetadata!.retainedVersionField).toBe("retain")
+    expect(saved.content).toBe(artifact.content)
+    expect(saved.data).toEqual(artifact.data)
+    expect(saved.reviewMetadata).toEqual(artifact.reviewMetadata)
+    if (mode === "identical") {
+      expect(client).not.toHaveProperty("data")
+      expect(workspaceArtifactDraftPayload(saved)).toEqual(workspaceArtifactDraftPayload(artifact))
+    } else expect(client.data).toEqual((artifact.versionMetadata!.workspaceClient as Record<string, unknown>).data)
+    expect(JSON.stringify(bundle)).toBe(before)
+  })
   it("builds sanitized zip filenames", () => {
     const filename = createWorkspaceExportZipFilename(
       "Alpha Research",
@@ -172,7 +212,8 @@ describe("workspace bundle zip compatibility", () => {
 
     expect(reexported.generatedArtifacts[0].content).toBe(expected.content)
     expect(reexported.generatedArtifacts[0].data).toEqual(expected.data)
-    expect(reexported.generatedArtifacts[0].versionMetadata).toEqual(expected.versionMetadata)
+    expect(reexported.generatedArtifacts[0].versionMetadata?.workspaceClient).not.toHaveProperty("data")
+    expect(workspaceArtifactDraftPayload(reexported.generatedArtifacts[0])).toEqual(workspaceArtifactDraftPayload(expected))
     expect(reexported.generatedArtifacts[0].status).toBe("completed")
   })
 
