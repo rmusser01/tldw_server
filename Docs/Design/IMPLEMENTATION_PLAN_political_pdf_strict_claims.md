@@ -11,7 +11,7 @@
 **Tests:** Claims unit/property cases for wrong evidence, qualifiers, attribution, compound claims, no/unknown IDs, incomplete judgment, limits; workspace endpoint ownership/range/provider tests.
 **Status:** Complete
 
-- [ ] Backend worker `pr_backend_verify` owns Claims_Extraction, the QA operation/schema and related tests under TASK-15505.16.
+- [x] Backend worker `pr_backend_verify` owns Claims_Extraction, the QA operation/schema and related tests under TASK-15505.16.
 - [x] Write and observe failing tests, implement the shared contract, run connected tests and Bandit. Backend release: 159 connected tests, 13 final API/governor tests; bounded total deadline, Unicode coverage and late-coroutine cleanup qualified. Ruff/Bandit clean.
 
 ## Stage 2: Chapter and overview Job integration
@@ -20,7 +20,7 @@
 **Tests:** Extend `tests/Research_Workspace/test_section_summary_jobs.py` with rejection, bounded failure, source/context binding, checkpoint resume and Markdown findings assertions.
 **Status:** Complete
 
-- [ ] Root owns `core/Research_Workspace/section_summaries.py`, a focused section adapter if needed, and its Job tests.
+- [x] Root owns `core/Research_Workspace/section_summaries.py`, a focused section adapter if needed, and its Job tests.
 - [x] First assert a completed fake generation produces a persisted strict report; watch failure before implementing. Three expected failures observed.
 - [x] Add tests for verifier failure and resume, then implement checkpoint and renderer integration. Connected section suite: 79 passed; touched adapter lint and production Bandit pass. Shared-service integration remains to qualify.
 
@@ -30,19 +30,19 @@
 **Tests:** Final QA callback tests; chapter/overview finding UI tests; Markdown/offline/complete-pack round trips, migration and stale-state guards.
 **Status:** Complete
 
-- [ ] Frontend worker `pr_frontend_verify` owns UI/services/export changes and tests under TASK-15505.17.
+- [x] Frontend worker `pr_frontend_verify` owns UI/services/export changes and tests under TASK-15505.17.
 - [x] Confirm the shared report contract, write failing integration tests, then wire the existing review and export paths. Frontend release: 683 connected tests, full types, zero new lint findings; independent review clear. Completed chapter checks retry without regeneration; unavailable QA checks preserve the original answer for review.
 
 ## Stage 4: Repeatable eval and fresh Luna evidence
 **Goal:** Make strict support checking repeatable across models and run the same PDF against a frozen implementation.
 **Success Criteria:** QA and generated artifacts expose real verification receipts; coverage and semantic outcomes stay distinct; regressions exercise known failures without invented human labels.
 **Tests:** Runner contract tests and fixture failures; actual Luna chapter/overview/QA run; UI and export/restore readback.
-**Status:** In Progress
+**Status:** Complete
 
-- [ ] Eval worker `pr_scope_review` owns `Helper_Scripts/Evals/run_political_pdf_eval.py`, fixtures/config/tests under TASK-15505.18.
-- [ ] Root coordinates the frozen local runtime and paid provider calls only after connected tests pass.
-- [ ] Retain receipts, inspect failures against source and document measured limits.
-- [ ] Qualify references-only extraction guidance and reuse of unchanged validated terminal receipts after the live SBA tail failure. Preserve the first response; finish Job 49 before restarting the runtime and explicitly resuming its failed portion. Missing/error/stale checks remain retryable, and no verdict or uncovered count is promoted.
+- [x] Eval worker `pr_scope_review` owns `Helper_Scripts/Evals/run_political_pdf_eval.py`, fixtures/config/tests under TASK-15505.18.
+- [x] Root coordinates the frozen local runtime and paid provider calls only after connected tests pass.
+- [x] Retain receipts, inspect failures against source and document measured limits.
+- [x] Qualify references-only extraction guidance and reuse of unchanged validated terminal receipts after the live SBA tail failure. Preserve the first response; finish Job 49 before restarting the runtime and explicitly resuming its failed portion. Missing/error/stale checks remain retryable, and no verdict or uncovered count is promoted.
 
 ## Stage 5: Review, delivery and CI
 **Goal:** Update PR #3480 against dev with reviewed implementation and verifiable results.
@@ -51,6 +51,6 @@
 **Status:** In Progress
 
 - [x] Review each worker diff, verify cross-layer integration, fix new findings, and keep Backlog records current. Root independent 274 backend/eval/ratchet tests and 76 frontend contract/export tests pass. Review found and repaired incomplete receipt coverage and verifier identity gaps. Hosted old-head locale mirror failure repaired with the existing generator; parity tests pass.
-- [ ] Commit/push without bypassing hooks; update PR description with ADR assessment and honest validation status.
+- [x] Commit/push without bypassing hooks; update PR description with ADR assessment and honest validation status. Final metadata closeout follows hosted gate qualification.
 - [ ] Follow current-head checks to a terminal result; do not merge, rebase an armed PR or manually dispatch required gates.
 - [ ] Remove this task-owned plan only when every stage is complete; retain design and outcome report.
