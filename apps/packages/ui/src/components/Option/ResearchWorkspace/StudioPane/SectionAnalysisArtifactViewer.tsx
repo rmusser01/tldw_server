@@ -1,4 +1,6 @@
 import React from "react"
+import { SectionArtifactReviewPanel, type SaveSectionArtifactReview } from "./SectionArtifactReviewPanel"
+import { getSectionReviewTarget } from "@/utils/section-artifact-review"
 import { Link } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { MarkdownPreview } from "@/components/Common/MarkdownPreview"
@@ -51,8 +53,10 @@ export const SectionAnalysisArtifactViewer: React.FC<{
   artifact: GeneratedArtifact
   analysis: SectionAnalysis
   sources: WorkspaceSource[]
-}> = ({ artifact, analysis, sources }) => {
+  onSaveReview?: SaveSectionArtifactReview
+}> = ({ artifact, analysis, sources, onSaveReview }) => {
   const { t } = useTranslation("playground")
+  const [reviewArtifact, setReviewArtifact] = React.useState(artifact)
   const selectorId = React.useId()
   const [selection, setSelection] = React.useState("overview")
   const [evidenceOpen, setEvidenceOpen] = React.useState(false)
@@ -65,6 +69,7 @@ export const SectionAnalysisArtifactViewer: React.FC<{
   const sourceTitle = section ? sources.find(source => source.id === section.source_id ||
     source.mediaId === section.media_id)?.title : undefined
   const summary = section ? text(section.content) : text(analysis.synthesis)
+  const reviewTarget = getSectionReviewTarget(reviewArtifact, selection)
 
   return <div className="max-h-[70vh] space-y-4 overflow-y-auto text-text">
     <div className="space-y-2">
@@ -117,12 +122,14 @@ export const SectionAnalysisArtifactViewer: React.FC<{
       </div>}
     </section>
 
-    {hasTraceableArtifactMetadata(artifact) && <div className="border-t border-border pt-3">
+    {reviewTarget && <SectionArtifactReviewPanel artifact={reviewArtifact} target={reviewTarget} onSave={onSaveReview} onSaved={setReviewArtifact} />}
+
+    {hasTraceableArtifactMetadata(reviewArtifact) && <div className="border-t border-border pt-3">
       <button type="button" aria-expanded={technicalOpen} onClick={() => setTechnicalOpen(open => !open)}
         className="min-h-10 text-sm text-text-muted underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
         {t("studio.sectionReader.technical", "Technical details")}
       </button>
-      {technicalOpen && <TraceableArtifactDetail artifact={artifact} />}
+      {technicalOpen && <TraceableArtifactDetail artifact={reviewArtifact} />}
     </div>}
   </div>
 }

@@ -1,0 +1,349 @@
+{
+  "schema_version": 1,
+  "source_url": "https://static.heritage.org/project2025/2025_MandateForLeadership_FULL.pdf",
+  "source_sha256": "7f2e97507370bbadb109034ecda0085c5a2e5f3837cfb843da272c3a41523c4c",
+  "pdf_pages": 922,
+  "frozen_before_followup_generation": true,
+  "purpose": "Source-grounded regression and held-out audit, not a calibrated accuracy benchmark",
+  "case_count": 13,
+  "cases": [
+    {
+      "id": "R01",
+      "split": "regression",
+      "failure_mode": "voice_attribution",
+      "question": "Does the FTC chapter describe Lina Khan as opposing its proposed response to ESG and DEI offers? Explain whose position is being quoted.",
+      "source_pages": [
+        {
+          "pdf_page": 906,
+          "printed_page": "873",
+          "extracted_page_sha256": "179ca67c62c71f60b26d908126022aa32e32c2aa36d9d61fbcc315a818d4c85c"
+        }
+      ],
+      "expected_source_facts": [
+        "The passage reports Khan rejecting offers of social policies in exchange for merger approval; it uses that testimony as evidence for the chapter discussion.",
+        "Do not invent a Candeub-versus-Khan disagreement from this passage."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "R02",
+      "split": "regression",
+      "failure_mode": "agency_identity",
+      "question": "Which agency chapter discusses restoring regional-office authority, and does it record an alternative conservative view?",
+      "source_pages": [
+        {
+          "pdf_page": 909,
+          "printed_page": "876",
+          "extracted_page_sha256": "2139e0957113f6393be6bf622548f5750091fbb315d78150a38dff12663d7830"
+        }
+      ],
+      "expected_source_facts": [
+        "FTC, the Federal Trade Commission; not the FEC.",
+        "The text proposes considering restored regional authority and records conservative objections."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "R03",
+      "split": "regression",
+      "failure_mode": "voice_attribution",
+      "question": "Compare how de Rugy and Hazelton use EXIM competitiveness reports. Keep the report years and each author’s argument separate.",
+      "source_pages": [
+        {
+          "pdf_page": 753,
+          "printed_page": "720",
+          "extracted_page_sha256": "c439a0b2b601dfd8d699ae8140c066b9aabe92939dbfe7a4183444a7c5de179a"
+        },
+        {
+          "pdf_page": 759,
+          "printed_page": "726",
+          "extracted_page_sha256": "5300cf3350eebde85bd83c65e3cf9df1350681b54d0ffb07dd76137bd2a48852"
+        }
+      ],
+      "expected_source_facts": [
+        "De Rugy critiques the 2020 report and its quorum/competitive-standing argument.",
+        "Hazelton cites the 2018 report when arguing foreign export-credit agencies embed their exporters in global supply chains.",
+        "Do not attribute the 2020 quorum critique to Hazelton."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "R04",
+      "split": "regression",
+      "failure_mode": "unsupported_agreement",
+      "question": "Do de Rugy and Hazelton agree that EXIM fills a private-financing gap for its major beneficiaries?",
+      "source_pages": [
+        {
+          "pdf_page": 752,
+          "printed_page": "719",
+          "extracted_page_sha256": "736aaa08dd609015edd8d1f81e6fd0446d6ac52e1a3b26f11b9e5bfca7eca1c5"
+        },
+        {
+          "pdf_page": 759,
+          "printed_page": "726",
+          "extracted_page_sha256": "5300cf3350eebde85bd83c65e3cf9df1350681b54d0ffb07dd76137bd2a48852"
+        }
+      ],
+      "expected_source_facts": [
+        "De Rugy argues major beneficiaries retained access to private financing during the quorum restriction.",
+        "Hazelton argues EXIM provides financing when the private sector will not.",
+        "Shared subject matter does not establish shared agreement."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "R05",
+      "split": "regression",
+      "failure_mode": "numerical_direction",
+      "question": "Describe the change in EXIM authorizations from FY2007 through FY2014 to FY2022, preserving the direction of each change.",
+      "source_pages": [
+        {
+          "pdf_page": 751,
+          "printed_page": "718",
+          "extracted_page_sha256": "024e33334258e940362542f9798d88d58ec7bf3c6d0ba0c73bee0f28140c79d8"
+        }
+      ],
+      "expected_source_facts": [
+        "12.6 billion to 21.5 billion is an increase; 21.5 billion to 5.2 billion is a decrease.",
+        "The final figure is below the initial one; the series is not a continuous decline."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "H01",
+      "split": "held_out",
+      "failure_mode": "agency_identity",
+      "question": "What organizational and forecasting changes does the Commerce chapter propose for NOAA and the National Weather Service?",
+      "source_pages": [
+        {
+          "pdf_page": 707,
+          "printed_page": "674",
+          "extracted_page_sha256": "d711e7e9448582f8f9ef2d2b593104d0ec5ae7164427cc0a7c50ddeccc057407"
+        },
+        {
+          "pdf_page": 708,
+          "printed_page": "675",
+          "extracted_page_sha256": "8618edb1aaa4beb488195a424bc6f1c36d581a764e6ee6cc2120493effa0ca6b"
+        }
+      ],
+      "expected_source_facts": [
+        "It proposes breaking up and downsizing NOAA.",
+        "It proposes NWS emphasis on gathering data and commercialization of forecasting operations.",
+        "Describe the chapter’s proposals and attributions; do not endorse its contested performance claims as independently established facts."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "H02",
+      "split": "held_out",
+      "failure_mode": "agency_identity",
+      "question": "Where does the Commerce chapter propose transferring National Ocean Service survey functions?",
+      "source_pages": [
+        {
+          "pdf_page": 709,
+          "printed_page": "676",
+          "extracted_page_sha256": "36fb0f3e00573e3ab7c9bdd20ced76bc843d15c5217518519474cfa07411c39f"
+        }
+      ],
+      "expected_source_facts": [
+        "U.S. Coast Guard and U.S. Geological Survey.",
+        "The proposal concerns NOS survey functions, not transfer of all NOAA functions."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "H03",
+      "split": "held_out",
+      "failure_mode": "proposed_vs_enacted",
+      "question": "How does the Health and Human Services chapter propose reorganizing CDC data collection and public-health recommendations?",
+      "source_pages": [
+        {
+          "pdf_page": 485,
+          "printed_page": "452",
+          "extracted_page_sha256": "4c04a373007d835429e29803a85ff1afb17e6e7c1c43bfe1893e40f6950f57b4"
+        },
+        {
+          "pdf_page": 486,
+          "printed_page": "453",
+          "extracted_page_sha256": "4dd9c2720f3a75e612270f95f93c49530bf1cb68bb6786dd366943861183dd34"
+        }
+      ],
+      "expected_source_facts": [
+        "It proposes two separate agencies with a firewall: one publishing epidemiological data and one public-health agency with restricted policy-recommendation authority.",
+        "This is a proposal in the document, not evidence that CDC has already been reorganized."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "H04",
+      "split": "held_out",
+      "failure_mode": "agency_identity",
+      "question": "Which agency would receive VAERS, VSD and CISA vaccine-safety functions and their funding under this document’s proposal?",
+      "source_pages": [
+        {
+          "pdf_page": 487,
+          "printed_page": "454",
+          "extracted_page_sha256": "1ada6ee362ac2e79463b6507898aeefa4dd97945622a76c25d04d4b893eb854e"
+        }
+      ],
+      "expected_source_facts": [
+        "FDA; not NIH, a new CDC data agency, or another department.",
+        "Attribute the proposed transfer to the document."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "H05",
+      "split": "held_out",
+      "failure_mode": "conditional_proposal",
+      "question": "What does the financial-regulatory chapter propose for the CFPB, and what condition does it attach to presidential dissolution?",
+      "source_pages": [
+        {
+          "pdf_page": 872,
+          "printed_page": "839",
+          "extracted_page_sha256": "db15eb7fc34a17b710d46a1362889e24042a8845aaade498380353d4d9b2b5a4"
+        }
+      ],
+      "expected_source_facts": [
+        "Congress should abolish CFPB and return consumer protection to banking regulators and the FTC.",
+        "Presidential dissolution is conditional on the Supreme Court affirming the referenced Fifth Circuit holding.",
+        "Do not present the book’s constitutional assertion or anticipated court outcome as a verified current legal fact."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "H06",
+      "split": "held_out",
+      "failure_mode": "unsupported_agreement",
+      "question": "Does the Labor chapter present one unanimous view of worker voice and representation? Compare its main recommendation and Alternative View.",
+      "source_pages": [
+        {
+          "pdf_page": 632,
+          "printed_page": "599",
+          "extracted_page_sha256": "637247663870df87c8e206bc7363e553b2e2c3bcf18ee7fb3230970005332ebd"
+        }
+      ],
+      "expected_source_facts": [
+        "The main recommendation supports the TEAM Act and employee involvement organizations, including a non-voting supervisory board member for qualifying corporations.",
+        "The Alternative View interprets workforce changes differently and favors the Worker’s Choice Act ending exclusive representation in right-to-work states.",
+        "Do not erase the stated disagreement or invent named authors for the alternative paragraph."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "H07",
+      "split": "held_out",
+      "failure_mode": "numerical_scope",
+      "question": "What Commerce budget and staffing figures does the chapter use to describe NOAA, and what time qualification applies?",
+      "source_pages": [
+        {
+          "pdf_page": 707,
+          "printed_page": "674",
+          "extracted_page_sha256": "d711e7e9448582f8f9ef2d2b593104d0ec5ae7164427cc0a7c50ddeccc057407"
+        }
+      ],
+      "expected_source_facts": [
+        "NOAA is described as receiving 6.5 billion of a 12 billion departmental annual operational budget.",
+        "It accounts for more than half of personnel in non-decadal Census years; the cited figures are for 2021.",
+        "Do not call these current 2026 budget facts or conflate budget share with a precise personnel percentage."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    },
+    {
+      "id": "H08",
+      "split": "held_out",
+      "failure_mode": "proposed_vs_enacted",
+      "question": "Based only on this PDF, can you establish whether Congress has abolished the CFPB as of November 15, 2026?",
+      "source_pages": [
+        {
+          "pdf_page": 872,
+          "printed_page": "839",
+          "extracted_page_sha256": "db15eb7fc34a17b710d46a1362889e24042a8845aaade498380353d4d9b2b5a4"
+        }
+      ],
+      "expected_source_facts": [
+        "No; the PDF contains policy recommendations and an anticipated court decision, not current enactment evidence.",
+        "State the evidence limitation without asserting a current legal outcome."
+      ],
+      "label_provenance": "agent_source_audit",
+      "human_review": {
+        "status": "pending",
+        "decision": null,
+        "reviewer": null
+      },
+      "generation_result": null
+    }
+  ]
+}

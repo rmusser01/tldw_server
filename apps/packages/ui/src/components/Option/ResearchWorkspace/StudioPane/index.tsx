@@ -49,7 +49,7 @@ import {
   Switch
 } from "antd"
 import { useMobile } from "@/hooks/useMediaQuery"
-import { persistWorkspaceArtifact, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
+import { persistWorkspaceArtifact, persistWorkspaceArtifactReview, hasCanonicalArtifactWorkspace } from "@/services/workspace-artifact-persistence"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
 import { hasWorkspaceArtifactOrigin, sameWorkspaceArtifactPayload, workspaceArtifactDraftPayload } from "@/store/workspace-artifact-codec"
 import { hasResearchWorkspaceMigrationTombstone, useWorkspaceStore } from "@/store/workspace"
@@ -1555,6 +1555,36 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
     }
   }
 
+  const saveArtifactReview = async (
+    artifact: GeneratedArtifact,
+    patch: Pick<GeneratedArtifact, "reviewStatus" | "reviewMetadata">,
+    editorIsCurrent: () => boolean
+  ): Promise<GeneratedArtifact> => {
+    const controller = new AbortController()
+    const deadline = performance.now() + 15000
+    const timeout = setTimeout(() => controller.abort(), 15000)
+    const stopWatching = watchChatAccountChanges(invalidated => { if (invalidated) controller.abort() })
+    let scope: ServicePromptSnapshot | undefined
+    const originalPayload = workspaceArtifactDraftPayload(artifact)
+    const isCurrent = () => {
+      const current = useWorkspaceStore.getState().generatedArtifacts.find(entry => entry.id === artifact.id)
+      return Boolean(editorIsCurrent() && !controller.signal.aborted && !scope?.scopeInvalidatedSignal.aborted &&
+        current && sameWorkspaceArtifactPayload(workspaceArtifactDraftPayload(current), originalPayload))
+    }
+    try {
+      if (!workspaceId || !isCurrent()) throw new Error("The output or workspace changed. Your review draft is retained.")
+      scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      const saved = await persistWorkspaceArtifactReview(artifact, patch, { workspaceId, scope, isCurrent, deadline })
+      if (!isCurrent()) throw new DOMException("The editor or workspace changed.", "AbortError")
+      updateArtifactStatus(saved.id, saved.status, saved)
+      return saved
+    } finally {
+      clearTimeout(timeout)
+      stopWatching()
+      scope?.release()
+    }
+  }
+
   // ── View artifact handler ──
 
   const openArtifactViewer = (config: Parameters<typeof artifactModal.info>[0]) => {
@@ -1793,11 +1823,16 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
 
     const sectionAnalysis = getSectionAnalysis(artifact)
     if (sectionAnalysis) {
-      openArtifactViewer({
+      const editor = createEditorGuard()
+      const modal = artifactModal.info({
         title: artifact.title,
-        content: <SectionAnalysisArtifactViewer artifact={artifact} analysis={sectionAnalysis} sources={workspaceSources} />,
+        afterClose: editor.afterClose,
+        content: <SectionAnalysisArtifactViewer artifact={artifact} analysis={sectionAnalysis} sources={workspaceSources}
+          onSaveReview={artifact.workspaceArtifactId && artifact.status !== "generating"
+            ? (original, patch) => saveArtifactReview(original, patch, editor.isCurrent) : undefined} />,
         ...responsiveModalProps(960)
       })
+      editor.attach(modal)
       return
     }
 

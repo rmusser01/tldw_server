@@ -2243,6 +2243,14 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockRagSearch).not.toHaveBeenCalled()
   })
 
+  it("connects canonical section-reader review controls without overwriting the model draft", async () => {
+    const artifact = { ...sectionReaderArtifact(), workspaceArtifactId: "canonical-summary", workspaceArtifactVersion: 1 }
+    const dialog = await openReader(artifact)
+    expect(dialog.getByRole("button", { name: "Save review" })).toBeEnabled()
+    fireEvent.change(dialog.getByLabelText("Correction for this section"), { target: { value: "Reviewed correction [E1.1.1]." } })
+    expect(workspaceStoreState.generatedArtifacts[0].content).toBe("RAW_FULL_EXPORT_WITH_ALL_EVIDENCE")
+  })
+
   it("opens complete section outputs with an overview and all chapter titles without dumping raw evidence", async () => {
     const dialog = await openReader(sectionReaderArtifact())
     expect(await dialog.findByText("Readable whole-book overview.")).toBeInTheDocument()

@@ -13,7 +13,7 @@ import { isServicePromptRequestPath } from '@/services/tldw/service-prompt-scope
 const io = vi.hoisted(() => ({ request: vi.fn(), migrated: true }));
 vi.mock('@/services/background-proxy', () => ({ bgRequest: io.request }));
 vi.mock('@/store/workspace', () => ({ hasResearchWorkspaceMigrationTombstone: () => io.migrated }));
-import { persistWorkspaceArtifact } from '../workspace-artifact-persistence';
+import { persistWorkspaceArtifact, persistWorkspaceArtifactReview } from '../workspace-artifact-persistence';
 
 const artifact = (): GeneratedArtifact =>
   bindWorkspaceArtifactOrigin(
@@ -335,4 +335,48 @@ describe('canonical Workspace draft persistence', () => {
     expect(saved.workspaceArtifactVersion).toBe(2);
   });
 
+});
+
+
+describe("section reviewer metadata saves", () => {
+  it("updates only review fields with an optimistic version while preserving the raw draft and evidence", async () => {
+    const first = { ...artifact(), workspaceArtifactId: "draft-owned", workspaceArtifactVersion: 1 };
+    let stored = row(first);
+    io.request.mockImplementation(async ({ method, body }) => {
+      if (method === "GET") return [stored];
+      expect(Object.keys(body).sort()).toEqual(["review_metadata", "review_state", "version"]);
+      stored = { ...stored, ...body, version: 2 };
+      return stored;
+    });
+    const saved = await persistWorkspaceArtifact({ ...first, reviewStatus: "needs_revision", reviewMetadata: { reason: "Attribution correction" } }, { ...lease().options, updateOnly: "review" });
+    expect(saved.reviewMetadata).toMatchObject({ reason: "Attribution correction" });
+    expect(stored.content).toBe(first.content);
+    expect(stored.version_metadata).toEqual(row(first).version_metadata);
+  });
+});
+
+
+describe("cold artifact review authority", () => {
+  it("revalidates a cold canonical artifact before saving review metadata", async () => {
+    const first = { ...artifact(), workspaceArtifactId: "draft-owned", workspaceArtifactVersion: 1 };
+    const cold = JSON.parse(JSON.stringify(mapServerArtifactToLocal(row(first))));
+    let stored = row(first);
+    io.request.mockImplementation(async ({ method, body }) => {
+      if (method === "GET") return [stored];
+      stored = { ...stored, ...body, version: 2 }; return stored;
+    });
+    const saved = await persistWorkspaceArtifactReview(cold, { reviewStatus: "needs_revision", reviewMetadata: { reason: "Source checked" } }, lease().options);
+    expect(saved.reviewStatus).toBe("needs_revision");
+    expect(saved.content).toBe(first.content);
+    expect(io.request.mock.calls.filter(([request]) => request.method === "PUT")).toHaveLength(1);
+  });
+  it.each(["foreign", "changed", "retired"])("refuses %s review authority without writing", async kind => {
+    const first = { ...artifact(), workspaceArtifactId: "draft-owned", workspaceArtifactVersion: 1 };
+    const options = lease().options;
+    if (kind === "foreign") options.scope = { ...options.scope, scopeKey: "server:bob" };
+    if (kind === "retired") { let calls = 0; options.isCurrent = () => ++calls < 2; }
+    io.request.mockResolvedValue([row(first, kind === "changed" ? 2 : 1)]);
+    await expect(persistWorkspaceArtifactReview(first, { reviewStatus: "accepted" }, options)).rejects.toThrow();
+    expect(io.request.mock.calls.some(([request]) => request.method === "PUT")).toBe(false);
+  });
 });

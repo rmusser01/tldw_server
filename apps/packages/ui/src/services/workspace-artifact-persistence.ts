@@ -12,6 +12,7 @@ import {
   workspaceArtifactDraftPayload,
   sameWorkspaceArtifactPayload,
   hasWorkspaceArtifactOrigin,
+  hasWorkspaceArtifactOriginEvidence,
   readWorkspaceArtifactClientPayload,
   bindWorkspaceArtifactOrigin,
 } from '@/store/workspace-artifact-codec';
@@ -23,7 +24,7 @@ export type WorkspaceArtifactSaveScope = {
   isCurrent: () => boolean;
   deadline?: number;
   reviewChangeOnly?: boolean;
-  updateOnly?: "content" | "client";
+  updateOnly?: "content" | "client" | "review";
 };
 
 const canonicalWorkspaces = new Map<string, string>();
@@ -79,7 +80,7 @@ export const persistWorkspaceArtifact = async (
   const operation = (async () => {
     if (prior) await prior.catch(() => {});
     assertCurrent();
-    let payload: Partial<WorkspaceArtifactCreateRequest> & { id: string } = options.reviewChangeOnly
+    let payload: Partial<WorkspaceArtifactCreateRequest> & { id: string } = options.reviewChangeOnly || options.updateOnly === "review"
       ? { id: artifact.workspaceArtifactId ?? artifact.id }
       : workspaceArtifactDraftPayload(artifact);
     const path = `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts` as const;
@@ -126,7 +127,10 @@ export const persistWorkspaceArtifact = async (
       );
     };
     const existing = await read();
-    if (options.updateOnly) {
+    if (options.updateOnly === "review") {
+      if (!existing) throw new Error('The saved draft is no longer available.');
+      payload = { id: existing.id, review_state: artifact.reviewStatus ?? "draft", review_metadata: artifact.reviewMetadata ?? {} };
+    } else if (options.updateOnly) {
       if (!existing) throw new Error('The saved draft is no longer available.');
       readWorkspaceArtifactClientPayload(existing.version_metadata);
       const client = payload.version_metadata?.workspaceClient;
@@ -218,3 +222,40 @@ export const loadWorkspaceArtifacts = (
   path: `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/artifacts`,
   method: "GET", ...options,
 });
+
+
+/** Revalidate a cold reader's canonical target before writing only review metadata. */
+export const persistWorkspaceArtifactReview = async (
+  artifact: GeneratedArtifact,
+  patch: Pick<GeneratedArtifact, "reviewStatus" | "reviewMetadata">,
+  options: WorkspaceArtifactSaveScope
+): Promise<GeneratedArtifact> => {
+  const { scope, workspaceId } = options;
+  const deadline = options.deadline ?? performance.now() + 15000;
+  const assertCurrent = () => {
+    if (!options.isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted)
+      throw createServicePromptScopeChangedError();
+    if (performance.now() >= deadline) throw new DOMException("Saving the review timed out. Your draft is retained.", "TimeoutError");
+  };
+  assertCurrent();
+  if (!artifact.workspaceArtifactId) throw new Error("Save this output before recording a review.");
+  if (hasWorkspaceArtifactOriginEvidence(artifact) && !hasWorkspaceArtifactOrigin(artifact, scope.scopeKey, workspaceId))
+    throw new Error("This output belongs to another account or workspace.");
+  const rows = await loadWorkspaceArtifacts(workspaceId, {
+    ...requestScopeFields(scope.requestScope),
+    abortSignal: AbortSignal.any([scope.scopeSignal, scope.scopeInvalidatedSignal, AbortSignal.timeout(Math.max(1, Math.ceil(deadline - performance.now())))]),
+    timeoutMs: Math.max(1, Math.ceil(deadline - performance.now())),
+  });
+  assertCurrent();
+  if (!Array.isArray(rows) || rows.some(row => row.workspace_id !== workspaceId))
+    throw new Error("Saved outputs belong to another workspace.");
+  const matches = rows.filter(row => row.id === artifact.workspaceArtifactId);
+  if (matches.length !== 1) throw new Error("The original output is no longer available.");
+  const canonical = mapServerArtifactToLocal(matches[0]);
+  if (canonical.workspaceArtifactVersion !== artifact.workspaceArtifactVersion || canonical.type !== artifact.type ||
+      !sameWorkspaceArtifactPayload([canonical.content, canonical.data, canonical.versionMetadata, canonical.reviewMetadata],
+        [artifact.content, artifact.data, artifact.versionMetadata, artifact.reviewMetadata]))
+    throw new Error("This output changed. Your review draft is retained; reopen the latest output before saving.");
+  const verified = bindWorkspaceArtifactOrigin({ ...canonical, id: artifact.id, ...patch }, scope.scopeKey, workspaceId);
+  return persistWorkspaceArtifact(verified, { ...options, deadline, updateOnly: "review" });
+};

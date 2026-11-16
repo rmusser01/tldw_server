@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib
 import json
+import re
 
 import pytest
 from hypothesis import given
@@ -879,7 +880,7 @@ async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves
                 {"summary": "Main point. " * 1500, "evidence": [{"claim": "Source claim", "source_span_ids": ["P1"]}]}
             )
         else:
-            content = "Opposing positions remain distinct [E1.1.1]."
+            content = "Opposing positions remain distinct [" + re.search(r"\bE\d+\.\d+\.\d+\b", kwargs["messages_payload"][0]["content"]).group(0) + "]."
         return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
 
     monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
@@ -998,7 +999,7 @@ async def test_combined_synthesis_progress_reports_completed_and_failed_sections
                 else json.dumps({"summary": "Alpha", "evidence": [{"claim": "Claim", "source_span_ids": ["P1"]}]})
             )
         else:
-            content = "Alpha [E1.1.1]."
+            content = "Alpha [" + re.search(r"\bE\d+\.\d+\.\d+\b", prompt).group(0) + "]."
             if "Synthesize the completed" in prompt:
                 final_progress.append(progress.message)
                 final_prompts.append(prompt)
@@ -1188,3 +1189,70 @@ async def test_research_section_job_terminalizes_through_real_worker_sdk(monkeyp
     assert workspace.row["status"] == "failed"
     provider.assert_not_awaited()
     runtime.close.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_synthesis_cannot_borrow_existing_citations_from_another_section(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    text = "Alice supports abolition. Bob supports retention."
+    split = text.index("Bob")
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": text, "navigation_version": "v1", "page_map": [], "nodes": [
+            {"id": "a", "title": "Abolition", "level": 1, "target_type": "char_range", "target_start": 0, "target_end": split},
+            {"id": "b", "title": "Retention", "level": 1, "target_type": "char_range", "target_start": split, "target_end": len(text)},
+        ],
+    }))
+    prompts = []
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        prompts.append(prompt)
+        if "SOURCE:" in prompt:
+            author = "Alice" if "Alice" in prompt else "Bob"
+            answer = json.dumps({"summary": "A position.", "evidence": [{"claim": "A policy proposal", "author": author, "source_span_ids": ["P1"]}]})
+        else:
+            answer = "A policy proposal [E1.1.1]."
+        return {"choices": [{"message": {"content": answer}}]}
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    settings = request().settings.model_copy(update={"sections": [
+        request().settings.sections[0].model_copy(update={"node_id": name}) for name in ("a", "b")
+    ]})
+    options = args(settings)
+    await mod.process_section_summary(**options)
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert analysis["sections"][1]["status"] == "failed"
+    assert analysis["sections"][1]["error_code"] == "unknown_evidence_reference"
+    first_synthesis = next(p for p in prompts if p.startswith("Summarize all portions of Abolition"))
+    assert "Alice" in first_synthesis and "Abolition" in first_synthesis
+
+
+def test_generic_faithfulness_instructions_cover_the_observed_failure_mechanisms():
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+    prompt, _ = mod.build_section_extraction_prompt("Two contributions", "Summarize", "Source text.")
+    reduction = mod.build_section_reduction_prompt(["A source-backed position [E1.1.1]."])
+    for text in (prompt, reduction):
+        assert "quoted speaker" in text
+        assert "both positions" in text
+        assert "agency names" in text
+        assert "numeric sequence" in text
+
+
+@pytest.mark.asyncio
+async def test_synthesis_does_not_trust_citation_shaped_text_in_a_model_summary(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": "Exact source.", "navigation_version": "v1", "nodes": [], "page_map": [],
+    }))
+    async def chat(**kwargs):
+        content = json.dumps({"summary": "A model-invented reference [E99.1.1]",
+            "evidence": [{"claim": "Source claim", "source_span_ids": ["P1"]}]}) if "SOURCE:" in kwargs["messages_payload"][0]["content"] else "Claim [E99.1.1]."
+        return {"choices": [{"message": {"content": content}}]}
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    await mod.process_section_summary(**options)
+    section = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]
+    assert section["status"] == "failed" and section["error_code"] == "unknown_evidence_reference"
