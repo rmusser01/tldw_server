@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import os
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int = 200, json_obj: Dict[str, Any] | None = None, lines: List[str] | None = None):
+    def __init__(self, status_code: int = 200, json_obj: dict[str, Any] | None = None, lines: list[str] | None = None):
         self.status_code = status_code
         self._json = json_obj or {}
         self._lines = lines or []
 
     def raise_for_status(self):
-        if 400 <= self.status_code:
+        if self.status_code >= 400:
             import httpx
             request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
             response = httpx.Response(self.status_code, request=request)
@@ -23,8 +22,7 @@ class _FakeResponse:
         return self._json
 
     def iter_lines(self):
-        for l in self._lines:
-            yield l
+        yield from self._lines
 
 
 class _FakeStreamCtx:
@@ -49,11 +47,11 @@ class _FakeClient:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def post(self, url: str, json: Dict[str, Any], headers: Dict[str, str]):
+    def post(self, url: str, json: dict[str, Any], headers: dict[str, str]):
         self.last_post = {"url": url, "json": json, "headers": headers}
         return _FakeResponse(200, {"object": "chat.completion", "choices": [{"message": {"content": "ok"}}]})
 
-    def stream(self, method: str, url: str, json: Dict[str, Any], headers: Dict[str, str]):
+    def stream(self, method: str, url: str, json: dict[str, Any], headers: dict[str, str]):
         self.last_stream = {"method": method, "url": url, "json": json, "headers": headers}
         lines = [
             "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}",
@@ -73,9 +71,9 @@ def _enable_native_http(monkeypatch):
 
 
 def test_openai_adapter_native_http_non_streaming(monkeypatch):
-    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
     # Patch adapter factory to return our fake client
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
     monkeypatch.setattr(openai_mod, "http_client_factory", lambda *a, **k: _FakeClient(*a, **k))
 
     adapter = OpenAIAdapter()
@@ -90,8 +88,8 @@ def test_openai_adapter_native_http_non_streaming(monkeypatch):
 
 
 def test_openai_adapter_native_http_streaming(monkeypatch):
-    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
     monkeypatch.setattr(openai_mod, "http_client_factory", lambda *a, **k: _FakeClient(*a, **k))
 
     adapter = OpenAIAdapter()
@@ -109,8 +107,8 @@ def test_openai_adapter_native_http_streaming(monkeypatch):
 
 
 def test_openai_adapter_native_http_logprobs_forwarded(monkeypatch):
-    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 
     captured = {}
 
@@ -136,10 +134,10 @@ def test_openai_adapter_native_http_logprobs_forwarded(monkeypatch):
 
 
 def test_openai_adapter_merges_extra_body_and_headers(monkeypatch):
-    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
     import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter import OpenAIAdapter
 
-    captured: Dict[str, Any] = {}
+    captured: dict[str, Any] = {}
 
     def _factory(*args, **kwargs):
         client = _FakeClient(*args, **kwargs)
@@ -235,3 +233,91 @@ def test_a_malformed_base_url_fails_the_stream_as_a_sanitized_provider_error(mon
         _streamed_payload(monkeypatch)
 
     assert excinfo.value.__cause__ is None
+
+
+async def _sent_payload(monkeypatch, method: str, **fields: Any) -> dict[str, Any]:
+    """Exercise a real adapter entrypoint, replacing only the external HTTP client."""
+    import tldw_Server_API.app.core.LLM_Calls.providers.openai_adapter as openai_mod
+
+    client = _FakeClient()
+    monkeypatch.setattr(openai_mod, "http_client_factory", lambda **kwargs: client)
+    adapter = openai_mod.OpenAIAdapter()
+    request = {
+        "messages": [{"role": "user", "content": "Summarize the supplied passage."}],
+        "model": "gpt-6-luna",
+        "api_key": "sk-test",
+        "app_config": {},
+        **fields,
+    }
+    if method == "chat":
+        adapter.chat(request)
+    elif method == "achat":
+        await adapter.achat(request)
+    elif method == "stream":
+        list(adapter.stream(request))
+    else:
+        async for _ in adapter.astream(request):
+            pass
+    return (client.last_post or client.last_stream)["json"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["chat", "achat", "stream", "astream"])
+@pytest.mark.parametrize("extensions", [False, True], ids=["standard-fields", "extra-body"])
+@pytest.mark.parametrize("model", ["gpt-6-luna", "gpt-6.1-sol", "gpt-6.1-terra"])
+async def test_gpt6_reasoning_sends_supported_parameters_without_changing_effort(monkeypatch, method, extensions, model):
+    """GPT-6 rejects legacy tokens and sampling in its default/explicit reasoning mode."""
+    fields = {"max_tokens": 4096, "temperature": 0.2, "top_p": 1, "logprobs": True, "top_logprobs": 3}
+    request = {"extra_body": {**fields, "reasoning_effort": "high"}} if extensions else fields
+    payload = await _sent_payload(monkeypatch, method, model=model, **request)
+
+    assert payload["max_completion_tokens"] == 4096
+    assert not {"max_tokens", "temperature", "top_p", "logprobs", "top_logprobs"}.intersection(payload)
+    assert payload.get("reasoning_effort") == ("high" if extensions else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["chat", "achat", "stream", "astream"])
+@pytest.mark.parametrize("extensions", [False, True], ids=["standard-fields", "extra-body"])
+@pytest.mark.parametrize("model", ["gpt-6-luna", "gpt-6.1-terra"])
+async def test_gpt6_explicit_no_reasoning_retains_requested_sampling(monkeypatch, method, extensions, model):
+    """Preserve the explicit choice; whether a model accepts none belongs to the provider."""
+    fields = {"max_tokens": 4096, "temperature": 0.2, "top_p": 0.8, "logprobs": True, "top_logprobs": 3}
+    request = {"extra_body": {**fields, "reasoning_effort": "none"}} if extensions else {
+        **fields, "extra_body": {"reasoning_effort": "none"},
+    }
+    payload = await _sent_payload(monkeypatch, method, model=model, **request)
+
+    assert {key: payload[key] for key in ("temperature", "top_p", "logprobs", "top_logprobs", "reasoning_effort")} == {
+        "temperature": 0.2, "top_p": 0.8, "logprobs": True, "top_logprobs": 3, "reasoning_effort": "none",
+    }
+    assert payload["max_completion_tokens"] == 4096
+    assert "max_tokens" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fields, expected", [
+    ({"max_tokens": 1000, "max_completion_tokens": 2000}, 2000),
+    ({"max_tokens": 1000, "extra_body": {"max_completion_tokens": 3000}}, 3000),
+    ({"max_completion_tokens": 2000, "extra_body": {"max_tokens": 1000, "max_completion_tokens": 3000}}, 2000),
+    ({"app_config": {"openai_api": {"max_completion_tokens": 4000}}, "max_tokens": 1000}, 4000),
+])
+async def test_gpt6_preserves_explicit_completion_budget_after_extensions(monkeypatch, fields, expected):
+    payload = await _sent_payload(monkeypatch, "chat", **fields)
+
+    assert payload["max_completion_tokens"] == expected
+    assert "max_tokens" not in payload
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model, expected", [
+    ("gpt-4o-mini", {"max_tokens": 4096, "temperature": 0.2, "top_p": 0.8, "logprobs": True}),
+    ("gpt-5-mini", {"max_completion_tokens": 4096, "temperature": 0.2, "logprobs": True}),
+    ("gpt-60-example", {"max_tokens": 4096, "temperature": 0.2, "top_p": 0.8, "logprobs": True}),
+])
+async def test_gpt6_normalization_preserves_other_model_contracts(monkeypatch, model, expected):
+    payload = await _sent_payload(monkeypatch, "chat", model=model,
+        max_tokens=4096, temperature=0.2, top_p=0.8, logprobs=True)
+
+    assert {key: value for key, value in payload.items()
+        if key in {"max_tokens", "max_completion_tokens", "temperature", "top_p", "logprobs"}} == expected
