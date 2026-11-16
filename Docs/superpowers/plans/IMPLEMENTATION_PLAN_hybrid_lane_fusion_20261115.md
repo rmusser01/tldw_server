@@ -18,6 +18,6 @@ Approved scope: preserve request weighting and prevent bounded hybrid fusion fro
 **Goal:** Independent review and one frozen retrieval-only replay by the parent.
 **Success Criteria:** Scoped tests, lint and Bandit pass; held-out misses remain reported; MiniLM index configuration is measured separately without changing model defaults.
 **Tests:** Current real Chroma/public endpoint provenance suite and retained 39-case replay.
-**Status:** In Progress
+**Status:** Complete
 
-Verification: 8 failing behavioral regressions before the repair; 172 connected retrieval/pipeline/real-Chroma/context tests pass after. Scoped Bandit has zero findings. Independent review and one frozen retrieval-only replay remain with the parent.
+Verification: 8 failing behavioral regressions before the repair; 172 connected retrieval/pipeline/real-Chroma/context tests pass after. Scoped Bandit has zero findings; independent fusion review passed 11 focused tests. The fixed 39-query real-PDF replay found all expected pages in 12/13 text, 10/13 vector and 13/13 hybrid cases, with no pipeline errors. See the follow-through report for separate generation-quality limits; H05 subsequently informed the page-boundary repair and is now regression evidence.

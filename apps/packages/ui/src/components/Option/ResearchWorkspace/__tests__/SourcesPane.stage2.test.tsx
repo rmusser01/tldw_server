@@ -652,7 +652,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     fireEvent.click(screen.getByTestId("preview-source-s1"))
     await screen.findByText("Source preview and annotations")
     fireEvent.change(screen.getByPlaceholderText("Annotation note"), {target: {value: "Keep this unsaved draft"}})
-    const storage = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {throw new Error("Quota exceeded")})
+    const storage = vi.spyOn(Object.getPrototypeOf(window.localStorage), "setItem").mockImplementation(() => {throw new Error("Quota exceeded")})
     try {
       fireEvent.click(screen.getByRole("button", {name: "Add annotation"}))
       expect(screen.getByPlaceholderText("Annotation note")).toHaveValue("Keep this unsaved draft")
@@ -671,7 +671,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     await screen.findByText("Saved annotation")
     fireEvent.click(screen.getByRole("button", {name: "Edit"}))
     fireEvent.change(screen.getByPlaceholderText("Annotation note"), {target: {value: "Unsaved edit"}})
-    const storage = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {throw new Error("Storage unavailable")})
+    const storage = vi.spyOn(Object.getPrototypeOf(window.localStorage), "setItem").mockImplementation(() => {throw new Error("Storage unavailable")})
     try {
       fireEvent.click(screen.getByRole("button", {name: "Delete"}))
       expect(screen.getByPlaceholderText("Annotation note")).toHaveValue("Unsaved edit")
@@ -691,7 +691,7 @@ describe("SourcesPane Stage 2 source highlighting", () => {
     fireEvent.click(screen.getByTestId("preview-source-s1"))
     await screen.findByText("Saved annotation")
     fireEvent.click(screen.getByRole("button", {name: "Delete"}))
-    const storage = vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {throw new Error("Storage unavailable")})
+    const storage = vi.spyOn(Object.getPrototypeOf(window.localStorage), "setItem").mockImplementation(() => {throw new Error("Storage unavailable")})
     try {
       fireEvent.click(await screen.findByRole("button", {name: "Undo"}))
       expect(screen.queryByText("Saved annotation")).not.toBeInTheDocument()
