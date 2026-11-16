@@ -11,6 +11,37 @@ const session = (): WorkspaceBundleChatSession => ({ historyId: "old-browser", s
 ] })
 
 describe("portable chat graph", () => {
+  it("restores ID-less legacy rows without inventing parent links or timestamps", async () => {
+    const original = session()
+    for (const row of original.messages) {
+      delete row.id
+      delete row.serverMessageId
+      delete row.serverMessageVersion
+      delete row.parentMessageId
+      delete row.createdAt
+    }
+    let sequence = 0
+    const result = remapImportedWorkspaceChat(original, () => `new-${++sequence}`)
+    expect(result.messages).toEqual([
+      { id: "new-1", parentMessageId: null, isBot: false, name: "You", message: "Question", sources: [] },
+      { id: "new-2", parentMessageId: null, isBot: true, name: "AI", message: "Answer", sources: [] },
+    ])
+    expect(result).toMatchObject({ historyId: null, serverChatId: null, history: original.history })
+    const bundle = portableFixture()
+    bundle.workspace.chatSession = result
+    await expect(buildWorkspaceChatImport(bundle, "destination")).rejects.toThrow("original message timestamps")
+  })
+
+  it("resolves an explicit server parent alias when the legacy row has no local ID", () => {
+    const original = session()
+    delete original.messages[0].id
+    let sequence = 0
+    const result = remapImportedWorkspaceChat(original, () => `new-${++sequence}`)
+    expect(result.messages.map(row => [row.id, row.parentMessageId])).toEqual([["new-1", null], ["new-2", "new-1"]])
+    expect(result.messages.map(row => [row.message, row.createdAt])).toEqual([["Question", 1000], ["Answer", 2000]])
+    expect(result.messages.every(row => !row.serverMessageId && !row.serverMessageVersion)).toBe(true)
+  })
+
   it("preserves branching graph edges across reordered rows and mixed source aliases", () => {
     for (let size = 2; size <= 40; size++) {
       const original = session()

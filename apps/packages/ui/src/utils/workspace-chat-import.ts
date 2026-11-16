@@ -23,7 +23,7 @@ export const remapImportedWorkspaceChat = (
   const ids = session.messages.map(() => makeId())
   if (new Set(ids).size !== ids.length) throw new Error("Imported chat message identities are ambiguous.")
   session.messages.forEach((row, index) => {
-    if (!row.id || row.variants?.length) throw new Error("Imported chat requires a complete, unambiguous message graph.")
+    if (row.variants?.length) throw new Error("Imported chat requires a complete, unambiguous message graph.")
     for (const alias of [row.id, row.serverMessageId].filter(Boolean) as string[]) {
       if (aliases.has(alias) && aliases.get(alias) !== index) throw new Error("Imported chat message aliases are ambiguous.")
       aliases.set(alias, index)

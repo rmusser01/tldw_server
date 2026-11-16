@@ -121,7 +121,7 @@ import {
   type WorkspaceACPRunArtifactSaveInput
 } from "./WorkspaceACPHistoryModal"
 import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
-import { WORKSPACES_PATH } from "@/routes/route-paths"
+import { RESEARCH_WORKSPACE_PATH, WORKSPACES_PATH } from "@/routes/route-paths"
 import { useActiveWorkspaceContext } from "@/services/workspace-context"
 import { renderWorkspaceMessageActionContent } from "./workspace-message-content"
 
@@ -1951,10 +1951,23 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 
     await runPackTransfer(async (scope, isCurrent, onProgress) => {
       const pack = await parseCompleteResearchPack(file)
-      if (!isCurrent()) return
+      if (!isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted) return
+      const bundle = pack ? pack.bundle : await parseWorkspaceImportFile(file)
+      if (!isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted) return
+      if (!pack && bundle.workspace.chatSession?.messages.some(row => row.createdAt == null)) {
+        if (!importWorkspaceBundle(bundle)) throw new Error("This older workspace snapshot could not be opened. The current workspace has not changed.")
+        messageApi.warning(t(
+          "playground:workspace.importLegacyBrowserOnly",
+          "The conversation from this older export stays in this browser. Its missing message dates prevent chat recovery in another browser. Keep your export as a backup."
+        ), 12)
+        setImportDialogOpen(false)
+        setPackTransfer(null)
+        navigate(RESEARCH_WORKSPACE_PATH, { replace: true })
+        return
+      }
       const result = pack
         ? await restoreWorkspaceResearchPack(pack, { scope, isCurrent, onProgress })
-        : await restoreLegacyWorkspaceBundle(await parseWorkspaceImportFile(file), { scope, isCurrent, onProgress })
+        : await restoreLegacyWorkspaceBundle(bundle, { scope, isCurrent, onProgress })
       if (!isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted) return
       const importedWorkspaceId = importWorkspaceBundle(result.bundle, { identity: result.identity, verifiedCanonicalScopeKey: scope.scopeKey })
       if (!importedWorkspaceId) throw new Error("The restored workspace could not be opened. Its server records and restore receipt are retained; the current workspace has not changed.")

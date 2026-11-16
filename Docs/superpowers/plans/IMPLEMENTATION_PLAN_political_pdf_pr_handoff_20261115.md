@@ -16,10 +16,12 @@ ADR assessment: no new durable rule. Retain ADR-003/007 Jobs and Workspace, ADR-
 **Tests:** Regression-first legacy remap/service tests, full workspace suite; changed Media/Embeddings callers and layering/endpoint contracts; TypeScript, focused lint/Bandit and independent review.
 **Status:** In Progress
 
+Legacy compatibility and dev integration are verified (350 connected UI cases, full TypeScript, 170 backend cases, 36 architecture checks, 49-file clean Bandit). A final long-running source browser exposed an empty-cache/nonempty-pointer guard boundary; TASK-15505.8 now covers bounded, explicit-reference mirror recovery without guessing among server chats or overwriting opaque local work.
+
 ## Stage 3: Publish draft and record checks
 **Goal:** Open the authorized PR against dev with a concrete review packet and honest acceptance limits.
 **Success Criteria:** Branch pushed without force, PR attached, checks inspected, task records linked. Human Change summary and semantic labels remain explicitly pending; no merge or deployment.
 **Tests:** Final diff/task/secret checks, GitHub base/head/draft verification and initial CI status.
-**Status:** Not Started
+**Status:** In Progress
 
 Remove only this plan after completion; preserve external acceptance work in TASK-15505.6.

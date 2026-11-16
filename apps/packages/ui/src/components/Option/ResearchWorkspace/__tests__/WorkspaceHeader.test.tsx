@@ -393,7 +393,8 @@ vi.mock("antd", async () => {
   }
 })
 
-vi.mock("@/store/workspace", () => {
+vi.mock("@/store/workspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/store/workspace")>()
   const useWorkspaceStore = ((
     selector: (state: typeof mockStoreState) => unknown
   ) => selector(mockStoreState)) as ((
@@ -413,7 +414,7 @@ vi.mock("@/store/workspace", () => {
     Object.assign(mockStoreState, next)
   }
 
-  return { useWorkspaceStore, generateWorkspaceId: () => crypto.randomUUID(), hasResearchWorkspaceMigrationTombstone: () => true }
+  return { ...actual, useWorkspaceStore, generateWorkspaceId: () => crypto.randomUUID(), hasResearchWorkspaceMigrationTombstone: () => true }
 })
 
 // Launcher ownership is qualified separately with the real router/store/library.
@@ -1934,6 +1935,10 @@ describe("WorkspaceHeader workspace browser modal", () => {
 
   it("uses verified complete-pack enrollment before local adoption", async () => {
     const bundle = mockExportWorkspaceBundle()
+    bundle.workspace.chatSession = {
+      messages: [{ isBot: false, name: "You", message: "Undated complete-pack conversation", sources: [] }],
+      history: [{ role: "user", content: "Undated complete-pack conversation" }], historyId: null, serverChatId: null
+    }
     packMocks.parse.mockResolvedValue({ bundle, fingerprint: "verified" })
     packMocks.restore.mockResolvedValue({ bundle, identity: { id: "new-destination", name: "Imported", tag: "workspace:new-destination" } })
     renderAcpHeader()
@@ -1941,6 +1946,81 @@ describe("WorkspaceHeader workspace browser modal", () => {
     await waitFor(() => expect(packMocks.restore).toHaveBeenCalledOnce())
     expect(mockParseWorkspaceImportFile).not.toHaveBeenCalled()
     expect(mockImportWorkspaceBundle).toHaveBeenCalledWith(bundle, { identity: { id: "new-destination", name: "Imported", tag: "workspace:new-destination" }, verifiedCanonicalScopeKey: "test-alpha-user" })
+    expect(mockMessageApi.warning).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])("imports an undated snapshot and clears requested workspace routing only for a valid graph (%s)", async (malformed) => {
+    const { useWorkspaceStore: realStore, workspacePersistWriterInternals } =
+      await vi.importActual<typeof import("@/store/workspace")>("@/store/workspace")
+    const previous = realStore.getState()
+    realStore.getState().initializeWorkspace("Existing local research")
+    const startingId = realStore.getState().workspaceId
+    const bundle = mockExportWorkspaceBundle()
+    bundle.workspace.chatSession = {
+      messages: [{ isBot: false, name: "You", message: "Retain this older conversation", sources: [],
+        ...(malformed ? { parentMessageId: "missing-parent" } : {}) }],
+      history: [{ role: "user", content: "Retain this older conversation" }],
+      historyId: "old-browser-history", serverChatId: "old-server-chat"
+    }
+    mockParseWorkspaceImportFile.mockResolvedValue(bundle)
+    mockImportWorkspaceBundle.mockImplementation(realStore.getState().importWorkspaceBundle)
+    try {
+      renderAcpHeader()
+      fireEvent.change(screen.getByTestId("workspace-import-input"), { target: { files: [new File(["{}"], "older.workspace.json")] } })
+      await waitFor(() => expect(acpPersistence.scope.release).toHaveBeenCalled())
+      expect(mockImportWorkspaceBundle).toHaveBeenCalledWith(bundle)
+      expect(packMocks.legacy).not.toHaveBeenCalled()
+      expect(packMocks.restore).not.toHaveBeenCalled()
+      expect(acpPersistence.request).not.toHaveBeenCalled()
+      if (malformed) {
+        expect(realStore.getState().workspaceId).toBe(startingId)
+        expect(screen.getByText(/older workspace snapshot could not be opened/i)).toBeInTheDocument()
+        expect(mockMessageApi.warning).not.toHaveBeenCalled()
+        expect(mockNavigate).not.toHaveBeenCalled()
+      } else {
+        const imported = realStore.getState()
+        expect(imported.workspaceId).not.toBe(startingId)
+        expect(imported.getWorkspaceChatSession(imported.workspaceId)).toMatchObject({
+          messages: [{ id: expect.any(String), message: "Retain this older conversation" }],
+          historyId: null, serverChatId: null
+        })
+        expect(mockNavigate).toHaveBeenCalledWith("/research-workspace", { replace: true })
+        expect(mockMessageApi.warning).toHaveBeenCalledWith(
+          expect.stringMatching(/conversation.*stays in this browser.*missing message dates prevent chat recovery in another browser.*keep your export/i),
+          expect.any(Number)
+        )
+      }
+    } finally {
+      workspacePersistWriterInternals.cancelPendingWrite()
+      realStore.setState(previous, true)
+      workspacePersistWriterInternals.cancelPendingWrite()
+    }
+  })
+
+  it.each(["account", "workspace"])("does not import an older snapshot after %s changes while parsing", async (changed) => {
+    const bundle = mockExportWorkspaceBundle()
+    bundle.workspace.chatSession = {
+      messages: [{ isBot: false, name: "You", message: "Older conversation", sources: [] }],
+      history: [{ role: "user", content: "Older conversation" }], historyId: null, serverChatId: null
+    }
+    let finish!: (value: unknown) => void
+    mockParseWorkspaceImportFile.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const controller = new AbortController()
+    acpPersistence.scope = { ...acpPersistence.scope, scopeInvalidatedSignal: controller.signal }
+    const view = renderAcpHeader()
+    fireEvent.change(screen.getByTestId("workspace-import-input"), { target: { files: [new File(["{}"], "older.workspace.json")] } })
+    await waitFor(() => expect(mockParseWorkspaceImportFile).toHaveBeenCalledOnce())
+    if (changed === "account") controller.abort()
+    else {
+      mockStoreState.workspaceId = "workspace-beta"
+      view.rerender(<WorkspaceHeader leftPaneOpen rightPaneOpen onToggleLeftPane={vi.fn()} onToggleRightPane={vi.fn()} />)
+    }
+    finish(bundle)
+    await waitFor(() => expect(acpPersistence.scope.release).toHaveBeenCalled())
+    expect(mockImportWorkspaceBundle).not.toHaveBeenCalled()
+    expect(packMocks.legacy).not.toHaveBeenCalled()
+    expect(mockMessageApi.warning).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it("does not adopt an import after the workspace changes during restore", async () => {
@@ -1957,6 +2037,12 @@ describe("WorkspaceHeader workspace browser modal", () => {
   })
 
   it("imports workspace bundle file from the workspace menu", async () => {
+    const bundle = mockExportWorkspaceBundle()
+    bundle.workspace.chatSession = {
+      messages: [{ id: "dated-message", isBot: false, name: "You", message: "Dated conversation", sources: [], createdAt: 1000 }],
+      history: [{ role: "user", content: "Dated conversation" }], historyId: null, serverChatId: null
+    }
+    mockParseWorkspaceImportFile.mockResolvedValue(bundle)
     render(
       <WorkspaceHeader
         leftPaneOpen={true}
@@ -1977,6 +2063,8 @@ describe("WorkspaceHeader workspace browser modal", () => {
       expect(mockParseWorkspaceImportFile).toHaveBeenCalledWith(file)
       expect(mockImportWorkspaceBundle).toHaveBeenCalledTimes(1)
     })
+    expect(packMocks.legacy).toHaveBeenCalledWith(bundle, expect.objectContaining({ scope: acpPersistence.scope }))
+    expect(mockImportWorkspaceBundle).toHaveBeenCalledWith(bundle, expect.objectContaining({ verifiedCanonicalScopeKey: "test-alpha-user" }))
   })
 
   it("opens a visible import dialog, rejects unsafe files, and names imported workspaces", async () => {
