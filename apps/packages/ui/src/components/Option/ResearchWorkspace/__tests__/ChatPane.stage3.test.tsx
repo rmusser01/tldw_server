@@ -3,7 +3,9 @@ import { parseReasoning } from "@/libs/reasoning"
 import * as workspaceUndo from "../undo-manager"
 import { webcrypto } from "node:crypto"
 import { sha256Text } from "@/store/workspace-migration"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { SourceFeedback } from "@/components/Sidepanel/Chat/SourceFeedback"
 import type { ReactNode } from "react"
 import { MemoryRouter, useLocation } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -45,6 +47,8 @@ const mockSaveWorkspaceChatSession = vi.fn()
 const mockGetWorkspaceChatSession = vi.fn()
 const mockFocusSourceById = vi.fn()
 const mockFocusSourceByMediaId = vi.fn()
+const mockTrackSourceClick = vi.fn()
+const mockTrackCitation = vi.fn()
 const mockSetMessages = vi.fn()
 const mockSetHistory = vi.fn()
 const mockSetHistoryId = vi.fn()
@@ -265,7 +269,8 @@ vi.mock("@/components/Common/Playground/Message", () => ({
   }) => (
     <div>
       <div data-testid="playground-message">{message}</div>
-      {sources?.[0] && <button onClick={() => onSourceClick?.(sources[0])}>Open cited evidence</button>}
+      {sources?.[0] && <SourceFeedback source={sources[0]} sourceKey="citation" sourceIndex={0}
+        onSourceClick={onSourceClick} onTrackClick={mockTrackSourceClick} onTrackCitation={mockTrackCitation} />}
       <button onClick={onRegenerate}>Regenerate capture test</button>
       <button onClick={() => onEditFormSubmit?.("edited question", true)}>
         Edit and send capture test
@@ -477,18 +482,35 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     }
   })
 
-  it("opens a PDF citation at the recorded page instead of focusing only the source row", async () => {
+  it("expands a PDF citation in the workspace and lets explicit page links own navigation", async () => {
     workspaceStoreState.sources = [{id: "pdf-source", mediaId: 42, title: "Book", type: "pdf"}]
     messageOptionState.messages = [{id: "answer", isBot: true, name: "Assistant", message: "Cited answer", sources: [
-      {type: "pdf", metadata: {media_id: 42, page_number: 352}, pageContent: "Evidence"}
+      {name: "Cited PDF passage", type: "pdf", metadata: {media_id: 42, page_number: 871, page_spans: [
+        {page_number: 871, start_char: 100, end_char: 120, printed_page_label: "838"},
+        {page_number: 872, start_char: 122, end_char: 140, printed_page_label: "839"}
+      ]}, pageContent: "Evidence"}
     ]}]
     const Location = () => {
       const location = useLocation()
       return <output data-testid="citation-route">{location.pathname}{location.search}</output>
     }
-    render(<MemoryRouter><Location /><ChatPane /></MemoryRouter>)
-    fireEvent.click(await screen.findByRole("button", {name: "Open cited evidence"}))
-    expect(screen.getByTestId("citation-route").textContent).toBe("/document-workspace?open=42&page=352")
+    render(<MemoryRouter initialEntries={["/research-workspace?workspace=workspace-a"]}><Location /><ChatPane /></MemoryRouter>)
+    const user = userEvent.setup()
+    const summary = await screen.findByText("Cited PDF passage", {selector: "summary span"})
+    await user.click(summary)
+    expect(summary.closest("details")).toHaveAttribute("open")
+    expect(screen.getByTestId("citation-route").textContent).toBe("/research-workspace?workspace=workspace-a")
+    expect(mockFocusSourceByMediaId).not.toHaveBeenCalled()
+    expect(mockFocusSourceById).not.toHaveBeenCalled()
+    expect(mockTrackSourceClick).toHaveBeenCalledTimes(1)
+    expect(mockTrackCitation).not.toHaveBeenCalled()
+    const secondPage = within(summary.closest("details")!).getByRole("link", {name: "Open PDF page 872"})
+    expect(secondPage).toHaveAttribute("href", "/document-workspace?open=42&page=872")
+    expect(secondPage).toHaveAttribute("target", "_blank")
+    await user.click(secondPage)
+    expect(screen.getByTestId("citation-route").textContent).toBe("/research-workspace?workspace=workspace-a")
+    expect(mockTrackSourceClick).toHaveBeenCalledTimes(2)
+    expect(mockTrackCitation).toHaveBeenCalledTimes(1)
   })
 
   it("does not Undo into a replacement account after Clear", () => {

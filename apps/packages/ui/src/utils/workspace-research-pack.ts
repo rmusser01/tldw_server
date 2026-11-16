@@ -6,7 +6,7 @@ import {
 } from "@/store/workspace-bundle"
 import { OUTPUT_TYPES, type WorkspaceNote } from "@/types/workspace"
 import { renderSectionReviewExport } from "./section-artifact-review"
-import { stripKnowledgeNoteProvenance } from "./knowledge-note-provenance"
+import { projectPdfPageSpans, stripKnowledgeNoteProvenance } from "./knowledge-note-provenance"
 
 const PACK_FILE = "research-pack.json"
 const MAX_ENTRY_BYTES = 128 * 1024 * 1024
@@ -209,7 +209,10 @@ export const buildCompleteResearchPack = async ({ bundle, chatbook, notes, sourc
   const messages = bundle.workspace.chatSession?.messages || []
   zip.file("offline/chat.html", htmlPage("Saved conversation", messages.map(message => `<h2>${escapeHtml(message.name || (message.isBot ? "Assistant" : "You"))}</h2>${textBlock(message.message)}${(message.sources || []).filter(record).map(source => {
     const metadata = record(source.metadata) ? source.metadata : source
-    return `<blockquote>${escapeHtml(source.pageContent || source.content || "")}</blockquote><p>${pageLinks(metadata.media_id || metadata.mediaId, [{ page_number: metadata.page_number || metadata.pageNumber, printed_page_label: metadata.printed_page_label }], "")}</p>`
+    const spans = projectPdfPageSpans(metadata.page_spans)?.map(span => ({
+      page_number: span.pageNumber, printed_page_label: span.printedPageLabel
+    })) || [{ page_number: metadata.page_number || metadata.pageNumber, printed_page_label: metadata.printed_page_label }]
+    return `<blockquote>${escapeHtml(source.pageContent || source.content || "")}</blockquote><p>${pageLinks(metadata.media_id || metadata.mediaId, spans, "")}</p>`
   }).join("")}`).join("")))
   zip.file("offline/annotations.html", htmlPage("Source annotations", textBlock(JSON.stringify(bundle.workspace.snapshot.sourceAnnotations || {}, null, 2))))
   zip.file("offline/index.html", htmlPage(bundle.workspace.name, `<p>Offline copy. Generated drafts and recorded reviews are preserved separately. Editable migration requires the complete ZIP in Research Workspace.</p><h2>Original sources</h2><ul>${sourceLinks.join("")}</ul><h2>Reports</h2><ul>${reportLinks.join("")}</ul><h2>Saved Notes</h2><ul>${noteLinks.join("")}</ul><p><a href="chat.html">Saved conversation and citations</a> · <a href="annotations.html">Source annotations</a></p>`))

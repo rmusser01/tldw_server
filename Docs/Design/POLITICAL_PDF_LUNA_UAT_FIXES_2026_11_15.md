@@ -12,6 +12,8 @@ The first Luna answers correctly state the two sampled proposals but contain no 
 
 Retrieved excerpts already carry canonical page spans, while cards display only the first page and saved conversation provenance drops the spans. Validate and display the full bounded page list/range and page-specific PDF actions. Preserve optional strict page spans through the existing shared Notes/conversation provenance contract, including its Python validator and export/import consumers. Existing single-page records remain valid; malformed ranges use the existing safe fallback. Cap optional spans at 20 using existing provenance bounds and do not change source quotations or IDs.
 
+Connected live checks require two presentation callers to follow the same contract: opening a PDF citation disclosure stays in the chat so its explicit page links can be chosen, and complete-pack `offline/chat.html` renders every validated page through its existing bundled-PDF link helper. Preserve non-PDF source focus, telemetry, legacy one-page fallback and archive escaping/identity checks.
+
 Some vector results lack Media type/URL, preventing a direct PDF action. The existing context expansion step already loads the authorized owning Media row. Enrich returned metadata from that verified row, preserving scope checks, hidden-parent filtering and exact source-offset validation. Do not infer PDF type from names, issue additional reads, reindex embeddings, or change ranking. This reaches old and new vectors through one production owner.
 
 ## Verification and architecture

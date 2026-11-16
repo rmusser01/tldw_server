@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { portableFixture } from "./fixtures/portable-workspace"
 import { buildCompleteResearchPack, parseCompleteResearchPack, readBlobBytes, readBoundedZipEntry, sha256Bytes } from "../workspace-research-pack"
 import { parseWorkspaceImportFile } from "@/store/workspace-bundle"
+import { projectWorkspaceRagSources, restoreWorkspaceRagSources } from "../workspace-rag-sources"
 
 const pdf = Uint8Array.from(new TextEncoder().encode("%PDF-1.7 exact original bytes"))
 const chatbook = async (missing = false) => {
@@ -134,6 +135,50 @@ describe("complete research pack archive", () => {
     const href = /href="([^"]+#page=352)"/.exec(html)![1]
     const target = new URL(href, "https://offline.test/offline/chat.html")
     expect(zip.file(target.pathname.slice(1))).not.toBeNull()
+  })
+
+  it.each(["live", "restored"])("links every PDF page in %s chat citations to the exact bundled original", async mode => {
+    const bundle = portableFixture()
+    const source = { name: "PDF", type: "pdf", pageContent: "Exact quote across pages", metadata: {
+      media_id: 1, page_number: 871, citation_index: 6, chunk_id: "chunk-2843",
+      page_spans: [
+        { page_number: 871, start_char: 100, end_char: 120, printed_page_label: "838" },
+        { page_number: 872, start_char: 122, end_char: 140, printed_page_label: "839" }
+      ]
+    } }
+    bundle.workspace.chatSession!.messages[0].sources = mode === "live" ? [source]
+      : restoreWorkspaceRagSources(JSON.parse(JSON.stringify(projectWorkspaceRagSources([source]))))
+    const blob = await buildCompleteResearchPack({ bundle, chatbook: await chatbook(), notes: [bundle.workspace.snapshot.currentNote], sourceWorkspaceId: "old" })
+    const zip = await JSZip.loadAsync(await readBlobBytes(blob))
+    const document = new DOMParser().parseFromString(await zip.file("offline/chat.html")!.async("string"), "text/html")
+    const links = Array.from(document.querySelectorAll("a"))
+    expect(links.map(link => link.textContent)).toEqual(["PDF page 871 (printed 838)", "PDF page 872 (printed 839)"])
+    expect(document.querySelector("blockquote")?.textContent).toBe(source.pageContent)
+    for (const [index, link] of links.entries()) {
+      const target = new URL(link.getAttribute("href")!, "https://offline.test/offline/chat.html")
+      expect(target.hash).toBe(`#page=${871 + index}`)
+      expect(await zip.file(target.pathname.slice(1))!.async("uint8array")).toEqual(pdf)
+    }
+    expect((await parseCompleteResearchPack(new File([await readBlobBytes(blob)], "complete.zip")))?.bundle).toEqual(JSON.parse(JSON.stringify(bundle)))
+  })
+
+  it("keeps legacy fallback for malformed chat spans without linking unbundled media or interpreting HTML", async () => {
+    const bundle = portableFixture()
+    const source = { name: "PDF", pageContent: "<script>untrusted excerpt</script>", metadata: {
+      media_id: 1, page_number: 871, printed_page_label: '<img src=x onerror="alert(1)">',
+      page_spans: [{ page_number: 872, start_char: 140, end_char: 100 }]
+    } }
+    bundle.workspace.chatSession!.messages[0].sources = [source, { ...source, metadata: {
+      media_id: 999, page_number: 872,
+      page_spans: [{ page_number: 872, start_char: 100, end_char: 140 }]
+    } }]
+    const blob = await buildCompleteResearchPack({ bundle, chatbook: await chatbook(), notes: [bundle.workspace.snapshot.currentNote], sourceWorkspaceId: "old" })
+    const zip = await JSZip.loadAsync(await readBlobBytes(blob))
+    const document = new DOMParser().parseFromString(await zip.file("offline/chat.html")!.async("string"), "text/html")
+    expect(Array.from(document.querySelectorAll("a")).map(link => link.getAttribute("href"))).toEqual(["sources/media-1.pdf#page=871"])
+    expect(document.querySelector("a")?.textContent).toBe(`PDF page 871 (printed ${source.metadata.printed_page_label})`)
+    expect(document.querySelector("blockquote")?.textContent).toBe(source.pageContent)
+    expect(document.querySelector("script, img")).toBeNull()
   })
 
   it.each(["file", "inventory"])("rejects nested account restoration via %s", async mode => {

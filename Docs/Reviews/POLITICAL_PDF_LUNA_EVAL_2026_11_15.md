@@ -20,6 +20,29 @@ The CLI freezes 13 existing questions and page fingerprints. H05 is a tuned regr
 | Review | A review-save attempt retained the draft but reported a stale-output conflict despite matching version numbers. Generation had omitted canonical metadata, causing the strict review guard to reject the payload. | Producer repair underway; no false accepted label was written. |
 | Notes | The FEC draft was explicitly saved to a new workspace Note and appeared in its pinned Notes list. | A saved draft does not imply factual acceptance. |
 
+## Frozen question results
+
+The corrected run at `b6b285147b` retained all 26 first responses, with no QA retries: 13 reference-page and 13 retrieved-context answers. All returned `gpt-6-luna`, finished normally, and passed JSON/evidence-ID checks. Reported usage was 45,095 prompt tokens and 20,721 completion tokens, including 13,036 reasoning tokens. Median completion latency was 7.694 seconds; these are serial local observations with a separate summary job running, not a load benchmark.
+
+| Retrieval mode | Cases with every expected page | Expected pages found | Median seconds |
+|---|---:|---:|---:|
+| Text | 11/13 | 15/17 | 1.232 |
+| Vector | 10/13 | 13/17 | 0.290 |
+| Hybrid | 12/13 | 16/17 | 1.348 |
+
+All results stayed within the selected source. R02's expected physical page 909 was absent in all three modes. Page coverage is not semantic recall: R05 retrieved the expected page number but omitted the numerical passage needed to answer the question.
+
+Agent source audit classified 22 answers as broadly supported, one as material misattribution, one as a bounded omission, and two as retrieval/context limitations. Minor wording and attribution concerns remain itemized in the private audit; 22 is not an all-claims-perfect accuracy score. Human labels remain unfilled.
+
+| Case/context | Finding |
+|---|---|
+| R03/reference | Correct report years and arguments, but invented author “Richard A. Hazelton” twice. The original PDF credits Jennifer Hazelton on physical page 757; the supplied reference passages did not support expanding her name. |
+| H03/retrieved | Omitted the proposed CDC firewall even though the retrieved context supplied it. Added source-supported material was less relevant to the question. |
+| R02/retrieved | Regional-office passage missing. Luna appropriately abstained from naming the requested agency. |
+| R05/retrieved | Requested 2007/2014 authorization figures missing. Luna acknowledged that limitation instead of inventing them. |
+
+The [prior DeepSeek audit](POLITICAL_PDF_CLAIM_REVIEW_2026_11_15.md) used a different runtime configuration and did not contain this same two-context matrix. These results support case-level comparison and future controlled runs, not a model ranking or a claim that either model is safe for unattended dissemination.
+
 ## NN/g issue tracking
 
 Agent heuristic evaluation uses [NN/g's ten heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/) and [0–4 severity scale](https://www.nngroup.com/articles/how-to-rate-the-severity-of-usability-problems/), considering frequency, impact and persistence. These are not VIP participant observations.
@@ -28,7 +51,7 @@ Agent heuristic evaluation uses [NN/g's ten heuristics](https://www.nngroup.com/
 |---|---|---|---|---|
 | UX-PDF-63 | Selecting a supported GPT-6 model produced a generic invalid-request error because the adapter sent incompatible token/sampling parameters. | H1, H4, H5, H9 | 3 | Fixed in the shared native OpenAI adapter; actual app completion and chapter job passed. |
 | UX-PDF-64 | A cross-page retrieval card displays the first page only; some vector cards lack a direct PDF link. The default answer prompt also does not request inline source markers. Correct answer text is harder to verify. | H2, H4, H6 | 3 | Range rendering/persistence, authoritative Media type enrichment and default citation instruction under repair. First UI response retained. |
-| UX-PDF-65 | Saving a review on a freshly completed output reports a conflict with the same server version. The draft survives, but the reviewer cannot finish the task. | H1, H3, H9 | 3 | Canonical metadata was dropped by generation projection; repair preserves the review guard. |
+| UX-PDF-65 | Saving a review on a freshly completed output reports a conflict with the same server version. The draft survives, but the reviewer cannot finish the task. | H1, H3, H9 | 3 | Producer now retains canonical metadata; connected generation-to-review tests pass and the review guard remains intact. Live full-job review is pending. |
 
 ## Verification and limits
 

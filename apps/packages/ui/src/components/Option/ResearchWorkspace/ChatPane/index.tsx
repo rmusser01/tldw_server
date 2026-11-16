@@ -78,7 +78,7 @@ import {
 } from "@/utils/message-variants"
 import { buildConversationShareUrl } from "@/components/Layouts/chat-share-links"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
-import { Link, useNavigate } from "react-router-dom"
+import { Link } from "react-router-dom"
 import { EmptyState } from "@/components/ui/feedback/EmptyState"
 import { ChatModelSelectorDropdown } from "@/components/Option/Playground/ChatModelSelectorDropdown"
 import { buildChatLorebookDebugPath, buildDocumentPagePath } from "@/routes/route-paths"
@@ -1223,7 +1223,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [t]
   )
   const isMobile = useMobile()
-  const navigate = useNavigate()
   const [messageApi, messageContextHolder] = message.useMessage()
 
   // Workspace store
@@ -2888,7 +2887,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       const type = source?.type || record?.type || metadata?.type || metadata?.media_type
       const pagePath = type === "pdf" ? buildDocumentPagePath(citationMediaId, metadata?.page_number ?? record?.page_number) : null
       if (pagePath) {
-        navigate(pagePath)
+        // The disclosure stays in chat; its explicit page links own navigation.
         return
       }
       if (citationMediaId !== null && focusSourceByMediaId(citationMediaId)) {
@@ -2903,7 +2902,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     [
       focusSourceById,
       focusSourceByMediaId,
-      navigate,
       provenanceEnabled,
       sources,
       workspaceSessionId
