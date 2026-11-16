@@ -61,6 +61,7 @@ from tldw_Server_API.app.core.Chat.generation_metadata import (
     GenerationMetadataError,
     validate_generation_metadata,
 )
+from tldw_Server_API.app.core.Chat.workspace_references import validate_workspace_references
 
 IMPORT_FINGERPRINT_SCHEMA_VERSION = 1
 IMPORT_AUTHORITY_VERSION = 1
@@ -430,6 +431,9 @@ def chat_import_fingerprint(
         "conversation": {field: conversation.get(field) for field in _CONVERSATION_FIELDS},
         "messages": list(messages),
     }
+    # Preserve the historical global fingerprint so existing receipts still replay.
+    if conversation.get("scope_type") == "workspace":
+        payload["scope"] = {"scope_type": "workspace", "workspace_id": conversation["workspace_id"]}
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
     return hashlib.sha256(encoded.encode("ascii")).hexdigest()
 
@@ -462,6 +466,16 @@ def prepare_chat_import(
         ValueError: ``request["id"]`` is not a usable UUID.
     """
     conversation_id = normalize_client_conversation_id(request["id"])
+    scope_type = request.get("scope_type", "global")
+    workspace_id = request.get("workspace_id")
+    if scope_type not in {"global", "workspace"} or (
+        scope_type == "global" and workspace_id is not None
+    ) or (
+        scope_type == "workspace" and (
+            not isinstance(workspace_id, str) or not workspace_id or workspace_id != workspace_id.strip()
+        )
+    ):
+        raise ChatImportError("invalid_scope", 422, "Choose global scope or an exact workspace ID.")
     latest = now.astimezone(timezone.utc) + timedelta(seconds=limits.max_future_skew_seconds)
 
     title = _text(request.get("title"), field="title")
@@ -490,6 +504,22 @@ def prepare_chat_import(
         moment = _timestamp(message.get("timestamp"), field="timestamp", latest=latest, message_id=message_id)
         newest = moment if newest is None or moment > newest else newest
         metadata = _generation_metadata(message.get("metadata"), role=role, message_id=message_id)
+        references = message.get("metadata_extra")
+        if references is not None:
+            if (scope_type != "workspace" or role != "assistant" or not isinstance(references, dict)
+                    or set(references) != {"workspace_rag_sources_v1"}):
+                raise ChatImportError(
+                    "unsupported_metadata", 422,
+                    "Only workspace assistant messages may import workspace_rag_sources_v1 references.",
+                    message_id=message_id,
+                )
+            try:
+                references = {"workspace_rag_sources_v1": validate_workspace_references(references["workspace_rag_sources_v1"])}
+            except ValueError:
+                raise ChatImportError(
+                    "unsupported_metadata", 422, "Workspace references are invalid or exceed their limits.",
+                    message_id=message_id,
+                ) from None
 
         images: list[dict[str, Any]] = []
         digests: list[list[Any]] = []
@@ -525,7 +555,7 @@ def prepare_chat_import(
                 "content": content,
                 "timestamp": timestamp,
                 "images": images,
-                "extra_metadata": {"sender_role": role, **metadata},
+                "extra_metadata": {"sender_role": role, **metadata, **(references or {})},
             }
         )
         canonical.append(
@@ -539,6 +569,8 @@ def prepare_chat_import(
                 "metadata": metadata or None,
             }
         )
+        if references is not None:
+            canonical[-1]["metadata_extra"] = references
 
     created = _timestamp(request.get("created_at"), field="created_at", latest=latest)
     if request.get("last_modified") is not None:
@@ -564,6 +596,8 @@ def prepare_chat_import(
         "persona_memory_mode": request.get("persona_memory_mode"),
         "parent_conversation_id": request.get("parent_conversation_id"),
         "forked_from_message_id": request.get("forked_from_message_id"),
+        "scope_type": scope_type,
+        "workspace_id": workspace_id,
     }
     return PreparedChatImport(
         conversation_id=conversation_id,

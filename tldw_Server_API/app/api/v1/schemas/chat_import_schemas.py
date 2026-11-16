@@ -7,9 +7,9 @@ binding, fork lineage) and its messages (``id``, ``parent_message_id``,
 
 Every model is closed (``extra="forbid"``). An import is lossless or it is
 refused, so a field the server would not store is an error, not something to
-ignore. That also means the body cannot name an owner, a scope, a version or a
-deleted flag: the chat always goes to the authenticated account, in the global
-chat scope, as live version-1 rows.
+ignore. The body cannot name an owner, a version or a deleted flag: the chat
+always goes to the authenticated account as live version-1 rows. Explicit
+workspace scope requires an available workspace owned by that account.
 """
 
 from __future__ import annotations
@@ -119,6 +119,13 @@ class ChatImportMessage(BaseModel):
             "any other key is refused."
         ),
     )
+    metadata_extra: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "For a workspace assistant message only: workspace_rag_sources_v1 recorded references. "
+            "Unknown fields are refused. References confer no Media access."
+        ),
+    )
 
 
 class ChatImportRequest(BaseModel):
@@ -162,6 +169,8 @@ class ChatImportRequest(BaseModel):
         json_schema_extra={"format": "uuid"},
     )
     title: str = Field(..., min_length=1, description="Chat title")
+    scope_type: Literal["global", "workspace"] = Field("global", description="Destination conversation scope")
+    workspace_id: ImportReference | None = Field(None, description="Owned destination workspace for workspace scope")
     state: str | None = Field(None, description="Lifecycle state for the conversation")
     created_at: ImportTimestamp = Field(..., description="When the chat was created: ISO 8601 with a UTC offset")
     last_modified: ImportTimestamp | None = Field(
@@ -222,6 +231,11 @@ class ChatImportRequest(BaseModel):
     @model_validator(mode="after")
     def _normalize_binding_and_lineage(self) -> ChatImportRequest:
         """Normalize the assistant binding the way chat creation does, and require a fork's parent."""
+        if self.scope_type == "workspace":
+            if not self.workspace_id or self.workspace_id != self.workspace_id.strip():
+                raise ValueError("workspace scope requires an exact nonblank workspace_id")
+        elif self.workspace_id is not None:
+            raise ValueError("workspace_id requires workspace scope")
         if self.forked_from_message_id is not None and self.parent_conversation_id is None:
             raise ValueError("forked_from_message_id requires parent_conversation_id")
 
