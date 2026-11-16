@@ -76,14 +76,16 @@ async def test_pdf_cancellation_skips_pending_ocr_pages(monkeypatch, tmp_path):
     monkeypatch.setattr(pdf, "_get_ocr_backend", lambda _: OCR())
     monkeypatch.setenv("OCR_PAGE_CONCURRENCY", "1")
 
-    result = await pdf.process_pdf_task(
-        file_bytes=source.read_bytes(),
-        filename=source.name,
-        enable_ocr=True,
-        ocr_mode="always",
-        ocr_dpi=72,
-        cancel_check=cancelled.is_set,
-    )
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.job_progress import pdf_job_progress
+
+    with pdf_job_progress(cancelled.is_set):
+        result = await pdf.process_pdf_task(
+            file_bytes=source.read_bytes(),
+            filename=source.name,
+            enable_ocr=True,
+            ocr_mode="always",
+            ocr_dpi=72,
+        )
 
     assert result["status"] == "Cancelled"
     assert calls == ["ocr"]

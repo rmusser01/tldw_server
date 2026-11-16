@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_dat
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.job_progress import pdf_job_progress
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     apply_chunking_template_if_any,
@@ -697,21 +698,24 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             else:
                 publish_progress(20, "process")
 
-            result = await process_document_like_item(
-                item_input_ref=str(input_ref),
-                processing_source=str(source),
-                media_type=form_data.media_type,
-                is_url=(source_kind == "url"),
-                form_data=form_data,
-                chunk_options=chunk_options,
-                temp_dir=temp_dir,
-                loop=loop,
-                db_path=str(db_path),
-                client_id=str(client_id),
-                user_id=int(user_id) if user_id.isdigit() else None,
-                cancel_check=cancel_check,
-                pdf_progress_callback=publish_progress if is_pdf else None,
+            progress_scope = (
+                pdf_job_progress(cancel_check, publish_progress) if is_pdf else contextlib.nullcontext()
             )
+            with progress_scope:
+                result = await process_document_like_item(
+                    item_input_ref=str(input_ref),
+                    processing_source=str(source),
+                    media_type=form_data.media_type,
+                    is_url=(source_kind == "url"),
+                    form_data=form_data,
+                    chunk_options=chunk_options,
+                    temp_dir=temp_dir,
+                    loop=loop,
+                    db_path=str(db_path),
+                    client_id=str(client_id),
+                    user_id=int(user_id) if user_id.isdigit() else None,
+                    cancel_check=cancel_check,
+                )
             results = [result]
 
         if cancel_check() or (not publish_progress(90, "finalize") and is_pdf):
