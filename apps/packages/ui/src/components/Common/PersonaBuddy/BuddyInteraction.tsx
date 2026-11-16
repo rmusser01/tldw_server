@@ -22,6 +22,11 @@ import {
 } from "@/services/buddies"
 import type { BuddyDraftState } from "./buddy-drafts"
 import { buddyConversationLabels } from "./buddy-conversation-labels"
+import {
+  buddyFailureSignature,
+  startBuddyPoll,
+  type BuddyPoll
+} from "./buddy-poll-schedule"
 import { useStoreMessageOption } from "@/store/option"
 import type { PersonaVisualStateId } from "@/types/persona-visuals"
 import type { ServerChatMessage } from "@/services/tldw/TldwApiClient"
@@ -190,6 +195,7 @@ export const BuddyInteraction = ({
   React.useEffect(() => {
     let active = true
     let pending = false
+    let schedule: BuddyPoll | null = null
     const poll = async () => {
       if (pending) return
       pending = true
@@ -228,6 +234,23 @@ export const BuddyInteraction = ({
         onAttentionChange?.(
           scopedActivity.filter((item) => !item.acknowledged).length
         )
+        // Report what this read saw so quiet polls back off (WP-39): turn
+        // lifecycle changes and new/acknowledged activity results are what
+        // this panel renders from.
+        schedule?.settle(
+          JSON.stringify([
+            scopedTurns.map((turn) => [
+              turn.id,
+              turn.status,
+              turn.updated_at
+            ]),
+            scopedActivity.map((item) => [
+              item.result.id,
+              item.acknowledged
+            ]),
+            results.hasMore ?? results.turns.length >= turnPages * 100
+          ])
+        )
         if (visible && conversation) {
           const result = await readBuddyConversation(
             attachment,
@@ -265,10 +288,11 @@ export const BuddyInteraction = ({
         if (seenResults.current.size > 500)
           seenResults.current = new Set([...seenResults.current].slice(-250))
       } catch (e) {
+        const message =
+          e instanceof Error ? e.message : "Buddy interaction unavailable"
+        schedule?.settle(buddyFailureSignature(message))
         if (active) {
-          setLoadError(
-            e instanceof Error ? e.message : "Buddy interaction unavailable"
-          )
+          setLoadError(message)
           setTranscript({ conversationId: "", messages: [] })
           setTurns([])
           setActivity([])
@@ -280,11 +304,17 @@ export const BuddyInteraction = ({
         pending = false
       }
     }
-    void poll()
-    const timer = window.setInterval(() => void poll(), 4000)
+    // WP-39: this poll used to be a fixed 4 s interval that ran whenever a
+    // buddy was attached, even with the panel closed or the page hidden. The
+    // shared Buddy schedule keeps the fast cadence only while the panel is
+    // open (and the page visible), skips hidden pages, and backs off to once
+    // a minute while the panel stays closed.
+    schedule = startBuddyPoll(() => void poll(), {
+      isActive: () => visible
+    })
     return () => {
       active = false
-      window.clearInterval(timer)
+      schedule?.stop()
     }
   }, [
     attachment,

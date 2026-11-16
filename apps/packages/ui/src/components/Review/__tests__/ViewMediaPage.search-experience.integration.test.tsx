@@ -436,9 +436,11 @@ describe('ViewMediaPage metadata search integration', () => {
       target: { value: 'library' }
     })
     await waitFor(() => {
+      // WP-43: the type-discovery fan-out is gone; the mount search listing
+      // is the settle signal.
       expect(mocks.bgRequest).toHaveBeenCalledWith(
         expect.objectContaining({
-          path: '/api/v1/media/?page=1&results_per_page=50'
+          path: '/api/v1/media/?page=1&results_per_page=20&include_keywords=true'
         })
       )
     })
@@ -473,9 +475,11 @@ describe('ViewMediaPage metadata search integration', () => {
       target: { value: 'library' }
     })
     await waitFor(() => {
+      // WP-43: the type-discovery fan-out is gone; the mount search listing
+      // is the settle signal.
       expect(mocks.bgRequest).toHaveBeenCalledWith(
         expect.objectContaining({
-          path: '/api/v1/media/?page=1&results_per_page=50'
+          path: '/api/v1/media/?page=1&results_per_page=20&include_keywords=true'
         })
       )
     })

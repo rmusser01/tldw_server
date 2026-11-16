@@ -188,11 +188,65 @@ it("an incidental enabled mount reuses a verified nonempty current catalog witho
   const client = createQueryClient()
   const models = [{ model: "verified-current", provider: "openai" }]
   client.setQueryData(["playground:chatModels", 0], models)
-  const wrapper = ({ children }: React.PropsWithChildren<object>) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
   const hook = renderHook(() => useChatModelCatalog(true), { wrapper })
   expect(hook.result.current.data).toEqual(models)
   expect(hook.result.current.isSuccess).toBe(true)
   expect(io.fetch).not.toHaveBeenCalled()
   hook.unmount()
   client.clear()
+})
+
+it("a remount past the old 30s window but inside the 15-minute stale window does not re-fetch the catalog", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    io.fetch.mockResolvedValue([{ model: "cached-catalog" }])
+    const client = createQueryClient()
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    const first = renderHook(() => useChatModelCatalog(true), { wrapper })
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true))
+    expect(io.fetch).toHaveBeenCalledTimes(1)
+    first.unmount()
+    act(() => { vi.advanceTimersByTime(31_000) })
+    const second = renderHook(() => useChatModelCatalog(true), { wrapper })
+    await waitFor(() => expect(second.result.current.isSuccess).toBe(true))
+    expect(second.result.current.data).toEqual([{ model: "cached-catalog" }])
+    expect(io.fetch).toHaveBeenCalledTimes(1)
+    second.unmount()
+    client.clear()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it("an unmounted catalog survives past the default 5-minute gc window inside the stale window", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  try {
+    io.fetch.mockResolvedValue([{ model: "held-catalog" }])
+    const client = createQueryClient()
+    const wrapper = ({ children }: { children: React.ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    const first = renderHook(() => useChatModelCatalog(true), { wrapper })
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true))
+    expect(io.fetch).toHaveBeenCalledTimes(1)
+    first.unmount()
+    act(() => { vi.advanceTimersByTime(6 * 60_000) })
+    const second = renderHook(() => useChatModelCatalog(true), { wrapper })
+    await waitFor(() => expect(second.result.current.isSuccess).toBe(true))
+    expect(second.result.current.data).toEqual([{ model: "held-catalog" }])
+    expect(io.fetch).toHaveBeenCalledTimes(1)
+    second.unmount()
+    client.clear()
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+it("an explicit refresh forces a fresh read even while the catalog is fresh", async () => {
+  io.fetch.mockResolvedValue([{ model: "authoritative" }])
+  const { result } = setup()
+  await waitFor(() => expect(result.current.isSuccess).toBe(true))
+  expect(io.fetch).toHaveBeenCalledTimes(1)
+  await act(async () => { await result.current.refetch() })
+  expect(io.fetch).toHaveBeenCalledTimes(2)
+  expect(result.current.data).toEqual([{ model: "authoritative" }])
 })

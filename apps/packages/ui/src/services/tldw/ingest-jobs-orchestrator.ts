@@ -158,11 +158,15 @@ export const createIngestJobsTracker = <TMeta>() => {
       for (const item of tracked.values()) {
         pending.add(item.batchId)
       }
-      for (const batchId of pending) {
-        if (!batchId || cancelledBatches.has(batchId)) continue
-        cancelledBatches.add(batchId)
-        await cancelBatch(batchId)
-      }
+      // Batch cancels are independent per batch: fan them out together
+      // instead of paying one round-trip per tracked batch (WP-38).
+      await Promise.all(
+        Array.from(pending).map(async (batchId) => {
+          if (!batchId || cancelledBatches.has(batchId)) return
+          cancelledBatches.add(batchId)
+          await cancelBatch(batchId)
+        })
+      )
     }
   }
 }
@@ -330,8 +334,16 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
       number,
       IngestJobStatusResponse | undefined
     >()
-    for (const [batchId, batchJobIds] of jobsByBatch) {
-      const response = await options.fetchJobs?.(batchId, batchJobIds)
+    // Batch status fetches are independent per batch: issue them together so
+    // a poll round costs one round-trip, not one per tracked batch (WP-37).
+    const batchEntries = Array.from(jobsByBatch.entries())
+    const batchResponses = await Promise.all(
+      batchEntries.map(([batchId, batchJobIds]) =>
+        options.fetchJobs?.(batchId, batchJobIds)
+      )
+    )
+    batchEntries.forEach(([, batchJobIds], index) => {
+      const response = batchResponses[index]
       const jobs = response?.ok ? response.data?.jobs : null
       if (Array.isArray(jobs)) {
         for (const job of jobs) {
@@ -351,7 +363,7 @@ export const pollTrackedIngestJobs = async <TMeta, TResult>(
           responsesByJob.set(jobId, response)
         }
       }
-    }
+    })
 
     let observedTerminal = false
     for (const [jobId, item] of Array.from(unresolved.entries())) {
