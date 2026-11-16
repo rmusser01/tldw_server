@@ -1048,9 +1048,12 @@ export const chatRagMethods = {
       status === 409 ||
       status === 412 ||
       hasStructuredConflictCode ||
-      message.includes("version conflict") ||
-      message.includes("expected_version") ||
-      message.includes("stale")
+      // Transport errors include the request URL, which may name expected_version.
+      (!Number.isFinite(status) && (
+        message.includes("version conflict") ||
+        message.includes("expected_version") ||
+        message.includes("stale")
+      ))
     )
   },
 
