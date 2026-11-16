@@ -31,7 +31,6 @@ Usage (legacy only):
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import os
 from pathlib import Path
@@ -47,20 +46,19 @@ from tldw_Server_API.app.api.v1.endpoints.media_embeddings import (
     generate_embeddings_for_media,
 )
 from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
-from tldw_Server_API.app.core.Chunking.chunker import Chunker
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import resolve_user_id_value
+from tldw_Server_API.app.core.Chunking.chunker import Chunker
+from tldw_Server_API.app.core.config import settings
+from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
     DatabasePaths,
     get_user_media_db_path,
 )
-from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import _kanban_card_indexable
-from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
-from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_id
+from tldw_Server_API.app.core.DB_Management.media_db.api import get_media_by_id, managed_media_database
 from tldw_Server_API.app.core.Embeddings.ChromaDB_Library import ChromaDBManager
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
-from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.testing import is_truthy
 
 _EMBEDDINGS_DOMAIN = "embeddings"
@@ -620,8 +618,10 @@ async def _handle_embedding_job(
         "embeddings_path",
         _embedding_artifact_path(artifact_dir),
     )
-    if embeddings_path.exists() and not force_regenerate:
-        stored = _read_json(embeddings_path)
+    stored = _read_json(embeddings_path) if embeddings_path.exists() and not force_regenerate else None
+    stored_provider = stored.get("embedding_provider", embedding_provider) if isinstance(stored, dict) else embedding_provider
+    verified_coverage = isinstance(stored, dict) and stored.get("input_coverage_version") == 1
+    if stored is not None and (stored_provider != "huggingface" or verified_coverage):
         if isinstance(stored, dict):
             embeddings = stored.get("embeddings") or []
             embedding_model = stored.get("embedding_model") or embedding_model
@@ -660,8 +660,11 @@ async def _handle_embedding_job(
     try:
         from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import (
             create_embeddings_batch_async,
+            prepare_media_chunks_for_embedding,
         )
 
+        chunks = await prepare_media_chunks_for_embedding(chunks, embedding_provider, embedding_model)
+        chunk_texts = [chunk["text"] for chunk in chunks]
         embeddings = await create_embeddings_batch_async(
             texts=chunk_texts,
             provider=embedding_provider,
@@ -677,6 +680,8 @@ async def _handle_embedding_job(
         if embedding_model != FALLBACK_EMBEDDING_MODEL:
             logger.warning(f"Failed with {embedding_model}, trying fallback {FALLBACK_EMBEDDING_MODEL}")
             try:
+                chunks = await prepare_media_chunks_for_embedding(chunks, "huggingface", FALLBACK_EMBEDDING_MODEL)
+                chunk_texts = [chunk["text"] for chunk in chunks]
                 embeddings = await create_embeddings_batch_async(
                     texts=chunk_texts,
                     provider="huggingface",
@@ -693,8 +698,11 @@ async def _handle_embedding_job(
         else:
             raise EmbeddingsJobError(str(exc), retryable=True) from exc
 
+    _write_json(chunks_path, chunks)
+    _update_root_result(root_uuid, result={"total_chunks": len(chunks)})
     embeddings_list = _normalize_embeddings(embeddings)
     payload_to_store = {
+        "input_coverage_version": 1,
         "embeddings": embeddings_list,
         "embedding_model": embedding_model,
         "embedding_provider": embedding_provider,
@@ -735,6 +743,8 @@ async def _handle_storage_job(
     if storage_path.exists() and not force_regenerate:
         stored = _read_json(storage_path)
         if isinstance(stored, dict):
+            if stored.get("embedding_provider", embedding_provider) == "huggingface" and stored.get("input_coverage_version") != 1:
+                raise EmbeddingsJobError("Embedding input coverage is unverified; regenerate the index", retryable=False)
             return stored
         raise EmbeddingsJobError(
             "Storage artifact invalid for idempotent reuse",
@@ -754,6 +764,10 @@ async def _handle_storage_job(
         embedding_provider = stored_embeddings.get("embedding_provider") or embedding_provider
     else:
         embeddings = stored_embeddings
+    if embedding_provider == "huggingface" and (
+        not isinstance(stored_embeddings, dict) or stored_embeddings.get("input_coverage_version") != 1
+    ):
+        raise EmbeddingsJobError("Embedding input coverage is unverified; regenerate the index", retryable=False)
     if not isinstance(embeddings, list):
         raise EmbeddingsJobError("Embeddings payload invalid for storage stage", retryable=False)
 
@@ -827,6 +841,7 @@ async def _handle_storage_job(
         )
 
     result = {
+        "input_coverage_version": 1,
         "embedding_count": len(embeddings),
         "chunks_processed": len(chunks),
         "total_chunks": len(chunks),

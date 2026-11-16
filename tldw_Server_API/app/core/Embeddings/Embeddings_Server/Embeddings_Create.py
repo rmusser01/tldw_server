@@ -16,7 +16,7 @@ import threading
 import time
 import warnings
 import weakref
-from functools import partial, wraps
+from functools import lru_cache, partial, wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -26,6 +26,8 @@ import numpy as np
 from loguru import logger
 from prometheus_client import REGISTRY, Counter, Gauge  # Assuming these are defined elsewhere or used directly
 from pydantic import BaseModel, Field
+
+from tldw_Server_API.app.core.Embeddings.input_limits import split_chunks_to_token_budget, validate_token_budget
 
 # Was a fourth copy with NO message-text branch and inverted attribute precedence
 # (exc.status_code before exc.response, never exc.status), so an aiohttp
@@ -1377,6 +1379,83 @@ def estimate_model_size(model_name: str, model_path: str | None = None) -> float
         return 1.0  # Default estimate
 
 
+def format_hf_embedding_texts(texts: list[str], model_name: str) -> list[str]:
+    """Apply the same model instruction formatting for budgeting and inference."""
+    model_l = (model_name or "").lower()
+    is_qwen3_embed = "qwen3" in model_l and "embedding" in model_l
+
+    fmt_texts = texts
+    if is_qwen3_embed:
+        # Load optional instruction and mode from embeddings.prompts
+        instr = load_prompt("embeddings", "qwen3_embeddings_instruction") or (
+            "Given a web search query, retrieve relevant passages that answer the query"
+        )
+        mode = (load_prompt("embeddings", "qwen3_embeddings_mode") or "auto").strip().lower()
+
+        def _likely_query(s: str) -> bool:
+            t = (s or "").strip().lower()
+            if t.endswith("?"):
+                return True
+            prefixes = ("what ", "who ", "when ", "where ", "why ", "how ", "explain ", "define ")
+            return len(t) <= 160 and any(t.startswith(p) for p in prefixes)
+
+        def _format_query(q: str) -> str:
+            return f"<Instruct>: {instr}\n<Query>: {q}"
+
+        def _format_doc(d: str) -> str:
+            return f"<Instruct>: {instr}\n<Document>: {d}"
+
+        fmt_texts = []
+        for t in texts:
+            if isinstance(t, str) and "<Instruct>:" in t:
+                fmt_texts.append(t)
+                continue
+            if mode == "query":
+                fmt_texts.append(_format_query(t))
+            elif mode == "document":
+                fmt_texts.append(_format_doc(t))
+            else:  # auto
+                fmt_texts.append(_format_query(t) if _likely_query(t) else _format_doc(t))
+
+    return fmt_texts
+
+
+@lru_cache(maxsize=8)
+def _load_hf_input_tokenizer(model_name: str, cache_dir: str, revision: str | None, trust_remote_code: bool):
+    """Reuse the dispatch loader's pinned model identity without loading weights."""
+    _ensure_hf_revision(model_name, revision)
+    _, tokenizer_class = _import_transformers()
+    return tokenizer_class.from_pretrained(  # nosec B615 -- Same pinned model policy as inference.
+        model_name, cache_dir=cache_dir, revision=revision, trust_remote_code=trust_remote_code,
+    )
+
+
+def _hf_input_tokenizer(model_id: str, config: HFModelCfg, model_storage_base_dir: str):
+    """Resolve the exact configured tokenizer through existing model path guards."""
+    base = _normalize_model_storage_base_dir(model_storage_base_dir)
+    cache = _safe_model_storage_subdir(base, config.hf_cache_dir_subpath, "hf_cache_dir_subpath")
+    cache = _safe_model_storage_subdir(cache, _model_cache_subdir_name(model_id), "model_cache_dir")
+    tokenizer = _load_hf_input_tokenizer(config.model_name_or_path, cache,
+                                       config.revision or COMMIT_HASHES.get(config.model_name_or_path),
+                                       config.trust_remote_code)
+    return tokenizer
+
+
+def validate_hf_embedding_inputs(texts: list[str], model_id: str, config: HFModelCfg,
+                                 model_storage_base_dir: str) -> None:
+    """Preflight raw API input using actual model formatting and tokenizer."""
+    tokenizer = _hf_input_tokenizer(model_id, config, model_storage_base_dir)
+    validate_token_budget(format_hf_embedding_texts(texts, config.model_name_or_path), tokenizer, config.max_length)
+
+
+def refine_hf_embedding_chunks(chunks: list[dict[str, Any]], model_id: str, config: HFModelCfg,
+                               model_storage_base_dir: str) -> list[dict[str, Any]]:
+    """Bound media chunks with the exact tokenizer and formatting used by local HF."""
+    tokenizer = _hf_input_tokenizer(model_id, config, model_storage_base_dir)
+    return split_chunks_to_token_budget(chunks, tokenizer, config.max_length,
+        format_text=lambda text: format_hf_embedding_texts([text], config.model_name_or_path)[0])
+
+
 class HuggingFaceEmbedder:
     def __init__(self, model_identifier: str, config: HFModelCfg, hf_cache_dir: str):
         self._lock = threading.RLock()
@@ -1532,43 +1611,13 @@ class HuggingFaceEmbedder:
                 # Qwen3 Embeddings: apply instruction-aware formatting and use last-token pooling
                 model_l = (self.config.model_name_or_path or "").lower()
                 is_qwen3_embed = "qwen3" in model_l and "embedding" in model_l
+                fmt_texts = format_hf_embedding_texts(texts, self.config.model_name_or_path)
 
-                fmt_texts = texts
-                if is_qwen3_embed:
-                    # Load optional instruction and mode from embeddings.prompts
-                    instr = load_prompt("embeddings", "qwen3_embeddings_instruction") or (
-                        "Given a web search query, retrieve relevant passages that answer the query"
-                    )
-                    mode = (load_prompt("embeddings", "qwen3_embeddings_mode") or "auto").strip().lower()
-
-                    def _likely_query(s: str) -> bool:
-                        t = (s or "").strip().lower()
-                        if t.endswith("?"):
-                            return True
-                        prefixes = ("what ", "who ", "when ", "where ", "why ", "how ", "explain ", "define ")
-                        return len(t) <= 160 and any(t.startswith(p) for p in prefixes)
-
-                    def _format_query(q: str) -> str:
-                        return f"<Instruct>: {instr}\n<Query>: {q}"
-
-                    def _format_doc(d: str) -> str:
-                        return f"<Instruct>: {instr}\n<Document>: {d}"
-
-                    fmt_texts = []
-                    for t in texts:
-                        if isinstance(t, str) and "<Instruct>:" in t:
-                            fmt_texts.append(t)
-                            continue
-                        if mode == "query":
-                            fmt_texts.append(_format_query(t))
-                        elif mode == "document":
-                            fmt_texts.append(_format_doc(t))
-                        else:  # auto
-                            fmt_texts.append(_format_query(t) if _likely_query(t) else _format_doc(t))
-
-                # Tokenize
+                # Reject before padding/tensor allocation so one huge input
+                # cannot inflate the entire batch before its length is checked.
+                validate_token_budget(fmt_texts, current_tokenizer, self.config.max_length)
                 inputs = current_tokenizer(
-                    fmt_texts, return_tensors="pt", padding=True, truncation=True, max_length=self.config.max_length
+                    fmt_texts, return_tensors="pt", padding=True, truncation=False
                 )
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
@@ -1615,7 +1664,7 @@ class HuggingFaceEmbedder:
                     logger.info(f"Retrying embedding creation for {self.model_identifier} with float32 model.")
                     # Re-tokenize with same formatting
                     inputs = current_tokenizer(  # Use current_tokenizer, it hasn't changed
-                        fmt_texts, return_tensors="pt", padding=True, truncation=True, max_length=self.config.max_length
+                        fmt_texts, return_tensors="pt", padding=True, truncation=False
                     )
                     inputs = {k: v.to(self.device) for k, v in inputs.items()}
                     with torch.no_grad():

@@ -14,12 +14,17 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status as http_status
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, rbac_rate_limit, resolve_user_id_for_request, User
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    User,
+    get_request_user,
+    rbac_rate_limit,
+    resolve_user_id_for_request,
+)
 
 # Local imports
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.utils.rag_cache import invalidate_rag_caches
 from tldw_Server_API.app.core.Chunking.base import ChunkerConfig
 from tldw_Server_API.app.core.Chunking.chunker import Chunker
@@ -328,7 +333,10 @@ async def generate_embeddings_for_media(
     """Generate embeddings for media content"""
     request_metadata = {"user_id": str(user_id)}
     try:
-        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import create_embeddings_batch_async
+        from tldw_Server_API.app.api.v1.endpoints.embeddings_v5_production_enhanced import (
+            create_embeddings_batch_async,
+            prepare_media_chunks_for_embedding,
+        )
 
         # Extract text content
         allow_zero_embeddings = _allow_zero_embeddings_for_media(media_content.get("media_item", {}))
@@ -501,6 +509,8 @@ async def generate_embeddings_for_media(
             )
 
         try:
+            chunks = await prepare_media_chunks_for_embedding(chunks, embedding_provider, embedding_model)
+            chunk_texts = [chunk["text"] for chunk in chunks]
             embeddings = await create_embeddings_batch_async(
                 texts=chunk_texts,
                 provider=embedding_provider,
@@ -511,13 +521,15 @@ async def generate_embeddings_for_media(
             if embedding_model != FALLBACK_EMBEDDING_MODEL:
                 logger.warning("Primary embedding generation failed; trying fallback model")
                 try:
+                    chunks = await prepare_media_chunks_for_embedding(chunks, "huggingface", FALLBACK_EMBEDDING_MODEL)
+                    chunk_texts = [chunk["text"] for chunk in chunks]
                     embeddings = await create_embeddings_batch_async(
                         texts=chunk_texts,
                         provider="huggingface",
                         model_id=FALLBACK_EMBEDDING_MODEL,
                         metadata=request_metadata,
                     )
-                except Exception as exc:
+                except Exception:
                     logger.error("Fallback embedding generation failed")
                     return {
                         "status": "error",
