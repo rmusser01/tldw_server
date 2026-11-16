@@ -506,6 +506,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
     const mirrorBinding = chatReference?.serverChatId && cachedChat?.historyId ? {
       historyId: cachedChat.historyId, chatId: chatReference.serverChatId,
       ownerKey: serverChatMirrorOwnerKey(scope), workspaceId,
+      recoverEmptyGlobalAlias: true,
     } : undefined;
     const mirror = mirrorBinding ? await readWorkspaceServerChatMirror(mirrorBinding) : undefined;
     assertCurrent();
@@ -544,7 +545,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
       if (canonicalHistoryJson(await readWorkspaceServerChatMirror(mirrorBinding!)) !== canonicalHistoryJson(mirror))
         throw new Error("Workspace Chat mirror changed during restoration");
       // Keep its exact local settings association and optimistic display data.
-      chatSession = cachedChat;
+      chatSession = { ...cachedChat!, historyId: mirror.header.id };
     }
     assertCurrent();
     const relevantReceipts = (rows: MigrationReceipt[]) => rows

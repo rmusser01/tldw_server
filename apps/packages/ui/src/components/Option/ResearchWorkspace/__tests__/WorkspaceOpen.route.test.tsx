@@ -805,6 +805,34 @@ it("opens the producer's acknowledged Workspace mirror after cold persistence wi
   expect(mirror.transactions.every(mode => mode === "r")).toBe(true);
 });
 
+it("recovers an empty global alias only through the unique owned workspace mirror and exact canonical messages", async () => {
+  const { historyId, save } = await prepareOwnedMirror(false, true);
+  const current = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+  mirror.histories.set("wrong-global", { ...mirror.histories.get(historyId), id: "wrong-global", server_scope_type: "global", server_workspace_id: undefined });
+  save(TARGET, { ...current, historyId: "wrong-global" }, { scopeKey: boundary.scopeKey, isCurrent: () => true });
+  const rows = structuredClone([...mirror.messages]);
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual({ ...current, historyId });
+  expect([...mirror.messages]).toEqual(rows);
+  expect(mirror.histories.has("wrong-global")).toBe(true);
+});
+
+it.each(["foreign-owner", "nonempty-alias", "multiple-mirrors", "changed-source"])("keeps unsafe global alias recovery %s untouched", async kind => {
+  const { historyId, save } = await prepareOwnedMirror();
+  const current = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+  const header = mirror.histories.get(historyId)!;
+  mirror.histories.set("wrong-global", { ...header, id: "wrong-global", server_scope_type: "global", server_workspace_id: undefined, ...(kind === "foreign-owner" ? { server_scope_key: "other" } : {}) });
+  if (kind === "nonempty-alias") mirror.messages.set("local-work", { id: "local-work", history_id: "wrong-global", role: "user", content: "Keep me" });
+  if (kind === "multiple-mirrors") mirror.histories.set("another-workspace-mirror", { ...header, id: "another-workspace-mirror" });
+  if (kind === "changed-source") mirror.messages.get("local-answer")!.content = "A local edited answer";
+  const preserved = { ...current, historyId: "wrong-global" };
+  save(TARGET, preserved, { scopeKey: boundary.scopeKey, isCurrent: () => true });
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByRole("alert");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(preserved);
+});
+
 it.each([
   "foreign-owner", "wrong-workspace", "legacy-namespace", "missing-header", "pending-settings",
   "edited-row", "extra-row", "hidden-context", "compare", "pending-turn", "pending-confirmation", "files",

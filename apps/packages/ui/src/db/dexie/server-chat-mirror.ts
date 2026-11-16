@@ -28,10 +28,32 @@ export const hasAcknowledgedServerChatMirror = ({ historyId, ...binding }: Mirro
 
 /** Read authority without adopting a legacy mirror or changing any local work. */
 export const readWorkspaceServerChatMirror = async ({
-  historyId, chatId, ownerKey, workspaceId,
-}: { historyId: string; chatId: string; ownerKey: string; workspaceId: string }) =>
+  historyId, chatId, ownerKey, workspaceId, recoverEmptyGlobalAlias = false,
+}: { historyId: string; chatId: string; ownerKey: string; workspaceId: string; recoverEmptyGlobalAlias?: boolean }) =>
   db.transaction("r", [db.chatHistories, db.messages, db.compareStates, db.historySelections, db.sessionFiles], async () => {
-    const header = await db.chatHistories.get(historyId)
+    let header = await db.chatHistories.get(historyId)
+    let recoveredAlias: { header: typeof header } | undefined
+    if (recoverEmptyGlobalAlias && header?.server_chat_id === chatId && header.server_scope_key === ownerKey &&
+        header.server_scope_type === "global" && !header.server_workspace_id) {
+      assertNoPendingLocalSettingsWrite(header)
+      const aliasRows = await db.messages.where("history_id").equals(historyId).toArray()
+      const aliasCompare = await db.compareStates.get(historyId)
+      const aliasSelections = await db.historySelections.where("conversation_id").equals(historyId).toArray()
+      const aliasFiles = await db.sessionFiles.get(historyId)
+      // A previous loader could create an empty global alias for a workspace Chat.
+      // Recover only that empty cache pointer, never move or merge local content/settings.
+      if (aliasRows.length || aliasCompare || aliasSelections.length || aliasFiles ||
+          header.is_rag || header.doc_id || header.character_id || header.last_used_prompt ||
+          header.root_id || header.parent_conversation_id || header.forked_from_message_id || header.local_owner_key ||
+          header.model_id || header.local_settings_guard)
+        throw new Error("Workspace Chat alias has local work")
+      const candidates = (await db.chatHistories.where("server_chat_id").equals(chatId).toArray()).filter(row =>
+        row.server_scope_key === ownerKey && row.server_scope_type === "workspace" && row.server_workspace_id === workspaceId)
+      if (candidates.length !== 1) throw new Error("Workspace Chat mirror ownership is ambiguous")
+      recoveredAlias = { header }
+      header = candidates[0]
+      historyId = header.id
+    }
     if (!header || header.server_chat_id !== chatId || header.server_scope_key !== ownerKey ||
         header.server_scope_type !== "workspace" || header.server_workspace_id !== workspaceId)
       throw new Error("Workspace Chat mirror ownership unavailable")
@@ -56,7 +78,7 @@ export const readWorkspaceServerChatMirror = async ({
     if (rows.some(row => Object.entries(row).some(([key, value]) => value !== undefined && !fields.has(key)) ||
         !["user", "assistant", "system"].includes(row.role)))
       throw new Error("Workspace Chat mirror has unverified message context")
-    return { header, rows, compare, selections, files }
+    return { header, rows, compare, selections, files, ...(recoveredAlias ? { recoveredAlias } : {}) }
   })
 
 export const linkServerChatMirror = async ({

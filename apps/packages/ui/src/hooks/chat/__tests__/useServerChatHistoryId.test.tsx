@@ -70,6 +70,24 @@ describe("useServerChatHistoryId", () => {
     )
   })
 
+  it("keeps the surface workspace namespace when loader hydration has no Scene send", async () => {
+    const { result } = renderHook(() => useServerChatHistoryId({ serverChatId: "chat", historyId: "workspace-mirror", setHistoryId: vi.fn(), temporaryChat: false, scope: { type: "workspace", workspaceId: "research" }, t: vi.fn() as unknown as TFunction }))
+    await result.current.ensureServerChatHistoryId("chat", "Research", undefined, { scopeKey: "A", requestScope: { userId: "A" } } as unknown as ServicePromptSnapshot)
+    expect(ownedLink).toHaveBeenCalledWith(expect.objectContaining({ scope: { type: "workspace", workspaceId: "research" } }))
+  })
+
+  it("does not publish a pending hydration mirror after the surface workspace changes", async () => {
+    const pending = deferred<string>()
+    ownedLink.mockReturnValueOnce(pending.promise)
+    const setHistoryId = vi.fn()
+    const { result, rerender } = renderHook(({ workspaceId }) => useServerChatHistoryId({ serverChatId: "chat", historyId: null, setHistoryId, temporaryChat: false, scope: { type: "workspace", workspaceId }, t: vi.fn() as unknown as TFunction }), { initialProps: { workspaceId: "original" } })
+    const request = result.current.ensureServerChatHistoryId("chat", "Research", undefined, { scopeKey: "A", requestScope: { userId: "A" } } as unknown as ServicePromptSnapshot)
+    rerender({ workspaceId: "next" })
+    pending.resolve("original-mirror")
+    await expect(request).rejects.toMatchObject({ status: 412 })
+    expect(setHistoryId).not.toHaveBeenCalled()
+  })
+
   it("rejects an unowned eager link without reading or mutating local history", async () => {
     const { result } = renderHook(() => useServerChatHistoryId({ serverChatId: "chat", historyId: "legacy", setHistoryId: vi.fn(), temporaryChat: false, t: vi.fn() as unknown as TFunction }))
     await expect(result.current.ensureServerChatHistoryId("chat", "Cedar")).rejects.toMatchObject({ status: 412 })
