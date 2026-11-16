@@ -15,7 +15,6 @@ from tldw_Server_API.app.core.Chatbooks import chatbook_service as chatbook_serv
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import ConflictResolution, ImportJob, ImportStatus
 from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
-from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.UserProfiles.response_mappers import (
     LegacyProfileCommandResult,
 )
@@ -460,7 +459,9 @@ async def test_service_default_archive_import_restores_restorable_full_account_p
     assert evals_db.evaluations["e1"]["name"] == "Eval restore"
     assert evals_db.runs[0]["id"] == "run-1"
     assert media_db.media[1]["title"] == "Media restore"
-    assert media_db.files[0]["storage_path"].startswith("imported_media/media_1/")
+    from tldw_Server_API.app.core.Storage import get_storage_backend
+    assert media_db.files[0]["storage_path"].startswith("1/media/1/")
+    assert await get_storage_backend().exists(media_db.files[0]["storage_path"])
     assert media_db.vector_updates == [(1, b"vector-bytes")]
     assert transcript_calls
     assert chroma.stored[0]["collection_name"] == "restore_collection"
@@ -554,10 +555,13 @@ async def test_live_worker_restores_bundled_media_and_records_inventory_result(t
     assert restored_job.metadata["imported_items"]["media"] == 1
     assert restored_job.metadata["inventory_summary"]["counts"]["media_stored_artifacts"] == 2
     assert media_db.files
-    user_root = DatabasePaths.resolve_user_base_directory(1).resolve()
-    restored_path = (user_root / media_db.files[0]["storage_path"]).resolve()
-    assert restored_path.is_relative_to(user_root)
-    assert restored_path.read_bytes() == b"account-owned stored media bytes"
+    from tldw_Server_API.app.core.Storage import get_storage_backend
+    assert media_db.files[0]["storage_path"].startswith("1/media/1/")
+    restored = await get_storage_backend().retrieve(media_db.files[0]["storage_path"])
+    try:
+        assert restored.read() == b"account-owned stored media bytes"
+    finally:
+        restored.close()
 
 
 def test_v1_1_import_rejects_bundled_media_artifact_missing_inventory(tmp_path, monkeypatch):

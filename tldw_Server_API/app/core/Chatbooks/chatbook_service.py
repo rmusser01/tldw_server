@@ -1509,31 +1509,6 @@ class ChatbookService:
 
         return payloads, errors
 
-    def _safe_import_artifact_destination(
-        self,
-        *,
-        media_id: int,
-        original_filename: Any,
-        fallback_name: str,
-    ) -> tuple[Path, str] | None:
-        """Return an account-owned destination for a bundled media artifact."""
-        try:
-            user_root = DatabasePaths.resolve_user_base_directory(self.user_id_int or self.user_id).resolve()
-        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
-            return None
-        raw_name = str(original_filename or fallback_name or "artifact.bin")
-        safe_name = Path(raw_name.replace("\\", "/")).name or "artifact.bin"
-        if self._is_unsafe_archive_path(safe_name):
-            safe_name = "artifact.bin"
-        dest_dir = user_root / "imported_media" / f"media_{media_id}"
-        dest_name = f"{uuid4().hex}_{safe_name}"
-        dest = (dest_dir / dest_name).resolve()
-        try:
-            dest.relative_to(user_root)
-        except ValueError:
-            return None
-        return dest, dest.relative_to(user_root).as_posix()
-
     def _restore_media_artifacts(
         self,
         *,
@@ -1563,30 +1538,40 @@ class ChatbookService:
                 pointer_only += 1
                 status.warnings.append(f"Stored media artifact missing from archive: {archive_path}")
                 continue
-            destination = self._safe_import_artifact_destination(
-                media_id=media_id,
-                original_filename=artifact.get("original_filename"),
-                fallback_name=Path(str(archive_path)).name or f"artifact_{index}.bin",
-            )
-            if destination is None:
-                pointer_only += 1
-                status.warnings.append("Stored media artifact skipped: could not resolve account-owned destination.")
-                continue
-            dest_path, storage_path = destination
+            storage_path = None
+            storage = None
             try:
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, dest_path)
+                from ..Storage import get_storage_backend
+
+                storage = get_storage_backend()
+                raw_name = str(artifact.get("original_filename") or Path(str(archive_path)).name or f"artifact_{index}.bin")
+                safe_name = Path(raw_name.replace("\\", "/")).name or "artifact.bin"
+                with source.open("rb") as stream:
+                    checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+                    stream.seek(0)
+                    # All public import lanes execute this synchronous importer
+                    # in a worker thread. Store keys must match media/file reads.
+                    storage_path = asyncio.run(storage.store(
+                        user_id=str(self.user_id_int or self.user_id),
+                        media_id=int(media_id), filename=f"imported-{uuid4().hex}_{safe_name}",
+                        data=stream, mime_type=artifact.get("mime_type"),
+                    ))
                 insert_media_file(
                     media_id=int(media_id),
                     file_type=str(artifact.get("file_type") or "artifact"),
                     storage_path=storage_path,
                     original_filename=artifact.get("original_filename"),
-                    file_size=int(artifact.get("file_size") or source.stat().st_size),
+                    file_size=source.stat().st_size,
                     mime_type=artifact.get("mime_type"),
-                    checksum=artifact.get("checksum"),
+                    checksum=checksum,
                 )
                 restored += 1
             except Exception as exc:
+                if storage_path is not None and storage is not None:
+                    try:
+                        asyncio.run(storage.delete(storage_path))
+                    except Exception:  # noqa: BLE001 - Preserve the registration failure if cleanup also fails.
+                        logger.warning("Could not clean up an unregistered restored media artifact.")
                 pointer_only += 1
                 status.warnings.append(f"Stored media artifact restore failed: {str(exc)}")
         return restored, pointer_only

@@ -4,12 +4,16 @@ import hashlib
 import json
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 
+import httpx
 import pytest
+from fastapi import FastAPI
 from hypothesis import given
 from hypothesis import strategies as st
 
 from tldw_Server_API.app.api.v1.endpoints.chatbooks import _import_job_response
+from tldw_Server_API.app.api.v1.endpoints.media import file as media_file
 from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ChatbookManifest,
     ChatbookVersion,
@@ -69,6 +73,20 @@ async def test_uploaded_storage_original_is_bundled_and_restored_exactly(stores,
     assert okay, message
     restored_id = result["id_maps"]["media"][str(media_id)]
     restored_file = destination._get_media_db().get_media_files(restored_id)[0]
+    monkeypatch.setattr(media_file, "get_storage_backend", lambda: storage)
+    app = FastAPI()
+    app.include_router(media_file.router, prefix="/api/v1/media")
+    app.dependency_overrides[media_file.get_media_db_for_user] = lambda: destination._get_media_db()
+    app.dependency_overrides[media_file.get_request_user] = lambda: SimpleNamespace(id=202)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
+        response = await client.get(f"/api/v1/media/{restored_id}/file")
+        assert response.status_code == 200
+        assert response.content == original
+        partial = await client.get(f"/api/v1/media/{restored_id}/file", headers={"Range": "bytes=5-12"})
+        assert partial.status_code == 206
+        assert partial.content == original[5:13]
+    assert restored_file["file_size"] == len(original)
+    assert restored_file["checksum"] == hashlib.sha256(original).hexdigest()
     assert destination._resolve_owned_media_artifact_path(restored_file["storage_path"]).read_bytes() == original
 
 
@@ -196,7 +214,7 @@ async def test_real_media_note_roundtrip_returns_destination_ids_and_exact_page_
     assert okay, message
     assert retry["id_maps"]["media"][str(media_id)] == restored_id
     stored_file = destination._get_media_db().get_media_files(restored_id)[0]
-    restored_original = DatabasePaths.resolve_user_base_directory(202) / stored_file["storage_path"]
+    restored_original = destination._resolve_owned_media_artifact_path(stored_file["storage_path"])
     assert restored_original.read_bytes() == original.read_bytes()
     restored_original.write_bytes(b"changed destination original")
     okay, message, retry = await destination.import_chatbook(
@@ -317,7 +335,21 @@ def test_skip_does_not_map_previously_imported_but_edited_canonical_text(stores,
 
 
 def test_failed_original_restore_never_yields_usable_mapping_even_after_skip_retry(stores, tmp_path, monkeypatch):  # noqa: F811
+    from tldw_Server_API.app.core import Storage
+    from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
+
     _, service = stores
+    storage = FileSystemStorage(tmp_path / "restored-blobs")
+    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+    stored_keys = []
+    original_store = storage.store
+
+    async def record_store(**kwargs):
+        key = await original_store(**kwargs)
+        stored_keys.append(key)
+        return key
+
+    monkeypatch.setattr(storage, "store", record_store)
     payload = tmp_path / "content/media/media_1.json"
     payload.parent.mkdir(parents=True)
     original = payload.parent / "original.pdf"
@@ -366,3 +398,5 @@ def test_failed_original_restore_never_yields_usable_mapping_even_after_skip_ret
         )
         assert mapping == {}
         assert (status.failed_items, status.skipped_items) == ((1, 0) if attempt == 0 else (0, 1))
+    assert len(stored_keys) == 1
+    assert not (storage.base_path / stored_keys[0]).exists()
