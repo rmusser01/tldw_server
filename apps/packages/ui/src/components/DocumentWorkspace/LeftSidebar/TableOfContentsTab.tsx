@@ -245,7 +245,7 @@ const TocEntry: React.FC<TocEntryProps> = ({
   )
 }
 
-export const TableOfContentsTab: React.FC = () => {
+export const TableOfContentsTab: React.FC<{ onHide?: () => void }> = ({ onHide }) => {
   const { t } = useTranslation(["option", "common"])
   const activeDocumentId = useDocumentWorkspaceStore((s) => s.activeDocumentId)
   const activeDocumentType = useDocumentWorkspaceStore((s) => s.activeDocumentType)
@@ -405,18 +405,23 @@ export const TableOfContentsTab: React.FC = () => {
           image={<FileText className="mx-auto h-12 w-12 text-muted" />}
           description={
             <div className="text-center">
-              <p className="mb-1 text-sm text-text-secondary">
+              <p className="mb-1 text-sm text-text">
                 {t(
                   "option:documentWorkspace.noToc",
                   "No table of contents"
                 )}
               </p>
-              <p className="text-xs text-muted">
+              <p className="text-xs text-text-muted">
                 {t(
                   "option:documentWorkspace.noTocHint",
                   "This document doesn't have an embedded outline"
                 )}
               </p>
+              {onHide && (
+                <button type="button" onClick={onHide} className="mt-3 min-h-11 rounded border border-border px-3 text-sm text-text hover:bg-surface2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus">
+                  {t("option:documentWorkspace.hideContents", "Hide contents")}
+                </button>
+              )}
             </div>
           }
         />

@@ -846,6 +846,24 @@ function CollapsibleQuickNotes() {
     <button onClick={() => setExpanded(true)}>Reopen Quick Notes</button>
 }
 
+it.each([['title', 'Note title'], ['content', 'Note content']] as const)(
+  'focuses the requested %s field before consuming the request',
+  async (field, label) => {
+    useWorkspaceStore.getState().focusWorkspaceNote(field)
+    render(<React.StrictMode><QuickNotesSection /></React.StrictMode>)
+    await waitFor(() => expect(screen.getByRole('textbox', { name: label })).toHaveFocus())
+    expect(useWorkspaceStore.getState().noteFocusTarget).toBeNull()
+  }
+)
+
+it('opens the editor before focusing a draft that was in Preview', async () => {
+  render(<QuickNotesSection />)
+  fireEvent.click(screen.getByRole('button', { name: 'Preview', exact: true }))
+  await act(async () => { useWorkspaceStore.getState().focusWorkspaceNote('content') })
+  await waitFor(() => expect(screen.getByRole('textbox', { name: 'Note content' })).toHaveFocus())
+  expect(useWorkspaceStore.getState().noteFocusTarget).toBeNull()
+})
+
 it("keeps the content base after a conflict until explicit reload and merge", async () => {
   useWorkspaceStore.setState({ currentNote: { ...draft(), version: 40 } })
   let remoteBody = "Remote edited body"

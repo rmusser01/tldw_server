@@ -18,6 +18,7 @@ import { isWorkspaceSourceSelectable } from "@/store/workspace-source-status"
 
 // Component-only ownership boundary; connected SDK tests exercise the genuine account/Scene hooks.
 const chatOwner = vi.hoisted(() => ({ generation: 0 }))
+const viewport = vi.hoisted(() => ({ mobile: false }))
 vi.mock("../ChatPane/useResearchActorScene", async () => {
   const React = await vi.importActual<typeof import("react")>("react")
   return {
@@ -195,7 +196,7 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => false
+  useMobile: () => viewport.mobile
 }))
 
 vi.mock("@/hooks/useSmartScroll", () => ({
@@ -378,10 +379,10 @@ vi.mock("antd", async () => {
   }
 })
 
-function renderChatPane() {
+function renderChatPane(props: React.ComponentProps<typeof ChatPane> = {}) {
   return render(
     <MemoryRouter>
-      <ChatPane />
+      <ChatPane {...props} />
     </MemoryRouter>
   )
 }
@@ -389,6 +390,7 @@ function renderChatPane() {
 describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    viewport.mobile = false
     chatOwner.generation++
     realSourcesStore = null
     Object.defineProperty(globalThis, "crypto", {
@@ -401,6 +403,7 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
     connectionStoreState.state.lastError = null
 
     workspaceStoreState.workspaceId = "workspace-a"
+    workspaceStoreState.currentNote = { title: "", content: "", keywords: [], isDirty: true }
     workspaceStoreState.workspaceChatReferenceId = "workspace-a"
     workspaceStoreState.sources = []
     workspaceStoreState.selectedSourceFolderIds = []
@@ -1873,5 +1876,40 @@ describe("ChatPane Stage 3 adaptive mode controls and settings", () => {
         title: expect.stringContaining("Assistant:")
       })
     )
+  })
+
+  it("keeps mobile chat settings closed with the answer and composer available", () => {
+    viewport.mobile = true
+    messageOptionState.messages = [{ id: "answer", isBot: true, name: "Assistant", message: "Readable answer", sources: [] }]
+    renderChatPane()
+    const settings = screen.getByText("Chat settings").closest("details")
+    expect(settings).not.toHaveAttribute("open")
+    expect(settings).toContainElement(screen.getByLabelText("Response style"))
+    expect(settings).not.toContainElement(screen.getByText("Readable answer"))
+    expect(settings).not.toContainElement(screen.getByRole("textbox"))
+    fireEvent.click(screen.getByText("Chat settings"))
+    expect(settings).toHaveAttribute("open")
+  })
+
+  it("reports an unsaved capture and opens the existing draft only on request", () => {
+    const onOpenNoteDraft = vi.fn()
+    messageOptionState.messages = [{ id: "answer", isBot: true, name: "Assistant", message: "Visible answer", sources: [] }]
+    renderChatPane({ onOpenNoteDraft })
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    expect(screen.getByRole("status")).toHaveTextContent("Added to the current note draft. Not saved yet.")
+    expect(onOpenNoteDraft).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Open draft" }))
+    expect(onOpenNoteDraft).toHaveBeenCalledOnce()
+    expect(mockCaptureToCurrentNote).toHaveBeenCalledOnce()
+  })
+
+  it("clears the unsaved capture notice once the Note has been saved", () => {
+    messageOptionState.messages = [{ id: "answer", isBot: true, name: "Assistant", message: "Visible answer", sources: [] }]
+    const view = renderChatPane()
+    fireEvent.click(screen.getByRole("button", { name: "Save to Notes" }))
+    expect(screen.getByText("Added to the current note draft. Not saved yet.")).toBeInTheDocument()
+    workspaceStoreState.currentNote.isDirty = false
+    view.rerender(<MemoryRouter><ChatPane /></MemoryRouter>)
+    expect(screen.queryByText("Added to the current note draft. Not saved yet.")).not.toBeInTheDocument()
   })
 })

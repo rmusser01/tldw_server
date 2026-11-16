@@ -89,6 +89,7 @@ const workspaceSessions = new Map<
 >()
 
 const workspaceStoreState = {
+  currentNote: { title: "", content: "", keywords: [], isDirty: false },
   sources: [] as Array<{
     id: string
     mediaId: number

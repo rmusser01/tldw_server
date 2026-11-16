@@ -734,6 +734,10 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   useEffect(() => {
     if (!noteFocusTarget) return
+    if (noteFocusTarget.field === "content" && editorMode !== "edit") {
+      setEditorMode("edit")
+      return
+    }
 
     const timer = window.setTimeout(() => {
       if (noteFocusTarget.field === "title") {
@@ -743,14 +747,14 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         const textArea = contentInputRef.current?.resizableTextArea?.textArea
         textArea?.focus()
       }
+      // Clearing earlier reruns this effect and cancels focus before it happens.
+      clearNoteFocusTarget()
     }, 0)
-
-    clearNoteFocusTarget()
 
     return () => {
       window.clearTimeout(timer)
     }
-  }, [clearNoteFocusTarget, noteFocusTarget])
+  }, [clearNoteFocusTarget, editorMode, noteFocusTarget])
 
   // Debounce timer ref for search
   const searchDebounceRef = useRef<NodeJS.Timeout | null>(null)

@@ -46,6 +46,7 @@ const connectionStoreState = {
 }
 
 const workspaceStoreState = {
+  currentNote: { title: "", content: "", keywords: [], isDirty: false },
   sources: [] as Array<{
     id: string
     mediaId: number
@@ -891,6 +892,7 @@ describe("ChatPane Stage 2 citation traceability and retrieval transparency", ()
     await waitFor(() => {
       expect(mockOnSubmit).toHaveBeenCalledWith({
         message: "Question scoped to dropped source",
+        ragQuery: "Question scoped to dropped source",
         image: ""
       })
     })

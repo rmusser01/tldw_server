@@ -127,7 +127,7 @@ const isErrorWithStatus = (err: unknown): err is ErrorWithStatus => {
 /**
  * Left sidebar tab content for the document workspace layout.
  */
-const LeftSidebarContent: React.FC = () => {
+const LeftSidebarContent: React.FC<{ onHide?: () => void }> = ({ onHide }) => {
   const { t } = useTranslation(["option", "common"])
   const activeSidebarTab = useDocumentWorkspaceStore((s) => s.activeSidebarTab)
   const setActiveSidebarTab = useDocumentWorkspaceStore(
@@ -149,7 +149,7 @@ const LeftSidebarContent: React.FC = () => {
       case "pages":
         return <PagesTab />
       case "toc":
-        return <TableOfContentsTab />
+        return <TableOfContentsTab onHide={onHide} />
       case "info":
         return <DocumentInfoTab />
       case "references":
@@ -1105,7 +1105,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
     ]
 
     const mobileContent = {
-      sidebar: <LeftSidebarContent />,
+      sidebar: <LeftSidebarContent onHide={() => setActiveTab("viewer")} />,
        viewer: (
         <Suspense fallback={viewerPanelFallback}>
           <DocumentViewer
@@ -1231,7 +1231,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
           {/* Left pane - Sidebar (desktop) */}
           {leftPaneOpen && (
             <aside className="hidden h-full min-h-0 shrink-0 border-r border-border bg-surface lg:flex lg:flex-col" style={{ width: leftPanel.width }}>
-              <LeftSidebarContent />
+              <LeftSidebarContent onHide={() => setLeftPaneOpen(false)} />
             </aside>
           )}
           {leftPaneOpen && (
@@ -1259,7 +1259,7 @@ const OwnedDocumentWorkspace: React.FC<{operation: QuickIngestOperation}> = ({op
             className="lg:hidden"
             styles={{ body: { padding: 0, height: "100%", display: "flex", flexDirection: "column" } }}
           >
-            <LeftSidebarContent />
+            <LeftSidebarContent onHide={() => setLeftDrawerOpen(false)} />
           </Drawer>
 
           {/* Center pane - Document Viewer */}

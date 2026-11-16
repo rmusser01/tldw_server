@@ -22,6 +22,7 @@ const {
   const getModels = vi.fn()
 
   const workspaceState = {
+    currentNote: { title: "", content: "", keywords: [], isDirty: false },
     sources: [] as Array<{
       id: string
       mediaId: number

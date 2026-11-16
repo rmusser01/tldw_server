@@ -19,6 +19,7 @@ import {
   Sparkles,
   Search,
   Command,
+  ChevronDown,
   Loader2
 } from "lucide-react"
 import {
@@ -2681,6 +2682,11 @@ const ResearchWorkspaceBody: React.FC = () => {
     }, 0)
   }, [focusWorkspaceNote, focusWorkspacePane])
 
+  const openCurrentNoteDraft = React.useCallback(() => {
+    focusWorkspacePane("studio")
+    window.setTimeout(() => focusWorkspaceNote("content"), 0)
+  }, [focusWorkspaceNote, focusWorkspacePane])
+
   const startNewNoteWithUndo = React.useCallback(() => {
     const previousNote = {
       ...currentNote,
@@ -3442,6 +3448,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             refreshResearchWorkspaceCapabilitiesIfStale
           }
           onStartWorkspaceTask={openWorkspaceAgentTask}
+          onOpenNoteDraft={openCurrentNoteDraft}
         />
       )
     },
@@ -3897,26 +3904,37 @@ const ResearchWorkspaceBody: React.FC = () => {
       {/* Mobile vs desktop layout */}
       {isMobile ? (
         <>
-          <WorkspaceHeader
-            leftPaneOpen={false}
-            rightPaneOpen={false}
-            onToggleLeftPane={handleToggleLeftPane}
-            onToggleRightPane={handleToggleRightPane}
-            onOpenSearch={openGlobalSearch}
-            onOpenSplitWorkspace={handleOpenSplitWorkspace}
-            hideToggles
-            storageUsedBytes={workspaceStorageUsage.usedBytes}
-            storageQuotaBytes={workspaceStorageUsage.quotaBytes}
-            storageOriginUsedBytes={workspaceStorageUsage.originUsedBytes ?? undefined}
-            storageOriginQuotaBytes={workspaceStorageUsage.originQuotaBytes ?? undefined}
-            storageAccountUsedBytes={workspaceStorageUsage.accountUsedBytes ?? undefined}
-            storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
-            provenanceEnabled={provenanceEnabled}
-            statusGuardrailsEnabled={statusGuardrailsEnabled}
-            serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
-            agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
-            agentTaskPrefill={agentTaskPrefill}
-          />
+          <details className="group shrink-0 border-b border-border bg-surface text-text">
+            <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 px-4 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus">
+              <span className="min-w-0 truncate font-semibold">{workspaceName || t("playground:workspace.title", "Research Workspace")}</span>
+              <span className="shrink-0 text-xs text-text-muted">{t("playground:workspace.mobileControls", "Workspace controls")}</span>
+              <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 group-open:rotate-180" />
+            </summary>
+            <div className="max-h-[45dvh] overflow-y-auto">
+                <WorkspaceHeader
+                  leftPaneOpen={false}
+                  rightPaneOpen={false}
+                  onToggleLeftPane={handleToggleLeftPane}
+                  onToggleRightPane={handleToggleRightPane}
+                  onOpenSearch={openGlobalSearch}
+                  onOpenSplitWorkspace={handleOpenSplitWorkspace}
+                  hideToggles
+                  storageUsedBytes={workspaceStorageUsage.usedBytes}
+                  storageQuotaBytes={workspaceStorageUsage.quotaBytes}
+                  storageOriginUsedBytes={workspaceStorageUsage.originUsedBytes ?? undefined}
+                  storageOriginQuotaBytes={workspaceStorageUsage.originQuotaBytes ?? undefined}
+                  storageAccountUsedBytes={workspaceStorageUsage.accountUsedBytes ?? undefined}
+                  storageAccountQuotaBytes={workspaceStorageUsage.accountQuotaBytes ?? undefined}
+                  provenanceEnabled={provenanceEnabled}
+                  statusGuardrailsEnabled={statusGuardrailsEnabled}
+                  serverContextRefreshVersion={workspaceStatusProjectionReadyVersion}
+                  agentTaskHandoffOpenSignal={agentTaskHandoffOpenSignal}
+                  agentTaskPrefill={agentTaskPrefill}
+                />
+
+                {tutorialPromptBanner}
+            </div>
+          </details>
 
           <WorkspaceBanner
             banner={workspaceBanner}
@@ -3924,8 +3942,6 @@ const ResearchWorkspaceBody: React.FC = () => {
             isMobile
           />
           {deepResearchReturnBanner}
-
-          {tutorialPromptBanner}
 
           <WorkspaceStatusBar
             storageUsedBytes={workspaceStorageUsage.usedBytes}
@@ -3949,7 +3965,7 @@ const ResearchWorkspaceBody: React.FC = () => {
             items={mobileTabItems}
             centered
             destroyOnHidden
-            className="flex-1 [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-tabpane]:h-full"
+            className="min-h-0 flex-1 overflow-hidden [&_.ant-tabs-content]:h-full [&_.ant-tabs-content-holder]:min-h-0 [&_.ant-tabs-content-holder]:flex-1 [&_.ant-tabs-content-holder]:overflow-hidden [&_.ant-tabs-tabpane]:h-full"
             tabBarStyle={{ marginBottom: 0, borderBottom: "1px solid var(--border)" }}
           />
         </>
@@ -4053,6 +4069,7 @@ const ResearchWorkspaceBody: React.FC = () => {
                   refreshResearchWorkspaceCapabilitiesIfStale
                 }
                 onStartWorkspaceTask={openWorkspaceAgentTask}
+                onOpenNoteDraft={openCurrentNoteDraft}
               />
             </main>
 

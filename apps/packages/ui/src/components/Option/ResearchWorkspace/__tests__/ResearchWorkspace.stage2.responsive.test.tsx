@@ -531,6 +531,25 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
     expect(statusBar).toHaveAttribute("data-compact", "true")
   })
 
+  it("starts mobile workspace controls closed while keeping tabs and status outside", () => {
+    testState.isMobile = true
+    render(<ResearchWorkspace />)
+    const controls = screen.getByText("Workspace controls").closest("details")
+    expect(controls).not.toHaveAttribute("open")
+    expect(controls).toContainElement(screen.getByTestId("workspace-header"))
+    expect(controls).not.toContainElement(screen.getByTestId("workspace-mobile-tabs"))
+    expect(controls).not.toContainElement(screen.getByTestId("workspace-status-bar"))
+  })
+
+  it("opens the captured Note draft in mobile Studio and requests content focus", async () => {
+    testState.isMobile = true
+    render(<ResearchWorkspace />)
+    await waitFor(() => expect(mockChatPaneProps.at(-1)?.onOpenNoteDraft).toBeTypeOf("function"))
+    act(() => mockChatPaneProps.at(-1)?.onOpenNoteDraft())
+    expect(screen.getByTestId("workspace-mobile-tabs")).toHaveAttribute("data-active-key", "studio")
+    await waitFor(() => expect(testState.focusWorkspaceNote).toHaveBeenCalledWith("content"))
+  })
+
   it("opens Studio from the mobile ?tab=studio route state", () => {
     testState.isMobile = true
     window.history.replaceState(null, "", "/research-workspace?tab=studio")
