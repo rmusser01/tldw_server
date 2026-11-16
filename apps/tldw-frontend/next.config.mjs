@@ -183,7 +183,9 @@ const nextConfig = {
   experimental: {
     // Generation already allows 180s on the client. Next's 30s rewrite default
     // otherwise drops valid backend responses before that budget expires.
-    ...(deploymentMode === 'quickstart' ? { proxyTimeout: 180000 } : {}),
+    // bgUpload caps the complete multipart request at128MiB; leave framing
+    // headroom so Next never truncates a supported upload at its10MiB default.
+    ...(deploymentMode === 'quickstart' ? { proxyTimeout: 180000, proxyClientMaxBodySize: '129mb' } : {}),
     // Isolated UAT runs rebuild from fresh state; avoid multi-GB dev caches.
     ...(liveTierDistDir ? { turbopackFileSystemCacheForDev: false } : {}),
   },

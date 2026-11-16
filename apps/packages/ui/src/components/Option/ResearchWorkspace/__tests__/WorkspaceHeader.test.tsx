@@ -84,6 +84,10 @@ vi.mock("@/services/background-proxy", () => ({
   bgRequest: (...args: unknown[]) => acpPersistence.request(...args)
 }))
 
+const packMocks = vi.hoisted(() => ({ parse: vi.fn(), export: vi.fn(), restore: vi.fn(), legacy: vi.fn() }))
+vi.mock("@/utils/workspace-research-pack", () => ({ parseCompleteResearchPack: packMocks.parse }))
+vi.mock("@/services/workspace-research-pack", () => ({ exportWorkspaceResearchPack: packMocks.export, restoreWorkspaceResearchPack: packMocks.restore, restoreLegacyWorkspaceBundle: packMocks.legacy }))
+
 const canonicalAcpRow = (payload: WorkspaceArtifactCreateRequest): WorkspaceArtifactApiResponse => ({
   ...payload, status: payload.status ?? "completed", content: payload.content ?? null,
   total_tokens: null, total_cost_usd: null, created_at: new Date().toISOString(),
@@ -567,6 +571,9 @@ describe("WorkspaceHeader workspace browser modal", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockAddArtifact.mockReset()
+    packMocks.parse.mockResolvedValue(null)
+    packMocks.export.mockResolvedValue(new Blob(["complete research pack"]))
+    packMocks.legacy.mockImplementation(async bundle => ({ bundle, identity: { id: "new-destination", name: bundle.workspace.name, tag: "workspace:new-destination" } }))
     const scopeController = new AbortController()
     acpPersistence.scope = {
       scopeKey: "test-alpha-user", capability: "unchecked", definitions: {},
@@ -1911,6 +1918,42 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(latestNote.content).toContain("## Studio recommendations")
     expect(latestNote.content).toContain("Executive brief")
     expect(latestNote.content).not.toContain("Literature matrix")
+  })
+
+  it("exports a complete research pack explicitly without silently falling back to a snapshot", async () => {
+    const anchor = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:pack")
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    renderAcpHeader()
+    fireEvent.click(screen.getByRole("button", { name: "Workspace settings" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Export complete research pack" }))
+    await waitFor(() => expect(packMocks.export).toHaveBeenCalledOnce())
+    await waitFor(() => expect(anchor).toHaveBeenCalled())
+    expect(mockCreateWorkspaceExportZipBlob).not.toHaveBeenCalled()
+  })
+
+  it("uses verified complete-pack enrollment before local adoption", async () => {
+    const bundle = mockExportWorkspaceBundle()
+    packMocks.parse.mockResolvedValue({ bundle, fingerprint: "verified" })
+    packMocks.restore.mockResolvedValue({ bundle, identity: { id: "new-destination", name: "Imported", tag: "workspace:new-destination" } })
+    renderAcpHeader()
+    fireEvent.change(screen.getByTestId("workspace-import-input"), { target: { files: [new File(["zip"], "pack.zip")] } })
+    await waitFor(() => expect(packMocks.restore).toHaveBeenCalledOnce())
+    expect(mockParseWorkspaceImportFile).not.toHaveBeenCalled()
+    expect(mockImportWorkspaceBundle).toHaveBeenCalledWith(bundle, { identity: { id: "new-destination", name: "Imported", tag: "workspace:new-destination" }, verifiedCanonicalScopeKey: "test-alpha-user" })
+  })
+
+  it("does not adopt an import after the workspace changes during restore", async () => {
+    let finish!: (value: unknown) => void
+    packMocks.legacy.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const view = renderAcpHeader()
+    fireEvent.change(screen.getByTestId("workspace-import-input"), { target: { files: [new File(["{}"], "workspace.json")] } })
+    await waitFor(() => expect(packMocks.legacy).toHaveBeenCalledOnce())
+    mockStoreState.workspaceId = "workspace-beta"
+    view.rerender(<WorkspaceHeader leftPaneOpen rightPaneOpen onToggleLeftPane={vi.fn()} onToggleRightPane={vi.fn()} />)
+    finish({ bundle: mockExportWorkspaceBundle(), identity: { id: "stale", name: "Imported", tag: "workspace:stale" } })
+    await waitFor(() => expect(acpPersistence.scope.release).toHaveBeenCalled())
+    expect(mockImportWorkspaceBundle).not.toHaveBeenCalled()
   })
 
   it("imports workspace bundle file from the workspace menu", async () => {

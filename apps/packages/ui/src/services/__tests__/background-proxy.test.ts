@@ -2023,6 +2023,54 @@ describe("background proxy fallback safety", () => {
     expect(body.has("file")).toBe(false)
   })
 
+  it.each(["single", "legacy-alias", "fields"])("rejects oversized quickstart multipart %s before dispatch", async kind => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    mocks.runtimeId = null
+    const { bgUpload } = await importProxy()
+    const file = { name: "archive.zip", type: "application/zip", data: new Uint8Array((kind === "single" ? 129 : kind === "legacy-alias" ? 65 : 0) * 1024 * 1024) }
+    try {
+      await expect(bgUpload({ path: "/api/v1/chatbooks/import", method: "POST", file,
+        ...(kind === "legacy-alias" ? {} : { fileFieldName: "file" }),
+        fields: kind === "fields" ? { padding: "€".repeat(43 * 1024 * 1024) } : {} })).rejects.toMatchObject({ status: 413 })
+      expect(mocks.tldwRequest).not.toHaveBeenCalled()
+      expect(mocks.sendMessage).not.toHaveBeenCalled()
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it("preserves a supported quickstart upload larger than10MiB exactly once", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    mocks.runtimeId = null
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: {} })
+    const { bgUpload } = await importProxy()
+    const bytes = new Uint8Array(11 * 1024 * 1024)
+    try {
+      await bgUpload({ path: "/api/v1/chatbooks/import", method: "POST", fileFieldName: "file", file: { name: "archive.zip", data: bytes } })
+      const form = mocks.tldwRequest.mock.calls[0][0].body as FormData
+      expect([...form.keys()]).toEqual(["file"])
+      expect((form.get("file") as Blob).size).toBe(bytes.length)
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it("counts multipart newline normalization when bounding field bytes", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    mocks.runtimeId = null
+    const { bgUpload } = await importProxy()
+    try {
+      await expect(bgUpload({ path: "/api/v1/chatbooks/import", method: "POST", fields: { padding: "\n".repeat(65 * 1024 * 1024) } })).rejects.toMatchObject({ status: 413 })
+      expect(mocks.tldwRequest).not.toHaveBeenCalled()
+    } finally { vi.unstubAllEnvs() }
+  })
+
+  it("bounds a quickstart direct fallback after a proven missing extension receiver", async () => {
+    vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+    mocks.sendMessage.mockRejectedValue(new Error("Could not establish connection. Receiving end does not exist."))
+    const { bgUpload } = await importProxy()
+    try {
+      await expect(bgUpload({ path: "/api/v1/chatbooks/import", method: "POST", fileFieldName: "file", file: { name: "archive.zip", data: new Uint8Array(129 * 1024 * 1024) } })).rejects.toMatchObject({ status: 413 })
+      expect(mocks.tldwRequest).not.toHaveBeenCalled()
+    } finally { vi.unstubAllEnvs() }
+  })
+
   it("appends single direct-fallback uploads to files and the legacy file alias", async () => {
     mocks.tldwRequest.mockResolvedValue({
       ok: true,

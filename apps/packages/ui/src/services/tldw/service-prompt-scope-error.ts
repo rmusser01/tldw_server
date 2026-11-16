@@ -192,6 +192,7 @@ export const isServicePromptRequestPath = (
     return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
     return ["PATCH", "DELETE"].includes(requestMethod)
+  if (/^\/api\/v1\/workspaces\/[^/]+\/sources$/.test(pathname) && requestMethod === "POST") return true
   if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts$/.test(pathname)) return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/workspaces\/[^/]+\/artifacts\/[^/]+$/.test(pathname)) return requestMethod === "PUT"
   if (/^\/api\/v1\/research\/runs\/[^/]+\/bundle$/.test(pathname)) return requestMethod === "GET"
@@ -227,11 +228,12 @@ export const isServicePromptRequestPath = (
     /^\/api\/v1\/chat\/conversations\/[^/]+\/messages-with-context$/.test(pathname) ||
     pathname === "/api/v1/notes/search/" ||
     pathname === "/api/v1/rag/source-health" ||
-    /^\/api\/v1\/chatbooks\/download\/[^/]+$/.test(pathname)
+    /^\/api\/v1\/chatbooks\/download\/[^/]+$/.test(pathname) ||
+    /^\/api\/v1\/chatbooks\/(?:export|import)\/jobs\/[A-Za-z0-9_-]+$/.test(pathname)
   )) return true
   if (requestMethod === "POST" && (
     /^\/api\/v1\/chat\/messages\/[^/]+\/rag-context$/.test(pathname) ||
-    pathname === "/api/v1/rag/search/stream" || pathname === "/api/v1/chatbooks/export"
+    pathname === "/api/v1/rag/search/stream" || pathname === "/api/v1/chatbooks/export" || pathname === "/api/v1/chatbooks/import"
   )) return true
   if (requestMethod === "POST" && pathname === "/api/v1/media/documents/render") return true
   if (requestMethod === "GET" && /^\/api\/v1\/media\/[1-9][0-9]*\/annotated-file$/.test(pathname)) return true

@@ -15,6 +15,10 @@ const loadConfig = async (mode: string, internalOrigin: string) => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe('quickstart public health routing', () => {
+  it('preserves the bounded128MiB upload budget plus multipart framing', async () => {
+    const config = await loadConfig('quickstart', 'http://app:8000');
+    expect(config.experimental.proxyClientMaxBodySize).toBe('129mb');
+  });
   it.each(['http://app:8000', 'http://app:8000/'])(
     'forwards readiness to the public backend endpoint for %s',
     async (internalOrigin) => {

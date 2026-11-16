@@ -28,6 +28,8 @@ import {
 } from '@/store/workspace-chat-session-key'
 import { applyWorkspaceSourceTransfer } from '../workspace-source-transfer'
 import { saveResearchWorkspaceChatReference } from '../workspace-migration'
+import { hasWorkspaceArtifactOrigin } from '../workspace-artifact-codec'
+import { prepareLegacyWorkspaceImport } from '../workspace-import-authority'
 
 // TODO: These helpers need to be exported from workspace.ts
 import {
@@ -478,7 +480,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
     }
   },
 
-  importWorkspaceBundle: (bundle) => {
+  importWorkspaceBundle: (bundle, options) => {
     if (
       !bundle ||
       (bundle.format !== WORKSPACE_EXPORT_BUNDLE_FORMAT &&
@@ -488,7 +490,7 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
       return null
     }
 
-    const snapshotPayload = bundle.workspace?.snapshot
+    let snapshotPayload = bundle.workspace?.snapshot
     if (!snapshotPayload) return null
 
     if (snapshotPayload.sourceAnnotations !== undefined && !Array.isArray(snapshotPayload.sources)) return null
@@ -506,10 +508,23 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
         : typeof bundle.workspace?.name === "string"
           ? bundle.workspace.name.trim()
           : "") || "Imported Workspace"
-    const importedName = `${baseName} (Imported)`
-    const importedId = generateWorkspaceId()
+    const importedName = options?.identity.name ?? `${baseName} (Imported)`
+    const importedId = options?.identity.id ?? generateWorkspaceId()
     const importedSlug = createSlug(importedName) || importedId.slice(0, 8)
-    const importedTag = `workspace:${importedSlug}`
+    const importedTag = options?.identity.tag ?? `workspace:${importedSlug}`
+    if (options) {
+      if (!importedId.trim() || importedId !== importedId.trim() || importedId.length > 128 ||
+        !importedName.trim() || !importedTag.trim() || !options.verifiedCanonicalScopeKey ||
+        importedId === state.workspaceId || state.workspaceSnapshots[importedId] ||
+        [...state.savedWorkspaces, ...state.archivedWorkspaces].some(workspace => workspace.id === importedId) ||
+        !snapshotPayload.generatedArtifacts.every(artifact => artifact.workspaceArtifactId &&
+          hasWorkspaceArtifactOrigin(artifact, options.verifiedCanonicalScopeKey, importedId))) return null
+    } else {
+      try {
+        bundle = prepareLegacyWorkspaceImport(bundle, { id: importedId, name: importedName, tag: importedTag })
+        snapshotPayload = bundle.workspace.snapshot
+      } catch { return null }
+    }
 
     const importedSnapshot = hydrateWorkspaceBundleSnapshot(
       snapshotPayload,

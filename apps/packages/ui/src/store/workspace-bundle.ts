@@ -248,14 +248,15 @@ const readFileAsArrayBuffer = async (file: File): Promise<ArrayBuffer> => {
 }
 
 /**
- * Strip serverChatId from an imported chat session to prevent
- * accidental reconnection to a server chat from a different scope.
+ * Imported conversation content is portable; local and server chat identities
+ * belong to the exporting browser/account and must not reconnect on import.
  */
 export const sanitizeImportedChatSession = <T extends Record<string, any>>(
   session: T
-): Omit<T, "serverChatId"> & { serverChatId: null } => ({
+): Omit<T, "serverChatId" | "historyId"> & { serverChatId: null; historyId: null } => ({
   ...session,
   serverChatId: null,
+  historyId: null,
 })
 
 export const parseWorkspaceImportFile = async (
@@ -280,6 +281,9 @@ export const parseWorkspaceImportFile = async (
     manifest = JSON.parse(manifestRaw) as unknown
   } catch {
     throw new Error("invalid-zip-manifest")
+  }
+  if (isRecord(manifest) && manifest.researchPack) {
+    throw new Error("Complete research packs require verified restore before opening the workspace.")
   }
   if (!isValidZipManifest(manifest)) {
     throw new Error("invalid-zip-manifest")

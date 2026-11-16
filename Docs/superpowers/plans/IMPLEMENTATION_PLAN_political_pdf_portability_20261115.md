@@ -26,12 +26,12 @@
 **Goal:** Provide the requested offline and editable outcomes from existing Workspace actions.
 **Success criteria:** Complete ZIP has source bytes, readable reports, Notes and metadata; importing remaps every typed link, resets old mutation authority and preserves the existing workspace on failure.
 **Tests:** Vitest malformed paths/size limits, incomplete content, unknown mappings, collision remap, Note markers, artifact evidence, old bundles, stale account and failed save; mounted Header tests verify progress/recovery and no incomplete fallback.
-**Status:** In Progress
+**Status:** Complete
 
-- [ ] Build codec/remapping helpers with failing behavioral tests before implementation.
-- [ ] Add scoped orchestration using existing Chatbook/Notes clients and Workspace reconciliation.
-- [ ] Add complete-export action and safe import dispatch while retaining legacy snapshot support.
-- [ ] Run connected export/import/storage suites, lint and TypeScript.
+- [x] Build codec/remapping helpers with failing behavioral tests before implementation.
+- [x] Add scoped orchestration using existing Chatbook/Notes clients and Workspace reconciliation.
+- [x] Add complete-export action and safe import dispatch while retaining legacy snapshot support.
+- [x] Run connected export/import/storage suites, lint and TypeScript.
 
 ## Stage 3: Separate-server acceptance and delivery
 **Goal:** Prove the actual PDF can travel with its research and remain usable.

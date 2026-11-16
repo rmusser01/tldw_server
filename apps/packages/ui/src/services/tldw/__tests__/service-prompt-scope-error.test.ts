@@ -21,6 +21,45 @@ describe("B09 scoped analysis versions", () => {
 })
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/chatbooks/export", "POST"],
+    ["/api/v1/chatbooks/export/jobs/export-1", "GET"],
+    ["/api/v1/chatbooks/download/export-1", "GET"],
+    ["/api/v1/chatbooks/import", "POST"],
+    ["/api/v1/chatbooks/import/jobs/import-1", "GET"],
+    ["/api/v1/workspaces/restored-workspace", "PUT"],
+    ["/api/v1/workspaces/restored-workspace/sources", "GET"],
+    ["/api/v1/workspaces/restored-workspace/sources", "POST"],
+    ["/api/v1/workspaces/restored-workspace/artifacts", "GET"],
+    ["/api/v1/workspaces/restored-workspace/artifacts", "POST"],
+    ["/api/v1/workspaces/restored-workspace/artifacts/restored-artifact", "PUT"],
+    ["/api/v1/notes/search/?tokens=workspace%3Aowned", "GET"],
+    ["/api/v1/notes/restored-note", "GET"],
+    ["/api/v1/notes/restored-note", "PUT"]
+  ])("permits captured research-pack operation %s %s", (path, method) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(true)
+  })
+
+  it.each([
+    ["/api/v1/chatbooks/import", "GET"],
+    ["/api/v1/chatbooks/import", "DELETE"],
+    ["/api/v1/chatbooks/import/extra", "POST"],
+    ["/api/v1/chatbooks/export/jobs", "GET"],
+    ["/api/v1/chatbooks/export/jobs/export-1", "POST"],
+    ["/api/v1/chatbooks/export/jobs/export-1", "DELETE"],
+    ["/api/v1/chatbooks/import/jobs/import-1", "PUT"],
+    ["/api/v1/chatbooks/import/jobs/import-1/remove", "GET"],
+    ["/api/v1/chatbooks/import/jobs/a%2fb", "GET"],
+    ["/api/v1/chatbooks/import/jobs/%2e%2e", "GET"],
+    ["/api/v1/chatbooks/import/jobs//", "GET"],
+    ["/api/v1/workspaces/restored-workspace/sources", "DELETE"],
+    ["/api/v1/workspaces/restored-workspace/sources/extra", "POST"],
+    ["/api/v1/workspaces/a%2fb/sources", "POST"],
+    ["https://other.test/api/v1/chatbooks/import", "POST"]
+  ])("rejects unrelated research-pack authority %s %s", (path, method) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(false)
+  })
+
+  it.each([
     ["/api/v1/config/docs-info", "GET", true],
     ["/api/v1/config/docs-info", "POST", false],
     ["/api/v1/config/docs-info/extra", "GET", false],

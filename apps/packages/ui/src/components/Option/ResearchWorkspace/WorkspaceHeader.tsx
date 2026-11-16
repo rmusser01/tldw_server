@@ -61,6 +61,9 @@ import { loadWorkspaceArtifacts, persistWorkspaceArtifact, rememberCanonicalArti
 import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec"
 import { mapServerArtifactToLocal } from "@/store/workspace-api"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
+import { exportWorkspaceResearchPack, restoreWorkspaceResearchPack, restoreLegacyWorkspaceBundle } from "@/services/workspace-research-pack"
+import { parseCompleteResearchPack } from "@/utils/workspace-research-pack"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { useConnectionStore } from "@/store/connection"
 import { DESIGN_SYSTEM_STATES, getDesignSystemState } from "@/design-system"
@@ -383,6 +386,8 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
   }, [])
   const [shareDialogOpen, setShareDialogOpen] = React.useState(false)
   const [importDialogOpen, setImportDialogOpen] = React.useState(false)
+  const [packTransfer, setPackTransfer] = React.useState<{ message: string; failed?: boolean } | null>(null)
+  const packOperationRef = React.useRef<AbortController | null>(null)
   const [bannerModalOpen, setBannerModalOpen] = React.useState(false)
   const [bannerTitleDraft, setBannerTitleDraft] = React.useState("")
   const [bannerSubtitleDraft, setBannerSubtitleDraft] = React.useState("")
@@ -674,6 +679,12 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     return watchChatAccountChanges((invalidated) => {
       if (invalidated) pendingAcpDrafts.current.clear()
     })
+  }, [workspaceId])
+  React.useLayoutEffect(() => {
+    const retire = () => { packOperationRef.current?.abort(); packOperationRef.current = null; setPackTransfer(null) }
+    retire()
+    const unsubscribe = watchChatAccountChanges(invalidated => { if (invalidated) retire() })
+    return () => { unsubscribe(); packOperationRef.current?.abort(); packOperationRef.current = null }
   }, [workspaceId])
   const captureUndoSnapshot = useWorkspaceStore((s) => s.captureUndoSnapshot)
   const restoreUndoSnapshot = useWorkspaceStore((s) => s.restoreUndoSnapshot)
@@ -1790,6 +1801,39 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
     )
   }
 
+  const runPackTransfer = async (work: (scope: ServicePromptSnapshot, isCurrent: () => boolean, onProgress: (text: string) => void) => Promise<void>) => {
+    if (packOperationRef.current) return
+    const controller = new AbortController()
+    packOperationRef.current = controller
+    const startingWorkspaceId = workspaceId
+    const isCurrent = () => packOperationRef.current === controller && !controller.signal.aborted && useWorkspaceStore.getState().workspaceId === startingWorkspaceId
+    let scope: ServicePromptSnapshot | undefined
+    setPackTransfer({ message: "Preparing workspace transfer…" })
+    try {
+      scope = await loadServicePromptSnapshot([], { signal: controller.signal })
+      if (!isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted) return
+      await work(scope, isCurrent, text => { if (isCurrent()) setPackTransfer({ message: text }) })
+      if (isCurrent()) setPackTransfer(null)
+    } catch (error) {
+      if (isCurrent()) setPackTransfer({ failed: true, message: error instanceof Error ? error.message : "Workspace transfer failed. The current workspace has not changed." })
+    } finally {
+      scope?.release()
+      if (packOperationRef.current === controller) packOperationRef.current = null
+    }
+  }
+
+  const handleExportCompleteResearchPack = async () => {
+    if (!workspaceId) return
+    const bundle = exportWorkspaceBundle(workspaceId)
+    if (!bundle) { messageApi.error("Unable to export this workspace."); return }
+    await runPackTransfer(async (scope, isCurrent, onProgress) => {
+      const blob = await exportWorkspaceResearchPack(bundle, workspaceId, { scope, isCurrent, onProgress })
+      if (!isCurrent()) return
+      triggerFileDownload(blob, createWorkspaceExportZipFilename(bundle.workspace.name, bundle.exportedAt).replace(/\.zip$/, ".complete.zip"))
+      messageApi.success("Complete research pack exported with original sources, saved Notes and offline reading.")
+    })
+  }
+
   const handleExportCurrentWorkspace = async () => {
     if (!workspaceId) return
     const bundle = exportWorkspaceBundle(workspaceId)
@@ -1905,36 +1949,19 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       return
     }
 
-    try {
-      const parsed = await parseWorkspaceImportFile(file)
-      const importedWorkspaceId = importWorkspaceBundle(parsed)
-      if (!importedWorkspaceId) {
-        throw new Error("import-failed")
-      }
-
-      const importedName =
-        typeof parsed.workspace?.name === "string" && parsed.workspace.name.trim()
-          ? parsed.workspace.name.trim()
-          : t(
-              "playground:workspace.importedWorkspaceFallback",
-              "Imported workspace"
-            )
-      messageApi.success(
-        t(
-          "playground:workspace.importSuccessNamed",
-          "Workspace imported: {{name}}",
-          { name: importedName }
-        )
-      )
+    await runPackTransfer(async (scope, isCurrent, onProgress) => {
+      const pack = await parseCompleteResearchPack(file)
+      if (!isCurrent()) return
+      const result = pack
+        ? await restoreWorkspaceResearchPack(pack, { scope, isCurrent, onProgress })
+        : await restoreLegacyWorkspaceBundle(await parseWorkspaceImportFile(file), { scope, isCurrent, onProgress })
+      if (!isCurrent() || scope.scopeSignal.aborted || scope.scopeInvalidatedSignal.aborted) return
+      const importedWorkspaceId = importWorkspaceBundle(result.bundle, { identity: result.identity, verifiedCanonicalScopeKey: scope.scopeKey })
+      if (!importedWorkspaceId) throw new Error("The restored workspace could not be opened. Its server records and restore receipt are retained; the current workspace has not changed.")
+      messageApi.success(t("playground:workspace.importSuccessNamed", "Workspace imported: {{name}}", { name: result.bundle.workspace.name }))
       setImportDialogOpen(false)
-    } catch {
-      messageApi.error(
-        t(
-          "playground:workspace.importFailed",
-          "Unable to import this workspace file."
-        )
-      )
-    }
+      setPackTransfer(null)
+    })
   }
 
   const savedCountLabel = (workspace: SavedWorkspace) =>
@@ -2241,6 +2268,13 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
               "Export Workspace"
             ),
             onClick: handleExportCurrentWorkspace
+          },
+          {
+            key: "export-complete-research-pack",
+            icon: <Download className="h-4 w-4" />,
+            label: "Export complete research pack",
+            disabled: Boolean(packTransfer && !packTransfer.failed),
+            onClick: handleExportCompleteResearchPack
           },
           {
             key: "export-citations-bibtex",
@@ -2824,6 +2858,12 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
         </div>
       </Modal>
 
+      <Modal title="Research pack transfer" open={packTransfer !== null} footer={null}
+        onCancel={() => { packOperationRef.current?.abort(); packOperationRef.current = null; setPackTransfer(null) }}>
+        <p role={packTransfer?.failed ? "alert" : "status"} className="text-text">{packTransfer?.message}</p>
+        {!packTransfer?.failed && <p className="mt-3 text-sm text-text-muted">Keep this tab open. Closing this dialog stops waiting; a submitted server import continues. Reopen the same file to check its saved receipt.</p>}
+      </Modal>
+
       <input
         ref={importFileInputRef}
         type="file"
@@ -2846,7 +2886,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
           <p className="text-sm text-text-muted">
             {t(
               "playground:workspace.importWorkspaceHelp",
-              "Choose a Research Workspace JSON or .workspace.zip export to import."
+              "Choose a complete research pack to restore original sources and saved Notes on this server, or a lightweight workspace snapshot from this same server."
             )}
           </p>
           <label

@@ -3202,7 +3202,7 @@ interface WorkspaceListActions {
   /** Export a workspace snapshot bundle (defaults to current workspace) */
   exportWorkspaceBundle: (id?: string) => WorkspaceExportBundle | null
   /** Import a workspace snapshot bundle and switch to it */
-  importWorkspaceBundle: (bundle: WorkspaceExportBundle) => string | null
+  importWorkspaceBundle: (bundle: WorkspaceExportBundle, options?: import("./workspace-import-authority").WorkspaceImportOptions) => string | null
   /** Switch to a different workspace by ID */
   switchWorkspace: (id: string) => void
   /** Create a new workspace (optionally with a name), saving current first */

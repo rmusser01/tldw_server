@@ -2629,7 +2629,9 @@ describe("workspace store snapshot persistence", () => {
     const parsed = await parseWorkspaceImportFile(new File([blob], "research.workspace.zip", {type: "application/zip"}))
     const importedId = useWorkspaceStore.getState().importWorkspaceBundle(parsed)!
     expect(importedId).not.toBe(workspaceId)
-    expect(JSON.parse(localStorage.getItem(key(importedId))!)).toEqual(annotations)
+    expect(JSON.parse(localStorage.getItem(key(importedId))!)).toEqual({
+      [useWorkspaceStore.getState().sources[0].id]: annotations[source.id]
+    })
   })
 
   it.each(["oversized", "malformed"])("refuses export when saved annotations are %s instead of omitting them", (kind) => {
@@ -2775,24 +2777,29 @@ describe("workspace store snapshot persistence", () => {
     )
     expect(importedState.sources).toHaveLength(1)
     expect(importedState.sources[0]?.title).toBe("Export source")
-    expect(importedState.selectedSourceIds).toEqual([source.id])
+    expect(importedState.selectedSourceIds).toEqual([importedState.sources[0].id])
+    expect(importedState.sources[0].id).not.toBe(source.id)
     expect(importedState.sourceFolders).toHaveLength(1)
     expect(importedState.sourceFolders[0]?.name).toBe("Evidence")
     expect(importedState.sourceFolders[0]?.workspaceId).toBe(importedWorkspaceId)
     expect(importedState.sourceFolderMemberships).toEqual([
       {
         folderId: folder.id,
-        sourceId: source.id
+        sourceId: importedState.sources[0].id
       }
     ])
     expect(importedState.selectedSourceFolderIds).toEqual([folder.id])
     expect(importedState.activeFolderId).toBe(folder.id)
     expect(importedState.generatedArtifacts).toHaveLength(2)
     expect(importedState.generatedArtifacts[0]?.previousVersionId).toBe(
-      baseArtifact.id
+      importedState.generatedArtifacts[1]?.id
     )
+    expect(importedState.generatedArtifacts[1]?.id).not.toBe(baseArtifact.id)
     expect(importedState.notes).toBe("Workspace export notes")
     expect(importedState.currentNote.title).toBe("Workspace note")
+    expect(importedState.currentNote.id).toBeUndefined()
+    expect(importedState.currentNote.version).toBeUndefined()
+    expect(importedState.currentNote.isDirty).toBe(true)
     expect(importedState.workspaceBanner.title).toBe("Export Banner")
     expect(importedState.workspaceBanner.subtitle).toBe("Export subtitle")
     expect(importedState.workspaceBanner.image?.dataUrl).toBe(
@@ -2807,7 +2814,7 @@ describe("workspace store snapshot persistence", () => {
     const importedSession = useWorkspaceStore
       .getState()
       .getWorkspaceChatSession(importedWorkspaceId as string)
-    expect(importedSession?.historyId).toBe("history-export")
+    expect(importedSession?.historyId).toBeNull()
     expect(importedSession?.messages[0]?.message).toBe("Export this workspace")
     expect(importedSession?.serverChatId).toBeNull()
   })

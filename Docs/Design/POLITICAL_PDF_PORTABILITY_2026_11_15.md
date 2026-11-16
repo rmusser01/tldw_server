@@ -23,3 +23,17 @@ Validate archive paths, expected file entries, declared sizes and total expanded
 ## ADR check
 
 ADR required: no new ownership or queue rule. This extends existing Chatbooks serialization/results and the Workspace cache/reconciliation contract under ADR-007, with Notes under ADR-065 and Media storage remaining canonical. The optional portable payload is backward compatible; existing snapshots do not gain an unsupported cross-server guarantee. No new archive engine, dependency, database or authority source is introduced. Reassess if implementation requires changing these owners.
+
+## Cold-reopen prerequisite (TASK-15505.8)
+
+Live qualification found that account-snapshot Chat hydration omitted the surface's workspace scope when linking its local mirror. This created an empty global alias and replaced the cached history pointer, while the correctly owned workspace mirror still held the messages. Pass the explicit surface scope through the existing mirror hook and fence pending publications when that scope changes.
+
+For already affected caches, canonical restore may recover only an empty global alias with the same verified owner and Chat ID, no local settings or content, and exactly one matching workspace mirror. The existing strict mirror, canonical-message equality, pending-work, account and race checks still apply before replacing only the cached history pointer. Keep both IndexedDB records and every message unchanged. Foreign, ambiguous, edited or nonempty aliases remain blocked. This is a cache-pointer repair within the existing ownership contract, not a new persistence or authorization rule.
+
+## Bounded multipart transport
+
+Complete import sends the embedded Chatbook once under the API's singular `file` field and rejects compressed Chatbooks above the backend's 100 MiB quota before creating a submission receipt. The outer offline ZIP's expanded-size limit is a separate local parsing limit. Quickstart uploads preflight an aggregate 128 MiB request budget, including repeated legacy file aliases, fields and conservative multipart framing. Next's body-clone limit is 129 MiB, leaving framing headroom rather than silently truncating a supported upload at its default 10 MiB. Requests exceeding the browser budget report HTTP 413 before dispatch. Advanced direct and extension transports retain their existing backend limits. This configures the existing proxy; it does not introduce a new upload engine or persistence owner.
+
+## Lost chat acknowledgment recovery (TASK-15505.8)
+
+A subsequent live turn persisted its assistant server acknowledgment in the owned IndexedDB mirror but not the cached message array. Recover the cache acknowledgment only through the exact local message ID in that verified mirror. Every representation must still match canonical identity, full content, citations and parent graph. An exact duplicate introduced by hydration may collapse only after both copies pass that proof; arbitrary equal text grants no identity. Rebuild request history only when it exactly matches the verified visible-message projection, otherwise preserve local work and refuse restoration. The existing account, mirror reread and cache race fences remain mandatory. Fix acknowledgment publication at the producer separately. No canonical or IndexedDB message content is rewritten during this cache repair.
