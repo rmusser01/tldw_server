@@ -830,11 +830,6 @@
       "count": 1
     }
   },
-  "packages/ui/src/hooks/document-workspace/usePdfOutline.ts": {
-    "no-restricted-imports": {
-      "count": 1
-    }
-  },
   "packages/ui/src/hooks/document-workspace/useReadingProgress.ts": {
     "no-restricted-imports": {
       "count": 1
