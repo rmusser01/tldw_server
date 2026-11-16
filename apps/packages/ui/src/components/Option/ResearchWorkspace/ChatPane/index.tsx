@@ -1,4 +1,6 @@
 import { useResearchActorScene } from "./useResearchActorScene"
+import { ClaimVerificationPanel } from "../ClaimVerificationPanel"
+import { CLAIM_VERIFICATION_KEY, CLAIM_VERIFICATION_IMPORTED_KEY } from "@/utils/claim-verification"
 import { projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
 import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
 import { sha256Text } from "@/store/workspace-migration"
@@ -3633,6 +3635,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         hideContinue={true}
                         temporaryChat={false}
                       />
+                      {msg.isBot && msg.message.trim() && (msg.sources?.length || msg.metadataExtra?.[CLAIM_VERIFICATION_KEY]) && <div className="px-2">
+                        <ClaimVerificationPanel text={msg.message} report={msg.metadataExtra?.[CLAIM_VERIFICATION_KEY]}
+                          checking={isProcessing && idx === messages.length - 1 && msg.metadataExtra?.claim_verification_pending === true}
+                          imported={msg.metadataExtra?.[CLAIM_VERIFICATION_IMPORTED_KEY] === true} />
+                      </div>}
                       {msg.isBot && diagnostics && provenanceEnabled && (
                         <div className="px-2">
                           <RetrievalDiagnosticsPanel diagnostics={diagnostics} />

@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-STAGES = ("source", "retrieval", "qa", "summary", "pack")
+STAGES = ("source", "retrieval", "qa", "summary", "pack", "verification_regressions")
 SECRET_FIELD = re.compile(r"(?:api_?key|authorization|password|secret|credential|access_token|refresh_token|jwt)", re.I)
 
 
@@ -54,7 +54,7 @@ def load_plan(config_path: Path) -> dict:
     import pymupdf
 
     config = json.loads(config_path.read_text())
-    fields(config, "schema_version api source cases case_ids workspace_id retrieval models qa summary pack")
+    fields(config, "schema_version api source cases case_ids workspace_id retrieval models qa summary pack verification verification_regressions")
     if config.get("schema_version") != 1:
         raise ValueError("Unsupported configuration version")
     fields(config["api"], "base_url api_key_env jwt_env timeout_seconds")
@@ -64,6 +64,12 @@ def load_plan(config_path: Path) -> dict:
     for key in ("api_key_env", "jwt_env"):
         if key in config["api"] and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", config["api"][key]):
             raise ValueError("Authentication configuration must name an environment variable")
+    verification = config.get("verification", {})
+    fields(verification, "required provider model")
+    if "required" in verification and type(verification["required"]) is not bool:
+        raise ValueError("Verification required must be boolean")
+    if any(key in verification for key in ("provider", "model")) and not all(isinstance(verification.get(key), str) and verification[key].strip() for key in ("provider", "model")):
+        raise ValueError("Verification requires an exact provider and model pair")
     fields(config["source"], "path sha256 pdf_pages media_id")
     source = config["source"]
     if type(source["media_id"]) is not int or source["media_id"] < 1:
@@ -125,16 +131,54 @@ def load_plan(config_path: Path) -> dict:
         config["pack"]["path"] = str(Path(config["pack"]["path"]).expanduser().resolve())
         if digest(Path(config["pack"]["path"]).read_bytes()) != config["pack"]["sha256"]:
             raise ValueError("Pack fingerprint mismatch")
+    regression_cases, regression_hash = [], None
+    if config.get("verification_regressions"):
+        regression_cases, regression_hash = load_verification_regressions(config)
     # Fixed read-only command; no config or source content enters its arguments.
     revision_result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True)  # nosec B603 B607
     revision = revision_result.stdout.strip()
     return {"schema_version": 1, "config": config, "config_sha256": digest(encoded(config)),
-            "source_sha256": source["sha256"], "fixture_sha256": digest(fixture_bytes), "git_sha": revision, "cases": cases,
+            "source_sha256": source["sha256"], "fixture_sha256": digest(fixture_bytes), "git_sha": revision, "cases": cases, "verification_regressions": regression_cases, "verification_regressions_sha256": regression_hash,
             "checks": {"pdf_pages_match": True, "page_fingerprints_match": True, "ingestion": "reused"},
-            "paid_operations": {"qa": len(cases) * len(config["models"]) * len(config["qa"]["contexts"]),
+            "paid_operations": {"verification_regressions": len(regression_cases) * len(config["models"]), "qa_verification": len(cases) * len(config["models"]) * len(config["qa"]["contexts"]) if verification.get("required") else 0, "qa": len(cases) * len(config["models"]) * len(config["qa"]["contexts"]),
                                 "summary_jobs_to_submit_if_selected": len(config["models"]) - len(config.get("summary", {}).get("job_ids", {})),
                                 "summary_jobs_to_adopt_if_selected": len(config.get("summary", {}).get("job_ids", {})), "summary_provider_calls": "unavailable until execution"}}
 
+
+
+def load_verification_regressions(config: dict) -> tuple[list[dict], str]:
+    """Freeze explicit source-audited expectations independently of generated answers."""
+    spec = config["verification_regressions"]
+    fields(spec, "path sha256")
+    spec["path"] = str(Path(spec["path"]).expanduser().resolve())
+    raw = Path(spec["path"]).read_bytes()
+    if digest(raw) != spec["sha256"]:
+        raise ValueError("Verification regression fingerprint mismatch")
+    fixture = json.loads(raw)
+    if fixture.get("schema_version") != 1 or fixture.get("source_sha256") != config["source"]["sha256"]:
+        raise ValueError("Verification regression source fingerprint mismatch")
+    cases, identifiers = fixture.get("cases"), set()
+    if not isinstance(cases, list) or not cases or len(cases) > 100:
+        raise ValueError("Verification regressions require 1 to 100 frozen cases")
+    for case in cases:
+        fields(case, "id text evidence expected_statuses label_provenance human_review reason")
+        if not isinstance(case.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", case["id"]) or case["id"] in identifiers:
+            raise ValueError("Verification regression IDs must be unique")
+        identifiers.add(case["id"])
+        if not isinstance(case.get("text"), str) or not 0 < len(case["text"]) <= 100000 or not isinstance(case.get("evidence"), list):
+            raise ValueError("Verification regressions require text and evidence")
+        evidence_ids = set()
+        for row in case["evidence"]:
+            fields(row, "id quote")
+            if not isinstance(row.get("id"), str) or not re.fullmatch(r"P[1-9][0-9]*", row["id"]) or row["id"] in evidence_ids or not isinstance(row.get("quote"), str) or not row["quote"]:
+                raise ValueError("Verification regressions require distinct passage IDs and exact quotes")
+            evidence_ids.add(row["id"])
+        if (not isinstance(case.get("expected_statuses"), list) or not case["expected_statuses"]
+            or any(value not in ("supported", "unsupported", "contradicted", "uncited", "not_checked", "error") for value in case["expected_statuses"])
+            or case.get("label_provenance") != "agent_source_audit"
+            or case.get("human_review") != {"status": "pending", "decision": None}):
+            raise ValueError("Regression expectations must retain their source-audited, human-pending provenance")
+    return cases, digest(raw)
 
 def result_documents(body: dict) -> list[dict]:
     """Read the public RAG result list without dropping raw response evidence."""
@@ -440,6 +484,116 @@ class Runner:
         return self.request(f"retrieval:{case['id']}:{mode}", "retrieval", "POST", "/api/v1/rag/search", body=body,
             metadata={"case_id": case["id"], "mode": mode}, checks=lambda payload: retrieval_checks(payload, case, self.config["source"]["media_id"], self.config["source"]["pdf_pages"]))
 
+    def canonical_source(self) -> dict:
+        """Freeze one owned canonical version and its physical-page and enrollment receipts."""
+        from tldw_Server_API.app.core.Media.page_provenance import page_map_for_content
+
+        workspace, media_id = self.config.get("workspace_id"), self.config["source"]["media_id"]
+        if not workspace:
+            raise ValueError("Strict QA requires an existing workspace with the source enrolled")
+        def read(operation, path):
+            event = self.request(operation, "qa_source", "GET", path)
+            if event["outcome"] != "completed":
+                raise ValueError("Canonical QA source read failed; no paid request submitted")
+            return self.body(event)
+        sources = read("qa-source-enrollment", f"/api/v1/workspaces/{quote(workspace, safe='')}/sources")
+        enrolled = [row for row in sources if row.get("media_id") == media_id and row.get("workspace_id") == workspace]
+        if len(enrolled) != 1 or not isinstance(enrolled[0].get("id"), str) or not enrolled[0]["id"]:
+            raise ValueError("Canonical QA requires one unambiguous owned source enrollment")
+        versions = read("qa-source-version", f"/api/v1/media/{media_id}/versions?include_content=true&limit=1")
+        if not isinstance(versions, list) or len(versions) != 1 or versions[0].get("media_id") != media_id or not isinstance(versions[0].get("content"), str):
+            raise ValueError("Canonical QA source version is unavailable")
+        content = versions[0]["content"]
+        page_map = page_map_for_content(versions[0].get("safe_metadata"), content)
+        if not page_map or len(page_map) != self.config["source"]["pdf_pages"]:
+            raise ValueError("Canonical QA page map does not match its source content")
+        nav = read("qa-source-navigation", f"/api/v1/media/{media_id}/navigation")
+        if nav.get("media_id") != media_id or not nav.get("navigation_version"):
+            raise ValueError("Canonical QA navigation identity is unavailable")
+        return {"content": content, "page_map": page_map, "source_id": enrolled[0]["id"], "navigation_version": nav["navigation_version"]}
+
+    def canonical_qa_passages(self, case: dict, context: str) -> tuple[list[dict], list[int]]:
+        """Clip reference pages or exact retrieved fragments without bridging page gaps."""
+        from tldw_Server_API.app.core.Research_Workspace.section_summaries import (
+            BATCH_CHARS,
+            build_section_extraction_prompt,
+        )
+
+        snapshot = self.canonical_source()
+        content, page_map = snapshot["content"], snapshot["page_map"]
+        fragments = []
+        if context == "reference_pages":
+            pages = [row["pdf_page"] for row in case["source_pages"]]
+            fragments = [(page_map[page - 1]["start_char"], page_map[page - 1]["end_char"]) for page in pages]
+        else:
+            mode = self.config["qa"].get("retrieval_mode", self.config["retrieval"]["modes"][0])
+            event = self.retrieve(case, mode)
+            if event["outcome"] != "completed" or not event["checks"].get("source_scope_valid"):
+                raise UnsafeResume("Retrieval failed or escaped the owned source; no QA request submitted")
+            pages = event["checks"]["covered_pages"]
+            for doc in result_documents(self.body(event)):
+                text = str(doc.get("content", doc.get("text", doc.get("pageContent", ""))))
+                metadata = {**doc, **(doc.get("metadata") or {})}
+                start, end = metadata.get("start_char"), metadata.get("end_char")
+                if not (type(start) is int and type(end) is int and 0 <= start < end <= len(content) and content[start:end] == text):
+                    start = content.find(text) if text else -1
+                    if start < 0 or content.find(text, start + 1) >= 0:
+                        raise ValueError("Retrieved QA evidence is not an exact unambiguous canonical source excerpt")
+                    end = start + len(text)
+                fragments.append((start, end))
+        if not fragments or sum(end - start for start, end in fragments) > BATCH_CHARS:
+            raise ValueError("Canonical QA context is empty or exceeds the production extraction budget")
+        passages = []
+        for start, end in fragments:
+            _, split = build_section_extraction_prompt(case["id"], "", content[start:end])
+            for passage in split:
+                passages.append({**passage, "id": f"P{len(passages) + 1}", "start_char": start + passage["start_char"],
+                    "end_char": start + passage["end_char"], "source_id": snapshot["source_id"], "navigation_version": snapshot["navigation_version"]})
+        return passages, pages
+
+    def verify_answer(self, answer: dict, model: dict) -> dict:
+        """Check the retained answer against its actual owned canonical P passages."""
+        from Helper_Scripts.Evals.political_pdf_eval_report import verification_metrics
+
+        request = json.loads((self.directory / answer["request_path"]).read_text())
+        passages = request["context_evidence"]["passages"]
+        content = self.body(answer)["choices"][0]["message"]["content"]
+        parsed = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", content))
+        from tldw_Server_API.app.core.Research_Workspace.section_verification import batch_claim_text
+        claims = [{**row, "id": identifier} for row in parsed["evidence"] for identifier in row["source_span_ids"]]
+        text = parsed["summary"] + "\n\n" + batch_claim_text({"evidence": claims})
+        config = self.config.get("verification", {})
+        body = {"workspace_id": self.config["workspace_id"], "text": text,
+            "api_provider": config.get("provider", model["provider"]), "model": config.get("model", model["model"]),
+            "evidence": [{"id": row["id"], "quote": row["text"], **{key: row[key] for key in ("source_id", "start_char", "end_char", "navigation_version")}} for row in passages]}
+        def checks(report):
+            metrics = verification_metrics(report, text, {row["id"]: row["text"] for row in passages}, expected_identity=(body["api_provider"], body["model"]))
+            return {"strict_verification": metrics, "passed": metrics["all_claims_supported"], "semantic_review": "pending"}
+        return self.request(f"qa-verification:{model['key']}:{answer['case_id']}:{answer['context']}", "qa_verification", "POST",
+            "/api/v1/research-workspace/citations/verify", body=body, metadata={key: answer[key] for key in ("case_id", "model_key", "context")}, checks=checks)
+
+    def verification_regression(self, case: dict, model: dict) -> dict:
+        """Submit a frozen fixed claim without generating or repairing it first."""
+        from Helper_Scripts.Evals.political_pdf_eval_report import regression_metrics
+
+        snapshot = self.canonical_source()
+        evidence = []
+        for row in case["evidence"]:
+            start = snapshot["content"].find(row["quote"])
+            if start < 0 or snapshot["content"].find(row["quote"], start + 1) >= 0:
+                raise ValueError("Regression quote is not an exact unique canonical source excerpt")
+            evidence.append({**row, "source_id": snapshot["source_id"], "navigation_version": snapshot["navigation_version"],
+                "start_char": start, "end_char": start + len(row["quote"])})
+        config = self.config.get("verification", {})
+        body = {"workspace_id": self.config["workspace_id"], "text": case["text"], "evidence": evidence,
+            "api_provider": config.get("provider", model["provider"]), "model": config.get("model", model["model"])}
+        def checks(report):
+            metrics = regression_metrics(report, body, case["expected_statuses"])
+            return {**metrics, "passed": metrics["regression_expectation_met"], "human_review": "pending"}
+        return self.request(f"verification-regression:{model['key']}:{case['id']}", "verification_regression", "POST",
+            "/api/v1/research-workspace/citations/verify", body=body, metadata={"model_key": model["key"], "context": case["id"]},
+            context_evidence={"expected_statuses": case["expected_statuses"], "label_provenance": "agent_source_audit", "human_review": "pending"}, checks=checks)
+
     def answer(self, case: dict, model: dict, context: str) -> dict:
         """Ask the production extraction prompt against reference or frozen retrieved evidence."""
         import pymupdf
@@ -449,7 +603,11 @@ class Runner:
             build_section_extraction_prompt,
         )
         pages = [page["pdf_page"] for page in case["source_pages"]]
-        if context == "reference_pages":
+        strict = self.config.get("verification", {}).get("required", False)
+        if strict:
+            passages, pages = self.canonical_qa_passages(case, context)
+            source = "\n\n".join(row["text"] for row in passages)
+        elif context == "reference_pages":
             with pymupdf.open(self.config["source"]["path"]) as pdf:
                 source = "\n\n".join(f"Physical PDF page {page}:\n{pdf[page - 1].get_text()}" for page in pages)
         else:
@@ -464,14 +622,19 @@ class Runner:
             raise ValueError("No evidence text is available; no QA request submitted")
         if len(source) > BATCH_CHARS:
             raise ValueError("QA context exceeds the production extraction budget; no paid request submitted")
-        prompt, passages = build_section_extraction_prompt(case["id"], "Answer this question using only the supplied evidence: " + case["question"], source)
+        instruction = "Answer this question using only the supplied evidence: " + case["question"]
+        if strict:
+            prompt, _ = build_section_extraction_prompt(case["id"], instruction + " Cite supporting [P...] IDs inline in summary text as well as source_span_ids. Do not invent citations.", "")
+            prompt += "\n\n".join(f"[{row['id']}] source characters [{row['start_char']}, {row['end_char']})\n{row['text']}" for row in passages)
+        else:
+            prompt, passages = build_section_extraction_prompt(case["id"], instruction, source)
         body = {"api_provider": model["provider"], "model": model["model"], "messages": [{"role": "user", "content": prompt}], "stream": False, "save_to_db": False,
                 **{key: model[key] for key in ("max_tokens", "temperature", "top_p") if key in model}}
         if "reasoning_effort" in model:
             body["extra_body"] = {"reasoning_effort": model["reasoning_effort"]}
         return self.request(f"qa:{model['key']}:{case['id']}:{context}", "qa", "POST", "/api/v1/chat/completions", body=body,
             metadata={"model_key": model["key"], "case_id": case["id"], "context": context},
-            context_evidence={"passages": passages, "pages": pages, "media_id": self.config["source"]["media_id"]}, checks=lambda payload: completion_checks(payload, passages))
+            context_evidence={"passages": passages, "pages": pages, "media_id": self.config["source"]["media_id"], "context_origin": "canonical_media_version" if strict else "legacy_pdf_or_retrieval"}, checks=lambda payload: completion_checks(payload, passages))
 
     def summarize(self, model: dict) -> dict:
         """Poll a durable job; terminal failures retain portions and never trigger a new POST."""
@@ -538,6 +701,12 @@ class Runner:
                   "job_latency_basis": "submission-to-observed-terminal wall clock, including resume downtime" if submitted else "unavailable for adopted job",
                   "evidence_spans_valid": spans_valid, "selected_scope_valid": selected_scope_valid,
                   "passed": result["status"] == "completed" and artifact.get("status") in {"complete", "completed"} and artifact in rows and spans_valid and selected_scope_valid}
+        if self.config.get("verification", {}).get("required"):
+            from Helper_Scripts.Evals.political_pdf_eval_report import summary_verification_metrics
+            analysis = artifact.get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
+            checks["structural_passed"] = checks["passed"]
+            checks["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(model["provider"], model["model"]))
+            checks["passed"] &= checks["strict_verification"]["all_claims_supported"]
         return self.request(final_id, "summary", "LOCAL", "saved-job-artifact", local=lambda: result,
                             metadata={"model_key": model["key"]}, checks=lambda _: checks)
 
@@ -551,7 +720,17 @@ class Runner:
         if "retrieval" in stages:
             results.extend(self.retrieve(case, mode) for case in self.plan["cases"] for mode in self.config["retrieval"]["modes"])
         if "qa" in stages:
-            results.extend(self.answer(case, model, context) for model in self.config["models"] for case in self.plan["cases"] for context in self.config["qa"]["contexts"])
+            for model in self.config["models"]:
+                for case in self.plan["cases"]:
+                    for context in self.config["qa"]["contexts"]:
+                        answer = self.answer(case, model, context)
+                        results.append(answer)
+                        if self.config.get("verification", {}).get("required") and answer["outcome"] == "completed":
+                            results.append(self.verify_answer(answer, model))
+        if "verification_regressions" in stages:
+            if not self.plan.get("verification_regressions"):
+                raise ValueError("The verification_regressions stage requires its frozen fixture config")
+            results.extend(self.verification_regression(case, model) for model in self.config["models"] for case in self.plan["verification_regressions"])
         if "summary" in stages:
             results.extend(self.summarize(model) for model in self.config["models"])
         if "pack" in stages:
@@ -566,7 +745,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--run-dir", type=Path)
     parser.add_argument("--execute", action="store_true")
-    parser.add_argument("--stages", default="source,retrieval", help="Comma-separated source,retrieval,qa,summary,pack; summary is opt-in")
+    parser.add_argument("--stages", default="source,retrieval", help="Comma-separated source,retrieval,qa,summary,pack,verification_regressions; summary is opt-in")
     parser.add_argument("--retry-operation", action="append", default=[])
     args = parser.parse_args(argv)
     try:

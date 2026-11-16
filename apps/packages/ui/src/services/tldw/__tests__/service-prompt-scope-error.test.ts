@@ -21,6 +21,16 @@ describe("B09 scoped analysis versions", () => {
 })
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/research-workspace/citations/verify", "POST", true],
+    ["/api/v1/research-workspace/citations/verify", "GET", false],
+    ["/api/v1/research-workspace/citations/verify", "PUT", false],
+    ["/api/v1/research-workspace/citations/verify/extra", "POST", false],
+    ["/api/v1/research-workspace/citations/../verify", "POST", false],
+    ["https://other.test/api/v1/research-workspace/citations/verify", "POST", false]
+  ])("bounds captured citation verification %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+  it.each([
     ["/api/v1/media/7/outline", "GET", true],
     ["/api/v1/media/7/navigation?include_generated_fallback=false", "GET", true],
     ["/api/v1/media/7/outline", "POST", false],

@@ -1,5 +1,7 @@
 import React from "react"
 import { ArtifactRunIdentity } from "./ArtifactRunIdentity"
+import { getArtifactRunIdentity } from "./output-identity"
+import { ClaimVerificationPanel } from "../ClaimVerificationPanel"
 import { SectionArtifactReviewPanel, type SaveSectionArtifactReview } from "./SectionArtifactReviewPanel"
 import { getSectionReviewTarget } from "@/utils/section-artifact-review"
 import { Link } from "react-router-dom"
@@ -134,12 +136,18 @@ export const SectionAnalysisArtifactViewer: React.FC<{
             ? t("studio.sectionReader.pendingOverview", "The overview is pending while generation continues. Choose a completed chapter to read now.")
             : t("studio.sectionReader.noOverview", "Overview is not available yet.")}
       </p>}
+      {summary && <ClaimVerificationPanel text={summary} report={section ? section.claim_verification : analysis.synthesis_verification}
+        imported={(getArtifactRunIdentity(artifact).imported || artifact.producerMetadata?.origin === "research_pack_import")} />}
       {section && <div className="border-t border-border pt-3">
         <button type="button" aria-expanded={evidenceOpen} onClick={() => setEvidenceOpen(open => !open)}
           className="min-h-10 text-sm font-medium text-primary underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
           {evidenceOpen ? t("studio.sectionReader.hideEvidence", "Hide evidence") : t("studio.sectionReader.showEvidence", "Show evidence")} ({evidence.length})
         </button>
         {evidenceOpen && <div className="mt-3 space-y-5">
+          {Array.isArray(section.batches) && section.batches.filter(record).map((batch, index) => batch.claim_verification && <details key={index}>
+            <summary className="min-h-10 cursor-pointer py-2 font-medium">{t("claims.extraction", "Saved evidence checks")} {index + 1}</summary>
+            <ClaimVerificationPanel text={text(batch.verification_text)} report={batch.claim_verification} imported={(getArtifactRunIdentity(artifact).imported || artifact.producerMetadata?.origin === "research_pack_import")} />
+          </details>)}
           {evidence.length === 0 && <p className="text-sm text-text-muted">{t("studio.sectionReader.noEvidence", "No saved evidence for this section.")}</p>}
           {evidence.map((item, index) => <section key={`${text(item.id)}:${index}`} className="space-y-2 border-b border-border pb-4 text-sm">
             <p className="font-medium">[{text(item.id) || index + 1}] {text(item.claim)}</p>

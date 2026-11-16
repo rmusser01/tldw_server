@@ -358,3 +358,156 @@ def test_derived_report_name_cannot_be_used_as_immutable_evidence(run_dir: Path)
     with pytest.raises(ValueError, match="path"):
         _report(run_dir)
     assert (run_dir / "report.json").read_bytes() == original
+
+
+def _strict_report(text: str, status: str = "supported") -> dict:
+    import hashlib
+    evaluated = status in {"supported", "unsupported", "contradicted"}
+    return {"version": 1, "text_sha256": hashlib.sha256(text.encode()).hexdigest(),
+        "verdict": "supported" if status == "supported" else "needs_revision" if status in {"unsupported", "contradicted", "uncited"} else "unverified",
+        "provider": "openai", "model": "test-verifier", "context": {"scope": "test"}, "limits": {"max_units": 256},
+        "coverage": {"total": 1, "evaluated": int(evaluated), "supported": int(status == "supported"), "uncovered": int(not evaluated), "complete": evaluated},
+        "findings": [{"id": "C1", "text": text, "start": 0, "end": len(text), "evidence_ids": ["P1"], "status": status, "reason": "Recorded cited-source verdict"}],
+        "evidence": {"P1": {"text_sha256": hashlib.sha256(b"Exact source.").hexdigest(), "media_id": 42}}}
+
+
+@pytest.mark.parametrize("failure,status", [
+    ("wrong citation", "unsupported"), ("wrong attribution", "contradicted"),
+    ("dropped qualifier", "unsupported"), ("uncited assertion", "uncited"), ("verifier failure", "error")])
+def test_strict_receipt_preserves_failures_separately_from_structural_success(run_dir: Path, failure: str, status: str) -> None:
+    _qa(run_dir)
+    text = f"{failure} [P1]"
+    _json(run_dir / "requests/verify.json", {"body": {"text": text, "api_provider": "openai", "model": "test-verifier", "evidence": [{"id": "P1", "quote": "Exact source."}]}})
+    _json(run_dir / "responses/verify.json", {"status_code": 200, "body": _strict_report(text, status)})
+    _event(run_dir, event="started", stage="qa_verification", operation_id="verify", request_path="requests/verify.json")
+    _event(run_dir, stage="qa_verification", operation_id="verify", outcome="completed", response_path="responses/verify.json", checks={"passed": True})
+
+    report = _report(run_dir)
+
+    assert report["operations"][0]["attempts"][0]["metrics"]["structured_output_valid"] is True
+    metrics = report["operations"][1]["attempts"][0]["metrics"]["strict_verification"]
+    assert metrics["integrity_valid"] is True
+    assert metrics["all_claims_supported"] is False
+    assert metrics["finding_status_counts"] == {status: 1}
+    assert metrics["coverage"]["evaluated"] == int(status not in {"uncited", "error"})
+    packet = json.loads((run_dir / "semantic-review.json").read_text())
+    assert all(item["status"] == "pending" and all(label is None for label in item["labels"].values()) for item in packet["items"])
+    assert "Strict verification" in (run_dir / "report.md").read_text()
+
+
+@pytest.mark.parametrize("mutation", ["text_hash", "evidence_hash", "coverage", "range", "unsupported_claimed_supported", "missing"])
+def test_strict_report_cannot_claim_support_with_stale_or_inconsistent_receipts(mutation: str) -> None:
+    from Helper_Scripts.Evals.political_pdf_eval_report import verification_metrics
+    text = "A condition applies [P1]."
+    report = _strict_report(text)
+    if mutation == "text_hash":
+        report["text_sha256"] = "0" * 64
+    if mutation == "evidence_hash":
+        report["evidence"]["P1"]["text_sha256"] = "0" * 64
+    if mutation == "coverage":
+        report["coverage"]["evaluated"] = 0
+    if mutation == "range":
+        report["findings"][0]["end"] = len(text) + 1
+    if mutation == "unsupported_claimed_supported":
+        report["findings"][0]["status"] = "unsupported"
+    if mutation == "missing":
+        report = None
+    checks = verification_metrics(report, text, {"P1": "Exact source."})
+    assert checks["integrity_valid"] is False
+    assert checks["all_claims_supported"] is False
+    assert checks["human_review"] == "pending"
+
+
+@pytest.mark.parametrize("mutation", ["status_list", "coverage_bool", "empty_id", "missing_provider"])
+def test_malformed_strict_receipts_fail_closed_without_crashing(mutation):
+    from Helper_Scripts.Evals.political_pdf_eval_report import verification_metrics
+    text = "Claim [P1]"
+    report = _strict_report(text)
+    if mutation == "status_list":
+        report["findings"][0]["status"] = []
+    if mutation == "coverage_bool":
+        report["coverage"]["total"] = True
+    if mutation == "empty_id":
+        report["findings"][0]["id"] = ""
+    if mutation == "missing_provider":
+        report.pop("provider")
+    assert verification_metrics(report, text, {"P1": "Exact source."})["integrity_valid"] is False
+
+
+def test_strict_receipt_accepts_only_punctuation_gaps_skipped_by_real_parser():
+    from Helper_Scripts.Evals.political_pdf_eval_report import verification_metrics
+    text = "Claim [P1]."
+    report = _strict_report(text)
+    report["findings"][0].update(text=text[:-1], end=len(text)-1)
+    assert verification_metrics(report, text, {"P1": "Exact source."})["all_claims_supported"] is True
+    report["findings"][0].update(text=text[2:-1], start=2)
+    assert verification_metrics(report, text, {"P1": "Exact source."})["integrity_valid"] is False
+
+
+@pytest.mark.parametrize("status", ["supported", "unsupported", "error", "missing"])
+def test_summary_verification_counts_all_batches_chapters_and_overview(status):
+    from Helper_Scripts.Evals.political_pdf_eval_report import summary_verification_metrics
+    text = "Claim [P1]"
+    batch = {"status": "completed", "verification_text": text,
+        "evidence": [{"id": "P1", "quote": "Exact source.", "claim": "Claim"}]}
+    section = {"title": "Chapter", "status": "completed", "content": text, "batches": [batch]}
+    analysis = {"sections": [section], "synthesis": text}
+    if status != "missing":
+        batch["claim_verification"] = _strict_report(text, status)
+        section["claim_verification"] = _strict_report(text)
+        analysis["synthesis_verification"] = _strict_report(text)
+    metrics = summary_verification_metrics(analysis)
+    assert metrics["expected_reports"] == {"batches": 1, "chapters": 1, "overview": 1}
+    assert metrics["valid_reports"] == {"batches": int(status != "missing"), "chapters": int(status != "missing"), "overview": int(status != "missing")}
+    assert metrics["all_claims_supported"] is (status == "supported")
+    assert metrics["human_review"] == "pending"
+
+
+def test_strict_receipt_cannot_substitute_a_different_valid_citation():
+    import hashlib
+
+    from Helper_Scripts.Evals.political_pdf_eval_report import verification_metrics
+    report = _strict_report("Claim [P1]")
+    report["findings"][0]["evidence_ids"] = ["P2"]
+    report["evidence"]["P2"] = {"text_sha256": hashlib.sha256(b"Other source.").hexdigest()}
+    assert verification_metrics(report, "Claim [P1]", {"P1": "Exact source.", "P2": "Other source."})["integrity_valid"] is False
+
+
+@pytest.mark.asyncio
+async def test_offline_report_accepts_real_shared_parser_and_support_receipt():
+    from Helper_Scripts.Evals.political_pdf_eval_report import verification_metrics
+
+    from tldw_Server_API.app.core.Claims_Extraction.citation_support import verify_cited_text
+    text = "A condition applies [P1].\n\n* A second conditional claim [P1]."
+    async def provider(*args, **kwargs):
+        return {"choices": [{"finish_reason": "stop", "message": {"content": json.dumps({"label": "supported", "confidence": 1, "rationale": "Test source support"})}}]}
+    receipt = await verify_cited_text(text, {"P1": {"text": "Exact source."}}, provider="openai", model="test", analyze_fn=provider)
+    metrics = verification_metrics(receipt, text, {"P1": "Exact source."})
+    assert metrics["integrity_valid"] is True
+    assert metrics["coverage"]["total"] == 2
+    assert metrics["all_claims_supported"] is True
+
+
+def test_unavailable_whole_text_error_is_valid_uncovered_evidence_not_supported():
+    from Helper_Scripts.Evals.political_pdf_eval_report import verification_metrics
+
+    from tldw_Server_API.app.core.Research_Workspace.section_verification import unavailable_verification
+    text = "A claim [P1]. " * 300
+    metrics = verification_metrics(unavailable_verification(text, provider="openai", model="test"), text, {})
+    assert metrics["integrity_valid"] is True
+    assert metrics["all_claims_supported"] is False
+    assert metrics["coverage"]["uncovered"] == 1
+
+
+@pytest.mark.parametrize("field", ["api_provider", "model"])
+def test_offline_strict_receipt_binds_the_requested_verifier_identity(run_dir, field):
+    text = "Claim [P1]"
+    request = {"text": text, "api_provider": "openai", "model": "test-verifier", "evidence": [{"id": "P1", "quote": "Exact source."}]}
+    request[field] = "different-requested-identity"
+    _json(run_dir / "requests/verify.json", {"body": request})
+    _json(run_dir / "responses/verify.json", {"status_code": 200, "body": _strict_report(text)})
+    _event(run_dir, event="started", stage="qa_verification", operation_id="verify", request_path="requests/verify.json")
+    _event(run_dir, stage="qa_verification", operation_id="verify", outcome="completed", response_path="responses/verify.json")
+    metrics = _report(run_dir)["operations"][0]["attempts"][0]["metrics"]["strict_verification"]
+    assert metrics["integrity_valid"] is False
+    assert metrics["all_claims_supported"] is False

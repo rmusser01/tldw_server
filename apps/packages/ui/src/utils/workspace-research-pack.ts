@@ -7,6 +7,7 @@ import {
 import { OUTPUT_TYPES, type WorkspaceNote } from "@/types/workspace"
 import { renderSectionReviewExport } from "./section-artifact-review"
 import { projectPdfPageSpans, stripKnowledgeNoteProvenance } from "./knowledge-note-provenance"
+import { CLAIM_VERIFICATION_IMPORTED_KEY, CLAIM_VERIFICATION_KEY, readClaimVerification, renderClaimVerification } from "./claim-verification"
 
 const PACK_FILE = "research-pack.json"
 const MAX_ENTRY_BYTES = 128 * 1024 * 1024
@@ -175,8 +176,16 @@ export const buildCompleteResearchPack = async ({ bundle, chatbook, notes, sourc
     return spans.filter(record).filter(span => positive(span.page_number)).map(span => `<a href="${prefix}${escapeHtml(path)}#page=${span.page_number}">PDF page ${span.page_number}${span.printed_page_label ? ` (printed ${escapeHtml(span.printed_page_label)})` : ""}</a>`).join(", ")
   }
   const reportLinks: string[] = []
+  const checksHtml = (value: unknown, text: unknown, imported = false, prefix = "../") => {
+    if (typeof text !== "string" || !text.trim()) return ""
+    const report = readClaimVerification(value, text)
+    const links = Object.entries(report?.evidence || {}).map(([id, evidence]) =>
+      `<p>${escapeHtml(id)}: ${pageLinks(evidence.media_id, evidence.page_spans, prefix)}</p>`).join("")
+    return `<h2>Citation support</h2>${textBlock(renderClaimVerification(value, text, imported))}${links}`
+  }
   for (const [index, artifact] of bundle.workspace.snapshot.generatedArtifacts.entries()) {
     const stem = `artifact-${index + 1}`
+    const imported = ["workspace_snapshot_import", "research_pack_import"].includes(String(artifact.producerMetadata?.origin))
     zip.file(`offline/reports/${stem}.md`, artifact.reviewMetadata ? renderSectionReviewExport(artifact) : artifact.content || "")
     const analysis = record(artifact.data?.sectionAnalysis) ? artifact.data.sectionAnalysis : null
     let body = textBlock(artifact.content || artifact.errorMessage || "No completed text is available.")
@@ -186,10 +195,12 @@ export const buildCompleteResearchPack = async ({ bundle, chatbook, notes, sourc
         const path = `${stem}-section-${sectionIndex + 1}.html`
         const evidence = (Array.isArray(section.batches) ? section.batches.filter(record) : []).flatMap(batch => Array.isArray(batch.evidence) ? batch.evidence.filter(record) : [])
         const evidenceHtml = evidence.map(item => `<details><summary>${escapeHtml(item.id)} — ${escapeHtml(item.claim)}</summary><blockquote>${escapeHtml(item.quote)}</blockquote><p>${pageLinks(section.media_id, item.page_spans || section.page_spans)}</p>${textBlock([item.author, item.interpretation, item.limitations].filter(Boolean).join("\n"))}</details>`).join("")
-        zip.file(`offline/reports/${path}`, htmlPage(String(section.title || `Section ${sectionIndex + 1}`), `<p><a href="${stem}.html">Overview</a></p>${textBlock(section.content || section.error || "No completed summary.")}<p>${pageLinks(section.media_id, section.page_spans)}</p><h2>Exact evidence</h2>${evidenceHtml}`))
+        const batchChecks = (Array.isArray(section.batches) ? section.batches.filter(record) : []).map(batch =>
+          checksHtml(batch.claim_verification, batch.verification_text, imported)).join("")
+        zip.file(`offline/reports/${path}`, htmlPage(String(section.title || `Section ${sectionIndex + 1}`), `<p><a href="${stem}.html">Overview</a></p>${textBlock(section.content || section.error || "No completed summary.")}<p>${pageLinks(section.media_id, section.page_spans)}</p>${checksHtml(section.claim_verification, section.content, imported)}<h2>Exact evidence</h2>${evidenceHtml}${batchChecks}`))
         links.push(`<li><a href="${path}">${escapeHtml(section.title || `Section ${sectionIndex + 1}`)}</a></li>`)
       }
-      body = `${textBlock(analysis.synthesis || analysis.synthesis_error || "No overview is available.")}<h2>Chapters and sections</h2><ol>${links.join("")}</ol>`
+      body = `${textBlock(analysis.synthesis || analysis.synthesis_error || "No overview is available.")}${checksHtml(analysis.synthesis_verification, analysis.synthesis, imported)}<h2>Chapters and sections</h2><ol>${links.join("")}</ol>`
     }
     if (artifact.reviewMetadata) body += `<h2>Reviewer corrections</h2>${textBlock(renderSectionReviewExport({ ...artifact, content: "" }))}<details><summary>Technical review record</summary>${textBlock(JSON.stringify(artifact.reviewMetadata, null, 2))}</details>`
     zip.file(`offline/reports/${stem}.html`, htmlPage(artifact.title, `<p><a href="../index.html">Research index</a> · <a href="${stem}.md">Full original Markdown</a></p>${body}`))
@@ -207,15 +218,16 @@ export const buildCompleteResearchPack = async ({ bundle, chatbook, notes, sourc
     noteLinks.push('<li><a href="current-note-draft.md">Current unsaved Note draft</a></li>')
   }
   const messages = bundle.workspace.chatSession?.messages || []
+  zip.file("offline/chat.md", messages.map(message => `## ${message.name || (message.isBot ? "Assistant" : "You")}\n\n${message.message}${message.isBot ? `\n\n${renderClaimVerification(message.metadataExtra?.[CLAIM_VERIFICATION_KEY], message.message, message.metadataExtra?.[CLAIM_VERIFICATION_IMPORTED_KEY] === true)}` : ""}`).join("\n\n"))
   zip.file("offline/chat.html", htmlPage("Saved conversation", messages.map(message => `<h2>${escapeHtml(message.name || (message.isBot ? "Assistant" : "You"))}</h2>${textBlock(message.message)}${(message.sources || []).filter(record).map(source => {
     const metadata = record(source.metadata) ? source.metadata : source
     const spans = projectPdfPageSpans(metadata.page_spans)?.map(span => ({
       page_number: span.pageNumber, printed_page_label: span.printedPageLabel
     })) || [{ page_number: metadata.page_number || metadata.pageNumber, printed_page_label: metadata.printed_page_label }]
     return `<blockquote>${escapeHtml(source.pageContent || source.content || "")}</blockquote><p>${pageLinks(metadata.media_id || metadata.mediaId, spans, "")}</p>`
-  }).join("")}`).join("")))
+  }).join("")}${message.isBot ? checksHtml(message.metadataExtra?.[CLAIM_VERIFICATION_KEY], message.message, message.metadataExtra?.[CLAIM_VERIFICATION_IMPORTED_KEY] === true, "") : ""}`).join("")))
   zip.file("offline/annotations.html", htmlPage("Source annotations", textBlock(JSON.stringify(bundle.workspace.snapshot.sourceAnnotations || {}, null, 2))))
-  zip.file("offline/index.html", htmlPage(bundle.workspace.name, `<p>Offline copy. Generated drafts and recorded reviews are preserved separately. Editable migration requires the complete ZIP in Research Workspace.</p><h2>Original sources</h2><ul>${sourceLinks.join("")}</ul><h2>Reports</h2><ul>${reportLinks.join("")}</ul><h2>Saved Notes</h2><ul>${noteLinks.join("")}</ul><p><a href="chat.html">Saved conversation and citations</a> · <a href="annotations.html">Source annotations</a></p>`))
+  zip.file("offline/index.html", htmlPage(bundle.workspace.name, `<p>Offline copy. Generated drafts and recorded reviews are preserved separately. Editable migration requires the complete ZIP in Research Workspace.</p><h2>Original sources</h2><ul>${sourceLinks.join("")}</ul><h2>Reports</h2><ul>${reportLinks.join("")}</ul><h2>Saved Notes</h2><ul>${noteLinks.join("")}</ul><p><a href="chat.html">Saved conversation and citations</a> · <a href="chat.md">Conversation Markdown and checks</a> · <a href="annotations.html">Source annotations</a></p>`))
   const files: PackFile[] = []
   let total = 0
   for (const entry of Object.values(zip.files)) {

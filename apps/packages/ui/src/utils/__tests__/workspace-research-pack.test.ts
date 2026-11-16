@@ -6,6 +6,7 @@ import { portableFixture } from "./fixtures/portable-workspace"
 import { buildCompleteResearchPack, parseCompleteResearchPack, readBlobBytes, readBoundedZipEntry, sha256Bytes } from "../workspace-research-pack"
 import { parseWorkspaceImportFile } from "@/store/workspace-bundle"
 import { projectWorkspaceRagSources, restoreWorkspaceRagSources } from "../workspace-rag-sources"
+import { claimTextHash } from "../claim-verification"
 
 const pdf = Uint8Array.from(new TextEncoder().encode("%PDF-1.7 exact original bytes"))
 const digest = webcrypto.subtle.digest.bind(webcrypto.subtle)
@@ -19,6 +20,38 @@ const chatbook = async (missing = false) => {
 }
 
 describe("complete research pack archive", () => {
+  it("preserves citation findings and links in offline chapters, overview and conversation", async () => {
+    const bundle = portableFixture()
+    const report = (text: string) => ({ version: 1, text_sha256: claimTextHash(text), verdict: "needs_revision", provider: "openai", model: "saved-model",
+      coverage: { total: 1, evaluated: 1, supported: 0, uncovered: 0, complete: true },
+      findings: [{ id: "C1", text, start: 0, end: text.length, evidence_ids: ["1"], status: "unsupported", reason: "The cited source does not name this author <script>." }],
+      evidence: { "1": { text_sha256: "a".repeat(64), source_id: "source-old", media_id: 1, page_spans: [{ page_number: 352 }] } }, limits: {}, context: {} })
+    const artifact = bundle.workspace.snapshot.generatedArtifacts[0]
+    const analysis = artifact.data!.sectionAnalysis as { synthesis: string; synthesis_verification?: unknown; sections: Array<{ content: string; claim_verification?: unknown; batches: Array<{ verification_text?: string; claim_verification?: unknown }> }> }
+    analysis.sections[0].content += " [1]"
+    analysis.synthesis = "Overview [1]"
+    analysis.synthesis_verification = report(analysis.synthesis)
+    analysis.sections[0].claim_verification = report(analysis.sections[0].content)
+    analysis.sections[0].batches[0].verification_text = "Extracted claim [1]"
+    analysis.sections[0].batches[0].claim_verification = report("Extracted claim [1]")
+    const message = bundle.workspace.chatSession!.messages[0]
+    message.metadataExtra = { claim_verification: report(message.message) }
+    const original = JSON.stringify(bundle)
+    const blob = await buildCompleteResearchPack({ bundle, chatbook: await chatbook(), notes: [bundle.workspace.snapshot.currentNote], sourceWorkspaceId: "old" })
+    const zip = await JSZip.loadAsync(await readBlobBytes(blob))
+    for (const path of ["offline/reports/artifact-1-section-1.html", "offline/reports/artifact-1.html", "offline/chat.html"]) {
+      const document = new DOMParser().parseFromString(await zip.file(path)!.async("string"), "text/html")
+      expect(document.body.textContent).toContain("Citation support: Needs review")
+      expect(document.body.textContent).toContain("The cited source does not name this author <script>.")
+      expect(document.querySelector("script")).toBeNull()
+      expect(Array.from(document.querySelectorAll("a")).some(link => link.getAttribute("href")?.endsWith("sources/media-1.pdf#page=352"))).toBe(true)
+    }
+    expect(await zip.file("offline/reports/artifact-1-section-1.html")!.async("string")).toContain("Extracted claim [1]")
+    expect(await zip.file("offline/chat.md")!.async("string")).toContain("Citation support: Needs review")
+    expect(await zip.file("offline/reports/artifact-1.md")!.async("string")).toContain(artifact.content)
+    expect(JSON.parse(await zip.file("workspace.json")!.async("string"))).toEqual(JSON.parse(original))
+    expect(JSON.stringify(bundle)).toBe(original)
+  })
   beforeEach(() => {
     Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true })
     // Node 20 rejects jsdom ArrayBuffers; bridge realms while retaining real hashing.

@@ -1,4 +1,6 @@
 import { WORKSPACE_RAG_SOURCES_KEY, projectWorkspaceRagSources } from "@/utils/workspace-rag-sources"
+import { verifyWorkspaceAnswer, uncheckedAnswerVerification } from "@/services/workspace-claim-verification"
+import { CLAIM_VERIFICATION_KEY } from "@/utils/claim-verification"
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
 import type { BaseMessage } from "@/types/messages"
 import {
@@ -101,6 +103,7 @@ const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
 let didLogPipelineSetHistoryMissing = false
 
 export type ChatModeParamsBase = {
+  claimVerificationWorkspaceId?: string
   saveToDb?: boolean
   onResponseDispatch?: () => void
   historyTurn?: HistorySendTurn
@@ -1178,10 +1181,25 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       !sourceProvenance
     )
       throw new Error("Source history is invalid or too large to save");
+    let claimVerification
+    if (mode.id === "rag" && params.claimVerificationWorkspaceId) {
+      if (streamTransportInterrupted || outputLimited || signal.aborted) {
+        claimVerification = uncheckedAnswerVerification(fullText, "This answer was interrupted or cut off. Its citation support has not been checked.")
+      } else {
+        setMessagesWithTransition(previous => previous.map(msg => msg.id === generateMessageId ? updateActiveVariant(msg, {
+          message: fullText, sources, generationInfo: viewGenerationInfo,
+          metadataExtra: { claim_verification_pending: true }
+        }) : msg))
+        claimVerification = await verifyWorkspaceAnswer({ workspaceId: params.claimVerificationWorkspaceId, text: fullText, sources,
+          provider: modelClient.apiProvider, model: modelClient.model, scope: params.servicePromptSnapshot, signal })
+        params.servicePromptSnapshot?.scopeInvalidatedSignal.throwIfAborted()
+      }
+    }
     const assistantMetadataExtra =
-      dynamicUIEnvelope || sourceProvenance
+      dynamicUIEnvelope || sourceProvenance || claimVerification
         ? {
             ...(dynamicUIEnvelope ? { dynamic_ui: dynamicUIEnvelope } : {}),
+            ...(claimVerification ? { [CLAIM_VERIFICATION_KEY]: claimVerification } : {}),
             ...(sourceProvenance
               ? { [WORKSPACE_RAG_SOURCES_KEY]: sourceProvenance }
               : {}),

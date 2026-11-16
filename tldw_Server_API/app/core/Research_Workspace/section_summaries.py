@@ -32,6 +32,15 @@ from tldw_Server_API.app.core.Research_Workspace.section_attribution import (
     render_attribution_context,
     render_overview_author_notes,
 )
+from tldw_Server_API.app.core.Research_Workspace.section_verification import (
+    evidence_digest,
+    render_claim_verification,
+    section_evidence_map,
+    unavailable_verification,
+    verification_is_current,
+    verify_section_batches,
+    verify_section_text,
+)
 
 BATCH_CHARS = 24_000
 _FAILURE_DIAGNOSTIC_LIMIT = 5
@@ -211,6 +220,7 @@ def render_section_analysis(analysis: dict[str, Any]) -> str:
         lines.append(analysis["synthesis_error"])
     if analysis.get("synthesis"):
         lines.extend(["## Synthesis", analysis["synthesis"]])
+        lines.append(render_claim_verification(analysis.get("synthesis_verification")))
     for section in sections:
         location = (
             f"source characters {section['start_char']}–{section['end_char']}"
@@ -222,9 +232,12 @@ def render_section_analysis(analysis: dict[str, Any]) -> str:
             lines.append(f"Retry needed: {section['error']}")
         if section.get("content"):
             lines.append(section["content"])
+            lines.append(render_claim_verification(section.get("claim_verification")))
         for batch in section["batches"]:
             if batch.get("content") and section["status"] != "completed":
                 lines.extend(["### Completed portion", batch["content"]])
+            if batch.get("claim_verification"):
+                lines.extend(["### Extracted evidence claim checks", render_claim_verification(batch["claim_verification"])])
             for evidence in batch.get("evidence", []):
                 pages = evidence.get("page_spans", [])
                 location = (
@@ -538,6 +551,49 @@ def _section_checkpoint_updates(
     }
 
 
+def _initialize_section_analysis(
+    saved: dict[str, Any] | None, sections: list[dict[str, Any]], fingerprint: str,
+    artifact_type: str, snapshots: dict[int, Any],
+) -> dict[str, Any]:
+    """Validate checkpoint identity and rebuild exact attribution from the owned source."""
+    if saved and saved.get("fingerprint") != fingerprint:
+        raise ResearchWorkspaceOutputJobError("section_checkpoint_changed", status_code=409, retryable=False)
+    analysis = (
+        copy.deepcopy(saved)
+        if saved
+        else {
+            "schemaVersion": 1,
+            "fingerprint": fingerprint,
+            "title": "Section comparison"
+            if artifact_type == "compare_sources"
+            else "Source report"
+            if artifact_type == "report"
+            else "Section summaries",
+            "sections": sections,
+        }
+    )
+    # Rebuild source context only after the checkpoint fingerprint matches.
+    for section in analysis["sections"]:
+        section["attribution_contexts"] = build_section_attribution_contexts(section, snapshots[section["media_id"]])
+    analysis.pop("stopped_error", None)
+    analysis.pop("stopped_error_code", None)
+    return analysis
+
+
+def _section_coverage(sections: list[dict[str, Any]]) -> dict[str, int]:
+    """Keep the generation coverage denominator independent of support judgments."""
+    portions = [batch for section in sections for batch in section["batches"]]
+    return {
+        "selected_sections": len(sections),
+        "completed_sections": sum(section["status"] == "completed" for section in sections),
+        "failed_sections": sum(section["status"] == "failed" for section in sections),
+        "unread_sections": sum(section["status"] not in {"completed", "failed"} for section in sections),
+        "completed_portions": sum(batch["status"] == "completed" for batch in portions),
+        "failed_portions": sum(batch["status"] == "failed" for batch in portions),
+        "unread_portions": sum(batch["status"] not in {"completed", "failed"} for batch in portions),
+    }
+
+
 async def process_section_summary(
     *,
     payload: dict[str, Any],
@@ -564,29 +620,8 @@ async def process_section_summary(
     client = metadata.setdefault("workspaceClient", {"schemaVersion": 1})
     data = client.setdefault("data", {})
     saved = data.get("sectionAnalysis")
-    if saved and saved.get("fingerprint") != fingerprint:
-        raise ResearchWorkspaceOutputJobError("section_checkpoint_changed", status_code=409, retryable=False)
-    analysis = (
-        copy.deepcopy(saved)
-        if saved
-        else {
-            "schemaVersion": 1,
-            "fingerprint": fingerprint,
-            "title": "Section comparison"
-            if payload["artifact_type"] == "compare_sources"
-            else "Source report"
-            if payload["artifact_type"] == "report"
-            else "Section summaries",
-            "sections": sections,
-        }
-    )
+    analysis = _initialize_section_analysis(saved, sections, fingerprint, payload["artifact_type"], snapshots)
     data["sectionAnalysis"] = analysis
-    # Additive context is rebuilt from the currently verified owned source after
-    # the original checkpoint fingerprint has matched. Older checkpoints remain valid.
-    for section in analysis["sections"]:
-        section["attribution_contexts"] = build_section_attribution_contexts(section, snapshots[section["media_id"]])
-    analysis.pop("stopped_error", None)
-    analysis.pop("stopped_error_code", None)
     previous_failure_code = None
     consecutive_failures = 0
     last_completion = None
@@ -689,9 +724,33 @@ async def process_section_summary(
         last_completion = None
         return await _synthesize_sections(parts, instruction, complete=complete, report_progress=report_progress, **kwargs)
 
+    async def verify(target, key, text, evidence, stage):
+        if verification_is_current(target.get(key), text, evidence):
+            return
+        check_cancelled()
+        portions = [batch for section in analysis["sections"] for batch in section["batches"]]
+        completed_portions = sum(batch["status"] == "completed" for batch in portions)
+        report_progress(95 if stage == "overview" else 85 * completed_portions / max(1, len(portions)),
+                        f"Checking citation support: {stage}.")
+        try:
+            target[key] = await verify_section_text(
+                text, evidence, settings=settings, provider_credentials=provider_credentials,
+                chat_fn=perform_chat_api_call_async, on_provider_success=on_provider_success,
+                context={"stage": stage},
+            )
+        except _GENERATION_ERRORS:
+            target[key] = unavailable_verification(text, provider=settings.provider, model=settings.model)
+        target[key]["evidence_sha256"] = evidence_digest(evidence)
+        check_cancelled()
+        checkpoint()
+
     checkpoint()
     for section_index, section in enumerate(analysis["sections"]):
-        if section["status"] == "completed" or not section["batches"]:
+        if section["status"] == "completed":
+            evidence = await verify_section_batches(section, snapshots[section["media_id"]], verify)
+            await verify(section, "claim_verification", section["content"], evidence, section["title"])
+            continue
+        if not section["batches"]:
             continue
         section["status"] = "generating"
         section.pop("error", None)
@@ -736,6 +795,7 @@ async def process_section_summary(
             )
             if analysis.get("stopped_error_code"):
                 break
+        evidence = await verify_section_batches(section, snapshots[section["media_id"]], verify)
         if any(batch["status"] != "completed" for batch in section["batches"]):
             first_failure = next((batch for batch in section["batches"] if batch.get("error_code")), {})
             section.update(
@@ -755,6 +815,7 @@ async def process_section_summary(
                     attribution_context=render_attribution_context(section["attribution_contexts"]),
                 )
                 section["status"] = "completed"
+                await verify(section, "claim_verification", section["content"], evidence, section["title"])
                 section.pop("error_code", None)
                 previous_failure_code, consecutive_failures = None, 0
             except _GENERATION_ERRORS as exc:
@@ -784,28 +845,23 @@ async def process_section_summary(
                 if incomplete_count == 1
                 else f" {incomplete_count} sections need retry."
             )
-        all_portions = [batch for section in analysis["sections"] for batch in section["batches"]]
-        coverage = {
-            "selected_sections": len(sections),
-            "completed_sections": len(completed),
-            "failed_sections": sum(section["status"] == "failed" for section in analysis["sections"]),
-            "unread_sections": sum(
-                section["status"] not in {"completed", "failed"} for section in analysis["sections"]
-            ),
-            "completed_portions": sum(batch["status"] == "completed" for batch in all_portions),
-            "failed_portions": sum(batch["status"] == "failed" for batch in all_portions),
-            "unread_portions": sum(batch["status"] not in {"completed", "failed"} for batch in all_portions),
-        }
+        coverage = _section_coverage(analysis["sections"])
         try:
             last_completion = None
             overview_context = render_overview_author_notes(analysis["sections"])
-            analysis["synthesis"] = await synthesize(
-                completed,
-                build_section_overview_instruction(payload["artifact_type"], settings.summary_instruction, coverage),
-                progress_message=synthesis_progress,
-                stage="overview_synthesis",
-                attribution_context=overview_context,
-            )
+            instruction = build_section_overview_instruction(payload["artifact_type"], settings.summary_instruction, coverage)
+            synthesis_input = hashlib.sha256(json.dumps([completed, instruction, overview_context], ensure_ascii=False).encode()).hexdigest()
+            if not analysis.get("synthesis") or analysis.get("synthesis_input_sha256") != synthesis_input:
+                analysis["synthesis"] = await synthesize(
+                    completed, instruction, progress_message=synthesis_progress,
+                    stage="overview_synthesis", attribution_context=overview_context,
+                )
+                analysis["synthesis_input_sha256"] = synthesis_input
+            overview_evidence = {
+                key: value for section in analysis["sections"] if section["status"] == "completed"
+                for key, value in section_evidence_map(section, snapshots[section["media_id"]]).items()
+            }
+            await verify(analysis, "synthesis_verification", analysis["synthesis"], overview_evidence, "overview")
             analysis.pop("synthesis_error", None)
             analysis.pop("synthesis_error_code", None)
         except _GENERATION_ERRORS as exc:

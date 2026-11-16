@@ -2,6 +2,7 @@ import { SectionScopePicker } from "./SectionScopePicker"
 import { ArtifactRunIdentity, LongDocumentWaitingGuidance } from "./ArtifactRunIdentity"
 import { getSectionAnalysis, CurrentSectionAnalysisArtifactViewer } from "./SectionAnalysisArtifactViewer"
 import { getSectionArtifactErrorMessage } from "@/utils/section-artifact-status"
+import { hasUnfinishedSectionChecks } from "@/utils/claim-verification"
 import type { ResearchWorkspaceSectionSelection } from "@/services/tldw/domains/workspace-api"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React, { Suspense, useState, useEffect, useRef } from "react"
@@ -3036,6 +3037,8 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   "Retry"
                 )
                 const sectionAnalysis = getSectionAnalysis(artifact)
+                const canRetryChecks = artifact.status === "completed" && sectionJob && Boolean(artifact.workspaceArtifactId) &&
+                  hasUnfinishedSectionChecks(sectionAnalysis)
                 const canViewCompletedChapters = artifact.status === "generating" &&
                   Boolean(sectionAnalysis?.sections.some(section => section.status === "completed" &&
                     typeof section.content === "string" && section.content.trim()))
@@ -3164,6 +3167,13 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                           className="flex flex-wrap items-center gap-1 rounded border border-border/70 bg-surface/70 px-1.5 py-1"
                         >
                           {viewAction}
+                          {canRetryChecks && <button type="button"
+                            disabled={isGeneratingOutput}
+                            onClick={() => void handleCapabilityAwareGenerateOutput(artifact.type, { mode: "replace", targetArtifactId: artifact.id, retryCitationChecks: true })}
+                            className="rounded px-2 py-1 text-xs text-primary hover:bg-surface2 disabled:opacity-50"
+                            aria-label={t("playground:claims.retry", "Retry citation checks")}>
+                            {t("playground:claims.retry", "Retry citation checks")}
+                          </button>}
                           {(artifact.type === "flashcards" || artifact.type === "quiz") && (
                             <Tooltip title={t("common:edit", "Edit")}>
                               <button

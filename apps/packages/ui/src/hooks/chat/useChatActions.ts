@@ -4278,6 +4278,7 @@ export const useChatActions = ({
         sdkViewIsCurrent = workspaceServerChat.viewIsCurrent
         const ragModeParamsWithSnapshot = {
           ...chatModeParamsWithRegen,
+          claimVerificationWorkspaceId: scope?.type === "workspace" ? scope.workspaceId : undefined,
           ragQuery,
           ...alternateHistoryParams,
           actorSceneSend: workspaceServerChat.sceneSend,
@@ -5198,6 +5199,7 @@ export const useChatActions = ({
       if (!actorSceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
       const enhancedChatModeParams = {
         ...chatModeParams,
+        claimVerificationWorkspaceId: scope?.type === "workspace" ? scope.workspaceId : undefined,
         uploadedFiles: uploadedFiles,
         servicePromptSnapshot: replyServicePromptSnapshot
       }

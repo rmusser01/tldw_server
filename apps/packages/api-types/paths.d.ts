@@ -1524,6 +1524,7 @@ export type ApiPath =
   | "/api/v1/reading/saved-searches/{search_id}"
   | "/api/v1/research-workspace/artifacts/generate"
   | "/api/v1/research-workspace/capabilities"
+  | "/api/v1/research-workspace/citations/verify"
   | "/api/v1/research/arxiv-search"
   | "/api/v1/research/discovery/search"
   | "/api/v1/research/runs"

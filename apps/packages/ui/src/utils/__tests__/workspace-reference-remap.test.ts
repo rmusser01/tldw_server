@@ -2,11 +2,29 @@ import { describe, expect, it } from "vitest"
 import { remapPortableWorkspace, remapPortableNote, type VerifiedResearchImportMaps } from "../workspace-reference-remap"
 import { readKnowledgeNoteProvenance } from "../knowledge-note-provenance"
 import { portableFixture } from "./fixtures/portable-workspace"
+import { claimTextHash, readClaimVerification } from "../claim-verification"
 
 const identity = { id: "destination", name: "Imported research", tag: "workspace:destination" }
 const maps = { media: { "1": 42 }, notes: { "note-old": "note-new" } }
 
 describe("verified portable workspace remapping", () => {
+  it("remaps checked evidence identity while retaining exact findings, text hashes and historical state", () => {
+    const bundle = portableFixture()
+    const message = bundle.workspace.chatSession!.messages[0]
+    const report = { version: 1, text_sha256: claimTextHash(message.message), verdict: "unverified", provider: "openai", model: "saved-model",
+      coverage: { total: 1, evaluated: 0, supported: 0, uncovered: 1, complete: false },
+      findings: [{ id: "C1", text: message.message, start: 0, end: message.message.length, evidence_ids: ["1"], status: "error", reason: "judge_timeout" }],
+      evidence: { "1": { text_sha256: "a".repeat(64), source_id: "source-old", media_id: 1, start_char: 0, end_char: 12 } }, limits: {}, context: {} }
+    message.metadataExtra = { claim_verification: report }
+    const result = remapPortableWorkspace(bundle, maps, identity)
+    const imported = result.workspace.chatSession!.messages[0]
+    const receipt = readClaimVerification(imported.metadataExtra?.claim_verification, imported.message)!
+    expect(receipt.evidence["1"]).toEqual({ ...report.evidence["1"], media_id: 42, source_id: result.workspace.snapshot.sources[0].id })
+    expect(receipt.findings).toEqual(report.findings)
+    expect(receipt.text_sha256).toBe(report.text_sha256)
+    expect(imported.metadataExtra?.claim_verification_imported).toBe(true)
+    expect(message.metadataExtra).toEqual({ claim_verification: report })
+  })
   it("rewrites both local and server parent aliases into the destination message graph", () => {
     const bundle = portableFixture()
     bundle.workspace.chatSession = { historyId: "old-local", serverChatId: "old-server", history: [], messages: [

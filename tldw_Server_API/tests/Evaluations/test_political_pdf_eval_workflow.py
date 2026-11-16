@@ -113,7 +113,8 @@ def test_explicit_retry_retains_first_failure_and_resume_reuses_success(runner_m
 def test_started_request_and_identity_drift_block_resume(runner_module, config_file, tmp_path):
     plan = runner_module.load_plan(config_file)
     directory = tmp_path / "run"
-    with runner_module.Runner(plan, directory, fetch=lambda **_: None) as run:
+    with runner_module.Runner(plan, directory, fetch=lambda **_:
+        None) as run:
         run.append({"schema_version": 1, "event": "started", "operation_id": "op", "attempt": 1, "stage": "qa"})
     with runner_module.Runner(plan, directory, resume=True) as run:
         with pytest.raises(runner_module.UnsafeResume):
@@ -235,7 +236,8 @@ def test_failed_check_keeps_raw_response_and_error_diagnostic(runner_module, con
     def broken_check(_):
         raise ValueError("Cannot parse returned shape")
 
-    with runner_module.Runner(runner_module.load_plan(config_file), tmp_path / "run", fetch=lambda **_: httpx.Response(200, json={"raw": "failed output"})) as run:
+    with runner_module.Runner(runner_module.load_plan(config_file), tmp_path / "run", fetch=lambda **_:
+        httpx.Response(200, json={"raw": "failed output"})) as run:
         result = run.request("malformed", "qa", "POST", "/chat", checks=broken_check)
         assert result["outcome"] == "failed"
         assert run.body(result) == {"raw": "failed output"}
@@ -475,7 +477,8 @@ def test_summary_rejects_unrepresentable_reasoning_setting_before_post(runner_mo
     plan = runner_module.load_plan(config_file)
     model = {**plan["config"]["models"][0], "reasoning_effort": "none"}
     calls = []
-    with runner_module.Runner(plan, tmp_path / "run", fetch=lambda **kw: calls.append(kw)) as run:
+    with runner_module.Runner(plan, tmp_path / "run", fetch=lambda **kw:
+        calls.append(kw)) as run:
         with pytest.raises(ValueError, match="reasoning"):
             run.summarize(model)
     assert not calls
@@ -503,3 +506,218 @@ def test_whole_book_identity_is_not_relaxed_to_pass_media_scope(runner_module):
         {"source_pages": [{"pdf_page": 906}]}, 1, 922)
     assert checks["source_scope_valid"] is False
     assert checks["covered_pages"] == []
+
+
+@pytest.fixture
+def strict_config(config_file):
+    config = json.loads(config_file.read_text())
+    config["verification"] = {"required": True, "provider": "openai", "model": "test-verifier"}
+    config_file.write_text(json.dumps(config))
+    return config_file
+
+
+def _strict_receipt(text, evidence, status="supported"):
+    import re
+    findings, cursor = [], 0
+    for index, paragraph in enumerate(text.split("\n\n"), 1):
+        start = text.index(paragraph, cursor)
+        end = start + len(paragraph)
+        findings.append({"id": f"C{index}", "text": paragraph, "start": start, "end": end,
+            "evidence_ids": re.findall(r"\[(P\d+|E\d+\.\d+\.\d+)\]", paragraph), "status": status, "reason": "Cited-source check"})
+        cursor = end
+    count = len(findings)
+    evaluated = count if status in {"supported", "unsupported", "contradicted"} else 0
+    return {"version": 1, "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "provider": "openai", "model": "test-verifier",
+        "verdict": "supported" if status == "supported" else "needs_revision" if status in {"unsupported", "contradicted", "uncited"} else "unverified",
+        "coverage": {"total": count, "evaluated": evaluated, "supported": count if status == "supported" else 0,
+            "uncovered": count - evaluated, "complete": count > 0 and evaluated == count}, "findings": findings,
+        "evidence": {row["id"]: {"text_sha256": hashlib.sha256(row["quote"].encode()).hexdigest()} for row in evidence}, "limits": {}, "context": {}}
+
+
+@pytest.mark.parametrize("status", ["supported", "unsupported", "contradicted", "uncited", "error"])
+def test_strict_qa_uses_canonical_owned_ranges_and_retains_real_verifier_receipts(runner_module, strict_config, tmp_path, status):
+    config = json.loads(strict_config.read_text())
+    canonical = "Canonical commission: retain regional offices only if funded."
+    calls = []
+    def server(**kwargs):
+        calls.append(kwargs)
+        path, body = kwargs["url"].split(":8000")[1], kwargs.get("json", {})
+        if path.endswith("/file"):
+            return httpx.Response(200, content=Path(config["source"]["path"]).read_bytes())
+        if path.endswith("/navigation"):
+            return httpx.Response(200, json={"media_id": 7, "available": True, "navigation_version": "v1", "nodes": [{"id": "chapter"}]})
+        if "/versions?" in path:
+            return httpx.Response(200, json=[{"media_id": 7, "version_number": 1, "content": canonical,
+                "safe_metadata": {"page_map_content_hash": hashlib.sha256(canonical.encode()).hexdigest(),
+                    "page_map": [{"page_number": 1, "start_char": 0, "end_char": len(canonical)}]}}])
+        if path.endswith("/sources"):
+            return httpx.Response(200, json=[{"id": "source-7", "workspace_id": "ws", "media_id": 7}])
+        if path == "/api/v1/rag/search":
+            return httpx.Response(200, json={"results": [{"content": canonical,
+                "metadata": {"media_id": 7, "page_number": 1, "start_char": 0, "end_char": len(canonical)}}], "errors": []})
+        if path == "/api/v1/chat/completions":
+            prompt = body["messages"][0]["content"]
+            assert canonical in prompt
+            assert "The commission proposes keeping" not in prompt
+            assert "cite" in prompt.lower()
+            content = json.dumps({"summary": "Retain offices only if funded [P1].", "evidence": [{"claim": "Retain offices only if funded", "author": "Alice", "interpretation": "A conditional proposal", "limitations": "Funding required", "source_span_ids": ["P1"]}]})
+            return httpx.Response(200, json={"choices": [{"finish_reason": "stop", "message": {"content": content}}]})
+        assert path == "/api/v1/research-workspace/citations/verify"
+        assert body["workspace_id"] == "ws"
+        assert body["api_provider"] == "openai" and body["model"] == "test-verifier"
+        assert body["text"] == "Retain offices only if funded [P1].\n\nRetain offices only if funded Attributed to: Alice. Interpretation: A conditional proposal. Limitations: Funding required. [P1]"
+        assert body["evidence"] == [{"id": "P1", "source_id": "source-7", "quote": canonical,
+            "start_char": 0, "end_char": len(canonical), "navigation_version": "v1"}]
+        return httpx.Response(200, json=_strict_receipt(body["text"], body["evidence"], status))
+
+    with runner_module.Runner(runner_module.load_plan(strict_config), tmp_path / "run", fetch=server) as run:
+        results = run.execute(["qa"])
+    generation = [row for row in results if row["stage"] == "qa"]
+    verification = [row for row in results if row["stage"] == "qa_verification"]
+    assert len(generation) == len(verification) == 2
+    assert all(row["outcome"] == "completed" for row in generation)
+    assert all(row["checks"]["strict_verification"]["integrity_valid"] for row in verification)
+    assert all(row["checks"]["passed"] is (status == "supported") for row in verification)
+    from Helper_Scripts.Evals.political_pdf_eval_report import write_report
+    report = write_report(tmp_path / "run")
+    assert len([op for op in report["operations"] if op["stage"] == "qa_verification"]) == 2
+    assert sum(call["url"].endswith("/citations/verify") for call in calls) == 2
+
+
+def test_strict_verifier_unknown_outcome_resumes_without_regenerating_answer(runner_module, strict_config, tmp_path):
+    # Reuse the existing immutable ledger contract for a paid verifier operation.
+    plan = runner_module.load_plan(strict_config)
+    calls = []
+    def timeout(**kwargs):
+        calls.append(kwargs)
+        raise httpx.ReadTimeout("Lost strict verifier response")
+    with runner_module.Runner(plan, tmp_path / "run", fetch=timeout) as run:
+        event = run.request("qa-verification:test:R01:reference_pages", "qa_verification", "POST", "/api/v1/research-workspace/citations/verify", body={"text": "Claim [P1]"})
+        assert event["outcome"] == "unknown"
+    with runner_module.Runner(plan, tmp_path / "run", fetch=timeout, resume=True) as run:
+        with pytest.raises(runner_module.UnsafeResume):
+            run.request("qa-verification:test:R01:reference_pages", "qa_verification", "POST", "/api/v1/research-workspace/citations/verify", body={"text": "Claim [P1]"})
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("status", ["supported", "unsupported", "error"])
+def test_strict_summary_generation_status_is_separate_from_all_report_coverage(runner_module, strict_config, tmp_path, status):
+    text, quote = "Claim [P1]", "Source"
+    evidence = [{"id": "P1", "quote": quote, "claim": "Claim", "start_char": 0, "end_char": len(quote)}]
+    report = {**_strict_receipt(text, evidence, status), "model": "test-model"}
+    section = {"source_id": "source-7", "node_id": "chapter", "navigation_version": "v1", "media_id": 7,
+        "start_char": 0, "end_char": len(quote), "status": "completed", "content": text, "claim_verification": report,
+        "batches": [{"start_char": 0, "end_char": len(quote), "status": "completed", "evidence": evidence,
+            "verification_text": text, "claim_verification": report}]}
+    analysis = {"sections": [section], "synthesis": text, "synthesis_verification": report}
+    artifact = {"id": "summary", "artifact_type": "summary", "status": "complete", "content": text,
+        "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}
+    def server(**kwargs):
+        path = kwargs["url"]
+        if kwargs["method"] == "POST":
+            return httpx.Response(202, json={"job_id": 12})
+        if "/outputs/12" in path:
+            return httpx.Response(200, json={"status": "completed", "artifact": artifact})
+        if "/navigation/chapter/content" in path:
+            return httpx.Response(200, json={"node_id": "chapter", "navigation_version": "v1", "media_id": 7,
+                "resolved_start_char": 0, "resolved_end_char": len(quote), "content": quote, "coverage_status": "exact"})
+        return httpx.Response(200, json=[artifact])
+    with runner_module.Runner(runner_module.load_plan(strict_config), tmp_path / "run", fetch=server) as run:
+        result = run.summarize(run.config["models"][0])
+    assert result["checks"]["structural_passed"] is True
+    assert result["checks"]["job_status"] == "completed"
+    assert result["checks"]["passed"] is (status == "supported")
+    from Helper_Scripts.Evals.political_pdf_eval_report import write_report
+    metrics = next(row for row in write_report(tmp_path / "run")["operations"] if row["stage"] == "summary")["attempts"][0]["metrics"]["strict_verification"]
+    assert metrics["expected_reports"] == {"batches": 1, "chapters": 1, "overview": 1}
+    assert metrics["all_claims_supported"] is (status == "supported")
+
+
+@pytest.mark.parametrize("status", ["unsupported", "supported", "error"])
+def test_fixed_source_audited_regression_uses_actual_verifier_without_generation(runner_module, strict_config, tmp_path, status):
+    config = json.loads(strict_config.read_text())
+    canonical = "The source requires purchasing at least 64 new interceptors."
+    case = {"id": "number-regression", "text": "Maintain 64 existing interceptors [P1]",
+        "evidence": [{"id": "P1", "quote": canonical}], "expected_statuses": ["unsupported", "contradicted"],
+        "label_provenance": "agent_source_audit", "human_review": {"status": "pending", "decision": None}}
+    fixture = tmp_path / "regressions.json"
+    fixture.write_text(json.dumps({"schema_version": 1, "source_sha256": config["source"]["sha256"], "cases": [case]}))
+    config["verification_regressions"] = {"path": str(fixture), "sha256": hashlib.sha256(fixture.read_bytes()).hexdigest()}
+    strict_config.write_text(json.dumps(config))
+    posts = []
+    def server(**kwargs):
+        path = kwargs["url"]
+        if path.endswith("/sources"):
+            return httpx.Response(200, json=[{"id": "source-7", "workspace_id": "ws", "media_id": 7}])
+        if path.endswith("/navigation"):
+            return httpx.Response(200, json={"media_id": 7, "navigation_version": "v1"})
+        if "/versions?" in path:
+            return httpx.Response(200, json=[{"media_id": 7, "content": canonical, "safe_metadata": {
+                "page_map_content_hash": hashlib.sha256(canonical.encode()).hexdigest(),
+                "page_map": [{"page_number": 1, "start_char": 0, "end_char": len(canonical)}]}}])
+        assert path.endswith("/citations/verify") and kwargs["method"] == "POST"
+        body = kwargs["json"]
+        assert body["text"] == case["text"]
+        assert body["evidence"][0]["quote"] == canonical
+        assert body["evidence"][0]["source_id"] == "source-7"
+        posts.append(body)
+        return httpx.Response(200, json=_strict_receipt(body["text"], body["evidence"], status))
+    plan = runner_module.load_plan(strict_config)
+    assert plan["verification_regressions_sha256"] == config["verification_regressions"]["sha256"]
+    with runner_module.Runner(plan, tmp_path / "run", fetch=server) as run:
+        result = run.verification_regression(case, run.config["models"][0])
+    assert result["checks"]["passed"] is (status == "unsupported")
+    assert result["checks"]["strict_verification"]["all_claims_supported"] is (status == "supported")
+    with runner_module.Runner(plan, tmp_path / "run", fetch=server, resume=True) as run:
+        assert run.verification_regression(case, run.config["models"][0]) == result
+    assert len(posts) == 1
+    from Helper_Scripts.Evals.political_pdf_eval_report import write_report
+    observed = next(row for row in write_report(tmp_path / "run")["operations"] if row["stage"] == "verification_regression")
+    assert observed["attempts"][0]["metrics"]["regression_expectation_met"] is (status == "unsupported")
+    fixture.write_text(fixture.read_text() + " ")
+    with pytest.raises(ValueError, match="fingerprint"):
+        runner_module.load_plan(strict_config)
+
+
+def test_strict_unknown_check_reuses_generated_answer_before_stopping_resume(runner_module, strict_config, tmp_path):
+    plan, posts = runner_module.load_plan(strict_config), []
+    raw = {"choices": [{"message": {"content": json.dumps({"summary": "Claim [P1]", "evidence": [{"claim": "Claim", "source_span_ids": ["P1"]}]})}}]}
+    def provider(**kwargs):
+        posts.append(kwargs["url"])
+        if kwargs["url"].endswith("/chat/completions"):
+            return httpx.Response(200, json=raw)
+        raise httpx.ReadTimeout("Lost verifier response")
+    def answer(run):
+        return run.request("qa:test:R01:reference_pages", "qa", "POST", "/api/v1/chat/completions", body={},
+            metadata={"model_key": "test", "case_id": "R01", "context": "reference_pages"},
+            context_evidence={"passages": [{"id": "P1", "text": "Exact source.", "source_id": "source-7", "start_char": 0, "end_char": 13, "navigation_version": "v1"}]})
+    with runner_module.Runner(plan, tmp_path / "run", fetch=provider) as run:
+        generated = answer(run)
+        assert run.verify_answer(generated, run.config["models"][0])["outcome"] == "unknown"
+    with runner_module.Runner(plan, tmp_path / "run", fetch=provider, resume=True) as run:
+        assert answer(run) == generated
+        with pytest.raises(runner_module.UnsafeResume):
+            run.verify_answer(generated, run.config["models"][0])
+    assert len(posts) == 2
+
+
+@pytest.mark.parametrize("problem", ["wrong_media", "stale_hash", "ambiguous_enrollment", "unmatched_retrieval"])
+def test_canonical_source_mismatch_stops_before_any_paid_request(runner_module, strict_config, tmp_path, problem):
+    canonical = "Canonical source."
+    def server(**kwargs):
+        path = kwargs["url"]
+        if path.endswith("/sources"):
+            row = {"id": "source-7", "workspace_id": "ws", "media_id": 7}
+            return httpx.Response(200, json=[row, {**row, "id": "other"}] if problem == "ambiguous_enrollment" else [row])
+        if path.endswith("/navigation"):
+            return httpx.Response(200, json={"media_id": 7, "navigation_version": "v1"})
+        if "/versions?" in path:
+            return httpx.Response(200, json=[{"media_id": 8 if problem == "wrong_media" else 7, "content": canonical, "safe_metadata": {
+                "page_map_content_hash": "stale" if problem == "stale_hash" else hashlib.sha256(canonical.encode()).hexdigest(),
+                "page_map": [{"page_number": 1, "start_char": 0, "end_char": len(canonical)}]}}])
+        assert path.endswith("/rag/search")
+        return httpx.Response(200, json={"results": [{"content": "Not canonical", "metadata": {"media_id": 7, "page_number": 1}}]})
+    with runner_module.Runner(runner_module.load_plan(strict_config), tmp_path / "run", fetch=server) as run:
+        with pytest.raises(ValueError):
+            run.answer(run.plan["cases"][0], run.config["models"][0], "retrieved")
+        assert not any(row["stage"] in {"qa", "qa_verification"} for row in run.events)

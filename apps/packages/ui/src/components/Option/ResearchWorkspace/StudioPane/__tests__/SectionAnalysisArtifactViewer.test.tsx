@@ -4,6 +4,7 @@ import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 import type { GeneratedArtifact } from "@/types/workspace"
 import { getSectionAnalysis, SectionAnalysisArtifactViewer } from "../SectionAnalysisArtifactViewer"
+import { claimTextHash } from "@/utils/claim-verification"
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }) }))
 
@@ -17,6 +18,28 @@ const checkpoint = (status: GeneratedArtifact["status"], version: number): Gener
 })
 
 describe("section reader checkpoint updates", () => {
+  it("separates overview, chapter and extracted-evidence findings from the saved human review", () => {
+    const artifact = checkpoint("completed", 1)
+    artifact.reviewStatus = "accepted"
+    const analysis = getSectionAnalysis(artifact)!
+    const report = (text: string, reason: string, status: string) => ({ version: 1, text_sha256: claimTextHash(text), verdict: status === "supported" ? "supported" : "needs_revision",
+      provider: "openai", model: "saved-model", coverage: { total: 1, evaluated: 1, supported: status === "supported" ? 1 : 0, uncovered: 0, complete: true },
+      findings: [{ id: "C1", text, start: 0, end: text.length, evidence_ids: ["E1.1.1"], status, reason }], evidence: { "E1.1.1": { text_sha256: "a".repeat(64) } }, context: {}, limits: {} })
+    analysis.synthesis = "Overview 1 [E1.1.1]"
+    analysis.sections[0].content = "Chapter checkpoint 1 [E1.1.1]"
+    analysis.synthesis_verification = report("Overview 1 [E1.1.1]", "Overview attribution is unsupported.", "unsupported")
+    analysis.sections[0].claim_verification = report("Chapter checkpoint 1 [E1.1.1]", "Chapter evidence supports the text.", "supported")
+    analysis.sections[0].batches = [{ verification_text: "Extracted evidence claim [E1.1.1]", claim_verification: report("Extracted evidence claim [E1.1.1]", "Earlier extraction needs correction.", "unsupported"), evidence: [] }]
+    const original = JSON.stringify(artifact)
+    render(<MemoryRouter><SectionAnalysisArtifactViewer artifact={artifact} analysis={analysis} sources={[]} /></MemoryRouter>)
+    expect(screen.getByText("Needs review")).toBeInTheDocument()
+    fireEvent.change(screen.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "0" } })
+    expect(screen.getByText("Supported by cited evidence")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /Show evidence/ }))
+    expect(screen.getByText("Needs review")).toBeInTheDocument()
+    expect(screen.getByText(/Earlier extraction needs correction/)).toBeInTheDocument()
+    expect(JSON.stringify(artifact)).toBe(original)
+  })
   it("keeps generation read-only even if its caller supplies a save callback", () => {
     const artifact = checkpoint("generating", 1)
     const save = vi.fn()

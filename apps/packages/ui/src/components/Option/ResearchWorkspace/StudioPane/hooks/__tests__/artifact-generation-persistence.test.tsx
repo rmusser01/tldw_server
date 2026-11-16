@@ -831,7 +831,7 @@ it('retains a submitted section job and its checkpoint when Studio unmounts with
 });
 
 
-it('explicitly regenerates a completed section overview using its saved checkpoint', async () => {
+it.each(['regenerateCompleted', 'retryCitationChecks'] as const)('explicitly resumes a completed section for %s using its saved checkpoint', async (option) => {
   const settings = { sections: [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }],
     provider: 'deepseek', model: 'saved-model', max_tokens: 8192, summary_instruction: 'Saved instruction' };
   const row = { id: 'saved-overview', workspace_id: 'owned', artifact_type: 'summary', title: 'Complete chapters',
@@ -847,7 +847,7 @@ it('explicitly regenerates a completed section overview using its saved checkpoi
   const hook = renderHook(() => useArtifactGeneration({ ...deps(), hasSelectedSources: false,
     selectedSources: [], selectedMediaIds: [], selectedMediaCount: 0 }));
   await act(async () => { await hook.result.current.handleGenerateOutput('summary', {
-    mode: 'replace', targetArtifactId: original.id, regenerateCompleted: true
+    mode: 'replace', targetArtifactId: original.id, [option]: true
   }); });
   expect(io.submit).toHaveBeenCalledWith('owned', expect.objectContaining({
     resume_artifact_id: row.id, source_ids: ['source-1'], settings: expect.objectContaining(settings)

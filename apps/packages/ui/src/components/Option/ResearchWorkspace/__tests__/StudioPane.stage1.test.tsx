@@ -2261,6 +2261,17 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(workspaceStoreState.generatedArtifacts[0].content).toBe("RAW_FULL_EXPORT_WITH_ALL_EVIDENCE")
   })
 
+  it("offers checks-only recovery for a completed canonical section output with missing checks", () => {
+    const artifact = { ...sectionReaderArtifact(), workspaceArtifactId: "canonical-summary", workspaceArtifactVersion: 1,
+      producerMetadata: { origin: "research_workspace_output_job", job_id: 41, source_ids: ["source-1"] }, reviewStatus: "accepted" as const }
+    workspaceStoreState.generatedArtifacts = [artifact]
+    const before = JSON.stringify(artifact)
+    renderStudioPane()
+    expect(screen.getByRole("button", { name: "Retry citation checks" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "View" })).toBeEnabled()
+    expect(JSON.stringify(artifact)).toBe(before)
+  })
+
   it("opens complete section outputs with an overview and all chapter titles without dumping raw evidence", async () => {
     const dialog = await openReader(sectionReaderArtifact())
     expect(await dialog.findByText("Readable whole-book overview.")).toBeInTheDocument()

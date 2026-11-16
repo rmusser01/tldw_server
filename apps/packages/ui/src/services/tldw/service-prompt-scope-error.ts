@@ -113,6 +113,7 @@ export const isServicePromptRequestPath = (
     pathname === "/api/v1/acp/sessions"
   )) return true
   if (requestMethod === "POST" && [
+    "/api/v1/research-workspace/citations/verify",
     "/api/v1/research-workspace/artifacts/generate", "/api/v1/quizzes/generate",
     "/api/v1/slides/generate/from-media", "/api/v1/audio/speech",
   ].includes(pathname)) return true

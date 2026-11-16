@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { remapImportedWorkspaceChat, buildWorkspaceChatImport } from "../workspace-chat-import"
 import { portableFixture } from "./fixtures/portable-workspace"
 import type { WorkspaceBundleChatSession } from "@/store/workspace-bundle"
+import { claimTextHash } from "../claim-verification"
 
 const session = (): WorkspaceBundleChatSession => ({ historyId: "old-browser", serverChatId: "old-server", history: [
   { role: "user", content: "Question" }, { role: "assistant", content: "Answer" }
@@ -11,6 +12,23 @@ const session = (): WorkspaceBundleChatSession => ({ historyId: "old-browser", s
 ] })
 
 describe("portable chat graph", () => {
+  it("retains exact verification findings and marks a restored check as historical", async () => {
+    const original = session()
+    const report = { version: 1, text_sha256: claimTextHash("Answer"), verdict: "needs_revision", provider: "openai", model: "test",
+      coverage: { total: 1, evaluated: 1, supported: 0, uncovered: 0, complete: true }, findings: [{ id: "C1", text: "Answer", start: 0, end: 6,
+        evidence_ids: ["1"], status: "unsupported", reason: "The source describes another agency." }], evidence: { "1": { text_sha256: "a".repeat(64) } }, limits: {}, context: {} }
+    original.messages[1].metadataExtra = { claim_verification: report }
+    const before = JSON.stringify(original)
+    let next = 0
+    const restored = remapImportedWorkspaceChat(original, () => `new-${++next}`)
+    expect(restored.messages[1].metadataExtra).toEqual({ claim_verification: report, claim_verification_imported: true })
+    const bundle = portableFixture()
+    bundle.workspace.chatSession = restored
+    const imported = await buildWorkspaceChatImport(bundle, "destination")
+    expect(imported!.messages[1].metadata_extra).toMatchObject({ claim_verification: report, claim_verification_imported: true })
+    expect(JSON.stringify(original)).toBe(before)
+  })
+
   it("restores ID-less legacy rows without inventing parent links or timestamps", async () => {
     const original = session()
     for (const row of original.messages) {

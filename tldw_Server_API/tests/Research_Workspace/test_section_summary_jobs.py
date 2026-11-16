@@ -20,6 +20,17 @@ from tldw_Server_API.app.core.Research_Workspace.research_workspace_outputs impo
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def stub_claims_provider(monkeypatch):
+    """Generation contract tests isolate the separate, externally judged Claims stage."""
+    from tldw_Server_API.app.core.Research_Workspace.section_verification import unavailable_verification
+
+    async def unavailable(text, evidence_by_id, **kwargs):
+        return unavailable_verification(text, provider="test", model="test")
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Research_Workspace.section_summaries.verify_section_text", unavailable)
+
+
 def request(version="v1", kind="summary"):
     return ResearchWorkspaceOutputSubmitRequest.model_validate(
         {
@@ -916,7 +927,7 @@ async def test_hierarchical_reduction_caps_only_intermediate_calls_and_preserves
     assert options["workspace_db"].row["status"] == "complete"
     calls.clear()
     await mod.process_section_summary(**options)
-    assert len(calls) == 1 and "SOURCE:" not in calls[0]["messages_payload"][0]["content"]
+    assert calls == []  # Unchanged synthesis is retained when retrying citation checks.
 
 
 @pytest.mark.asyncio
@@ -1425,7 +1436,7 @@ async def test_verified_heading_continues_across_portions_and_refreshes_on_legac
     refreshed = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
     assert refreshed["fingerprint"] == fingerprint
     assert "Spoofed context" not in repr(refreshed["sections"][0]["attribution_contexts"])
-    assert len(prompts) == before + 1 and "SOURCE:" not in prompts[-1]
+    assert len(prompts) == before  # Exact rebuilt context matches the existing synthesis input.
 
 
 @pytest.mark.asyncio

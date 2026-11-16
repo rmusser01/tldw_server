@@ -1843,5 +1843,55 @@
     "viewToolbar": "Conversation view",
     "noArtifactsYet": "No artifacts yet",
     "artifactsShort": "Artifacts"
+  },
+  "claims": {
+    "checking": "Checking citation support… The answer is retained while checks finish.",
+    "heading": "Citation support",
+    "status": {
+      "supported": {
+        "recorded": "Supported by cited evidence"
+      },
+      "needs_revision": {
+        "recorded": "Needs review"
+      },
+      "unverified": {
+        "recorded": "Not fully checked",
+        "missing": "Not checked"
+      }
+    },
+    "imported": "Imported historical check; sources have not been checked again in this workspace.",
+    "limitation": "These checks compare the draft with its cited evidence. They do not establish real-world truth or replace your review.",
+    "coverage": "{{evaluated}} of {{total}} claims checked; {{supported}} supported; {{uncovered}} uncovered.",
+    "coverageUnavailable": "Check coverage is unavailable.",
+    "findings": "Findings and cited evidence",
+    "finding": {
+      "supported": "supported",
+      "unsupported": "unsupported",
+      "contradicted": "contradicted",
+      "uncited": "uncited",
+      "not_checked": "not checked",
+      "error": "error"
+    },
+    "uncited": "No cited evidence",
+    "extraction": "Saved evidence checks",
+    "retry": "Retry citation checks",
+    "moreFindings": "Showing the first 256 findings. All findings are retained in the complete research pack.",
+    "reason": {
+      "missing_citation": "This claim has no citation. Review it and add supporting evidence.",
+      "citation_not_resolved": "The cited evidence could not be resolved.",
+      "citation_source_unavailable": "The cited source is unavailable in this workspace.",
+      "citation_source_changed_or_unresolved": "The citation could not be matched exactly to the saved source.",
+      "text_or_unit_limit": "This claim exceeded the check's text or claim limit and was not checked.",
+      "cited_evidence_limit": "The cited evidence exceeds the check's context limit.",
+      "citation_without_claim": "This citation has no accompanying claim to check.",
+      "judge_unavailable": "The citation checker is unavailable.",
+      "judge_timeout": "The citation check timed out.",
+      "verification_deadline": "The check's total time limit was reached before this claim was checked.",
+      "judge_failed": "The citation check could not finish.",
+      "judge_provider_failed": "The citation checking provider could not complete the request.",
+      "judge_response_invalid": "The checker returned an unusable response; this claim is not verified.",
+      "judge_completion_unconfirmed": "The checker's response was incomplete; this claim is not verified.",
+      "semantic_judgment_unavailable": "No usable citation-support judgment was returned."
+    }
   }
 }

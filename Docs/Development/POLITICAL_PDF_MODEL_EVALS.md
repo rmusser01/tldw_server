@@ -2,7 +2,7 @@
 
 Use `Helper_Scripts/Evals/run_political_pdf_eval.py` to compare models against the same PDF, frozen questions and saved retrieval evidence. It calls the existing Media, RAG, Chat and Workspace Jobs APIs; the report is generated offline. It reuses ingestion and never marks an output as human-approved.
 
-Tracked by TASK-15505.11. See the [design](../Design/POLITICAL_PDF_MODEL_EVALS_2026_11_15.md) for scope and architecture.
+Tracked by TASK-15505.11 and TASK-15505.18. Strict verification follows [ADR-096](../ADR/096-research-citation-bound-claims-verification.md) and the [strict Claims design](../Design/POLITICAL_PDF_STRICT_CLAIMS_2026_11_16.md). See the [design](../Design/POLITICAL_PDF_MODEL_EVALS_2026_11_15.md) for scope and architecture.
 
 ## Prepare a local configuration
 
@@ -25,6 +25,10 @@ Edit the copied [sample configuration](../../Helper_Scripts/Evals/configs/politi
 | `cases` | The frozen [case fixture](../../tldw_Server_API/tests/Research_Workspace/fixtures/political_pdf_claim_cases.json). Optional `case_ids` selects a nonempty subset. |
 | `models` | A list of unique `key`, exact `provider` and `model` IDs, and `max_tokens` values. Optional controls are `temperature`, `top_p` and QA-only `reasoning_effort`. |
 | `retrieval` | `modes`: `text`, `vector`, and/or `hybrid`; `top_k`; and `hybrid_alpha`. Required embeddings/indexes must already be available on the server. |
+| `workspace_id` | An existing owned workspace with the exact Media item enrolled; required for strict QA and fixed verification regressions as well as summaries. |
+| `verification.required` | The sample enables strict QA and saved-summary report checks. Omit this additive setting only to reproduce the legacy unverified runner mode in a new run. |
+| `verification.provider`, `verification.model` | Optional pair selecting the QA/regression verifier; otherwise each matrix entry supplies both. Summary Jobs use their own recorded generation provider/model for verification. |
+| `verification_regressions.path`, `.sha256` | The frozen [fixed-claim fixture](../../Helper_Scripts/Evals/configs/political_pdf_verification_regressions.v1.json) and its exact file hash. It is only submitted when the explicit regression stage is selected. |
 | `qa.contexts` | `reference_pages`, `retrieved`, or both. `qa.retrieval_mode` must be in the configured retrieval modes. |
 
 Paths in the config resolve from the current working directory, not the config file's directory. Model and case keys use letters, digits, `_`, `-` and `.`. Add one model entry per comparison candidate; each receives the selected question/context matrix. Use exact IDs supported by your configured server. Provider credentials stay in server configuration.
@@ -51,7 +55,7 @@ python Helper_Scripts/Evals/run_political_pdf_eval.py run \
   --stages source,retrieval,qa --execute
 ```
 
-`run` requires a new run identity and `--execute`; it refuses an existing manifest. Every non-pack workflow verifies the retained server PDF and navigation identity before generation. Retrieval disables generation and model-driven query enhancements. Retrieved QA reuses the saved selected retrieval mode; reference-page QA reads the frozen pages directly. Results remain separate by model, case and context.
+`run` requires a new run identity and `--execute`; it refuses an existing manifest. Every non-pack workflow verifies the retained server PDF and navigation identity before generation. Retrieval disables generation and model-driven query enhancements. Retrieved QA reuses the saved selected retrieval mode; strict reference-page QA clips the corresponding physical pages from the owned canonical Media version using its hash-bound page map. Retrieved passages must exactly match that same frozen source, by valid offsets or a unique literal substring. Mismatched or ambiguous evidence stops before generation; no whitespace or HTML normalization is applied. Legacy QA without `verification.required` retains its earlier PDF-extraction behavior. Results remain separate by model, case and context.
 
 Retrieval uses chunk-level FTS with late chunking disabled. QA rejects empty context or context over the production limit of 24,000 characters before making a paid request. To reduce retrieved context, lower `retrieval.top_k` in a new configuration/run; evidence is not silently truncated.
 
@@ -65,6 +69,23 @@ python Helper_Scripts/Evals/run_political_pdf_eval.py report \
 Use a fixed, preferably clean checkout for comparable runs. `manifest.json` freezes resolved configuration, source/fixture hashes, selected cases and Git `HEAD`; the Git SHA does not fingerprint uncommitted edits. `resume` refuses changed configuration, paths, source, fixture or revision. Use a new run directory for a changed matrix or code revision, preserving the old run.
 
 The recorded revision describes the runner checkout; it does not attest an already-running API or Jobs worker. Start the application and relevant workers from the intended revision before a live comparison, keep their code fixed through the run, and record a separate deployment/image identity when applicable. Restarting only the CLI does not reload a worker's imported code.
+
+## Strict QA and fixed verifier regressions
+
+With `verification.required: true`, `--stages qa` also submits each saved answer to `/research-workspace/citations/verify`. The server resolves the enrolled source and checks exact quoted passages. The original structured generation response remains unchanged. The runner verifies a separate text rendering: unchanged summary, then each claim with its literal author, interpretation and limitations fields and the actual returned passage IDs. It requests inline summary citations but never inserts missing ones afterward; an uncited summary remains an uncovered finding.
+
+To test the verifier independently of fresh generation, explicitly select the optional fixed-claim stage:
+
+```bash
+python Helper_Scripts/Evals/run_political_pdf_eval.py run \
+  --config .tmp/political-evals/config.json \
+  --run-dir .tmp/political-evals/verification-controls-a \
+  --stages source,verification_regressions --execute
+```
+
+The eight supplied controls include supported and deliberately incorrect claims about NGI procurement, Financial endnote 53, a CFPB condition, Khan's reported position, a wrong citation and an uncited statement. Their exact excerpts must resolve uniquely in the canonical source. Expected statuses are source-audited agent expectations, with human decisions explicitly null; this is a regression suite, not a calibrated accuracy benchmark. A negative control passes its regression expectation when the verifier rejects the unsupported claim, while its claim-support result remains false. Raw requests, reports and failed first attempts remain saved. The fixture hash participates in run identity and resume validation; changing a claim or quote requires a new config/hash/run.
+
+Planning reports potential endpoint-request counts, not billable provider-call counts. Each check may evaluate multiple cited text units, and uncited or unresolvable units may require no provider call. Shared verification limits can leave units explicitly uncovered. Provider usage is unavailable unless the public response exposes it; do not infer zero usage from its absence.
 
 ## Summaries and existing jobs
 
@@ -86,6 +107,8 @@ Without adoption, each configured model submits a distinct output job. To inspec
 `summary.wait_seconds` defaults to `3600` and accepts integers from `1` to `86400`. Polls wait up to 15 seconds, bounded by the remaining wait time. Reaching the wait deadline records `pending` and returns a nonzero exit; it does not cancel the server job. Resume with the same config to continue polling its saved ID without another POST.
 
 Every poll retains its full response, so large artifacts and long jobs can consume substantial disk space even at this interval. Allow room for the evidence; interrupting CLI polling does not cancel the server job.
+
+With strict verification required, each saved extraction batch, chapter and overview must have a receipt bound to its actual text and cited evidence. Report coverage includes all selected portions and chapters, including missing checks. Generation completion and structural scope/span/readback success remain visible separately; unsupported, unverified or missing reports keep the strict check unsuccessful.
 
 Terminal summary results, including failures and partial evidence, are retained on resume. The runner rejects `--retry-operation` for a known summary job, whether running or terminal. Resume its recorded job or use a new run directory for a new intentional generation.
 
@@ -114,7 +137,7 @@ python Helper_Scripts/Evals/run_political_pdf_eval.py resume \
 
 The flag creates another immutable attempt and can incur another provider call. It never erases the first failure. Repeat the flag for additional reviewed operation IDs; do not edit the ledger to manufacture success. One process holds the run-directory lock at a time.
 
-CLI exit codes are `0` when requested operations are recorded as completed, `1` for returned non-completed outcomes such as failure, unknown or pending, and `2` for validation/unsafe-resume errors. A completed HTTP operation is not a semantic pass; inspect its structural metrics and human review packet. `report` returning `0` means report generation succeeded.
+CLI exit codes are `0` when requested operations are recorded as completed, `1` for returned non-completed outcomes such as failure, unknown or pending, and `2` for validation/unsafe-resume errors. An HTTP 200 alone is not a pass: strict QA/summary checks require supported complete reports, and fixed regressions require their explicit expected statuses. Structural validity, automated support and human acceptance remain separate; inspect all three. Negative regression controls can succeed while correctly reporting an unsupported claim. `report` returning `0` means report generation succeeded.
 
 ## Validate a supplied research pack
 
@@ -129,15 +152,15 @@ Validation checks bounded ZIP inventory, required entries, manifest byte counts 
 | `manifest.json` | Frozen resolved configuration and source/fixture/revision identity. |
 | `attempts.jsonl` | Append-only started/finished records, operation IDs, all attempts, outcomes, timings and checks. |
 | `evidence/` | Immutable requests, response envelopes and retained binary artifacts. |
-| `report.json` | Every attempt plus first/latest outcomes, per-model operation counts, structural metrics and available usage/identity. |
-| `report.md` | Compact comparison with failures, pending outcomes, citation/page checks and summary counts. |
+| `report.json` | Every attempt plus first/latest outcomes, per-model operation counts, structural metrics, strict receipt integrity/coverage/verdicts, regression expectations and available usage/identity. |
+| `report.md` | Compact comparison with failures, pending outcomes, citation/page checks, summary verification coverage and fixed-regression outcomes. |
 | `semantic-review.json` | Frozen expected facts, physical page references, evidence paths and initially unfilled human labels. |
 
 Retrieval coverage uses the frozen expected physical-page set as its denominator. Source scope, pipeline errors and overbroad returned ranges are separate diagnostics. QA checks output shape, supplied passage IDs, finish reason/truncation and returned model identity; token counts are reported only when present and valid. Missing usage is **unavailable**, not zero.
 
 Summary checks retain section/portion completion and failure counts, selected-scope and exact evidence-span validation, and artifact readback. Jobs do not expose provider-call token usage through this interface. New-job elapsed time is submission-to-observed-terminal wall time, including resume downtime; adopted-job latency is unavailable. Per-operation elapsed time and its sum are not whole-run wall time.
 
-Faithfulness, author attribution, disagreement and completeness remain human judgments. Review the source and saved response, then fill the packet's labels/status and optional reviewer/notes. Regenerating reports preserves those decisions only for the same evidence fingerprint; changed evidence is rejected. H05 is a tuned regression, not an untouched held-out result. No automatic judge or accuracy score is supplied, and no frontend UI evaluation is automated here.
+Faithfulness, author attribution, disagreement and completeness remain human judgments. Review the source and saved response, then fill the packet's labels/status and optional reviewer/notes. Regenerating reports preserves those decisions only for the same evidence fingerprint; changed evidence is rejected. H05 is a tuned regression, not an untouched held-out result. Strict Claims results are uncalibrated automated source-support judgments; they never populate human labels or establish real-world truth. No accuracy score is inferred, and no frontend UI evaluation is automated here.
 
 CLI QA uses the production extraction prompt; the UI uses its chat pipeline. Passing CLI checks does not establish UI behavior or semantic correctness.
 

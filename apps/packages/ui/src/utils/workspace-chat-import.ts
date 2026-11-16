@@ -1,6 +1,7 @@
 import type { WorkspaceBundleChatSession, WorkspaceExportBundle } from "@/store/workspace-bundle"
 import { canonicalHistoryJson } from "@/db/dexie/history-selection"
 import { projectWorkspaceRagSources, readWorkspaceRagSourceProvenance, WORKSPACE_RAG_SOURCES_KEY } from "./workspace-rag-sources"
+import { CLAIM_VERIFICATION_KEY, CLAIM_VERIFICATION_IMPORTED_KEY, readClaimVerification } from "./claim-verification"
 
 const enrolledChats = new WeakMap<WorkspaceBundleChatSession, { scopeKey: string; workspaceId: string; snapshot: string }>()
 
@@ -48,6 +49,7 @@ export const remapImportedWorkspaceChat = (
   }
   const messages = session.messages.map((row, index) => {
     const copy = { ...row, id: ids[index], parentMessageId: parents[index] === null ? null : ids[parents[index]!] }
+    if (row.metadataExtra?.[CLAIM_VERIFICATION_KEY] != null) copy.metadataExtra = { ...row.metadataExtra, [CLAIM_VERIFICATION_IMPORTED_KEY]: true }
     delete copy.serverMessageId
     delete copy.serverMessageVersion
     return copy
@@ -95,6 +97,9 @@ export const buildWorkspaceChatImport = async (
       throw new Error("Imported chat citation evidence is incomplete or inconsistent.")
     const provenance = stored || projected
     if (provenance && role !== "assistant") throw new Error("Imported chat citations require an assistant message.")
+    const rawVerification = row.metadataExtra?.[CLAIM_VERIFICATION_KEY]
+    const verification = rawVerification == null ? null : readClaimVerification(rawVerification)
+    if (rawVerification != null && (!verification || role !== "assistant")) throw new Error("Imported chat citation checks are malformed or attached to the wrong role.")
     const generation = role === "assistant" ? Object.fromEntries(
       ["generation_status", "model_id", "provider", "finish_reason", "usage"].flatMap(key =>
         row.metadataExtra?.[key] == null ? [] : [[key, row.metadataExtra[key]]])
@@ -103,7 +108,10 @@ export const buildWorkspaceChatImport = async (
     return { id: row.id, parent_message_id: row.parentMessageId ?? null, role: role as WorkspaceChatImportMessage["role"],
       content: row.message || "", timestamp: new Date(row.createdAt).toISOString(), images,
       ...(Object.keys(generation).length ? { metadata: generation } : {}),
-      ...(provenance ? { metadata_extra: { [WORKSPACE_RAG_SOURCES_KEY]: provenance } } : {}) }
+      ...(provenance || verification ? { metadata_extra: {
+        ...(provenance ? { [WORKSPACE_RAG_SOURCES_KEY]: provenance } : {}),
+        ...(verification ? { [CLAIM_VERIFICATION_KEY]: verification, [CLAIM_VERIFICATION_IMPORTED_KEY]: true } : {})
+      } } : {}) }
   })
   const dates = messages.map(row => row.timestamp).sort()
   return { id, title: bundle.workspace.name, scope_type: "workspace", workspace_id: workspaceId,

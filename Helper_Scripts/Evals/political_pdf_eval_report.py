@@ -21,6 +21,7 @@ _PATHS = ("request_path", "response_path", "artifact_path")
 _OUTPUT_NAMES = ("report.json", "report.md", "semantic-review.json")
 _LIMITATIONS = [
     "Structural checks do not measure semantic correctness; human review remains pending.",
+    "Strict support verdicts are uncalibrated automated judgments, not human acceptance or real-world truth.",
     "H05 is a tuned regression, not an untouched held-out case.",
     "Summary provider-call usage is unavailable through the public Jobs API.",
     "Backend evidence does not certify browser export, offline reading, or cross-server UI restore.",
@@ -172,7 +173,100 @@ def _qa_metrics(body: Any, request: Any) -> tuple[dict, Any, Any]:
     return metrics, model if isinstance(model, str) else None, usage
 
 
-def _attempt(root: Path, record: dict, case: dict) -> dict:
+
+def verification_metrics(report: Any, text: str, evidence: dict[str, str], *, expected_identity: tuple | None = None) -> dict:
+    """Validate a saved strict receipt and expose automated outcomes without human labels."""
+    result = {"available": isinstance(report, dict), "integrity_valid": False,
+        "verdict": "unverified", "all_claims_supported": False, "all_claims_evaluated": False,
+        "coverage": {}, "finding_status_counts": {}, "human_review": "pending"}
+    if not isinstance(report, dict) or not isinstance(text, str) or not isinstance(evidence, dict) or any(not isinstance(value, str) for value in evidence.values()):
+        return result
+    findings, coverage, recorded_evidence = (report.get(key) for key in ("findings", "coverage", "evidence"))
+    result.update({"verdict": report.get("verdict", "unverified"), "provider": report.get("provider"), "model": report.get("model")})
+    if not isinstance(findings, list) or not isinstance(coverage, dict) or not isinstance(recorded_evidence, dict):
+        return result
+    statuses = {"supported", "unsupported", "contradicted", "uncited", "not_checked", "error"}
+    counts: Counter = Counter()
+    valid = type(report.get("version")) is int and report["version"] == 1 and all(isinstance(report.get(key), str) and report[key].strip() for key in ("provider", "model")) and report.get("text_sha256") == hashlib.sha256(text.encode()).hexdigest()
+    if expected_identity is not None:
+        valid &= (report.get("provider"), report.get("model")) == expected_identity
+    previous_end, ids = 0, set()
+    for finding in findings:
+        if not isinstance(finding, dict):
+            valid = False
+            continue
+        start, end, cited, status = (finding.get(key) for key in ("start", "end", "evidence_ids", "status"))
+        bounded = type(start) is int and type(end) is int and previous_end <= start < end <= len(text)
+        valid &= bounded and isinstance(finding.get("id"), str) and bool(finding["id"]) and finding["id"] not in ids
+        valid &= isinstance(status, str) and status in statuses and isinstance(finding.get("reason"), str)
+        if bounded:
+            valid &= finding.get("text") == text[start:end] and not any(character.isalnum() for character in text[previous_end:start])
+            previous_end = end
+        if isinstance(finding.get("id"), str):
+            ids.add(finding["id"])
+        if isinstance(status, str):
+            counts[status] += 1
+        valid_citations = isinstance(cited, list) and all(isinstance(value, str) for value in cited)
+        valid &= valid_citations
+        literal_ids = [token.strip().removeprefix("Source ") for group in re.findall(r"\[([^\]\n]+)\]", finding.get("text", "") if isinstance(finding.get("text"), str) else "") for token in group.split(",")]
+        valid &= cited == list(dict.fromkeys(literal_ids)) or (status in ("error", "not_checked") and cited == [])
+        if status in ("supported", "unsupported", "contradicted"):
+            valid &= bool(cited) and valid_citations and all(value in evidence and value in recorded_evidence for value in cited)
+    valid &= not any(character.isalnum() for character in text[previous_end:])
+    for identifier, item in recorded_evidence.items():
+        valid &= isinstance(item, dict) and identifier in evidence and item.get("text_sha256") == hashlib.sha256(evidence.get(identifier, "").encode()).hexdigest()
+    evaluated = sum(counts[status] for status in ("supported", "unsupported", "contradicted"))
+    expected = {"total": len(findings), "evaluated": evaluated, "supported": counts["supported"],
+        "uncovered": len(findings) - evaluated, "complete": bool(findings) and evaluated == len(findings)}
+    expected_verdict = ("supported" if expected["complete"] and counts["supported"] == len(findings)
+        else "needs_revision" if any(counts[key] for key in ("unsupported", "contradicted", "uncited")) else "unverified")
+    valid &= all(type(coverage.get(key)) is int for key in ("total", "evaluated", "supported", "uncovered")) and type(coverage.get("complete")) is bool
+    valid &= coverage == expected and report.get("verdict") == expected_verdict
+    result.update({"integrity_valid": bool(valid), "coverage": expected, "reported_coverage": coverage,
+        "finding_status_counts": dict(counts), "all_claims_evaluated": bool(valid and expected["complete"]),
+        "all_claims_supported": bool(valid and expected_verdict == "supported")})
+    return result
+
+
+def regression_metrics(report: Any, submitted: dict, expected: list[str]) -> dict:
+    """Compare frozen source-audited expectations; never call this model accuracy."""
+    evidence = {item["id"]: item["quote"] for item in submitted.get("evidence", [])
+        if isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("quote"), str)}
+    metrics = verification_metrics(report, submitted.get("text", ""), evidence, expected_identity=(submitted.get("api_provider"), submitted.get("model")))
+    observed = set(metrics["finding_status_counts"])
+    return {"strict_verification": metrics, "regression_expectation_met": bool(metrics["integrity_valid"] and observed and observed <= set(expected)),
+        "expected_statuses": expected, "expectation_provenance": "agent_source_audit"}
+
+
+def summary_verification_metrics(analysis: Any, *, expected_identity: tuple | None = None) -> dict:
+    """Account for every selected chapter, extraction portion and final overview."""
+    from tldw_Server_API.app.core.Research_Workspace.section_verification import batch_claim_text
+
+    analysis = analysis if isinstance(analysis, dict) else {}
+    sections = analysis.get("sections", [])
+    rows, all_evidence = [], {}
+    for section_index, section in enumerate(sections, 1):
+        evidence = {item["id"]: item["quote"] for batch in section.get("batches", []) for item in batch.get("evidence", [])
+            if isinstance(item.get("id"), str) and isinstance(item.get("quote"), str)}
+        all_evidence.update(evidence)
+        for batch_index, batch in enumerate(section.get("batches", []), 1):
+            own = {item["id"]: evidence[item["id"]] for item in batch.get("evidence", []) if item.get("id") in evidence}
+            expected_text = batch_claim_text(batch) if all(isinstance(item.get("id"), str) for item in batch.get("evidence", [])) else ""
+            metrics = verification_metrics(batch.get("claim_verification"), expected_text, own, expected_identity=expected_identity)
+            if batch.get("verification_text") != expected_text:
+                metrics.update(integrity_valid=False, all_claims_supported=False, all_claims_evaluated=False)
+            rows.append({"kind": "batches", "section": section_index, "batch": batch_index, "generation_status": batch.get("status"), **metrics})
+        rows.append({"kind": "chapters", "section": section_index, "title": section.get("title"), "generation_status": section.get("status"),
+            **verification_metrics(section.get("claim_verification"), section.get("content", ""), evidence, expected_identity=expected_identity)})
+    rows.append({"kind": "overview", **verification_metrics(analysis.get("synthesis_verification"), analysis.get("synthesis", ""), all_evidence, expected_identity=expected_identity)})
+    kinds = ("batches", "chapters", "overview")
+    return {"expected_reports": {kind: sum(row["kind"] == kind for row in rows) for kind in kinds},
+        "valid_reports": {kind: sum(row["kind"] == kind and row["integrity_valid"] for row in rows) for kind in kinds},
+        "all_claims_supported": bool(sections) and all(row["all_claims_supported"] for row in rows),
+        "all_claims_evaluated": bool(sections) and all(row["all_claims_evaluated"] for row in rows),
+        "human_review": "pending", "reports": rows}
+
+def _attempt(root: Path, record: dict, case: dict, config: dict) -> dict:
     """Derive one attempt without dropping the runner's original checks."""
     row = {key: record[key] for key in ("attempt", "outcome", "utc_time", "elapsed_seconds", "http_status",
         "job_id", "artifact_id", *_PATHS) if key in record}
@@ -187,6 +281,19 @@ def _attempt(root: Path, record: dict, case: dict) -> dict:
         row["metrics"].update(metrics)
         row.update({"returned_model": model, "reported_usage": usage,
             "usage_status": "reported" if usage is not None else "unavailable"})
+    elif stage in ("qa_verification", "verification_regression"):
+        request = _read_json(_path(root, record["request_path"])) if "request_path" in record else {}
+        submitted = request.get("body", {}) if isinstance(request, dict) else {}
+        evidence = {item["id"]: item["quote"] for item in submitted.get("evidence", [])
+            if isinstance(item, dict) and isinstance(item.get("id"), str) and isinstance(item.get("quote"), str)}
+        row["metrics"]["strict_verification"] = verification_metrics(body, submitted.get("text", ""), evidence, expected_identity=(submitted.get("api_provider"), submitted.get("model")))
+        if stage == "verification_regression":
+            expected = (request.get("context_evidence") or {}).get("expected_statuses", [])
+            row["metrics"].update(regression_metrics(body, submitted, expected))
+    elif stage == "summary" and isinstance(body, dict):
+        analysis = (body.get("artifact") or {}).get("version_metadata", {}).get("workspaceClient", {}).get("data", {}).get("sectionAnalysis", {})
+        configured = next((model for model in config.get("models", []) if model.get("key") == record.get("model_key")), {})
+        row["metrics"]["strict_verification"] = summary_verification_metrics(analysis, expected_identity=(configured.get("provider"), configured.get("model")))
     elif stage == "retrieval":
         expected = _pages(case)
         covered = checks.get("covered_pages", [])
@@ -254,6 +361,27 @@ def _markdown(report: dict) -> str:
                     f"({metrics.get('job_latency_basis', 'unavailable')})")
             lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], row["attempt"],
                 row["outcome"], row.get("elapsed_seconds"), row["usage_status"], row.get("returned_model"), detail)) + " |")
+    strict_rows = [(op, row, row["metrics"].get("strict_verification")) for op in report["operations"] for row in op["attempts"]]
+    if any(isinstance(checks, dict) for _, _, checks in strict_rows):
+        lines.extend(["", "## Strict verification", "", "| Operation | Attempt | Receipt valid | Automated verdict | Evaluated / total | Supported | Uncovered |", "| --- | ---: | --- | --- | --- | ---: | ---: |"])
+        for op, row, checks in strict_rows:
+            if not isinstance(checks, dict):
+                continue
+            coverage = checks.get("coverage", {})
+            lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], row["attempt"],
+                checks.get("integrity_valid"), checks.get("verdict"), f"{coverage.get('evaluated', '?')} / {coverage.get('total', '?')}",
+                coverage.get("supported"), coverage.get("uncovered"))) + " |")
+    regressions = [(op, row) for op in report["operations"] if op["stage"] == "verification_regression" for row in op["attempts"]]
+    if regressions:
+        lines.extend(["", "## Source-audited regression expectations", "", "These are agent-authored source regressions, not human labels or a calibrated accuracy benchmark.", "", "| Operation | Expected statuses | Observed statuses | Expectation met |", "| --- | --- | --- | --- |"])
+        for op, row in regressions:
+            metrics = row["metrics"]
+            lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], metrics.get("expected_statuses"), metrics.get("strict_verification", {}).get("finding_status_counts"), metrics.get("regression_expectation_met"))) + " |")
+    summary_rows = [(op, row, checks) for op, row, checks in strict_rows if isinstance(checks, dict) and "expected_reports" in checks]
+    if summary_rows:
+        lines.extend(["", "## Saved summary verification coverage", "", "| Operation | Valid batch / chapter / overview receipts | Expected receipts | All text units evaluated | All supported |", "| --- | --- | --- | --- | --- |"])
+        for op, _row, checks in summary_rows:
+            lines.append("| " + " | ".join(cell(value) for value in (op["operation_id"], checks["valid_reports"], checks["expected_reports"], checks["all_claims_evaluated"], checks["all_claims_supported"])) + " |")
     lines.extend(["", "Detailed structural metrics and original check results: report.json.",
         "Human labels and frozen expected facts: semantic-review.json.", ""])
     return "\n".join(lines)
@@ -298,13 +426,15 @@ def write_report(run_dir: Path) -> dict:
     reviews = []
     for record in records:
         case = cases.get(record.get("case_id"), {})
+        if record["stage"] == "verification_regression":
+            case = next((row for row in manifest.get("verification_regressions", []) if row.get("id") == record.get("context")), {})
         operation = operations.setdefault(record["operation_id"], {"operation_id": record["operation_id"],
             **{key: record[key] for key in _IDENTITY if key in record}, "attempts": []})
-        row = _attempt(root, record, case)
+        row = _attempt(root, record, case, manifest["config"])
         operation["attempts"].append(row)
         operation["first_outcome"] = operation["attempts"][0]["outcome"]
         operation["latest_outcome"] = row["outcome"]
-        if record["stage"] in ("qa", "summary") and "response_path" in record:
+        if record["stage"] in ("qa", "qa_verification", "verification_regression", "summary") and "response_path" in record:
             frozen = {"case": case, "identity": {key: record.get(key) for key in _IDENTITY},
                 "files": {key: hashlib.sha256(_path(root, record[key]).read_bytes()).hexdigest()
                     for key in _PATHS if key in record}}
@@ -312,6 +442,7 @@ def write_report(run_dir: Path) -> dict:
                 **{key: record[key] for key in (*_IDENTITY, *_PATHS) if key in record},
                 "outcome": row["outcome"], "question": case.get("question"),
                 "expected_source_facts": case.get("expected_source_facts", []),
+                "regression_expected_statuses": case.get("expected_statuses"), "regression_reason": case.get("reason"),
                 "source_pages": case.get("source_pages", []),
                 "label_provenance": case.get("label_provenance"),
                 "case_note": "H05 is a tuned regression" if case.get("id") == "H05" else "Frozen case",

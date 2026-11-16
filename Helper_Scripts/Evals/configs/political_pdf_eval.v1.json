@@ -36,5 +36,12 @@
     "max_tokens": 8192,
     "wait_seconds": 3600,
     "summary_instruction": "Summarize supported policy proposals and distinguish opposing authors and positions."
+  },
+  "verification": {
+    "required": true
+  },
+  "verification_regressions": {
+    "path": "Helper_Scripts/Evals/configs/political_pdf_verification_regressions.v1.json",
+    "sha256": "96e05f005176f7d1de44faae13389fbb73504d033047ef7ecc311d21ef8dc67d"
   }
 }
