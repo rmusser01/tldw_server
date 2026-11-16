@@ -3028,10 +3028,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                   buildLiteratureDeepResearchLaunchPath(artifact, {
                     workspaceId
                   })
-                const failedStatusDeleteLabel = t(
-                  "playground:studio.deleteFailedOutput",
-                  "Delete failed output"
-                )
+                const statusDeleteLabel = artifact.status === "failed"
+                  ? t("playground:studio.deleteFailedOutput", "Delete failed output")
+                  : t("playground:studio.deleteOutput", "Delete output")
                 const failedRetryLabel = t(
                   "playground:studio.retryFailedOutput",
                   "Retry"
@@ -3092,7 +3091,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                   <RefreshCw className="h-3.5 w-3.5 shrink-0 text-text-muted hover:text-primary" />
                                 </button>
                               </Tooltip>
-                              <Tooltip title={failedStatusDeleteLabel}>
+                              <Tooltip title={statusDeleteLabel}>
                                 <button
                                   type="button"
                                   onClick={(event) => {
@@ -3101,7 +3100,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                   }}
                                   onKeyDown={handleIconButtonKeyDown}
                                   className="rounded p-0.5 hover:bg-error/10"
-                                  aria-label={failedStatusDeleteLabel}
+                                  aria-label={statusDeleteLabel}
                                 >
                                   <StatusIcon
                                     className={`h-4 w-4 shrink-0 ${StatusConfig.className}`}

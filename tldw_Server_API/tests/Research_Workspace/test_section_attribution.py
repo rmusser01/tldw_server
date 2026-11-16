@@ -274,3 +274,99 @@ def test_heading_excerpt_is_bounded_exact_source_with_original_offsets(suffix):
         assert section["start_char"] <= context["heading_start_char"] <= context["heading_end_char"] <= section["end_char"]
         assert len(context["heading_quote"]) <= 800
     assert len(module().render_attribution_context(contexts)) <= 16_000
+
+
+def note_fixture(source, children=()):
+    section = {"source_id": "source", "media_id": 1, "node_id": "root", "navigation_version": "v",
+               "start_char": 0, "end_char": len(source)}
+    nodes = [{"id": "root", "title": "Policy", "level": 1, "target_type": "char_range",
+              "target_start": 0, "target_end": len(source)}]
+    nodes.extend(children)
+    return section, {"content": source, "nodes": nodes, "page_map": [], "navigation_version": "v"}
+
+
+@pytest.mark.parametrize("label", ["AUTHOR'S NOTE:", "AUTHORS' NOTE:", "**AUTHOR’S NOTE:**",
+                                  "## AUTHORS’ NOTE", "**AUTHOR’S\nNOTE:**"])
+def test_literal_author_note_retains_wrapped_exact_source_without_interpreting_responsibility(label):
+    note = label + "\nThe authors alone assume responsibility.\n\nNo views belong to any other individual."
+    source = "# Policy\n\n**Ada Example**\n\n" + "Policy detail. " * 100 + "\n" + note + "\n\n**ENDNOTES**\nCited Person."
+    section, snapshot = note_fixture(source)
+    before = copy.deepcopy(snapshot)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    saved = contexts[0]["author_notes"][0]
+    assert saved["quote"].strip() == note
+    assert saved["quote"] == source[saved["start_char"]:saved["end_char"]]
+    projected = json.loads(module().render_attribution_context(contexts).rsplit("\n", 1)[-1])
+    assert projected[0]["author_notes"][0]["quote"] == saved["quote"]
+    assert snapshot == before
+
+
+def test_author_notes_stop_at_contribution_boundaries_and_selected_child_excludes_siblings():
+    first = "# Policy\n\n**Ada Example**\n\n" + "First policy. " * 100 + "\n**AUTHOR’S NOTE:** Thanks to First Helper.\n\n"
+    second = "## Second\n\n**Bert Sample**\n\n" + "Second policy. " * 100 + "\n**AUTHOR’S NOTE:** No individual owns these views.\n"
+    source = first + second
+    child = {"id": "second", "title": "Second", "level": 2, "parent_id": "root", "target_type": "char_range",
+             "target_start": len(first), "target_end": len(source)}
+    section, snapshot = note_fixture(source, [child])
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert contexts[0]["author_notes"][0]["end_char"] == len(first)
+    assert "Bert Sample" not in contexts[0]["author_notes"][0]["quote"]
+    section.update(node_id="second", start_char=len(first))
+    selected = module().build_section_attribution_contexts(section, snapshot)
+    assert "First Helper" not in module().render_attribution_context(selected)
+    assert "No individual owns these views." in selected[0]["author_notes"][0]["quote"]
+
+
+@pytest.mark.parametrize("padding", ["", "Policy detail. " * 100])
+def test_author_note_names_do_not_authorize_attribution_to_a_different_body_passage(padding):
+    source = "# Policy\n\n**Ada Example**\n\n" + padding + "\n**AUTHOR’S NOTE:** Thanks to Guest Person.\n\nIndependent proposal."
+    section, snapshot = note_fixture(source)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert "Guest Person" in contexts[0]["author_notes"][0]["quote"]
+    assert author_at("Guest Person", "Independent proposal.", source, contexts) == ""
+    assert author_at("Ada Example", "Independent proposal.", source, contexts) == "Ada Example"
+
+
+@pytest.mark.parametrize("label", ["A sentence quotes AUTHOR’S NOTE:", "> AUTHOR’S NOTE:", "**AUTHOR’S NOTEBOOK:**"])
+def test_only_literal_source_note_labels_are_retained(label):
+    section, snapshot = note_fixture("# Policy\n\n**Ada Example**\n\n" + label + " Other Person.")
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert all(not context.get("author_notes") for context in contexts)
+
+
+@pytest.mark.parametrize("mode", ["whole", "unresolved", "reference", "empty"])
+def test_notes_from_unresolved_or_reference_sources_are_not_retained(mode):
+    source = "# Policy\n\n**ENDNOTES**\n" if mode == "reference" else "# Policy\n\n"
+    section, snapshot = note_fixture(source + "**AUTHOR’S NOTE:** Collective views.")
+    if mode == "whole":
+        section["node_id"] = None
+    if mode == "unresolved":
+        section["navigation_version"] = "changed"
+    if mode == "empty":
+        snapshot["content"] = ""
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert all(not context.get("author_notes") for context in contexts)
+
+
+def test_many_author_notes_count_towards_existing_context_budget_and_mark_omission():
+    source = "# Policy\n\n**Ada Example**\n\n" + ("\nAUTHOR’S NOTE: " + "x" * 900) * 12
+    section, snapshot = note_fixture(source)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    assert any(context.get("omitted") for context in contexts)
+    assert len(module().render_attribution_context(contexts)) <= 16_000
+
+
+@given(st.text(alphabet=st.characters(blacklist_categories=("Cs",)), min_size=1, max_size=2000))
+def test_author_note_excerpt_is_bounded_and_exact_with_original_offsets(suffix):
+    source = "# Policy\n\n**Ada Example**\n\n" + "Policy. " * 120 + "\nAUTHOR’S NOTE: " + suffix
+    section, snapshot = note_fixture(source)
+    contexts = module().build_section_attribution_contexts(section, snapshot)
+    notes = [note for context in contexts for note in context.get("author_notes", [])]
+    assert notes
+    for note in notes:
+        assert note["quote"] == source[note["start_char"]:note["end_char"]]
+        assert section["start_char"] <= note["start_char"] < note["end_char"] <= section["end_char"]
+        assert len(note["quote"]) <= 800
+        if note["end_char"] < section["end_char"]:
+            assert note["truncated"]
+    assert len(module().render_attribution_context(contexts)) <= 16_000

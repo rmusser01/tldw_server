@@ -1624,8 +1624,122 @@ async def test_collective_authorship_caveat_reaches_reduction_and_final_synthesi
         assert "explicit collective-authorship or disavowal caveats" in system
         assert "byline does not authorize assigning all proposals to that individual" in system
         assert "chapter-level wording" in system and "Keep the caveat visible" in system
+        assert "Identify the supplied byline as source attribution" in system
+        assert "Organize a single contribution by policy topic" in system
+        assert "separate named proponent sections only for source-supported distinct contributions or explicit opposing positions" in system
     assert all("collective-authorship" not in c["system_message"] for c in calls if c not in synthesis)
     assert "collective-authorship" not in mod.build_section_extraction_prompt("Policy", "Summarize", source)[0]
     analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
     assert options["workspace_db"].row["status"] == "complete"
     assert all(e["author"] == "" for s in analysis["sections"] for b in s["batches"] for e in b["evidence"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["single", "siblings", "whole-document"])
+async def test_verified_attribution_context_survives_name_dropping_reductions(monkeypatch, scope):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    first = "# Policy\n\n**Avery Example**\n\nSource mentions E1.2.1 as text. " + "First policy. " * 2000
+    second = "# Alternative\n\n**Blair Sample**\n\n" + "Second policy. " * 1700
+    source = first + (second if scope == "siblings" else "Further policy. " * 1700) + "\n\n**ENDNOTES**\n\nReference only."
+    nodes = [{"id": "dsi:1", "title": "Policy", "level": 1, "target_type": "char_range", "target_start": 0, "target_end": len(source)}]
+    if scope == "siblings":
+        nodes.append({"id": "child", "parent_id": "dsi:1", "title": "Alternative", "level": 2,
+                      "target_type": "char_range", "target_start": len(first), "target_end": len(source)})
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": nodes,
+    }))
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "A policy point. " * 1000, "evidence": [
+                {"claim": "A source-backed policy", "source_span_ids": ["P1"]},
+            ]})
+        else:
+            allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            content = "Compressed policy without names " + " ".join(f"[{value}]" for value in allowed)
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    settings = request().settings
+    if scope == "whole-document":
+        settings = settings.model_copy(update={"sections": []})
+    options = args(settings)
+    await mod.process_section_summary(**options)
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert options["workspace_db"].row["status"] == "complete"
+    reductions = [c for c in calls if "intermediate compression step" in c["system_message"]]
+    final = next(c for c in calls if c["messages_payload"][0]["content"].startswith("Summarize all portions"))
+    assert reductions
+    first_allowed = json.loads(reductions[0]["messages_payload"][0]["content"].split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+    assert first_allowed == ["E1.1.1"]  # Context cannot authorize another portion's registered evidence.
+    contexts = analysis["sections"][0]["attribution_contexts"]
+    for call in [*reductions, final]:
+        prompt = call["messages_payload"][0]["content"]
+        if scope == "whole-document":
+            assert not contexts and "SOURCE HEADING CONTEXT" not in prompt
+        else:
+            rendered = mod.render_attribution_context(contexts)
+            assert rendered in prompt
+            assert prompt.count("SOURCE HEADING CONTEXT") == 1
+            assert "Avery Example" in prompt and "not citable passages" in prompt
+            if scope == "siblings":
+                assert "Blair Sample" in prompt
+                assert [(c["start_char"], c["end_char"]) for c in contexts if c["type"] == "heading"] == [
+                    (0, len(first)), (len(first), source.index("**ENDNOTES**")),
+                ]
+            assert contexts[-1]["type"] == "reference" and contexts[-1]["start_char"] == source.index("**ENDNOTES**")
+        allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+        assert all(re.fullmatch(r"E1\.\d+\.1", value) for value in allowed)
+    overview = next(c for c in calls if c["messages_payload"][0]["content"].startswith("Synthesize the completed"))
+    assert "SOURCE HEADING CONTEXT" not in overview["messages_payload"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_late_literal_author_note_reaches_early_extraction_and_name_dropping_synthesis(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    note = "**AUTHOR’S NOTE:** No policy view should be attributed to any individual contributor or the author."
+    source = "# Policy\n\n**Avery Example**\n\n" + "Source policy. " * 4000 + "\n\n" + note + "\n\n**ENDNOTES**\n\nReferences."
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": [
+            {"id": "dsi:1", "title": "Policy", "level": 1, "target_type": "char_range", "target_start": 0, "target_end": len(source)},
+        ],
+    }))
+    calls = []
+
+    async def chat(**kwargs):
+        calls.append(kwargs)
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "A policy point. " * 1000, "evidence": [
+                {"claim": "A source-backed policy", "source_span_ids": ["P1"]},
+            ]})
+        else:
+            allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
+            content = "Compressed policy without names or caveats " + " ".join(f"[{value}]" for value in allowed)
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings)
+    await mod.process_section_summary(**options)
+    extractions = [c for c in calls if "SOURCE:" in c["messages_payload"][0]["content"]]
+    first_prompt = extractions[0]["messages_payload"][0]["content"]
+    assert note in first_prompt.split("SOURCE:", 1)[0]
+    assert note not in first_prompt.split("SOURCE:", 1)[1]
+    reductions = [c for c in calls if "intermediate compression step" in c["system_message"]]
+    final = next(c for c in calls if c["messages_payload"][0]["content"].startswith("Summarize all portions"))
+    assert reductions and all(note in c["messages_payload"][0]["content"] for c in [*reductions, final])
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    context = analysis["sections"][0]["attribution_contexts"][0]
+    saved_note = context["author_notes"][0]
+    assert source[saved_note["start_char"]:saved_note["end_char"]] == saved_note["quote"]
+    assert note in saved_note["quote"] and saved_note["start_char"] >= 48_000
+    assert options["workspace_db"].row["status"] == "complete"

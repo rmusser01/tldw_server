@@ -18,6 +18,10 @@ DHS also explicitly disclaims assigning all views to any single contributor, des
 
 The output card must distinguish an overview-only failure from incomplete sections, including previously cached generic errors. Preserve specific checkpoint, permission, provider and save errors.
 
+Fresh Job 44 identifies a further context-loss path: Personnel's verified joint byline is present in both first-round reduction inputs, but source context is not reattached after compression. The resulting chapter invents an unnamed contribution. Retain bounded verified attribution context separately through reduction and final synthesis, so a reducer cannot erase it. Test a reducer that deliberately drops all names; do not infer or normalize joint authors more broadly without evidence. The successful raw extraction author strings were not retained, so empty normalized author fields do not prove why names were lost. DHS also still mixes a correct collective-authorship caveat with individual proposal attribution; retain this as an observed semantic failure until a focused retest supports a repair.
+
+The same audit finds late literal AUTHOR'S/AUTHORS' NOTE passages. Some disclaim attributing views to any individual; others explicitly place responsibility on the bylined author. Preserve these source excerpts and coordinates within their verified contribution ranges and existing context bounds, independently of model compression. Recognize the source label without classifying its meaning. Notes remain attribution context, not new citable claim evidence or an additional authority for accepting proposed author names. Acknowledged people must not become authors merely because their names appear in a retained note. Topic-oriented chapter wording should preserve genuine named disagreements without inventing contributor divisions from missing metadata.
+
 ## Scope and ownership
 
 - Existing `section_summaries.py`: extraction/synthesis prompts, current-call citation vocabulary, bounded owned-artifact diagnostics and context wiring.

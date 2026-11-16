@@ -462,6 +462,9 @@ async def process_section_summary(
                             "Keep actual quoted or cited voices distinct. "
                             "Respect explicit collective-authorship or disavowal caveats: a byline does not authorize assigning all proposals to that individual. "
                             "Where the source disclaims single-contributor views, use chapter-level wording. Keep the caveat visible."
+                            " Identify the supplied byline as source attribution. Organize a single contribution by policy topic "
+                            "and describe proposals at chapter or contribution level. Use separate named proponent sections only "
+                            "for source-supported distinct contributions or explicit opposing positions."
                         )
                     )
                     + (
@@ -528,10 +531,12 @@ async def process_section_summary(
                 raise SectionGenerationError("unknown_evidence_reference")
         return text
 
-    async def synthesize(parts, instruction, *, progress_message=None, stage="section_synthesis", section_number=None):
+    async def synthesize(parts, instruction, *, progress_message=None, stage="section_synthesis", section_number=None, attribution_context=""):
         nonlocal last_completion
         last_completion = None
         call_context = {"stage": stage, "section_index": section_number, "reduction_round": 0, "reduction_group": 0}
+        # Renderer-bounded source context survives independently of model compression.
+        context_suffix = "\n\n" + attribution_context if attribution_context else ""
         # Bounded reduction retains every completed input rather than clipping the tail.
         reduction_round = 0
         while sum(len(part) for part in parts) > BATCH_CHARS:
@@ -558,14 +563,14 @@ async def process_section_summary(
                         90,
                         f"{progress_message} Reduction {reduction_round}, group {group_index} of {len(groups)}.",
                     )
-                reduced.append(await complete(build_section_reduction_prompt(group), reduction=True, supplied_parts=group,
+                reduced.append(await complete(build_section_reduction_prompt(group) + context_suffix, reduction=True, supplied_parts=group,
                     call_context={**call_context, "reduction_round": reduction_round, "reduction_group": group_index}))
             if sum(map(len, reduced)) >= sum(map(len, parts)):
                 raise SectionGenerationError("synthesis_not_reduced")
             parts = reduced
         if progress_message:
             _update_output_job_progress(job_manager, job_id, progress, 95, progress_message + " Final synthesis.")
-        return await complete(instruction + "\n\n" + "\n\n".join(parts), supplied_parts=parts, call_context=call_context)
+        return await complete(instruction + context_suffix + "\n\n" + "\n\n".join(parts), supplied_parts=parts, call_context=call_context)
 
     checkpoint()
     for section_index, section in enumerate(analysis["sections"]):
@@ -695,11 +700,11 @@ async def process_section_summary(
                 section["content"] = await synthesize(
                     [f"Processing portion {index + 1} of {len(section['batches'])}; "
                      f"source characters {batch['start_char']}–{batch['end_char']}.\n"
-                     + render_attribution_context(section["attribution_contexts"], batch["start_char"], batch["end_char"])
-                     + "\n" + batch["content"] for index, batch in enumerate(section["batches"])],
+                     + batch["content"] for index, batch in enumerate(section["batches"])],
                     f"Summarize all portions of {section['title']}. Preserve named authors, disagreements, qualifications and evidence IDs. "
                     + _FAITHFULNESS_INSTRUCTION,
                     section_number=section_index + 1,
+                    attribution_context=render_attribution_context(section["attribution_contexts"]),
                 )
                 section["status"] = "completed"
                 section.pop("error_code", None)

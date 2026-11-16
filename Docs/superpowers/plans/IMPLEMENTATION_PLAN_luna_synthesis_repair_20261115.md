@@ -15,7 +15,7 @@
 **Goal:** Add verified heading context, exact citation vocabulary/diagnostics and accurate failure wording; fix actionable CI failures.
 **Success Criteria:** Regression tests first fail for demonstrated behavior, then pass without weakening scope/version guards.
 **Tests:** Single/multiple contributor contexts, mixed batches, shared references, ambiguous nodes, bounded diagnostics, current-call IDs, old cache projections; connected tests, types/lint, Bandit and pre-commit.
-**Status:** Complete
+**Status:** Complete — verified context and literal author notes now survive reduction independently; 227 connected backend tests and independent reviews pass. CI follow-through continues in Stage 4.
 
 ## Stage 3: Rerun Luna and source-audit outputs
 **Goal:** Generate a separate full chapter output and rerun the frozen QA matrix.

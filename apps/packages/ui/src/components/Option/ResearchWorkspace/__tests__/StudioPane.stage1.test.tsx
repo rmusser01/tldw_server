@@ -2463,6 +2463,20 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(mockRemoveArtifact).toHaveBeenCalledWith("artifact-existing")
   })
 
+  it("labels a saved running output's delete action without calling it failed", () => {
+    workspaceStoreState.generatedArtifacts = [{
+      id: "artifact-running", workspaceArtifactId: "saved-running", type: "summary",
+      title: "Running output", status: "generating", createdAt: new Date("2026-02-18T10:00:00.000Z"),
+      producerMetadata: { origin: "research_workspace_output_job", job_id: 7 }
+    }]
+
+    renderStudioPane()
+
+    expect(screen.getByRole("button", { name: "Delete output" })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "Delete failed output" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Check saved generation progress" })).toBeEnabled()
+  })
+
   it("uses failed status x icon to delete failed generated output", () => {
     workspaceStoreState.generatedArtifacts = [
       {
