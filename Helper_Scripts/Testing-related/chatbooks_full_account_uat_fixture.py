@@ -560,9 +560,8 @@ async def verify(root: str | Path) -> dict[str, Any]:
     bundled = [row for row in stored_files if str(row.get("file_type")) == "original"]
     if len(bundled) != 1:
         raise FixtureVerificationError("destination stored media artifact is missing")
-    user_root = DatabasePaths.resolve_user_base_directory(destination_user_id).resolve()
-    artifact_path = (user_root / str(bundled[0]["storage_path"])).resolve()
-    if not artifact_path.is_relative_to(user_root) or not artifact_path.is_file():
+    artifact_path = service._resolve_owned_media_artifact_path(bundled[0]["storage_path"])
+    if artifact_path is None:
         raise FixtureVerificationError("destination stored media artifact path is invalid")
     artifact_sha256 = sha256_bytes(artifact_path.read_bytes())
     if artifact_sha256 != expected["media"]["artifact_sha256"]:

@@ -51,6 +51,7 @@ from ..DB_Management.ChaChaNotes_DB import (
     CharactersRAGDBError,
 )
 from ..DB_Management.db_path_utils import DatabasePaths
+from ..DB_Management.chacha.chatbook_job_store import fail_stale_import_job, save_import_job
 from ..Notes.organization_capture import active_coordinator, capture_note_upsert, stable_note_id
 from ..Templating.template_renderer import (
     TemplateContext,
@@ -5675,15 +5676,9 @@ class ChatbookService:
 
                     if job_id:
                         try:
-                            self.db.execute_query(
-                                "UPDATE import_jobs SET status = ?, error_message = ? "
-                                "WHERE job_id = ?",
-                                (
-                                    ImportStatus.FAILED.value,
-                                    "Marked failed by orphan cleanup (stale job)",
-                                    job_id,
-                                ),
-                                commit=True,
+                            fail_stale_import_job(
+                                self.db, job_id=job_id, user_id=self.user_id,
+                                selected_status=status_val, cutoff=cutoff_str,
                             )
                         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
                             logger.warning(f"Failed to mark stale import job {job_id} as failed: {e}")
@@ -8522,6 +8517,9 @@ class ChatbookService:
     def _save_import_job(self, job: ImportJob, *, commit: bool = True):
         """Save import job to database.
 
+        Cancelled rows reject stale lifecycle changes but retain public terminal
+        receipts, so a racing worker cannot revive the job or lose restored IDs.
+
         Note: Uses execute_query with commit=True by default, which handles its own transaction.
         Previous _with_transaction wrapper was removed because it created a separate
         connection that didn't share the transaction with execute_query's connection.
@@ -8530,32 +8528,7 @@ class ChatbookService:
             if job.status == ImportStatus.COMPLETED:
                 job.progress_percentage = 100
                 job.processed_items = job.total_items
-            self.db.execute_query("""
-                INSERT INTO import_jobs (
-                    job_id, user_id, status, chatbook_path,
-                    created_at, started_at, completed_at, error_message,
-                    progress_percentage, total_items, processed_items,
-                    successful_items, failed_items, skipped_items,
-                    conflicts, warnings, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(job_id) DO UPDATE SET
-                    user_id = excluded.user_id,
-                    status = excluded.status,
-                    chatbook_path = excluded.chatbook_path,
-                    created_at = excluded.created_at,
-                    started_at = excluded.started_at,
-                    completed_at = excluded.completed_at,
-                    error_message = excluded.error_message,
-                    progress_percentage = excluded.progress_percentage,
-                    total_items = excluded.total_items,
-                    processed_items = excluded.processed_items,
-                    successful_items = excluded.successful_items,
-                    failed_items = excluded.failed_items,
-                    skipped_items = excluded.skipped_items,
-                    conflicts = excluded.conflicts,
-                    warnings = excluded.warnings,
-                    metadata = excluded.metadata
-            """, (
+            save_import_job(self.db, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_path,
                 self._serialize_job_timestamp(job.created_at),
                 self._serialize_job_timestamp(job.started_at),

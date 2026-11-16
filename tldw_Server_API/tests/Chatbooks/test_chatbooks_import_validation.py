@@ -479,6 +479,7 @@ def test_v1_1_import_uses_verified_explicit_content_item_path(service):
         "successful_items": 1,
         "failed_items": 0,
         "skipped_items": 0,
+        "id_maps": {"media": {}, "notes": {"1": "123"}},
     }
     service.db.add_note.assert_called_once_with(
         title="Verified Note",
