@@ -3,12 +3,13 @@ import { remapPortableWorkspace, remapPortableNote, type VerifiedResearchImportM
 import { readKnowledgeNoteProvenance } from "../knowledge-note-provenance"
 import { portableFixture } from "./fixtures/portable-workspace"
 import { claimTextHash, readClaimVerification } from "../claim-verification"
+import { prepareLegacyWorkspaceImport } from "@/store/workspace-import-authority"
 
 const identity = { id: "destination", name: "Imported research", tag: "workspace:destination" }
 const maps = { media: { "1": 42 }, notes: { "note-old": "note-new" } }
 
 describe("verified portable workspace remapping", () => {
-  it("remaps checked evidence identity while retaining exact findings, text hashes and historical state", () => {
+  it.each(["snapshot", "complete pack"])("preserves exact historical report subtrees during %s import", mode => {
     const bundle = portableFixture()
     const message = bundle.workspace.chatSession!.messages[0]
     const report = { version: 1, text_sha256: claimTextHash(message.message), verdict: "unverified", provider: "openai", model: "saved-model",
@@ -16,10 +17,20 @@ describe("verified portable workspace remapping", () => {
       findings: [{ id: "C1", text: message.message, start: 0, end: message.message.length, evidence_ids: ["1"], status: "error", reason: "judge_timeout" }],
       evidence: { "1": { text_sha256: "a".repeat(64), source_id: "source-old", media_id: 1, start_char: 0, end_char: 12 } }, limits: {}, context: {} }
     message.metadataExtra = { claim_verification: report }
-    const result = remapPortableWorkspace(bundle, maps, identity)
+    const analysis = bundle.workspace.snapshot.generatedArtifacts[0].data!.sectionAnalysis as Record<string, unknown> & { sections: Array<Record<string, unknown> & { batches: Array<Record<string, unknown>> }> }
+    analysis.synthesis_verification = report
+    analysis.sections[0].claim_verification = report
+    analysis.sections[0].batches[0].claim_verification = report
+    const before = JSON.stringify(report)
+    const result = mode === "snapshot" ? prepareLegacyWorkspaceImport(bundle, identity) : remapPortableWorkspace(bundle, maps, identity)
     const imported = result.workspace.chatSession!.messages[0]
     const receipt = readClaimVerification(imported.metadataExtra?.claim_verification, imported.message)!
-    expect(receipt.evidence["1"]).toEqual({ ...report.evidence["1"], media_id: 42, source_id: result.workspace.snapshot.sources[0].id })
+    expect(JSON.stringify(receipt)).toBe(before)
+    const importedAnalysis = result.workspace.snapshot.generatedArtifacts[0].data!.sectionAnalysis as typeof analysis
+    expect(JSON.stringify(importedAnalysis.synthesis_verification)).toBe(before)
+    expect(JSON.stringify(importedAnalysis.sections[0].claim_verification)).toBe(before)
+    expect(JSON.stringify(importedAnalysis.sections[0].batches[0].claim_verification)).toBe(before)
+    expect(imported.sources[0].metadata).toMatchObject({ media_id: mode === "snapshot" ? 1 : 42 })
     expect(receipt.findings).toEqual(report.findings)
     expect(receipt.text_sha256).toBe(report.text_sha256)
     expect(imported.metadataExtra?.claim_verification_imported).toBe(true)

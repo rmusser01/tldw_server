@@ -72,6 +72,6 @@ describe("store source guard: no JSON deep clones in mutation paths", () => {
   it("allowlisted workspace import contains only its JSON bundle/replacer transform", () => {
     const source = readFileSync(resolve(storeDir, "workspace-import-authority.ts"), "utf8")
     expect(source.split(PATTERN)).toHaveLength(2)
-    expect(source).toContain("JSON.parse(JSON.stringify(bundle, (key, value) => {")
+    expect(source).toContain("JSON.parse(JSON.stringify(bundle, function (this: object, key: string, value: unknown) {")
   })
 })

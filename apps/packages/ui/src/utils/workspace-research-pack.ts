@@ -179,7 +179,7 @@ export const buildCompleteResearchPack = async ({ bundle, chatbook, notes, sourc
   const checksHtml = (value: unknown, text: unknown, imported = false, prefix = "../") => {
     if (typeof text !== "string" || !text.trim()) return ""
     const report = readClaimVerification(value, text)
-    const links = Object.entries(report?.evidence || {}).map(([id, evidence]) =>
+    const links = Object.entries(imported ? {} : report?.evidence || {}).map(([id, evidence]) =>
       `<p>${escapeHtml(id)}: ${pageLinks(evidence.media_id, evidence.page_spans, prefix)}</p>`).join("")
     return `<h2>Citation support</h2>${textBlock(renderClaimVerification(value, text, imported))}${links}`
   }

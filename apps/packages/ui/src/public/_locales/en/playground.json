@@ -4999,7 +4999,7 @@
     "message": "Not checked"
   },
   "claims_imported": {
-    "message": "Imported historical check; sources have not been checked again in this workspace."
+    "message": "Imported historical check; sources have not been checked again in this workspace. Use the restored source citations to open evidence."
   },
   "claims_limitation": {
     "message": "These checks compare the draft with its cited evidence. They do not establish real-world truth or replace your review."

@@ -127,7 +127,7 @@ export function hasUnfinishedSectionChecks(value: unknown): boolean {
 export function renderClaimVerification(value: unknown, text: string, imported = false): string {
   const view = verificationPresentation(value, text)
   const lines = [`Citation support: ${view.label}`, view.reason, CLAIM_VERIFICATION_LIMITATION]
-  if (imported) lines.push("Imported historical check; sources have not been checked again in this workspace.")
+  if (imported) lines.push("Imported historical check; sources have not been checked again in this workspace. Use the restored source citations to open evidence.")
   if (view.report) {
     const { coverage } = view.report
     lines.push(coverage.total ? `${coverage.evaluated} of ${coverage.total} claims checked; ${coverage.supported} supported; ${coverage.uncovered} uncovered.` : "Check coverage is unavailable.")

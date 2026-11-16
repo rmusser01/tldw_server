@@ -1859,7 +1859,7 @@
         "missing": "Not checked"
       }
     },
-    "imported": "Imported historical check; sources have not been checked again in this workspace.",
+    "imported": "Imported historical check; sources have not been checked again in this workspace. Use the restored source citations to open evidence.",
     "limitation": "These checks compare the draft with its cited evidence. They do not establish real-world truth or replace your review.",
     "coverage": "{{evaluated}} of {{total}} claims checked; {{supported}} supported; {{uncovered}} uncovered.",
     "coverageUnavailable": "Check coverage is unavailable.",

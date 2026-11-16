@@ -7,6 +7,7 @@ import { buildCompleteResearchPack, parseCompleteResearchPack, readBlobBytes, re
 import { parseWorkspaceImportFile } from "@/store/workspace-bundle"
 import { projectWorkspaceRagSources, restoreWorkspaceRagSources } from "../workspace-rag-sources"
 import { claimTextHash } from "../claim-verification"
+import { remapPortableWorkspace } from "../workspace-reference-remap"
 
 const pdf = Uint8Array.from(new TextEncoder().encode("%PDF-1.7 exact original bytes"))
 const digest = webcrypto.subtle.digest.bind(webcrypto.subtle)
@@ -20,6 +21,37 @@ const chatbook = async (missing = false) => {
 }
 
 describe("complete research pack archive", () => {
+  it("withholds historical report links after Media 1 becomes 2, retaining restored source navigation", async () => {
+    const original = portableFixture()
+    const draft = "Historical answer [1]"
+    const report = { version: 1, text_sha256: claimTextHash(draft), verdict: "supported", provider: "openai", model: "saved-model",
+      coverage: { total: 1, evaluated: 1, supported: 1, uncovered: 0, complete: true },
+      findings: [{ id: "C1", text: draft, start: 0, end: draft.length, evidence_ids: ["1"], status: "supported", reason: "Saved evidence supports this." }],
+      evidence: { "1": { text_sha256: "a".repeat(64), source_id: "source-old", media_id: 1, page_spans: [{ page_number: 999 }] } }, limits: {}, context: {} }
+    original.workspace.chatSession!.messages[0].message = draft
+    original.workspace.chatSession!.history = [{ role: "assistant", content: draft }]
+    original.workspace.chatSession!.messages[0].metadataExtra = { claim_verification: report }
+    const analysis = original.workspace.snapshot.generatedArtifacts[0].data!.sectionAnalysis as { synthesis?: string; synthesis_verification?: unknown; sections: Array<{ content: string; claim_verification?: unknown; batches: Array<{ verification_text?: string; claim_verification?: unknown }> }> }
+    analysis.synthesis = analysis.sections[0].content = analysis.sections[0].batches[0].verification_text = draft
+    analysis.synthesis_verification = analysis.sections[0].claim_verification = analysis.sections[0].batches[0].claim_verification = report
+    const bundle = remapPortableWorkspace(original, { media: { "1": 2 }, notes: { "note-old": "note-old" } }, { id: "destination", name: "Imported", tag: "workspace:destination" })
+    bundle.workspace.snapshot.sources.push({ id: "unrelated", mediaId: 1, title: "Unrelated destination source", type: "pdf", addedAt: new Date(0) })
+    const archive = await JSZip.loadAsync(await chatbook())
+    const manifest = JSON.parse(await archive.file("manifest.json")!.async("string"))
+    manifest.content_items.push({ type: "media", id: "2", file_path: "content/media/media_2.json" })
+    archive.file("manifest.json", JSON.stringify(manifest))
+    archive.file("content/media/media_2.json", JSON.stringify({ ...JSON.parse(await archive.file("content/media/media_1.json")!.async("string")), id: 2 }))
+    const blob = await buildCompleteResearchPack({ bundle, chatbook: await archive.generateAsync({ type: "uint8array" }), notes: [bundle.workspace.snapshot.currentNote], sourceWorkspaceId: "destination" })
+    const zip = await JSZip.loadAsync(await readBlobBytes(blob))
+    for (const path of ["offline/chat.html", "offline/reports/artifact-1.html", "offline/reports/artifact-1-section-1.html"]) {
+      const doc = new DOMParser().parseFromString(await zip.file(path)!.async("string"), "text/html")
+      expect(Array.from(doc.querySelectorAll("a")).some(link => link.href.includes("#page=999"))).toBe(false)
+      expect(doc.body.textContent).toContain("Use the restored source citations to open evidence.")
+      if (!path.endsWith("artifact-1.html")) expect(Array.from(doc.querySelectorAll("a")).some(link => link.getAttribute("href")?.endsWith("sources/media-2.pdf#page=352"))).toBe(true)
+    }
+    const parsed = await parseCompleteResearchPack(new File([await readBlobBytes(blob)], "reexport.zip"))
+    expect(JSON.stringify(parsed!.bundle.workspace.chatSession!.messages[0].metadataExtra?.claim_verification)).toBe(JSON.stringify(report))
+  })
   it.each(["text_or_unit_limit", "report_size_limit"])("retains full unchecked text and its %s notice in complete and readable exports", async reason => {
     const bundle = portableFixture()
     const draft = "Unchecked text [1]. 🌍\n".repeat(120)

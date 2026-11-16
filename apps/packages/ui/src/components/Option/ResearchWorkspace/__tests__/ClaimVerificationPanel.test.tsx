@@ -4,6 +4,9 @@ import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 import { ClaimVerificationPanel } from "../ClaimVerificationPanel"
 import { claimTextHash, renderClaimVerification } from "@/utils/claim-verification"
+import { portableFixture } from "@/utils/__tests__/fixtures/portable-workspace"
+import { prepareLegacyWorkspaceImport } from "@/store/workspace-import-authority"
+import { remapPortableWorkspace } from "@/utils/workspace-reference-remap"
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }) }))
 const text = "The named author proposed this [E1.1.1]."
 const report = { version: 1, text_sha256: claimTextHash(text), verdict: "needs_revision", provider: "openai", model: "test",
@@ -40,13 +43,30 @@ describe("citation-support review", () => {
     expect(JSON.stringify(receipt)).toBe(before)
   })
   it("shows reasons and exact evidence links separately from human review", () => {
-    render(<MemoryRouter><ClaimVerificationPanel report={report} text={text} imported /></MemoryRouter>)
+    render(<MemoryRouter><ClaimVerificationPanel report={report} text={text} /></MemoryRouter>)
     expect(screen.getByText("Needs review")).toBeInTheDocument()
     fireEvent.click(screen.getByText(/Findings and cited evidence/))
     expect(screen.getByText(`unsupported: ${report.findings[0].reason}`)).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "[E1.1.1]" })).toHaveAttribute("href", "/document-workspace?open=7&page=352")
-    expect(screen.getByText(/Imported historical check/)).toBeInTheDocument()
     expect(screen.getByText(/do not establish real-world truth/)).toBeInTheDocument()
+  })
+  it.each(["snapshot", "complete pack"])("retains %s report evidence without navigating to historical server IDs", mode => {
+    const before = JSON.stringify(report)
+    const bundle = portableFixture()
+    bundle.workspace.chatSession!.messages[0].message = text
+    bundle.workspace.chatSession!.history = [{ role: "assistant", content: text }]
+    bundle.workspace.chatSession!.messages[0].metadataExtra = { claim_verification: report }
+    const identity = { id: "destination", name: "Imported", tag: "workspace:destination" }
+    const result = mode === "snapshot" ? prepareLegacyWorkspaceImport(bundle, identity)
+      : remapPortableWorkspace(bundle, { media: { "1": 2, "7": 2 }, notes: { "note-old": "note-new" } }, identity)
+    const message = result.workspace.chatSession!.messages[0]
+    render(<MemoryRouter><ClaimVerificationPanel report={message.metadataExtra?.claim_verification} text={message.message} imported={message.metadataExtra?.claim_verification_imported === true} /></MemoryRouter>)
+    fireEvent.click(screen.getByText(/Findings and cited evidence/))
+    expect(screen.getByText("[E1.1.1]")).toBeVisible()
+    expect(screen.queryByRole("link", { name: "[E1.1.1]" })).not.toBeInTheDocument()
+    expect(screen.getByText(/Use the restored source citations to open evidence/)).toBeVisible()
+    expect(JSON.stringify(report)).toBe(before)
+    expect(JSON.stringify(message.metadataExtra?.claim_verification)).toBe(before)
   })
   it.each([undefined, report])("shows checks pending while verification runs", value => {
     render(<MemoryRouter><ClaimVerificationPanel report={value} text={text} checking /></MemoryRouter>)

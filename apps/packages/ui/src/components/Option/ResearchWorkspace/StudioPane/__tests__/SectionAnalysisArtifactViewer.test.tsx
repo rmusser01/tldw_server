@@ -5,8 +5,11 @@ import { describe, expect, it, vi } from "vitest"
 import type { GeneratedArtifact } from "@/types/workspace"
 import { getSectionAnalysis, SectionAnalysisArtifactViewer } from "../SectionAnalysisArtifactViewer"
 import { claimTextHash } from "@/utils/claim-verification"
+import { portableFixture } from "@/utils/__tests__/fixtures/portable-workspace"
+import { remapPortableWorkspace } from "@/utils/workspace-reference-remap"
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }) }))
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (_key: string, fallback: string | { count: number; defaultValue_one: string; defaultValue_other: string }) =>
+  typeof fallback === "string" ? fallback : (fallback.count === 1 ? fallback.defaultValue_one : fallback.defaultValue_other).replace("{{count}}", String(fallback.count)) }) }))
 
 const checkpoint = (status: GeneratedArtifact["status"], version: number): GeneratedArtifact => ({
   id: "reading", workspaceArtifactId: "canonical-reading", workspaceArtifactVersion: version,
@@ -18,6 +21,27 @@ const checkpoint = (status: GeneratedArtifact["status"], version: number): Gener
 })
 
 describe("section reader checkpoint updates", () => {
+  it("opens remapped chapter evidence while keeping historical report IDs noninteractive", () => {
+    const bundle = portableFixture()
+    const original = bundle.workspace.snapshot.generatedArtifacts[0]
+    const section = (original.data!.sectionAnalysis as { sections: Array<Record<string, unknown>> }).sections[0]
+    section.status = "completed"
+    section.content = "Historical chapter [E1]"
+    section.claim_verification = { version: 1, text_sha256: claimTextHash(String(section.content)), verdict: "supported", provider: "openai", model: "saved-model",
+      coverage: { total: 1, evaluated: 1, supported: 1, uncovered: 0, complete: true },
+      findings: [{ id: "C1", text: section.content, start: 0, end: String(section.content).length, evidence_ids: ["E1"], status: "supported", reason: "Historical support." }],
+      evidence: { E1: { text_sha256: "a".repeat(64), source_id: "source-old", media_id: 1, page_spans: [{ page_number: 352 }] } }, context: {}, limits: {} }
+    const imported = remapPortableWorkspace(bundle, { media: { "1": 2 }, notes: { "note-old": "note-new" } }, { id: "destination", name: "Imported", tag: "workspace:destination" })
+    const artifact = imported.workspace.snapshot.generatedArtifacts[0]
+    const before = JSON.stringify(artifact)
+    render(<MemoryRouter><SectionAnalysisArtifactViewer artifact={artifact} analysis={getSectionAnalysis(artifact)!} sources={imported.workspace.snapshot.sources} /></MemoryRouter>)
+    fireEvent.change(screen.getByRole("combobox", { name: "Chapter or section" }), { target: { value: "0" } })
+    fireEvent.click(screen.getByText(/Findings and cited evidence/))
+    expect(screen.getByRole("link", { name: "Printed 319 · PDF 352" })).toHaveAttribute("href", "/document-workspace?open=2&page=352")
+    expect(screen.queryByRole("link", { name: "[E1]" })).not.toBeInTheDocument()
+    expect(screen.getAllByRole("link").some(link => link.getAttribute("href")?.includes("open=1&"))).toBe(false)
+    expect(JSON.stringify(artifact)).toBe(before)
+  })
   it("separates overview, chapter and extracted-evidence findings from the saved human review", () => {
     const artifact = checkpoint("completed", 1)
     artifact.reviewStatus = "accepted"

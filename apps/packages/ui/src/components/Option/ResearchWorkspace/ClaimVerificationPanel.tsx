@@ -18,7 +18,7 @@ export const ClaimVerificationPanel: React.FC<{ report?: unknown; text: string; 
     </p>
     <p>{view.reason}</p>
     {limitReasons.map(reason => <p key={reason} className="text-warning">{t(`claims.reason.${reason}`, claimCheckReason(reason))}</p>)}
-    {imported && <p className="text-text-muted">{t("claims.imported", "Imported historical check; sources have not been checked again in this workspace.")}</p>}
+    {imported && <p className="text-text-muted">{t("claims.imported", "Imported historical check; sources have not been checked again in this workspace. Use the restored source citations to open evidence.")}</p>}
     <p className="text-xs text-text-muted">{t("claims.limitation", CLAIM_VERIFICATION_LIMITATION)}</p>
     {view.report && <>
       <p className="text-xs text-text-muted">{view.report.coverage.total
@@ -36,7 +36,7 @@ export const ClaimVerificationPanel: React.FC<{ report?: unknown; text: string; 
               const spans = evidence?.page_spans
               const first = Array.isArray(spans) ? spans[0] : undefined
               const page = first && typeof first === "object" ? first.page_number : undefined
-              const path = buildDocumentPagePath(evidence?.media_id, page)
+              const path = imported ? null : buildDocumentPagePath(evidence?.media_id, page)
               return path ? <Link key={id} to={path} target="_blank" rel="noreferrer" className="text-primary underline underline-offset-2">[{id}]</Link> : <span key={id}>[{id}]</span>
             })}{finding.evidence_ids.length === 0 && t("claims.uncited", "No cited evidence")}</p>
           </li>)}

@@ -16,7 +16,13 @@ export const prepareLegacyWorkspaceImport = (
   makeId: () => string = () => crypto.randomUUID()
 ): WorkspaceExportBundle => {
   const sourceIds = new Map((bundle.workspace.snapshot.sources ?? []).map(source => [source.id, makeId()]))
-  const output: WorkspaceExportBundle = JSON.parse(JSON.stringify(bundle, (key, value) => {
+  const historicalReports = new WeakSet<object>()
+  const output: WorkspaceExportBundle = JSON.parse(JSON.stringify(bundle, function (this: object, key: string, value: unknown) {
+    // Receipt identities describe the original check, not destination navigation.
+    if (['claim_verification', 'synthesis_verification'].includes(key) || historicalReports.has(this)) {
+      if (value !== null && typeof value === 'object') historicalReports.add(value)
+      return value
+    }
     if (['sourceId', 'source_id'].includes(key) && typeof value === 'string') return sourceIds.get(value) ?? value
     if (['selectedSourceIds', 'source_ids'].includes(key) && Array.isArray(value))
       return value.map(id => sourceIds.get(id) ?? id)
