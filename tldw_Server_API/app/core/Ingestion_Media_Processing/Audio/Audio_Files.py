@@ -40,7 +40,7 @@ import yt_dlp
 
 #
 # Local Imports
-from tldw_Server_API.app.core.config import loaded_config_data
+from tldw_Server_API.app.core.config import MAX_STANDARD_MEDIA_UPLOAD_MIB, loaded_config_data
 from tldw_Server_API.app.core.exceptions import TranscriptionCancelled
 from tldw_Server_API.app.core.http_client import RetryPolicy
 from tldw_Server_API.app.core.http_client import download as http_download
@@ -87,7 +87,7 @@ from tldw_Server_API.app.core.Chunking import improved_chunking_process
 
 # Get configuration values or use defaults
 media_config = loaded_config_data.get('media_processing', {}) if loaded_config_data else {}
-MAX_FILE_SIZE = media_config.get('max_audio_file_size_mb', 500) * 1024 * 1024
+MAX_FILE_SIZE = media_config.get('max_audio_file_size_mb', MAX_STANDARD_MEDIA_UPLOAD_MIB) * 1024 * 1024
 """int: Maximum allowed file size for downloads and local files in bytes."""
 UUID_LENGTH = media_config.get('uuid_generation_length', 8)
 """int: Length of UUID strings to generate for unique identifiers."""

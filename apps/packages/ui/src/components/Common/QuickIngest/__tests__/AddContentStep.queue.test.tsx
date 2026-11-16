@@ -10,7 +10,7 @@ import {
 import { IngestWizardProvider, useIngestWizard } from "../IngestWizardContext";
 import { useQuickIngestSessionStore } from "@/store/quick-ingest-session";
 import { AddContentStep } from "../AddContentStep";
-import { QUICK_INGEST_MAX_FILE_SIZE } from "../constants";
+const DOCUMENT_LIMIT = 250 * 1024 ** 2;
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -166,7 +166,7 @@ describe("file rejection feedback", () => {
           : new File(["large"], "oversized.txt", { type: "text/plain" });
       if (kind === "oversized")
         Object.defineProperty(file, "size", {
-          value: QUICK_INGEST_MAX_FILE_SIZE + 1,
+          value: DOCUMENT_LIMIT + 1,
         });
       fireEvent.change(screen.getByTestId("qi-file-input"), {
         target: { files: [file] },
@@ -174,7 +174,7 @@ describe("file rejection feedback", () => {
       expect(screen.getByRole("alert")).toHaveTextContent(
         kind === "unsupported"
           ? "rejected.exe is not a supported file type"
-          : "oversized.txt exceeds 50 MB quick-ingest limit",
+          : "oversized.txt exceeds 250 MB quick-ingest limit",
       );
       expect(screen.getByTestId("filenames")).toHaveTextContent("[]");
     },

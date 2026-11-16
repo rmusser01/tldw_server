@@ -2009,6 +2009,28 @@ describe("background proxy fallback safety", () => {
     expect(body.get("target_voice")).toBeInstanceOf(Blob)
   })
 
+  it("appends the original browser File to direct multipart without extension serialization", async () => {
+    mocks.sendMessage.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgUpload } = await importProxy()
+    const directFile = new File(["example"], "scan.pdf", { type: "application/pdf" })
+    const abortSignal = new AbortController().signal
+    await bgUpload({
+      path: "/api/v1/media/ingest/jobs",
+      method: "POST",
+      fileFieldName: "files",
+      directFile,
+      abortSignal,
+      timeoutMs: 20 * 60_000,
+    })
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    const request = mocks.tldwRequest.mock.calls[0][0]
+    expect(request).toMatchObject({ abortSignal, timeoutMs: 20 * 60_000 })
+    expect((request.body as FormData).getAll("files")).toEqual([directFile])
+    expect((request.body as FormData).get("files")).toBe(directFile)
+    expect((request.body as FormData).has("file")).toBe(false)
+  })
+
   it("uploads one large file when the canonical multipart field is explicit", async () => {
     mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
     const { bgUpload } = await importProxy()

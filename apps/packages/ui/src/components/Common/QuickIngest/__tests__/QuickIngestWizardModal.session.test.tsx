@@ -575,6 +575,7 @@ function CatalogueProbe() {
 describe("QuickIngestWizardModal session runtime", () => {
   it("keeps the attached live File eligible when an ordinary URL handoff remounts the real modal", async () => {
     const file = new NodeFile(["Attached source"], "source.txt", { type: "text/plain" }) as unknown as File
+    const readBytes = vi.spyOn(file, "arrayBuffer")
     mocks.queuedReviewFile = file
     mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-direct-handoff" })
     mocks.submitQuickIngestBatch.mockResolvedValue({ ok: true, results: [{ id: "attached-file", type: "document", status: "ok" }] })
@@ -593,7 +594,10 @@ describe("QuickIngestWizardModal session runtime", () => {
     await waitFor(() => expect(screen.getByTestId("eligible-count")).toHaveTextContent("2"))
     fireEvent.click(screen.getByRole("button", { name: "Submit current queue" }))
     await waitFor(() => expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1))
-    expect(mocks.submitQuickIngestBatch.mock.calls[0][0]).toMatchObject({ files: [{ id: "attached-file", name: "source.txt", data: Array.from(new Uint8Array(await file.arrayBuffer())) }], entries: [{ url: "https://example.com/article" }] })
+    const request = mocks.submitQuickIngestBatch.mock.calls[0][0]
+    expect(request).toMatchObject({ files: [{ id: "attached-file", name: "source.txt" }], entries: [{ url: "https://example.com/article" }] })
+    expect(request.files[0].directFile).toBe(file)
+    expect(readBytes).not.toHaveBeenCalled()
   })
 
   it("carries explicit playlist repetition through the modal submission contract", async () => {
@@ -833,10 +837,11 @@ describe("QuickIngestWizardModal session runtime", () => {
     fireEvent.change(await screen.findByLabelText("Reattach source.txt"), { target: { files: [new NodeFile(["hello"], "wrong.txt", { type: "text/plain" })] } })
     expect(await screen.findByRole("alert")).toHaveTextContent("Choose the original file")
     expect(mocks.bgUpload).not.toHaveBeenCalled()
-    fireEvent.change(screen.getByLabelText("Reattach source.txt"), { target: { files: [new NodeFile(["hello"], "source.txt", { type: "text/plain" })] } })
+    const reattachedFile = new NodeFile(["hello"], "source.txt", { type: "text/plain" })
+    fireEvent.change(screen.getByLabelText("Reattach source.txt"), { target: { files: [reattachedFile] } })
     fireEvent.click(await screen.findByRole("button", { name: "Retry source.txt" }))
     await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.results).toEqual([expect.objectContaining({ id: "file-failed", mediaId: 79 })]))
-    expect(mocks.bgUpload.mock.calls[0][0].file.name).toBe("source.txt")
+    expect(mocks.bgUpload.mock.calls[0][0].directFile).toBe(reattachedFile)
   })
 
   it("abandons a retry when its owner changes before upload acknowledgement", async () => {
@@ -1546,9 +1551,8 @@ describe("QuickIngestWizardModal session runtime", () => {
       expect(mocks.startQuickIngestSession).toHaveBeenCalledOnce()
     )
     const request = mocks.startQuickIngestSession.mock.calls[0][0]
-    expect(request.files).toMatchObject([
-      { id: "failed-file", name: "source.txt", data: [116, 101, 120, 116] }
-    ])
+    expect(request.files).toMatchObject([{ id: "failed-file", name: "source.txt" }])
+    expect(request.files[0].directFile).toBe(file)
     expect(request.advancedValues).toEqual({ chunk_size: 123 })
   })
 

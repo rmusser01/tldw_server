@@ -109,7 +109,7 @@ type QuickIngestRequestPayload = {
     id: string
     name: string
     type?: string
-    data: number[]
+    directFile: File
     defaults?: TypeDefaults
     conferenceOverride?: ConferenceItemMetadataOverride
   }>
@@ -844,7 +844,7 @@ const buildProgressFromReattachedJobs = (
     }
   })
 
-const buildQuickIngestPayload = async (
+const buildQuickIngestPayload = (
   items: WizardQueueItem[],
   conferenceBatchMetadata: ConferenceBatchMetadata | null,
   options: QuickIngestRequestPayload["common"] & {
@@ -853,7 +853,7 @@ const buildQuickIngestPayload = async (
     advancedValues?: Record<string, unknown>
     typeDefaults: TypeDefaults
   }
-): Promise<QuickIngestRequestPayload> => {
+): QuickIngestRequestPayload => {
   const validItems = getEligibleQueueItems(items)
   const entries = validItems
     .filter((item): item is WizardQueueItem & { url: string } => Boolean(item.url))
@@ -867,18 +867,16 @@ const buildQuickIngestPayload = async (
       processAgain: item.processAgain,
     }))
 
-  const files = await Promise.all(
-    validItems
-      .filter((item): item is WizardQueueItem & { file: File } => Boolean(item.file))
-      .map(async (item) => ({
-        id: item.id,
-        name: item.file.name,
-        type: item.file.type || undefined,
-        data: Array.from(new Uint8Array(await item.file.arrayBuffer())),
-        defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
-        conferenceOverride: item.conferenceOverride,
-      }))
-  )
+  const files = validItems
+    .filter((item): item is WizardQueueItem & { file: File } => Boolean(item.file))
+    .map((item) => ({
+      id: item.id,
+      name: item.file.name,
+      type: item.file.type || undefined,
+      directFile: item.file,
+      defaults: buildDefaultsForQueueItem(item, options.typeDefaults),
+      conferenceOverride: item.conferenceOverride,
+    }))
 
   return {
     entries,
@@ -1437,7 +1435,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       }
       if (!operation.isCurrent() || cancelRequestedRef.current) return
 
-      const requestPayload = await buildQuickIngestPayload(
+      const requestPayload = buildQuickIngestPayload(
         validQueueItems,
         state.conferenceBatchMetadata,
         {

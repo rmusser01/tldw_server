@@ -554,3 +554,51 @@ class TestArchiveExtensionHandling:
         assert not result.is_valid
         joined = " ".join(result.issues)
         assert "unsupported link entry" in joined
+
+
+@pytest.mark.parametrize("media_type", ["audio", "video", "pdf", "ebook", "document"])
+def test_standard_media_upload_defaults_to_one_gibibyte(media_type):
+    assert FileValidator().get_media_config(media_type)["max_size_mb"] == 1024
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("configured_mib", "expected_mib"), [(2, 1), (0.5, 0.5)])
+async def test_standard_media_upload_honors_hard_ceiling_and_lower_limits(monkeypatch, tmp_path, configured_mib, expected_mib):
+    from io import BytesIO
+
+    from starlette.datastructures import UploadFile
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import Upload_Sink
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.input_sourcing import save_uploaded_files
+
+    monkeypatch.setattr(Upload_Sink, "MAX_STANDARD_MEDIA_UPLOAD_MIB", 1, raising=False)
+    validator = FileValidator(custom_media_configs={"document": {"max_size_mb": configured_mib}})
+    scanned = []
+
+    def scan(path):
+        scanned.append(path.stat().st_size)
+        return True, []
+
+    monkeypatch.setattr(validator, "_scan_file_with_yara", scan)
+    expected_bytes = int(expected_mib * 1024 * 1024)
+    files = [
+        UploadFile(file=BytesIO(b"x" * expected_bytes), filename="exact.txt"),
+        UploadFile(file=BytesIO(b"x" * (expected_bytes + 1)), filename="over.txt"),
+    ]
+
+    saved, errors = await save_uploaded_files(files, tmp_path, validator, expected_media_type_key="document")
+
+    assert [item["original_filename"] for item in saved] == ["exact.txt"]
+    assert [item["original_filename"] for item in errors] == ["over.txt"]
+    assert scanned == [expected_bytes]
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["exact.txt"]
+
+
+def test_specialized_media_upload_defaults_are_unchanged():
+    validator = FileValidator()
+    assert validator.get_media_config("html")["max_size_mb"] == 5
+    assert validator.get_media_config("xml")["max_size_mb"] == 10
+    assert validator.get_media_config("image")["max_size_mb"] == 20
+    assert validator.get_media_config("email")["max_size_mb"] == 50
+    assert validator.get_media_config("code")["max_size_mb"] == 50
+    assert validator.get_media_config("archive")["archive_file_size_mb"] == 200
