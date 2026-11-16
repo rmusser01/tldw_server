@@ -297,8 +297,11 @@ def test_late_terminal_receipt_uses_owned_backend_lock(backend_name):
         finally:
             locked = False
 
-    def execute(query, params, *, commit=False):
+    parameter_logging = []
+
+    def execute(query, params, *, commit=False, log_params=True):
         calls.append((query, params, commit, locked))
+        parameter_logging.append(log_params)
         if query.startswith("SELECT"):
             return SimpleNamespace(fetchone=lambda: {"warnings": "[]", "metadata": '{"current":true}'})
         return SimpleNamespace(rowcount=0)
@@ -310,6 +313,7 @@ def test_late_terminal_receipt_uses_owned_backend_lock(backend_name):
     assert calls[1][1] == ("job", "owner", "cancelled") and calls[1][3]  # nosec B101 -- Select and merge are scoped and transactional.
     assert calls[2][1][-3:] == ("job", "owner", "cancelled") and calls[2][2:] == (False, True)  # nosec B101 -- Preserve owner/status and caller commit semantics.
     assert json.loads(calls[2][1][6]) == {"current": True, "imported_items": {"note": 1}}  # nosec B101 -- Lock-protected current metadata survives.
+    assert parameter_logging == [False, True, False]  # nosec B101 -- Both payload-bearing writes redact parameters; the scoped identity read is unchanged.
 
 
 @pytest.mark.parametrize("selected_status", [ImportStatus.PENDING, ImportStatus.VALIDATING])

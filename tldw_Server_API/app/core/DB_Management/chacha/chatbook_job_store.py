@@ -46,6 +46,7 @@ def _retain_cancelled_receipt(db: Any, values: tuple[Any, ...]) -> None:
             "WHERE job_id = ? AND user_id = ? AND status = ?",
             (*values[9:14], json.dumps(warnings), json.dumps(metadata, ensure_ascii=False), values[0], values[1], "cancelled"),
             commit=False,
+            log_params=False,
         )
 
 
@@ -81,7 +82,7 @@ def save_import_job(db: Any, values: tuple[Any, ...], *, commit: bool = True) ->
             warnings = excluded.warnings,
             metadata = excluded.metadata
         WHERE import_jobs.status != 'cancelled' OR excluded.status = 'cancelled'
-    """, values, commit=commit)
+    """, values, commit=commit, log_params=False)
     if values[2] in {"failed", "completed"} and getattr(cursor, "rowcount", None) == 0:
         metadata = json.loads(values[16])
         if any(isinstance(metadata.get(key), dict) for key in ("imported_items", "inventory_summary", "skipped_non_restorable", "id_maps")):

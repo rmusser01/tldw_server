@@ -38,7 +38,7 @@ def client(tmp_path_factory, monkeypatch):
         def get_connection(self):
             return MagicMock()
 
-        def execute_query(self, sql, params=(), commit=False):
+        def execute_query(self, sql, params=(), commit=False, *, log_params=True):
             sql_norm = " ".join(str(sql).strip().split()).lower()
             if sql_norm.startswith("create table if not exists export_jobs"):
                 return _DummyCursor([])
