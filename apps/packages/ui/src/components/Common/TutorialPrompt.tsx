@@ -9,6 +9,7 @@ import { useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { Button, ConfigProvider, notification, Space, theme } from "antd"
 import { GraduationCap } from "lucide-react"
+import { CHAT_PATH } from "@/routes/route-paths"
 import { useTutorialStore } from "@/store/tutorials"
 import { getPrimaryTutorialForRoute, normalizeTutorialRoute } from "@/tutorials"
 import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
@@ -25,6 +26,8 @@ const PROMPT_COOLDOWN_MS = 10000
 /** Duration the notification stays open (seconds); auto-dismiss after 15s */
 const NOTIFICATION_DURATION = 15
 const NOTIFICATION_KEY = "tutorial-prompt-global"
+// Place the Chat offer below the workspace toolbar and clear of the composer.
+const CHAT_PROMPT_TOP_PX = 128
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
@@ -36,7 +39,7 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
   const { t } = useTranslation(["tutorials", "common"])
   const location = useLocation()
   const { token } = theme.useToken()
-  const [api, contextHolder] = notification.useNotification()
+  const [api, contextHolder] = notification.useNotification({ top: CHAT_PROMPT_TOP_PX })
   const shownRef = useRef<Set<string>>(new Set())
   const lastPromptShownAtRef = useRef(0)
 
@@ -172,7 +175,7 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
           </Space>
         ),
         duration: NOTIFICATION_DURATION,
-        placement: "bottomRight",
+        placement: pageKey === CHAT_PATH ? "topRight" : "bottomRight",
         className: "tutorial-prompt-notification",
         onClose: () => {
           if (currentPrompt !== prompt) return
