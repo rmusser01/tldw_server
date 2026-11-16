@@ -3311,6 +3311,11 @@ describe("WorkspaceHeader workspace browser modal", () => {
     acpPersistence.rows.push({ ...post.body, workspace_id: "workspace-alpha", version: 1 })
     acpPersistence.failSave = false
     const retryButton = within(modal).getByRole("button", { name: "Save to Studio" }) as HTMLButtonElement
+    // Ant Design can still suppress clicks after the native button is enabled.
+    await waitFor(() => {
+      expect(retryButton).toBeEnabled()
+      expect(retryButton).not.toHaveClass("ant-btn-loading")
+    })
     const retryState = () => ({
       disabled: retryButton.disabled,
       loading: retryButton.classList.contains("ant-btn-loading"),
@@ -3318,7 +3323,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
       posts: acpPersistence.request.mock.calls.filter(([r]) => r.method === "POST").length
     })
     const beforeRetry = retryState()
-    fireEvent.click(within(modal).getByRole("button", { name: "Save to Studio" }))
+    fireEvent.click(retryButton)
     try {
       await waitFor(() => expect(mockAddArtifact).toHaveBeenCalledTimes(1))
     } catch (error) {

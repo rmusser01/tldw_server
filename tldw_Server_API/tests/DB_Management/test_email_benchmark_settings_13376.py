@@ -71,23 +71,32 @@ def test_full_parity_verification_preserves_benchmark_parallel_budget(pg_databas
     db = MediaDatabase(":memory:", client_id="42", backend=backend)
     try:
         with scoped_context(user_id=42):
+            before = fixture.describe_postgres_benchmark_settings(db)
+            assert before["work_mem"] == "64MB"
+            assert before["max_parallel_workers_per_gather"] == "2"
             original = db._fetchone_with_connection
             parity_workers = []
+            parity_memory = []
 
             def observe(conn, query, params=None):
                 if "AS linked" in query:
                     setting = backend.execute(
-                        "SELECT current_setting('max_parallel_workers_per_gather') AS workers",
+                        "SELECT current_setting('max_parallel_workers_per_gather') AS workers, "
+                        "current_setting('work_mem') AS work_mem",
                         connection=conn,
                     ).rows[0]
                     parity_workers.append(setting["workers"])
+                    parity_memory.append(setting["work_mem"])
                 return original(conn, query, params)
 
             monkeypatch.setattr(db, "_fetchone_with_connection", observe)
             security = fixture.describe_fixture_security(db)
             after = fixture.describe_postgres_benchmark_settings(db)
             assert parity_workers == ["0"]
+            assert parity_memory == ["64MB"]
             assert security["parity_verification_parallel_workers"] == 0
+            assert security["postgres_runtime_settings"]["work_mem"] == "64MB"
+            assert security["postgres_runtime_settings"]["max_parallel_workers_per_gather"] == "2"
             assert after["max_parallel_workers_per_gather"] == "2"
             assert after["work_mem"] == "64MB"
     finally:
