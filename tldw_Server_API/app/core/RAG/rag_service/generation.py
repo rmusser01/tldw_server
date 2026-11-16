@@ -372,7 +372,7 @@ class BaseGenerator(ABC):
 
     def format_context(self, documents: list[Document]) -> str:
         """Format documents into context string."""
-        from .response_writer import format_page_location
+        from .response_writer import format_page_content, format_page_location
         if not documents:
             return "No relevant context found."
 
@@ -385,7 +385,7 @@ class BaseGenerator(ABC):
             label = f"[{i}] {title} ({source})" if self.config.enable_citations else f"[Source {i}: {title} ({source})]"
             context_parts.append(label)
             context_parts.append(format_page_location(doc.metadata))
-            context_parts.append(doc.content)
+            context_parts.append(format_page_content(doc.content, doc.metadata))
             context_parts.append("")  # Empty line between documents
 
         return "\n".join(context_parts)

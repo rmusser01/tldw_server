@@ -7069,11 +7069,11 @@ async def unified_rag_pipeline(
                         if isinstance(_writer_policy, dict):
                             result.metadata["structured_writer"]["depth_policy"] = _writer_policy
                     else:
-                        from .response_writer import format_page_location
+                        from .response_writer import format_page_content, format_page_location
 
                         context = "\n\n".join(
                             f"[{index}] {format_page_location(getattr(doc, 'metadata', {}) or {})}\n"
-                            f"{getattr(doc, 'content', str(doc))}"
+                            f"{format_page_content(getattr(doc, 'content', str(doc)), getattr(doc, 'metadata', {}) or {})}"
                             for index, doc in enumerate(context_docs, 1)
                         )
 
