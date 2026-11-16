@@ -1,10 +1,12 @@
 ---
 id: TASK-15551
 title: Support large native file uploads in Quick Ingest
-status: In Progress
+status: Done
 labels:
 - quick-ingest
 - media-ingestion
+references:
+- https://github.com/rmusser01/tldw_server/pull/3484
 ---
 
 ## Description
@@ -17,26 +19,27 @@ Use a configurable 250 MiB document limit in Quick Ingest, allow 1 GiB audio/vid
 <!-- AC:BEGIN -->
 - [x] #1 Documents default to 250 MiB at the frontend, and audio/video accept 1 GiB.
 - [x] #2 Preserve native File uploads and a one GiB per-file API ceiling with existing security checks.
-- [ ] #3 Verify boundary behavior and open a PR against dev.
+- [x] #3 Verify boundary behavior and open a PR against dev.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-Passed focused frontend and backend suites. A production Next client bundle built with a 384 MiB setting rendered that override. API boundary tests cover streaming admission and preservation of lower operator limits. Exact-byte staging browser uploads are in progress.
+432 focused frontend tests and 121 backend tests passed, with one expected backend failure. The emitted Next.js client showed a 384 MiB override. No new runtime Bandit findings. Hosted browser proof used the same upload behavior. Exact-size Chrome controls were verified on staging with generated files and AI analysis disabled. Media jobs were cancelled after upload. A lost acknowledgement can leave a just-created job running on Cancel All.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Chrome accepted the exact 250 MiB PDF, EPUB, and DOCX and exact 1 GiB WAV and MP4. The 500-page PDF preserved text from its first and last pages. All corresponding one-byte-over controls were rejected before upload. Live API limits were 1 GiB per standard file. The PR includes the verification results.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
