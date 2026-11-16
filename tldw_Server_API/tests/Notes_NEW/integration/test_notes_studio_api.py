@@ -63,7 +63,7 @@ def client_with_notes_studio_db(tmp_path, monkeypatch):
             diagram_adapter=_test_diagram_adapter,
         )
 
-    monkeypatch.setattr(notes_endpoint, "NotesStudioService", _service_factory)
+    monkeypatch.setattr("tldw_Server_API.app.core.Notes.studio_service.NotesStudioService", _service_factory)
 
     fastapi_app = FastAPI()
     fastapi_app.include_router(notes_endpoint.router, prefix="/api/v1/notes")

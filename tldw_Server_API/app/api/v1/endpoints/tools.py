@@ -12,7 +12,8 @@ from tldw_Server_API.app.api.v1.schemas.tools import (
     ToolInfo,
     ToolListResponse,
 )
-from tldw_Server_API.app.core.Tools.tool_executor import ToolExecutionError, ToolExecutor
+from tldw_Server_API.app.core.Tools.tool_executor import ToolExecutionError
+import tldw_Server_API.app.core.Tools.tool_executor as _tool_executor
 
 router = APIRouter()
 _TOOL_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
@@ -29,7 +30,7 @@ _TOOL_ENDPOINT_NONCRITICAL_EXCEPTIONS = (
 @router.get("/tools", response_model=ToolListResponse, summary="List available tools for current user")
 async def list_tools_endpoint(current_user: User = Depends(get_request_user)) -> ToolListResponse:
     try:
-        executor = ToolExecutor()
+        executor = _tool_executor.ToolExecutor()
 
         out = await executor.list_tools(
             user_id=str(current_user.id),
@@ -75,7 +76,7 @@ async def execute_tool_endpoint(
     current_user: User = Depends(get_request_user),
 ) -> ExecuteToolResult:
     try:
-        executor = ToolExecutor()
+        executor = _tool_executor.ToolExecutor()
         if req.dry_run:
             await executor.execute(
                 user_id=str(current_user.id),

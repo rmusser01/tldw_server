@@ -44,8 +44,7 @@ def test_endpoint_chroma_manager_uses_canonical_resolved_base(
             created["user_embedding_config"] = user_embedding_config
 
     monkeypatch.setattr(
-        embeddings_v5_production_enhanced,
-        "settings",
+        "tldw_Server_API.app.core.config.settings",
         {
             "EMBEDDING_CONFIG": {"provider": "test"},
             "USER_DB_BASE_DIR": "Databases/user_databases",
@@ -58,8 +57,7 @@ def test_endpoint_chroma_manager_uses_canonical_resolved_base(
         staticmethod(lambda: resolved_base),
     )
     monkeypatch.setattr(
-        embeddings_v5_production_enhanced,
-        "ChromaDBManager",
+        "tldw_Server_API.app.core.Embeddings.ChromaDB_Library.ChromaDBManager",
         FakeChromaDBManager,
     )
 
@@ -86,8 +84,7 @@ def test_endpoint_chroma_manager_fails_closed_when_base_resolution_fails(
         raise OSError("synthetic canonical path failure")
 
     monkeypatch.setattr(
-        embeddings_v5_production_enhanced,
-        "settings",
+        "tldw_Server_API.app.core.config.settings",
         {
             "EMBEDDING_CONFIG": {},
             "USER_DB_BASE_DIR": "Databases/stale-user-databases",
@@ -100,8 +97,7 @@ def test_endpoint_chroma_manager_fails_closed_when_base_resolution_fails(
         staticmethod(_fail_resolution),
     )
     monkeypatch.setattr(
-        embeddings_v5_production_enhanced,
-        "ChromaDBManager",
+        "tldw_Server_API.app.core.Embeddings.ChromaDB_Library.ChromaDBManager",
         FakeChromaDBManager,
     )
 

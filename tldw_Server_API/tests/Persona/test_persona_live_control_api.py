@@ -190,10 +190,9 @@ def _install_persona_stream_test_stubs(
         persona_ep, "_open_persona_ws_db",
         lambda user_id: CharactersRAGDB(str(persona_db.db_path), client_id=str(user_id)),
     )
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
-    monkeypatch.setattr(persona_ep, "persist_persona_turn", _fake_persist_persona_turn)
-    monkeypatch.setattr(persona_ep, "retrieve_top_memories", lambda **kwargs: [])
-    monkeypatch.setattr(persona_ep, "load_companion_context", lambda **kwargs: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.memory_integration.persist_persona_turn", _fake_persist_persona_turn)
+    monkeypatch.setattr("tldw_Server_API.app.core.Personalization.companion_context.load_companion_context", lambda **kwargs: {})
     monkeypatch.setattr(
         persona_ep,
         "resolve_persona_exemplar_runtime_context",
@@ -212,7 +211,7 @@ def test_live_sessions_requires_auth():
 
 
 def test_live_sessions_list_returns_owned_session_summaries(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a", name="Persona A")
     _create_profile(persona_db, user_id="2", persona_id="persona_b", name="Persona B")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-owned")
@@ -237,7 +236,7 @@ def test_live_sessions_list_returns_owned_session_summaries(monkeypatch, persona
 
 
 def test_live_sessions_list_batches_persona_name_lookup(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a", name="Persona A")
     _create_profile(persona_db, user_id="1", persona_id="persona_b", name="Persona B")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
@@ -257,7 +256,7 @@ def test_live_sessions_list_batches_persona_name_lookup(monkeypatch, persona_db:
 
 
 def test_live_session_create_resume_compatible_reuses_active_session(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -281,7 +280,7 @@ def test_live_session_create_resume_compatible_omitted_surface_uses_default_surf
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         companion = client.post(
@@ -305,7 +304,7 @@ def test_live_session_create_resume_compatible_omitted_surface_uses_default_surf
 
 
 def test_live_session_create_new_honors_idempotency_key(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         first = client.post(
@@ -383,7 +382,7 @@ def test_live_session_create_idempotency_serializes_concurrent_requests(
 
 
 def test_live_session_idempotency_key_ignores_stopped_session(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         first = client.post(
@@ -420,7 +419,7 @@ def test_live_session_create_new_unknown_persona_returns_not_found(
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         resp = client.post(
@@ -440,7 +439,7 @@ def test_live_session_resume_compatible_unknown_persona_returns_not_found(
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         resp = client.post(
@@ -457,7 +456,7 @@ def test_live_session_resume_compatible_unknown_persona_returns_not_found(
 
 def test_live_session_create_uses_existing_session_materialization(monkeypatch, persona_db: CharactersRAGDB):
     manager = SessionManager()
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: manager)
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -489,7 +488,7 @@ def test_live_session_created_by_live_control_can_resume_existing_session_endpoi
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -510,7 +509,7 @@ def test_live_session_created_by_live_control_can_resume_existing_session_endpoi
 
 
 def test_live_session_focus_last_write_wins(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-b")
@@ -527,7 +526,7 @@ def test_live_session_focus_last_write_wins(monkeypatch, persona_db: CharactersR
 
 
 def test_live_session_focus_a_then_b_only_marks_b_focused(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-b")
@@ -546,7 +545,7 @@ def test_live_session_focus_reconciles_stale_focused_rows_after_missed_snapshot(
     monkeypatch: pytest.MonkeyPatch,
     persona_db: CharactersRAGDB,
 ) -> None:
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(
         persona_db,
@@ -631,7 +630,7 @@ def test_live_session_focus_retries_conflicted_clear_updates(
 
 
 def test_live_session_focus_uses_utc_iso_focus_timestamp(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
 
@@ -647,7 +646,7 @@ def test_live_session_focus_and_stop_return_not_found_for_other_user_session(
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-owned")
 
@@ -660,7 +659,7 @@ def test_live_session_focus_and_stop_return_not_found_for_other_user_session(
 
 
 def test_live_session_stop_marks_closed_and_clears_focus(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
 
@@ -677,7 +676,7 @@ def test_live_session_stop_marks_closed_and_clears_focus(monkeypatch, persona_db
 
 
 def test_live_session_stop_terminal_session_is_idempotent(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(
         persona_db,
@@ -698,7 +697,7 @@ def test_live_session_stop_terminal_session_is_idempotent(monkeypatch, persona_d
 
 
 def test_live_session_focus_and_stop_preserve_unrelated_preferences(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(
         persona_db,
@@ -726,7 +725,7 @@ def test_live_session_focus_and_stop_preserve_unrelated_preferences(monkeypatch,
 
 
 def test_live_session_focus_preserves_fresh_preference_state(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(
         persona_db,
@@ -758,7 +757,7 @@ def test_live_session_focus_preserves_fresh_preference_state(monkeypatch, person
 
 
 def test_live_sessions_ignore_stale_focused_closed_session(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(
         persona_db,
@@ -786,7 +785,7 @@ def test_live_sessions_ignore_stale_focused_closed_session(monkeypatch, persona_
 
 
 def test_live_session_rest_created_without_stream_is_idle(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         created = client.post(
@@ -868,7 +867,7 @@ def test_persona_stream_voice_commit_records_bounded_client_message_id(monkeypat
 
 
 def test_live_session_active_stream_presence_is_connected(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
     persona_live_stream_registry.mark_connected(user_id="1", session_id="sess-a")
@@ -881,7 +880,7 @@ def test_live_session_active_stream_presence_is_connected(monkeypatch, persona_d
 
 
 def test_live_session_idempotency_scans_beyond_first_page(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
 
     with _client_for_user(1, persona_db) as client:
         first = client.post(
@@ -925,7 +924,7 @@ def test_live_session_focus_only_touches_target_and_previously_focused(
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-b")
@@ -947,7 +946,7 @@ def test_live_session_focus_does_not_paginate_all_sessions(
     monkeypatch,
     persona_db: CharactersRAGDB,
 ):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     monkeypatch.setattr(live_control_module, "_SESSION_SCAN_PAGE_SIZE", 2)
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     for idx in range(5):
@@ -970,7 +969,7 @@ def test_live_session_focus_does_not_paginate_all_sessions(
 
 
 def test_live_session_list_reports_focus_outside_returned_page(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     focused_session_id = "sess-old-focused"
     _create_session(
@@ -1006,7 +1005,7 @@ def test_live_session_list_reports_focus_outside_returned_page(monkeypatch, pers
 
 
 def test_live_session_list_detects_pretty_printed_focus_metadata(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     focused_session_id = "sess-pretty-focused"
     _create_session(
@@ -1040,7 +1039,7 @@ def test_live_session_list_detects_pretty_printed_focus_metadata(monkeypatch, pe
 
 
 def test_live_session_list_does_not_paginate_all_sessions_for_focus(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     monkeypatch.setattr(live_control_module, "_SESSION_SCAN_PAGE_SIZE", 2)
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     focused_session_id = "sess-old-focused"
@@ -1342,7 +1341,7 @@ def test_persona_stream_presence_refcounts_multiple_websockets_on_same_session(
 
 
 def test_live_session_terminal_status_excludes_send_text_action(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(persona_db, user_id="1", persona_id="persona_a", session_id="sess-closed", status="closed")
 
@@ -1355,7 +1354,7 @@ def test_live_session_terminal_status_excludes_send_text_action(monkeypatch, per
 
 
 def test_live_session_summary_redacts_sensitive_preferences(monkeypatch, persona_db: CharactersRAGDB):
-    monkeypatch.setattr(persona_ep, "get_session_manager", lambda: SessionManager())
+    monkeypatch.setattr("tldw_Server_API.app.core.Persona.session_manager.get_session_manager", lambda: SessionManager())
     _create_profile(persona_db, user_id="1", persona_id="persona_a")
     _create_session(
         persona_db,

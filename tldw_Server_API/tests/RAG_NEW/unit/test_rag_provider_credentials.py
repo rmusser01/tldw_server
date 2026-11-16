@@ -168,8 +168,7 @@ def _result() -> UnifiedSearchResult:
 def _install_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
     _RecordingRuntime.created.clear()
     monkeypatch.setattr(
-        rag_endpoint,
-        "ProviderCredentialRuntime",
+        "tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime",
         _RecordingRuntime,
         raising=False,
     )
@@ -190,10 +189,9 @@ def _install_common_endpoint_fakes(
         return None
 
     monkeypatch.setattr(rag_endpoint, "_log_rag_queries_for_org", no_usage_log)
-    monkeypatch.setattr(rag_endpoint, "rag_result_from_unified_search_result", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_from_unified_search_result", lambda result: result)
     monkeypatch.setattr(
-        rag_endpoint,
-        "rag_result_to_response",
+        "tldw_Server_API.app.core.RAG.rag_service.response_mapping.rag_result_to_response",
         lambda result: {"query": result.query, "answer": result.generated_answer},
     )
 
@@ -223,7 +221,7 @@ async def test_standard_search_passes_ephemeral_runtime_and_closes_it(
         captured.update(kwargs)
         return _result()
 
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", fake_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", fake_pipeline)
     try:
         response = await rag_endpoint.unified_search_endpoint(
             request_raw=_request(),
@@ -391,7 +389,7 @@ async def test_knowledge_qa_routes_isolate_configured_server_credentials_at_adap
     )
     monkeypatch.setattr(rag_endpoint, "_resolve_kanban_db_path", lambda *_args: "kanban.db")
     monkeypatch.setattr(rag_endpoint, "_log_rag_queries_for_org", no_usage_log)
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", acceptance_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", acceptance_pipeline)
     monkeypatch.setattr(gateway, "_get_llm_registry", lambda: Registry())
 
     async def invoke(label: str) -> Any:
@@ -492,7 +490,7 @@ async def test_agentic_search_passes_same_runtime_without_putting_it_in_payload(
         captured.update(kwargs)
         return _result()
 
-    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", fake_agentic_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", fake_agentic_pipeline)
     await rag_endpoint.unified_search_endpoint(
         request_raw=_request(),
         request=rag_endpoint.UnifiedRAGRequest(query="credential runtime", strategy="agentic"),
@@ -523,7 +521,7 @@ async def test_stream_runtime_lives_until_body_iterator_finishes(
         captured.update(kwargs)
         yield {"type": "delta", "text": "safe"}
 
-    monkeypatch.setattr(rag_endpoint, "stream_rag_events", fake_stream_rag_events)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.streaming_executor.stream_rag_events", fake_stream_rag_events)
     response = await rag_endpoint.unified_search_stream_endpoint(
         request_raw=_request("/api/v1/rag/search/stream"),
         request=rag_endpoint.UnifiedRAGRequest(query="credential runtime", enable_generation=True),
@@ -609,9 +607,9 @@ async def test_batch_passes_one_runtime_and_closes_after_all_queries(
     async def no_usage_log(*args: Any, **kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(rag_endpoint, "require_within_limit", lambda *args, **kwargs: fake_limit_checker)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.billing_deps.require_within_limit", lambda *args, **kwargs: fake_limit_checker)
     monkeypatch.setattr(rag_endpoint, "_build_batch_request_bundle", lambda *args, **kwargs: bundle)
-    monkeypatch.setattr(rag_endpoint, "unified_batch_pipeline", fake_batch_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_batch_pipeline", fake_batch_pipeline)
     monkeypatch.setattr(rag_endpoint, "_log_rag_queries_for_org", no_usage_log)
 
     await rag_endpoint.unified_batch_endpoint(
@@ -723,7 +721,7 @@ async def test_resume_batch_passes_ephemeral_runtime_without_checkpoint_storage(
     monkeypatch.setattr(checkpoint_module, "CheckpointManager", FakeCheckpointManager)
     monkeypatch.setattr(rag_endpoint, "_build_resume_batch_request", lambda *args, **kwargs: object())
     monkeypatch.setattr(rag_endpoint, "_build_batch_request_bundle", lambda *args, **kwargs: bundle)
-    monkeypatch.setattr(rag_endpoint, "unified_batch_pipeline", fake_batch_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_batch_pipeline", fake_batch_pipeline)
 
     await rag_endpoint.resume_batch_endpoint(
         checkpoint_id="checkpoint-1",
@@ -764,7 +762,7 @@ async def test_stream_runtime_closes_when_body_iterator_is_closed_early(
         yield {"type": "delta", "text": "first"}
         await keep_open.wait()
 
-    monkeypatch.setattr(rag_endpoint, "stream_rag_events", fake_stream_rag_events)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.streaming_executor.stream_rag_events", fake_stream_rag_events)
     response = await rag_endpoint.unified_search_stream_endpoint(
         request_raw=_request("/api/v1/rag/search/stream"),
         request=rag_endpoint.UnifiedRAGRequest(query="credential runtime", enable_generation=True),
@@ -808,9 +806,9 @@ async def test_stream_endpoint_closes_each_rag_stream_before_its_runtime(
         finally:
             lifecycle[runtime.label].append("rag_stream_close")
 
-    monkeypatch.setattr(rag_endpoint, "ProviderCredentialRuntime", OrderedRuntime)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime.ProviderCredentialRuntime", OrderedRuntime)
     _install_common_endpoint_fakes(monkeypatch, bundle=bundle)
-    monkeypatch.setattr(rag_endpoint, "stream_rag_events", fake_stream_rag_events)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.streaming_executor.stream_rag_events", fake_stream_rag_events)
 
     async def build_and_close() -> None:
         response = await rag_endpoint.unified_search_stream_endpoint(
@@ -974,7 +972,7 @@ async def test_agentic_typed_failure_bypasses_raw_fallback(
     async def failing_agentic_pipeline(**kwargs: Any) -> UnifiedSearchResult:
         raise ChatAuthenticationError(_SENTINEL_SECRET, provider="openai")
 
-    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", failing_agentic_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", failing_agentic_pipeline)
     with pytest.raises(HTTPException) as exc_info:
         await rag_endpoint.unified_search_endpoint(
             request_raw=_request(),
@@ -1043,7 +1041,7 @@ async def test_agentic_untyped_failure_fails_closed_without_fabricated_evidence(
 
     log_records: list[Any] = []
     sink_id = logger.add(log_records.append)
-    monkeypatch.setattr(rag_endpoint, "agentic_rag_pipeline", failing_agentic_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", failing_agentic_pipeline)
     try:
         with pytest.raises(HTTPException) as exc_info:
             await rag_endpoint.unified_search_endpoint(
@@ -1105,7 +1103,7 @@ async def test_standard_untyped_failure_has_bounded_http_error_and_logs(
     async def failing_standard_pipeline(**_kwargs: Any) -> UnifiedSearchResult:
         raise RuntimeError(raw_failure)
 
-    monkeypatch.setattr(rag_endpoint, "unified_rag_pipeline", failing_standard_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", failing_standard_pipeline)
     log_records: list[Any] = []
     sink_id = logger.add(log_records.append)
     try:

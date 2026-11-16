@@ -156,8 +156,7 @@ def _patch_failing_service(monkeypatch: pytest.MonkeyPatch) -> _LoggerStub:
     logger_stub = _LoggerStub()
     monkeypatch.setattr(evaluations_datasets, "logger", logger_stub)
     monkeypatch.setattr(
-        evaluations_datasets,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _ExplodingDatasetService(),
     )
     return logger_stub
@@ -221,8 +220,7 @@ async def test_create_dataset_sanitizes_idempotency_record_warning(monkeypatch: 
     logger_stub = _LoggerStub()
     monkeypatch.setattr(evaluations_datasets, "logger", logger_stub)
     monkeypatch.setattr(
-        evaluations_datasets,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _IdempotencyRecordWarningService(),
     )
 
@@ -245,8 +243,7 @@ async def test_create_dataset_sanitizes_idempotency_lookup_debug(monkeypatch: py
     logger_stub = _LoggerStub()
     monkeypatch.setattr(evaluations_datasets, "logger", logger_stub)
     monkeypatch.setattr(
-        evaluations_datasets,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _IdempotencyLookupDebugService(),
     )
 
@@ -271,8 +268,7 @@ async def test_create_dataset_sanitizes_idempotent_replay_header_debug(
     logger_stub = _LoggerStub()
     monkeypatch.setattr(evaluations_datasets, "logger", logger_stub)
     monkeypatch.setattr(
-        evaluations_datasets,
-        "get_unified_evaluation_service_for_user",
+        "tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user",
         lambda _user_id: _IdempotencyReplayDebugService(),
     )
 

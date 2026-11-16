@@ -35,7 +35,7 @@ def owners(request, tmp_path, monkeypatch):
     if request.param == "postgresql":
         backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
     dbs = [CharactersRAGDB(tmp_path / f"{owner}.db", client_id=str(owner), backend=backend) for owner in (2, 3)]
-    monkeypatch.setattr(endpoint, "is_persona_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: True)
     try:
         yield SimpleNamespace(kind=request.param, alice=dbs[0], bob=dbs[1], backend=backend)
     finally:

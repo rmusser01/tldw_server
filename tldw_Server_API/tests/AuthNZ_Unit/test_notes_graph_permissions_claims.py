@@ -356,7 +356,7 @@ async def test_notes_graph_neighbors_maps_db_error_to_500(monkeypatch: pytest.Mo
 async def test_notes_graph_read_sanitizes_generic_error_log(monkeypatch: pytest.MonkeyPatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(notes_graph_mod, "logger", logger_stub)
-    monkeypatch.setattr(notes_graph_mod, "NOTES_GRAPH_ENABLED", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Notes_Graph.graph_service.NOTES_GRAPH_ENABLED", lambda: True)
 
     def _raise_generic_error(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("notes graph backend exploded at /private/notes-graph.db")
@@ -382,7 +382,7 @@ async def test_notes_graph_read_sanitizes_generic_error_log(monkeypatch: pytest.
 async def test_notes_graph_neighbors_sanitizes_generic_error_log(monkeypatch: pytest.MonkeyPatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(notes_graph_mod, "logger", logger_stub)
-    monkeypatch.setattr(notes_graph_mod, "NOTES_GRAPH_ENABLED", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Notes_Graph.graph_service.NOTES_GRAPH_ENABLED", lambda: True)
 
     def _raise_generic_error(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("notes graph backend exploded at /private/notes-graph.db")

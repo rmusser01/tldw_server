@@ -19,12 +19,12 @@ from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     ToolCatalogEntryResponse,
     ToolCatalogResponse,
 )
-from tldw_Server_API.app.core.AuthNZ.orgs_teams import list_org_members, list_team_members
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.exceptions import ToolCatalogConflictError
 from tldw_Server_API.app.services import admin_tool_catalog_service
 from tldw_Server_API.app.services.mcp_hub_service import emit_mcp_hub_audit
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+import tldw_Server_API.app.core.AuthNZ.orgs_teams as _orgs_teams
 
 router = APIRouter(prefix="", tags=["mcp-catalogs-scope"])
 _CATALOG_NONCRITICAL_EXCEPTIONS = (
@@ -67,7 +67,7 @@ async def _require_org_manager(principal: AuthPrincipal, org_id: int) -> None:
         raise HTTPException(status_code=403, detail="Org manager role required")
     # Check org membership
     try:
-        members = await list_org_members(org_id=org_id, limit=1000, offset=0)
+        members = await _orgs_teams.list_org_members(org_id=org_id, limit=1000, offset=0)
         uid = int(principal.user_id)
         for m in members:
             try:
@@ -87,7 +87,7 @@ async def _require_team_manager(principal: AuthPrincipal, team_id: int) -> None:
     if principal.user_id is None:
         raise HTTPException(status_code=403, detail="Team manager role required")
     try:
-        members = await list_team_members(team_id)
+        members = await _orgs_teams.list_team_members(team_id)
         uid = int(principal.user_id)
         for m in members:
             try:

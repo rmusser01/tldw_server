@@ -153,7 +153,6 @@ from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import has_scope, normalize_scope
 from tldw_Server_API.app.core.AuthNZ.websocket_principal import (
     auth_subprotocol,
-    resolve_ws_principal_or_deprecated_query,
 )
 from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import cookie_websocket_rejection_code
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
@@ -170,22 +169,16 @@ from tldw_Server_API.app.core.DB_Management.PersonaVisualPortability_DB import (
 )
 from tldw_Server_API.app.core.feature_flags import (
     is_mcp_hub_policy_enforcement_enabled,
-    is_persona_enabled,
 )
-from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
-from tldw_Server_API.app.core.Image_Generation.adapter_registry import (
-    get_registry as get_image_generation_registry,
-)
+from tldw_Server_API.app.core.http_client import RetryPolicy
 from tldw_Server_API.app.core.Jobs.manager import JobManager
-from tldw_Server_API.app.core.MCP_unified import MCPRequest, get_mcp_server
+from tldw_Server_API.app.core.MCP_unified import MCPRequest
 from tldw_Server_API.app.core.MCP_unified.auth_scope import project_authenticated_execution_scope
 from tldw_Server_API.app.core.MCP_unified.persona_scope import normalize_persona_scope_payload
 from tldw_Server_API.app.core.MCP_unified.protocol_types import AuthenticatedExecutionScope
-from tldw_Server_API.app.core.Metrics import increment_counter
 from tldw_Server_API.app.core.Persona import live_conversation
 from tldw_Server_API.app.core.Persona.buddy import (
     build_persona_buddy_summary,
-    ensure_persona_buddy_for_profile,
 )
 from tldw_Server_API.app.core.Persona.connections import (
     PERSONA_CONNECTION_STATUS_FIELD,
@@ -232,11 +225,6 @@ from tldw_Server_API.app.core.Persona.live_stt import (
 from tldw_Server_API.app.core.Persona.live_voice_runtime import (
     PersonaVoiceInputLimitError,
     persona_live_voice_registry,
-)
-from tldw_Server_API.app.core.Persona.memory_integration import (
-    persist_persona_turn,
-    persist_tool_outcome,
-    retrieve_top_memories,
 )
 from tldw_Server_API.app.core.Persona.policy_evaluator import (
     default_allow_rules,
@@ -306,7 +294,6 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_persona_session_summarized,
     record_persona_tool_executed,
 )
-from tldw_Server_API.app.core.Personalization.companion_context import load_companion_context
 from tldw_Server_API.app.core.Skills.context_integration import handle_skill_tool_call
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import env_flag_enabled
@@ -331,6 +318,17 @@ from tldw_Server_API.app.core.VoiceAssistant import (
 from tldw_Server_API.app.core.VoiceAssistant import (
     get_voice_command as get_voice_command_db,
 )
+import tldw_Server_API.app.core.AuthNZ.websocket_principal as _websocket_principal
+import tldw_Server_API.app.core.Image_Generation.adapter_registry as _adapter_registry
+import tldw_Server_API.app.core.MCP_unified as _MCP_unified
+import tldw_Server_API.app.core.Metrics as _Metrics
+import tldw_Server_API.app.core.Persona.buddy as _buddy
+import tldw_Server_API.app.core.Persona.memory_integration as _memory_integration
+import tldw_Server_API.app.core.Persona.session_manager as _session_manager
+import tldw_Server_API.app.core.Personalization.companion_context as _companion_context
+import tldw_Server_API.app.core.Streaming.streams as _streams
+import tldw_Server_API.app.core.feature_flags as _feature_flags
+import tldw_Server_API.app.core.http_client as _http_client
 
 router = APIRouter()
 
@@ -511,7 +509,7 @@ def _runtime_explorer_notice_message(diagnostics: dict[str, Any]) -> str:
 def _increment_persona_metric(metric_name: str, labels: dict[str, str]) -> None:
     safe_labels = {str(k): str(v) for k, v in labels.items()}
     with contextlib.suppress(Exception):
-        increment_counter(metric_name, 1, labels=safe_labels)
+        _Metrics.increment_counter(metric_name, 1, labels=safe_labels)
 
 
 _PERSONA_SETTING_READ_EXCEPTIONS = (AttributeError, ImportError, TypeError, ValueError)
@@ -1215,7 +1213,7 @@ async def _test_persona_connection(
 
     started_at = time.perf_counter()
     try:
-        response = await afetch(**request_kwargs)
+        response = await _http_client.afetch(**request_kwargs)
         try:
             body_preview = _parse_persona_connection_test_response_body(response)
         finally:
@@ -2116,7 +2114,7 @@ def _ensure_persona_buddy_after_profile_mutation(
     profile: dict[str, Any],
 ) -> dict[str, Any]:
     """Keep buddy state aligned after a committed profile mutation."""
-    return ensure_persona_buddy_for_profile(db, profile)
+    return _buddy.ensure_persona_buddy_for_profile(db, profile)
 
 
 def _persona_exemplar_to_response(exemplar: dict[str, Any]) -> PersonaExemplarResponse:
@@ -2212,7 +2210,7 @@ def _build_persona_visual_generation_readiness(
     requested_backend = str(backend or "").strip() or None
     worker_enabled = env_flag_enabled("PERSONA_VISUAL_GENERATION_WORKER_ENABLED")
     try:
-        registry = get_image_generation_registry()
+        registry = _adapter_registry.get_registry()
         enabled_backends = registry.list_backend_names(include_disabled=False)
         default_backend = registry.resolve_backend(None)
         resolved_backend = registry.resolve_backend(requested_backend) if requested_backend else default_backend
@@ -3600,7 +3598,7 @@ async def _resolve_authenticated_user_id(ws: WebSocket) -> tuple[str | None, boo
     tools run, and a cleared scope list would read as "not a scoped key" and allow every tool.
     """
     try:
-        principal = await resolve_ws_principal_or_deprecated_query(ws, required_scope="read")
+        principal = await _websocket_principal.resolve_ws_principal_or_deprecated_query(ws, required_scope="read")
     except WebSocketException as exc:
         # Fail closed until the socket closes: forward no credential and deny every scoped tool.
         ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", []
@@ -3651,7 +3649,7 @@ async def list_persona_profiles(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> list[PersonaProfileResponse]:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -3682,7 +3680,7 @@ async def create_persona_profile(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaProfileResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -3734,7 +3732,7 @@ async def get_persona_profile(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaProfileResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -3765,7 +3763,7 @@ async def update_persona_profile(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaProfileResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     update_data = payload.model_dump(exclude_unset=True)
@@ -3832,14 +3830,14 @@ async def get_persona_buddy(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaBuddyResponse:
     """Return the resolved buddy profile for one active persona profile."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
         profile = await _run_persona_db_call(db.get_persona_profile, persona_id, user_id=user_id, include_deleted=False)
         if profile is None:
             raise HTTPException(status_code=404, detail="Persona profile not found")
-        buddy = await _run_persona_db_call(ensure_persona_buddy_for_profile, db, profile)
+        buddy = await _run_persona_db_call(_buddy.ensure_persona_buddy_for_profile, db, profile)
         if buddy is None:
             raise HTTPException(status_code=500, detail="Failed to load persona buddy")
         return _persona_buddy_to_response(buddy)
@@ -3863,7 +3861,7 @@ async def get_persona_buddy_preferences(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaBuddyPreferencesResponse:
     """Return the authenticated user's global companion preference or its safe default."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -3896,7 +3894,7 @@ async def update_persona_buddy_preferences(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaBuddyPreferencesResponse:
     """Version-check and persist the authenticated user's global companion preference."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -3928,7 +3926,7 @@ async def get_persona_buddy_override_preferences(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaBuddyPreferencesOverrideResponse:
     """Return the current user's per-Persona ambient overlay preference."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -3939,7 +3937,7 @@ async def get_persona_buddy_override_preferences(
             include_deleted=False,
         )
         buddy = await _run_persona_db_call(
-            ensure_persona_buddy_for_profile,
+            _buddy.ensure_persona_buddy_for_profile,
             db,
             profile,
         )
@@ -3970,7 +3968,7 @@ async def update_persona_buddy_override_preferences(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaBuddyPreferencesOverrideResponse:
     """Patch only a current user's per-Persona ambient-mode overlay preference."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4011,7 +4009,7 @@ async def list_persona_visual_renderers(
     _current_user: User = Depends(get_request_user),
 ) -> PersonaVisualRendererCapabilitiesResponse:
     """List known Persona/Buddy visual renderer capabilities for this server."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     _require_current_user_id(_current_user)
     return PersonaVisualRendererCapabilitiesResponse(
@@ -4059,7 +4057,7 @@ async def list_persona_visual_starter_packs(
     starter_service: PersonaVisualStarterCatalogService = Depends(get_persona_visual_starter_catalog_service),
 ) -> PersonaVisualStarterPackListResponse:
     """List bundled Persona Visual starter packs available for draft copy."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     _require_current_user_id(_current_user)
     try:
@@ -4082,7 +4080,7 @@ async def get_persona_visual_starter_pack(
     starter_service: PersonaVisualStarterCatalogService = Depends(get_persona_visual_starter_catalog_service),
 ) -> PersonaVisualStarterPackDetailResponse:
     """Return one bundled Persona Visual starter pack fixture preview."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     _require_current_user_id(_current_user)
     try:
@@ -4103,7 +4101,7 @@ async def get_persona_visual_starter_asset_content(
     starter_service: PersonaVisualStarterCatalogService = Depends(get_persona_visual_starter_catalog_service),
 ) -> Response:
     """Preview immutable bundled artwork without creating a Persona or draft."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     _require_current_user_id(_current_user)
     try:
@@ -4135,7 +4133,7 @@ async def copy_persona_visual_starter_pack(
     starter_service: PersonaVisualStarterCatalogService = Depends(get_persona_visual_starter_catalog_service),
 ) -> PersonaVisualPackResponse:
     """Copy a bundled starter pack to a target persona as an inactive draft."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4168,7 +4166,7 @@ async def list_persona_visual_library_items(
     library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
 ) -> PersonaVisualLibraryListResponse:
     """List the current user's personal Persona Visual pack library."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4202,7 +4200,7 @@ async def update_persona_visual_library_item(
     library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
 ) -> PersonaVisualLibraryItemResponse:
     """Update display metadata for one personal Persona Visual library item."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     update_kwargs: dict[str, Any] = {}
     if "title" in payload.model_fields_set:
@@ -4243,7 +4241,7 @@ async def delete_persona_visual_library_item(
     library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
 ) -> PersonaVisualLibraryDeleteResponse:
     """Soft-delete one personal Persona Visual library item."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4279,7 +4277,7 @@ async def use_persona_visual_library_item(
     library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
 ) -> PersonaVisualPackResponse:
     """Use a personal library item by duplicating its source pack to a target persona as a draft."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4315,7 +4313,7 @@ async def save_persona_visual_pack_to_library(
     library_service: PersonaVisualLibraryService = Depends(get_persona_visual_library_service),
 ) -> PersonaVisualLibraryItemResponse:
     """Save a same-user Persona Visual pack as a reference-backed personal library item."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4361,7 +4359,7 @@ async def list_persona_visual_packs(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> list[PersonaVisualPackResponse]:
     """List visual packs owned by the current user for one active persona profile."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4413,7 +4411,7 @@ async def create_persona_visual_pack(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaVisualPackResponse:
     """Create a draft visual pack manifest for one active persona profile."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4452,7 +4450,7 @@ async def deactivate_persona_visual_pack(
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
 ) -> PersonaVisualDeactivateResponse:
     """Deactivate the current active visual pack for one persona profile."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4490,7 +4488,7 @@ async def get_persona_visual_pack(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaVisualPackResponse:
     """Return one visual pack and its projected asset URLs."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4542,7 +4540,7 @@ async def update_persona_visual_pack_manifest(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaVisualPackResponse:
     """Replace a draft visual-pack manifest with optimistic version protection."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4601,7 +4599,7 @@ async def duplicate_persona_visual_pack(
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
 ) -> PersonaVisualPackResponse:
     """Duplicate a persona visual pack to another same-user persona as a draft."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4638,7 +4636,7 @@ async def upload_persona_visual_asset(
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
 ) -> PersonaVisualAssetResponse:
     """Validate and store one raster asset for a persona visual pack."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4682,7 +4680,7 @@ async def get_persona_visual_asset_content(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> FileResponse:
     """Stream stored visual-pack asset bytes after user and pack ownership checks."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4734,7 +4732,7 @@ async def review_persona_visual_pack(
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
 ) -> PersonaVisualPackResponse:
     """Validate and record the authenticated user's review of an inactive pack revision."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4799,7 +4797,7 @@ async def fork_persona_visual_pack_revision(
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
 ) -> PersonaVisualPackResponse:
     """Fork an owned pack revision after validating the source version."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4859,7 +4857,7 @@ async def activate_persona_visual_pack(
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
 ) -> PersonaVisualPackResponse:
     """Validate the manifest and make this pack the active visual for a persona."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4908,7 +4906,7 @@ async def list_persona_visual_generated_candidates(
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
 ) -> PersonaVisualCandidateListResponse:
     """Return generated visual candidates and preview asset URLs for review."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -4970,7 +4968,7 @@ async def get_persona_visual_generated_candidate(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaVisualCandidateResponse:
     """Return one generated visual candidate and its preview asset URLs."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5022,7 +5020,7 @@ async def get_persona_visual_generation_readiness(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaVisualGenerationReadinessResponse:
     """Report whether visual generation can be queued for this pack."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5063,7 +5061,7 @@ async def create_persona_visual_generation_job(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualGenerationJobResponse:
     """Queue a generated visual candidate job for later human review."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5174,7 +5172,7 @@ async def start_persona_visual_pack_export(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualPackExportResponse:
     """Queue a persona visual pack export job for a portable archive."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     export_request = payload or PersonaVisualPackExportRequest()
@@ -5264,7 +5262,7 @@ async def get_persona_visual_pack_export_status(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualPortabilityJobResponse:
     """Return one persona visual pack export job row for the current user."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5323,7 +5321,7 @@ async def cancel_persona_visual_pack_export(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualPortabilityJobResponse:
     """Cancel a queued or processing persona visual pack export job."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5440,7 +5438,7 @@ async def start_persona_visual_pack_import_preview(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualImportPreviewStartResponse:
     """Upload a persona visual pack archive and queue import-preview validation."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     filename = str(archive.filename or "")
@@ -5532,7 +5530,7 @@ async def get_persona_visual_pack_import_preview(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualImportPreviewResponse:
     """Return one import-preview validation row for the current user."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5583,7 +5581,7 @@ async def cancel_persona_visual_pack_import_preview(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualImportPreviewResponse:
     """Cancel a queued or processing persona visual pack import-preview job."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5656,7 +5654,7 @@ async def delete_persona_visual_pack_import_preview(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> Response:
     """Delete import-preview staging metadata and the user-owned staged archive."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5731,7 +5729,7 @@ async def start_persona_visual_pack_import_commit(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualImportCommitStartResponse:
     """Queue a reviewed import preview for commit into a new draft visual pack."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5853,7 +5851,7 @@ async def get_persona_visual_pack_import_commit_status(
     jobs_manager: JobManager = Depends(get_persona_visual_job_manager),
 ) -> PersonaVisualPortabilityJobResponse:
     """Return import-commit status for the current user and target persona."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5903,7 +5901,7 @@ async def review_persona_visual_candidate(
     visual_service: PersonaVisualService = Depends(get_persona_visual_service),
 ) -> PersonaVisualCandidateResponse:
     """Accept, reject, or mark a generated visual candidate as failed."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5963,7 +5961,7 @@ async def delete_persona_profile(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaDeleteResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -5996,7 +5994,7 @@ async def restore_persona_profile(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaProfileResponse:
     """Restore a soft-deleted persona profile and resume its buddy projection."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6043,7 +6041,7 @@ async def list_persona_exemplars(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> list[PersonaExemplarResponse]:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6083,7 +6081,7 @@ async def create_persona_exemplar(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaExemplarResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6127,7 +6125,7 @@ async def import_persona_exemplars(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> list[PersonaExemplarResponse]:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6183,7 +6181,7 @@ async def get_persona_exemplar(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaExemplarResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6225,7 +6223,7 @@ async def update_persona_exemplar(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaExemplarResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     update_data = payload.model_dump(exclude_unset=True)
@@ -6278,7 +6276,7 @@ async def review_persona_exemplar(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaExemplarResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6346,7 +6344,7 @@ async def delete_persona_exemplar(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaExemplarDeleteResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6382,7 +6380,7 @@ async def get_persona_profile_state(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaStateResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6412,7 +6410,7 @@ async def replace_persona_profile_state(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaStateResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     updates_raw = payload.model_dump(exclude_unset=True)
@@ -6469,7 +6467,7 @@ async def list_persona_profile_state_history(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaStateHistoryResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
 
@@ -6522,7 +6520,7 @@ async def restore_persona_profile_state_entry(
     restored entry becomes active for its state field, sibling active entries
     for that field are archived, and the updated state-doc view is returned.
     """
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     target_entry_id = str(payload.entry_id or "").strip()
@@ -6613,7 +6611,7 @@ async def archive_persona_profile_state_entry(
     returns the updated state-doc view; missing Persona or entry ownership
     failures return 404.
     """
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     target_entry_id = str(payload.entry_id or "").strip()
@@ -6677,7 +6675,7 @@ async def list_persona_scope_rules(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaScopeRulesResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6704,7 +6702,7 @@ async def replace_persona_scope_rules(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaScopeRulesResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6735,7 +6733,7 @@ async def list_persona_policy_rules(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaPolicyRulesResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6762,7 +6760,7 @@ async def replace_persona_policy_rules(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaPolicyRulesResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6797,7 +6795,7 @@ async def get_persona_setup_analytics(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaSetupAnalyticsResponse:
     """Return aggregated setup analytics and recent setup runs for one persona."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6844,7 +6842,7 @@ async def create_persona_setup_event(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaSetupEventWriteResponse:
     """Append one persona setup analytics event and return its dedupe status."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -6895,7 +6893,7 @@ async def get_persona_voice_analytics(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaVoiceAnalyticsResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7067,7 +7065,7 @@ async def update_persona_live_voice_session_analytics(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaLiveVoiceSessionSummary:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7153,7 +7151,7 @@ async def list_persona_voice_commands(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceCommandListResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7204,7 +7202,7 @@ async def create_persona_voice_command(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceCommandInfo:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     normalized_persona_id = _normalize_command_path_persona_id(persona_id, payload.persona_id)
@@ -7273,7 +7271,7 @@ async def update_persona_voice_command(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceCommandInfo:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     normalized_persona_id = _normalize_command_path_persona_id(persona_id, payload.persona_id)
@@ -7357,7 +7355,7 @@ async def toggle_persona_voice_command(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> VoiceCommandInfo:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7426,7 +7424,7 @@ async def delete_persona_voice_command(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> None:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7463,7 +7461,7 @@ async def dry_run_persona_voice_command(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaCommandDryRunResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7564,7 +7562,7 @@ async def list_persona_connections(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> list[PersonaConnectionResponse]:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7589,7 +7587,7 @@ async def create_persona_connection(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaConnectionResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7632,7 +7630,7 @@ async def update_persona_connection(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaConnectionResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7680,7 +7678,7 @@ async def delete_persona_connection(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaConnectionDeleteResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7718,7 +7716,7 @@ async def test_persona_connection(
     _current_user: User = Depends(get_request_user),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaConnectionTestResponse:
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7744,7 +7742,7 @@ async def persona_catalog(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> list[PersonaInfo]:
     """Return persona catalog backed by ChaCha profile records."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7778,10 +7776,10 @@ async def persona_session(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaSessionResponse:
     """Create or resume a persona session with a materialized scope snapshot."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
-    session_manager = get_session_manager()
+    session_manager = _session_manager.get_session_manager()
 
     try:
         materialized = materialize_persona_session(
@@ -7849,7 +7847,7 @@ async def persona_live_sessions(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaLiveSessionListResponse:
     """List user-scoped Persona Live control session summaries."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7878,13 +7876,13 @@ async def persona_live_session_create(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaLiveSessionFocusResponse:
     """Create or resume a text-capable Persona Live session and focus it."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
         session = create_or_resume_live_session(
             db,
-            session_manager=get_session_manager(),
+            session_manager=_session_manager.get_session_manager(),
             user_id=user_id,
             persona_id=req.persona_id,
             reuse_policy=req.reuse_policy,
@@ -7915,7 +7913,7 @@ async def persona_live_session_focus(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaLiveSessionFocusResponse:
     """Focus a Persona Live session as the current Buddy target."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7948,7 +7946,7 @@ async def persona_live_session_stop(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaLiveSessionStopResponse:
     """Stop a Persona Live session and clear focus metadata."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     try:
@@ -7975,10 +7973,10 @@ async def persona_sessions(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> list[PersonaSessionSummary]:
     """List persisted persona sessions for the authenticated user."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
-    manager = get_session_manager()
+    manager = _session_manager.get_session_manager()
     try:
         rows = db.list_persona_sessions(
             user_id=user_id,
@@ -8018,10 +8016,10 @@ async def persona_session_detail(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaSessionDetail:
     """Get an owned session with retained durable transcript and current runtime plans."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
-    manager = get_session_manager()
+    manager = _session_manager.get_session_manager()
     try:
         row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)
         if row is None:
@@ -8059,11 +8057,11 @@ async def persona_session_export(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
 ) -> PersonaSessionExportResponse:
     """Export a redacted transcript for one selected Persona session owned by the user."""
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         raise HTTPException(status_code=404, detail="Persona disabled")
     user_id = _require_current_user_id(_current_user)
     _require_persona_export_allowed()
-    manager = get_session_manager()
+    manager = _session_manager.get_session_manager()
     try:
         row = db.get_persona_session(session_id, user_id=user_id, include_deleted=False)
         if row is None:
@@ -8249,7 +8247,7 @@ async def persona_stream(
     - Tool execution requires an authenticated user_id.
     - Connections must authenticate before the stream is accepted.
     """
-    if not is_persona_enabled():
+    if not _feature_flags.is_persona_enabled():
         with contextlib.suppress(RuntimeError, OSError):
             await ws.accept()
             await ws.send_json(
@@ -8266,7 +8264,7 @@ async def persona_stream(
             await ws.close(code=1000)
         return
 
-    stream: WebSocketStream | None = None
+    stream: _streams.WebSocketStream | None = None
     persona_scope_db: CharactersRAGDB | None = None
     auth_watchdog_task: asyncio.Task | None = None
     auth_watchdog_stop: asyncio.Event | None = None
@@ -8299,7 +8297,7 @@ async def persona_stream(
         # the offered auth marker echoed, never the credential following it.
         if auth_protocol := auth_subprotocol(ws):
             await ws.accept(subprotocol=auth_protocol)
-        stream = WebSocketStream(
+        stream = _streams.WebSocketStream(
             ws,
             heartbeat_interval_s=0.0,  # disable WS pings for this scaffold
             idle_timeout_s=None,
@@ -8366,7 +8364,7 @@ async def persona_stream(
 
         persona_scope_db = _open_persona_ws_db(authenticated_user_id)
         connection_user_id = authenticated_user_id
-        session_manager = get_session_manager()
+        session_manager = _session_manager.get_session_manager()
         default_session_id = uuid.uuid4().hex
         persona_id = "research_assistant"
         ws_event_seq_by_session: dict[str, int] = defaultdict(int)
@@ -8730,7 +8728,7 @@ async def persona_stream(
                     raise ConflictError("Persona runtime retired before transcript publication.")
             if persist_personalization:
                 _ = await asyncio.to_thread(
-                    persist_persona_turn,
+                    _memory_integration.persist_persona_turn,
                     user_id=authenticated_user_id,
                     session_id=session_id,
                     persona_id=effective_persona_id,
@@ -9422,7 +9420,7 @@ async def persona_stream(
                 )
             resolved_name, resolved_arguments = _translate_persona_tool_request(name, arguments or {})
             req = MCPRequest(method="tools/call", params={"name": resolved_name, "arguments": resolved_arguments})
-            server = get_mcp_server()
+            server = _MCP_unified.get_mcp_server()
             if not server.initialized:
                 await server.initialize()
             audit_metadata = {
@@ -9662,7 +9660,7 @@ async def persona_stream(
                 result=result,
             )
             _ = await asyncio.to_thread(
-                persist_tool_outcome,
+                _memory_integration.persist_tool_outcome,
                 user_id=authenticated_user_id,
                 session_id=session_id,
                 persona_id=persona_id,
@@ -10148,7 +10146,7 @@ async def persona_stream(
             )
             memory_context: list[str] = []
             if use_memory_context and memory_allowed_by_mode:
-                memories = retrieve_top_memories(
+                memories = _memory_integration.retrieve_top_memories(
                     user_id=authenticated_user_id,
                     query_text=normalized_text,
                     top_k=memory_top_k,
@@ -10166,7 +10164,7 @@ async def persona_stream(
             }
             if use_companion_context:
                 companion_context = await asyncio.to_thread(
-                    load_companion_context,
+                    _companion_context.load_companion_context,
                     user_id=authenticated_user_id,
                     query=normalized_text,
                 )

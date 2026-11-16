@@ -197,8 +197,8 @@ async def test_verify_api_key_logs_jwt_decode_failure_without_raw_exception(
             raise RuntimeError("jwt decode leaked /private/jwt-secrets.db")
 
     monkeypatch.setattr(eval_auth, "logger", logger_stub)
-    monkeypatch.setattr(eval_auth, "get_settings", _multi_user_settings)
-    monkeypatch.setattr(eval_auth, "get_jwt_service", lambda: _JWTServiceStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.get_settings", _multi_user_settings)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.jwt_service.get_jwt_service", lambda: _JWTServiceStub())
 
     with pytest.raises(HTTPException) as exc:
         await eval_auth.verify_api_key(
@@ -235,9 +235,9 @@ async def test_verify_api_key_logs_jwt_verification_failure_without_raw_exceptio
         raise RuntimeError("jwt verify leaked /private/jwt-secrets.db")
 
     monkeypatch.setattr(eval_auth, "logger", logger_stub)
-    monkeypatch.setattr(eval_auth, "get_settings", _multi_user_settings)
-    monkeypatch.setattr(eval_auth, "get_jwt_service", lambda: _JWTServiceStub())
-    monkeypatch.setattr(eval_auth, "verify_jwt_and_fetch_user", _raise_user_verification)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.get_settings", _multi_user_settings)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.jwt_service.get_jwt_service", lambda: _JWTServiceStub())
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.verify_jwt_and_fetch_user", _raise_user_verification)
 
     with pytest.raises(HTTPException) as exc:
         await eval_auth.verify_api_key(

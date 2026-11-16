@@ -167,7 +167,7 @@ async def test_embeddings_abtest_events_treats_cancelled_as_terminal(monkeypatch
                     raise AssertionError("SSE stream did not terminate for cancelled status")
                 await asyncio.sleep(0)
 
-    monkeypatch.setattr(unified_mod, "get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda _user_id: _SvcStub())
     monkeypatch.setattr(streams_mod, "SSEStream", _FakeSSEStream)
 
     response = await unified_mod.stream_embeddings_abtest_events(

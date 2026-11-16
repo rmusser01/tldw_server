@@ -56,7 +56,7 @@ def test_create_run_uses_typed_model(evals_crud_client, monkeypatch):
             }
 
     import tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_crud as crud
-    monkeypatch.setattr(crud, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
 
     payload = {
         "target_model": "gpt-4o-mini",
@@ -98,7 +98,7 @@ def test_create_run_returns_503_on_mandatory_audit_failure(evals_crud_client, mo
 
     import tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_crud as crud
 
-    monkeypatch.setattr(crud, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
 
     response = client.post(
         "/api/v1/evaluations/eval_abc/runs",
@@ -154,7 +154,7 @@ def test_create_run_names_its_judge_provider_to_the_llm_quota(
 
     import tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_crud as crud
 
-    monkeypatch.setattr(crud, "get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
+    monkeypatch.setattr("tldw_Server_API.app.core.Evaluations.unified_evaluation_service.get_unified_evaluation_service_for_user", lambda uid: _SvcStub())
     refuse_llm_work(monkeypatch)
     asked = users_own_key(monkeypatch, stored)
 

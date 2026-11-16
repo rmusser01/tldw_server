@@ -136,7 +136,7 @@ async def test_vector_stores_batches_non_admin_cannot_override_user_id(monkeypat
         captured["user_id"] = user_id
         return [{"id": "b1", "user_id": user_id, "status": status or "completed"}]
 
-    monkeypatch.setattr(vs_mod, "db_list_batches", _fake_list_batches)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.list_batches", _fake_list_batches)
 
     with TestClient(app) as client:
         # Without override: should succeed and use the current user's id.
@@ -176,7 +176,7 @@ async def test_vector_stores_batches_admin_can_override_user_id(monkeypatch):
         captured["user_id"] = user_id
         return [{"id": "b2", "user_id": user_id, "status": status or "completed"}]
 
-    monkeypatch.setattr(vs_mod, "db_list_batches", _fake_list_batches)
+    monkeypatch.setattr("tldw_Server_API.app.core.Embeddings.vector_store_batches_db.list_batches", _fake_list_batches)
 
     with TestClient(app) as client:
         resp = client.get("/vector_stores/batches", params={"user_id": "42"})

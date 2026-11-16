@@ -15,7 +15,7 @@ async def test_persona_ws_emits_ws_latency_metrics(monkeypatch):
         return "1", True, True
 
     monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _fake_resolve)
-    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: True)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: True)
 
     app = FastAPI()
     app.include_router(persona_ep.router, prefix="/api/v1/persona")

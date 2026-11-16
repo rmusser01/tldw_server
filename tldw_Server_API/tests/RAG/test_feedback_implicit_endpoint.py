@@ -31,7 +31,7 @@ def test_implicit_feedback_records_citation_used(implicit_feedback_client, monke
         "tldw_Server_API.app.core.config.implicit_feedback_enabled",
         lambda: True,
     )
-    monkeypatch.setattr(rag_unified, "UnifiedFeedbackSystem", lambda: collector)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", lambda: collector)
 
     resp = implicit_feedback_client.post(
         "/api/v1/rag/feedback/implicit",
@@ -81,7 +81,7 @@ def test_implicit_feedback_records_dwell_time(implicit_feedback_client, monkeypa
         "tldw_Server_API.app.core.config.implicit_feedback_enabled",
         lambda: True,
     )
-    monkeypatch.setattr(rag_unified, "UnifiedFeedbackSystem", lambda: collector)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", lambda: collector)
 
     resp = implicit_feedback_client.post(
         "/api/v1/rag/feedback/implicit",
@@ -114,7 +114,7 @@ def test_implicit_feedback_normalizes_legacy_single_user_id(implicit_feedback_cl
         "tldw_Server_API.app.core.config.implicit_feedback_enabled",
         lambda: True,
     )
-    monkeypatch.setattr(rag_unified, "UnifiedFeedbackSystem", lambda: collector)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.analytics_system.UnifiedFeedbackSystem", lambda: collector)
 
     resp = implicit_feedback_client.post(
         "/api/v1/rag/feedback/implicit",

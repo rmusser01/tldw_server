@@ -182,7 +182,7 @@ def test_persona_visual_renderer_capabilities_respect_persona_feature_flag(
 ) -> None:
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 
-    monkeypatch.setattr(persona_ep, "is_persona_enabled", lambda: False)
+    monkeypatch.setattr("tldw_Server_API.app.core.feature_flags.is_persona_enabled", lambda: False)
     with _client_for_user(1, persona_db) as client:
         response = client.get("/api/v1/persona/visual-renderers")
 
@@ -1301,8 +1301,7 @@ def test_visual_generation_readiness_reports_disabled_worker(
     monkeypatch.delenv("PERSONA_VISUAL_GENERATION_WORKER_ENABLED", raising=False)
     monkeypatch.setenv("PERSONA_VISUAL_GENERATION_JOBS_QUEUE", "persona-generation")
     monkeypatch.setattr(
-        persona_ep,
-        "get_image_generation_registry",
+        "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
         lambda: FakeImageRegistry(
             enabled_backends=["openrouter"],
             default_backend="openrouter",
@@ -1335,8 +1334,7 @@ def test_visual_generation_readiness_reports_missing_image_provider(
 ) -> None:
     monkeypatch.setenv("PERSONA_VISUAL_GENERATION_WORKER_ENABLED", "1")
     monkeypatch.setattr(
-        persona_ep,
-        "get_image_generation_registry",
+        "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
         lambda: FakeImageRegistry(enabled_backends=[], default_backend=None),
         raising=False,
     )
@@ -1365,8 +1363,7 @@ def test_visual_generation_readiness_reports_available_backend(
 ) -> None:
     monkeypatch.setenv("PERSONA_VISUAL_GENERATION_WORKER_ENABLED", "true")
     monkeypatch.setattr(
-        persona_ep,
-        "get_image_generation_registry",
+        "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
         lambda: FakeImageRegistry(
             enabled_backends=["openrouter", "novita"],
             default_backend="openrouter",
@@ -1400,8 +1397,7 @@ def test_visual_generation_readiness_reports_adapter_unavailable(
 ) -> None:
     monkeypatch.setenv("PERSONA_VISUAL_GENERATION_WORKER_ENABLED", "true")
     monkeypatch.setattr(
-        persona_ep,
-        "get_image_generation_registry",
+        "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
         lambda: FakeImageRegistry(
             enabled_backends=["openrouter"],
             default_backend="openrouter",
@@ -1435,8 +1431,7 @@ def test_visual_generation_readiness_fails_closed_when_dependency_check_errors(
     monkeypatch.setenv("PERSONA_VISUAL_GENERATION_WORKER_ENABLED", "true")
     monkeypatch.setenv("PERSONA_VISUAL_GENERATION_JOBS_QUEUE", "persona-generation")
     monkeypatch.setattr(
-        persona_ep,
-        "get_image_generation_registry",
+        "tldw_Server_API.app.core.Image_Generation.adapter_registry.get_registry",
         lambda: FakeImageRegistry(
             enabled_backends=["openrouter"],
             default_backend="openrouter",

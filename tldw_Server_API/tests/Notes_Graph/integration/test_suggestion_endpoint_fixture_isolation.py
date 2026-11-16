@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 @pytest.fixture
 def real_factory(monkeypatch):
     # Start from the real boundary even when a preceding baseline test leaked.
-    monkeypatch.setattr(endpoint, "build_notes_graph_suggestions_api", build_notes_graph_suggestions_api)
+    monkeypatch.setattr("tldw_Server_API.app.core.Notes_Graph.suggestion_api.build_notes_graph_suggestions_api", build_notes_graph_suggestions_api)
     return build_notes_graph_suggestions_api
 
 

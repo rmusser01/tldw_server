@@ -15,10 +15,8 @@ from loguru import logger
 
 import tldw_Server_API.app.core.LLM_Calls.adapter_registry as llm_adapter_registry
 from tldw_Server_API.app.core.Chat.provider_manager import get_provider_manager
-from tldw_Server_API.app.core.config import load_comprehensive_config
 from tldw_Server_API.app.core.config_llm_providers import (
     ALL_SUPPORTED_PROVIDER_NAMES_LIST,
-    get_api_keys,
 )
 from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_config_option_names,
@@ -33,7 +31,6 @@ from tldw_Server_API.app.core.exceptions import (
 )
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
-from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import get_allowed_fields
 from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
     get_model_extra_body_compat,
@@ -57,25 +54,14 @@ from tldw_Server_API.app.core.LLM_Calls.provider_metadata import (
     provider_requires_api_key,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_model_inventory import (
-    discover_provider_models,
     has_model_listing,
     inventory_endpoint_scope,
-    resolve_provider_models_base_url,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     ModelDiscoveryResult,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
-    configured_endpoint_probe_enabled as _configured_endpoint_probe_enabled,
-)
-from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
     normalize_catalog_provider_for_chat as _normalize_catalog_provider_for_chat,
-)
-from tldw_Server_API.app.core.LLM_Calls.provider_readiness import (
-    provider_readiness as _provider_readiness,
-)
-from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
-    resolve_tokenizer_metadata,
 )
 from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     strict_token_counting_enabled as _strict_token_counting_enabled_shared,
@@ -88,19 +74,24 @@ from tldw_Server_API.app.core.Local_LLM.LLM_Inference_Exceptions import LLMInfer
 from tldw_Server_API.app.core.Provider_Credentials.byok_runtime import (
     ByokResolutionError,
     ServerFallbackCredentials,
-    resolve_static_server_fallback,
 )
 from tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides import (
     ProviderOverrideCallSnapshot,
-    apply_llm_provider_overrides_to_listing,
-    get_llm_provider_overrides_snapshot,
 )
 from tldw_Server_API.app.core.Security.egress import (
     ConfiguredEndpointScope,
     URLPolicyResult,
-    evaluate_url_policy,
 )
-from tldw_Server_API.app.core.Usage.pricing_catalog import list_provider_models
+import tldw_Server_API.app.core.Image_Generation.listing as _listing
+import tldw_Server_API.app.core.LLM_Calls.provider_model_inventory as _provider_model_inventory
+import tldw_Server_API.app.core.LLM_Calls.provider_readiness as __provider_readiness
+import tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver as _tokenizer_resolver
+import tldw_Server_API.app.core.Provider_Credentials.byok_runtime as _byok_runtime
+import tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides as _llm_provider_overrides
+import tldw_Server_API.app.core.Usage.pricing_catalog as _pricing_catalog
+import tldw_Server_API.app.core.Utils.egress as _egress
+import tldw_Server_API.app.core.config as _config
+import tldw_Server_API.app.core.config_llm_providers as _config_llm_providers
 
 #######################################################################################################################
 #
@@ -584,7 +575,7 @@ def _resolve_model_tokenizer_support(
             strict_mode_effective=strict_mode_effective,
         )
     try:
-        return resolve_tokenizer_metadata(
+        return _tokenizer_resolver.resolve_tokenizer_metadata(
             provider_name,
             model_name,
             strict_mode_effective=strict_mode_effective,
@@ -766,7 +757,7 @@ def _resolve_commercial_listing(
             return None, False, ModelDiscoveryResult("auth_failed")
         return api_key_value, bool(api_key_value), ModelDiscoveryResult("auth_failed")
     try:
-        static = resolve_static_server_fallback(provider_name)
+        static = _byok_runtime.resolve_static_server_fallback(provider_name)
         fallback = ProviderOverrideCallSnapshot(provider_name, override).server_fallback(
             ServerFallbackCredentials(api_key=api_key_value, credential_fields={}, app_config=static.app_config)
         )
@@ -781,14 +772,14 @@ def _resolve_commercial_listing(
     if not has_model_listing(provider_name):
         return api_key_value, True, None  # no listing: the configured models are shown, as before
     fallback_config = fallback.app_config if fallback is not None else static.app_config
-    base_url = resolve_provider_models_base_url(
+    base_url = _provider_model_inventory.resolve_provider_models_base_url(
         provider_name, dict(fallback_config) if fallback_config is not None else None, credentials_resolved=True,
     )
     if base_url is None:
         return api_key_value, True, ModelDiscoveryResult("unsupported")
     scope = inventory_endpoint_scope(provider_name, base_url)
     scope_option: dict[str, Any] = {"configured_endpoint": scope} if scope is not None else {}
-    return api_key_value, True, discover_provider_models(
+    return api_key_value, True, _provider_model_inventory.discover_provider_models(
         provider_name, api_key_value, base_url=base_url,
         force_refresh=refresh_openrouter and provider_name == "openrouter", **scope_option,
     )
@@ -797,7 +788,7 @@ def _resolve_commercial_listing(
 def _with_pricing_models(provider_name: str, models: list[str]) -> list[str]:
     """Configured models, then the pricing catalog's chat models: dev's listing for a provider with no model list."""
     try:
-        pricing_models = [m for m in list_provider_models(provider_name) if 'embed' not in m.lower()]
+        pricing_models = [m for m in _pricing_catalog.list_provider_models(provider_name) if 'embed' not in m.lower()]
     except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
         pricing_models = []
     seen = {m.strip() for m in models}
@@ -857,9 +848,9 @@ def get_configured_providers(
         Dictionary containing provider information
     """
     try:
-        config_parser = load_comprehensive_config()
+        config_parser = _config.load_comprehensive_config()
         try:
-            provider_overrides = get_llm_provider_overrides_snapshot()
+            provider_overrides = _llm_provider_overrides.get_llm_provider_overrides_snapshot()
             credential_store_available = True
         except ByokResolutionError:
             provider_overrides, credential_store_available = {}, False
@@ -886,7 +877,7 @@ def get_configured_providers(
             }
 
         try:
-            api_keys_by_provider = get_api_keys()
+            api_keys_by_provider = _config_llm_providers.get_api_keys()
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             api_keys_by_provider = {}
 
@@ -1149,8 +1140,8 @@ def get_configured_providers(
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             health_report = {}
         registry_capability_envelopes = _llm_registry_capability_envelopes()
-        supported_chat_providers = set(ALL_SUPPORTED_PROVIDER_NAMES_LIST)
-        endpoint_probe_enabled = _configured_endpoint_probe_enabled()
+        supported_chat_providers = set(_config_llm_providers.ALL_SUPPORTED_PROVIDER_NAMES_LIST)
+        endpoint_probe_enabled = __provider_readiness.configured_endpoint_probe_enabled()
 
         commercial_listings = (
             _resolve_commercial_listings(
@@ -1242,7 +1233,7 @@ def get_configured_providers(
             if endpoint_url:
                 try:
                     endpoint_scope = ConfiguredEndpointScope.from_url(endpoint_url)
-                    endpoint_policy = evaluate_url_policy(
+                    endpoint_policy = _egress.evaluate_url_policy(
                         endpoint_url,
                         configured_endpoint=endpoint_scope,
                     )
@@ -1287,7 +1278,7 @@ def get_configured_providers(
                         [*models, *discovery_result.models]
                     )
 
-            provider_readiness = _provider_readiness(
+            provider_readiness = __provider_readiness.provider_readiness(
                 provider_name=provider_name,
                 provider_info=provider_info,
                 is_configured=is_configured,
@@ -1533,7 +1524,7 @@ def get_all_available_models() -> list[str]:
     Returns:
         List of all available model names
     """
-    result = apply_llm_provider_overrides_to_listing(get_configured_providers())
+    result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(get_configured_providers())
     models = []
 
     for provider in result.get('providers', []):
@@ -1795,7 +1786,7 @@ async def get_llm_providers(include_deprecated: bool = False):
 
         # Inject Diagnostics UI interval bounds from server config if available
         try:
-            cfg = load_comprehensive_config()
+            cfg = _config.load_comprehensive_config()
             section = 'LLM_Diagnostics'
             def _getint(key: str, fallback: int) -> int:
                 try:
@@ -1820,7 +1811,7 @@ async def get_llm_providers(include_deprecated: bool = False):
             # Best-effort; omit diagnostics_ui on failure
             pass
 
-        result = apply_llm_provider_overrides_to_listing(result)
+        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
 
         if result['total_configured'] == 0:
             logger.warning("No LLM providers are configured")
@@ -1905,7 +1896,7 @@ async def get_models_metadata(
             include_deprecated=include_deprecated,
             refresh_openrouter=refresh_openrouter,
         )
-        result = apply_llm_provider_overrides_to_listing(result)
+        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
         flattened: list[dict[str, Any]] = []
         for provider in result.get('providers', []):
             provider_is_configured = bool(provider.get('is_configured'))
@@ -1953,7 +1944,7 @@ async def get_models_metadata(
             flattened.append(entry)
         # Append image generation backends to the catalog
         try:
-            image_models = list_image_models_for_catalog()
+            image_models = _listing.list_image_models_for_catalog()
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             logger.warning("Failed to list image generation models")
             image_models = []
@@ -1993,7 +1984,7 @@ async def get_provider_details(provider_name: str, include_deprecated: bool = Fa
     """
     try:
         result = await get_configured_providers_async(include_deprecated=include_deprecated)
-        result = apply_llm_provider_overrides_to_listing(result)
+        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
 
         # Find the specific provider
         for provider in result['providers']:
@@ -2050,7 +2041,7 @@ async def get_all_models(
         input_filters = _normalize_filter_values(input_modality)
         output_filters = _normalize_filter_values(output_modality)
         result = await get_configured_providers_async(include_deprecated=include_deprecated)
-        result = apply_llm_provider_overrides_to_listing(result)
+        result = _llm_provider_overrides.apply_llm_provider_overrides_to_listing(result)
         models: list[str] = []
         for provider in result.get('providers', []):
             provider_name = provider.get('name') or "unknown"
@@ -2069,7 +2060,7 @@ async def get_all_models(
                 models.append(f"{provider_name}/{model}")
         # Append image generation backends to the flat list
         try:
-            image_models = list_image_models_for_catalog()
+            image_models = _listing.list_image_models_for_catalog()
         except _LLM_PROVIDERS_NONCRITICAL_EXCEPTIONS:
             logger.warning("Failed to list image generation models")
             image_models = []

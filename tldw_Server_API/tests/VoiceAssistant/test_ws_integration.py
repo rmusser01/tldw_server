@@ -214,18 +214,15 @@ def mock_ws_dependencies(monkeypatch: pytest.MonkeyPatch) -> tuple:
     # Mock getters
     monkeypatch.setattr(voice_assistant, "_authenticate_websocket", _auth)
     monkeypatch.setattr(
-        voice_assistant,
-        "get_voice_session_manager",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_session_manager",
         lambda: session_manager,
     )
     monkeypatch.setattr(
-        voice_assistant,
-        "get_voice_command_router",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_command_router",
         lambda: command_router,
     )
     monkeypatch.setattr(
-        voice_assistant,
-        "get_voice_command_registry",
+        "tldw_Server_API.app.core.VoiceAssistant.get_voice_command_registry",
         lambda: registry,
     )
 
@@ -276,8 +273,7 @@ class TestWebSocketAuthentication:
 
         monkeypatch.setattr(voice_assistant, "logger", LoggerStub())
         monkeypatch.setattr(
-            voice_assistant,
-            "get_chacha_db_for_user_id",
+            "tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps.get_chacha_db_for_user_id",
             _fail_get_db_for_user_id,
         )
 
@@ -315,8 +311,7 @@ class TestWebSocketAuthentication:
 
         monkeypatch.setattr(voice_assistant, "logger", LoggerStub())
         monkeypatch.setattr(
-            voice_assistant,
-            "get_voice_session_manager",
+            "tldw_Server_API.app.core.VoiceAssistant.get_voice_session_manager",
             _fail_get_session_manager,
         )
 

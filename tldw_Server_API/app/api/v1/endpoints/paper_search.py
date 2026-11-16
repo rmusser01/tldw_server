@@ -70,7 +70,6 @@ from tldw_Server_API.app.api.v1.schemas.research_schemas import (
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     MediaDbSession,
     MediaWriterLike,
-    get_media_repository,
 )
 from tldw_Server_API.app.core.http_client import (
     RetryPolicy as _RetryPolicy,
@@ -185,7 +184,7 @@ def _ingest_paper_search_media(
 ) -> tuple[Any, Any, Any]:
     """Route paper-search ingest through the repository API for real DB sessions."""
     try:
-        media_writer = get_media_repository(media_db)
+        media_writer = _api.get_media_repository(media_db)
     except _PAPER_SEARCH_NONCRITICAL_EXCEPTIONS:
         media_writer = media_db
     return media_writer.add_media_with_keywords(
@@ -2453,6 +2452,7 @@ def _handle_provider_error(err: str) -> None:
 from tldw_Server_API.app.api.v1.schemas.paper_search_schemas import (  # noqa: E402
     RepecCitationsResponse,
 )
+import tldw_Server_API.app.core.DB_Management.media_db.api as _api
 
 
 @router.get(

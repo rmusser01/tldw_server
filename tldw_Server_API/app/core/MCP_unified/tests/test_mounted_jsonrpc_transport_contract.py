@@ -92,14 +92,11 @@ def _install_mounted_http_single_user_compat(
     async def _get_api_key_manager() -> _NoStoredApiKeyManager:
         return _NoStoredApiKeyManager()
 
-    monkeypatch.setattr(mcp_unified_endpoint, "get_auth_principal", _no_principal)
-    monkeypatch.setattr(mcp_unified_endpoint, "is_single_user_profile_mode", lambda: True)
-    monkeypatch.setattr(mcp_unified_endpoint, "is_test_mode", lambda: test_mode)
-    monkeypatch.setattr(mcp_unified_endpoint, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _no_principal)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.settings.is_single_user_profile_mode", lambda: True)
     monkeypatch.setattr(mcp_unified_endpoint, "get_settings", lambda: _SingleUserSettings(api_key))
-    monkeypatch.setattr(mcp_unified_endpoint, "get_config", lambda: _DebugConfig(debug_mode=debug_mode))
-    monkeypatch.setattr(mcp_unified_endpoint, "is_single_user_ip_allowed", lambda _ip, _settings: ip_allowed)
-    monkeypatch.setattr(mcp_unified_endpoint, "get_api_key_manager", _get_api_key_manager)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.ip_allowlist.is_single_user_ip_allowed", lambda _ip, _settings: ip_allowed)
+    monkeypatch.setattr("tldw_Server_API.app.core.AuthNZ.api_key_manager.get_api_key_manager", _get_api_key_manager)
     if test_key is None:
         monkeypatch.delenv("SINGLE_USER_TEST_API_KEY", raising=False)
     else:
@@ -209,7 +206,7 @@ def test_mounted_http_principal_dependency_projects_authenticated_scope(
         return principal
 
     server = _RecordingHttpAuthServer()
-    monkeypatch.setattr(mcp_unified_endpoint, "get_auth_principal", _scoped_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _scoped_principal)
     monkeypatch.setattr(app_services(), "mcp_server", server)
 
     with build_mcp_test_client() as client:
@@ -336,7 +333,7 @@ def test_mounted_http_single_user_api_key_does_not_attach_trust_when_ip_rejected
     async def _valid_principal(_request: Any) -> AuthPrincipal:
         return AuthPrincipal(kind="user", user_id=7, roles=["user"], permissions=[])
 
-    monkeypatch.setattr(mcp_unified_endpoint, "get_auth_principal", _valid_principal)
+    monkeypatch.setattr("tldw_Server_API.app.api.v1.API_Deps.auth_deps.get_auth_principal", _valid_principal)
     server = _RecordingHttpAuthServer()
     monkeypatch.setattr(app_services(), "mcp_server", server)
 
@@ -772,8 +769,7 @@ def test_mounted_ws_single_user_cookie_preserves_absent_scope(
         return object()
 
     monkeypatch.setattr(
-        mcp_unified_endpoint,
-        "resolve_single_user_cookie_websocket",
+        "tldw_Server_API.app.core.AuthNZ.websocket_session_auth.resolve_single_user_cookie_websocket",
         _cookie_identity,
     )
 

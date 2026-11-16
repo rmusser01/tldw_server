@@ -41,8 +41,7 @@ async def test_translate_text_sanitizes_error_string_result(monkeypatch):
     logger_stub = _LoggerStub()
     monkeypatch.setattr(translate_module, "logger", logger_stub)
     monkeypatch.setattr(
-        translate_module,
-        "analyze",
+        "tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze",
         lambda **kwargs: "Error: translation backend exploded at /private/translate-cache",
     )
 
@@ -72,7 +71,7 @@ async def test_translate_text_sanitizes_unexpected_exception(monkeypatch):
     def _raise_unexpected_error(**kwargs):
         raise RuntimeError("translation backend exploded at /private/translate-cache")
 
-    monkeypatch.setattr(translate_module, "analyze", _raise_unexpected_error)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", _raise_unexpected_error)
 
     request = TranslateRequest(
         text="Hello world",

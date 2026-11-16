@@ -44,13 +44,12 @@ def _client_for_config(monkeypatch: pytest.MonkeyPatch, parser: ConfigParser) ->
     async def _configured_providers(*args, **kwargs):
         return await llm_providers.get_configured_providers_async(*args, **kwargs)
 
-    monkeypatch.setattr(llm_providers, "load_comprehensive_config", lambda: parser)
-    monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {})
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_comprehensive_config", lambda: parser)
+    monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {})
     monkeypatch.setattr(llm_providers, "get_provider_manager", lambda: _EmptyProviderManager())
-    monkeypatch.setattr(llm_providers, "discover_provider_models", lambda *_args, **_kwargs: ModelDiscoveryResult("ready"))
-    monkeypatch.setattr(llm_providers, "list_image_models_for_catalog", lambda: [])
+    monkeypatch.setattr("tldw_Server_API.app.core.Image_Generation.listing.list_image_models_for_catalog", lambda: [])
     monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", lambda *_args, **_kwargs: [])
-    monkeypatch.setattr(llm_providers, "apply_llm_provider_overrides_to_listing", lambda result: result)
+    monkeypatch.setattr("tldw_Server_API.app.core.Provider_Credentials.llm_provider_overrides.apply_llm_provider_overrides_to_listing", lambda result: result)
     monkeypatch.setattr(llm_providers, "_LLAMACPP_VISION_CACHE", {}, raising=False)
     unavailable_props = Mock(return_value=httpx.Response(404))
     monkeypatch.setattr(llm_providers, "_http_fetch", unavailable_props)
@@ -80,7 +79,7 @@ def test_external_llamacpp_vision_reaches_only_its_reported_model(
     probe = Mock(return_value=response)
     with _client_for_config(monkeypatch, parser) as client:
         monkeypatch.setattr(llm_providers, "_http_fetch", probe)
-        monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {"llama.cpp": "test-secret"})
+        monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {"llama.cpp": "test-secret"})
         result = client.get(f"/api/v1/llm/{route}")
     assert result.status_code == 200
     models = (result.json()["models"] if route == "models/metadata"
@@ -121,7 +120,7 @@ def test_external_llamacpp_models_vision_when_native_props_is_unsupported(monkey
     probe = Mock(side_effect=[props, models])
     with _client_for_config(monkeypatch, parser) as client:
         monkeypatch.setattr(llm_providers, "_http_fetch", probe)
-        monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {"llama.cpp": "test-secret"})
+        monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {"llama.cpp": "test-secret"})
         result = client.get(f"/api/v1/llm/{route}")
     entries = (
         result.json()["models"] if route == "models/metadata" else _provider(result.json(), "llama")["models_info"]
@@ -278,7 +277,7 @@ def test_external_llamacpp_cache_rechecks_credentials_endpoint_and_expiry(monkey
     ])
     with _client_for_config(monkeypatch, parser) as client:
         monkeypatch.setattr(llm_providers, "_http_fetch", probe)
-        monkeypatch.setattr(llm_providers, "get_api_keys", lambda: {
+        monkeypatch.setattr("tldw_Server_API.app.core.config_llm_providers.get_api_keys", lambda: {
             "llama.cpp": parser.get("Local-API", "llama_api_key"),
         })
         monkeypatch.setattr(llm_providers, "_vision_cache_time", lambda: clock[0], raising=False)
@@ -482,7 +481,7 @@ def test_catalog_computes_discovery_once_and_passes_same_result_to_readiness(
 
     client = _client_for_config(monkeypatch, parser)
     monkeypatch.setattr(llm_providers, "discover_models_from_endpoint", discover)
-    monkeypatch.setattr(llm_providers, "_provider_readiness", reduce_readiness)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.provider_readiness.provider_readiness", reduce_readiness)
     with client:
         response = client.get("/api/v1/llm/providers")
 
@@ -507,8 +506,7 @@ def test_catalog_maps_dns_unresolved_to_endpoint_unreachable(
     )
     client = _client_for_config(monkeypatch, parser)
     monkeypatch.setattr(
-        llm_providers,
-        "evaluate_url_policy",
+        "tldw_Server_API.app.core.Utils.egress.evaluate_url_policy",
         lambda *_args, **_kwargs: URLPolicyResult(
             False,
             "Host could not be resolved",

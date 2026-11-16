@@ -162,7 +162,7 @@ async def test_get_task_run_history_includes_acp_session_drillthrough(monkeypatc
         with acp_mod._ACP_AUDIT_LOCK:
             return [dict(event) for event in acp_mod._ACP_AUDIT_EVENTS if event.get("session_id") == session_id]
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(acp_mod, "_acp_list_audit_events", fake_audit_events)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
@@ -265,7 +265,7 @@ async def test_get_task_run_history_redacted_mode_omits_support_unsafe_text(monk
         with acp_mod._ACP_AUDIT_LOCK:
             return [dict(event) for event in acp_mod._ACP_AUDIT_EVENTS if event.get("session_id") == session_id]
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(acp_mod, "_acp_list_audit_events", fake_audit_events)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
@@ -402,7 +402,7 @@ async def test_get_task_run_history_includes_failed_session_diagnostics(monkeypa
     async def fake_store():
         return _RunHistorySessionStore({"session-failed": session})
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -620,7 +620,7 @@ async def test_canonical_workspace_bridge_creates_linked_execution_workspace(mon
     workspace_root.mkdir()
     canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
 
     try:
@@ -663,7 +663,7 @@ async def test_canonical_workspace_bridge_reuses_existing_link(monkeypatch, tmp_
     )
     canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
 
     try:
@@ -695,7 +695,7 @@ async def test_canonical_workspace_bridge_links_existing_unlinked_root(monkeypat
     )
     canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
 
     try:
@@ -723,7 +723,7 @@ async def test_canonical_workspace_bridge_rejects_missing_canonical_workspace(mo
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
 
     try:
@@ -751,7 +751,7 @@ async def test_canonical_workspace_bridge_requires_allowed_root(monkeypatch, tmp
     workspace_root.mkdir()
     canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: ())
 
     try:
@@ -791,7 +791,7 @@ async def test_canonical_workspace_bridge_rejects_root_linked_to_other_workspace
     )
     canonical_db = _CanonicalWorkspaceDB({"workspace-alpha": {"id": "workspace-alpha", "name": "Alpha Workspace"}})
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
 
     try:
@@ -827,7 +827,7 @@ async def test_project_and_task_detail_include_canonical_workspace(monkeypatch, 
     project = db.create_project(name="P1", workspace_id=workspace.id)
     task = db.create_task(project.id, title="T1", description="Dispatch me", agent_type="codex")
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
 
     try:
         project_detail = await orch_mod.get_project(project.id, user=_TestUser())
@@ -878,7 +878,7 @@ async def test_list_projects_filters_by_canonical_workspace(monkeypatch, tmp_pat
     )
     db.create_project(name="Unrelated unbound work")
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
 
     try:
         results = await orch_mod.list_projects(
@@ -931,7 +931,7 @@ async def test_list_projects_canonical_filter_normalizes_legacy_source(
         },
     )
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
 
     try:
         results = await orch_mod.list_projects(
@@ -973,7 +973,7 @@ async def test_dispatch_run_inherits_trusted_root_from_canonical_bridge(monkeypa
     async def fake_client():
         return client
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
@@ -1170,7 +1170,7 @@ async def test_dispatch_run_sanitizes_create_session_failure(monkeypatch, tmp_pa
     async def fake_client():
         return _CreateSessionFailingClient()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "logger", fake_logger)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
@@ -1217,7 +1217,7 @@ async def test_dispatch_run_sanitizes_register_session_warning(monkeypatch, tmp_
     async def fake_client():
         return _SuccessfulClient()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "logger", fake_logger)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
@@ -1266,7 +1266,7 @@ async def test_dispatch_run_reviewer_agent_approval_completes_and_records_review
     async def fake_client():
         return client
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1336,7 +1336,7 @@ async def test_dispatch_run_reviewer_agent_rejection_retries_with_history(monkey
     async def fake_client():
         return client
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1394,7 +1394,7 @@ async def test_dispatch_run_allows_retry_after_rejected_review(monkeypatch, tmp_
         """Return the mutable fake client for each dispatch attempt."""
         return client_holder["client"]
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1435,7 +1435,7 @@ async def test_dispatch_run_rejects_duplicate_active_run(monkeypatch, tmp_path):
     db, task = await _build_dispatch_task(tmp_path)
     db.transition_task(task.id, TaskStatus.IN_PROGRESS)
     db.create_run(task.id, agent_type="codex", session_id="active-session")
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
 
     try:
         with pytest.raises(HTTPException) as exc_info:
@@ -1473,7 +1473,7 @@ async def test_dispatch_run_reviewer_agent_rejection_max_attempts_triages(monkey
     async def fake_client():
         return client
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1516,7 +1516,7 @@ async def test_dispatch_run_valid_completion_without_reviewer_completes_task(mon
     async def fake_client():
         return _SuccessfulClient()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1571,7 +1571,7 @@ async def test_dispatch_run_promotes_completion_artifact_to_canonical_workspace(
     async def fake_client():
         return client
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1643,7 +1643,7 @@ async def test_dispatch_run_reports_artifact_promotion_failure_without_rolling_b
     def failing_promotion(*_args, **_kwargs):
         raise RuntimeError("promotion backend unavailable")
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1653,7 +1653,7 @@ async def test_dispatch_run_reports_artifact_promotion_failure_without_rolling_b
         fake_client,
     )
     monkeypatch.setattr(orch_mod, "_allowed_workspace_roots", lambda: (tmp_path.resolve(),))
-    monkeypatch.setattr(orch_mod, "promote_acp_completion_artifacts", failing_promotion)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.artifact_promotion.promote_acp_completion_artifacts", failing_promotion)
 
     try:
         result = await orch_mod.dispatch_run(
@@ -1707,7 +1707,7 @@ async def test_dispatch_run_injects_workspace_env_and_mcp_servers(monkeypatch, t
     async def fake_client():
         return client
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1755,7 +1755,7 @@ async def test_dispatch_run_requires_completion_signal(monkeypatch, tmp_path):
     async def fake_client():
         return _MissingCompletionClient()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1795,7 +1795,7 @@ async def test_dispatch_run_rejects_malformed_completion_signal(monkeypatch, tmp
     async def fake_client():
         return _MalformedCompletionClient()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1834,7 +1834,7 @@ async def test_dispatch_run_rejects_rejected_completion_signal(monkeypatch, tmp_
     async def fake_client():
         return _RejectedCompletionClient()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
         fake_store,
@@ -1875,7 +1875,7 @@ async def test_dispatch_run_sanitizes_prompt_failure(monkeypatch, tmp_path):
     async def fake_client():
         return client
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr(orch_mod, "logger", fake_logger)
     monkeypatch.setattr(
         "tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store",
@@ -2036,7 +2036,7 @@ async def test_native_dispatch_records_and_validates_streamed_answer(monkeypatch
     async def get_client():
         return client
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _uid: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _uid: db)
     monkeypatch.setattr(acp_mod, "get_acp_session_store", get_store)
     monkeypatch.setattr("tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store", get_store)
     monkeypatch.setattr("tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client", get_client)
@@ -2087,7 +2087,7 @@ async def test_native_dispatch_invalid_answer_is_retained_without_success(monkey
     async def get_client():
         return NativeClient()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _uid: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _uid: db)
     monkeypatch.setattr(acp_mod, "get_acp_session_store", get_store)
     monkeypatch.setattr("tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store", get_store)
     monkeypatch.setattr("tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client", get_client)
@@ -2210,7 +2210,7 @@ async def test_cancelled_dispatch_never_completes_task(monkeypatch, tmp_path):
     async def fake_client():
         return CancelledClient()
 
-    monkeypatch.setattr(orch_mod, "get_orchestration_db", lambda _user_id: db)
+    monkeypatch.setattr("tldw_Server_API.app.core.Agent_Orchestration.db_factory.get_orchestration_db", lambda _user_id: db)
     monkeypatch.setattr("tldw_Server_API.app.services.admin_acp_sessions_service.get_acp_session_store", fake_store)
     monkeypatch.setattr("tldw_Server_API.app.core.Agent_Client_Protocol.runner_client.get_runner_client", fake_client)
     try:

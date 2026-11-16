@@ -322,7 +322,7 @@ def test_rag_streaming_generation_uses_shared_resolved_payload(
         )
 
     monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", fake_unified_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
 
     payload = {
@@ -520,7 +520,7 @@ def test_rag_streaming_emits_research_progress_before_generation(
         context.metadata = {"streaming": True}
         return context
 
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_unified_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_unified_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", _fake_generate_streaming_response)
 
     payload = {
@@ -603,7 +603,7 @@ def test_rag_streaming_preserves_delta_and_claim_events(
         context.stream_generator = _gen()
         return context
 
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_unified_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_unified_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", _fake_generate_streaming_response)
 
     payload = {
@@ -665,7 +665,7 @@ def test_rag_streaming_emits_explicit_clean_empty_completion(
         context.metadata = {"streaming": True}
         return context
 
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_unified_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_unified_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", _fake_generate_streaming_response)
 
     events = []
@@ -722,7 +722,7 @@ def test_rag_streaming_partial_provider_error_is_terminal_and_sanitized(
         context.metadata = {"streaming": True}
         return context
 
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", _fake_unified_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", _fake_unified_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", _fake_generate_streaming_response)
 
     with client_with_stream_overrides.stream(
@@ -910,7 +910,7 @@ def test_rag_streaming_agentic_path_uses_profile_resolved_defaults(
         return context
 
     monkeypatch.setattr(rag_ep, "MultiDatabaseRetriever", StubRetriever)
-    monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", fake_agentic_rag_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
 
     payload = {
@@ -1066,8 +1066,8 @@ def test_rag_streaming_agentic_path_uses_bundle_contracts_without_re_resolving(
 
     monkeypatch.setattr(rag_ep, "_build_standard_request_bundle", fake_build_standard_request_bundle)
     monkeypatch.setattr(rag_ep, "build_agentic_execution_context", fake_build_agentic_execution_context)
-    monkeypatch.setattr(rag_ep, "unified_rag_pipeline", fake_unified_rag_pipeline)
-    monkeypatch.setattr(rag_ep, "agentic_rag_pipeline", fake_agentic_rag_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.unified_rag_pipeline", fake_unified_rag_pipeline)
+    monkeypatch.setattr("tldw_Server_API.app.core.RAG.rag_service.agentic_chunker.agentic_rag_pipeline", fake_agentic_rag_pipeline)
     monkeypatch.setattr(rag_ep, "generate_streaming_response", fake_generate_streaming_response)
 
     payload = {
