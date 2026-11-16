@@ -3,6 +3,10 @@
 import copy
 import hashlib
 import json
+import subprocess  # nosec B404 -- Fresh-interpreter regression with a fixed local script, no shell.
+import sys
+from pathlib import Path
+from textwrap import dedent
 
 import pytest
 from hypothesis import given
@@ -147,5 +151,47 @@ def test_unicode_finding_offsets_use_python_codepoints_and_survive_json_roundtri
 def test_api_response_names_reexport_the_core_models():
     from tldw_Server_API.app.api.v1.schemas import research_workspace_citations as api
     from tldw_Server_API.app.core.Claims_Extraction import citation_support_types as core
+    from tldw_Server_API.app.core.Sync_Contracts import citation_support_types as contract
     for name in ("CitationSupportReport", "CitationSupportFinding", "CitationSupportCoverage"):
-        assert getattr(api, name) is getattr(core, name)
+        assert getattr(api, name) is getattr(core, name) is getattr(contract, name)
+    assert core.validate_claim_verification is contract.validate_claim_verification
+    assert core.MAX_CLAIM_VERIFICATION_BYTES == contract.MAX_CLAIM_VERIFICATION_BYTES
+
+
+def test_imported_chat_receipt_validates_without_loading_claim_engines_or_database():
+    script = dedent("""
+        import importlib.abc
+        import json
+        import sys
+        from datetime import datetime, timezone
+
+        class ForbidDatabaseAndClaims(importlib.abc.MetaPathFinder):
+            def find_spec(self, fullname, path=None, target=None):
+                for prefix in ("tldw_Server_API.app.core.DB_Management", "tldw_Server_API.app.core.Claims_Extraction"):
+                    if fullname == prefix or fullname.startswith(prefix + "."):
+                        raise AssertionError("Pure chat import loaded " + fullname)
+
+        sys.meta_path.insert(0, ForbidDatabaseAndClaims())
+        from tldw_Server_API.app.core.Chat.conversation_import import ChatImportLimits, prepare_chat_import
+
+        report = json.load(sys.stdin)
+        metadata = {"claim_verification": report, "claim_verification_imported": True}
+        moment = datetime(2026, 11, 16, tzinfo=timezone.utc)
+        request = {
+            "id": "6b0f8c1e-2d4a-4f3b-9a71-5c2e8d9f0a14", "title": "Historical import",
+            "scope_type": "workspace", "workspace_id": "owned-workspace", "created_at": moment,
+            "messages": [{"id": "m1", "parent_message_id": None, "role": "assistant",
+                "content": report["findings"][0]["text"], "timestamp": moment, "images": [],
+                "metadata_extra": metadata}],
+        }
+        prepared = prepare_chat_import(request, limits=ChatImportLimits(1000, 64, 64), now=moment,
+            inspect_image=lambda _: "image/png")
+        assert prepared.messages[0]["extra_metadata"] == {"sender_role": "assistant", **metadata}
+        print("historical report preserved without database or claim engines")
+    """)
+    result = subprocess.run(  # nosec B603 -- Fixed interpreter/script; receipt enters only as JSON stdin.
+        [sys.executable, "-c", script], input=json.dumps(receipt()),
+        cwd=Path(__file__).resolve().parents[3], capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "historical report preserved without database or claim engines"

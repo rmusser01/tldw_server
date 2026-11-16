@@ -6,11 +6,11 @@ import hashlib
 import json
 from typing import Any
 
-from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import validate_claim_verification
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
 from tldw_Server_API.app.core.Research_Workspace.section_attribution import render_attribution_context
+from tldw_Server_API.app.core.Sync_Contracts.citation_support_types import validate_claim_verification
 
 
 def section_evidence_map(section: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:

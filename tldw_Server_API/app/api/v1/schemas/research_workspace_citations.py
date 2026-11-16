@@ -2,13 +2,13 @@
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import (
+from tldw_Server_API.app.core.Sync_Contracts.citation_support_types import (
     CitationSupportCoverage as CitationSupportCoverage,
 )
-from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import (
+from tldw_Server_API.app.core.Sync_Contracts.citation_support_types import (
     CitationSupportFinding as CitationSupportFinding,
 )
-from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import (
+from tldw_Server_API.app.core.Sync_Contracts.citation_support_types import (
     CitationSupportReport as CitationSupportReport,
 )
 

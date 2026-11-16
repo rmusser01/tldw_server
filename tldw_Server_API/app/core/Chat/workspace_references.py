@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 from pydantic import AnyHttpUrl
 
-from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import validate_claim_verification
+from tldw_Server_API.app.core.Sync_Contracts.citation_support_types import validate_claim_verification
 from tldw_Server_API.app.core.Sync_Contracts.notes_provenance_contract import validate_notes_provenance_payload
 
 WORKSPACE_ASSISTANT_METADATA_KEYS = frozenset({

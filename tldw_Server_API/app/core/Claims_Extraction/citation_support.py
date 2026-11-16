@@ -13,9 +13,9 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 from tldw_Server_API.app.core.RAG.rag_service.types import Document
+from tldw_Server_API.app.core.Sync_Contracts.citation_support_types import MAX_CLAIM_VERIFICATION_BYTES
 
 from .analyze_types import ClaimsAnalyzeCallable
-from .citation_support_types import MAX_CLAIM_VERIFICATION_BYTES
 from .citation_syntax import CITATION_RUN, extract_citation_ids
 from .claims_engine import Claim, HybridClaimVerifier
 
