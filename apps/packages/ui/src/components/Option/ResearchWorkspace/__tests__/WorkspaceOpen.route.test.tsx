@@ -828,6 +828,114 @@ it("opens the producer's acknowledged Workspace mirror after cold persistence wi
   expect(mirror.transactions.every(mode => mode === "r")).toBe(true);
 });
 
+const prepareEmptyCachedMirror = async (serverChatId: string | null = null) => {
+  const prepared = await prepareOwnedMirror(false, true);
+  prepared.save(TARGET, useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!,
+    { scopeKey: boundary.scopeKey, isCurrent: () => true });
+  const empty = { messages: [], history: [], historyId: prepared.historyId, serverChatId };
+  prepared.save(TARGET, empty);
+  return { ...prepared, empty };
+};
+
+it.each([null, "verified-chat"])("recovers an empty cache only from its saved reference and exact owned mirror (cached chat %s)", async serverChatId => {
+  const { historyId, messages } = await prepareEmptyCachedMirror(serverChatId);
+  const rows = structuredClone([...mirror.messages]);
+  mirror.transactions = [];
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  const recovered = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;
+  expect(recovered).toMatchObject({ historyId, serverChatId: "verified-chat",
+    messages: [{ id: "local-user", serverMessageId: "server-user", message: "Saved question" },
+      { id: "local-answer", serverMessageId: "server-answer", message: "Saved cited answer" }],
+    history: [{ role: "user", content: "Saved question" }, { role: "assistant", content: "Saved cited answer" }] });
+  expect(recovered.messages[1].sources).toEqual(messages[1].sources);
+  expect([...mirror.messages]).toEqual(rows);
+  expect(mirror.transactions.length).toBeGreaterThanOrEqual(2);
+  expect(mirror.transactions.every(mode => mode === "r")).toBe(true);
+  expect(boundary.request.mock.calls.some(([request]) => request.path.startsWith("/api/v1/chats/?"))).toBe(false);
+});
+
+it.each([false, true])("requires all canonical pages before recovering an empty cache (second page fails %s)", async failSecondPage => {
+  const { historyId, messages, serverMessages, empty } = await prepareEmptyCachedMirror();
+  const additional = Array.from({ length: 199 }, (_, index) => ({
+    id: `server-page-${index}`, role: "assistant" as const, content: `Recorded reply ${index}`,
+    parent_message_id: index ? `server-page-${index - 1}` : "server-answer", version: 1,
+    created_at: new Date(Date.parse("2026-11-01T00:00:00Z") + index * 1000).toISOString(),
+  }));
+  const allServerMessages = [...serverMessages, ...additional];
+  const allMessages = [...messages, ...mapServerChatMessagesToPlaygroundMessages({
+    serverMessages: additional, assistantName: "AI", characterId: null,
+  }).map((row, index) => ({ ...row, id: `local-page-${index}` }))];
+  const { reconcileServerChatMirror } = await import("@/db/dexie/server-chat-mirror");
+  await reconcileServerChatMirror({ historyId, chatId: "verified-chat",
+    ownerKey: String(mirror.histories.get(historyId)!.server_scope_key),
+    messages: allMessages, localMessages: allMessages });
+  const rows = structuredClone([...mirror.messages]);
+  const request = boundary.request.getMockImplementation()!;
+  const offsets: number[] = [];
+  boundary.request.mockImplementation(args => {
+    if (!args.path.startsWith("/api/v1/chats/verified-chat/messages")) return request(args);
+    const offset = Number(new URL(args.path, "https://test").searchParams.get("offset"));
+    offsets.push(offset);
+    if (offset && failSecondPage) return Promise.reject(new Error("Second page unavailable"));
+    return Promise.resolve({ messages: allServerMessages.slice(offset, offset + 200), total: 201 });
+  });
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  if (failSecondPage) {
+    await screen.findByRole("alert");
+    expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(empty);
+  } else {
+    await screen.findByTestId("opened-sources");
+    expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.messages).toHaveLength(201);
+  }
+  expect(offsets).toEqual([0, 200]);
+  expect([...mirror.messages]).toEqual(rows);
+});
+
+it.each([
+  "conflicting-chat", "missing-reference", "cleared-reference", "different-reference", "foreign-owner", "wrong-workspace",
+  "pending-settings", "pending-turn", "files", "hidden-history", "canonical-content", "canonical-citation", "incomplete-page",
+  "mirror-race", "header-race", "cache-race", "hint-race", "account-race",
+])("keeps an empty cache with %s untouched", async kind => {
+  const { historyId, empty, save, serverMessages } = await prepareEmptyCachedMirror();
+  const hint = readSavedResearchWorkspaceChatReference(localStorage, TARGET, boundary.scopeKey);
+  const header = mirror.histories.get(historyId)!;
+  if (kind === "conflicting-chat") save(TARGET, { ...empty, serverChatId: "another-chat" });
+  if (kind === "missing-reference") localStorage.removeItem(hint.key);
+  if (kind === "cleared-reference") localStorage.setItem(hint.key, JSON.stringify({ referenceId: TARGET, serverChatId: null }));
+  if (kind === "different-reference") localStorage.setItem(hint.key, JSON.stringify({ referenceId: "another-reference", serverChatId: "verified-chat" }));
+  if (kind === "foreign-owner") header.server_scope_key = "another-owner";
+  if (kind === "wrong-workspace") header.server_workspace_id = PREVIOUS;
+  if (kind === "pending-settings") header.local_settings_guard = { revision: "r", pending: ["held-write"] };
+  if (kind === "pending-turn") mirror.selections.set("pending", { conversation_id: historyId, pending_turns: { turn: { state: "unknown" } } });
+  if (kind === "files") mirror.files.set(historyId, { sessionId: historyId, files: [{ id: "draft-file" }], retrievalEnabled: true });
+  if (kind === "hidden-history") save(TARGET, { ...empty, history: [{ role: "system", content: "Keep hidden context" }] });
+  if (kind === "canonical-content") serverMessages[1].content = "A changed canonical answer";
+  if (kind === "canonical-citation") Object.assign(serverMessages[1], { metadata_extra: { workspace_rag_sources_v1: {
+    origin: "knowledge_qa", sources: [{ originalId: 99, mediaId: 99, title: "Different source", excerpt: "Other evidence", type: "text", sourceType: "file" }],
+  } } });
+  let preserved = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+  const request = boundary.request.getMockImplementation()!;
+  boundary.request.mockImplementation(args => {
+    if (args.path.startsWith("/api/v1/chats/verified-chat/messages")) {
+      if (kind === "incomplete-page") return Promise.resolve({ messages: serverMessages.slice(0, 1), total: 2 });
+      if (kind === "mirror-race") mirror.messages.get("local-answer")!.content = "Keep concurrent mirror edit";
+      if (kind === "header-race") header.title = "Keep changed title";
+      if (kind === "cache-race") {
+        save(TARGET, { ...empty, history: [{ role: "system", content: "New hidden context" }] });
+        preserved = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET);
+      }
+      if (kind === "hint-race") localStorage.setItem(hint.key, JSON.stringify({ referenceId: TARGET, serverChatId: null }));
+      if (kind === "account-race") boundary.controller.abort();
+    }
+    return request(args);
+  });
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByRole("alert");
+  expect(screen.queryByTestId("opened-sources")).not.toBeInTheDocument();
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)).toEqual(preserved);
+});
+
 it("recovers an empty global alias only through the unique owned workspace mirror and exact canonical messages", async () => {
   const { historyId, save } = await prepareOwnedMirror(false, true);
   const current = useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)!;

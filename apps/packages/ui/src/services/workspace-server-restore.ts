@@ -572,8 +572,12 @@ export const restoreMigratedResearchWorkspace = async (options: {
     } : undefined;
     const mirror = mirrorBinding ? await readWorkspaceServerChatMirror(mirrorBinding) : undefined;
     assertCurrent();
-    if (chatReference?.serverChatId && cachedChat?.serverChatId === chatReference.serverChatId &&
-        cachedChat.messages.length) {
+    const recoverEmptyCache = !!mirror?.rows.length && !!(savedChat.value ?? markerReference)?.serverChatId &&
+      cachedSelection?.referenceId === chatReference?.referenceId &&
+      cachedChat?.messages.length === 0 && cachedChat.history.length === 0 &&
+      (cachedChat.serverChatId === null || cachedChat.serverChatId === chatReference?.serverChatId);
+    if (chatReference?.serverChatId && cachedChat &&
+        ((cachedChat.serverChatId === chatReference.serverChatId && cachedChat.messages.length) || recoverEmptyCache)) {
       const signal = AbortSignal.any([scope.scopeSignal, AbortSignal.timeout(15000)]);
       const serverMessages = await fetchAllServerChatMessages(
         ({ limit, offset }) => tldwClient.listChatMessages(chatReference.serverChatId!, {
@@ -598,6 +602,11 @@ export const restoreMigratedResearchWorkspace = async (options: {
           (cachedChat.history.length === 0 ||
             canonicalHistoryJson(cachedChat.history) === canonicalHistoryJson(deriveHistoryFromMessages(canonical))))
         verifiedCachedChat = cachedSelection!;
+      if (recoverEmptyCache && mirrorMessages && mirror!.rows.length === mirrorMessages.length &&
+          cachedMessagesMatchCanonical(mirrorMessages, canonical)) {
+        recoveredCachedMessages = mirrorMessages;
+        verifiedCachedChat = cachedSelection!;
+      }
       if (!verifiedCachedChat && mirrorMessages && mirror!.rows.length === mirrorMessages.length) {
         const recovered = recoverCachedMirrorAcknowledgments(cachedChat.messages, mirrorMessages, canonical);
         if (recovered && (cachedChat.history.length === 0 ||
@@ -618,7 +627,8 @@ export const restoreMigratedResearchWorkspace = async (options: {
       // Keep its exact local settings association and optimistic display data.
       chatSession = { ...cachedChat!, historyId: mirror.header.id };
       if (recoveredCachedMessages) chatSession = { ...chatSession,
-        messages: recoveredCachedMessages, history: deriveHistoryFromMessages(recoveredCachedMessages) };
+        messages: recoveredCachedMessages, history: deriveHistoryFromMessages(recoveredCachedMessages),
+        serverChatId: chatReference!.serverChatId };
     }
     assertCurrent();
     const relevantReceipts = (rows: MigrationReceipt[]) => rows
