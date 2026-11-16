@@ -339,6 +339,7 @@ export const ChatModelSelectorDropdown = React.memo(
             aria-label={chipAccessibleName}
             aria-haspopup="menu"
             aria-expanded={modelDropdownOpen}
+            data-tutorial-prompt-blocker
             data-testid="model-selector"
             className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 text-xs transition-colors ${
               statusWarning

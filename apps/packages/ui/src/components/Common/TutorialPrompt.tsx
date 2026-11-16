@@ -37,14 +37,8 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
   const location = useLocation()
   const { token } = theme.useToken()
   const [api, contextHolder] = notification.useNotification()
-  const timeoutRef = useRef<ReturnType<typeof globalThis.setTimeout> | null>(
-    null
-  )
-  const notificationKeyRef = useRef<string | null>(null)
   const shownRef = useRef<Set<string>>(new Set())
   const lastPromptShownAtRef = useRef(0)
-  const activePromptPageRef = useRef<string | null>(null)
-  const suppressCloseMarkRef = useRef(false)
 
   const hasSeenPromptForPage = useTutorialStore(
     (state) => state.hasSeenPromptForPage
@@ -67,27 +61,9 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
   useEffect(() => {
     // Keep the prompt's original source; unrelated renders must not cancel its delay.
     const launchTutorial = launcherRef.current
-    let active = true
     const pageKey = normalizeTutorialRoute(location.pathname)
-    let promptObserver: MutationObserver | undefined
     const tutorialLookupOptions = {
       completedTutorialIds: completedTutorials
-    }
-
-    // Clean up previous timeout
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
-      timeoutRef.current = null
-    }
-
-    // Always keep a single active notification instance.
-    if (notificationKeyRef.current) {
-      suppressCloseMarkRef.current = true
-      api.destroy(notificationKeyRef.current)
-      notificationKeyRef.current = null
-      activePromptPageRef.current = null
-    } else {
-      suppressCloseMarkRef.current = false
     }
 
     // Skip prompts while a tutorial/help modal is active.
@@ -128,51 +104,46 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
     const firstTarget = primaryTutorial.requireFirstTargetForPrompt
       ? primaryTutorial.steps[0]?.target
       : undefined
-    const showPrompt = () => {
-      if (!active) return
-      const modalOpen = Array.from(
-        document.querySelectorAll<HTMLElement>('[aria-modal="true"]')
-      ).some((dialog) => !isHiddenBySelfOrAncestor(dialog))
-      if (modalOpen || (firstTarget && !document.querySelector(firstTarget))) {
-        if (!promptObserver) {
-          promptObserver = new MutationObserver(showPrompt)
-          promptObserver.observe(document.body, {
-            childList: true,
-            subtree: true,
-            attributes: true,
-            attributeFilter: ["aria-hidden", "aria-modal", "class", "hidden", "style"]
-          })
-        }
+    let currentPrompt: symbol | undefined
+    const closePrompt = () => {
+      if (!currentPrompt) return
+      currentPrompt = undefined
+      api.destroy(NOTIFICATION_KEY)
+    }
+    const updatePrompt = () => {
+      const overlayOpen = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          '[aria-modal="true"], [data-tutorial-prompt-blocker][aria-expanded="true"]'
+        )
+      ).some((element) => !isHiddenBySelfOrAncestor(element))
+      if (overlayOpen) {
+        closePrompt()
         return
       }
-      promptObserver?.disconnect()
+      if (currentPrompt || (firstTarget && !document.querySelector(firstTarget))) {
+        return
+      }
+
+      const prompt = Symbol()
+      currentPrompt = prompt
       shownRef.current.add(pageKey)
       lastPromptShownAtRef.current = Date.now()
-      activePromptPageRef.current = pageKey
 
-      const handleDismiss = () => {
-        if (!active) return
-        active = false
-        if (notificationKeyRef.current) {
-          api.destroy(notificationKeyRef.current)
-          notificationKeyRef.current = null
-        }
+      const finishPrompt = () => {
+        promptObserver.disconnect()
         markPromptSeen(pageKey)
-        activePromptPageRef.current = null
+      }
+      const handleDismiss = () => {
+        if (currentPrompt !== prompt) return
+        closePrompt()
+        finishPrompt()
       }
 
       const handleStartTour = () => {
-        if (!active || !launchTutorial(primaryTutorial.id)) return
-        active = false
-        if (notificationKeyRef.current) {
-          api.destroy(notificationKeyRef.current)
-          notificationKeyRef.current = null
-        }
-        markPromptSeen(pageKey)
-        activePromptPageRef.current = null
+        if (currentPrompt !== prompt || !launchTutorial(primaryTutorial.id)) return
+        handleDismiss()
       }
 
-      notificationKeyRef.current = NOTIFICATION_KEY
       api.info({
         key: NOTIFICATION_KEY,
         message: (
@@ -204,37 +175,28 @@ export const TutorialPrompt: React.FC<{ excludedRoutes?: readonly string[] }> = 
         placement: "bottomRight",
         className: "tutorial-prompt-notification",
         onClose: () => {
-          if (!active) return
-          active = false
-          notificationKeyRef.current = null
-          if (suppressCloseMarkRef.current) {
-            suppressCloseMarkRef.current = false
-            return
-          }
-
-          if (activePromptPageRef.current) {
-            markPromptSeen(activePromptPageRef.current)
-          }
-          activePromptPageRef.current = null
+          if (currentPrompt !== prompt) return
+          currentPrompt = undefined
+          finishPrompt()
         }
       })
     }
 
-    timeoutRef.current = globalThis.setTimeout(showPrompt, delayMs)
+    const promptObserver = new MutationObserver(updatePrompt)
+    const timeout = globalThis.setTimeout(() => {
+      promptObserver.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["aria-expanded", "aria-hidden", "aria-modal", "class", "hidden", "style"]
+      })
+      updatePrompt()
+    }, delayMs)
 
     return () => {
-      active = false
-      promptObserver?.disconnect()
-      if (timeoutRef.current) {
-        window.clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
-      if (notificationKeyRef.current) {
-        suppressCloseMarkRef.current = true
-        api.destroy(notificationKeyRef.current)
-        notificationKeyRef.current = null
-        activePromptPageRef.current = null
-      }
+      globalThis.clearTimeout(timeout)
+      promptObserver.disconnect()
+      closePrompt()
     }
   }, [
     location.pathname,

@@ -216,6 +216,49 @@ describe("TutorialPrompt behavior", () => {
     expect(infoMock).toHaveBeenCalledOnce()
   })
 
+  it.each(["before", "after"])(
+    "keeps the walkthrough available if the model picker opens %s the prompt",
+    async (when) => {
+      const content = (open: boolean) => (
+        <MemoryRouter initialEntries={["/chat"]}>
+          <TutorialPrompt />
+          <button
+            aria-expanded={open}
+            data-tutorial-prompt-blocker
+            type="button"
+          >
+            Choose a model
+          </button>
+        </MemoryRouter>
+      )
+      const view = render(content(when === "before"))
+      act(() => vi.advanceTimersByTime(2000))
+      const firstPrompt = infoMock.mock.calls[0]?.[0]
+
+      if (when === "before") {
+        expect(firstPrompt).toBeUndefined()
+      } else {
+        expect(firstPrompt).toBeDefined()
+        await act(async () => view.rerender(content(true)))
+        expect(destroyMock).toHaveBeenCalledWith("tutorial-prompt-global")
+        await act(async () =>
+          firstPrompt.btn.props.children[1].props.onClick()
+        )
+        expect(startTutorialMock).not.toHaveBeenCalled()
+      }
+
+      await act(async () => view.rerender(content(false)))
+      expect(infoMock).toHaveBeenCalledTimes(when === "before" ? 1 : 2)
+      // Ant Design can call the old close handler after a replacement appears.
+      act(() => firstPrompt?.onClose())
+      expect(markPromptSeenMock).not.toHaveBeenCalled()
+      const restoredPrompt = infoMock.mock.calls.at(-1)![0]
+      act(() => restoredPrompt.btn.props.children[1].props.onClick())
+      expect(startTutorialMock).toHaveBeenCalledOnce()
+      expect(markPromptSeenMock).toHaveBeenCalledWith("/chat")
+    }
+  )
+
   it("waits for async page content before offering its walkthrough", async () => {
     getPrimaryTutorialForRouteMock.mockReturnValueOnce({
       id: "test-async-tour",
