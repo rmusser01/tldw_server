@@ -36,7 +36,7 @@ def test_safe_increment_metric_failure_log_is_sanitized(monkeypatch):
         raise RuntimeError("chatbook metrics exploded at /private/chatbooks.db")
 
     logger_stub = _LoggerStub()
-    monkeypatch.setattr(chatbooks, "increment_counter", _raise_increment_counter)
+    monkeypatch.setattr("tldw_Server_API.app.core.Metrics.metrics_manager.increment_counter", _raise_increment_counter)
     monkeypatch.setattr(chatbooks, "logger", logger_stub)
 
     chatbooks._safe_increment_metric(

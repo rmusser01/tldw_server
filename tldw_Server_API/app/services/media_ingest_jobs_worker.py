@@ -14,7 +14,11 @@ from typing import Any
 from fastapi import HTTPException
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import (
+    media_analysis_credentials,
+    media_analysis_provider,
+    media_analysis_requested,
+)
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.Chunking.templates import TemplateClassifier
 from tldw_Server_API.app.core.config import settings
@@ -40,8 +44,15 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
-from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context, mark_llm_quota_prechecked
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    FRESH_ROOT,
+    bind_provider_credentials,
+    current_llm_user_id,
+    llm_call_context,
+    mark_llm_quota_prechecked,
+)
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, user_to_check
+from tldw_Server_API.app.core.Usage.llm_roots import ensure_llm_state_executor
 from tldw_Server_API.app.core.Workspaces.status_projection import derive_workspace_source_media_status
 
 _MEDIA_DOMAIN = "media_ingest"
@@ -368,18 +379,24 @@ async def _admit_or_refuse_analysis(form_data: AddMediaForm) -> LLMQuotaExceeded
 
     Admitted, the rest of the job runs as an admitted request does (LLM usage accounting
     spec §4a), so no refusal lands part-way through an item. Refused, the refusal is
-    returned and the job runs without analysis.
+    returned and the job runs without analysis. The analysis runs on the owner's own key
+    when they stored one (TASK-15426); an over-limit owner whose analysis runs on it, and
+    who turned on no other LLM stage, is admitted without the mark, so each call is
+    checked where its key is known.
     """
     if not media_analysis_requested(form_data):
         return None
+    handle = await media_analysis_credentials(current_llm_user_id(), form_data)
     user_id = user_to_check()
-    if user_id is None:
-        return None
-    try:
-        await check_user_async(user_id)
-    except LLMQuotaExceededError as refusal:
-        return refusal
-    mark_llm_quota_prechecked()
+    if user_id is not None:
+        try:
+            await check_user_async(user_id)
+        except LLMQuotaExceededError as refusal:
+            if handle is None or media_analysis_provider(form_data) is None:
+                return refusal  # the server's key, or another LLM stage: refused as before, no key bound
+        else:
+            mark_llm_quota_prechecked()
+    bind_provider_credentials(handle)
     return None
 
 
@@ -406,7 +423,7 @@ async def _schedule_embeddings(
     form_data: AddMediaForm,
 ) -> None:
     try:
-        from tldw_Server_API.app.api.v1.endpoints.media_embeddings import (
+        from tldw_Server_API.app.core.Embeddings.media_embeddings import (
             generate_embeddings_for_media,
             get_media_content,
         )
@@ -518,6 +535,8 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
     if str(job.get("job_type") or "").lower() not in {_MEDIA_JOB_TYPE, _WORKSPACE_SOURCE_JOB_TYPE}:
         return await _handle_job_in_scope(job, jm, progress)
     user_id = _resolve_user_id(job)
+    # The job's executor hops carry its call state (owner, admission, own-key handle) whoever calls the handler.
+    ensure_llm_state_executor()
     # llm_call_context(): an admission the job marks (TASK-13864) ends with the job, whoever calls the handler.
     with scoped_context(user_id=int(user_id), is_admin=False), llm_call_context():
         return await _handle_job_in_scope(job, jm, progress)
@@ -700,14 +719,16 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         media_id = result_item.get("db_id") if isinstance(result_item, dict) else None
 
         if media_id and getattr(form_data, "generate_embeddings", False):
-            asyncio.create_task(
-                _schedule_embeddings(
-                    media_id=int(media_id),
-                    user_id=user_id,
-                    db=db,
-                    form_data=form_data,
+            # The task outlives the job: it keeps the owner, not the job's admission or key.
+            with llm_call_context(**FRESH_ROOT):
+                asyncio.create_task(
+                    _schedule_embeddings(
+                        media_id=int(media_id),
+                        user_id=user_id,
+                        db=db,
+                        form_data=form_data,
+                    )
                 )
-            )
 
         progress.percent = 100.0
         progress.message = "completed"

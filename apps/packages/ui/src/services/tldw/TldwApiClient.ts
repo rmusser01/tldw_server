@@ -1068,6 +1068,7 @@ export interface ChatCompletionRequest {
   tldw_history_branch?: boolean
   tldw_history_edit_v1?: import("@/types/history-selection").HistoryEditTargetV1
   tldw_history_server_existing_input_v1?: import("@/types/history-selection").HistorySelectionV1
+  metadata?: Record<string, unknown>
   messages: ChatMessage[]
   model: string
   routing?: {

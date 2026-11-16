@@ -68,3 +68,23 @@ def test_graph_tag_edge_keyword_table_mapping(graph_db, populated):
     assert db.get_note_tag_edges([note]) == (
         [{"note_id": note, "keyword_id": keyword, "keyword": "edge-tag"}] if populated else []
     )
+
+
+@pytest.mark.parametrize("include_deleted", [True, False], ids=["with-deleted", "live-only"])
+@pytest.mark.parametrize(
+    ("stored", "requested"),
+    [("Éclair", "ÉCLAIR"), ("Éclair", "éclair"), ("Éclair", "tag:éclair"), ("Straße", "STRASSE")],
+    ids=["accented-upper", "accented-lower", "accented-prefixed", "sharp-s"],
+)
+def test_graph_tag_seed_matches_by_keyword_identity(graph_db, include_deleted, stored, requested):
+    """SQLite LOWER() folds ASCII only ("Éclair" vs "éclair") and Postgres LOWER() misses ß/SS.
+
+    ÉCLAIR happened to match on SQLite, since LOWER() leaves É alone on both sides.
+    """
+    db = graph_db
+    tagged = db.add_note("Tagged graph note", "body")
+    other = db.add_note("Plain graph note", "body")
+    db.link_note_to_keyword(tagged, db.add_keyword(stored))
+    db.link_note_to_keyword(other, db.add_keyword("plain"))
+
+    assert db.get_note_ids_by_tag_for_graph(requested, include_deleted=include_deleted) == [tagged]

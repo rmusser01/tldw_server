@@ -144,10 +144,10 @@ def huggingface_boundary(monkeypatch: pytest.MonkeyPatch) -> _RecordingHuggingFa
     monkeypatch.setenv("CHAT_FORCE_MOCK", "false")
     monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_HUGGINGFACE", "1")
     monkeypatch.setattr(chat_endpoint, "ProviderCredentialRuntime", _KeyOnlyCredentialRuntime)
-    monkeypatch.setattr(chat_endpoint, "get_provider_manager", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.provider_manager.get_provider_manager", lambda: None)
     monkeypatch.setattr(chat_endpoint, "ENABLE_PROVIDER_FALLBACK", False)
     monkeypatch.setattr(chat_endpoint, "QUEUED_EXECUTION", False)
-    monkeypatch.setattr(chat_endpoint, "get_request_queue", lambda: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", lambda: None)
     monkeypatch.setattr(chat_service, "get_request_queue", lambda: None)
     monkeypatch.setattr(
         hf_module,

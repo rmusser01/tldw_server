@@ -7,9 +7,6 @@ from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_request_user, rbac_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
-from tldw_Server_API.app.api.v1.endpoints.media_navigation_policy import (
-    MEDIA_NAVIGATION_ROUTE_POLICY,
-)
 from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (
     MediaNavigationContentQueryParams,
     MediaNavigationContentResponse,
@@ -19,6 +16,9 @@ from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (
     MediaNavigationTarget,
 )
 from tldw_Server_API.app.api.v1.utils.cache import cache_response, get_cached_response
+from tldw_Server_API.app.api.v1.utils.media_navigation_policy import (
+    MEDIA_NAVIGATION_ROUTE_POLICY,
+)
 from tldw_Server_API.app.core.Media.navigation import (
     MAX_OUTLINE_FILE_SIZE as MAX_OUTLINE_FILE_SIZE,
 )

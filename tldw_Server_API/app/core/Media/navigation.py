@@ -11,11 +11,6 @@ from typing import Any, Protocol
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.media_navigation_schemas import (
-    MediaNavigationContentQueryParams,
-    MediaNavigationNode,
-    MediaNavigationQueryParams,
-)
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     get_document_version,
     get_latest_transcription,
@@ -27,6 +22,11 @@ from tldw_Server_API.app.core.Media.document_outline import (
     MAX_OUTLINE_FILE_SIZE,
     _check_pymupdf_available,
     _extract_pdf_outline,
+)
+from tldw_Server_API.app.core.Media.navigation_schemas import (
+    MediaNavigationContentQueryParams,
+    MediaNavigationNode,
+    MediaNavigationQueryParams,
 )
 from tldw_Server_API.app.core.Media.page_provenance import page_map_for_content, resolve_navigation_span
 from tldw_Server_API.app.core.Storage import get_storage_backend

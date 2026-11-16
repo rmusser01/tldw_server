@@ -35,11 +35,10 @@ pytestmark = pytest.mark.integration
 @pytest.mark.parametrize("absolute_key", [False, True])
 async def test_uploaded_storage_original_is_bundled_and_restored_exactly(stores, tmp_path, monkeypatch, absolute_key):  # noqa: F811
     from tldw_Server_API.app.core import Storage
-    from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
 
     source, destination = stores
-    storage = FileSystemStorage(tmp_path / "configured-blob-storage")
-    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+    monkeypatch.setenv("FILE_STORAGE_PATH", str(tmp_path / "configured-blob-storage"))
+    storage = Storage.get_storage_backend()
     media_id, _, _ = source._get_media_db().add_media_with_keywords(
         title="Uploaded PDF", media_type="document", content="Exact PDF text", keywords=[], owner_user_id=101,
     )
@@ -73,7 +72,6 @@ async def test_uploaded_storage_original_is_bundled_and_restored_exactly(stores,
     assert okay, message
     restored_id = result["id_maps"]["media"][str(media_id)]
     restored_file = destination._get_media_db().get_media_files(restored_id)[0]
-    monkeypatch.setattr(media_file, "get_storage_backend", lambda: storage)
     app = FastAPI()
     app.include_router(media_file.router, prefix="/api/v1/media")
     app.dependency_overrides[media_file.get_media_db_for_user] = lambda: destination._get_media_db()

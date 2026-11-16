@@ -17,8 +17,7 @@ def test_character_default_provider_prefers_config_over_env(monkeypatch):
     monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
     monkeypatch.setattr(
-        ccs,
-        "load_and_log_configs",
+        "tldw_Server_API.app.core.config.load_and_log_configs",
         lambda: {"llm_api_settings": {"default_api": "config-provider"}},
         raising=False,
     )
@@ -29,7 +28,7 @@ def test_character_default_provider_prefers_config_over_env(monkeypatch):
 @pytest.mark.unit
 def test_character_default_provider_falls_back_to_env(monkeypatch):
     _clear_cached_provider()
-    monkeypatch.setattr(ccs, "load_and_log_configs", lambda: {}, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_and_log_configs", lambda: {}, raising=False)
     monkeypatch.setenv("DEFAULT_LLM_PROVIDER", "env-provider")
     monkeypatch.delenv("TEST_MODE", raising=False)
     monkeypatch.delenv("TLDW_TEST_MODE", raising=False)
@@ -40,7 +39,7 @@ def test_character_default_provider_falls_back_to_env(monkeypatch):
 @pytest.mark.unit
 def test_character_default_provider_uses_local_llm_in_test_mode(monkeypatch):
     _clear_cached_provider()
-    monkeypatch.setattr(ccs, "load_and_log_configs", lambda: {}, raising=False)
+    monkeypatch.setattr("tldw_Server_API.app.core.config.load_and_log_configs", lambda: {}, raising=False)
     monkeypatch.delenv("DEFAULT_LLM_PROVIDER", raising=False)
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.delenv("TLDW_TEST_MODE", raising=False)

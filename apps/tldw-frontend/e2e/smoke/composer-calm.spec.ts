@@ -138,6 +138,102 @@ for (const viewport of [
   }
 }
 
+// CO-06 (#3113): at 1024x768 the review found the chrome left the
+// transcript about 340px. Connected, with a model chosen and Tools closed,
+// the header, view toolbar and composer must leave it most of the window.
+const MODEL_ID = 'openai:gpt-4.1-mini';
+const connectWithOneModel = async (page: Page) => {
+  // Registered after prepareOfflinePreview, so these win over its 503s: the
+  // server answers, with nothing stored, and one configured model.
+  await page.route('http://127.0.0.1:8000/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' })
+  );
+  await page.route('**/api/v1/health', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'ok', checks: {} }),
+    })
+  );
+  await page.route('**/api/v1/llm/providers**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        providers: [
+          {
+            id: 'openai',
+            name: 'OpenAI',
+            apiProvider: 'openai',
+            models: ['gpt-4.1-mini'],
+            configured: true,
+            available: true,
+          },
+        ],
+      }),
+    })
+  );
+  await page.route('**/api/v1/llm/models/metadata**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        models: [
+          {
+            id: MODEL_ID,
+            model: 'gpt-4.1-mini',
+            name: 'GPT-4.1 Mini',
+            provider: 'openai',
+            apiProvider: 'openai',
+            capabilities: ['chat'],
+          },
+        ],
+      }),
+    })
+  );
+  await page.addInitScript((modelId) => {
+    localStorage.setItem('selectedModel', JSON.stringify(modelId));
+  }, MODEL_ID);
+};
+
+test('leaves the transcript most of a 1024x768 window', async ({ page }, testInfo) => {
+  const viewport = { width: 1024, height: 768 };
+  await prepareOfflinePreview(page);
+  await connectWithOneModel(page);
+  await page.addInitScript(() => {
+    localStorage.setItem('playgroundChatLayoutMode', JSON.stringify('cockpit'));
+  });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize(viewport);
+  await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 30_000 });
+  const exitFocus = page.getByRole('button', { name: 'Exit focus', exact: true });
+  if (await exitFocus.isVisible()) await exitFocus.click();
+  // The everyday chrome: the conversation header, a chosen model and a
+  // closed Tools tray.
+  await expect(page.getByTestId('chat-conversation-header')).toBeVisible();
+  await expect(page.getByTestId('model-selector')).not.toHaveText(/select a model|loading/i, {
+    timeout: 30_000,
+  });
+  await expect(page.getByTestId('composer-options-toggle')).toHaveAttribute(
+    'aria-expanded',
+    'false'
+  );
+  await page.evaluate(async () => {
+    await document.fonts.ready;
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+  });
+  const transcript = (await page.getByTestId('playground-chat-transcript').boundingBox())!;
+  const dock = (await page.getByTestId('playground-chat-composer-dock').boundingBox())!;
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath('1024x768.png') });
+  expect(transcript.y + transcript.height).toBeLessThanOrEqual(dock.y + 1);
+  expect(
+    transcript.height,
+    `transcript ${transcript.height}px from y=${transcript.y}; composer dock ${dock.height}px`
+  ).toBeGreaterThanOrEqual(viewport.height * 0.6);
+});
+
 test('remembers whether Tools was expanded across reload', async ({ page }) => {
   await prepareOfflinePreview(page);
   await page.goto('/chat', { waitUntil: 'domcontentloaded' });

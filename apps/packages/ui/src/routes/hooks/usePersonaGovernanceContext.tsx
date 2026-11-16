@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
@@ -499,7 +500,7 @@ export function usePersonaGovernanceContext(
     try {
       scrollTarget.scrollIntoView?.({
         block: "start",
-        behavior: "smooth",
+        behavior: smoothScrollBehavior(),
       })
     } catch {
       // Ignore environments without scrollIntoView support.

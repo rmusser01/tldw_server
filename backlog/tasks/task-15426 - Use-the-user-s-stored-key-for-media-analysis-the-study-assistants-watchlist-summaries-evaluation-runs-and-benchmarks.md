@@ -2,7 +2,7 @@
 id: TASK-15426
 title: Use the user's stored key for media analysis, the study assistants, watchlist
   summaries, evaluation runs and benchmarks
-status: In Progress
+status: Done
 labels:
 - quotas
 - backend
@@ -18,8 +18,8 @@ Follow-up of TASK-13956. These features call their provider with the server's ke
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 The owner decides whether each listed feature uses the user's stored key
-- [ ] #2 Each feature the owner approves resolves the user's key through ProviderCredentialRuntime and passes the handle on every LLM call, with a test
-- [ ] #3 Its boundary names its provider to enforce_llm_quota, and the media ingest job's start check admits an over-limit user whose analysis provider runs on their own key without marking the job admitted, with a test
+- [x] #2 Each feature the owner approves resolves the user's key through ProviderCredentialRuntime and passes the handle on every LLM call, with a test
+- [x] #3 Its boundary names its provider to enforce_llm_quota, and the media ingest job's start check admits an over-limit user whose analysis provider runs on their own key without marking the job admitted, with a test
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -28,19 +28,28 @@ Follow-up of TASK-13956. These features call their provider with the server's ke
 AC #1 answered (owner, 2026-11-07): all four families use the user's stored key, built cheapest first: (a) the flashcards and quizzes study assistants; (b) benchmark runs and watchlist output summaries; (c) evaluation runs; (d) media analysis (the /media endpoints) and media ingest jobs. ADR-004 Change summary waived for every TASK-15426 PR (owner, 2026-11-07: "Yes, waive for all").
 Plan, PR A of 4 (study assistants): Docs/superpowers/plans/2026-11-07-own-key-study-assistants.md.
 PR A (https://github.com/rmusser01/tldw_server/pull/3444): the flashcards and quizzes study assistants run on the user's own key for the reply's provider (users_own_key_credentials + enforce_llm_quota_on_own_key in usage_quota_deps.py; study_assistant_own_key replaces require_llm_quota on both routes). Over a limit: own key admitted unmarked, server key and no usable provider refused with the same 402. Tests: focused 17 passed; wider set 1041 passed, 1 skipped, 0 failed (34 files; base 1026 passed, 1 skipped). Bandit: no issues. Docs: Usage_Quotas.md, BYOK guide (including last_used_at), ADR-083 amendment (mirrored). The prompt-improvement live-DNS test is left to the live-network-tests task (filed by the benchmark-judge PR).
+Plan, PR B of 4 (benchmark runs, watchlist output summaries): Docs/superpowers/plans/2026-11-07-own-key-benchmarks-watchlist-summaries.md.
+PR B (https://github.com/rmusser01/tldw_server/pull/3452): benchmark runs (both routes; a raw api_key names no provider) and watchlist output summaries run on the user's own key (enforce_llm_quota_on_own_key; handle through evaluate_custom_metric, both the model response and the judge call, and summarize_items_for_output). Enrichment unchanged. The standalone /benchmarks/{name}/run no longer returns 500 after its LLM calls with the default save_results: it stored its rate limiter as user_id; it now stores the run in the user's own evaluations database under their id. Built on TASK-15485 (#3445, the benchmark judge fix, merged first). Tests: focused 11 passed, 0 network attempts; wider set 1 failed (known probe artifact test_ssrf_protection_private_ip), 534 passed, 4 skipped, 1 xpassed (base 1 failed, 526 passed); Docs/lint/CI/backlog-py 2 failed, 1768 passed, 6 skipped, 1 error (the same environment-only ids as the base). Bandit: one pre-existing finding (B608), none new. Docs updated (mirrored).
+Plan, PR C of 4 (evaluation runs): Docs/superpowers/plans/2026-11-07-own-key-evaluation-runs.md. Filed TASK-15491: label-choice and NLI evaluation runs score a failed judge call 0.0 (pre-existing; the owner's 2026-11-10 benchmark ruling applied to runs).
+PR C (https://github.com/rmusser01/tldw_server/pull/3460): evaluation runs name their judge provider (run_llm_provider, the runner's own resolution) and run every judge call on the user's own key (handle in eval_config, never stored; summarization, RAG, response quality, label choice, NLI; a direct judge call checks the handle's provider). rag_pipeline, raw api_key and no-LLM runs still refused over a limit. A run already started keeps its key (owner, 2026-11-07); the BYOK guide says to cancel it. Built on PR B (#3452). Follow-up: TASK-15491 (label choice and NLI score a failed judge call 0.0). Tests: focused set 31 passed (0 network attempts); wider set 60 files 825 passed, 42 skipped, plus the 3 PostgreSQL files 90 passed, 0 netprobe attempts; CI suites (Docs, lint, CI, backlog-py) 1773 passed, 6 skipped, 2 environment-only failures and 1 environment-only error (no coverage, no setuptools in the shared venv). Bandit: no issues. Docs updated (mirrored).
+PR C final review (fable, clean): Ready to merge Yes, 0 Critical, 0 Important, 4 Minor (deferred). Filed TASK-15492: an evaluation's evaluator_model set to a model name is used as the provider name (pre-existing).
+Plan, PR D of 4 (media analysis, media ingest job; closes the task): Docs/superpowers/plans/2026-11-07-own-key-media-analysis-close-out.md. Filed TASK-15496: own-key calls through analyze skip the DEFAULT_MODEL_<PROVIDER> fallback (pre-existing; with PR D it also reaches media analysis). At the owner's request (2026-11-13) PR D also fixes its wider set's test failures (four test files leaking app state into later tests in the same xdist worker; the pixabay download stubbed; docling cases skipped where docling is not installed); filed from that work TASK-15497 (in-place app reloads the app-main guard misses) and TASK-15498 (17 Telegram tests fail with 403 on dev; no CI shard runs tests/Telegram).
+PR D (https://github.com/rmusser01/tldw_server/pull/3470): media analysis on /media/add and the six /media/process-* endpoints, and a media ingest job, run on the user's own key (admit_media_analysis; the handle rides LLMCallContext, and Summarization_General_Lib._dispatch_to_api reads it for an analyze call that brings no key of its own). The job's start check admits an over-limit owner whose analysis runs on their own key without marking the job. With another LLM stage on, an under-limit user's analysis still runs on their key (owner, 2026-11-07) and an over-limit user is refused as before. _handle_job installs the carrying executor itself; llm_call_root drops a bound handle; no job payload, stored media metadata or log line carries it. /media/ingest-web-content and /media/process-web-scraping keep the server's key and the refusal. Built on PR C (#3460). Tests: wider set of 132 files (123 regular, 9 PostgreSQL) 0 failed, 3355 passed, 43 skipped, 2 xfailed, and PostgreSQL 253 passed; Docs, lint, CI and backlog-py tests 1779 passed, 2 failed and 1 error (the environment-only coverage and setuptools gaps). Bandit: no issues. Docs: Usage_Quotas.md, BYOK guide, ADR-083 amendment (mirrored).
+Closed by PR D (https://github.com/rmusser01/tldw_server/pull/3470): ACs #2-#3, the Definition of Done and the final summary.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+TASK-15426 moved the four families onto the user's own stored key (owner, 2026-11-07: all four). When users_own_key_serves holds for a feature's provider (BYOK on, a provider that bills per key and reaches its vendor, allowlisted, an active key of the user's), the feature resolves that key once through ProviderCredentialRuntime (users_own_key_credentials: a handle only for credential_source 'user', never a team or org key) and passes the handle on every LLM call of the feature (for media, every analysis call; the other LLM stages a media request can turn on keep the server's key), so those calls are recorded credential_source = user and the per-user limits neither count nor check them. Each boundary names its provider to enforce_llm_quota with the handle as its answer (enforce_llm_quota_on_own_key; admit_media_analysis for media), so an over-limit user whose calls all run on their own key is admitted unmarked and everyone else gets the same 402. PR A (#3444): the flashcards and quizzes study assistants. The benchmark judge fix (TASK-15485, #3445) landed before PR B. PR B (#3452): benchmark runs (a raw api_key on the standalone route names no provider) and watchlist output summaries. PR C (#3460): evaluation runs (the runner's judge; rag_pipeline, raw api_key and no-LLM runs still refused). PR D (https://github.com/rmusser01/tldw_server/pull/3470): media analysis on /media/add and the six /media/process-* endpoints, and the media ingest job (the handle rides the LLM call context; the job is admitted unmarked). Owner decisions (2026-11-07): team and org keys are not used; a raw api_key keeps counting; watchlist output enrichment, /media/ingest-web-content, /media/process-web-scraping and rag_pipeline evaluation runs keep the server's key; a run or job keeps the key it resolved at its start (the BYOK guide says to cancel it); with another LLM stage on, a media request's analysis still runs on an under-limit user's key. At the owner's request (2026-11-13) PR D also fixed its wider set's test failures: four test files leaked app state into later tests in the same xdist worker, the pixabay audio case downloaded live, and the docling cases ran where docling is not installed. Follow-ups: TASK-15486 (tests that reach a real host, among them the prompt-improvement test and the media tests' downloads), TASK-15491 (label choice and NLI score a failed judge call 0.0), TASK-15492 (an evaluator_model set to a model name is taken as the provider), TASK-15496 (own-key calls through analyze skip the DEFAULT_MODEL_<PROVIDER> fallback), TASK-15497 (test files that reload app.main or app modules in place leak a rebuilt app into later tests), TASK-15498 (17 Telegram tests fail with 403 on dev, and no CI shard runs tests/Telegram); the own-key helpers move into core/Usage when TASK-13950 cuts services -> api. Known skips: no PostgreSQL case skipped (253 passed); 43 skipped in the 123 regular files, among them the docling cases, which skip where docling is not installed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

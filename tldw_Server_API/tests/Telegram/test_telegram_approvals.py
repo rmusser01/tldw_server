@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import Request
 
-import tldw_Server_API.app.api.v1.endpoints.telegram_support as telegram_support
-from tldw_Server_API.app.api.v1.endpoints.telegram_support import (
+import tldw_Server_API.app.api.v1.utils.chatops.telegram_support as telegram_support
+from tldw_Server_API.app.api.v1.utils.chatops.telegram_support import (
     TelegramScope,
     TelegramWebhookContext,
     build_telegram_approval_callback_data,

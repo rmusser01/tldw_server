@@ -101,7 +101,7 @@ and GitHub issue that tracks its fix, plus a note.
 
 | Spec | Measures | Baseline |
 |---|---|---|
-| `a11y.spec.ts` | Serious and critical axe violations (WCAG 2.0-2.2 A/AA plus best practices, including `color-contrast` and `target-size`), node count per rule, in five states: /notes empty, populated (25 notes) and with a note in the editor; /chat on a fresh load and with the model picker open. The app's default (dark) theme, 1280x720. | `baselines/a11y.json` |
+| `a11y.spec.ts` | Serious and critical axe violations (WCAG 2.0-2.2 A/AA plus best practices, including `color-contrast` and `target-size`), node count per rule, in six states, each in the dark and the light theme: /notes empty, populated (25 notes) and with a note in the editor; /chat on a fresh load and with the model picker open (1280x720); the extension side panel's chat (420x900, from the built extension). | `baselines/a11y.json` (entries name their `state` and `theme`) |
 | `request-budget.spec.ts` | API requests started in the first `windowMs` after loading warm /notes and /chat: the total, duplicate GETs (same path and query within `duplicateWindowMs`) and polling (an endpoint hit `pollingMinHits`+ times after `idleFromMs`). | `baselines/request-budget.json` |
 
 The comparison (`e2e/utils/ratchet.ts`) fails in both directions:
@@ -120,7 +120,7 @@ The comparison (`e2e/utils/ratchet.ts`) fails in both directions:
 1. Run `bun run e2e:ux-regression -- --grep "ratchet"` (both specs) or
    `--grep "Accessibility ratchet"` / `--grep "Request budget ratchet"`.
 2. The failure lists every difference. Each test also attaches what it
-   observed: `a11y-<state>.json` (every node, with its markup) or
+   observed: `a11y-<state>-<theme>.json` (every node, with its markup) or
    `request-budget-<page>.json` (counts and a request timeline). The runner's
    `test-results/live-tier-uat/<run-id>/playwright-results.json` embeds them.
 3. Remove or lower only the entries your change fixed. Never raise a count

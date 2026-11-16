@@ -83,21 +83,22 @@ async def test_media_callers_store_refined_exact_chunks_and_rebudget_fallback(mo
     import json
 
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as api
-    from tldw_Server_API.app.api.v1.endpoints import media_embeddings as media
+    from tldw_Server_API.app.core.Embeddings import media_embeddings as media
     from tldw_Server_API.app.core.Embeddings.services import jobs_worker as worker
 
     source = "https://example.org/" + "abc%20" * 30 + "😀界"
     captured = {}
     monkeypatch.setattr(embedding, "_load_hf_input_tokenizer", lambda *args: CharacterTokenizer())
 
-    async def embed(*, texts, provider, model_id, **kwargs):
-        if fallback and model_id == "unit/model":
+    def embed(texts, user_app_config, model_id_override=None, **kwargs):
+        if fallback and model_id_override == "huggingface:unit/model":
             raise RuntimeError("Primary unavailable")
         assert all(len(CharacterTokenizer().encode(text)) <= 16 for text in texts)
         captured["texts"] = texts
         return [[0.1, 0.2] for _ in texts]
 
-    monkeypatch.setattr(api, "create_embeddings_batch_async", embed)
+    await api.embedding_cache.clear()
+    monkeypatch.setattr(embedding, "create_embeddings_batch", embed)
     if path == "direct":
 
         class Manager:
@@ -154,11 +155,12 @@ async def test_legacy_hf_embedding_checkpoint_is_recomputed_not_reused(monkeypat
     )
     calls = []
 
-    async def embed(**kwargs):
-        calls.append(kwargs["texts"])
-        return [[0.2] for text in kwargs["texts"]]
+    def embed(texts, user_app_config, model_id_override=None, **kwargs):
+        calls.append(texts)
+        return [[0.2] for text in texts]
 
-    monkeypatch.setattr(api, "create_embeddings_batch_async", embed)
+    await api.embedding_cache.clear()
+    monkeypatch.setattr(embedding, "create_embeddings_batch", embed)
     result = await worker._handle_embedding_job(
         {"id": 1},
         {},
@@ -198,10 +200,11 @@ async def test_storage_refuses_unverified_legacy_hf_embedding_checkpoint(monkeyp
 async def test_raw_api_length_error_is_actionable_before_breaker_or_provider(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import embeddings_v5_production_enhanced as api
     from tldw_Server_API.app.core.Embeddings.request_types import EmbeddingInputError
+    from tldw_Server_API.app.core.Infrastructure.circuit_breaker import registry
 
     monkeypatch.setattr(embedding, "_load_hf_input_tokenizer", lambda *args: CharacterTokenizer())
     monkeypatch.setattr(
-        api, "get_or_create_circuit_breaker", lambda *args: pytest.fail("Invalid input reached circuit breaker")
+        registry, "get", lambda *args: pytest.fail("Invalid input reached circuit breaker")
     )
     with pytest.raises(EmbeddingInputError) as raised:
         await api.create_embeddings_with_circuit_breaker(

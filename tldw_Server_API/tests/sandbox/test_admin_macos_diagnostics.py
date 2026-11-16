@@ -159,7 +159,7 @@ def test_admin_macos_diagnostics_returns_structured_payload(monkeypatch) -> None
     )
 
     fake_service = SimpleNamespace(macos_diagnostics=lambda: _diagnostics_payload())
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
     registry = StartupWarningRegistry(startup_id="boot-1")
@@ -285,7 +285,7 @@ def test_admin_runtime_diagnostics_returns_structured_payload(
             ],
         }
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
     registry = StartupWarningRegistry(startup_id="boot-1")
@@ -357,7 +357,7 @@ def test_admin_operator_status_returns_structured_payload(monkeypatch) -> None:
     fake_service = SimpleNamespace(
         operator_status=fake_operator_status,
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
     monkeypatch.setattr(sandbox_mod.asyncio, "to_thread", fake_to_thread)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
@@ -424,7 +424,7 @@ def test_admin_runtime_diagnostics_offloads_runtime_discovery(
             "runtimes": [],
         }
     )
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
     monkeypatch.setattr(sandbox_mod.asyncio, "to_thread", fake_to_thread)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
@@ -534,7 +534,7 @@ def test_admin_macos_diagnostics_allows_real_vz_linux_execution_mode(monkeypatch
     }
 
     fake_service = SimpleNamespace(macos_diagnostics=lambda: payload)
-    monkeypatch.setattr(sandbox_mod, "_service", fake_service, raising=True)
+    monkeypatch.setattr("tldw_Server_API.app.core.Sandbox.default_service.sandbox_service", fake_service)
 
     app = _build_app_with_overrides(_make_principal(is_admin=True))
 

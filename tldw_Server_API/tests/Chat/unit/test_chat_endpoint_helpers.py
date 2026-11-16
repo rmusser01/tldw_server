@@ -160,7 +160,7 @@ async def test_process_content_for_db_sync_large_image_path_handles_processor_re
         async def process_image_url(self, _url: str, _max_size_bytes: int):
             return False, None, "text/plain", "Unsupported image MIME type: text/plain"
 
-    monkeypatch.setattr(chat_endpoint, "get_image_processor", lambda: _RejectingProcessor())
+    monkeypatch.setattr("tldw_Server_API.app.core.Utils.chunked_image_processor.get_image_processor", lambda: _RejectingProcessor())
 
     large_payload = "A" * 100001
     content = [

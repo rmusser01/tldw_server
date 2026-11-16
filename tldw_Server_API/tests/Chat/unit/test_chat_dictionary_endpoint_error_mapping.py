@@ -81,8 +81,7 @@ def _patch_service(monkeypatch: pytest.MonkeyPatch, **methods) -> None:
         setattr(_Service, name, method)
 
     monkeypatch.setattr(
-        chat_dictionary_endpoints,
-        "ChatDictionaryService",
+        "tldw_Server_API.app.core.Character_Chat.chat_dictionary.ChatDictionaryService",
         _Service,
         raising=True,
     )

@@ -32,6 +32,7 @@ import { PlaygroundUserMessageBubble } from "./PlaygroundUserMessage"
 import { resolveAssistantDisplayName, USER_TURN_TINT_STYLE } from "./turn-presentation"
 import { DocumentProcessingTurn } from "./DocumentProcessingTurn"
 import { copyToClipboard } from "@/utils/clipboard"
+import { useCopyFeedback } from "@/components/Common/useCopyFeedback"
 import { ChatDocuments } from "@/models/ChatTypes"
 import { buildChatTextClass } from "@/utils/chat-style"
 import { highlightText } from "@/utils/text-highlight"
@@ -255,6 +256,12 @@ type Props = {
   onRegenerate: () => void
   regenerateDisabledReason?: string | null
   /**
+   * Why Continue can't run on this reply (CM-01). A surface whose one reason
+   * covers every generation (for example an unavailable persona) can omit it;
+   * Continue then uses `regenerateDisabledReason`.
+   */
+  continueDisabledReason?: string | null
+  /**
    * This reply's Continue and Retry run on the server's saved reply (D7), so its
    * recorded output-limit or interrupted status may offer them (CM-03).
    */
@@ -275,6 +282,11 @@ type Props = {
   isTTSEnabled?: boolean
   generationInfo?: any
   isStreaming: boolean
+  /**
+   * A request for this reply is in flight but not streaming yet (for example
+   * while the server admits the message). The reply bubble offers Stop then too.
+   */
+  isPending?: boolean
   reasoningTimeTaken?: number
   openReasoning?: boolean
   modelImage?: string
@@ -444,8 +456,9 @@ const arePlaygroundMessagePropsEqual = (prev: Props, next: Props): boolean => {
 const PlaygroundMessageImpl = (props: Props) => {
   const [sourcesExpanded, setSourcesExpanded] = useState<boolean | null>(null)
   const articleRef = useRef<HTMLElement | null>(null)
-  const [isBtnPressed, setIsBtnPressed] = React.useState(false)
+  const copyFeedback = useCopyFeedback(2000)
   const [editPresentation, setEditPresentation] = React.useState<"flat" | "bubble" | null>(null)
+  const [reasoningEditIndex, setReasoningEditIndex] = React.useState<number | null>(null)
   const editMode = editPresentation !== null
   const [checkWideMode] = useStorage("checkWideMode", false)
   const [isUserChatBubble] = useStorage("userChatBubble", true)
@@ -558,6 +571,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     detachedReplyRef.current?.message === props.message
   const responseStreaming = props.isStreaming && !detachedResponse
   const responseProcessing = props.isProcessing && !detachedResponse
+  const responsePending = Boolean(props.isPending) && !detachedResponse
 
   // Track streaming completion for aria-live announcement
   const wasStreamingRef = useRef(false)
@@ -1172,6 +1186,12 @@ const PlaygroundMessageImpl = (props: Props) => {
   ])
 
   useEffect(() => {
+    if (reasoningEditIndex !== null && !parseReasoning(props.message)[reasoningEditIndex]?.range) {
+      setReasoningEditIndex(null)
+    }
+  }, [props.message, reasoningEditIndex])
+
+  useEffect(() => {
     if (typeof window === "undefined") return
 
     const handleEditMessage = (event: Event) => {
@@ -1311,17 +1331,14 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.isBot
   ])
 
+  const runCopy = copyFeedback.run
   const handleCopy = React.useCallback(async () => {
-    await copyToClipboard({
+    const copied = await runCopy(() => copyToClipboard({
       text: errorFriendlyText || props.message,
       formatted: copyAsFormattedText
-    })
-    trackCopy()
-    setIsBtnPressed(true)
-    setTimeout(() => {
-      setIsBtnPressed(false)
-    }, 2000)
-  }, [copyAsFormattedText, errorFriendlyText, props.message, trackCopy])
+    }))
+    if (copied) trackCopy()
+  }, [copyAsFormattedText, errorFriendlyText, props.message, runCopy, trackCopy])
 
   const handleGenerateDocument = React.useCallback(() => {
     if (!props.serverChatId || typeof window === "undefined") return
@@ -1434,15 +1451,11 @@ const PlaygroundMessageImpl = (props: Props) => {
       !errorPayload &&
       !ttsActionDisabled
     ) {
-      await copyToClipboard({
+      const copied = await runCopy(() => copyToClipboard({
         text: props.message,
         formatted: copyAsFormattedText
-      })
-      trackCopy()
-      setIsBtnPressed(true)
-      setTimeout(() => {
-        setIsBtnPressed(false)
-      }, 2000)
+      }))
+      if (copied) trackCopy()
     }
   }
 
@@ -1513,7 +1526,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   const isActiveResponse =
     props.isBot &&
     isLastMessage &&
-    (responseStreaming || responseProcessing)
+    (responseStreaming || responseProcessing || responsePending)
   const feedbackDisabled =
     !canSubmit ||
     Boolean(errorPayload) ||
@@ -1777,6 +1790,8 @@ const PlaygroundMessageImpl = (props: Props) => {
       props.onRegenerate()
     }, true)
   }, [apiProviderOverride, props.onRegenerate, t, updateChatModelSetting, runResponseRecovery])
+  const continueDisabledReason =
+    props.continueDisabledReason === undefined ? props.regenerateDisabledReason : props.continueDisabledReason
   const errorRecoveryActions = React.useMemo(() => {
     if (!errorPayload || responseRecoveryBusy) return []
     const actions: ResponseRecoveryAction[] = [
@@ -1814,7 +1829,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.continueFromPartial",
           "Continue from partial"
         ),
-        disabledReason: props.regenerateDisabledReason,
+        disabledReason: continueDisabledReason,
         onClick: () => runResponseRecovery(() => props.onContinue?.(), true)
       })
     }
@@ -1855,6 +1870,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.onContinue,
     props.onRegenerate,
     props.regenerateDisabledReason,
+    continueDisabledReason,
     t
   ])
   const interruptionRecoveryActions = React.useMemo(() => {
@@ -1890,7 +1906,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           "playground:errorRecovery.continueFromPartial",
           "Continue from partial"
         ),
-        disabledReason: props.regenerateDisabledReason,
+        disabledReason: continueDisabledReason,
         onClick: () => runResponseRecovery(() => props.onContinue?.(), true)
       })
     }
@@ -1907,6 +1923,7 @@ const PlaygroundMessageImpl = (props: Props) => {
     props.onContinue,
     props.onRegenerate,
     props.regenerateDisabledReason,
+    continueDisabledReason,
     t
   ])
 
@@ -1917,6 +1934,7 @@ const PlaygroundMessageImpl = (props: Props) => {
         : incompleteReplyRecoveryActions({
             t: (key, fallback) => t(key, fallback) as string,
             disabledReason: props.regenerateDisabledReason,
+            continueDisabledReason,
             onRetry: () => runResponseRecovery(props.onRegenerate, true),
             onSwitchModel: () => runResponseRecovery(handleOpenModelSettings),
             onContinue: props.onContinue && !props.hideContinue
@@ -1924,7 +1942,7 @@ const PlaygroundMessageImpl = (props: Props) => {
           }),
     [liveOutputLimited, recordedIncomplete, isLastMessage, errorPayload, responseRecoveryBusy, runResponseRecovery,
       handleOpenModelSettings, props.hideContinue, props.onContinue, props.onRegenerate,
-      props.regenerateDisabledReason, t]
+      props.regenerateDisabledReason, continueDisabledReason, t]
   )
 
   const emptyResponseRecoveryActions = React.useMemo(
@@ -1970,7 +1988,8 @@ const PlaygroundMessageImpl = (props: Props) => {
   const actionRowVisibility = isProMode || props.messageView === "research" || (props.isBot && isLastMessage)
     ? "flex"
     : "hidden group-hover:flex group-focus-within:flex"
-  const showInlineActions = !props.isProcessing && !editMode
+  const showInlineActions = !props.isProcessing && !editMode && reasoningEditIndex === null
+  const canEditReasoning = showInlineActions && !props.hideEditAndRegenerate && !responseStreaming
   const showEmptyAssistantResponse =
     props.isBot &&
     !isSystemMessage &&
@@ -2919,6 +2938,19 @@ const PlaygroundMessageImpl = (props: Props) => {
                             searchQuery={props.searchQuery}
                             t={t}
                             enableMermaidDiagrams={enableAssistantMermaidDiagrams}
+                            onEdit={e.range && canEditReasoning
+                              ? () => setReasoningEditIndex(i)
+                              : undefined}
+                            editor={e.range && reasoningEditIndex === i ? (
+                              <EditMessageForm
+                                key={messageKey}
+                                value={props.message}
+                                reasoningRange={e.range}
+                                onSumbit={props.onEditFormSubmit}
+                                onClose={() => setReasoningEditIndex(null)}
+                                isBot
+                              />
+                            ) : undefined}
                           />
                         )
                       }
@@ -3181,7 +3213,9 @@ const PlaygroundMessageImpl = (props: Props) => {
               isSpeaking={isSpeaking}
               onToggleTts={handleToggleTts}
               hideCopy={props.hideCopy}
-              copyPressed={isBtnPressed}
+              copyPressed={copyFeedback.copied}
+              copyFailed={copyFeedback.failed}
+              copyAttempt={copyFeedback.attempt}
               onCopy={handleCopy}
               canReply={canReply}
               onReply={handleReply}

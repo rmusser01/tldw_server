@@ -33,7 +33,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_request_user,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_cursor_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS

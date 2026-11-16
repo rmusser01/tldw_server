@@ -1,7 +1,7 @@
 """RAG sensitivity filtering must use trusted authority without bypassing ACLs."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -95,8 +95,12 @@ async def test_public_search_endpoint_preserves_accountability_evidence_with_int
     from tldw_Server_API.app.api.v1.endpoints import rag_unified as endpoint
     from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGRequest
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
     from tldw_Server_API.app.core.Monitoring import topic_monitoring_service
+    from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import ProviderCredentialRuntime
+    from tldw_Server_API.app.core.RAG.rag_service import transport
+    from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import MediaDBRetriever, MultiDatabaseRetriever
 
     content = (
         "Conduct an immediate review of all major active FBI investigations and activities. "
@@ -115,17 +119,18 @@ async def test_public_search_endpoint_preserves_accountability_evidence_with_int
         id="core-fbi-passage", content=excerpt, source=DataSource.MEDIA_DB, score=.9,
         start_char=0, end_char=len(excerpt), metadata={"media_id": str(media_id), "chunk_index": 0},
     )
-    retriever = SimpleNamespace(retrieve=AsyncMock(return_value=[seed]))
+    monkeypatch.setattr(MultiDatabaseRetriever, "retrieve", AsyncMock(return_value=[seed]))
+    monkeypatch.setattr(MediaDBRetriever, "_initialize_vector_store", lambda self: None)
+    close_runtime = ProviderCredentialRuntime.close
+    closed_runtimes = []
 
-    def factory(*args, **kwargs):
-        return retriever
+    async def close(runtime):
+        await close_runtime(runtime)
+        closed_runtimes.append(runtime)
 
-    monkeypatch.setattr(endpoint, "MultiDatabaseRetriever", factory)
-    monkeypatch.setattr(up, "MultiDatabaseRetriever", factory)
-    runtime = SimpleNamespace(_user_id=1, close=AsyncMock())
-    monkeypatch.setattr(endpoint, "_build_credential_runtime", lambda *args: runtime)
-    monkeypatch.setattr(endpoint, "_resolve_kanban_db_path", lambda *args: None)
-    monkeypatch.setattr(endpoint, "_log_rag_queries_for_org", AsyncMock())
+    monkeypatch.setattr(ProviderCredentialRuntime, "close", close)
+    monkeypatch.setattr(DatabasePaths, "get_kanban_db_path", Mock(side_effect=FileNotFoundError("No Kanban fixture")))
+    monkeypatch.setattr(transport, "log_rag_queries_for_org_context", AsyncMock())
     monkeypatch.setattr(
         topic_monitoring_service, "get_topic_monitoring_service",
         lambda: SimpleNamespace(schedule_evaluate_and_alert=lambda **kwargs: None),
@@ -159,7 +164,7 @@ async def test_public_search_endpoint_preserves_accountability_evidence_with_int
         assert payload["documents"][0]["metadata"]["page_spans"][0]["printed_page_label"] == "5"
         rerank.assert_awaited_once()
     assert not payload["errors"]
-    runtime.close.assert_awaited_once()
+    assert len(closed_runtimes) == 1
 
 
 @pytest.mark.unit

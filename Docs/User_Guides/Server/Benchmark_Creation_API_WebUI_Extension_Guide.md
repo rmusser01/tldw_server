@@ -147,8 +147,8 @@ If your goal is a custom quality test today without backend benchmark registrati
 
 ### 402 LLM quota
 
-- The user is over an LLM limit: `detail.error` is `limit_exceeded`, and `Retry-After` says when to try again. The run is refused before its dataset loads, so nothing is evaluated.
-- An admitted run runs to completion, even if it takes the user past the limit; no item is refused mid-run. The next run is refused.
+- The user is over an LLM limit: `detail.error` is `limit_exceeded`, and `Retry-After` says when to try again. The run is refused before its dataset loads, so nothing is evaluated. A run whose `api_name` runs on a key the user stored that bills them (see `Docs/User_Guides/Server/BYOK_User_Guide.md`) is not refused: every item's model response and judge call run on that key and do not count. This route takes no `api_key`; only the standalone `POST /api/v1/benchmarks/{name}/run` does, and a run there that sends one is refused, because that key counts.
+- An admitted run runs to completion, even if it takes the user past the limit; no item is refused mid-run. The next run on the server's key is refused.
 
 ### 404 benchmark not found
 

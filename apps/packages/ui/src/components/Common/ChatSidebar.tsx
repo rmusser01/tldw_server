@@ -330,10 +330,14 @@ export function ChatSidebar({
     }
   }, [currentTab, markPanelEngaged, recentConversationsExpanded, setRecentCollapsed])
 
+  // A landmark, so screen-reader users can jump to chat history (AX-14).
+  const historyLandmarkLabel = t("common:chatSidebar.historyLandmark", "Chat history")
+
   // Collapsed view - just icons
   if (collapsed) {
     return (
-      <div
+      <nav
+        aria-label={historyLandmarkLabel}
         id={sidebarId}
         data-testid="chat-sidebar"
       data-chat-sidebar
@@ -444,13 +448,14 @@ export function ChatSidebar({
             </button>
           </Tooltip>
         </div>
-      </div>
+      </nav>
     )
   }
 
   // Expanded view
   return (
-    <div
+    <nav
+      aria-label={historyLandmarkLabel}
       id={sidebarId}
       data-testid="chat-sidebar"
         data-chat-sidebar
@@ -762,7 +767,7 @@ export function ChatSidebar({
           </div>
         </div>
       </div>
-    </div>
+    </nav>
   )
 }
 

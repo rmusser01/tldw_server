@@ -11,12 +11,14 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from tldw_Server_API.app.core.Chat.history_selection import (
+    REPLY_ACTION_REFUSED_QUESTION,
     HistoryBranchChangedError,
     HistoryEditTargetChangedError,
     HistoryFencesV1,
     HistorySelectionError,
     HistorySelectionSnapshotV1,
     history_branch_leaves,
+    reply_action_refusal,
     resolve_legacy_projection,
     resolve_parent_path,
     snapshot_to_wire,
@@ -1022,7 +1024,13 @@ class MessageStore:
         owner_key: str,
         conn: Any | None = None,
     ) -> dict[str, Any]:
-        """Reuse a protected user behind the selected reply without rewriting its authority."""
+        """Reuse a protected user behind the selected reply without rewriting its authority.
+
+        Every ``unsupported_history_regeneration`` here is about the saved
+        question (no admission, or the reply does not answer it directly), so it
+        carries ``reason: "question"``: Continue reuses the same admission and
+        is refused for the same reasons.
+        """
         from pydantic import ValidationError
 
         from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionV1
@@ -1035,7 +1043,7 @@ class MessageStore:
         ):
             raise HistorySelectionError("owner_conversation_mismatch")
         if body.get("interpretation", {}).get("kind") != "parent_graph_v1":
-            raise HistorySelectionError("unsupported_history_regeneration")
+            raise reply_action_refusal("unsupported_history_regeneration", REPLY_ACTION_REFUSED_QUESTION)
         with nullcontext(conn) if conn is not None else self._db.transaction() as active:
             self._lock_history_owner(active, conversation_id, owner_client_id)
             fresh, _ = self.validate_history_selection(
@@ -1047,7 +1055,7 @@ class MessageStore:
             nodes = {node["id"]: node for node in fresh.nodes}
             target, user = nodes[reply_id], nodes[path[-2]["id"]]
             if target["role"] != "assistant" or user["role"] != "user" or target["parent_id"] != user["id"]:
-                raise HistorySelectionError("unsupported_history_regeneration")
+                raise reply_action_refusal("unsupported_history_regeneration", REPLY_ACTION_REFUSED_QUESTION)
             row = active.execute(
                 "SELECT history_admission_json FROM messages WHERE id = ? AND conversation_id = ? AND deleted = FALSE",
                 (user["id"], conversation_id),
@@ -1059,7 +1067,7 @@ class MessageStore:
             except (TypeError, ValueError) as exc:
                 raise HistorySelectionError("invalid_admission") from exc
             if not isinstance(authority, dict) or not isinstance(authority.get("admission"), dict):
-                raise HistorySelectionError("unsupported_history_regeneration")
+                raise reply_action_refusal("unsupported_history_regeneration", REPLY_ACTION_REFUSED_QUESTION)
             try:
                 admission = HistoryAdmissionV1.model_validate(authority["admission"]).model_dump(mode="json")
             except ValidationError as exc:

@@ -7,7 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.Ingestion_Media_Processing import persistence
 import tldw_Server_API.app.core.Embeddings.jobs_adapter as jobs_adapter_module
-import tldw_Server_API.app.api.v1.endpoints.media_embeddings as media_embeddings_endpoint
+import tldw_Server_API.app.core.Embeddings.media_embeddings as core_media_embeddings
 
 
 pytestmark = pytest.mark.unit
@@ -229,8 +229,8 @@ async def test_background_embeddings_task_treats_status_as_sole_success_signal(m
             "error": "unexpected empty embedding batch",
         }
 
-    monkeypatch.setattr(media_embeddings_endpoint, "get_media_content", fake_get_media_content)
-    monkeypatch.setattr(media_embeddings_endpoint, "generate_embeddings_for_media", fake_generate_embeddings_for_media)
+    monkeypatch.setattr(core_media_embeddings, "get_media_content", fake_get_media_content)
+    monkeypatch.setattr(core_media_embeddings, "generate_embeddings_for_media", fake_generate_embeddings_for_media)
     monkeypatch.setattr(
         persistence,
         "_mark_media_embeddings_complete",
@@ -276,8 +276,8 @@ async def test_background_embeddings_task_marks_error_when_completion_persist_fa
     async def fake_generate_embeddings_for_media(**_kwargs: Any) -> dict[str, Any]:
         return {"status": "success", "embedding_count": 1, "chunks_processed": 1}
 
-    monkeypatch.setattr(media_embeddings_endpoint, "get_media_content", fake_get_media_content)
-    monkeypatch.setattr(media_embeddings_endpoint, "generate_embeddings_for_media", fake_generate_embeddings_for_media)
+    monkeypatch.setattr(core_media_embeddings, "get_media_content", fake_get_media_content)
+    monkeypatch.setattr(core_media_embeddings, "generate_embeddings_for_media", fake_generate_embeddings_for_media)
 
     def fail_mark_complete(db: Any, media_id: int) -> bool:
         captured["complete_calls"] += 1

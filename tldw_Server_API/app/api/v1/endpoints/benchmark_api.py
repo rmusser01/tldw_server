@@ -12,21 +12,20 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_rate_limiter_dep
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota_on_own_key
 from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
     get_eval_request_user,
+    get_evaluation_identity,
     require_eval_permissions,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
 # Create router
 router = APIRouter(prefix="/benchmarks", tags=["benchmarks"])
-
-# Initialize components
-evaluation_manager = EvaluationManager()
 
 
 # Request/Response schemas
@@ -205,7 +204,6 @@ async def get_benchmark_samples(
 async def run_benchmark(
     benchmark_name: str,
     request: BenchmarkRunRequest,
-    user_id: str = Depends(get_rate_limiter_dep),
     current_user: User = Depends(get_eval_request_user),
 ):
     """
@@ -217,14 +215,18 @@ async def run_benchmark(
     Args:
         benchmark_name: Name of the benchmark to run
         request: Run configuration
-        user_id: User ID from auth
+        current_user: The authenticated user; the run is stored in their evaluations database
 
     Returns:
         Summary of benchmark results.
     """
-    # Usage quotas (LLM usage accounting spec §4a): checked before any work, as the evaluations route does.
-    await enforce_llm_quota(getattr(current_user, "id", None))
+    # Usage quotas (LLM usage accounting spec §4a): checked before any work, as the evaluations route does, and
+    # on the user's own key, if any. A raw ``api_key`` counts, so its run names no provider.
+    provider = None if request.api_key else canonical_provider_name(request.api_name)
+    own_key = await enforce_llm_quota_on_own_key(getattr(current_user, "id", None), provider)
     try:
+        identity = get_evaluation_identity(current_user)
+        evaluation_manager = EvaluationManager(user_id=identity.user_scope)
         registry = get_registry()
         config = registry.get(benchmark_name)
 
@@ -280,6 +282,7 @@ async def run_benchmark(
                     scoring_criteria=eval_data['scoring_criteria'],
                     api_name=request.api_name,
                     api_key=request.api_key,
+                    provider_credentials=own_key,
                 )
                 tasks.append(task)
 
@@ -347,7 +350,7 @@ async def run_benchmark(
                 },
                 metadata={
                     "api_name": request.api_name,
-                    "user_id": user_id,
+                    "user_id": identity.created_by,
                     "total_samples": len(dataset)
                 }
             )

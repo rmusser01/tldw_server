@@ -1,7 +1,7 @@
 import pytest
 from pydantic import BaseModel, Field, ValidationError, model_validator
 
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+from tldw_Server_API.app.api.v1.utils.pagination import (
     build_link_header,
     build_offset_pagination_meta,
     build_page_pagination_meta,
@@ -338,3 +338,9 @@ def test_build_link_header_offset_compatibility_signature_stays_stable() -> None
         '</api/v1/workflows/runs?status=running&limit=25&offset=25>; rel="prev", '
         '</api/v1/workflows/runs?status=running&limit=25&offset=0>; rel="first"'
     )
+
+
+def test_the_endpoint_pagination_module_is_gone() -> None:
+    import importlib.util
+
+    assert importlib.util.find_spec("tldw_Server_API.app.api.v1.endpoints._pagination_utils") is None

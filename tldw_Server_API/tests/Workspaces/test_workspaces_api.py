@@ -15,7 +15,7 @@ from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
-from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
+from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
     WORKSPACES_DELETE_RATE_LIMIT,
     WORKSPACES_READ_RATE_LIMIT,
     WORKSPACES_WRITE_RATE_LIMIT,
@@ -341,7 +341,7 @@ class TestWorkspaceLifecycle:
 
 @pytest.mark.integration
 def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fastapi_app, db: CharactersRAGDB):
-    from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
+    from tldw_Server_API.app.api.v1.utils.workspaces_rate_limit_policy import (
         WORKSPACES_READ_RATE_LIMIT,
         WORKSPACES_WRITE_RATE_LIMIT,
     )

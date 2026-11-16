@@ -10,13 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from loguru import logger
 from pydantic import BaseModel, Field
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
-from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota_on_own_key
 
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
 from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
 from tldw_Server_API.app.core.Evaluations.identity import EvaluationIdentity
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
 from .evaluations_auth import (
     check_evaluation_rate_limit,
@@ -105,8 +106,8 @@ async def run_benchmark(
     current_user: User = Depends(get_eval_request_user),
 ):
     # Usage quotas (LLM usage accounting spec §4a): every item is an LLM call, so the run is
-    # checked here, before the dataset loads, and then runs to completion.
-    await enforce_llm_quota(getattr(current_user, "id", None))
+    # checked here, before the dataset loads, and then runs to completion; on the user's own key, if any.
+    own_key = await enforce_llm_quota_on_own_key(getattr(current_user, "id", None), canonical_provider_name(request.api_name))
     try:
         identity = get_evaluation_identity(current_user)
         evaluation_manager = _get_evaluation_manager_for_user(identity)
@@ -162,6 +163,7 @@ async def run_benchmark(
                     input_data=eval_data["input_data"],
                     scoring_criteria=eval_data["scoring_criteria"],
                     api_name=request.api_name,
+                    provider_credentials=own_key,
                 )
                 tasks.append(task)
 

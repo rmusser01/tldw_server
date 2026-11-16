@@ -108,7 +108,7 @@ async def test_jwt_quota_enforced_for_chat_and_rag_sqlite(monkeypatch, tmp_path,
 
         # Monkeypatch chat API call at endpoint layer to avoid external calls
         import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-        monkeypatch.setattr(chat_endpoint, 'perform_chat_api_call', lambda **kwargs: _chat_stub_response())
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: _chat_stub_response())
         # Provide a dummy provider key
         monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test"}))
 
@@ -267,7 +267,7 @@ async def test_api_key_quota_enforced_for_rag_and_chat_sqlite(monkeypatch, tmp_p
 
             # Chat with API key: monkeypatch orchestrator and enforce max_calls=1
             import tldw_Server_API.app.api.v1.endpoints.chat as chat_endpoint
-            monkeypatch.setattr(chat_endpoint, 'perform_chat_api_call', lambda **kwargs: _chat_stub_response())
+            monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: _chat_stub_response())
             monkeypatch.setattr(config_llm_providers, "get_api_keys", api_keys_source({"openai": "test"}))
             vk2 = await mgr.create_virtual_key(
                 user_id=int(user_id),

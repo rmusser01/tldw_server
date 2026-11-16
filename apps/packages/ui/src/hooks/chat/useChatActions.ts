@@ -3886,7 +3886,7 @@ export const useChatActions = ({
         }
       }
       if (historyRegenerate && (!isRegenerate || historyEditResend || historyRetryAdmission || !selectedHistoryTurn))
-        throw new Error("unsupported_history_regeneration")
+        throw new Error(historyRegenerate.action === "continue" ? "unsupported_history_continuation" : "unsupported_history_regeneration")
       if (greetingSeed && (!historySelection || turnResolvedSendMode !== "tracked_character" ||
           !greetingIsCurrent || !greetingIsCurrent() || message || isRegenerate || isContinue ||
           compareModeActive || turnUsesImageMode || turnContextFiles.length || docs?.length ||

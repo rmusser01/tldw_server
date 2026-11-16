@@ -63,3 +63,38 @@ describe("SidepanelHeaderSimple focus indicators", () => {
     }
   })
 })
+
+// AX-14 (#3123): every side-panel page has one h1 naming it.
+describe("SidepanelHeaderSimple page heading", () => {
+  it("names the chat page with a visually hidden h1", () => {
+    render(
+      <MemoryRouter>
+        <SidepanelHeaderSimple activeTitle="Trip planning" />
+      </MemoryRouter>
+    )
+
+    const heading = screen.getByRole("heading", { level: 1 })
+    expect(heading).toHaveTextContent("Chat")
+    expect(heading).toHaveClass("sr-only")
+  })
+
+  it("names another side-panel page with the heading it passes", () => {
+    render(
+      <MemoryRouter>
+        <SidepanelHeaderSimple activeTitle="Companion" heading="Companion" />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Companion")
+  })
+
+  it("adds no h1 for a page that renders its own", () => {
+    render(
+      <MemoryRouter>
+        <SidepanelHeaderSimple activeTitle="Companion" heading={null} />
+      </MemoryRouter>
+    )
+
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull()
+  })
+})

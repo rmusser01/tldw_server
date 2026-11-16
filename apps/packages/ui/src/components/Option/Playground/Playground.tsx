@@ -82,6 +82,7 @@ import {
 } from "@/store/model";
 import { hasCurrentServerChatSelection, usePlaygroundSessionStore } from "@/store/playground-session";
 import { useServerChatRouteSync } from "@/hooks/chat/useServerChatRouteSync";
+import { settleHistoryHandoff } from "@/hooks/chat/server-chat-route";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
 import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton";
@@ -1993,6 +1994,8 @@ const PlaygroundContent = () => {
       // this one-shot effect and cancel readiness before init resolves.
       await initializePlaygroundCallbackRef.current(controller.signal);
       if (!cancelled) {
+        // A handoff link the page arrived with is now loaded or failed (#3119).
+        settleHistoryHandoff();
         setPlaygroundReady(true);
       }
     };
@@ -4140,15 +4143,6 @@ const PlaygroundContent = () => {
                   : ""
               }`}
             >
-              {!isMobileViewport && !focusModeActive ? (
-                <div
-                  className={`mx-auto w-full ${chatContentWidthClassName} px-4 pt-2 text-[11px] text-text-muted`}
-                >
-                  <span className="inline-flex items-center rounded-full border border-border bg-surface2 px-2 py-0.5">
-                    {t("playground:regions.composer", "Composer")}
-                  </span>
-                </div>
-              ) : null}
               {!isAutoScrollToBottom && messages.length > 0 && (
                 <ScrollToLatestButton
                   onClick={() => autoScrollToBottom()}

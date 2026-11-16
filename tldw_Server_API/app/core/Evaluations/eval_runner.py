@@ -13,6 +13,7 @@ import asyncio
 import os
 import statistics
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from copy import deepcopy
 from datetime import datetime
@@ -58,6 +59,11 @@ from tldw_Server_API.app.core.Evaluations.run_state import (
 )
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_geval_metric
 from tldw_Server_API.app.core.Evaluations.webhook_security import webhook_validator
+from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
+from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
+    PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
+    is_runtime_issued_provider_call_credentials,
+)
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import SummaryProviderError
 from tldw_Server_API.app.core.RAG.rag_custom_metrics import get_custom_metrics
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
@@ -113,11 +119,17 @@ def _call_adapter_text(
     user: Optional[str] = None,
     app_config: Optional[dict[str, Any]] = None,
     timeout: Optional[float] = None,
+    provider_credentials: Any = None,
     **extra_kwargs: Any,
 ) -> str:
     provider = normalize_provider(api_endpoint)
     if not provider:
         raise ChatConfigurationError(provider=api_endpoint, message="LLM provider is required.")
+    if provider_credentials is not None:  # the user's own key, recorded as theirs (TASK-15426)
+        if not is_runtime_issued_provider_call_credentials(provider_credentials, provider=provider):
+            raise ChatConfigurationError(provider=provider, message="Provider credential context is invalid.")
+        api_key, app_config = provider_credentials.api_key, provider_credentials.app_config
+        extra_kwargs.update({PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY: provider_credentials, "credentials_resolved": True})
     cfg = ensure_app_config(app_config)
     resolved_model = model or resolve_provider_model(provider, cfg)
     if not resolved_model:
@@ -141,6 +153,24 @@ def _call_adapter_text(
     response = get_adapter_or_raise(provider).chat(request, timeout=timeout)
     return extract_response_content(response) or str(response)
 
+
+_LLM_RUN_TYPES = frozenset({"model_graded", "label_choice", "nli_factcheck"})
+
+
+def run_llm_provider(
+    evaluation: Optional[Mapping[str, Any]], run_config: Optional[Mapping[str, Any]]
+) -> tuple[Optional[str], Optional[str]]:
+    """The provider and model every LLM call of an evaluation run uses, as the runner resolves them (TASK-15426).
+
+    ``(None, None)`` when the run cannot be placed on one key: no evaluation, a type that makes no LLM
+    call, a raw ``api_key`` in the spec or the run config (it counts), or a ``rag_pipeline`` run, whose
+    pipeline stages pick their own providers.
+    """
+    spec = (evaluation or {}).get("eval_spec") or {}
+    if (evaluation or {}).get("eval_type") not in _LLM_RUN_TYPES or spec.get("sub_type") == "rag_pipeline":
+        return None, None
+    api_name, model, api_key = EvaluationRunner._resolve_eval_provider_model_api_key(spec, {"config": run_config})
+    return (None, None) if api_key else (canonical_provider_name(api_name), model)
 
 
 class EvaluationRunner:
@@ -166,8 +196,8 @@ class EvaluationRunner:
         self.semaphore = asyncio.Semaphore(max_concurrent_evals)
         self.eval_timeout = eval_timeout
 
+    @staticmethod
     def _resolve_eval_provider_model_api_key(
-        self,
         eval_spec: dict[str, Any],
         eval_config: dict[str, Any],
     ) -> tuple[str, Optional[str], Optional[str]]:
@@ -1459,6 +1489,7 @@ class EvaluationRunner:
                 api_name=api_name,
                 model=model_override,
                 save=False,
+                provider_credentials=config.get("provider_credentials"),
             )
             result = await loop.run_in_executor(None, call_geval)
 
@@ -1529,7 +1560,12 @@ class EvaluationRunner:
 
             # Run RAG evaluation
             api_name, model_override, _ = self._resolve_eval_provider_model_api_key(eval_spec, config)
-            result = await self.rag_evaluator.evaluate(
+            handle = config.get("provider_credentials")
+            # On the user's own key the similarity is the LLM's too, as on /evaluations/rag (TASK-15426).
+            evaluator = self.rag_evaluator if handle is None else RAGEvaluator(
+                embedding_provider=None, embedding_model=None, provider_credentials=handle
+            )
+            result = await evaluator.evaluate(
                 query=query,
                 contexts=contexts,
                 response=response,
@@ -1599,6 +1635,7 @@ class EvaluationRunner:
                 custom_criteria=eval_spec.get("custom_criteria"),
                 api_name=api_name,
                 model=model_override,
+                provider_credentials=config.get("provider_credentials"),
             )
 
             # Extract scores
@@ -1925,6 +1962,7 @@ class EvaluationRunner:
                         max_tokens=16,
                         api_key=api_key,
                         model=model_override,
+                        provider_credentials=config.get("provider_credentials"),
                     )
                 except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as ce:
                     logger.error(f"Chat call failed for label_choice {sample_id}: {ce}")
@@ -2119,6 +2157,7 @@ class EvaluationRunner:
                         max_tokens=16,
                         api_key=api_key,
                         model=model_override,
+                        provider_credentials=config.get("provider_credentials"),
                     )
                 except _EVAL_RUNNER_NONCRITICAL_EXCEPTIONS as ce:
                     logger.error(f"Chat call failed for nli_factcheck {sample_id}: {ce}")

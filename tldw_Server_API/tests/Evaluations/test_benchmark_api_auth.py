@@ -27,7 +27,7 @@ def _make_app() -> FastAPI:
     return app
 
 
-def _override_user(app: FastAPI, permissions: list[str]) -> None:
+def _override_user(app: FastAPI, permissions: list[str], user_id: int = 1) -> None:
     """Override the app's eval auth deps with a fake user holding ``permissions``."""
 
     async def _verify_api_key_override() -> str:
@@ -37,7 +37,7 @@ def _override_user(app: FastAPI, permissions: list[str]) -> None:
     async def _get_user_override() -> User:
         """Return a fake authenticated user whose permissions the test controls live."""
         return User(
-            id=1,
+            id=user_id,
             username="tester",
             email=None,
             is_active=True,
@@ -124,23 +124,66 @@ def test_run_routes_accept_evals_manage_permission() -> None:
         assert evaluate_resp.status_code == 200, evaluate_resp.text
 
 
-def test_run_route_refuses_an_over_quota_user_before_any_work(monkeypatch) -> None:
-    """The standalone run route checks the LLM quota before it looks up the benchmark (TASK-13638), whatever keys
-    the user stored: its items run on the server's key or a raw ``api_key`` (TASK-13956)."""
-    from tldw_Server_API.tests.helpers.llm_quota import (
-        assert_llm_quota_402,
-        own_keys_for_every_provider,
-        refuse_llm_work,
-    )
+@pytest.mark.parametrize(
+    ("body", "stored", "expected", "asks"),
+    [({}, "openai", 404, ["openai"]), ({}, "anthropic", 402, ["openai"]), ({"api_key": "sk-raw"}, "openai", 402, [])],
+    ids=["own-key", "server-key", "raw-api-key"],
+)
+def test_run_route_names_its_provider_to_the_llm_quota(monkeypatch, body, stored, expected, asks) -> None:
+    """The standalone run route checks the LLM quota before it looks up the benchmark (TASK-13638), naming its
+    provider: a run on the user's own key goes on to the benchmark lookup (here a 404); a run on the server's key,
+    or on a raw ``api_key`` (which counts, so the route names no provider), gets the 402 (TASK-15426)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work, users_own_key
 
     refuse_llm_work(monkeypatch)
-    asked = own_keys_for_every_provider(monkeypatch)
+    asked = users_own_key(monkeypatch, stored)
     app = _make_app()
     _override_user(app, [EVALS_MANAGE])
 
     with TestClient(app) as client:
-        response = client.post("/api/v1/benchmarks/does-not-exist/run", json={})
+        response = client.post("/api/v1/benchmarks/does-not-exist/run", json=body)
 
-    assert_llm_quota_402(response)
-    assert response.json()["detail"]["error"] == "limit_exceeded"
-    assert asked == []
+    assert asked == asks
+    if expected == 402:
+        assert_llm_quota_402(response)
+    else:
+        assert response.status_code == expected, response.text
+
+
+def test_a_run_saved_by_default_is_stored_for_its_user(monkeypatch, tmp_path) -> None:
+    """A run with ``save_results`` (the default) returns 200 and is stored in the user's own evaluations database
+    under their id. The route stored its rate limiter as ``user_id``, so ``json.dumps`` failed with a 500 after every
+    item's LLM calls had run (TASK-15426, review of PR B)."""
+    import asyncio
+    import json
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Evaluations.evaluation_manager import EvaluationManager
+
+    async def _evaluate(_manager, **_kwargs):
+        return {"score": 0.8, "explanation": "ok"}
+
+    item = {
+        "name": "m", "description": "d", "evaluation_prompt": "{q}", "input_data": {"q": "q"}, "scoring_criteria": {}
+    }
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        benchmark_module,
+        "get_registry",
+        lambda: SimpleNamespace(
+            get=lambda _name: SimpleNamespace(evaluation_type="demo"),
+            create_evaluator=lambda _name: SimpleNamespace(format_for_custom_metric=lambda _item: item),
+        ),
+    )
+    monkeypatch.setattr(benchmark_module, "load_benchmark_dataset", lambda *_a, **_k: [{"q": "q"}])
+    monkeypatch.setattr(EvaluationManager, "evaluate_custom_metric", _evaluate)
+    app = _make_app()
+    _override_user(app, [EVALS_MANAGE], user_id=7)
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/benchmarks/demo/run", json={"limit": 1})
+
+    assert response.status_code == 200, response.text
+    stored = asyncio.run(EvaluationManager(user_id=7).get_evaluation(response.json()["evaluation_id"]))
+    assert stored, "the run is not in the user's own evaluations database"
+    assert json.loads(stored["metadata"])["user_id"] == "7"

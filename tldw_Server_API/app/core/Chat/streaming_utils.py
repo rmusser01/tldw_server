@@ -1053,6 +1053,8 @@ class StreamingResponseHandler:
         self.last_activity = time.time()
         self.is_cancelled = False
         self.full_response: list[str] = []
+        self.reasoning_open = False
+        self.retain_reasoning = False
         self.response_size = 0
         self.error_occurred = False
         # Optional transform to apply to textual deltas before emission (e.g., moderation redaction)
@@ -1239,6 +1241,32 @@ class StreamingResponseHandler:
             return True
         return self.is_cancelled and not self.error_occurred
 
+    def _append_response_content(self, text: str, *, reasoning: bool = False) -> bool:
+        """Append one text delta and account for a pending closing delimiter."""
+        if not text:
+            return True
+        if reasoning:
+            text = text.replace("&", "&#x000026;").replace("<", "&#x00003c;")
+        if reasoning != self.reasoning_open:
+            text = ("<think>" if reasoning else "</think>") + text
+        size = len(text.encode("utf-8"))
+        closing_size = len("</think>") if reasoning else 0
+        if self.response_size + size + closing_size > self.max_response_size:
+            return False
+        if len(self.full_response) >= MAX_RESPONSE_LIST_LENGTH:
+            logger.warning(
+                f"Response list length exceeded max ({MAX_RESPONSE_LIST_LENGTH}) for {self.conversation_id}"
+            )
+            return False
+        self.full_response.append(text)
+        self.response_size += size
+        self.reasoning_open = reasoning
+        return True
+
+    def _response_text(self) -> str:
+        """Close a trailing thinking block without changing the forwarded SSE."""
+        return "".join(self.full_response) + ("</think>" if self.reasoning_open else "")
+
     def _absorb_transform_tail(self) -> bool:
         """Fold text a transform still holds back into the partial reply.
 
@@ -1263,17 +1291,8 @@ class StreamingResponseHandler:
                 type(flush_err).__name__,
             )
             return True
-        if not tail:
-            return True
-        tail_text = str(tail)
-        tail_size = len(tail_text.encode("utf-8"))
-        if (
-            self.response_size + tail_size > self.max_response_size
-            or len(self.full_response) >= MAX_RESPONSE_LIST_LENGTH
-        ):
-            return True
-        self.full_response.append(tail_text)
-        self.response_size += tail_size
+        if tail:
+            self._append_response_content(str(tail))
         return True
 
     def _start_partial_settlement(
@@ -1297,7 +1316,7 @@ class StreamingResponseHandler:
         self._settlement_started = True
         if not self._absorb_transform_tail():
             return None
-        partial_text = "".join(self.full_response)
+        partial_text = self._response_text()
         if not partial_text.strip():
             return None
         generation = self.generation_snapshot()
@@ -1523,21 +1542,11 @@ class StreamingResponseHandler:
                     or stripped_chunk.startswith((":", "event:", "data:"))
                 )
 
-            def append_content(text_piece: str) -> bool:
-                if not text_piece:
-                    return True
-                chunk_size = len(text_piece.encode("utf-8"))
-                if self.response_size + chunk_size > self.max_response_size:
-                    return False
-                # Also check list length to prevent unbounded item count
-                if len(self.full_response) >= MAX_RESPONSE_LIST_LENGTH:
-                    logger.warning(
-                        f"Response list length exceeded max ({MAX_RESPONSE_LIST_LENGTH}) for {self.conversation_id}"
-                    )
-                    return False
-                self.full_response.append(text_piece)
-                self.response_size += chunk_size
-                return True
+            def response_size_error() -> str:
+                payload = {"error": {"message": "Response size limit exceeded"}}
+                self._attach_stream_metadata(payload)
+                self.error_occurred = True
+                return sse_data(payload)
 
             def canonical_provider_error(value: Any) -> str:
                 err_payload = provider_stream_error_payload(value)
@@ -1633,6 +1642,8 @@ class StreamingResponseHandler:
                     self.stream_usage.feed_event(data)
                     if isinstance(data, dict):
                         choices = data.get("choices")
+                        additional = data.get("additional_kwargs")
+                        extra_reasoning = additional.get("reasoning_content") if isinstance(additional, dict) else None
                         if isinstance(choices, list) and choices:
                             self.openai_sse_seen = True
                             for choice in choices:
@@ -1686,6 +1697,16 @@ class StreamingResponseHandler:
                                 ):
                                     self.semantic_output_seen = True
                                     first_output_pending = True
+                                reasoning = delta.get("reasoning_content")
+                                if reasoning is None:
+                                    reasoning = extra_reasoning
+                                if (
+                                    self.retain_reasoning
+                                    and choice.get("index", 0) == 0
+                                    and isinstance(reasoning, str)
+                                    and not self._append_response_content(reasoning, reasoning=True)
+                                ):
+                                    return [response_size_error()], True
                                 refusal = delta.get("refusal")
                                 if isinstance(refusal, str) and refusal:
                                     self.semantic_output_seen = True
@@ -1731,18 +1752,19 @@ class StreamingResponseHandler:
                                         outputs.append(sse_data(err_payload))
                                         self.error_occurred = True
                                         return outputs, True
-                                    if text_piece and not append_content(text_piece):
-                                        err_payload = {"error": {"message": "Response size limit exceeded"}}
-                                        self._attach_stream_metadata(err_payload)
-                                        outputs.append(sse_data(err_payload))
-                                        self.error_occurred = True
-                                        return outputs, True
+                                    if not self._append_response_content(text_piece):
+                                        return [response_size_error()], True
                                     delta["content"] = text_piece
                             self._attach_stream_metadata(data)
                             outputs.append(sse_data(data))
                             self.update_activity()
                             return outputs, False
                     if isinstance(data, dict):
+                        if self.retain_reasoning and isinstance(extra_reasoning, str) and extra_reasoning:
+                            if not self._append_response_content(extra_reasoning, reasoning=True):
+                                return [response_size_error()], True
+                            self.semantic_output_seen = True
+                            first_output_pending = True
                         if not self.forward_usage_chunk and is_empty_choices_usage_chunk(data):
                             # A usage chunk the client did not ask for: read above for the usage record, not sent.
                             self.update_activity()
@@ -1803,12 +1825,8 @@ class StreamingResponseHandler:
                     outputs.append(sse_data(err_payload))
                     self.error_occurred = True
                     return outputs, True
-                if text_piece and not append_content(text_piece):
-                    err_payload = {"error": {"message": "Response size limit exceeded"}}
-                    self._attach_stream_metadata(err_payload)
-                    outputs.append(sse_data(err_payload))
-                    self.error_occurred = True
-                    return outputs, True
+                if not self._append_response_content(text_piece):
+                    return [response_size_error()], True
                 if text_piece:
                     content_payload = {"choices": [{"delta": {"content": text_piece}}]}
                     self._attach_stream_metadata(content_payload)
@@ -1970,7 +1988,7 @@ class StreamingResponseHandler:
                         except _STREAMING_NONCRITICAL_EXCEPTIONS:
                             flush_text = ""
                         if flush_text:
-                            if append_content(flush_text):
+                            if self._append_response_content(flush_text):
                                 content_payload = {"choices": [{"delta": {"content": flush_text}}]}
                                 self._attach_stream_metadata(content_payload)
                                 yield sse_data(content_payload)
@@ -2056,11 +2074,8 @@ class StreamingResponseHandler:
                             except _STREAMING_NONCRITICAL_EXCEPTIONS:
                                 flush_text = ""
                             if flush_text:
-                                if not append_content(flush_text):
-                                    err_payload = {"error": {"message": "Response size limit exceeded"}}
-                                    self._attach_stream_metadata(err_payload)
-                                    yield sse_data(err_payload)
-                                    self.error_occurred = True
+                                if not self._append_response_content(flush_text):
+                                    yield response_size_error()
                                 else:
                                     content_payload = {"choices": [{"delta": {"content": flush_text}}]}
                                     self._attach_stream_metadata(content_payload)
@@ -2110,7 +2125,7 @@ class StreamingResponseHandler:
                     # The complete reply is being settled; a stop or timeout that
                     # arrives during the save must not also save it as a partial.
                     self._settlement_started = True
-                    full_text = "".join(self.full_response)
+                    full_text = self._response_text()
                     aggregated_tool_calls = self.get_accumulated_tool_calls()
                     aggregated_function_call = self.get_accumulated_function_call()
                     extra_events: list[dict[str, Any]] = []
@@ -2256,6 +2271,7 @@ async def create_streaming_response_with_timeout(
     user_message_id: Optional[str] = None,
     partial_save_callback: Optional[Callable[..., Any]] = None,
     forward_usage_chunk: bool = True,
+    retain_reasoning: bool = False,
 ) -> AsyncIterator[str]:
     """
     Create a streaming response with timeout and error handling.
@@ -2278,6 +2294,7 @@ async def create_streaming_response_with_timeout(
             unfinished reply; see ``StreamingResponseHandler.safe_stream_generator``
         forward_usage_chunk: False keeps a usage chunk with empty ``choices`` from the client
             (it is still read for the usage record)
+        retain_reasoning: Include typed thinking in the text passed to persistence callbacks.
 
     Yields:
         SSE formatted messages
@@ -2293,6 +2310,7 @@ async def create_streaming_response_with_timeout(
     handler.history_persistence_ack = history_persistence_ack
     handler.user_message_id = user_message_id
     handler.forward_usage_chunk = forward_usage_chunk
+    handler.retain_reasoning = retain_reasoning
     if isinstance(continuation_metadata, dict) and continuation_metadata:
         handler.continuation_metadata = dict(continuation_metadata)
 

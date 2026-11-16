@@ -15,9 +15,9 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summary
 from tldw_Server_API.app.core.Usage import llm_accounting, quota_resolver
-from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context
+from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_call_context, current_llm_user_id
 from tldw_Server_API.app.core.Usage.llm_quota_gate import user_to_check
-from tldw_Server_API.tests.helpers.llm_quota import own_keys_for_every_provider, refuse_llm_calls
+from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls, users_own_key
 
 pytestmark = pytest.mark.integration
 
@@ -40,7 +40,7 @@ def _write_wav(tmp_path: Path) -> Path:
     return source
 
 
-def _create_job(manager: JobManager, tmp_path: Path, source: Path, media_type: str) -> dict[str, Any]:
+def _create_job(manager: JobManager, tmp_path: Path, source: Path, media_type: str, **options: Any) -> dict[str, Any]:
     return manager.create_job(
         domain="media_ingest",
         queue="default",
@@ -59,6 +59,7 @@ def _create_job(manager: JobManager, tmp_path: Path, source: Path, media_type: s
                 "api_name": "openai",
                 "perform_chunking": False,
                 "generate_embeddings": False,
+                **options,
             },
         },
     )
@@ -162,22 +163,52 @@ async def test_a_refused_document_batch_keeps_every_document(job_dbs: Path, refu
 
 
 @pytest.mark.asyncio
-async def test_a_stored_key_for_the_analysis_provider_does_not_admit_the_job(
-    job_dbs: Path, refused: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("stored", "options"),
+    [("anthropic", {}), ("openai", {"perform_confabulation_check_of_analysis": True})],
+    ids=["another-provider", "own-key-and-another-llm-stage"],
+)
+async def test_a_stored_key_for_another_provider_keeps_the_refusal(
+    job_dbs: Path, refused: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch, stored: str, options: dict
 ) -> None:
-    """Job analysis runs on the server's key, never the owner's, so an own key leaves the start check as it was.
-
-    Refused, the job is stored without analysis and makes no LLM call (TASK-13956).
-    """
-    asked = own_keys_for_every_provider(monkeypatch)
+    """An over-limit owner whose analysis provider runs on the server's key, or who also turned on another LLM stage,
+    is refused at the start, as before (TASK-15426)."""
+    asked = users_own_key(monkeypatch, stored)
     manager = JobManager()
-    row = _create_job(manager, job_dbs, _write_document(job_dbs, "Cedar"), "document")
+    row = _create_job(manager, job_dbs, _write_document(job_dbs, "Cedar"), "document", **options)
 
     await _run_jobs(manager, 1)
 
     _assert_kept_with_refusal(manager.get_job(int(row["id"])), job_dbs, "Project Cedar opens")
     assert refused == []
-    assert asked == []
+    assert asked == ["openai"]
+
+
+@pytest.mark.asyncio
+async def test_an_over_limit_owner_whose_analysis_runs_on_their_own_key_is_admitted_unmarked(
+    job_dbs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The start check admits an over-limit owner whose analysis provider runs on their own key without marking
+    the job admitted; the analysis runs on that key (TASK-15426)."""
+    calls: list[tuple[Any, bool]] = []
+
+    def _analysis(**kwargs: Any) -> str:
+        calls.append((getattr(kwargs["provider_credentials"], "api_key", None), current_llm_call_context().prechecked))
+        return "Cedar opens in January."
+
+    monkeypatch.setattr(summary, "_summarize_via_adapter", _analysis)
+    refuse_llm_calls(monkeypatch)
+    asked = users_own_key(monkeypatch, "openai")
+    manager = JobManager()
+    row = _create_job(manager, job_dbs, _write_document(job_dbs, "Cedar"), "document")
+
+    await _run_jobs(manager, 1)
+
+    result = manager.get_job(int(row["id"]))["result"]
+    assert result["status"] == "Success", result
+    assert "analysis_error" not in result
+    assert calls == [("sk-users-own-key", False)]
+    assert asked == ["openai"]
 
 
 @pytest.mark.asyncio
@@ -221,12 +252,49 @@ async def test_an_admitted_job_is_not_checked_again_part_way(
 async def test_the_admission_ends_with_the_job(
     job_dbs: Path, under_the_limit: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A job admitted at its start leaves no admission behind for whatever its caller runs next."""
-    monkeypatch.setattr(summary, "_summarize_via_adapter", lambda **_kwargs: "Cedar opens in January.")
+    """A job admitted at its start leaves no admission and no owner's key behind for whatever its caller runs next
+    (TASK-15426)."""
+    used: list[Any] = []
+    monkeypatch.setattr(
+        summary, "_summarize_via_adapter", lambda **kwargs: used.append(kwargs["provider_credentials"]) or "Cedar opens."
+    )
+    users_own_key(monkeypatch, "openai")
     manager = JobManager()
     row = _create_job(manager, job_dbs, _write_document(job_dbs, "Cedar"), "document")
 
     result = await worker._handle_job(manager.get_job(int(row["id"])), manager, worker._ProgressState())
 
     assert result["status"] == "Success", result
+    assert [getattr(handle, "api_key", None) for handle in used] == ["sk-users-own-key"]
     assert current_llm_call_context().prechecked is False
+    assert current_llm_call_context().provider_credentials is None
+
+
+@pytest.mark.asyncio
+async def test_the_embeddings_task_carries_no_key_and_no_admission(
+    job_dbs: Path, under_the_limit: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fire-and-forget embeddings task outlives the job, so it starts with neither the job's admission nor the
+    owner's key: an LLM call it made would be checked at the call, on the server's key (TASK-15500)."""
+    seen: list[Any] = []
+    started = asyncio.Event()
+
+    async def _embeddings(**kwargs: Any) -> None:
+        seen.append((current_llm_call_context(), current_llm_user_id(), kwargs["user_id"]))
+        started.set()
+
+    monkeypatch.setattr(worker, "_schedule_embeddings", _embeddings)
+    monkeypatch.setattr(summary, "_summarize_via_adapter", lambda **_kwargs: "Cedar opens.")
+    users_own_key(monkeypatch, "openai")
+    manager = JobManager()
+    row = _create_job(manager, job_dbs, _write_document(job_dbs, "Cedar"), "document", generate_embeddings=True)
+
+    result = await worker._handle_job(manager.get_job(int(row["id"])), manager, worker._ProgressState())
+    await asyncio.wait_for(started.wait(), timeout=5)
+
+    assert result["status"] == "Success", result
+    [(context, context_user_id, user_id)] = seen
+    assert context.provider_credentials is None
+    assert context.prechecked is False
+    assert context_user_id == 1
+    assert str(user_id) == "1"

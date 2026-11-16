@@ -4,7 +4,7 @@ from typing import BinaryIO
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.document_outline import OutlineEntry
+from tldw_Server_API.app.core.Media.document_outline_schemas import OutlineEntry
 
 # Maximum file size for outline extraction (500 MB)
 MAX_OUTLINE_FILE_SIZE = 500 * 1024 * 1024

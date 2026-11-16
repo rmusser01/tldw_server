@@ -12,11 +12,10 @@ shapes, which are not equally bad:
   schema at runtime: the models moved into core and the api modules re-export them. The
   one exception is type-only, ``ChaChaNotes_DB.py:63`` under ``TYPE_CHECKING``, which
   creates no runtime edge. The remaining core -> api pairs are true inversions.
-* True inversions: core importing ``api/v1/endpoints/*`` or ``api/v1/API_Deps/*``.
-  ``Ingestion_Media_Processing/persistence.py`` has one: the background embedding task
-  that ``schedule_media_add_embeddings`` schedules (``generate_embeddings_task``) lazily
-  imports ``generate_embeddings_for_media`` and ``get_media_content`` from
-  ``api.v1.endpoints.media_embeddings``, so core calls into an endpoint module.
+* True inversions: core importing ``api/v1/endpoints/*`` or ``api/v1/API_Deps/*``. Since
+  TASK-13950.20 core reaches ``api.v1.endpoints.*`` only through TASK-13950.28's
+  ``embeddings_v5_production_enhanced`` imports (the media-embeddings helpers moved to
+  ``core/Embeddings/media_embeddings.py`` with their two lazy imports of it).
 
 Pair-based since TASK-13950.9. This is the core -> api view of the layering contract
 (test_layering_contract.py), which counts module- and function-level import statements

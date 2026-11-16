@@ -1,4 +1,5 @@
 import { extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
+import { encodeReasoningText } from "@/libs/reasoning"
 
 export type StreamingChunk =
   | string
@@ -170,7 +171,7 @@ export const consumeStreamingChunk = (
 
   if (reasoningDelta) {
     const reasoningText =
-      typeof reasoningDelta === "string" ? reasoningDelta : ""
+      typeof reasoningDelta === "string" ? encodeReasoningText(reasoningDelta) : ""
     const reasoningContent = `${apiReasoning ? "" : "<think>"}${reasoningText}`
     fullText += reasoningContent
     contentToSave += reasoningContent

@@ -13,7 +13,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_password_service_dep,
     get_registration_service_dep,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
+from tldw_Server_API.app.api.v1.utils.pagination import build_offset_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.admin_schemas import (
     AdminMfaRequirementRequest,
     AdminMfaRequirementResponse,

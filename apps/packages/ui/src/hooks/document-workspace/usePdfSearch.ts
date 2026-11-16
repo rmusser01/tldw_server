@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import type { DocumentProps } from "react-pdf"
 import { useDocumentWorkspaceStore } from "@/store/document-workspace"
 
@@ -239,7 +240,7 @@ export function usePdfSearch(
               activeSpan.classList.add("pdf-search-match-active")
               if (scrollToActive) {
                 pendingScrollPageRef.current = null
-                activeSpan.scrollIntoView({ behavior: "smooth", block: "center" })
+                activeSpan.scrollIntoView({ behavior: smoothScrollBehavior(), block: "center" })
               }
             }
           }

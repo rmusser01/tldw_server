@@ -143,7 +143,7 @@ def test_server_completion_refuses_stale_tip_before_provider_or_writes(history_a
     def forbidden(*args, **kwargs):
         raise AssertionError("a refused admission must not reach the provider")
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", forbidden)
     response = completion(client, cid, headers, tip, tldw_history_branch=False, stream=stream)
     assert_branch_changed(response, db, cid)
     assert (db.count_messages_for_conversation(cid), db.get_conversation_settings(cid)) == before
@@ -236,7 +236,7 @@ def test_protected_edit_refuses_excluded_target_change_before_any_write_or_provi
         provider_calls.append(True)
         raise AssertionError("changed excluded target reached provider")
 
-    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", forbidden)
     kwargs = {"tldw_history_branch": True, "tldw_history_edit_v1": target}
     response = (
         send(client, cid, headers, selection, "edit-input", **kwargs)

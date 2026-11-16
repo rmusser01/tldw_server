@@ -5,7 +5,7 @@ Telegram is a small core helper package for deterministic Telegram chat-to-sessi
 ## Start Here
 
 - `session_mapper.py` contains the session-key and conversation-id helpers.
-- Related API surface: `app/api/v1/endpoints/telegram.py`, `app/api/v1/endpoints/telegram_support.py`, and `app/api/v1/endpoints/integrations_control_plane.py`.
+- Related API surface: `app/api/v1/endpoints/telegram.py`, `app/api/v1/utils/chatops/telegram_support.py`, and `app/api/v1/endpoints/integrations_control_plane.py`.
 - Related schemas: `app/api/v1/schemas/telegram_schemas.py`.
 - Related tests: `tests/Telegram/`.
 
@@ -23,7 +23,7 @@ Telegram is a small core helper package for deterministic Telegram chat-to-sessi
 ## How It Connects
 
 - `app/api/v1/endpoints/telegram.py` handles webhook and command entry points that use these session keys.
-- `app/api/v1/endpoints/telegram_support.py` and `app/api/v1/endpoints/integrations_control_plane.py` expose support/admin operations around Telegram integrations.
+- `app/api/v1/utils/chatops/telegram_support.py` and `app/api/v1/endpoints/integrations_control_plane.py` expose support/admin operations around Telegram integrations.
 - `app/core/AuthNZ/repos/telegram_runtime_repo.py` and `telegram_approvals_repo.py` store runtime and approval state.
 - `app/services/telegram_delivery_service.py` handles outbound delivery.
 

@@ -553,14 +553,22 @@ class EvaluationManager:
         scoring_criteria: dict[str, Any],
         api_name: str = "openai",
         api_key: Optional[str] = None,
+        provider_credentials: Any = None,
     ) -> dict[str, Any]:
-        """Evaluate using custom metric definition"""
+        """Evaluate using custom metric definition.
+
+        Both LLM calls, the model's response (when an input value is ``{model_response}``) and the judge's score,
+        run on the key of ``provider_credentials`` when it is given (the user's own key; TASK-15426), else on
+        ``api_key`` or the server's. ``score`` is None when the item has no score (its model or judge call failed,
+        or the reply held none): the callers count it unscored, in no average (TASK-15485).
+        """
         runtime_input_data = dict(input_data)
         if self._contains_model_response_placeholder(runtime_input_data):
             model_call = self._generate_model_response(
                 input_data=runtime_input_data,
                 api_name=api_name,
                 api_key=api_key,
+                provider_credentials=provider_credentials,
             )
             try:
                 model_response = await model_call
@@ -602,6 +610,7 @@ class EvaluationManager:
                 temp=0.3,
                 system_message="You are an expert evaluator. Provide scores and detailed explanations.",
                 input_is_literal_text=True,
+                provider_credentials=provider_credentials,
             )
 
             # A failed judge call (provider error, timeout, rate limit, truncated or empty reply)
@@ -760,6 +769,7 @@ class EvaluationManager:
         input_data: dict[str, Any],
         api_name: str,
         api_key: Optional[str],
+        provider_credentials: Any = None,
     ) -> str:
         prompt = self._build_model_response_prompt(input_data)
         response = await asyncio.to_thread(
@@ -772,6 +782,7 @@ class EvaluationManager:
             system_message=(
                 "You are a helpful assistant. Respond directly to the task."
             ),
+            provider_credentials=provider_credentials,
         )
         if isinstance(response, str):
             return response.strip()

@@ -50,7 +50,7 @@ describe("Playground responsive parity guard", () => {
     expect(playgroundSource).toContain("hidden sm:inline-flex")
     expect(playgroundSource).toContain("border-b border-border/60 px-2 py-1 sm:px-4")
     expect(playgroundSource).toContain("px-2 sm:px-4")
-    expect(playgroundSource).toContain('!isMobileViewport && !focusModeActive ? (')
+    expect(playgroundSource).not.toContain('"playground:regions.composer"')
     const toolbarSource = fs.readFileSync(path.resolve(__dirname, "../ComposerToolbar.tsx"), "utf8")
     expect(formSource).toContain("flex w-full min-w-0 flex-col")
     expect(formSource).toContain("rounded-2xl border border-border bg-surface p-3")

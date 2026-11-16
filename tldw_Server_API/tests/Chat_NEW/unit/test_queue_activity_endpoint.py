@@ -56,7 +56,7 @@ def auth_override():
 @pytest.mark.unit
 def test_queue_activity_endpoint_enabled_default_limit(auth_override):
     with TestClient(app) as client:
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=_QStub()):
+        with patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=_QStub()):
             resp = client.get("/api/v1/chat/queue/activity")
             assert resp.status_code == 200
             data = resp.json()
@@ -68,7 +68,7 @@ def test_queue_activity_endpoint_enabled_default_limit(auth_override):
 @pytest.mark.unit
 def test_queue_activity_endpoint_enabled_custom_limit(auth_override):
     with TestClient(app) as client:
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=_QStub()):
+        with patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=_QStub()):
             resp = client.get("/api/v1/chat/queue/activity?limit=2")
             assert resp.status_code == 200
             data = resp.json()
@@ -80,7 +80,7 @@ def test_queue_activity_endpoint_enabled_custom_limit(auth_override):
 @pytest.mark.unit
 def test_queue_activity_endpoint_disabled(auth_override):
     with TestClient(app) as client:
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=None):
+        with patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=None):
             resp = client.get("/api/v1/chat/queue/activity?limit=5")
             assert resp.status_code == 200
             data = resp.json()
@@ -90,7 +90,7 @@ def test_queue_activity_endpoint_disabled(auth_override):
 @pytest.mark.unit
 def test_queue_activity_endpoint_limit_too_large(auth_override):
     with TestClient(app) as client:
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=_QStub()):
+        with patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=_QStub()):
             resp = client.get("/api/v1/chat/queue/activity?limit=1001")
             assert resp.status_code == 400
             assert "limit" in resp.json().get("detail", "").lower()
@@ -99,7 +99,7 @@ def test_queue_activity_endpoint_limit_too_large(auth_override):
 @pytest.mark.unit
 def test_queue_activity_endpoint_limit_too_small(auth_override):
     with TestClient(app) as client:
-        with patch("tldw_Server_API.app.api.v1.endpoints.chat.get_request_queue", return_value=_QStub()):
+        with patch("tldw_Server_API.app.core.Chat.request_queue.get_request_queue", return_value=_QStub()):
             resp = client.get("/api/v1/chat/queue/activity?limit=0")
             assert resp.status_code == 400
             assert "limit" in resp.json().get("detail", "").lower()

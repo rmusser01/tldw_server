@@ -758,12 +758,18 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       applicationChatHistory.push(webSearchSystemMessage)
     }
 
+    const capture = ctx.historyTurn?.capture
+    const supportsReasoningHistory =
+      capture?.status === "captured" &&
+      capture.native_completion_v1?.reasoning_history_supported === true
+
     return {
       chatHistory: applicationChatHistory,
       ...(!actorRewritesHistory && !(ctx.useOCR && ctx.image) && ctx.messageForModel === undefined &&
         !ctx.historyTurn?.clientManagedContext &&
         !(ctx.historyForModel ?? ctx.history).some(row => row.role === "system" || (row.role === "assistant" &&
-          (decodeChatErrorPayload(row.content) || removeReasoning(row.content) !== row.content)))
+          (decodeChatErrorPayload(row.content) ||
+            (!supportsReasoningHistory && removeReasoning(row.content) !== row.content))))
         ? { nativeCurrentInput: [...currentSystemMessages, ...(webSearchSystemMessage ? [webSearchSystemMessage] : [])] } : {}),
       humanMessage,
       sources: webSearchSources,

@@ -941,6 +941,23 @@ it.each(["complete", "refused", "unknown"])("native regeneration %s has accurate
 })
 
 
+it.each([
+  ["complete", "Continued reply saved", /saved as an alternative to the original reply/],
+  ["refused", "Continued reply refused", /before continuing again/],
+  ["unknown", "Continued reply unconfirmed", /before continuing again/]
+])("native Continue %s says Continue, not Regenerate", (state, title, body) => {
+  const selection = completedEditedSelection()
+  selection.recoveries[0].turn.action = "continue"
+  if (state !== "complete") Object.assign(selection.recoveries[0].turn, { outcome: undefined, settled_message_id: undefined, state })
+  render(<HistorySelectionReview selection={selection} />)
+  expect(screen.getByText(title)).toBeTruthy()
+  expect(screen.getByText(body)).toBeTruthy()
+  expect(screen.queryByText(/New reply|regenerat/i)).toBeNull()
+  if (state === "complete") expect(screen.getByRole("button", { name: "Open saved reply" })).toBeTruthy()
+  else expect(screen.queryByRole("button", { name: "Open saved reply" })).toBeNull()
+})
+
+
 describe("shared native send-conflict choices", () => {
   it("offers loading latest or a deliberate branch without submitting or changing the selected boundary", () => {
     const selection = {

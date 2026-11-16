@@ -179,7 +179,7 @@ async def test_native_post_json_maps_http_status_error(monkeypatch):
         payload={"error": {"message": sentinel, "authorization": sentinel}},
         text=sentinel,
     )
-    monkeypatch.setattr(messages_endpoint, "async_http_client_factory", lambda timeout=None: _FailingPostClient(response))
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.create_async_client", lambda timeout=None: _FailingPostClient(response))
 
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._native_post_json(
@@ -204,7 +204,7 @@ async def test_native_post_json_maps_http_status_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_native_post_json_maps_request_error_to_502(monkeypatch):
-    monkeypatch.setattr(messages_endpoint, "async_http_client_factory", lambda timeout=None: _RaisingPostClient())
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.create_async_client", lambda timeout=None: _RaisingPostClient())
 
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._native_post_json(
@@ -238,7 +238,7 @@ async def test_prepare_native_stream_iterator_maps_preflight_status_error(
         payload={"error": {"message": sentinel}},
         text=sentinel,
     )
-    monkeypatch.setattr(messages_endpoint, "async_http_client_factory", lambda timeout=None: _FailingStreamClient(response))
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.create_async_client", lambda timeout=None: _FailingStreamClient(response))
 
     with pytest.raises(HTTPException) as exc_info:
         await messages_endpoint._prepare_native_stream_iterator(
@@ -277,8 +277,7 @@ async def test_native_post_auth_failures_are_bounded_across_concurrent_requests(
         for timeout, status_code in ((1.0, 401), (2.0, 403))
     }
     monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
+        "tldw_Server_API.app.core.http_client.create_async_client",
         lambda timeout=None: _FailingPostClient(responses[timeout]),
     )
 
@@ -311,7 +310,7 @@ async def test_prepare_native_stream_iterator_maps_factory_error_detached(monkey
         del timeout
         raise RuntimeError(sentinel)
 
-    monkeypatch.setattr(messages_endpoint, "async_http_client_factory", _factory)
+    monkeypatch.setattr("tldw_Server_API.app.core.http_client.create_async_client", _factory)
 
     with pytest.raises(HTTPException) as exc_info:
         await _open_native_stream()
@@ -330,8 +329,7 @@ async def test_prepare_native_stream_iterator_maps_client_enter_error_detached(
         enter_error=RuntimeError(sentinel),
     )
     monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
+        "tldw_Server_API.app.core.http_client.create_async_client",
         lambda timeout=None: client_cm,
     )
 
@@ -356,8 +354,7 @@ async def test_prepare_native_stream_iterator_cleans_entered_client_on_stream_en
     )
     client_cm = _TrackingStreamClient(stream_cm)
     monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
+        "tldw_Server_API.app.core.http_client.create_async_client",
         lambda timeout=None: client_cm,
     )
 
@@ -385,8 +382,7 @@ async def test_prepare_native_stream_iterator_preserves_cancel_and_cleans_entere
     stream_cm = _BlockingStreamContext(_TrackingStreamResponse([]))
     client_cm = _TrackingStreamClient(stream_cm)
     monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
+        "tldw_Server_API.app.core.http_client.create_async_client",
         lambda timeout=None: client_cm,
     )
 
@@ -413,8 +409,7 @@ async def test_native_mid_read_failure_emits_one_bounded_error_and_closes_once(
     stream_cm = _TrackingStreamContext(response)
     client_cm = _TrackingStreamClient(stream_cm)
     monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
+        "tldw_Server_API.app.core.http_client.create_async_client",
         lambda timeout=None: client_cm,
     )
 
@@ -460,8 +455,7 @@ async def test_native_message_stop_ends_stream_before_later_transport_failure(
     stream_cm = _TrackingStreamContext(response)
     client_cm = _TrackingStreamClient(stream_cm)
     monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
+        "tldw_Server_API.app.core.http_client.create_async_client",
         lambda timeout=None: client_cm,
     )
 
@@ -498,8 +492,7 @@ async def test_native_mid_read_cancellation_is_preserved_and_closes_once(monkeyp
     stream_cm = _TrackingStreamContext(response)
     client_cm = _TrackingStreamClient(stream_cm)
     monkeypatch.setattr(
-        messages_endpoint,
-        "async_http_client_factory",
+        "tldw_Server_API.app.core.http_client.create_async_client",
         lambda timeout=None: client_cm,
     )
     stream = await _open_native_stream()

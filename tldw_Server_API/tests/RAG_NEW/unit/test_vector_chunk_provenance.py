@@ -3,7 +3,7 @@
 import hashlib
 import json
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import chromadb
 import pytest
@@ -67,9 +67,11 @@ async def test_public_vector_pipeline_preserves_distinct_exact_chunk_pages(
     from tldw_Server_API.app.api.v1.endpoints import rag_unified as endpoint
     from tldw_Server_API.app.api.v1.schemas.rag_schemas_unified import UnifiedRAGRequest
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
     from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
     from tldw_Server_API.app.core.Embeddings.Embeddings_Server import Embeddings_Create as embeddings
     from tldw_Server_API.app.core.Monitoring import topic_monitoring_service
+    from tldw_Server_API.app.core.RAG.rag_service import transport
     from tldw_Server_API.app.core.RAG.rag_service import unified_pipeline as pipeline
     from tldw_Server_API.app.core.RAG.rag_service.security_filters import SecurityFilters
 
@@ -119,10 +121,8 @@ async def test_public_vector_pipeline_preserves_distinct_exact_chunk_pages(
         embeddings, "get_embedding_config", lambda: {"embedding_config": {"default_model_id": None, "models": {}}}
     )
     monkeypatch.setattr(embeddings, "create_embeddings_batch", lambda *_args, **_kwargs: [[0.0, 0.0]])
-    runtime = SimpleNamespace(_user_id=1, close=AsyncMock())
-    monkeypatch.setattr(endpoint, "_build_credential_runtime", lambda *_: runtime)
-    monkeypatch.setattr(endpoint, "_resolve_kanban_db_path", lambda *_: None)
-    monkeypatch.setattr(endpoint, "_log_rag_queries_for_org", AsyncMock())
+    monkeypatch.setattr(DatabasePaths, "get_kanban_db_path", Mock(side_effect=FileNotFoundError("No Kanban fixture")))
+    monkeypatch.setattr(transport, "log_rag_queries_for_org_context", AsyncMock())
     monkeypatch.setattr(
         topic_monitoring_service,
         "get_topic_monitoring_service",

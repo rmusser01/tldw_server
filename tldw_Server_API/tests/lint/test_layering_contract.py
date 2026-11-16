@@ -21,7 +21,7 @@ Packages. A module's package is a prefix of its name under tldw_Server_API/app:
 ``core.<X>`` (a top-level core package or module: ``core.Chat``, ``core.config``),
 ``api.<version>.<X>`` (``api.v1.schemas``, ``api.v1.API_Deps``, ``api.v1.utils``), except
 that endpoints are split by family, ``api.<version>.endpoints.<family>`` (``.media``,
-``.chat``, ``._pagination_utils``), and ``services``/``main`` are one package each. The
+``.chat``, ``.audio``), and ``services``/``main`` are one package each. The
 importer is the package of the importing module; moving an import between modules of one
 package (a shimmed move) leaves the baseline alone. Failures print the importing modules.
 

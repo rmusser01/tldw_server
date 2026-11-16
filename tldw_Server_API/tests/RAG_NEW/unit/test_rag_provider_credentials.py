@@ -26,6 +26,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatBadRequestError,
     ChatConfigurationError,
 )
+from tldw_Server_API.app.core.RAG.rag_service import transport
 from tldw_Server_API.app.core.RAG.rag_service.agentic_chunker import (
     agentic_rag_pipeline as production_agentic_rag_pipeline,
 )
@@ -189,7 +190,7 @@ def _install_common_endpoint_fakes(
     async def no_usage_log(*args: Any, **kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(rag_endpoint, "_log_rag_queries_for_org", no_usage_log)
+    monkeypatch.setattr(transport, "log_rag_queries_for_org_context", no_usage_log)
     monkeypatch.setattr(rag_endpoint, "rag_result_from_unified_search_result", lambda result: result)
     monkeypatch.setattr(
         rag_endpoint,

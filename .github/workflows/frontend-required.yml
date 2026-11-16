@@ -161,10 +161,27 @@ jobs:
         with:
           bun-version: "1.3.2"
 
-      # Capture Bun install diagnostics on one shard.
       - name: Install frontend dependencies
         working-directory: apps
-        run: bun install --frozen-lockfile${{ matrix.shard == 1 && ' --verbose' || '' }}
+        shell: bash
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/bun-install.XXXXXX")"
+          trap 'rm -rf -- "$diagnostic_dir" || echo "Bun diagnostic cleanup failed" >&2' EXIT
+          (
+            umask 077
+            cp bun.lock "$diagnostic_dir/bun.lock"
+            : >"$diagnostic_dir/install.log"
+            : >"$diagnostic_dir/summary.log"
+          )
+          install_status=0
+          bun install --frozen-lockfile --verbose >"$diagnostic_dir/install.log" 2>&1 || install_status=$?
+          if (( install_status != 0 )); then
+            bun --no-install "$GITHUB_WORKSPACE/Helper_Scripts/ci/summarize_bun_install.mjs" \
+              "$diagnostic_dir/bun.lock" "$diagnostic_dir/install.log" 2>"$diagnostic_dir/summary.log" \
+              || echo "Bun install diagnostic-unavailable"
+          fi
+          printf 'Bun install exited with status %s\n' "$install_status"
+          exit "$install_status"
 
       - name: Run package-owned frontend unit tests
         working-directory: apps
@@ -596,7 +613,25 @@ jobs:
           bun-version: "1.3.2"
       - name: Install frontend dependencies
         working-directory: apps
-        run: bun install --frozen-lockfile
+        shell: bash
+        run: |
+          diagnostic_dir="$(mktemp -d "${RUNNER_TEMP}/bun-install.XXXXXX")"
+          trap 'rm -rf -- "$diagnostic_dir" || echo "Bun diagnostic cleanup failed" >&2' EXIT
+          (
+            umask 077
+            cp bun.lock "$diagnostic_dir/bun.lock"
+            : >"$diagnostic_dir/install.log"
+            : >"$diagnostic_dir/summary.log"
+          )
+          install_status=0
+          bun install --frozen-lockfile --verbose >"$diagnostic_dir/install.log" 2>&1 || install_status=$?
+          if (( install_status != 0 )); then
+            bun --no-install "$GITHUB_WORKSPACE/Helper_Scripts/ci/summarize_bun_install.mjs" \
+              "$diagnostic_dir/bun.lock" "$diagnostic_dir/install.log" 2>"$diagnostic_dir/summary.log" \
+              || echo "Bun install diagnostic-unavailable"
+          fi
+          printf 'Bun install exited with status %s\n' "$install_status"
+          exit "$install_status"
       - name: Run shared UI coverage shard
         working-directory: apps/packages/ui
         timeout-minutes: 17

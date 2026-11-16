@@ -7,7 +7,10 @@
  *   - what happened the last time this session sent to the model, and
  *   - the server's provider health report (/api/v1/llm/providers `health`).
  * Without either, the model is "not checked" rather than presumed healthy.
+ * Send outcomes belong to one account on one server and are forgotten when
+ * either changes (#3343).
  */
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import {
   normalizeProviderAvailabilityKey,
   toProviderHealthSignal
@@ -21,6 +24,7 @@ export type ChatModelReadinessState = "not_checked" | "working" | "unreachable"
 const outcomes = new Map<string, ChatModelSendOutcome>()
 const listeners = new Set<() => void>()
 let outcomesVersion = 0
+let stopWatchingAccount: (() => void) | null = null
 
 const toTrimmedString = (value: unknown): string => {
   if (typeof value !== "string" && typeof value !== "number") return ""
@@ -58,6 +62,9 @@ export const recordChatModelSendOutcome = (
   const key = chatModelReadinessKey(provider, model)
   if (!key || outcomes.get(key) === outcome) return
   outcomes.set(key, outcome)
+  stopWatchingAccount ??= watchChatAccountChanges((invalidated) => {
+    if (invalidated) resetChatModelSendOutcomes()
+  })
   notify()
 }
 
@@ -78,22 +85,14 @@ export const subscribeChatModelSendOutcomes = (listener: () => void) => {
 
 export const getChatModelSendOutcomesVersion = () => outcomesVersion
 
-/** Test helper: forget every recorded outcome. */
+/** Forget every recorded outcome: the account or server changed (and tests). */
 export const resetChatModelSendOutcomes = () => {
+  stopWatchingAccount?.()
+  stopWatchingAccount = null
   if (outcomes.size === 0) return
   outcomes.clear()
   notify()
 }
-
-const UNREACHABLE_ERROR_CODES = new Set([
-  "provider_unavailable",
-  "provider_error",
-  "upstream_error",
-  "upstream_unavailable",
-  "service_unavailable",
-  "bad_gateway",
-  "gateway_timeout"
-])
 
 const readStatus = (value: Record<string, unknown>): number | null => {
   for (const candidate of [
@@ -141,19 +140,6 @@ const someErrorLevel = (
   }
   return false
 }
-
-/**
- * True when a failed chat request shows the model's provider could not answer:
- * a 5xx from the server or a provider-unavailable error code. Client-side
- * aborts, timeouts and validation errors are not evidence either way.
- */
-export const isChatModelUnreachableError = (error: unknown): boolean =>
-  someErrorLevel(
-    error,
-    (status, codes) =>
-      (status !== null && status >= 500 && status <= 599) ||
-      codes.some((code) => UNREACHABLE_ERROR_CODES.has(code))
-  )
 
 const PROVIDER_FAILURE_CODES = new Set([
   "provider_unavailable",

@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -228,7 +229,7 @@ export const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({
     const focusConnectionForm = () => {
       const formTarget = connectionNameInputRef.current
       if (!formTarget) return false
-      formTarget.scrollIntoView?.({ block: "nearest", behavior: "smooth" })
+      formTarget.scrollIntoView?.({ block: "nearest", behavior: smoothScrollBehavior() })
       formTarget.focus()
       consume()
       return true
@@ -252,7 +253,7 @@ export const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({
     if (matchedConnection) {
       const editButton = connectionEditButtonRefs.current[matchedConnection.id]
       if (!editButton) return
-      editButton.scrollIntoView?.({ block: "nearest", behavior: "smooth" })
+      editButton.scrollIntoView?.({ block: "nearest", behavior: smoothScrollBehavior() })
       editButton.focus()
       consume()
       return

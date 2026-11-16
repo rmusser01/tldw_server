@@ -7,6 +7,7 @@ import { Button } from "@/components/Common/Button"
 import { getMessageEditFeedback } from "@/utils/message-edit-feedback"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { decodeReasoningText, encodeReasoningText, isEditableReasoningContent } from "@/libs/reasoning"
 
 type Props = {
   value: string
@@ -18,6 +19,7 @@ type Props = {
   ) => unknown
   onClose: () => void
   isBot: boolean
+  reasoningRange?: { start: number; end: number }
 }
 
 export const EditMessageForm = (props: Props) => {
@@ -41,7 +43,16 @@ export const EditMessageForm = (props: Props) => {
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
   const feedbackId = React.useId()
   const { t } = useTranslation("common")
-  const form = useSimpleForm({ initialValues: { message: props.value } })
+  const { reasoningRange } = props
+  const storedReasoning = reasoningRange
+    ? props.value.slice(reasoningRange.start, reasoningRange.end)
+    : ""
+  const reasoningText = decodeReasoningText(storedReasoning)
+  const form = useSimpleForm({
+    initialValues: {
+      message: reasoningRange ? reasoningText : props.value
+    }
+  })
   const attachTextarea = useDynamicTextareaSize(
     textareaRef,
     form.values.message,
@@ -152,7 +163,20 @@ export const EditMessageForm = (props: Props) => {
     const currentAttempt = {}
     const originalSource = source.current
     const revision = form.getRevision()
-    const value = form.getValues().message
+    const draft = form.getValues().message
+    const editedText = reasoningText === storedReasoning ? draft : encodeReasoningText(draft)
+    if (reasoningRange && !isEditableReasoningContent(editedText)) {
+      setFeedback(t(
+        "reasoning.invalidEdit",
+        "Enter thinking text and keep any thinking tags balanced."
+      ))
+      return
+    }
+    const value = reasoningRange
+      ? originalSource.value.slice(0, reasoningRange.start) +
+        editedText +
+        originalSource.value.slice(reasoningRange.end)
+      : draft
     attempt.current = currentAttempt
     setPending(true)
     setFeedback(null)
@@ -236,14 +260,16 @@ export const EditMessageForm = (props: Props) => {
         onCompositionEnd={() => {
           if (!isFirefoxTarget) composing.current = false
         }}
-        aria-label={t("editMessage.label", "Edit message")}
+        aria-label={reasoningRange
+          ? t("reasoning.edit", "Edit thinking")
+          : t("editMessage.label", "Edit message")}
         aria-describedby={alert ? feedbackId : undefined}
         required
         autoFocus
         rows={1}
         style={{ minHeight: "60px" }}
         tabIndex={0}
-        placeholder={t("editMessage.placeholder")}
+        placeholder={reasoningRange ? undefined : t("editMessage.placeholder")}
         ref={attachTextarea}
         className="w-full bg-transparent text-body text-text placeholder:text-text-muted focus-within:outline-none focus:ring-0 focus-visible:ring-0 ring-0 border-0"
       />

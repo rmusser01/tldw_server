@@ -52,8 +52,8 @@ def test_complete_v2_neutral_sampling_works_with_local_adapter_validation(
         })
         return {"choices": [{"message": {"content": "The garden has seven beds."}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", validated_completion)
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", validated_completion)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *args: None)
     response = test_client.post(
         f"/api/v1/chats/{chat_id}/complete-v2",
         headers=auth_headers,
@@ -82,8 +82,8 @@ def test_complete_v2_refuses_an_over_quota_user_before_any_llm_call(
         calls.append(kwargs)
         return {"choices": [{"message": {"content": "unused"}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", _recording_completion)
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _recording_completion)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *args: None)
     refuse_llm_work(monkeypatch)
     response = test_client.post(
         f"/api/v1/chats/{created.json()['id']}/complete-v2",
@@ -130,8 +130,8 @@ def test_complete_v2_admits_an_over_limit_user_whose_reply_runs_on_their_own_key
         admitted.append(current_llm_call_context().prechecked)
         return {"choices": [{"message": {"content": "On your own key."}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", _completion)
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _completion)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *args: None)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
     refuse_llm_work(monkeypatch)
     response = test_client.post(
@@ -168,7 +168,7 @@ def test_complete_v2_answers_402_when_an_admitted_own_key_reply_is_refused_at_th
             category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
         )
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", _refused_at_the_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _refused_at_the_call)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
     refuse_llm_work(monkeypatch)
     response = test_client.post(
@@ -199,7 +199,7 @@ def test_complete_v2_still_refuses_an_own_key_turn_that_may_extract_memories(
         """The reply's provider would run on the user's own key."""
         return True
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: calls.append(kwargs))
     # A regression would start extraction, which calls the server's provider for real: stub it.
     monkeypatch.setattr(
         character_memory_extraction, "extract_character_memories", lambda **kwargs: extractions.append(kwargs)
@@ -250,8 +250,8 @@ def test_complete_v2_answers_402_when_the_refused_router_call_leaves_no_route(
             ],
         },
     )
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", _refused_router_call)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: calls.append(kwargs))
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _refused_router_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", lambda **kwargs: calls.append(kwargs))
     refuse_llm_work(monkeypatch)
     response = test_client.post(
         f"/api/v1/chats/{chat_id}/complete-v2",
@@ -305,7 +305,7 @@ def test_complete_v2_asks_about_the_routed_provider(monkeypatch, test_client, au
             ],
         },
     )
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", _router_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", _router_call)
     monkeypatch.setattr(usage_quota_deps, "users_own_key_serves", _own_key)
     refuse_llm_work(monkeypatch)
     response = test_client.post(
@@ -380,8 +380,7 @@ async def test_auto_router_dispatch_keeps_one_static_credential_snapshot(
         raising=False,
     )
     monkeypatch.setattr(
-        character_chat_sessions,
-        "perform_chat_api_call_async",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
         provider_call,
     )
 
@@ -458,8 +457,8 @@ async def test_auto_router_logs_only_error_types(
     def _debug(message: str, *args: Any, **_kwargs: Any) -> None:
         logged.append(message.format(*args))
 
-    monkeypatch.setattr(character_chat_sessions, "log_model_router_usage", _usage_log)
-    monkeypatch.setattr(character_chat_sessions, "select_llm_router_choice", _select)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage", _usage_log)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", _select)
     monkeypatch.setattr(character_chat_sessions.logger, "debug", _debug)
 
     choice, diagnostics = await character_chat_sessions._select_auto_character_llm_router_choice(
@@ -519,8 +518,8 @@ async def test_auto_router_usage_row_records_whose_key_the_router_call_used(
     async def usage_log(**kwargs: Any) -> None:
         rows.append(kwargs)
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", provider_call)
-    monkeypatch.setattr(character_chat_sessions, "log_model_router_usage", usage_log)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage", usage_log)
 
     choice, _diagnostics = await character_chat_sessions._select_auto_character_llm_router_choice(
         router_request=RouterRequest(model="auto", surface="character_chat", latest_user_turn="route me", scope="chat-1"),
@@ -585,11 +584,10 @@ async def test_auto_router_propagates_cancellation_and_closes_runtime_once(
 
     monkeypatch.setattr(character_chat_sessions, "ProviderCredentialRuntime", Runtime)
     monkeypatch.setattr(
-        character_chat_sessions,
-        "log_model_router_usage",
+        "tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage",
         blocking_usage_log,
     )
-    monkeypatch.setattr(character_chat_sessions, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     task = asyncio.create_task(
         character_chat_sessions._select_auto_character_llm_router_choice(
@@ -713,8 +711,8 @@ async def test_auto_router_cancellation_marks_and_closes_after_adapter_exit(
         return {"provider": "openai", "model": "routed"}, {}
 
     monkeypatch.setattr(character_chat_sessions, "ProviderCredentialRuntime", Runtime)
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", provider_call)
-    monkeypatch.setattr(character_chat_sessions, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     task = asyncio.create_task(
         character_chat_sessions._select_auto_character_llm_router_choice(
@@ -846,8 +844,8 @@ async def test_auto_router_normal_result_marks_only_valid_route(
         choice = character_chat_sessions.extract_router_choice(result)
         return choice, {"choice_received": choice is not None}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", provider_call)
-    monkeypatch.setattr(character_chat_sessions, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     choice, _diagnostics = (
         await character_chat_sessions._select_auto_character_llm_router_choice(
@@ -921,8 +919,8 @@ async def test_auto_router_valid_result_drains_mark_before_cancellation(
         choice = character_chat_sessions.extract_router_choice(result)
         return choice, {"choice_received": choice is not None}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call_async", provider_call)
-    monkeypatch.setattr(character_chat_sessions, "select_llm_router_choice", select)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async", provider_call)
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.routing.select_llm_router_choice", select)
 
     task = asyncio.create_task(
         character_chat_sessions._select_auto_character_llm_router_choice(
@@ -1060,7 +1058,7 @@ def test_complete_v2_explicit_unavailable_model_returns_400(test_client, auth_he
     chat_id = chat_resp.json()["id"]
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.is_model_known_for_provider",
+        "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider",
         lambda provider, model: False,
     )
 
@@ -1173,17 +1171,17 @@ def test_complete_v2_auto_model_routes_before_strict_availability_check(
         _stub_route_model,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.perform_chat_api_call_async",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call_async",
         _stub_router_call,
         raising=False,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.log_model_router_usage",
+        "tldw_Server_API.app.core.LLM_Calls.routing.log_model_router_usage",
         _stub_router_usage,
         raising=False,
     )
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.is_model_known_for_provider",
+        "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider",
         lambda provider, model: False,
     )
 
@@ -1196,7 +1194,7 @@ def test_complete_v2_auto_model_routes_before_strict_availability_check(
         return {"choices": [{"message": {"content": "auto routed response"}}]}
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.perform_chat_api_call",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
         _stub_chat_api_call,
     )
 
@@ -1306,7 +1304,7 @@ def test_complete_v2_surfaces_provider_model_resolution_failures(
         raise RuntimeError("resolution exploded")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.resolve_provider_and_model",
+        "tldw_Server_API.app.core.Chat.chat_service.resolve_provider_and_model",
         _raise_resolution_failure,
     )
 
@@ -1360,7 +1358,7 @@ def test_complete_v2_maps_input_error_to_400(
         raise InputError("completion payload is invalid")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.post_message_to_conversation",
+        "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation",
         _raise_input_error,
     )
 
@@ -1414,7 +1412,7 @@ def test_complete_v2_maps_oversize_input_error_to_413(
         raise InputError("Completion attachment exceeds maximum size")
 
     monkeypatch.setattr(
-        "tldw_Server_API.app.api.v1.endpoints.character_chat_sessions.post_message_to_conversation",
+        "tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade.post_message_to_conversation",
         _raise_input_error,
     )
 
@@ -1454,9 +1452,9 @@ def test_complete_v2_plain_chat_acknowledges_optional_character_after_persistenc
         calls.append(kwargs)
         return {"choices": [{"message": {"content": "Rowan has seven beds."}}]}
 
-    monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", completion)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", completion)
     monkeypatch.setattr(
-        character_chat_sessions, "is_model_known_for_provider", lambda *args: None
+        "tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *args: None
     )
     response = test_client.post(
         f"/api/v1/chats/{chat_id}/complete-v2",
@@ -1511,11 +1509,10 @@ def test_complete_v2_refuses_empty_answer_before_any_message_write(
     assert created.status_code == 201  # nosec B101 - pytest behavior check.
     chat_id = created.json()["id"]
     monkeypatch.setattr(
-        character_chat_sessions,
-        "perform_chat_api_call",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
         lambda **kwargs: {"choices": [{"message": message, "finish_reason": "length"}]},
     )
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *args: None)
     response = test_client.post(
         f"/api/v1/chats/{chat_id}/complete-v2",
         headers=auth_headers,
@@ -1541,13 +1538,12 @@ def test_complete_v2_retains_valid_tool_only_completion(monkeypatch, test_client
     chat_id = created.json()["id"]
     tool_calls = [{"id": "call-1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]
     monkeypatch.setattr(
-        character_chat_sessions,
-        "perform_chat_api_call",
+        "tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call",
         lambda **kwargs: {
             "choices": [{"message": {"content": None, "tool_calls": tool_calls}, "finish_reason": "tool_calls"}]
         },
     )
-    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.is_model_known_for_provider", lambda *args: None)
     response = test_client.post(
         f"/api/v1/chats/{chat_id}/complete-v2",
         headers=auth_headers,

@@ -1,4 +1,5 @@
 import React from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 
 import type { PersonaVoiceAnalytics } from "@/components/PersonaGarden/CommandAnalyticsSummary"
@@ -294,7 +295,7 @@ export const AssistantDefaultsPanel: React.FC<AssistantDefaultsPanelProps> = ({
 
     if (!focusTarget || focusTarget.disabled) return
 
-    focusTarget.scrollIntoView?.({ block: "nearest", behavior: "smooth" })
+    focusTarget.scrollIntoView?.({ block: "nearest", behavior: smoothScrollBehavior() })
     focusTarget.focus()
     lastHandledHandoffTokenRef.current = handoffFocusRequest.token
     onSetupHandoffFocusConsumed?.(handoffFocusRequest.token)

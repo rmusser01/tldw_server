@@ -694,3 +694,49 @@ async def test_a_failed_model_answer_leaves_the_item_unscored(evaluation_manager
     assert len(prompts) == 1, prompts  # the model's call only
     assert result["score"] is None
     assert result["explanation"].startswith("Error:")
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+@pytest.mark.parametrize("benchmark", [None, "simple_bench"], ids=["custom-input", "benchmark-formatter"])
+async def test_a_custom_metric_runs_both_calls_on_the_handle_it_is_given(evaluation_manager, monkeypatch, benchmark):
+    """The model's response and the judge's score both run on the user's own-key handle, for a custom input and
+    for a benchmark formatter's (TASK-15426)."""
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import users_own_key_credentials
+    from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
+    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
+    from tldw_Server_API.app.core.Usage.llm_call_context import call_credential_source
+    from tldw_Server_API.tests.helpers.llm_quota import users_own_key
+
+    requests: list[dict] = []
+
+    def chat(request, timeout=None):
+        requests.append(request)
+        return {"choices": [{"message": {"content": "Score: 8"}}]}
+
+    monkeypatch.setattr(
+        summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _p: SimpleNamespace(chat=chat))
+    )
+    users_own_key(monkeypatch, "openai")
+    handle = await users_own_key_credentials(1, "openai")
+    data = (
+        get_registry().create_evaluator(benchmark).format_for_custom_metric(_MC_ITEM)
+        if benchmark
+        else {
+            "name": "m",
+            "description": "d",
+            "evaluation_prompt": "Rate {answer}",
+            "input_data": {"question": "Which day does Cedar open?", "answer": "{model_response}"},
+            "scoring_criteria": {"accuracy": "0-10"},
+        }
+    )
+
+    await evaluation_manager.evaluate_custom_metric(
+        metric_name=data["name"], description=data["description"], evaluation_prompt=data["evaluation_prompt"],
+        input_data=data["input_data"], scoring_criteria=data["scoring_criteria"],
+        api_name="openai", provider_credentials=handle,
+    )
+
+    assert [(r["api_key"], call_credential_source(r)) for r in requests] == [("sk-users-own-key", "user")] * 2

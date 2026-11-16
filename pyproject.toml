@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 ###########################
 [project]
 name = "tldw-server"
-version = "0.1.46"
+version = "0.1.47"
 description = "A comprehensive research assistant and media analysis platform - Too Long; Didn't Watch Server"
 requires-python = ">=3.12"
 readme = "README.md"
@@ -71,7 +71,7 @@ dependencies = [
   "pathspec>=0.12.1",
   "prometheus-client",
   "psutil>=5.9.0",
-  "pydantic>=2.13.5,<2.14.0",
+  "pydantic>=2.13.5,<2.15.0",
   "pydantic-core>=2.0.0",
   "pydantic-settings>=2.2.1",
   "python-dotenv>=1.0.0",
@@ -94,7 +94,7 @@ dependencies = [
   "toml>=0.10.0",
   "tomli>=2.0.0",
   "tqdm>=4.65.0",
-  "uvicorn[standard]==0.35.0",
+  "uvicorn[standard]==0.54.0",
   "websockets==15.0.1",
 
 
@@ -168,7 +168,7 @@ dependencies = [
   # HTML sanitization
   "bleach>=6.1.0",
   "html5lib==1.1",
-  "tinycss2==1.4.0",
+  "tinycss2==1.5.1",
 
   # Template/UI Utilities
   "Jinja2>=3.1.0",
@@ -190,7 +190,7 @@ acp = [
 
 # Native CodeGraph parser dependencies
 codegraph = [
-  "tree-sitter>=0.25,<0.26",
+  "tree-sitter>=0.25,<0.27",
   "tree-sitter-python>=0.25,<0.26",
   "tree-sitter-javascript>=0.25,<0.26",
   "tree-sitter-typescript>=0.23,<0.24",
@@ -343,7 +343,7 @@ STT_Parakeet = [
 STT_Parakeet_MLX = [
   "librosa",
   "parakeet-mlx",
-  "numpy<2.4; platform_system == \"Darwin\" and platform_machine == \"arm64\"",
+  "numpy<2.6; platform_system == \"Darwin\" and platform_machine == \"arm64\"",
   "mlx>=0.30.0; platform_system == \"Darwin\" and platform_machine == \"arm64\"",
 ]
 
@@ -805,7 +805,7 @@ exclude = []
 "tldw_Server_API/app/api/v1/endpoints/connectors.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/data_tables.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/discord.py" = ["BLE001"]
-"tldw_Server_API/app/api/v1/endpoints/discord_support.py" = ["BLE001"]
+"tldw_Server_API/app/api/v1/utils/chatops/discord_support.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_auth.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_unified.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/files.py" = ["BLE001"]
@@ -831,6 +831,7 @@ exclude = []
 "tldw_Server_API/app/api/v1/endpoints/media/reading_progress.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/media/reprocess.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/media_embeddings.py" = ["BLE001"]
+"tldw_Server_API/app/core/Embeddings/media_embeddings.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/meetings.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/org_invites.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/orgs.py" = ["BLE001"]
@@ -847,12 +848,12 @@ exclude = []
 "tldw_Server_API/app/api/v1/endpoints/sharing.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/skills.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/slack.py" = ["BLE001"]
-"tldw_Server_API/app/api/v1/endpoints/slack_support.py" = ["BLE001"]
+"tldw_Server_API/app/api/v1/utils/chatops/slack_support.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/slides.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/storage.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/study_suggestions.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/sync.py" = ["BLE001"]
-"tldw_Server_API/app/api/v1/endpoints/telegram_support.py" = ["BLE001"]
+"tldw_Server_API/app/api/v1/utils/chatops/telegram_support.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/translate.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/user_keys.py" = ["BLE001"]
 "tldw_Server_API/app/api/v1/endpoints/vlm.py" = ["BLE001"]

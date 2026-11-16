@@ -44,7 +44,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_request_user,
     require_expected_user,
 )
-from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
+from tldw_Server_API.app.api.v1.utils.pagination import (
     build_cursor_pagination_meta,
     build_offset_pagination_meta,
 )
@@ -2083,7 +2083,7 @@ async def list_runs(
     # Optional RFC5988 Link headers for pagination
     if response is not None:
         try:
-            from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_link_header
+            from tldw_Server_API.app.api.v1.utils.pagination import build_link_header
             base_path = "/api/v1/workflows/runs"
             params_common = []
             if status:
@@ -2453,7 +2453,7 @@ async def get_run_events(
                 logger.debug(f"Workflows events: failed to set Next-Cursor header: {e}")
             # Optional RFC5988 Link header for 'next'
             try:
-                from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_link_header
+                from tldw_Server_API.app.api.v1.utils.pagination import build_link_header
                 base_path = f"/api/v1/workflows/runs/{run_id}/events"
                 params = [("limit", str(limit))]
                 if types:

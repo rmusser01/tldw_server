@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useCallback } from "react"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 import { useTranslation } from "react-i18next"
 import { Tooltip } from "antd"
 import { X, FileText, BookOpen, Plus } from "lucide-react"
@@ -113,7 +114,7 @@ export const DocumentTabBar: React.FC<{
         '[aria-selected="true"]'
       )
       if (activeTab) {
-        activeTab.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" })
+        activeTab.scrollIntoView({ behavior: smoothScrollBehavior(), block: "nearest", inline: "nearest" })
       }
     }
   }, [activeDocumentId])

@@ -65,7 +65,7 @@ async def test_character_chat_streaming_unified_sse(monkeypatch):
         def _stub_chat_api_call(*args, **kwargs):  # returns a generator (sync iterator)
             return _fake_provider_stream()
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         async with _lifespan_async_client(app) as client:
             # Bootstrap: get default character + create chat
@@ -134,7 +134,7 @@ async def test_character_chat_streaming_unified_sse_slow_async_heartbeat(monkeyp
         async def _stub_chat_api_call(*args, **kwargs):
             return _fake_async_provider_stream_slow()
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         async with _lifespan_async_client(app) as client:
             # Bootstrap: default character + chat
@@ -213,7 +213,7 @@ async def test_character_chat_streaming_unified_sse_provider_duplicate_done(monk
 
             return _fake_provider_stream_with_duplicate_done_sync()
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         async with _lifespan_async_client(app) as client:
             # Bootstrap defaults
@@ -276,9 +276,9 @@ async def test_character_chat_streaming_unified_sse_chunk_limit(monkeypatch):
         def _stub_chat_api_call(*args, **kwargs):
             return _fake_provider_stream_many_chunks()
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
-        monkeypatch.setattr(mod, "MAX_STREAMING_CHUNKS", 2)
-        monkeypatch.setattr(mod, "MAX_STREAMING_BYTES", 10_000)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.constants.MAX_STREAMING_CHUNKS", 2)
+        monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.constants.MAX_STREAMING_BYTES", 10_000)
 
         async with _lifespan_async_client(app) as client:
             r = await client.get("/api/v1/characters/", headers=headers)
@@ -332,9 +332,9 @@ async def test_character_chat_streaming_unified_sse_byte_limit(monkeypatch):
         def _stub_chat_api_call(*args, **kwargs):
             return _fake_provider_stream_large_chunk()
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
-        monkeypatch.setattr(mod, "MAX_STREAMING_CHUNKS", 100)
-        monkeypatch.setattr(mod, "MAX_STREAMING_BYTES", 50)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.constants.MAX_STREAMING_CHUNKS", 100)
+        monkeypatch.setattr("tldw_Server_API.app.core.Character_Chat.constants.MAX_STREAMING_BYTES", 50)
 
         async with _lifespan_async_client(app) as client:
             r = await client.get("/api/v1/characters/", headers=headers)
@@ -394,7 +394,7 @@ async def test_character_chat_streaming_unified_sse_provider_error_emits_done(mo
         def _stub_chat_api_call(*args, **kwargs):
             return _fake_provider_stream_raises_bad_request()
 
-        monkeypatch.setattr(mod, "perform_chat_api_call", _stub_chat_api_call)
+        monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", _stub_chat_api_call)
 
         async with _lifespan_async_client(app) as client:
             r = await client.get("/api/v1/characters/", headers=headers)
