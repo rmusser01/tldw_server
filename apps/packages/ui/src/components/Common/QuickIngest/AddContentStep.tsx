@@ -28,8 +28,9 @@ import { useIngestWizard } from "./IngestWizardContext"
 import { PlaylistPreflightPanel } from "./PlaylistPreflightPanel"
 import { FileDropZone } from "./QueueTab/FileDropZone"
 import {
-  QUICK_INGEST_MAX_FILE_SIZE,
-  QUICK_INGEST_MAX_FILE_SIZE_LABEL
+  getQuickIngestFileLimit,
+  QUICK_INGEST_AV_LIMIT,
+  QUICK_INGEST_DOCUMENT_LIMIT
 } from "./constants"
 import {
   createUrlQueueItems,
@@ -143,8 +144,6 @@ const formatFileSize = (bytes: number): string => {
 // Component
 // ---------------------------------------------------------------------------
 
-// Warning uses >= (show at boundary); validation uses > (allow exactly at limit)
-const LARGE_FILE_WARNING_THRESHOLD = Math.floor(QUICK_INGEST_MAX_FILE_SIZE * 0.8)
 const PASSIVE_ALERT_PROPS = {
   role: "status",
   "aria-live": "polite",
@@ -512,7 +511,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   const canStartProcessing = canProceed && isOnlineForIngest && !isCheckingConnection
 
   const hasLargeFiles = useMemo(
-    () => queueItems.some((item) => item.fileSize >= LARGE_FILE_WARNING_THRESHOLD),
+    () => queueItems.some(({ file }) => file && file.size >= getQuickIngestFileLimit(file).bytes * 0.8),
     [queueItems]
   )
 
@@ -543,8 +542,8 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
         <Typography.Text className="text-[11px] text-text-subtle">
           {qi(
             "fileSizeLimits",
-            "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, video. Max file size: {{maxSize}}.",
-            { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
+            "Supported: PDF, EPUB, DOCX, TXT/RTF, Markdown, HTML, XML, JSON, audio, and video. Up to {{documentLimit}} for documents and {{avLimit}} for audio and video.",
+            { documentLimit: QUICK_INGEST_DOCUMENT_LIMIT.label, avLimit: QUICK_INGEST_AV_LIMIT.label }
           )}
         </Typography.Text>
         <Typography.Text className="block text-xs text-text-muted">
@@ -593,8 +592,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
             icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
             title={qi(
               "largeFileWarning",
-              "Large file -- this browser-buffered upload is close to the {{maxSize}} quick-ingest limit.",
-              { maxSize: QUICK_INGEST_MAX_FILE_SIZE_LABEL }
+              "Large files can take longer to upload."
             )}
           />
         )}

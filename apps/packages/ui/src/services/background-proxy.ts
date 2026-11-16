@@ -2365,6 +2365,8 @@ export interface BgUploadInit<P extends AllowedPath = AllowedPath, M extends All
   // File payload as raw bytes with metadata (structured-cloneable)
   file?: Omit<BgUploadFile, "fieldName">
   files?: BgUploadFile[]
+  // Native browser uploads stay in the direct runtime.
+  directFile?: File
   // Optional override for the multipart file field name
   fileFieldName?: string
   // Optional timeout override for upload requests
@@ -2383,6 +2385,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
     fields = {},
     file,
     files,
+    directFile,
     fileFieldName,
     timeoutMs,
     abortSignal,
@@ -2397,6 +2400,7 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
     )
   }
   const hasRuntimeMessage =
+    !directFile &&
     !preferDirect &&
     Boolean(browser?.runtime?.sendMessage && browser?.runtime?.id)
   const methodIsSafeFallback = isSafeFallbackMethod(method)
@@ -2543,7 +2547,10 @@ export async function bgUpload<T = any, P extends AllowedPath = AllowedPath, M e
       formData.append("file", blob, name)
     }
   }
-  if (Array.isArray(files) && files.length > 0) {
+  if (directFile) {
+    formData.append(fileFieldName || "files", directFile)
+    if (!fileFieldName) formData.append("file", directFile)
+  } else if (Array.isArray(files) && files.length > 0) {
     files.forEach((item) => {
       appendFile(item, item.fieldName || "files")
     })

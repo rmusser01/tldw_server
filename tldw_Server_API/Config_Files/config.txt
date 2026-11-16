@@ -180,11 +180,15 @@ storage_rollback = false
 processing_choice = cuda
 
 [Media-Processing]
-max_audio_file_size_mb = 500
-max_pdf_file_size_mb = 50
-max_video_file_size_mb = 1000
-max_epub_file_size_mb = 100
-max_document_file_size_mb = 50
+# Standard uploads default to 1 GiB. Values are in MiB.
+max_audio_file_size_mb = 1024
+max_pdf_file_size_mb = 1024
+max_video_file_size_mb = 1024
+max_epub_file_size_mb = 1024
+max_document_file_size_mb = 1024
+max_email_file_size_mb = 50
+max_code_file_size_mb = 50
+max_unknown_file_size_mb = 50
 pdf_conversion_timeout_seconds = 300
 audio_processing_timeout_seconds = 600
 video_processing_timeout_seconds = 1200

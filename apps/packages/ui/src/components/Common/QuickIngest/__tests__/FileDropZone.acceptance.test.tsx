@@ -25,6 +25,27 @@ vi.mock("react-i18next", () => ({
 import { FileDropZone } from "../QueueTab/FileDropZone"
 
 describe("FileDropZone acceptance", () => {
+  it.each([
+    ["scan.pdf", "application/pdf", 250 * 1024 ** 2, "250 MB"],
+    ["sample.epub", "application/epub+zip", 250 * 1024 ** 2, "250 MB"],
+    ["notes.txt", "text/plain", 250 * 1024 ** 2, "250 MB"],
+    ["sample.ogg", "audio/ogg", 1024 ** 3, "1 GB"],
+    ["sample.mkv", "", 1024 ** 3, "1 GB"]
+  ] as const)("accepts %s at the limit and rejects one more byte", async (name, type, limit, label) => {
+    const onFilesAdded = vi.fn()
+    const onFilesRejected = vi.fn()
+    render(<FileDropZone onFilesAdded={onFilesAdded} onFilesRejected={onFilesRejected} />)
+    const atLimit = new File([], name, { type })
+    const overLimit = new File([], name, { type })
+    Object.defineProperty(atLimit, "size", { value: limit })
+    Object.defineProperty(overLimit, "size", { value: limit + 1 })
+
+    await userEvent.setup().upload(screen.getByTestId("qi-file-input"), [atLimit, overLimit])
+
+    expect(onFilesAdded).toHaveBeenCalledExactlyOnceWith([atLimit])
+    expect(onFilesRejected).toHaveBeenCalledExactlyOnceWith([`${name} exceeds ${label} quick-ingest limit`])
+  })
+
   it("only autofocuses once when disabled state clears", () => {
     const focusSpy = vi
       .spyOn(HTMLElement.prototype, "focus")

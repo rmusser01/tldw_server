@@ -356,7 +356,7 @@ vi.mock(
               onFilesAdded?.([
                 {
                   name: "large-audio.mp3",
-                  size: 45 * 1024 * 1024,
+                  size: 850 * 1024 * 1024,
                   type: "audio/mpeg",
                 },
               ])
@@ -381,7 +381,7 @@ vi.mock(
               onFilesAdded?.([
                 {
                   name: "large-audio.mp3",
-                  size: 45 * 1024 * 1024,
+                  size: 850 * 1024 * 1024,
                   type: "audio/mpeg",
                 },
               ])
