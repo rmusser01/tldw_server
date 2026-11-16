@@ -59,7 +59,7 @@ jobs:
         )
       )
     # Locked Playwright 1.58 does not support the Ubuntu 26.04 latest image.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
       PYTHONPATH: .
@@ -218,7 +218,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 55
     env:
       PYTHONPATH: .
