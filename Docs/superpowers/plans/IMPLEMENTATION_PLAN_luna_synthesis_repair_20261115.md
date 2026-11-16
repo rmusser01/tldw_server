@@ -27,6 +27,6 @@
 **Goal:** Update report, tasks and draft PR against dev with the tested final state.
 **Success Criteria:** Tests/security/publication checks pass; new head and current CI inspected; unresolved external or human acceptance limits explicit.
 **Tests:** Task format/IDs, secret/diff checks, relevant pre-commit hooks, GitHub checks.
-**Status:** Not Started
+**Status:** In Progress — qualified repairs pushed; a demonstrated Node 20 frontend test failure is fixed and qualified locally, with current-head CI and final evidence publication pending.
 
 Remove this task-owned plan when all stages are complete; retain design and result evidence.

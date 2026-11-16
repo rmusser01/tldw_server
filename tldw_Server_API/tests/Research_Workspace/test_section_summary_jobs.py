@@ -640,7 +640,8 @@ def test_deepseek_uses_reasoning_budget_only_when_output_budget_is_unset():
 
 
 @pytest.mark.asyncio
-async def test_deepseek_json_mode_retains_exact_original_quote_and_offsets(monkeypatch):
+@pytest.mark.parametrize("provider, json_mode", [("deepseek", True), ("openai", True), ("anthropic", False)])
+async def test_provider_json_mode_retains_exact_original_quote_and_offsets(monkeypatch, provider, json_mode):
     from unittest.mock import AsyncMock
 
     from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
@@ -674,10 +675,13 @@ async def test_deepseek_json_mode_retains_exact_original_quote_and_offsets(monke
         return {"choices": [{"message": {"content": "A role [E1.1.1]."}}]}
 
     monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
-    options = args(request().settings.model_copy(update={"sections": [], "provider": "deepseek"}))
+    options = args(request().settings.model_copy(update={"sections": [], "provider": provider}))
     await mod.process_section_summary(**options)
-    assert calls[0]["response_format"] == {"type": "json_object"}
-    assert "response_format" not in calls[1]
+    if json_mode:
+        assert calls[0]["response_format"] == {"type": "json_object"}
+    else:
+        assert "response_format" not in calls[0]
+    assert all("response_format" not in call for call in calls[1:])
     row = options["workspace_db"].row
     evidence = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]["batches"][0][
         "evidence"
@@ -1666,7 +1670,7 @@ async def test_verified_attribution_context_survives_name_dropping_reductions(mo
         return {"choices": [{"message": {"content": content}}]}
 
     monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
-    settings = request().settings
+    settings = request().settings.model_copy(update={"provider": "openai"})
     if scope == "whole-document":
         settings = settings.model_copy(update={"sections": []})
     options = args(settings)
@@ -1680,6 +1684,7 @@ async def test_verified_attribution_context_survives_name_dropping_reductions(mo
     assert first_allowed == ["E1.1.1"]  # Context cannot authorize another portion's registered evidence.
     contexts = analysis["sections"][0]["attribution_contexts"]
     for call in [*reductions, final]:
+        assert "response_format" not in call
         prompt = call["messages_payload"][0]["content"]
         if scope == "whole-document":
             assert not contexts and "SOURCE HEADING CONTEXT" not in prompt
@@ -1697,6 +1702,7 @@ async def test_verified_attribution_context_survives_name_dropping_reductions(mo
         allowed = json.loads(prompt.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0])
         assert all(re.fullmatch(r"E1\.\d+\.1", value) for value in allowed)
     overview = next(c for c in calls if c["messages_payload"][0]["content"].startswith("Synthesize the completed"))
+    assert "response_format" not in overview
     assert "SOURCE HEADING CONTEXT" not in overview["messages_payload"][0]["content"]
 
 

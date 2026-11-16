@@ -1,12 +1,14 @@
+import { Buffer } from "node:buffer"
 import { webcrypto } from "node:crypto"
 import JSZip from "jszip"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import { portableFixture } from "./fixtures/portable-workspace"
 import { buildCompleteResearchPack, parseCompleteResearchPack, readBlobBytes, readBoundedZipEntry, sha256Bytes } from "../workspace-research-pack"
 import { parseWorkspaceImportFile } from "@/store/workspace-bundle"
 import { projectWorkspaceRagSources, restoreWorkspaceRagSources } from "../workspace-rag-sources"
 
 const pdf = Uint8Array.from(new TextEncoder().encode("%PDF-1.7 exact original bytes"))
+const digest = webcrypto.subtle.digest.bind(webcrypto.subtle)
 const chatbook = async (missing = false) => {
   const zip = new JSZip()
   zip.file("manifest.json", JSON.stringify({ content_items: [{ type: "media", id: "1", file_path: "content/media/media_1.json" }, { type: "note", id: "note-old", file_path: "content/notes/note_note-old.md" }] }))
@@ -17,7 +19,17 @@ const chatbook = async (missing = false) => {
 }
 
 describe("complete research pack archive", () => {
-  beforeEach(() => Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true }))
+  beforeEach(() => {
+    Object.defineProperty(globalThis, "crypto", { value: webcrypto, configurable: true })
+    // Node 20 rejects jsdom ArrayBuffers; bridge realms while retaining real hashing.
+    vi.spyOn(webcrypto.subtle, "digest").mockImplementation((algorithm, bytes) =>
+      digest(algorithm, Buffer.from(bytes as ArrayBuffer)))
+  })
+
+  it("hashes only the selected bytes with real SHA-256", async () => {
+    const bytes = Uint8Array.from([0, 97, 98, 99, 255])
+    expect(await sha256Bytes(bytes.subarray(1, 4))).toBe("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+  })
 
   it("retains originals, full >5MB artifact, Notes and metadata with usable offline page links", async () => {
     const bundle = portableFixture()

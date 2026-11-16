@@ -494,7 +494,7 @@ async def process_section_summary(
                 ),
                 **(
                     {"response_format": {"type": "json_object"}}
-                    if structured and (settings.provider or "").lower() == "deepseek"
+                    if structured and (settings.provider or "").lower() in {"deepseek", "openai"}
                     else {}
                 ),
             ),

@@ -22,6 +22,8 @@ Fresh Job 44 identifies a further context-loss path: Personnel's verified joint 
 
 The same audit finds late literal AUTHOR'S/AUTHORS' NOTE passages. Some disclaim attributing views to any individual; others explicitly place responsibility on the bylined author. Preserve these source excerpts and coordinates within their verified contribution ranges and existing context bounds, independently of model compression. Recognize the source label without classifying its meaning. Notes remain attribution context, not new citable claim evidence or an additional authority for accepting proposed author names. Acknowledged people must not become authors merely because their names appear in a retained note. Topic-oriented chapter wording should preserve genuine named disagreements without inventing contributor divisions from missing metadata.
 
+Job 44 also repeats a malformed-JSON extraction failure in Labor. The existing gateway supports OpenAI's response-format control, but these Jobs request JSON mode only for DeepSeek. Extend that existing branch to native OpenAI extraction calls; keep prose synthesis unchanged. This is syntax assistance, not schema or semantic validation: retain all current shape, passage-ID, finish and failure checks and do not add an automatic retry. The [OpenAI JSON-mode documentation](https://developers.openai.com/api/docs/guides/structured-outputs#json-mode) describes these limits. A separate Luna capability probe returned a parseable JSON object with `stop`; its exact quoted-string expectation did not pass, so it is not a content-fidelity success.
+
 ## Scope and ownership
 
 - Existing `section_summaries.py`: extraction/synthesis prompts, current-call citation vocabulary, bounded owned-artifact diagnostics and context wiring.
