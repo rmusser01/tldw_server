@@ -224,7 +224,7 @@ class ChatbookJobLimits:
 
 def record_failed_import_result(job: ImportJob, result: Any) -> None:
     """Retain public partial-restore evidence without persisting private account payloads."""
-    if not isinstance(result, dict) or job.status == ImportStatus.CANCELLED:
+    if not isinstance(result, dict):
         return
     for key in ("total_items", "processed_items", "successful_items", "failed_items", "skipped_items"):
         value = result.get(key)
@@ -235,7 +235,7 @@ def record_failed_import_result(job: ImportJob, result: Any) -> None:
         job.warnings = list(job.warnings or []) + [row for row in warnings if row not in (job.warnings or [])]
     job.metadata = {
         **(job.metadata if isinstance(job.metadata, dict) else {}),
-        **{key: result[key] for key in ("imported_items", "inventory_summary", "skipped_non_restorable") if key in result},
+        **{key: result[key] for key in ("imported_items", "inventory_summary", "skipped_non_restorable", "id_maps") if key in result},
     }
 
 
@@ -245,6 +245,7 @@ def _build_import_result(
     inventory_summary: dict[str, Any] | None,
     skipped_non_restorable: dict[str, int],
     account_restore_payload: dict[str, Any] | None,
+    id_maps: dict[str, Any] | None = None,
 ) -> tuple[bool, str, dict[str, Any]]:
     """Build the complete synchronous result before the caller cleans its extracted archive."""
     # Build result message
@@ -260,6 +261,8 @@ def _build_import_result(
     }
     if inventory_summary:
         sync_result["inventory_summary"] = inventory_summary
+    if id_maps is not None:
+        sync_result["id_maps"] = id_maps
     if skipped_non_restorable:
         sync_result["skipped_non_restorable"] = skipped_non_restorable
     if account_restore_payload:
@@ -1188,6 +1191,25 @@ class ChatbookService:
                 payload[key] = value
         return payload
 
+    @staticmethod
+    def _portable_media_metadata(metadata: Any, content: str) -> dict[str, Any]:
+        """Export only verified canonical page locations, never arbitrary server metadata."""
+        from ..Media.page_provenance import page_map_for_content
+
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (TypeError, ValueError):
+                return {}
+        page_map = page_map_for_content(metadata, content)
+        if not page_map:
+            return {}
+        return {
+            "page_count": len(page_map),
+            "page_map": page_map,
+            "page_map_content_hash": metadata["page_map_content_hash"],
+        }
+
     def _normalize_transcript_row(self, row: dict[str, Any]) -> dict[str, Any]:
         """Normalize transcript row from Media DB helpers."""
         payload: dict[str, Any] = {}
@@ -1554,6 +1576,35 @@ class ChatbookService:
                 pointer_only += 1
                 status.warnings.append(f"Stored media artifact restore failed: {str(exc)}")
         return restored, pointer_only
+
+    def _media_import_artifacts_match(self, media_db: Any, media_id: int, extract_dir: Path, payload: dict[str, Any]) -> bool:
+        """Reuse an import identity only while its bundled account-owned bytes still match."""
+        expected = [item for item in payload.get("stored_artifacts") or [] if isinstance(item, dict) and item.get("bundled")]
+        if not expected:
+            return True
+        list_files = getattr(media_db, "get_media_files", None)
+        if not callable(list_files):
+            return False
+        rows = list_files(media_id) or []
+        for item in expected:
+            source = self._safe_extracted_content_path(extract_dir, str(item.get("archive_path") or ""))
+            if source is None or not source.is_file():
+                return False
+            with source.open("rb") as stream:
+                expected_hash = hashlib.file_digest(stream, "sha256").digest()
+            matched = False
+            for row in rows:
+                if row.get("file_type") != item.get("file_type") or row.get("original_filename") != item.get("original_filename"):
+                    continue
+                destination = self._resolve_owned_media_artifact_path(row.get("storage_path"))
+                if destination is not None and destination.is_file():
+                    with destination.open("rb") as stream:
+                        if hashlib.file_digest(stream, "sha256").digest() == expected_hash:
+                            matched = True
+                            break
+            if not matched:
+                return False
+        return True
 
     @staticmethod
     def _media_chunks_for_restore(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3376,6 +3427,7 @@ class ChatbookService:
             conversation_id_map: dict[str, str] = {}
             message_id_map: dict[tuple[str, str], str] = {}
             media_id_map: dict[str, int | None] = {}
+            note_id_map: dict[str, str | None] = {}
             imported_items: dict[str, int] = {}
 
             def _run_import_for_type(
@@ -3503,6 +3555,7 @@ class ChatbookService:
                     manifest_path_index=manifest_path_index,
                     conversation_id_map=conversation_id_map,
                     message_id_map=message_id_map,
+                    note_id_map=note_id_map,
                 )
 
             # Import Explainer sessions from first-class content items.
@@ -3562,6 +3615,7 @@ class ChatbookService:
                 inventory_summary,
                 skipped_non_restorable,
                 account_restore_payload,
+                id_maps={"media": media_id_map, "notes": note_id_map},
             )
 
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS as e:
@@ -3705,6 +3759,8 @@ class ChatbookService:
 
             latest = self._get_import_job(job.job_id)
             if latest and latest.status == ImportStatus.CANCELLED:
+                record_failed_import_result(latest, result)
+                self._save_import_job(latest)
                 return
             if success:
                 job.status = ImportStatus.COMPLETED
@@ -3731,6 +3787,7 @@ class ChatbookService:
                         "imported_items": imported_items,
                         "inventory_summary": result.get("inventory_summary"),
                         "skipped_non_restorable": skipped_non_restorable,
+                        **({"id_maps": result["id_maps"]} if "id_maps" in result else {}),
                     }
                 else:
                     job.progress_percentage = 100
@@ -5791,6 +5848,16 @@ class ChatbookService:
 
             normalized = self._normalize_media_record(media_record)
             media_id = str(normalized.get("id", media_identifier))
+            version = (
+                get_document_version(media_db, int(media_record["id"]))
+                if get_document_version is not None else None
+            )
+            if version and isinstance(version.get("content"), str):
+                normalized["content"] = version["content"]
+            normalized["safe_metadata"] = self._portable_media_metadata(
+                (version or {}).get("safe_metadata", normalized.get("safe_metadata")),
+                normalized.get("content") or "",
+            )
 
             # Attach transcripts when helper is available
             transcripts: list[dict[str, Any]] = []
@@ -6906,6 +6973,7 @@ class ChatbookService:
         manifest_path_index: ManifestImportPathIndex | None = None,
         conversation_id_map: dict[str, str] | None = None,
         message_id_map: dict[tuple[str, str], str] | None = None,
+        note_id_map: dict[str, str | None] | None = None,
     ):
         """Import notes from chatbook."""
         template_settings = self._resolve_template_settings(manifest)
@@ -7047,6 +7115,10 @@ class ChatbookService:
                     )
 
                 if new_note_id:
+                    if note_id_map is not None:
+                        key = str(note_id)
+                        value = str(new_note_id)
+                        note_id_map[key] = value if key not in note_id_map or note_id_map[key] == value else None
                     status.successful_items += 1
                 else:
                     # If add failed, it might be a duplicate not caught by search
@@ -7403,7 +7475,7 @@ class ChatbookService:
                 if existing and conflict_resolution == ConflictResolution.SKIP:
                     version = None
                     if str(existing.get("owner_user_id")) == str(self.user_id_int) and get_document_version is not None:
-                        version = get_document_version(media_db, int(existing["id"]), include_content=False)
+                        version = get_document_version(media_db, int(existing["id"]), include_content=True)
                     stored_metadata = (version or {}).get("safe_metadata") or {}
                     if isinstance(stored_metadata, str):
                         try:
@@ -7417,6 +7489,10 @@ class ChatbookService:
                         and payload.get("uuid")
                         and isinstance(provenance, dict)
                         and provenance.get("source_uuid") == payload["uuid"]
+                        and (version or {}).get("content") == (payload.get("content") or "")
+                        and self._portable_media_metadata(stored_metadata, version["content"])
+                        == self._portable_media_metadata(payload.get("safe_metadata"), payload.get("content") or "")
+                        and self._media_import_artifacts_match(media_db, int(existing["id"]), extract_dir, payload)
                     ):
                         self._record_imported_media_ids(
                             media_id_map, media_id_text, payload.get("uuid"), int(existing["id"])
@@ -7437,6 +7513,7 @@ class ChatbookService:
                     analysis_content=payload.get("analysis_content"),
                     safe_metadata=json.dumps(
                         {
+                            **self._portable_media_metadata(payload.get("safe_metadata"), payload.get("content") or ""),
                             "chatbook_import": {
                                 "source_media_id": payload.get("id") or media_id_text,
                                 "source_uuid": payload.get("uuid"),
@@ -7456,6 +7533,20 @@ class ChatbookService:
                 )
                 if not new_media_id:
                     status.failed_items += 1
+                    continue
+                restored_row = get_media_by_id(media_db, int(new_media_id)) if get_media_by_id is not None else None
+                version = (
+                    get_document_version(media_db, int(new_media_id))
+                    if restored_row and str(restored_row.get("owner_user_id")) == str(self.user_id_int)
+                    and get_document_version is not None else None
+                )
+                if (
+                    not version or version.get("content") != (payload.get("content") or "")
+                    or self._portable_media_metadata(version.get("safe_metadata"), version["content"])
+                    != self._portable_media_metadata(payload.get("safe_metadata"), payload.get("content") or "")
+                ):
+                    status.failed_items += 1
+                    status.warnings.append(f"Media {media_id_text} did not restore its exact canonical content and page locations.")
                     continue
                 self._restore_media_transcripts(
                     media_db=media_db,
@@ -7478,6 +7569,13 @@ class ChatbookService:
                     status.warnings.append(
                         f"Restored {restored_artifacts} bundled stored media artifact(s) for media {media_id_text}."
                     )
+                requested_artifacts = sum(
+                    1 for item in payload.get("stored_artifacts") or [] if isinstance(item, dict) and item.get("bundled")
+                )
+                if restored_artifacts != requested_artifacts:
+                    status.failed_items += 1
+                    status.warnings.append(f"Media {media_id_text} was only partially restored; bundled original files are missing.")
+                    continue
                 if media_id_map is not None:
                     self._record_imported_media_ids(media_id_map, media_id_text, payload.get("uuid"), int(new_media_id))
                 status.successful_items += 1

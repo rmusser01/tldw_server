@@ -464,6 +464,9 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             logger.debug(f"Chatbooks Jobs worker: failed to remove import archive {resolved_path}: {cleanup_err}")
 
     ij = service._get_import_job(job_id)
+    if ij and ij.status == ImportStatus.CANCELLED:
+        record_failed_import_result(ij, result)
+        service._save_import_job(ij)
     if ok:
         if ij and ij.status != ImportStatus.CANCELLED:
             result_data = result if isinstance(result, dict) else {}
@@ -502,6 +505,7 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
                 "imported_items": imported_items,
                 "inventory_summary": result_data.get("inventory_summary"),
                 "skipped_non_restorable": skipped_non_restorable,
+                **({"id_maps": result_data["id_maps"]} if "id_maps" in result_data else {}),
             }
             service._save_import_job(ij)
         if isinstance(result, dict):
@@ -511,6 +515,8 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
             }
             if result.get("inventory_summary") is not None:
                 worker_result["inventory_summary"] = result.get("inventory_summary")
+            if "id_maps" in result:
+                worker_result["id_maps"] = result["id_maps"]
             if result.get("skipped_non_restorable"):
                 worker_result["skipped_non_restorable"] = result.get("skipped_non_restorable") or {}
             return worker_result

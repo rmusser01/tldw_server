@@ -81,6 +81,14 @@ class FakeMediaDB:
         self.media[media_id] = kwargs
         return media_id, f"media-uuid-{media_id}", "added"
 
+    def get_media_by_id(self, media_id, **_kwargs):
+        row = self.media.get(media_id)
+        return {"id": media_id, "uuid": f"media-uuid-{media_id}", **row} if row else None
+
+    def get_document_version(self, media_id, **_kwargs):
+        row = self.media.get(media_id)
+        return {"content": row["content"], "safe_metadata": row.get("safe_metadata")} if row else None
+
     def insert_media_file(self, **kwargs):
         self.files.append(kwargs)
         return f"file-{len(self.files)}"
@@ -887,6 +895,7 @@ async def test_service_allows_explicit_chatbook_media_and_embedding_restore_flag
     assert success is True, message
     assert result == {
         "imported_items": {},
+        "id_maps": {"media": {}, "notes": {}},
         "warnings": [],
         "total_items": 0,
         "processed_items": 0,
