@@ -1573,6 +1573,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
+              tldw_Server_API/tests/Claims/test_citation_support.py
+              tldw_Server_API/tests/Claims/test_citation_support_types.py
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
               tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
               tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
@@ -3339,6 +3341,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
+              tldw_Server_API/tests/Claims/test_citation_support.py
+              tldw_Server_API/tests/Claims/test_citation_support_types.py
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
               tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
               tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
@@ -4910,6 +4914,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
+              tldw_Server_API/tests/Claims/test_citation_support.py
+              tldw_Server_API/tests/Claims/test_citation_support_types.py
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
               tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
               tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
@@ -6385,6 +6391,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
+              tldw_Server_API/tests/Claims/test_citation_support.py
+              tldw_Server_API/tests/Claims/test_citation_support_types.py
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
               tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
               tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
@@ -7851,6 +7859,8 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_source_authority.py
           - name: product-claims-engine
             paths: >-
+              tldw_Server_API/tests/Claims/test_citation_support.py
+              tldw_Server_API/tests/Claims/test_citation_support_types.py
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
               tldw_Server_API/tests/Claims/test_claims_embedding_refresh_config.py
               tldw_Server_API/tests/Claims/test_claims_endpoints_api.py
