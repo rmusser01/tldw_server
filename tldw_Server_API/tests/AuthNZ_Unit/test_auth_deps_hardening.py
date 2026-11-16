@@ -214,7 +214,7 @@ async def test_maintenance_guard_skipped_log_is_sanitized(monkeypatch: pytest.Mo
     monkeypatch.setattr(admin_system_ops_service, "get_maintenance_state", _raise_secret_state)
 
     sink = io.StringIO()
-    token = logger.add(sink, level="DEBUG")
+    token = logger.add(sink, level="DEBUG", format="{message}")
     try:
         principal = await auth_deps.get_auth_principal(_DummyRequest())
     finally:
