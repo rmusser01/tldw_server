@@ -28,6 +28,77 @@ from tldw_Server_API.tests.Chatbooks.test_chatbooks_retry_identity import stores
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("absolute_key", [False, True])
+async def test_uploaded_storage_original_is_bundled_and_restored_exactly(stores, tmp_path, monkeypatch, absolute_key):  # noqa: F811
+    from tldw_Server_API.app.core import Storage
+    from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
+
+    source, destination = stores
+    storage = FileSystemStorage(tmp_path / "configured-blob-storage")
+    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+    media_id, _, _ = source._get_media_db().add_media_with_keywords(
+        title="Uploaded PDF", media_type="document", content="Exact PDF text", keywords=[], owner_user_id=101,
+    )
+    original = b"%PDF-1.7 original uploaded PDF bytes"
+    storage_key = await storage.store("101", media_id, "original.pdf", original, "application/pdf")
+    source._get_media_db().insert_media_file(
+        media_id=media_id, file_type="original",
+        storage_path=str(storage.base_path / storage_key) if absolute_key else storage_key,
+        original_filename="original.pdf", mime_type="application/pdf", file_size=len(original),
+        checksum=hashlib.sha256(original).hexdigest(),
+    )
+    selections = {ContentType.MEDIA: [str(media_id)]}
+    okay, message, archive_path = await source.create_chatbook(
+        name="Uploaded PDF", description="Original file", format_version=ChatbookVersion.V1_1,
+        content_selections=selections, include_media=True, include_embeddings=False, async_mode=False,
+    )
+    assert okay, message
+    with zipfile.ZipFile(archive_path) as archive:
+        exported = json.loads(archive.read(f"content/media/media_{media_id}.json"))
+        artifact = exported["stored_artifacts"][0]
+        assert artifact["bundled"] is True
+        assert artifact["pointer_only"] is False
+        assert archive.read(artifact["archive_path"]) == original
+        assert str(storage.base_path) not in json.dumps(exported)
+    target = destination.import_dir / "uploaded-original.chatbook"
+    target.write_bytes(Path(archive_path).read_bytes())
+    okay, message, result = await destination.import_chatbook(
+        str(target), content_selections=selections, conflict_resolution=ConflictResolution.RENAME,
+        prefix_imported=False, async_mode=False,
+    )
+    assert okay, message
+    restored_id = result["id_maps"]["media"][str(media_id)]
+    restored_file = destination._get_media_db().get_media_files(restored_id)[0]
+    assert destination._resolve_owned_media_artifact_path(restored_file["storage_path"]).read_bytes() == original
+
+
+@pytest.mark.parametrize("path_kind", ["foreign_relative", "foreign_absolute", "traversal", "file_symlink", "owner_symlink"])
+async def test_blob_storage_lookup_refuses_other_account_bytes(stores, tmp_path, monkeypatch, path_kind):  # noqa: F811
+    from tldw_Server_API.app.core import Storage
+    from tldw_Server_API.app.core.Storage.filesystem_storage import FileSystemStorage
+
+    source, _ = stores
+    storage = FileSystemStorage(tmp_path / "blob-storage")
+    monkeypatch.setattr(Storage, "get_storage_backend", lambda: storage)
+    foreign_key = await storage.store("202", 1, "private.pdf", b"Other account bytes", "application/pdf")
+    foreign_path = storage.base_path / foreign_key
+    if path_kind == "foreign_relative":
+        key = foreign_key
+    elif path_kind == "foreign_absolute":
+        key = str(foreign_path)
+    elif path_kind == "traversal":
+        key = "101/../" + foreign_key
+    elif path_kind == "file_symlink":
+        owned = storage.base_path / "101"
+        owned.mkdir()
+        (owned / "linked.pdf").symlink_to(foreign_path)
+        key = "101/linked.pdf"
+    else:
+        (storage.base_path / "101").symlink_to(storage.base_path / "202", target_is_directory=True)
+        key = "101/media/1/private.pdf"
+    assert source._resolve_owned_media_artifact_path(key) is None
+
+
 @pytest.mark.parametrize("valid_map", [True, False])
 async def test_real_media_note_roundtrip_returns_destination_ids_and_exact_page_map(stores, valid_map):  # noqa: F811
     source, destination = stores

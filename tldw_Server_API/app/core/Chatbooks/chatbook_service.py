@@ -1232,20 +1232,34 @@ class ChatbookService:
         }
 
     def _resolve_owned_media_artifact_path(self, storage_path: Any) -> Path | None:
-        """Resolve stored media bytes only when they live under the account-owned user root."""
+        """Resolve legacy files and configured blob keys within this account's subtree."""
         raw = str(storage_path or "").strip()
         if not raw:
             return None
         try:
-            user_root = DatabasePaths.resolve_user_base_directory(self.user_id_int or self.user_id).resolve()
+            user_directory = DatabasePaths.resolve_user_base_directory(self.user_id_int or self.user_id)
+            user_root = user_directory.resolve()
         except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
             return None
 
-        candidates = [Path(raw)] if Path(raw).is_absolute() else [user_root / raw]
-        for candidate in candidates:
+        candidates = [(user_root, Path(raw) if Path(raw).is_absolute() else user_root / raw)]
+        try:
+            from ..Storage import FileSystemStorage, get_storage_backend
+
+            storage = get_storage_backend()
+            if isinstance(storage, FileSystemStorage):
+                storage_root = storage.base_path.resolve()
+                # Do not resolve the owner root: a symlink to another account
+                # must not turn that account's files into authorized exports.
+                owned_root = storage_root / user_directory.name
+                candidate = Path(raw) if Path(raw).is_absolute() else storage_root / raw
+                candidates.append((owned_root, candidate))
+        except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
+            pass
+        for owned_root, candidate in candidates:
             try:
                 resolved = candidate.resolve()
-                resolved.relative_to(user_root)
+                resolved.relative_to(owned_root)
             except _CHATBOOK_NONCRITICAL_EXCEPTIONS:
                 continue
             if resolved.is_file():
