@@ -1949,6 +1949,64 @@ describe("WorkspaceHeader workspace browser modal", () => {
     expect(mockMessageApi.warning).not.toHaveBeenCalled()
   })
 
+  it.each(["complete pack", "dated snapshot", "undated snapshot"])("replaces the actual requested route after successful %s adoption", async mode => {
+    const router = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+    const { useWorkspaceStore: realStore, workspacePersistWriterInternals } =
+      await vi.importActual<typeof import("@/store/workspace")>("@/store/workspace")
+    const previous = realStore.getState()
+    realStore.getState().initializeWorkspace("Existing local research")
+    realStore.getState().setCurrentNote({ title: "Retained original", content: "Original draft", isDirty: true })
+    const startingId = realStore.getState().workspaceId
+    const bundle = mockExportWorkspaceBundle()
+    bundle.workspace.chatSession = { messages: [{ id: "import-message", isBot: false, name: "You", message: "Imported conversation", sources: [],
+      ...(mode === "undated snapshot" ? {} : { createdAt: 1000 }) }], history: [{ role: "user", content: "Imported conversation" }], historyId: null, serverChatId: null }
+    const result = { bundle, identity: { id: "new-destination", name: "Imported", tag: "workspace:new-destination" } }
+    if (mode === "complete pack") packMocks.parse.mockResolvedValue({ bundle, fingerprint: "verified" })
+    mockParseWorkspaceImportFile.mockResolvedValue(bundle)
+    packMocks.restore.mockResolvedValue(result)
+    packMocks.legacy.mockResolvedValue(result)
+    mockImportWorkspaceBundle.mockImplementation(realStore.getState().importWorkspaceBundle)
+    const RoutedHeader = () => {
+      const navigate = router.useNavigate(), location = router.useLocation()
+      mockNavigate.mockImplementation(navigate)
+      return <><output data-testid="import-route">{location.pathname + location.search}</output><WorkspaceHeader leftPaneOpen rightPaneOpen onToggleLeftPane={vi.fn()} onToggleRightPane={vi.fn()} /></>
+    }
+    try {
+      render(<router.MemoryRouter initialEntries={["/research-workspace?source_workspace_id=old-destination&source_artifact_id=old-output"]}><RoutedHeader /></router.MemoryRouter>)
+      fireEvent.change(screen.getByTestId("workspace-import-input"), { target: { files: [new File(["{}"], mode === "complete pack" ? "pack.zip" : "workspace.json")] } })
+      await waitFor(() => expect(acpPersistence.scope.release).toHaveBeenCalled())
+      const imported = realStore.getState()
+      expect(imported.workspaceId).not.toBe(startingId)
+      expect(screen.getByTestId("import-route")).toHaveTextContent(mode === "undated snapshot" ? "/research-workspace" : "/research-workspace?source_workspace_id=new-destination")
+      expect(screen.getByTestId("import-route").textContent).not.toContain("old-destination")
+      expect(screen.getByTestId("import-route").textContent).not.toContain("old-output")
+      expect(imported.getWorkspaceChatSession(imported.workspaceId)?.messages[0].message).toBe("Imported conversation")
+      expect(imported.workspaceSnapshots[startingId].currentNote.content).toBe("Original draft")
+      expect(mockNavigate).toHaveBeenCalledWith(expect.any(String), { replace: true })
+    } finally {
+      mockNavigate.mockReset()
+      workspacePersistWriterInternals.cancelPendingWrite()
+      realStore.setState(previous, true)
+      workspacePersistWriterInternals.cancelPendingWrite()
+    }
+  })
+
+  it.each(["restore failed", "adoption refused", "account changed"])("keeps the requested route when %s", async outcome => {
+    const controller = new AbortController()
+    acpPersistence.scope = { ...acpPersistence.scope, scopeInvalidatedSignal: controller.signal }
+    if (outcome === "restore failed") packMocks.legacy.mockRejectedValue(new Error("Restore not complete"))
+    else if (outcome === "adoption refused") mockImportWorkspaceBundle.mockReturnValue(null)
+    else packMocks.legacy.mockImplementation(async bundle => {
+      controller.abort()
+      return { bundle, identity: { id: "new-destination", name: "Imported", tag: "workspace:new-destination" } }
+    })
+    renderAcpHeader()
+    fireEvent.change(screen.getByTestId("workspace-import-input"), { target: { files: [new File(["{}"], "workspace.json")] } })
+    await waitFor(() => expect(acpPersistence.scope.release).toHaveBeenCalled())
+    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(mockMessageApi.success).not.toHaveBeenCalled()
+  })
+
   it.each([false, true])("imports an undated snapshot and clears requested workspace routing only for a valid graph (%s)", async (malformed) => {
     const { useWorkspaceStore: realStore, workspacePersistWriterInternals } =
       await vi.importActual<typeof import("@/store/workspace")>("@/store/workspace")
@@ -2034,6 +2092,7 @@ describe("WorkspaceHeader workspace browser modal", () => {
     finish({ bundle: mockExportWorkspaceBundle(), identity: { id: "stale", name: "Imported", tag: "workspace:stale" } })
     await waitFor(() => expect(acpPersistence.scope.release).toHaveBeenCalled())
     expect(mockImportWorkspaceBundle).not.toHaveBeenCalled()
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 
   it("imports workspace bundle file from the workspace menu", async () => {

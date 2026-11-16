@@ -121,7 +121,7 @@ import {
   type WorkspaceACPRunArtifactSaveInput
 } from "./WorkspaceACPHistoryModal"
 import { WorkspaceSandboxDiagnosticsPanel } from "./WorkspaceSandboxDiagnosticsPanel"
-import { RESEARCH_WORKSPACE_PATH, WORKSPACES_PATH } from "@/routes/route-paths"
+import { buildResearchWorkspaceReturnPath, RESEARCH_WORKSPACE_PATH, WORKSPACES_PATH } from "@/routes/route-paths"
 import { useActiveWorkspaceContext } from "@/services/workspace-context"
 import { renderWorkspaceMessageActionContent } from "./workspace-message-content"
 
@@ -1974,6 +1974,7 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
       messageApi.success(t("playground:workspace.importSuccessNamed", "Workspace imported: {{name}}", { name: result.bundle.workspace.name }))
       setImportDialogOpen(false)
       setPackTransfer(null)
+      navigate(buildResearchWorkspaceReturnPath({ sourceWorkspaceId: importedWorkspaceId }), { replace: true })
     })
   }
 
