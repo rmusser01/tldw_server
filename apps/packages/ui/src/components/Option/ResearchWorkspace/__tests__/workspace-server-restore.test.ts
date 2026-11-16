@@ -1189,7 +1189,7 @@ describe("post-migration saved chat identity", () => {
       workspaceChatReferenceId: "original"
     });
     const setItem = vi
-      .spyOn(localStorage, "setItem")
+      .spyOn(Object.getPrototypeOf(localStorage), "setItem")
       .mockImplementation(() => {
         throw new Error("Quota exceeded");
       });
