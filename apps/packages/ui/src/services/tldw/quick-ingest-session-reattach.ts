@@ -1,3 +1,4 @@
+import { readIngestJobProgress } from "./ingest-jobs-orchestrator"
 import { assertQuickIngestRequestCurrent, scopedQuickIngestRequest, type QuickIngestRequestContext } from "./quick-ingest-request-scope"
 import {
   completedIngestJobIndicatesFailure,
@@ -71,9 +72,6 @@ const interruptedSnapshot = (
   errorMessage,
 })
 
-const normalizeJobStatus = (value: unknown): string =>
-  String(value || "").trim().toLowerCase()
-
 const isTransientHttpStatus = (status: unknown): status is number =>
   typeof status === "number" &&
   Number.isFinite(status) &&
@@ -130,7 +128,8 @@ const buildJobSnapshot = (
   response: { data?: any },
   sourceItemId?: string
 ): ReattachedQuickIngestJob => {
-  const status = normalizeJobStatus(response.data?.status)
+  const progress = readIngestJobProgress(response.data)
+  const { status } = progress
   const terminalData =
     status === "completed"
       ? extractCompletedIngestJobTerminalData(response.data)
@@ -147,7 +146,7 @@ const buildJobSnapshot = (
 
   return {
     jobId,
-    status,
+    ...progress,
     result: terminalData,
     error: error || undefined,
     sourceItemId: sourceItemId || undefined,
@@ -193,17 +192,15 @@ export const reattachQuickIngestSession = async (
     for (const [index, jobId] of jobIds.entries()) {
       const response = await readJobStatus(jobId, context)
 
-      if (!response?.ok || !normalizeJobStatus(response.data?.status)) {
-        return interruptedSnapshot()
-      }
+      if (!response?.ok) return interruptedSnapshot()
 
-      jobs.push(
-        buildJobSnapshot(
-          jobId,
-          response,
-          jobIdToItemId[String(jobId)] || submittedItemIds[index]
-        )
+      const job = buildJobSnapshot(
+        jobId,
+        response,
+        jobIdToItemId[String(jobId)] || submittedItemIds[index]
       )
+      if (!job.status) return interruptedSnapshot()
+      jobs.push(job)
     }
   } catch (error) {
     assertQuickIngestRequestCurrent(context, error)

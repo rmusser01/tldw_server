@@ -29,12 +29,14 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_dat
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.job_progress import pdf_job_progress
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     apply_chunking_template_if_any,
     prepare_chunking_options_dict,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
+    PDF_SAVE_PROGRESS_PERCENT,
     _enforce_and_record_media_bytes,
     process_batch_media,
     process_document_like_item,
@@ -70,6 +72,10 @@ _MARK_PROCESSED_CONFLICT_BACKOFF_SECONDS = 0.05
 class _ProgressState:
     percent: float | None = None
     message: str | None = None
+
+
+class _MediaIngestStopped(Exception):
+    """The job was cancelled or reassigned before the next step."""
 
 
 class MediaIngestJobError(RuntimeError):
@@ -119,9 +125,9 @@ def _coerce_int(value: Any, default: int) -> int:
 def _jobs_manager() -> JobManager:
     db_url = (os.getenv("JOBS_DB_URL") or "").strip()
     if not db_url:
-        return JobManager()
+        return JobManager(enforce_leases=True)
     backend = "postgres" if db_url.startswith("postgres") else None
-    return JobManager(backend=backend, db_url=db_url)
+    return JobManager(backend=backend, db_url=db_url, enforce_leases=True)
 
 
 def _build_worker_config(*, worker_id: str, queue: str) -> WorkerConfig:
@@ -567,6 +573,23 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
     input_ref = payload.get("input_ref") or payload.get("original_filename") or source
 
     form_data = _build_form_data(payload)
+    is_pdf = str(form_data.media_type) == "pdf"
+    lease_id = str(job.get("lease_id") or "") if is_pdf else None
+
+    def cancel_check() -> bool:
+        if not is_pdf:
+            return _should_cancel(jm, job_id)
+        return not jm.owns_live_lease(job_id, lease_id or "")
+
+    def publish_progress(percent: float, message: str) -> bool:
+        updated = jm.update_job_progress(
+            job_id, progress_percent=percent, progress_message=message, lease_id=lease_id,
+            preserve_progress_at=PDF_SAVE_PROGRESS_PERCENT if is_pdf else None,
+        )
+        if updated:
+            progress.percent = percent
+            progress.message = message
+        return updated
 
     temp_dir = payload.get("temp_dir")
     cleanup_temp_dir = bool(payload.get("cleanup_temp_dir"))
@@ -586,6 +609,9 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             )
             _finalize_owned_cancelled(jm, job, reason="cancel requested before start")
             return {}
+
+        if is_pdf and not publish_progress(5, "prepare"):
+            raise _MediaIngestStopped()
 
         _mark_collection_item_status(
             user_id=user_id,
@@ -610,9 +636,8 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                     ) from exc
                 raise
 
-        progress.percent = 5.0
-        progress.message = "prepare"
-        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+        if not is_pdf:
+            publish_progress(5, "prepare")
 
         analysis_refusal = await _admit_or_refuse_analysis(form_data)
         if analysis_refusal is not None:
@@ -622,9 +647,6 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         db_path = getattr(db, "db_path_str", None) or getattr(db, "db_path", None) or ""
         client_id = getattr(db, "client_id", None) or str(user_id)
         loop = asyncio.get_running_loop()
-
-        def cancel_check():
-            return _should_cancel(jm, job_id)
 
         chunk_options, chunking_plan = await async_resolve_chunking_options_and_plan(
             form_data,
@@ -652,9 +674,7 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             uploaded_paths = [source] if source_kind == "file" else []
             source_to_ref_map = {str(source): input_ref}
 
-            progress.percent = 20.0
-            progress.message = "process"
-            jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+            publish_progress(20, "process")
 
             results = await process_batch_media(
                 media_type=str(form_data.media_type),
@@ -672,43 +692,40 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                 analysis_refusal=analysis_refusal,
             )
         else:
-            progress.percent = 20.0
-            progress.message = "process"
-            jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+            if is_pdf:
+                if cancel_check():
+                    raise _MediaIngestStopped()
+            else:
+                publish_progress(20, "process")
 
-            result = await process_document_like_item(
-                item_input_ref=str(input_ref),
-                processing_source=str(source),
-                media_type=form_data.media_type,
-                is_url=(source_kind == "url"),
-                form_data=form_data,
-                chunk_options=chunk_options,
-                temp_dir=temp_dir,
-                loop=loop,
-                db_path=str(db_path),
-                client_id=str(client_id),
-                user_id=int(user_id) if user_id.isdigit() else None,
-                cancel_check=cancel_check,
+            progress_scope = (
+                pdf_job_progress(cancel_check, publish_progress) if is_pdf else contextlib.nullcontext()
             )
+            with progress_scope:
+                result = await process_document_like_item(
+                    item_input_ref=str(input_ref),
+                    processing_source=str(source),
+                    media_type=form_data.media_type,
+                    is_url=(source_kind == "url"),
+                    form_data=form_data,
+                    chunk_options=chunk_options,
+                    temp_dir=temp_dir,
+                    loop=loop,
+                    db_path=str(db_path),
+                    client_id=str(client_id),
+                    user_id=int(user_id) if user_id.isdigit() else None,
+                    cancel_check=cancel_check,
+                )
             results = [result]
 
-        if _should_cancel(jm, job_id):
-            _mark_collection_item_status(
-                user_id=user_id,
-                item_id=planned_item_id,
-                status="cancelled",
-                latest_job_id=latest_job_id,
-                error_summary="cancel requested during processing",
-            )
-            _finalize_owned_cancelled(jm, job, reason="cancel requested during processing")
-            return {}
-
-        progress.percent = 90.0
-        progress.message = "finalize"
-        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+        if cancel_check() or (not publish_progress(90, "finalize") and is_pdf):
+            raise _MediaIngestStopped()
 
         result_item = results[0] if results else {}
         media_id = result_item.get("db_id") if isinstance(result_item, dict) else None
+
+        if not publish_progress(100, "completed") and is_pdf:
+            raise _MediaIngestStopped()
 
         if media_id and getattr(form_data, "generate_embeddings", False):
             # The task outlives the job: it keeps the owner, not the job's admission or key.
@@ -721,10 +738,6 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                         form_data=form_data,
                     )
                 )
-
-        progress.percent = 100.0
-        progress.message = "completed"
-        jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
 
         if isinstance(result_item, dict):
             final_chunking_plan = chunking_plan
@@ -761,6 +774,27 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             error_summary="No result produced",
         )
         return {"status": "Error", "error": "No result produced"}
+
+    except _MediaIngestStopped:
+        current = jm.get_job(job_id) or {}
+        if current.get("uuid") == job.get("uuid") and current.get("status") == "cancelled":
+            _mark_collection_item_status(
+                user_id=user_id,
+                item_id=planned_item_id,
+                status="cancelled",
+                latest_job_id=latest_job_id,
+                error_summary="cancel requested during processing",
+            )
+            _finalize_owned_cancelled(jm, job, reason="cancel requested during processing")
+        elif is_pdf:
+            # A replacement lease needs the original staged upload.
+            if payload.get("temp_dir"):
+                cleanup_temp_dir = False
+            jm.release_job(
+                job_id, worker_id=job.get("worker_id"), lease_id=lease_id,
+                reason="PDF ingest lease no longer active", enforce=True,
+            )
+        return {}
 
     except Exception as exc:
         _mark_collection_item_status(
@@ -805,14 +839,6 @@ async def run_media_ingest_jobs_worker(
     async def _handler(job: dict[str, Any]) -> dict[str, Any]:
         return await _handle_job(job, jm, progress_state)
 
-    def _progress_cb() -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        if progress_state.percent is not None:
-            out["progress_percent"] = progress_state.percent
-        if progress_state.message is not None:
-            out["progress_message"] = progress_state.message
-        return out
-
     async def _watch_stop() -> None:
         if stop_event is None:
             return
@@ -827,7 +853,7 @@ async def run_media_ingest_jobs_worker(
     try:
         # The trusted dispatcher crosses Job owners; content work still uses each persisted owner.
         with JobManager.scoped_rls_context(is_admin=True, domain_allowlist=_MEDIA_DOMAIN, owner_user_id=None):
-            await sdk.run(handler=_handler, cancel_check=_cancel_check, progress_cb=_progress_cb)
+            await sdk.run(handler=_handler, cancel_check=_cancel_check)
     finally:
         with contextlib.suppress(Exception):
             watcher.cancel()

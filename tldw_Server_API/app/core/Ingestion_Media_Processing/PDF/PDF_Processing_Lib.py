@@ -13,12 +13,13 @@
 ####################
 # Import necessary libraries
 import asyncio
+import contextvars
 import gc
 import importlib.util
 import re
 import sys
 from datetime import datetime
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 #
 # Import External Libs
@@ -36,6 +37,11 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resol
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
 from tldw_Server_API.app.core.Utils.Utils import logging
+
+from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.job_progress import (
+    PDFProcessingCancelled,
+    check_pdf_job,
+)
 
 _PDF_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -475,6 +481,34 @@ from pathlib import Path
 
 # ... other imports ...
 
+def _normalize_extracted_pdf_text(
+    result: dict[str, Any], content: str | None, filename: str
+) -> str | None:
+    # Normalize the final extracted text (including OCR merge) before chunking.
+    final_content = result.get("content")
+    if isinstance(final_content, str):
+        content = final_content
+    if content and content.strip():
+        try:
+            normalized_content = normalize_pdf_text_for_storage(content)
+            result["content"] = normalized_content
+            content = normalized_content
+            result.setdefault("analysis_details", {})["text_normalization"] = {
+                "applied": True,
+                "mode": "paragraph_safe",
+                "chars_before": len(final_content or ""),
+                "chars_after": len(normalized_content),
+                "line_breaks_before": (final_content or "").count("\n"),
+                "line_breaks_after": normalized_content.count("\n"),
+            }
+        except _PDF_NONCRITICAL_EXCEPTIONS as normalization_error:
+            logging.warning(f"PDF text normalization failed for {filename}: {normalization_error}")
+            result["warnings"] = (result.get("warnings") or []) + [
+                f"Text normalization failed: {normalization_error}"
+            ]
+    return content
+
+
 def process_pdf(
     file_input: Union[str, bytes, Path], # Can be path, bytes, or Path object
     filename: str, # Original filename for reference and metadata fallback
@@ -630,6 +664,7 @@ def process_pdf(
         else:
             raise TypeError(f"Unsupported file_input type: {type(file_input)}")
 
+        check_pdf_job(20, "Extracting PDF text")
         # --- Step 1: Extract Text (Now always uses path_for_processing) ---
         if not path_for_processing: # Should not happen, but defensive check
              raise RuntimeError("Internal logic error: path_for_processing not set")
@@ -659,6 +694,7 @@ def process_pdf(
                     try:
                         content = docling_parse_pdf(path_for_processing)
                     except _PDF_NONCRITICAL_EXCEPTIONS as docling_exc:
+                        check_pdf_job()
                         logging.warning(
                             "Docling parser failed for %s (%s); falling back to pymupdf4llm",
                             filename,
@@ -673,6 +709,7 @@ def process_pdf(
                 result["parser_used"] = "pymupdf4llm"
                 content = pymupdf4llm_parse_pdf(path_for_processing) # Fallback also uses path
 
+            check_pdf_job()
             result["content"] = content
             if content is not None: # Check if extraction actually yielded content
                  logging.info(f"Text extracted successfully for {filename} using {result['parser_used']}.")
@@ -691,6 +728,7 @@ def process_pdf(
                         should_ocr = True
 
                 if should_ocr:
+                    check_pdf_job(28, "Running PDF OCR")
                     requested_backend = (ocr_backend or "").strip().lower()
                     if requested_backend == "mineru":
                         mineru_warnings: list[str] = []
@@ -700,6 +738,7 @@ def process_pdf(
                             mineru_warnings.append("MinerU ignores ocr_dpi in v1")
 
                         try:
+                            check_pdf_job()
                             mineru_result = _run_mineru_document_ocr(
                                 pdf_path=Path(path_for_processing),
                                 output_format=ocr_output_format,
@@ -792,6 +831,7 @@ def process_pdf(
                                 backend_page_concurrency,
                             )
 
+                            check_pdf_job()
                             ocr_text, page_count, ocr_pages, structured_pages = _ocr_pdf_pages(
                                 pdf_path=path_for_processing,
                                 lang=ocr_lang or "eng",
@@ -802,6 +842,7 @@ def process_pdf(
                                 concurrency=effective_page_concurrency,
                                 output_format=ocr_output_format,
                                 prompt_preset=ocr_prompt_preset,
+                                cancellation_checkpoint=check_pdf_job,
                             )
                             result.setdefault("analysis_details", {})
                             details = {
@@ -904,6 +945,7 @@ def process_pdf(
              # Don't raise here
 
 
+        check_pdf_job()
         # --- Step 2: Extract Metadata ---
         # Metadata extraction should work even if text extraction failed.
         try:
@@ -974,6 +1016,7 @@ def process_pdf(
              }
 
 
+        check_pdf_job()
         # --- Step 2.5: VLM (Vision) Analysis / Detections ---
         try:
             if enable_vlm:
@@ -1087,33 +1130,14 @@ def process_pdf(
             result["warnings"].append(f"VLM processing error: {vlm_err}")
 
 
-        # Normalize the final extracted text (including OCR merge) before chunking.
-        final_content = result.get("content")
-        if isinstance(final_content, str):
-            content = final_content
-        if content and content.strip():
-            try:
-                normalized_content = normalize_pdf_text_for_storage(content)
-                result["content"] = normalized_content
-                content = normalized_content
-                result.setdefault("analysis_details", {})["text_normalization"] = {
-                    "applied": True,
-                    "mode": "paragraph_safe",
-                    "chars_before": len(final_content or ""),
-                    "chars_after": len(normalized_content),
-                    "line_breaks_before": (final_content or "").count("\n"),
-                    "line_breaks_after": normalized_content.count("\n"),
-                }
-            except _PDF_NONCRITICAL_EXCEPTIONS as normalization_error:
-                logging.warning(f"PDF text normalization failed for {filename}: {normalization_error}")
-                result["warnings"] = (result.get("warnings") or []) + [
-                    f"Text normalization failed: {normalization_error}"
-                ]
+        check_pdf_job(35, "Normalizing PDF text")
+        content = _normalize_extracted_pdf_text(result, content, filename)
 
         # --- Step 3: Chunking ---
         processed_chunks = None
         # Only proceed if text extraction was successful
         if content and perform_chunking:
+            check_pdf_job(40, "Chunking PDF text")
             if chunk_options is None:
                 # Provide sensible defaults if none are passed
                 chunk_options = {'method': 'sentences', 'max_size': 500, 'overlap': 100}
@@ -1154,7 +1178,8 @@ def process_pdf(
 
         # --- Step 4: Summarization / Analysis ---
         # Use path_for_processing for logging context if needed
-        logging.debug(f"PROCESS_PDF: Checking condition -> perform_analysis={perform_analysis}, api_name='{api_name}', api_key='{api_key}', chunks_exist={bool(processed_chunks)}") # Keep this log
+        check_pdf_job()
+        logging.debug(f"PROCESS_PDF: Checking condition -> perform_analysis={perform_analysis}, api_name='{api_name}', chunks_exist={bool(processed_chunks)}")
         # Allow analysis to proceed without explicit api_key (resolved from server config)
         if perform_analysis and api_name and processed_chunks:
             logging.info(f"Summarization enabled for {len(processed_chunks)} chunks of {filename} using API: {api_name}.")
@@ -1164,6 +1189,7 @@ def process_pdf(
             chunk_summaries = []  # Store summaries of individual chunks
             summarized_chunks_for_result = [] # Store chunk data including the generated analysis
 
+            chunk_count = len(processed_chunks)
             # Iterate through each chunk generated earlier
             for i, chunk in enumerate(processed_chunks):
                 chunk_text = chunk.get('text', '') # Get the text content of the chunk
@@ -1171,6 +1197,7 @@ def process_pdf(
 
                 # Only summarize if the chunk has actual text content
                 if chunk_text:
+                    check_pdf_job(50 + 25 * i / chunk_count, f"Analyzing chunk {i + 1} of {chunk_count}")
                     try:
                         # Call the external summarization library function
                         analysis_text = analyze(
@@ -1217,6 +1244,7 @@ def process_pdf(
             # --- Combine chunk summaries (optional recursive step) ---
             if chunk_summaries: # Proceed only if at least one chunk was successfully summarized
                 if summarize_recursively and len(chunk_summaries) > 1:
+                    check_pdf_job(77, "Combining PDF analysis")
                     # If recursive summarization is enabled and there are multiple chunk summaries
                     logging.info(f"Performing recursive summarization on {len(chunk_summaries)} chunk summaries for {filename}.")
                     # Join the individual chunk summaries into one large text block
@@ -1275,6 +1303,7 @@ def process_pdf(
             logging.warning(f"Summarization skipped for {filename} due to an unknown condition.")
 
 
+        check_pdf_job()
         # --- Step 5: Determine Final Status (Based on content and warnings) ---
         # Check if critical step (text extraction) failed. Check warnings for specific errors.
         extraction_failed = not content and any("Text extraction failed" in w for w in result["warnings"])
@@ -1296,6 +1325,9 @@ def process_pdf(
              logging.info(f"Setting status to Success for {filename}.")
 
     # --- Main Exception Handler ---
+    except PDFProcessingCancelled:
+        result["status"] = "Cancelled"
+        result["error"] = "PDF processing cancelled."
     except FileNotFoundError as fnf_err:
         logging.error(f"File not found error for {filename}: {fnf_err}", exc_info=True)
         result["status"] = "Error"
@@ -1559,6 +1591,7 @@ def _ocr_pdf_pages(
     concurrency: int = 1,
     output_format: Optional[str] = None,
     prompt_preset: Optional[str] = None,
+    cancellation_checkpoint: Callable[[], None] | None = None,
 ) -> tuple[str, int, int, Optional[list[dict[str, Any]]]]:
     """
     Render PDF pages to images and run OCR.
@@ -1606,8 +1639,15 @@ def _ocr_pdf_pages(
         futures = []
         idx_map = {}
 
+        def run_ocr(ocr: Callable[..., Any], *args: Any) -> Any:
+            if cancellation_checkpoint is not None:
+                cancellation_checkpoint()
+            return ocr(*args)
+
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             for idx, page in enumerate(doc, start=1):
+                if cancellation_checkpoint is not None:
+                    cancellation_checkpoint()
                 do_ocr = True
                 if per_page_check:
                     try:
@@ -1637,11 +1677,14 @@ def _ocr_pdf_pages(
                             try:
                                 return backend.ocr_image_structured(b, lang, output_format, prompt_preset)
                             except TypeError:
+                                if cancellation_checkpoint is not None:
+                                    cancellation_checkpoint()
                                 return backend.ocr_image_structured(b, lang)
 
-                        fut = pool.submit(_call_structured, img_bytes)
+                        ocr, args = _call_structured, (img_bytes,)
                     else:
-                        fut = pool.submit(backend.ocr_image, img_bytes, lang)
+                        ocr, args = backend.ocr_image, (img_bytes, lang)
+                    fut = pool.submit(contextvars.copy_context().run, run_ocr, ocr, *args)
                     futures.append(fut)
                     idx_map[fut] = idx
 

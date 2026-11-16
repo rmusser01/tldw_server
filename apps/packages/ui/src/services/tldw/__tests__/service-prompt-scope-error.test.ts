@@ -371,11 +371,15 @@ it.each([
 })
 it.each([
   ["/api/v1/media/ingest/jobs?batch_id=known", "GET", true],
+  ["/api/v1/media/ingest/jobs/77?reason=user_cancelled", "DELETE", true],
+  ["/api/v1/media/ingest/jobs/77/extra", "DELETE", false],
+  ["/api/v1/media/ingest/jobs/77%2fextra", "DELETE", false],
+  ["/api/v1/media/ingest/jobs/77", "PATCH", false],
   ["/api/v1/media/ingest/jobs", "DELETE", false],
   ["/api/v1/media/ingest/jobs/", "GET", false],
   ["/api/v1/media/ingest/jobs/extra", "GET", false],
   ["/api/v1/media/ingest/jobs%2fextra", "GET", false]
-] as const)("bounds recent import reads %s %s", (path, method, allowed) => {
+] as const)("bounds ingest job status and cancellation %s %s", (path, method, allowed) => {
     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
   })
 

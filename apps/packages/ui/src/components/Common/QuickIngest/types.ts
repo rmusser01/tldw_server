@@ -159,6 +159,8 @@ export type PersistedQuickIngestTracking = {
 export type ReattachedQuickIngestJob = {
   jobId: number
   status: string
+  progressPercent?: number
+  progressMessage?: string
   result?: unknown
   error?: string
   sourceItemId?: string

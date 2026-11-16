@@ -235,6 +235,7 @@ export const isServicePromptRequestPath = (
   )) return true
   if (requestMethod === "POST" && pathname === "/api/v1/media/documents/render") return true
   if (requestMethod === "GET" && /^\/api\/v1\/media\/[1-9][0-9]*\/annotated-file$/.test(pathname)) return true
+  if (requestMethod === "DELETE" && /^\/api\/v1\/media\/ingest\/jobs\/[1-9][0-9]*$/.test(pathname)) return true
   if (requestMethod === "GET" && (/^\/api\/v1\/media\/ingest\/jobs\/[0-9]+$/.test(pathname) || /^\/api\/v1\/media\/[0-9]+\/file$/.test(pathname) || pathname === "/api/v1/media"||
       pathname === "/api/v1/media/" ||
       pathname === "/api/v1/media/ingest/jobs")) return true

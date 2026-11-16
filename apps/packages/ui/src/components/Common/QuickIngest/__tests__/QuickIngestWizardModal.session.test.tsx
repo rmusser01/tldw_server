@@ -551,7 +551,6 @@ const SessionBackedQuickIngestModal = () => {
 
 vi.mock("@plasmohq/storage", async () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"))
 vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: { getCurrentUser: async () => ({ id: 1 }) } }))
-vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
 import { quickIngestAuthority } from "@/services/tldw/quick-ingest-authority"
 let releaseAuthority: (() => void) | undefined
 
@@ -3566,6 +3565,167 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
   })
 
+  it.each([true, false])("shows live PDF stages and reflects cancellation acknowledgement=%s", async (success) => {
+    mocks.useActualProcessingStep = true
+    const response = deferred<any>()
+    const cancel = deferred<any>()
+    mocks.startQuickIngestSession.mockResolvedValue({ ok: true, sessionId: "qi-direct-pdf" })
+    mocks.bgRequest.mockReturnValue(cancel.promise)
+    let livePayload: any
+    mocks.submitQuickIngestBatch.mockImplementation((payload: any) => {
+      livePayload = payload
+      payload.onTrackingMetadata({ mode: "webui-direct", jobIds: [77], jobIdToItemId: { "77": "pdf" }, startedAt: Date.now() })
+      return response.promise
+    })
+    useQuickIngestSessionStore.getState().createDraftSession({ queueItems: [
+      { id: "pdf", kind: "url", url: "https://example.com/paper.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } },
+      { id: "other", kind: "url", url: "https://example.com/other.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } },
+    ] })
+    render(<ReadyEventModalHost />)
+    await userEvent.click(screen.getByRole("button", { name: "Submit current queue" }))
+    await waitFor(() => expect(mocks.submitQuickIngestBatch).toHaveBeenCalledTimes(1))
+    act(() => livePayload.onJobProgress?.("pdf", { status: "running", progressPercent: 12, progressMessage: "Extracting PDF text" }))
+    expect(screen.getByText("Extracting PDF text")).toBeInTheDocument()
+    act(() => livePayload.onJobProgress("pdf", { status: "running", progressPercent: 45, progressMessage: "Analyzing chunk 1 of 2" }))
+    expect(screen.getByRole("progressbar", { name: "Processing https://example.com/paper.pdf" })).toHaveAttribute("aria-valuenow", "45")
+    expect(screen.getByText("Analyzing chunk 1 of 2")).toBeInTheDocument()
+
+    const cancelButton = screen.getByRole("button", { name: "Cancel https://example.com/paper.pdf" })
+    await userEvent.click(cancelButton)
+    expect(cancelButton).toBeDisabled()
+    expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/media/ingest/jobs/77?reason=user_cancelled", method: "DELETE", preferDirect: true,
+    }))
+    expect(screen.queryByText("Cancelled", { exact: true })).not.toBeInTheDocument()
+    await act(async () => {
+      cancel.resolve(success ? { ok: true, data: { success: true, status: "cancelled" } } : { ok: false, status: 409 })
+      await cancel.promise
+    })
+    act(() => livePayload.onJobProgress("pdf", { status: "running", progressPercent: 85, progressMessage: "Saving media" }))
+    if (!success) {
+      expect(screen.getByText("Saving media")).toBeInTheDocument()
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not cancel this item")
+      expect(screen.queryByText("Cancelled", { exact: true })).not.toBeInTheDocument()
+      await act(async () => {
+        response.resolve({ ok: true, results: [{ id: "pdf", status: "ok", type: "pdf", mediaId: 77 }, { id: "other", status: "ok", type: "pdf", mediaId: 78 }] })
+        await response.promise
+      })
+      expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:2")
+      return
+    }
+    expect(screen.getByText("Cancelled", { exact: true })).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "Processing https://example.com/other.pdf" })).toBeInTheDocument()
+    const timedOut = { id: "pdf", status: "error", type: "pdf", outcome: "failed", error: "Timed out reading job" }
+    act(() => livePayload.onItemResult?.(timedOut))
+    expect(screen.getByText("Cancelled", { exact: true })).toBeInTheDocument()
+
+    await act(async () => {
+      response.resolve({ ok: true, results: [timedOut, { id: "other", status: "ok", type: "pdf", mediaId: 78 }] })
+      await response.promise
+    })
+    expect(screen.getByTestId("wizard-result-pdf")).toHaveTextContent("pdf:cancelled")
+  })
+
+  it.each(["processing", "interrupted"])("keeps a reopened job cancelled when a pre-cancel %s poll arrives late", async (lifecycle) => {
+    vi.useFakeTimers()
+    mocks.useActualProcessingStep = true
+    const latePoll = deferred<any>()
+    const job = { jobId: 77, status: "running", progressPercent: 45, progressMessage: "Analyzing chunk 1 of 2" }
+    mocks.reattachQuickIngestSession
+      .mockResolvedValueOnce({ lifecycle: "processing", jobs: [job] })
+      .mockReturnValueOnce(latePoll.promise)
+      .mockResolvedValueOnce({ lifecycle: "cancelled", jobs: [{ jobId: 77, status: "cancelled" }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: { success: true, status: "cancelled" } })
+
+    useQuickIngestSessionStore.getState().createDraftSession({
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        { id: "pdf", kind: "url", url: "https://example.com/paper.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } },
+      ],
+      processingState: { status: "running", perItemProgress: [], elapsed: 0, estimatedRemaining: 0 },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-refreshed-pdf",
+        jobIds: [77],
+        itemIds: ["pdf"],
+        startedAt: Date.now(),
+      },
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.getByText("Analyzing chunk 1 of 2")).toBeInTheDocument()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel https://example.com/paper.pdf" }))
+    })
+    expect(screen.getByText("Cancelled", { exact: true })).toBeInTheDocument()
+    await act(async () => {
+      latePoll.resolve({ lifecycle, jobs: lifecycle === "processing" ? [job] : [] })
+      await latePoll.promise
+    })
+    expect(screen.getByText("Cancelled", { exact: true })).toBeInTheDocument()
+    expect(screen.queryByText("Analyzing chunk 1 of 2")).not.toBeInTheDocument()
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+  })
+
+  it.each([true, false])("reconciles tracked Cancel All after server acknowledgement=%s", async (success) => {
+    vi.useFakeTimers()
+    mocks.useActualProcessingStep = true
+    const cancel = deferred<{ ok: boolean }>()
+    const job = { jobId: 77, status: "running", progressMessage: "Analyzing chunk 1 of 2" }
+    mocks.reattachQuickIngestSession
+      .mockResolvedValueOnce({ lifecycle: "processing", jobs: [job] })
+      .mockResolvedValueOnce({ lifecycle: "processing", jobs: [job] })
+      .mockResolvedValueOnce({ lifecycle: "cancelled", jobs: [{ jobId: 77, status: "cancelled" }] })
+    mocks.cancelQuickIngestSession.mockReturnValue(cancel.promise)
+
+    useQuickIngestSessionStore.getState().createDraftSession({
+      lifecycle: "processing",
+      currentStep: 4,
+      queueItems: [
+        { id: "pdf", kind: "url", url: "https://example.com/paper.pdf", detectedType: "pdf", icon: "FileText", fileSize: 0, validation: { valid: true } },
+      ],
+      processingState: { status: "running", perItemProgress: [], elapsed: 0, estimatedRemaining: 0 },
+      tracking: {
+        mode: "webui-direct",
+        sessionId: "qi-direct-batch-cancel",
+        batchId: "batch-77",
+        jobIds: [77],
+        itemIds: ["pdf"],
+        startedAt: Date.now(),
+      },
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await act(async () => { await Promise.resolve() })
+
+    const button = screen.getByRole("button", { name: "Cancel All" })
+    fireEvent.click(button)
+    expect(button).toBeDisabled()
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+    expect(mocks.cancelQuickIngestSession).toHaveBeenCalledWith(expect.objectContaining({
+      confirmCancellation: true, sessionId: "qi-direct-batch-cancel", batchIds: ["batch-77"],
+    }))
+
+    await act(async () => {
+      cancel.resolve({ ok: success })
+      await cancel.promise
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    expect(screen.getByText("Analyzing chunk 1 of 2")).toBeInTheDocument()
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
+    if (!success) {
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not confirm cancellation")
+      expect(screen.getByRole("button", { name: "Cancel All" })).toBeEnabled()
+    }
+    await act(async () => { await vi.advanceTimersByTimeAsync(2_000) })
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+  })
+
   it("cancels a refreshed direct session using persisted tracking metadata", async () => {
     mocks.reattachQuickIngestSession.mockResolvedValue({
       lifecycle: "processing",
@@ -3629,10 +3789,12 @@ describe("QuickIngestWizardModal session runtime", () => {
     })
   })
 
-  it("ignores late persisted reattach processing after cancellation", async () => {
+  it("waits for the tracked job to confirm cancellation despite a stale processing update", async () => {
     vi.useFakeTimers()
     const reattach = deferred<any>()
-    mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
+    mocks.reattachQuickIngestSession
+      .mockReturnValueOnce(reattach.promise)
+      .mockResolvedValue({ lifecycle: "cancelled", jobs: [{ jobId: 77, status: "cancelled" }] })
 
     useQuickIngestSessionStore.getState().createDraftSession({
       ...createEmptyQuickIngestSession(),
@@ -3682,14 +3844,15 @@ describe("QuickIngestWizardModal session runtime", () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+    expect(screen.queryByTestId("wizard-results")).not.toBeInTheDocument()
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000)
     })
-    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(1)
+    expect(mocks.reattachQuickIngestSession).toHaveBeenCalledTimes(2)
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
   })
 
-  it("ignores late persisted reattach completion after cancellation", async () => {
+  it("shows the saved result when a tracked job finishes before cancellation", async () => {
     const user = userEvent.setup()
     const reattach = deferred<any>()
     mocks.reattachQuickIngestSession.mockReturnValue(reattach.promise)
@@ -3747,9 +3910,9 @@ describe("QuickIngestWizardModal session runtime", () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByTestId("wizard-results")).toHaveTextContent("cancelled:1")
+    expect(screen.getByTestId("wizard-results")).toHaveTextContent("complete:1")
     expect(screen.getByTestId("wizard-result-queued-url-1")).toHaveTextContent(
-      "queued-url-1:cancelled"
+      "queued-url-1:processed"
     )
   })
 

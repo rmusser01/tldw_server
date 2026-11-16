@@ -54,6 +54,10 @@ from tldw_Server_API.app.core.DB_Management.media_db.runtime.email_persisted_con
 )
 from tldw_Server_API.app.core.DB_Management.scope_context import ScopeContext, get_scope, scoped_context
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.Ingestion_Media_Processing.PDF.job_progress import (
+    PDF_SAVE_PROGRESS_PERCENT,
+    pdf_job_step_allowed,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     prepare_chunking_options_dict,
@@ -4860,6 +4864,31 @@ async def process_batch_media(
     return final_standardized_results
 
 
+_PDF_SAVE_CANCELLED = object()
+
+
+def _document_processing_cancelled(
+    result: dict[str, Any], cancel_check: Callable[[], bool] | None
+) -> bool:
+    if result.get("status") == "Cancelled":
+        return True
+    if cancel_check is not None:
+        with contextlib.suppress(_PERSISTENCE_NONCRITICAL_EXCEPTIONS):
+            return bool(cancel_check())
+    return False
+
+
+def _mark_document_processing_cancelled(result: dict[str, Any]) -> None:
+    result.update(
+        status="Cancelled",
+        error="Cancelled by user",
+        db_message="DB operation skipped (cancelled).",
+        db_id=None,
+        media_uuid=None,
+        warnings=result.get("warnings") or None,
+    )
+
+
 async def process_document_like_item(
     item_input_ref: str,
     processing_source: str,
@@ -5547,23 +5576,9 @@ async def process_document_like_item(
     final_result["input_ref"] = item_input_ref
     final_result["media_type"] = media_type
 
-    if cancel_check is not None:
-        try:
-            if cancel_check():
-                final_result.update(
-                    {
-                        "status": "Cancelled",
-                        "error": "Cancelled by user",
-                        "db_message": "DB operation skipped (cancelled).",
-                        "db_id": None,
-                        "media_uuid": None,
-                    },
-                )
-                if not final_result.get("warnings"):
-                    final_result["warnings"] = None
-                return final_result
-        except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
-            pass
+    if _document_processing_cancelled(final_result, cancel_check):
+        _mark_document_processing_cancelled(final_result)
+        return final_result
 
     _enforce_metadata_contract_on_result(
         result=final_result,
@@ -5598,6 +5613,9 @@ async def process_document_like_item(
                 f"Claim extraction failed: {claims_err}",
             )
             claims_context = None
+        if _document_processing_cancelled(final_result, cancel_check):
+            _mark_document_processing_cancelled(final_result)
+            return final_result
         await persist_doc_item_and_children(
             final_result=final_result,
             form_data=form_data,
@@ -5873,6 +5891,8 @@ async def persist_doc_item_and_children(
             def _db_worker() -> Any:
                 def _persist_document(worker_db: MediaDatabase) -> Any:
                     media_writer = _resolve_media_writer(worker_db)
+                    if not pdf_job_step_allowed(PDF_SAVE_PROGRESS_PERCENT, "Saving media"):
+                        return _PDF_SAVE_CANCELLED
                     media_id_local, media_uuid_local, db_message_local = media_writer.add_media_with_keywords(
                         **db_add_kwargs
                     )
@@ -5934,6 +5954,9 @@ async def persist_doc_item_and_children(
                 contextvars.copy_context().run,
                 _db_worker,
             )
+            if db_worker_result is _PDF_SAVE_CANCELLED:
+                _mark_document_processing_cancelled(final_result)
+                return
             if isinstance(db_worker_result, tuple) and len(db_worker_result) == 4:
                 (
                     media_id_result,

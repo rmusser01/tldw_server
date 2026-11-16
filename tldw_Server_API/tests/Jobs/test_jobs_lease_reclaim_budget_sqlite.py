@@ -71,7 +71,7 @@ class _CancelSelectRaceSQLite:
         if (
             not self.fired
             and normalized.startswith("SELECT id, domain, queue, job_type, uuid")
-            and "status, available_at FROM jobs WHERE" in normalized
+            and "available_at FROM jobs WHERE" in normalized
         ):
             self.fired = True
             prefetched = cursor.fetchone()

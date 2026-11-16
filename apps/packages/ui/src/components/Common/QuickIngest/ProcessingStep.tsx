@@ -86,10 +86,11 @@ type ItemRowProps = {
   item: WizardQueueItem
   progress: ItemProgress
   qi: (key: string, defaultValue: string, options?: Record<string, unknown>) => string
-  onCancel: (id: string) => void
+  onCancel?: (id: string) => Promise<boolean>
 }
 
 const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
+  const [cancelState, setCancelState] = useState<"idle" | "pending" | "failed">("idle")
   const IconComponent = TYPE_ICON_MAP[item.detectedType] || File
   const displayName = item.fileName || item.url || item.id
   const isTerminal = TERMINAL_STATUSES.has(progress.status)
@@ -123,11 +124,14 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
   }, [progress.status, qi])
 
   const handleCancel = useCallback(
-    (e: React.MouseEvent) => {
+    async (e: React.MouseEvent) => {
       e.stopPropagation()
-      onCancel(item.id)
+      if (!onCancel || cancelState === "pending") return
+      setCancelState("pending")
+      const cancelled = await onCancel(item.id)
+      setCancelState(cancelled ? "idle" : "failed")
     },
-    [item.id, onCancel]
+    [cancelState, item.id, onCancel]
   )
 
   return (
@@ -187,6 +191,12 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
           </div>
         </div>
 
+        {!isTerminal && progress.currentStage && (
+          <p className="break-words text-xs text-text-muted" aria-live="polite">
+            {progress.currentStage}
+          </p>
+        )}
+
         {isActive && (
           <div
             role="progressbar"
@@ -213,23 +223,31 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
           </div>
         )}
 
-        {/* Error message */}
+        {!isTerminal && cancelState === "failed" && (
+          <p role="alert" className="mt-0.5 text-xs text-danger">
+            {qi("processing.cancelItemFailed", "Could not cancel this item. Try again.")}
+          </p>
+        )}
         {progress.status === "failed" && progress.error && (
           <p className="mt-0.5 text-xs text-danger">{progress.error}</p>
         )}
       </div>
 
       {/* Cancel button */}
-      {!isTerminal && (
+      {!isTerminal && onCancel && (
         <button
           type="button"
           onClick={handleCancel}
+          disabled={cancelState === "pending"}
+          aria-busy={cancelState === "pending"}
           className="flex-shrink-0 rounded px-2 py-1 text-xs text-text-muted transition hover:bg-surface2 hover:text-danger focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
           aria-label={qi("processing.cancelItem", "Cancel {{name}}", {
             name: displayName,
           })}
         >
-          {qi("processing.cancel", "Cancel")}
+          {cancelState === "pending"
+            ? qi("processing.cancelling", "Cancelling…")
+            : qi("processing.cancel", "Cancel")}
         </button>
       )}
     </div>
@@ -242,12 +260,15 @@ const ItemRow: React.FC<ItemRowProps> = ({ item, progress, qi, onCancel }) => {
 
 type ProcessingStepProps = {
   onCancelAll?: () => void
+  cancelAllState?: "pending" | "failed" | null
+  onCancelItem?: ItemRowProps["onCancel"]
+  trackedJobIdsByItem?: ReadonlyMap<string, readonly number[]>
   onMinimize?: () => void
 }
 
-export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onMinimize }) => {
+export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, cancelAllState, onCancelItem, trackedJobIdsByItem, onMinimize }) => {
   const { t } = useTranslation(["option"])
-  const { state, cancelProcessing, cancelItem, minimize } = useIngestWizard()
+  const { state, cancelProcessing, minimize } = useIngestWizard()
   const { processingState, queueItems } = state
   const tracking = useQuickIngestSessionStore((store) => store.session?.tracking)
   const [failedExportNotice, setFailedExportNotice] = useState<string | null>(null)
@@ -387,13 +408,6 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onM
     minimize()
     onMinimize?.()
   }, [minimize, onMinimize])
-
-  const handleCancelItem = useCallback(
-    (id: string) => {
-      cancelItem(id)
-    },
-    [cancelItem]
-  )
 
   const handleExportFailedItems = useCallback(async () => {
     if (failedItems.length === 0) {
@@ -573,7 +587,7 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onM
                 item={queueItem}
                 progress={progress}
                 qi={qi}
-                onCancel={handleCancelItem}
+                onCancel={trackedJobIdsByItem?.has(progress.id) ? onCancelItem : undefined}
               />
             </div>
           )
@@ -649,6 +663,11 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onM
         </div>
       )}
 
+      {cancelAllState === "failed" && (
+        <p role="alert" className="text-xs text-danger">
+          {qi("processing.cancelAllFailed", "Could not confirm cancellation. We’re still checking the jobs.")}
+        </p>
+      )}
       {/* Action buttons */}
       <div className="flex items-center justify-end gap-2">
         {(processingState.status === "running" ||
@@ -656,9 +675,14 @@ export const ProcessingStep: React.FC<ProcessingStepProps> = ({ onCancelAll, onM
           <button
             type="button"
             onClick={handleCancelAll}
+            disabled={cancelAllState === "pending"}
+            aria-busy={cancelAllState === "pending"}
+            aria-label={qi("processing.cancelAll", "Cancel All")}
             className="rounded-md border border-danger/30 px-3 py-1.5 text-xs font-medium text-danger transition hover:bg-danger/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus"
           >
-            {qi("processing.cancelAll", "Cancel All")}
+            {cancelAllState === "pending"
+              ? qi("processing.cancelling", "Cancelling…")
+              : qi("processing.cancelAll", "Cancel All")}
           </button>
         )}
         {processingState.status === "running" && (

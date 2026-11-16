@@ -44,6 +44,8 @@ describe("reattachQuickIngestSession", () => {
       ok: true,
       data: {
         status: "processing",
+        progress_percent: 42,
+        progress_message: "Analyzing chunk 2 of 3",
       },
     })
 
@@ -59,6 +61,8 @@ describe("reattachQuickIngestSession", () => {
       expect.objectContaining({
         jobId: 77,
         status: "processing",
+        progressPercent: 42,
+        progressMessage: "Analyzing chunk 2 of 3",
       }),
     ])
     expect(mocks.bgRequest).toHaveBeenCalledWith(
