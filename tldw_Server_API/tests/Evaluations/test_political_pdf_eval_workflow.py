@@ -6,8 +6,10 @@ import hashlib
 import importlib
 import inspect
 import json
+import sys
 import zipfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import pymupdf
@@ -18,6 +20,8 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture
 def runner_module():
+    if sys.platform == "win32":
+        pytest.skip("Political PDF CLI requires Unix fcntl locking and O_NOFOLLOW; native Windows is unsupported")
     return importlib.import_module("Helper_Scripts.Evals.run_political_pdf_eval")
 
 
@@ -288,8 +292,13 @@ def test_summary_pending_status_is_journaled_without_a_success_claim(runner_modu
     config = json.loads(config_file.read_text())
     config["summary"]["wait_seconds"] = 60
     config_file.write_text(json.dumps(config))
-    times = iter([0, 0, 0, 0, 0, 61, 61, 61, 61])
-    monkeypatch.setattr(runner_module.time, "monotonic", lambda: next(times, 61))
+    elapsed = [0]
+
+    def sleep(seconds):
+        elapsed[0] += seconds
+
+    monkeypatch.setattr(runner_module.time, "monotonic", lambda: elapsed[0])
+    monkeypatch.setattr(runner_module.time, "sleep", sleep)
     def server(**kwargs):
         if kwargs["method"] == "POST":
             return httpx.Response(202, json={"job_id": 12, "artifact_id": "summary-1", "status": "queued"})
@@ -399,6 +408,48 @@ def test_complete_summary_checks_saved_selected_scope_and_exact_evidence(runner_
                               retry_operations={"summary:test:submit"}) as run:
         with pytest.raises(runner_module.UnsafeResume, match="known summary job"):
             run.summarize(run.config["models"][0])
+
+
+@pytest.mark.parametrize("artifact_status", ["complete", "failed"])
+@pytest.mark.parametrize("source", ["Exact plain source.", "## Trade\n|Thailand<br>Taiwan|\n|Exports &amp; imports|"])
+def test_summary_verifies_intrinsic_text_offsets_independently_of_synthesis_status(
+    runner_module, config_file, tmp_path, source, artifact_status
+):
+    from tldw_Server_API.app.core.Media import navigation
+
+    section = {"source_id": "source-7", "node_id": "chapter", "navigation_version": "v1", "media_id": 7,
+        "start_char": 0, "end_char": len(source), "status": "completed", "batches": [
+            {"start_char": 0, "end_char": len(source), "status": "completed", "evidence": [
+                {"id": "E1.1.1", "start_char": 0, "end_char": len(source), "quote": source}]}]}
+    analysis = {"sections": [section]}
+    if artifact_status == "failed":
+        analysis["synthesis_error_code"] = "unknown_evidence_reference"
+    artifact = {"id": "summary-1", "artifact_type": "summary", "status": artifact_status,
+        "version_metadata": {"workspaceClient": {"data": {"sectionAnalysis": analysis}}}}
+
+    def server(**kwargs):
+        path = kwargs["url"]
+        if kwargs["method"] == "POST":
+            return httpx.Response(202, json={"job_id": 12, "artifact_id": "summary-1", "status": "queued"})
+        if "/outputs/12" in path:
+            return httpx.Response(200, json={"job_id": 12, "artifact_id": "summary-1", "status": "completed", "artifact": artifact})
+        if "/navigation/chapter/content" in path:
+            # Exercise the public endpoint's actual rendering contract: plain HTML
+            # display text changes both tags/entities and canonical offset lengths.
+            variants, intrinsic = navigation._build_content_variants(source)
+            content_format, content = navigation._resolve_requested_content(
+                parse_qs(urlsplit(path).query)["format"][0], variants, intrinsic
+            )
+            return httpx.Response(200, json={"node_id": "chapter", "navigation_version": "v1", "media_id": 7,
+                "resolved_start_char": 0, "resolved_end_char": len(source), "coverage_status": "exact",
+                "content_format": content_format, "content": content})
+        return httpx.Response(200, json=[artifact])
+
+    with runner_module.Runner(runner_module.load_plan(config_file), tmp_path / "run", fetch=server) as run:
+        result = run.summarize(run.config["models"][0])
+        assert result["checks"]["evidence_spans_valid"] is True
+        assert result["outcome"] == ("completed" if artifact_status == "complete" else "failed")
+        assert run.body(result)["artifact"] == artifact
 
 
 def test_model_key_suffix_cannot_alias_another_models_summary_submission(runner_module, config_file, tmp_path):

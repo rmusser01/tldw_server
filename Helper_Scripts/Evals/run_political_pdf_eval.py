@@ -526,7 +526,7 @@ class Runner:
         for selected in summary["sections"]:
             node_id, version = selected["node_id"], selected["navigation_version"]
             node = self.request(f"summary-content:{node_id}", "summary_source", "GET",
-                f"/api/v1/media/{self.config['source']['media_id']}/navigation/{quote(node_id, safe='')}/content?format=plain&navigation_version={quote(version, safe='')}")
+                f"/api/v1/media/{self.config['source']['media_id']}/navigation/{quote(node_id, safe='')}/content?format=auto&navigation_version={quote(version, safe='')}")
             if node["outcome"] == "completed" and isinstance(self.body(node), dict):
                 contents[node_id] = self.body(node)
         spans_valid = section_spans_valid(sections, contents, self.config["source"]["media_id"])

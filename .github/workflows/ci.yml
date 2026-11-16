@@ -1123,6 +1123,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
           - name: ai-embeddings-media-validation
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_input_coverage.py
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -1210,10 +1211,12 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_flashrank_reranker_init.py
               tldw_Server_API/tests/RAG_NEW/unit/test_functional_pipeline.py
               tldw_Server_API/tests/RAG_NEW/unit/test_generation*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_hybrid_lane_fusion.py
               tldw_Server_API/tests/RAG_NEW/unit/test_hyde*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_natural_query_facets.py
               tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
@@ -1239,6 +1242,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_guardrails*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_category_boundaries.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_filter_authority.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
@@ -1290,6 +1295,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_page_provenance.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -1628,6 +1634,8 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
               tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
@@ -2879,6 +2887,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
           - name: ai-embeddings-media-validation
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_input_coverage.py
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -2966,10 +2975,12 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_flashrank_reranker_init.py
               tldw_Server_API/tests/RAG_NEW/unit/test_functional_pipeline.py
               tldw_Server_API/tests/RAG_NEW/unit/test_generation*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_hybrid_lane_fusion.py
               tldw_Server_API/tests/RAG_NEW/unit/test_hyde*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_natural_query_facets.py
               tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
@@ -2995,6 +3006,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_guardrails*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_category_boundaries.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_filter_authority.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
@@ -3046,6 +3059,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_page_provenance.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -3386,6 +3400,8 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
               tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
@@ -4442,6 +4458,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
           - name: ai-embeddings-media-validation
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_input_coverage.py
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -4529,10 +4546,12 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_flashrank_reranker_init.py
               tldw_Server_API/tests/RAG_NEW/unit/test_functional_pipeline.py
               tldw_Server_API/tests/RAG_NEW/unit/test_generation*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_hybrid_lane_fusion.py
               tldw_Server_API/tests/RAG_NEW/unit/test_hyde*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_natural_query_facets.py
               tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
@@ -4558,6 +4577,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_guardrails*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_category_boundaries.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_filter_authority.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
@@ -4609,6 +4630,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_page_provenance.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -4949,6 +4971,8 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
               tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
@@ -5909,6 +5933,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
           - name: ai-embeddings-media-validation
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_input_coverage.py
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -5996,10 +6021,12 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_flashrank_reranker_init.py
               tldw_Server_API/tests/RAG_NEW/unit/test_functional_pipeline.py
               tldw_Server_API/tests/RAG_NEW/unit/test_generation*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_hybrid_lane_fusion.py
               tldw_Server_API/tests/RAG_NEW/unit/test_hyde*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_natural_query_facets.py
               tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
@@ -6025,6 +6052,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_guardrails*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_category_boundaries.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_filter_authority.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
@@ -6076,6 +6105,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_page_provenance.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -6416,6 +6446,8 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
               tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
@@ -7367,6 +7399,7 @@ jobs:
               tldw_Server_API/tests/Embeddings/test_ledger_status_endpoint.py
           - name: ai-embeddings-media-validation
             paths: >-
+              tldw_Server_API/tests/Embeddings/test_input_coverage.py
               tldw_Server_API/tests/Embeddings/test_media_*.py
               tldw_Server_API/tests/Embeddings/test_message_validator*.py
           - name: ai-embeddings-observability
@@ -7454,10 +7487,12 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_flashrank_reranker_init.py
               tldw_Server_API/tests/RAG_NEW/unit/test_functional_pipeline.py
               tldw_Server_API/tests/RAG_NEW/unit/test_generation*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_hybrid_lane_fusion.py
               tldw_Server_API/tests/RAG_NEW/unit/test_hyde*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_kanban_retriever.py
               tldw_Server_API/tests/RAG_NEW/unit/test_learned_fusion_simple.py
               tldw_Server_API/tests/RAG_NEW/unit/test_llamacpp_reranker_topk_full_input.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_natural_query_facets.py
               tldw_Server_API/tests/RAG_NEW/unit/test_preinstalled_local_reranker.py
               tldw_Server_API/tests/RAG_NEW/unit/test_pipeline*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_post*.py
@@ -7483,6 +7518,8 @@ jobs:
               tldw_Server_API/tests/RAG_NEW/unit/test_guardrails*.py
               tldw_Server_API/tests/RAG_NEW/unit/test_path_validation_security.py
               tldw_Server_API/tests/RAG_NEW/unit/test_payload_exemplars*.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_category_boundaries.py
+              tldw_Server_API/tests/RAG_NEW/unit/test_security_filter_authority.py
               tldw_Server_API/tests/RAG_NEW/unit/test_security_filters_sanitizers.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_retrieval_hardening.py
               tldw_Server_API/tests/RAG_NEW/unit/test_slides_source_sql_interpolation.py
@@ -7534,6 +7571,7 @@ jobs:
           - name: media-core-documents
             paths: >-
               tldw_Server_API/tests/Media/test_document*.py
+              tldw_Server_API/tests/Media/test_pdf_page_provenance.py
               tldw_Server_API/tests/Media/test_pdf_text_normalization.py
           - name: media-core-api
             paths: >-
@@ -7874,6 +7912,8 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_mineru_ocr_evaluator.py
               tldw_Server_API/tests/Evaluations/test_ms_g_eval.py
               tldw_Server_API/tests/Evaluations/test_ocr_metrics.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_report.py
+              tldw_Server_API/tests/Evaluations/test_political_pdf_eval_workflow.py
               tldw_Server_API/tests/Evaluations/test_production_features_integration.py
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py

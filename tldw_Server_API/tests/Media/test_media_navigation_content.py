@@ -109,7 +109,12 @@ async def test_pdf_section_content_reports_exact_or_unavailable(mock_user, mock_
 
 
 @pytest.mark.asyncio
-async def test_navigation_content_auto_resolves_markdown(mock_user, mock_db):
+@pytest.mark.parametrize("content,intrinsic_format", [
+    ("## Section 1\nBody line here", "markdown"),
+    ("## Trade\n|Thailand<br>Taiwan|\n|Exports &amp; imports|", "html"),
+    ("Exact plain source.", "plain"),
+])
+async def test_navigation_content_auto_preserves_intrinsic_source_and_offsets(mock_user, mock_db, content, intrinsic_format):
     mock_db.get_media_by_id.return_value = {
         "id": 1,
         "type": "document",
@@ -118,6 +123,7 @@ async def test_navigation_content_auto_resolves_markdown(mock_user, mock_db):
         "last_modified": "2026-02-09T15:00:00Z",
     }
     sample_nodes = [_sample_char_node()]
+    sample_nodes[0]["target_end"] = len(content)
 
     app.dependency_overrides[get_request_user] = lambda: mock_user
     app.dependency_overrides[get_media_db_for_user] = lambda: mock_db
@@ -131,7 +137,7 @@ async def test_navigation_content_auto_resolves_markdown(mock_user, mock_db):
         patch.object(
             navigation_core,
             "get_document_version",
-            return_value={"content": "## Section 1\nBody line here"},
+            return_value={"content": content},
         ),
         patch.object(
             navigation_mod,
@@ -149,9 +155,10 @@ async def test_navigation_content_auto_resolves_markdown(mock_user, mock_db):
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["content_format"] == "markdown"
-    assert payload["content"].startswith("## Section")
-    assert "markdown" in payload["available_formats"]
+    assert payload["content_format"] == intrinsic_format
+    assert payload["content"] == content
+    assert payload["resolved_end_char"] - payload["resolved_start_char"] == len(content)
+    assert intrinsic_format in payload["available_formats"]
     assert payload["alternate_content"] is None
 
 
