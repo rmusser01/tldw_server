@@ -16,6 +16,6 @@
 **Goal:** Independent review and real local model index qualification.
 **Success Criteria:** Connected tests/lint/Bandit pass; offline real PDFtoken audit has no oversized chunks; root-controlled indexing/replay preserves failures.
 **Tests:** Embeddings Jobs/direct suites and actual cached MiniLM tokenizer audit.
-**Status:** In Progress
+**Status:** Complete
 
-Verification: initial raw-inference RED, Jobs/direct/fallback RED, legacy-checkpoint RED2, and preallocation/HTTP-contract RED2 observed. Final68connectedPASS, scopedBandit0, exactcanonicalPDFaudit431→2261chunks/max512/zerooversized. Parent owns controlled real reindex and frozen retrieval replay.
+Verification: initial raw-inference RED, Jobs/direct/fallback RED, legacy-checkpoint RED2, and preallocation/HTTP-contract RED2 observed. Final 68 connected tests and 14 independent input tests passed; scoped Bandit has zero findings. Exact canonical PDF audit: 431→2,261 chunks, maximum 512 tokens, zero oversized. Real reindex completed all 2,261 vectors in 72 seconds. The frozen public retrieval replay and fresh DeepSeek browser answer passed their bounded hybrid evidence checks; see the follow-through report for separate generation-quality limitations.

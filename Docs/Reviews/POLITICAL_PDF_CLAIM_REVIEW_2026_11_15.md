@@ -2,6 +2,8 @@
 
 Task: TASK-15505.6. This frozen set contains five preserved failure cases and eight held-out cases. Source expectations were checked by an agent against the specified physical PDF pages. Human labels remain pending; no human accuracy or calibrated judge score is claimed.
 
+Follow-through qualification: these were the original set assignments. H05 later exposed the multi-page citation boundary defect and informed its repair, so it is now regression evidence and must not be counted as untouched held-out validation. One post-fix browser answer correctly states the CFPB proposal and court condition but cites printed 838–839 / PDF 871–872 rather than pinpointing 839 / 872. The original failure and single retest are preserved in the [follow-through report](POLITICAL_PDF_FOLLOWTHROUGH_2026_11_15.md). Other known attribution and disagreement failures below remain unresolved semantic risks; review controls preserve corrections without replacing the model draft.
+
 Use the original PDF checksum and the fixture’s per-page extraction hashes to identify the source. Review both the retrieved evidence and generated answer: missing evidence is a retrieval failure; unsupported wording despite sufficient evidence is a generation failure.
 
 For each case, a human reviewer should record Accept / Correct / Unclear, the unsupported or omitted claim, and a correction with page evidence. A single passing run does not establish general accuracy.

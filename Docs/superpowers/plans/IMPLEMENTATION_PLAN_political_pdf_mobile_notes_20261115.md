@@ -18,4 +18,4 @@ Design: [approved addendum](../../Design/POLITICAL_PDF_VIP_FIXES_2026_11_15.md).
 **Goal**: Verify types/lint and phone/keyboard usability through parent acceptance.
 **Success Criteria**: Focused suites green, no new lint/type errors, positive reading height on 390×844 and usable draft focus.
 **Tests**: Full affected suites; parent browser acceptance. Bandit does not apply to TypeScript-only scope.
-**Status**: In Progress — typecheck passes; lint has no new findings versus HEAD; detector clean; parent browser/independent review pending.
+**Status**: Complete — typecheck passes; no new lint findings; detector clean. Independent mobile suites passed 91 tests and the final Notes suite passed 187. Live 390×844 chat has 354.7 px reading space without horizontal overflow, Education evidence opens PDF page 352, and Open draft focuses Note content. Canonical Save and explicit saved-note reload preserve the reviewed 671-character FBI note and its source history. Cold workspace reopening is a separate TASK-15505.8 chat-mirror repair; participant testing remains external acceptance.
