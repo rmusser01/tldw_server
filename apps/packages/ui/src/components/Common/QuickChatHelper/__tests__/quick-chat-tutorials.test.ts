@@ -97,8 +97,13 @@ describe("quick chat per-page tutorials", () => {
     expect(unlockedToolsTutorial?.isLocked).toBe(false)
   })
 
-  it("returns empty tutorial list for routes without definitions", () => {
+  it("lists the Settings tour on the Health subroute", () => {
     const entries = buildQuickChatPageTutorialEntries("/settings/health", [])
+    expect(entries.map(({ tutorial }) => tutorial.id)).toContain("settings-basics")
+  })
+
+  it("returns empty tutorial list for routes without definitions", () => {
+    const entries = buildQuickChatPageTutorialEntries("/unregistered-route", [])
     expect(entries).toEqual([])
   })
 

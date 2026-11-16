@@ -72,6 +72,8 @@ const clickPrimary = () => {
 }
 
 describe("TutorialRunner with the real react-joyride", { timeout: 30_000 }, () => {
+  let cancelScheduledWork: () => void
+
   beforeEach(() => {
     localStorage.clear()
     useTutorialStore.setState({
@@ -86,13 +88,22 @@ describe("TutorialRunner with the real react-joyride", { timeout: 30_000 }, () =
       new DOMRect(10, 10, 120, 40)
     )
     vi.spyOn(console, "warn").mockImplementation(() => undefined)
+
+    const frames = vi.spyOn(globalThis, "requestAnimationFrame")
+    const timeouts = vi.spyOn(globalThis, "setTimeout")
+    cancelScheduledWork = () => {
+      for (const { value } of frames.mock.results) cancelAnimationFrame(value)
+      for (const { value } of timeouts.mock.results) clearTimeout(value)
+    }
   })
 
-  afterEach(() => {
-    act(() => {
+  afterEach(async () => {
+    await act(async () => {
       useTutorialStore.getState().endTutorial()
     })
     cleanup()
+    // Cancel Joyride's deferred Popper update before jsdom disposes window.
+    cancelScheduledWork()
     vi.restoreAllMocks()
   })
 

@@ -14,7 +14,7 @@ const gettingStarted: TutorialDefinition = {
   labelFallback: "Getting Started",
   descriptionKey: "tutorials:gettingStarted.description",
   descriptionFallback:
-    "A quick tour of the main features to help you get the most out of tldw",
+    "Choose where to start with Chat, Knowledge, or Media.",
   icon: Rocket,
   priority: 0,
   sequence: {
@@ -23,27 +23,20 @@ const gettingStarted: TutorialDefinition = {
     nextLabelKey: "tutorials:gettingStarted.sequence.knowledgeLabel",
     nextLabelFallback: "Continue in Knowledge"
   },
+  requireFirstTargetForPrompt: true,
   steps: [
     {
-      target: '[data-testid="companion-home-shell"]',
-      titleKey: "tutorials:gettingStarted.welcome.title",
-      titleFallback: "Welcome to tldw!",
-      contentKey: "tutorials:gettingStarted.welcome.content",
-      contentFallback:
-        "This is your home dashboard. From here you can access all of tldw's features. Let's take a quick tour.",
-      placement: "bottom",
       disableBeacon: true,
-    },
-    {
       target: '[data-testid="companion-home-action-chat"]',
       titleKey: "tutorials:gettingStarted.chat.title",
       titleFallback: "Chat with AI",
       contentKey: "tutorials:gettingStarted.chat.content",
       contentFallback:
-        "Chat with 16+ AI providers using an OpenAI-compatible interface. You'll need to configure at least one LLM provider in Settings first.",
+        "Open Chat and ask a question. If the model list is empty, configure a provider in Settings first.",
       placement: "bottom",
     },
     {
+      optional: true,
       target: '[data-testid="companion-home-action-knowledge"]',
       titleKey: "tutorials:gettingStarted.knowledge.title",
       titleFallback: "Knowledge Base",
@@ -53,6 +46,7 @@ const gettingStarted: TutorialDefinition = {
       placement: "bottom",
     },
     {
+      optional: true,
       target: '[data-testid="companion-home-action-media-multi"]',
       titleKey: "tutorials:gettingStarted.analysis.title",
       titleFallback: "Media Analysis",
@@ -60,16 +54,7 @@ const gettingStarted: TutorialDefinition = {
       contentFallback:
         "Analyze and compare media files side by side. Great for reviewing transcripts, PDFs, and research materials.",
       placement: "bottom",
-    },
-    {
-      target: '[data-testid="companion-home-shell"]',
-      titleKey: "tutorials:gettingStarted.nextStep.title",
-      titleFallback: "Next: Configure a Provider",
-      contentKey: "tutorials:gettingStarted.nextStep.content",
-      contentFallback:
-        "To start using Chat, go to Settings > tldw Server and add an LLM provider API key (e.g., OpenAI, Anthropic). Then come back and open Chat!",
-      placement: "bottom",
-    },
+    }
   ],
 }
 

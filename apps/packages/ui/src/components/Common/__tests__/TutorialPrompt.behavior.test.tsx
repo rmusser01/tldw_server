@@ -29,9 +29,6 @@ type TutorialRouteOptions = {
   completedTutorialIds?: readonly string[]
 }
 
-const hasTutorialsForRouteMock = vi.fn<
-  (route: string, options?: TutorialRouteOptions) => boolean
->(() => true)
 const getPrimaryTutorialForRouteMock = vi.fn<
   (
     route: string,
@@ -40,11 +37,17 @@ const getPrimaryTutorialForRouteMock = vi.fn<
     id: string
     labelKey: string
     labelFallback: string
+    descriptionKey: string
+    descriptionFallback: string
+    requireFirstTargetForPrompt?: boolean
+    steps?: { target: string }[]
   }
 >(() => ({
   id: "playground-basics",
   labelKey: "tutorials:playground.basics.label",
-  labelFallback: "Chat Basics"
+  labelFallback: "Chat Basics",
+  descriptionKey: "tutorials:playground.basics.description",
+  descriptionFallback: "Start a conversation"
 }))
 
 let capturedNavigate: ReturnType<typeof useNavigate> | null = null
@@ -62,6 +65,8 @@ const notificationApi = { info: infoMock, destroy: destroyMock }
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: translate }) }))
 
 vi.mock("antd", () => ({
+  ConfigProvider: ({ children }: React.PropsWithChildren) => <>{children}</>,
+  theme: { useToken: () => ({ token: { zIndexPopupBase: 1000 } }) },
   notification: {
     useNotification: () => [
       notificationApi,
@@ -87,9 +92,8 @@ vi.mock("@/store/tutorials", () => ({
   )
 }))
 
-vi.mock("@/tutorials", () => ({
-  hasTutorialsForRoute: (route: string, options?: TutorialRouteOptions) =>
-    hasTutorialsForRouteMock(route, options),
+vi.mock("@/tutorials", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/tutorials")>()),
   getPrimaryTutorialForRoute: (route: string, options?: TutorialRouteOptions) =>
     getPrimaryTutorialForRouteMock(route, options)
 }))
@@ -193,6 +197,101 @@ describe("TutorialPrompt behavior", () => {
     vi.useRealTimers()
   })
 
+  it("waits for an open modal to close before offering its walkthrough", async () => {
+    const content = (open: boolean) => (
+      <MemoryRouter initialEntries={["/chat"]}>
+        <TutorialPrompt />
+        <div hidden={!open}>
+          <div role="dialog" aria-modal="true">MCP tool settings</div>
+        </div>
+      </MemoryRouter>
+    )
+    const view = render(content(true))
+
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+    expect(markPromptSeenMock).not.toHaveBeenCalled()
+
+    await act(async () => view.rerender(content(false)))
+    expect(infoMock).toHaveBeenCalledOnce()
+  })
+
+  it.each(["before", "after"])(
+    "keeps the walkthrough available if the model picker opens %s the prompt",
+    async (when) => {
+      const content = (open: boolean) => (
+        <MemoryRouter initialEntries={["/chat"]}>
+          <TutorialPrompt />
+          <button
+            aria-expanded={open}
+            data-tutorial-prompt-blocker
+            type="button"
+          >
+            Choose a model
+          </button>
+        </MemoryRouter>
+      )
+      const view = render(content(when === "before"))
+      act(() => vi.advanceTimersByTime(2000))
+      const firstPrompt = infoMock.mock.calls[0]?.[0]
+
+      if (when === "before") {
+        expect(firstPrompt).toBeUndefined()
+      } else {
+        expect(firstPrompt).toBeDefined()
+        await act(async () => view.rerender(content(true)))
+        expect(destroyMock).toHaveBeenCalledWith("tutorial-prompt-global")
+        await act(async () =>
+          firstPrompt.btn.props.children[1].props.onClick()
+        )
+        expect(startTutorialMock).not.toHaveBeenCalled()
+      }
+
+      await act(async () => view.rerender(content(false)))
+      expect(infoMock).toHaveBeenCalledTimes(when === "before" ? 1 : 2)
+      // Ant Design can call the old close handler after a replacement appears.
+      act(() => firstPrompt?.onClose())
+      expect(markPromptSeenMock).not.toHaveBeenCalled()
+      const restoredPrompt = infoMock.mock.calls.at(-1)![0]
+      act(() => restoredPrompt.btn.props.children[1].props.onClick())
+      expect(startTutorialMock).toHaveBeenCalledOnce()
+      expect(markPromptSeenMock).toHaveBeenCalledWith("/chat")
+    }
+  )
+
+  it("waits for async page content before offering its walkthrough", async () => {
+    getPrimaryTutorialForRouteMock.mockReturnValueOnce({
+      id: "test-async-tour",
+      labelKey: "tutorials:testAsync",
+      labelFallback: "Test tour",
+      descriptionKey: "tutorials:testAsyncDescription",
+      descriptionFallback: "Review your account",
+      requireFirstTargetForPrompt: true,
+      steps: [{ target: "#test-async-tour-anchor" }]
+    })
+    const renderPrompt = (ready: boolean) => (
+      <MemoryRouter initialEntries={["/account"]}>
+        <TutorialPrompt />
+        {ready && <h1 id="test-async-tour-anchor">Account</h1>}
+      </MemoryRouter>
+    )
+    const view = render(renderPrompt(false))
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+    await act(async () => view.rerender(renderPrompt(true)))
+    expect(infoMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("honors page-owned guides even when the route has a trailing slash", () => {
+    render(
+      <MemoryRouter initialEntries={["/notes/"]}>
+        <TutorialPrompt excludedRoutes={["/notes", "/research-workspace"]} />
+      </MemoryRouter>
+    )
+    act(() => vi.advanceTimersByTime(2000))
+    expect(infoMock).not.toHaveBeenCalled()
+  })
+
   it("shows a prompt with a single global notification key", () => {
     render(
       <MemoryRouter initialEntries={["/chat"]}>
@@ -216,6 +315,7 @@ describe("TutorialPrompt behavior", () => {
 
     expect(infoMock).toHaveBeenCalledTimes(1)
     expect(infoMock.mock.calls[0][0]?.key).toBe("tutorial-prompt-global")
+    expect(infoMock.mock.calls[0][0].description.props.children).toBe("Start a conversation")
   })
 
   it("passes completed tutorial IDs into tutorial route lookups", () => {
@@ -244,10 +344,6 @@ describe("TutorialPrompt behavior", () => {
     const expectedOptions = {
       completedTutorialIds: ["getting-started"]
     }
-    expect(hasTutorialsForRouteMock).toHaveBeenCalledWith(
-      "/knowledge",
-      expectedOptions
-    )
     expect(getPrimaryTutorialForRouteMock).toHaveBeenCalledWith(
       "/knowledge",
       expectedOptions

@@ -243,9 +243,6 @@ test.describe("Notes P0 reproductions", () => {
         const notes = new NotesPage(page)
         if (extension) {
           await page.setViewportSize(authedPage.viewportSize()!)
-          await extension.context.serviceWorkers()[0].evaluate(() =>
-            chrome.storage.local.set({ "notes-tutorial-shown": JSON.stringify("1") })
-          )
           await page.goto(`chrome-extension://${extension.extensionId}/options.html#/notes`)
           await expect(page).toHaveURL(/\/options\.html#\/notes$/)
         } else {

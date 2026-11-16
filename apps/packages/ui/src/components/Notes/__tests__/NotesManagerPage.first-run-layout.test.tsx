@@ -249,9 +249,10 @@ describe("NotesManagerPage first-run layout", { timeout: 60_000 }, () => {
     expect(screen.getByText("Markdown + LaTeX supported")).toBeInTheDocument()
   })
 
-  it("ends the Notes tour on the create action (NO-02)", () => {
+  it("guides users through creating, editing, and saving a note", () => {
     const tour = notesTutorials.find((entry) => entry.id === "notes-basics")
-    const lastStep = tour?.steps[tour.steps.length - 1]
-    expect(lastStep?.target).toBe('[data-testid="notes-new-note-button"]')
+    expect(tour?.steps.map((step) => step.titleFallback)).toEqual([
+      "Create a note", "Add a title and text", "Save your note"
+    ])
   })
 })

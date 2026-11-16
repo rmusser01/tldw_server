@@ -14,7 +14,6 @@ import { PageHelpModalHost } from "../PageHelpModalHost"
 import { TutorialRunner } from "../TutorialRunner"
 import { QuickChatHelperButton } from "../QuickChatHelper/QuickChatHelperButton"
 import NotesManagerOverlays from "@/components/Notes/NotesManagerOverlays"
-import { notesUiStorage } from "@/components/Notes/notes-manager-utils"
 import { useQuickChatStore } from "@/store/quick-chat"
 import { useTutorialStore } from "@/store/tutorials"
 import { useStoreMessageOption } from "@/store/option"
@@ -60,12 +59,9 @@ vi.mock("@/components/Notes/KeywordPickerModal", () => ({
   default: () => null
 }))
 vi.mock("@/components/Notes/notes-manager-utils", () => ({
-  NOTES_TUTORIAL_SHOWN_STORAGE_KEY: "notes-tutorial-shown",
-  notesUiStorage: { remove: vi.fn(async () => {}) },
   toKeywordTestIdSegment: (value: string) => value
 }))
 beforeEach(() => {
-  vi.mocked(notesUiStorage.remove).mockClear()
   vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible")
   useStoreMessageOption.getState().startNewChatDraft()
   useTutorialStore.getState().resetProgress()
@@ -183,7 +179,6 @@ it.each([false, true])(
       fireEvent.click(screen.getByRole("button", { name: "Open Notes help" }))
     act(originalStart)
     expect(useTutorialStore.getState().activeRun).toBeNull()
-    expect(notesUiStorage.remove).not.toHaveBeenCalled()
   }
 )
 
@@ -287,7 +282,9 @@ it("actual Notes dialog close completion preserves tour focus and returns to its
     return (
       <>
         <button onClick={() => setOpen(true)}>Notes help opener</button>
-        <div data-testid="notes-list-region">Notes target</div>
+        <button data-testid="notes-new-note-button">New note</button>
+        <div data-testid="notes-title-row">Title</div>
+        <button data-testid="notes-save-button">Save</button>
         <textarea
           aria-label="Exact Notes launch draft"
           defaultValue="Exact Notes draft.  "
@@ -305,7 +302,9 @@ it("actual Notes dialog close completion preserves tour focus and returns to its
       </MemoryRouter>
     </ConfigProvider>
   )
-  geometry(screen.getByTestId("notes-list-region"))
+  for (const target of ["notes-new-note-button", "notes-title-row", "notes-save-button"]) {
+    geometry(screen.getByTestId(target))
+  }
   const opener = screen.getByRole("button", { name: "Notes help opener" })
   opener.focus()
   fireEvent.click(opener)
@@ -315,7 +314,7 @@ it("actual Notes dialog close completion preserves tour focus and returns to its
   expect(useTutorialStore.getState().activeRun?.focusReturn?.target).toBe(
     opener
   )
-  const tour = await screen.findByRole("alertdialog", { name: "Notes List" })
+  const tour = await screen.findByRole("alertdialog", { name: "Create a note" })
   await waitFor(() =>
     expect(
       screen.queryByTestId("notes-shortcuts-modal")
