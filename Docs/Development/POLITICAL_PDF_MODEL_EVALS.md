@@ -53,6 +53,8 @@ python Helper_Scripts/Evals/run_political_pdf_eval.py run \
 
 `run` requires a new run identity and `--execute`; it refuses an existing manifest. Every non-pack workflow verifies the retained server PDF and navigation identity before generation. Retrieval disables generation and model-driven query enhancements. Retrieved QA reuses the saved selected retrieval mode; reference-page QA reads the frozen pages directly. Results remain separate by model, case and context.
 
+Retrieval uses chunk-level FTS with late chunking disabled. QA rejects empty context or context over the production limit of 24,000 characters before making a paid request. To reduce retrieved context, lower `retrieval.top_k` in a new configuration/run; evidence is not silently truncated.
+
 Regenerate reports without a server, credentials or the original checkout revision:
 
 ```bash
@@ -80,6 +82,8 @@ Set summary configuration **before** creating `run-a`, even if the first invocat
 Without adoption, each configured model submits a distinct output job. To inspect an existing job instead, set `summary.job_ids` to a mapping from a configured model key to its positive existing job ID before planning. The runner verifies the artifact type and configured provider/model/settings/section scope, then polls and reads back the artifact without a new submission. An incompatible job is rejected.
 
 `summary.wait_seconds` defaults to `3600` and accepts integers from `1` to `86400`. Polls wait up to 15 seconds, bounded by the remaining wait time. Reaching the wait deadline records `pending` and returns a nonzero exit; it does not cancel the server job. Resume with the same config to continue polling its saved ID without another POST.
+
+Every poll retains its full response, so large artifacts and long jobs can consume substantial disk space even at this interval. Allow room for the evidence; interrupting CLI polling does not cancel the server job.
 
 Terminal summary results, including failures and partial evidence, are retained on resume. The runner rejects `--retry-operation` for a known summary job, whether running or terminal. Resume its recorded job or use a new run directory for a new intentional generation.
 
@@ -130,6 +134,8 @@ Retrieval coverage uses the frozen expected physical-page set as its denominator
 Summary checks retain section/portion completion and failure counts, selected-scope and exact evidence-span validation, and artifact readback. Jobs do not expose provider-call token usage through this interface. New-job elapsed time is submission-to-observed-terminal wall time, including resume downtime; adopted-job latency is unavailable. Per-operation elapsed time and its sum are not whole-run wall time.
 
 Faithfulness, author attribution, disagreement and completeness remain human judgments. Review the source and saved response, then fill the packet's labels/status and optional reviewer/notes. Regenerating reports preserves those decisions only for the same evidence fingerprint; changed evidence is rejected. H05 is a tuned regression, not an untouched held-out result. No automatic judge or accuracy score is supplied, and no frontend UI evaluation is automated here.
+
+CLI QA uses the production extraction prompt; the UI uses its chat pipeline. Passing CLI checks does not establish UI behavior or semantic correctness.
 
 ## Local and CI verification
 
