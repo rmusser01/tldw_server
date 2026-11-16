@@ -22,6 +22,8 @@ QA uses the shared backend verifier through an authenticated workspace operation
 
 Calls are bounded and cancellable. Verification error, invalid judge output, truncation or a bound exceeded produces a visible incomplete/unverified finding, preserving generated material. Retry reuses unchanged generation and must not reuse a verification receipt after its text/source identity changes. Source ID remapping on portable restore retains findings as historical checks, without claiming a fresh check against a changed source.
 
+Live follow-through: references/publication-only portions still require a descriptive evidence claim bound to a current passage ID; their metadata must not become invented policy positions or conclusions from the cited works. Keep the nonempty extraction contract and exact server-materialized quotes. A controlled retry preserves the original failed response. Reuse validated terminal support, negative, uncited and known hard-limit findings only when verifier identity, exact draft/evidence hashes and full substantive text coverage remain current. Such reuse preserves the original verdict and uncovered counts; it does not turn an unchecked unit into support. Missing, malformed, stale, temporary-error or unknown checks still retry. These are repairs within ADR-096, not new evidence authority or an automatic generation-retry loop.
+
 ## UX and evaluation
 
 Show generation and checking progress, clear supported/needs-review/unchecked labels, reasons and evidence links. Preserve findings in readable exports and structured packs. This follows NN/g visibility of system status, error prevention, recognition rather than recall, and help recognizing/recovering from errors. A reviewer decision is separate from an automated support assessment.

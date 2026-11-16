@@ -6,6 +6,7 @@ import hashlib
 import json
 from typing import Any
 
+from tldw_Server_API.app.core.Claims_Extraction.citation_support_types import validate_claim_verification
 from tldw_Server_API.app.core.Provider_Credentials.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
@@ -67,15 +68,34 @@ def evidence_digest(evidence: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(evidence, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
-def verification_is_current(report: Any, text: str, evidence: dict[str, Any]) -> bool:
-    """Reuse only completed strict checks of unchanged text and source bindings."""
-    return bool(
-        isinstance(report, dict) and report.get("version") == 1
-        and report.get("text_sha256") == hashlib.sha256(text.encode()).hexdigest()
-        and report.get("evidence_sha256") == evidence_digest(evidence)
-        and report.get("verdict") in {"supported", "needs_revision"}
-        and report.get("coverage", {}).get("complete") is True
-    )
+def verification_is_current(
+    report: Any, text: str, evidence: dict[str, Any], *, provider: str | None, model: str | None,
+) -> bool:
+    """Reuse unchanged terminal findings without promoting negative or uncovered results."""
+    try:
+        validate_claim_verification(report)
+    except ValueError:
+        return False
+    if (
+        not report["findings"] or report["provider"] != provider or report["model"] != model
+        or report["text_sha256"] != hashlib.sha256(text.encode()).hexdigest()
+        or report.get("evidence_sha256") != evidence_digest(evidence)
+    ):
+        return False
+    previous_end = 0
+    for finding in report["findings"]:
+        start, end = finding["start"], finding["end"]
+        if (end > len(text) or text[start:end] != finding["text"]
+                or any(character.isalnum() for character in text[previous_end:start])):
+            return False
+        terminal = finding["status"] in {"supported", "unsupported", "contradicted", "uncited"}
+        hard_limit = finding["status"] == "not_checked" and finding["reason"] in {
+            "text_or_unit_limit", "cited_evidence_limit", "report_size_limit",
+        }
+        if not (terminal or hard_limit):
+            return False
+        previous_end = end
+    return not any(character.isalnum() for character in text[previous_end:])
 
 
 def unavailable_verification(text: str, *, provider: str | None, model: str | None) -> dict[str, Any]:

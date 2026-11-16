@@ -51,6 +51,17 @@ def test_comparison_rejects_single_section():
         request(kind="compare_sources")
 
 
+def test_reference_only_extraction_requires_descriptive_source_bound_evidence():
+    from tldw_Server_API.app.core.Research_Workspace.section_summaries import build_section_extraction_prompt
+
+    source = "73. Agency, Annual Report, 2024.\n74. Office, Publication Index, 2025."
+    prompt, passages = build_section_extraction_prompt("References", "Summarize the supplied portion.", source)
+    assert "For references-only or publication-only portions, return a nonempty evidence list" in prompt
+    assert "descriptive, non-policy claim" in prompt
+    assert "Do not infer the cited works' findings or endorsement" in prompt
+    assert passages == [{"id": "P1", "start_char": 0, "end_char": len(source), "text": source}]
+
+
 class Workspace:
     def __init__(self):
         self.row = {"id": "summary-1", "version": 1, "version_metadata": {}}
@@ -166,6 +177,50 @@ async def test_failed_batch_resume_preserves_full_ranges_and_coverage(monkeypatc
     assert "Coverage: 1 of 1 selected sections" in row["content"]
     assert "PDF page unavailable" in row["content"]
     assert options["workspace_db"].write_versions == list(range(1, row["version"]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tail_response", ["descriptive", "empty", "unknown passage"])
+async def test_references_only_tail_retains_exact_evidence_and_strict_validation(monkeypatch, tail_response):
+    mod = importlib.import_module("tldw_Server_API.app.core.Research_Workspace.section_summaries")
+    tail = "ENDNOTES\n73. Agency, Annual Report, 2024.\n74. Office, Publication Index, 2025.\n".ljust(817)
+    text = "The chapter proposes agency reform.\n".ljust(24_000) + tail
+    snapshot = {"content": text, "navigation_version": "v1", "page_map": [],
+                "nodes": [{"id": "dsi:1", "title": "Agency", "level": 1, "target_type": "char_range",
+                           "target_start": 0, "target_end": len(text)}]}
+
+    async def load(*args, **kwargs):
+        return snapshot
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        if "SOURCE:\n" not in prompt:
+            return {"choices": [{"message": {"content": "Agency reform is proposed [E1.1.1]."}}]}
+        is_tail = "ENDNOTES" in prompt.split("SOURCE:\n", 1)[1]
+        if is_tail and tail_response == "descriptive":
+            assert "For references-only or publication-only portions, return a nonempty evidence list" in prompt
+        evidence = [{"claim": "This portion lists two publications." if is_tail else "Agency reform is proposed.",
+                     "source_span_ids": ["P999" if is_tail and tail_response == "unknown passage" else "P1"]}]
+        raw = {"summary": "Publication references are listed." if is_tail else "Agency reform is proposed.",
+               "evidence": [] if is_tail and tail_response == "empty" else evidence}
+        return {"choices": [{"message": {"content": json.dumps(raw)}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(mod, "load_navigation_sections", load)
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings)
+    await mod.process_section_summary(**options)
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    section = analysis["sections"][0]
+    last = section["batches"][-1]
+    if tail_response == "descriptive":
+        assert section["status"] == "completed"
+        assert last["evidence"][0]["quote"] == tail
+        assert (last["evidence"][0]["start_char"], last["evidence"][0]["end_char"]) == (24_000, len(text))
+        assert last["evidence"][0]["claim"] == "This portion lists two publications."
+    else:
+        assert section["status"] == "failed"
+        assert last["error_code"] == ("invalid_response_shape" if tail_response == "empty" else "unknown_source_span")
+        assert analysis["generation_failures"][0]["response_preview"]
 
 
 @pytest.mark.asyncio

@@ -42,6 +42,7 @@
 - [ ] Eval worker `pr_scope_review` owns `Helper_Scripts/Evals/run_political_pdf_eval.py`, fixtures/config/tests under TASK-15505.18.
 - [ ] Root coordinates the frozen local runtime and paid provider calls only after connected tests pass.
 - [ ] Retain receipts, inspect failures against source and document measured limits.
+- [ ] Qualify references-only extraction guidance and reuse of unchanged validated terminal receipts after the live SBA tail failure. Preserve the first response; finish Job 49 before restarting the runtime and explicitly resuming its failed portion. Missing/error/stale checks remain retryable, and no verdict or uncovered count is promoted.
 
 ## Stage 5: Review, delivery and CI
 **Goal:** Update PR #3480 against dev with reviewed implementation and verifiable results.
