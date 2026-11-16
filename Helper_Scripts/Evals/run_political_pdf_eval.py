@@ -430,6 +430,7 @@ class Runner:
         """Freeze source-scoped retrieval with model-driven enhancements disabled."""
         body = {"query": case["question"], "sources": ["media_db"], "include_media_ids": [self.config["source"]["media_id"]],
                 "search_mode": "fts" if mode == "text" else mode, "top_k": self.config["retrieval"]["top_k"], "hybrid_alpha": self.config["retrieval"]["hybrid_alpha"],
+                "fts_level": "chunk", "enable_text_late_chunking": False,
                 "enable_generation": False, "enable_reranking": False, "enable_cache": False,
                 **dict.fromkeys(("adaptive_cache", "adaptive_hybrid_weights", "adaptive_rerun_include_generation",
                     "adaptive_rerun_on_low_confidence", "enable_dynamic_granularity", "enable_document_grading",
@@ -443,7 +444,10 @@ class Runner:
         """Ask the production extraction prompt against reference or frozen retrieved evidence."""
         import pymupdf
 
-        from tldw_Server_API.app.core.Research_Workspace.section_summaries import build_section_extraction_prompt
+        from tldw_Server_API.app.core.Research_Workspace.section_summaries import (
+            BATCH_CHARS,
+            build_section_extraction_prompt,
+        )
         pages = [page["pdf_page"] for page in case["source_pages"]]
         if context == "reference_pages":
             with pymupdf.open(self.config["source"]["path"]) as pdf:
@@ -458,6 +462,8 @@ class Runner:
             pages = retrieval["checks"]["covered_pages"]
         if not source.strip():
             raise ValueError("No evidence text is available; no QA request submitted")
+        if len(source) > BATCH_CHARS:
+            raise ValueError("QA context exceeds the production extraction budget; no paid request submitted")
         prompt, passages = build_section_extraction_prompt(case["id"], "Answer this question using only the supplied evidence: " + case["question"], source)
         body = {"api_provider": model["provider"], "model": model["model"], "messages": [{"role": "user", "content": prompt}], "stream": False, "save_to_db": False,
                 **{key: model[key] for key in ("max_tokens", "temperature", "top_p") if key in model}}

@@ -254,6 +254,8 @@ def test_retrieval_uses_current_public_request_schema(runner_module, config_file
 
     def public_schema(**kwargs):
         parsed = UnifiedRAGRequest.model_validate(kwargs["json"])
+        assert parsed.fts_level == "chunk"
+        assert parsed.enable_text_late_chunking is False
         return httpx.Response(200, json={"mode": parsed.search_mode, "results": []})
 
     plan = runner_module.load_plan(config_file)
@@ -393,4 +395,28 @@ def test_summary_rejects_unrepresentable_reasoning_setting_before_post(runner_mo
         with pytest.raises(ValueError, match="reasoning"):
             run.summarize(model)
     assert not calls
+
+
+def test_oversized_retrieved_context_is_rejected_before_paid_generation(runner_module, config_file, tmp_path):
+    from tldw_Server_API.app.core.Research_Workspace.section_summaries import BATCH_CHARS
+
+    calls = []
+    def server(**kwargs):
+        calls.append(kwargs)
+        return httpx.Response(200, json={"documents": [{"id": "media_7_chunk_1", "content": "x" * (BATCH_CHARS + 1),
+            "metadata": {"source": "media_db", "media_id": "7", "page_spans": [{"page_number": 1, "start_char": 0, "end_char": BATCH_CHARS + 1}]}}], "errors": []})
+    plan = runner_module.load_plan(config_file)
+    with runner_module.Runner(plan, tmp_path / "run", fetch=server) as run:
+        with pytest.raises(ValueError, match="context.*budget"):
+            run.answer(plan["cases"][0], plan["config"]["models"][0], "retrieved")
+    assert len(calls) == 1
+    assert calls[0]["url"].endswith("/rag/search")
+
+
+def test_whole_book_identity_is_not_relaxed_to_pass_media_scope(runner_module):
+    checks = runner_module.retrieval_checks({"documents": [{"id": "1", "content": "Whole book",
+        "metadata": {"source": "media_db", "source_id": "1", "source_type": "media_db", "page_map": [{"page_number": 906}]}}]},
+        {"source_pages": [{"pdf_page": 906}]}, 1, 922)
+    assert checks["source_scope_valid"] is False
+    assert checks["covered_pages"] == []
 
