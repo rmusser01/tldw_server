@@ -208,6 +208,10 @@ async def test_canonical_parent_completes_clause_and_preserves_page_offsets(medi
     assert "Department of Labor or the local council." in document["content"]
     assert document["content"] == content[metadata["start_char"] : metadata["end_char"]]
     assert metadata["matched_start_char"] == start and metadata["matched_end_char"] == end
+    assert metadata["media_type"] == "document"
+    assert metadata["title"] == "Program policy"
+    assert metadata["source_id"] == str(media_id)
+    assert metadata["source_type"] == "media_db"
     assert metadata["page_spans"] == [
         {"page_number": 1, "start_char": start - 100, "end_char": end, "printed_page_label": "10"},
         {"page_number": 2, "start_char": end, "end_char": end + 100, "printed_page_label": "11"},

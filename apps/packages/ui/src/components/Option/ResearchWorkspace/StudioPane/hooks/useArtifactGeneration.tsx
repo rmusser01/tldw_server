@@ -281,6 +281,9 @@ type GenerationResult = {
   presentationId?: string
   presentationVersion?: number
   producerMetadata?: GeneratedArtifact["producerMetadata"]
+  versionMetadata?: GeneratedArtifact["versionMetadata"]
+  reviewMetadata?: GeneratedArtifact["reviewMetadata"]
+  reviewStatus?: GeneratedArtifact["reviewStatus"]
   sourceLineage?: GeneratedArtifact["sourceLineage"]
   exportRefs?: GeneratedArtifact["exportRefs"]
   version?: number
@@ -1365,7 +1368,7 @@ const toGeneratedArtifactFromWorkspaceArtifact = (
   }
 
   return {
-    ...readWorkspaceArtifactClientPayload(response.version_metadata),
+    ...mapServerArtifactToLocal(response),
     partial: status === "failed",
     recoveryMessage: status === "failed" && response.producer_metadata?.error === "section_checkpoint_changed"
       ? "Section boundaries or source settings changed. Create new version to use the current selection; the original completed evidence is retained."
@@ -3968,6 +3971,11 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
           previewText: result.previewText,
           summary: result.summary,
           producerMetadata: result.producerMetadata,
+          ...(result.workspaceArtifactId ? {
+            versionMetadata: result.versionMetadata,
+            reviewMetadata: result.reviewMetadata,
+            reviewStatus: result.reviewStatus,
+          } : {}),
           sourceLineage: result.sourceLineage,
           exportRefs: result.exportRefs,
           version: result.version,

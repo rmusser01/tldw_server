@@ -60,9 +60,18 @@ def citation_payload():
     }
 
 
-def test_workspace_citations_survive_real_create_and_reload(message_api):
+@pytest.mark.parametrize("with_page_spans", [False, True])
+def test_workspace_citations_survive_real_create_and_reload(message_api, with_page_spans):
     client, db, chat, scope = message_api
     payload = citation_payload()
+    if with_page_spans:
+        payload["metadata_extra"]["workspace_rag_sources_v1"]["sources"][0].update(
+            type="pdf", sourceType="pdf", pageNumber=871,
+            pageSpans=[
+                {"pageNumber": 871, "startChar": 100, "endChar": 120, "printedPageLabel": "838"},
+                {"pageNumber": 872, "startChar": 122, "endChar": 140, "printedPageLabel": "839"},
+            ],
+        )
     response = client.post(f"/api/v1/chats/{chat}/messages", params=scope, json=payload)
     assert response.status_code == 201  # nosec B101 -- pytest behavior assertion.
     messages = client.get(

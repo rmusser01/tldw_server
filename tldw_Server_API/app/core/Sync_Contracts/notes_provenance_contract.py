@@ -10,7 +10,7 @@ from functools import partial
 from typing import Annotated, Literal
 from urllib.parse import quote, unquote
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
 MAX_PROVENANCE_BYTES = 1_000_000
 
@@ -28,6 +28,7 @@ ShortString = Annotated[
 Excerpt = Annotated[str, Field(max_length=100_000), AfterValidator(partial(_client_text_length, limit=100_000))]
 UrlString = Annotated[str, Field(max_length=4096), AfterValidator(partial(_client_text_length, limit=4096))]
 PositiveId = Annotated[int, Field(strict=True, gt=0, le=9_007_199_254_740_991)]
+CharacterOffset = Annotated[int, Field(strict=True, ge=0, le=9_007_199_254_740_991)]
 ShortList = Annotated[list[ShortString], Field(max_length=100)]
 TrustState = Literal[
     "cited_answer",
@@ -44,6 +45,35 @@ _MARKER = re.compile(r"^<!-- tldw-knowledge:v1:([^\r\n]+) -->$", re.MULTILINE)
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+class NotesProvenancePageSpan(_StrictModel):
+    """One physical PDF page intersecting the retained excerpt."""
+
+    pageNumber: PositiveId
+    startChar: CharacterOffset
+    endChar: CharacterOffset
+    printedPageLabel: ShortString | None = None
+
+    @model_validator(mode="after")
+    def ordered_offsets(self) -> NotesProvenancePageSpan:
+        """Reject empty or reversed source intervals."""
+        if self.startChar >= self.endChar:
+            raise ValueError("Page span must have increasing offsets")
+        return self
+
+
+def _ordered_page_spans(spans: list[NotesProvenancePageSpan]) -> list[NotesProvenancePageSpan]:
+    """Keep the canonical page order without overlapping source intervals."""
+    for previous, current in zip(spans, spans[1:]):
+        if current.pageNumber <= previous.pageNumber or current.startChar < previous.endChar:
+            raise ValueError("Page spans must have increasing pages and nonoverlapping offsets")
+    return spans
+
+
+PageSpans = Annotated[
+    list[NotesProvenancePageSpan], Field(min_length=1, max_length=20), AfterValidator(_ordered_page_spans)
+]
 
 
 class NotesProvenanceScope(_StrictModel):
@@ -73,6 +103,7 @@ class NotesProvenanceSource(_StrictModel):
     citationIndex: PositiveId | None = None
     chunkId: ShortString | None = None
     printedPageLabel: ShortString | None = None
+    pageSpans: PageSpans | None = None
 
 
 SourceList = Annotated[list[NotesProvenanceSource], Field(max_length=100)]

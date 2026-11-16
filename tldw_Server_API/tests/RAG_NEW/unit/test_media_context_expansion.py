@@ -43,6 +43,16 @@ class ParentReader:
         return [row for row in self.rows if start_index <= row["chunk_index"] <= end_index]
 
 
+class OwnedParentReader(ParentReader):
+    def __init__(self, content, **overrides):
+        super().__init__(content)
+        self.parent = {"id": 1, "type": "pdf", "title": "Owned policy source", "url": "owned-source.pdf", **overrides}
+
+    def get_media_by_id(self, media_id, **kwargs):
+        self.reads.append(("parent", media_id))
+        return self.parent
+
+
 def seed(content, start, end, **metadata):
     return Document(
         id="chunk-5",
@@ -324,6 +334,50 @@ async def test_custom_reader_cannot_silently_ignore_scoped_lookup():
     with scoped_context(user_id=1, is_admin=True), pytest.raises(TypeError, match="scoped"):
         await expand([seed(reader.content, 100, 120)], reader)
     assert reader.reads == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verification_only", [False, True])
+@pytest.mark.parametrize("owner_type", ["pdf", "video"])
+@pytest.mark.parametrize("cached_fields", [{}, {"title": "Spoofed title", "type": "unknown", "media_type": "video", "url": "https://untrusted.example/",
+    "source_id": "99", "source_type": "notes", "source": "notes", "evidence_origin": "web_search"}, {"type": "pdf", "media_type": "pdf",
+    "source_id": "99", "source_type": "notes", "source": "notes", "evidence_origin": "web_search"}])
+async def test_old_and_new_vector_metadata_uses_verified_owning_row_without_extra_reads(verification_only, owner_type, cached_fields):
+    content = "Canonical PDF policy paragraph. " * 20
+    db = OwnedParentReader(content, type=owner_type)
+    first, second = seed(content, 100, 120, **cached_fields), seed(content, 150, 170, **cached_fields)
+    results, _ = await expand([first, second], db, enable_parent_expansion=not verification_only, verify_locations=verification_only)
+    for result in results:
+        assert {key: result.metadata[key] for key in ("media_id", "source_id", "source_type", "source", "evidence_origin", "type", "media_type", "title", "url")} == {
+            "media_id": "1", "source_id": "1", "source_type": "media_db", "source": "media_db", "evidence_origin": "local_library",
+            "type": owner_type, "media_type": owner_type, "title": "Owned policy source", "url": "owned-source.pdf"}
+        assert result.content == content[result.start_char:result.end_char]
+    assert (results[0].id, results[0].score, results[0].chunk_index) == (first.id, first.score, first.chunk_index)
+    assert db.reads == [("parent", 1), ("version", 1)]
+    assert first.metadata.get("title") == cached_fields.get("title")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("parent_fields", [{"deleted": True}, {"is_trash": True}, {"system_operation_id": "internal"}, {"id": 2}])
+async def test_unusable_or_mismatched_owner_never_enriches_or_reads_version(parent_fields):
+    content = "Hidden source text. " * 20
+    db = OwnedParentReader(content, **parent_fields)
+    result, stats = await expand([seed(content, 100, 120)], db, verify_locations=True)
+    assert result == []
+    assert stats["context_hidden_count"] == 1
+    assert db.reads == [("parent", 1)]
+
+
+@pytest.mark.asyncio
+async def test_mismatched_seed_is_not_given_verified_parent_metadata():
+    db = OwnedParentReader("Changed canonical paragraph. " * 20)
+    original = seed("Old paragraph. " * 40, 100, 120)
+    results, stats = await expand([original], db, verify_locations=True)
+    assert results[0].content == original.content
+    assert results[0].page_number is None and "page_spans" not in results[0].metadata
+    assert "media_type" not in results[0].metadata and "title" not in results[0].metadata
+    assert stats["context_skipped_count"] == 1
+    assert db.reads == [("parent", 1), ("version", 1)]
 
 
 @settings(max_examples=20, deadline=None)

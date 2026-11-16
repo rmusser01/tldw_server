@@ -379,4 +379,19 @@ describe("cold artifact review authority", () => {
     await expect(persistWorkspaceArtifactReview(first, { reviewStatus: "accepted" }, options)).rejects.toThrow();
     expect(io.request.mock.calls.some(([request]) => request.method === "PUT")).toBe(false);
   });
+  it.each(["content", "data", "versionMetadata", "reviewMetadata"])("refuses same-version %s drift without writing", async kind => {
+    const stored = row();
+    const cold = JSON.parse(JSON.stringify(mapServerArtifactToLocal(stored))) as GeneratedArtifact;
+    if (kind === "content") stored.content = "Changed source claim";
+    else if (kind === "data") stored.version_metadata = {
+      ...stored.version_metadata, workspaceClient: { schemaVersion: 1, data: { changedEvidence: true } }
+    };
+    else if (kind === "versionMetadata") stored.version_metadata = { ...stored.version_metadata, revision_reason: "Changed revision" };
+    else stored.review_metadata = { reason: "A different reviewer changed the assessment" };
+    io.request.mockResolvedValue([stored]);
+
+    await expect(persistWorkspaceArtifactReview(cold, { reviewStatus: "accepted" }, lease().options)).rejects.toThrow("output changed");
+
+    expect(io.request.mock.calls.some(([request]) => request.method === "PUT")).toBe(false);
+  });
 });

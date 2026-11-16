@@ -120,6 +120,7 @@ async def expand_media_context(
                         break
                     if (
                         not parent
+                        or _integer(parent.get("id")) != media_id
                         or parent.get("deleted")
                         or parent.get("is_trash")
                         or parent.get("system_operation_id")
@@ -137,12 +138,21 @@ async def expand_media_context(
                                 safe_metadata = json.loads(safe_metadata)
                             except (ValueError, TypeError):
                                 safe_metadata = {}
-                        parents[media_id] = (content, page_map_for_content(safe_metadata, content))
+                        parents[media_id] = (
+                            content,
+                            page_map_for_content(safe_metadata, content),
+                            {
+                                "media_id": str(media_id), "source_id": str(media_id),
+                                "source": "media_db", "source_type": "media_db", "evidence_origin": "local_library",
+                                "type": parent.get("type"), "media_type": parent.get("type"),
+                                "title": parent.get("title"), "url": parent.get("url"),
+                            },
+                        )
                 parent = parents[media_id]
                 if parent is None:
                     stats["context_hidden_count"] += 1
                     continue
-                content, page_map = parent
+                content, page_map, owner_metadata = parent
                 start = _integer(doc.start_char if doc.start_char is not None else metadata.get("start_char"))
                 end = _integer(doc.end_char if doc.end_char is not None else metadata.get("end_char"))
                 cleaned = _without_pages(metadata)
@@ -156,6 +166,7 @@ async def expand_media_context(
                     output.append(replace(doc, metadata=cleaned, page_number=None))
                     stats["context_skipped_count"] += 1
                     continue
+                cleaned.update(owner_metadata)
                 lower, upper = max(0, start - budget), min(len(content), end + budget)
                 section_start, section_end = (
                     _integer(metadata.get("section_start")),

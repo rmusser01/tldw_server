@@ -4,7 +4,7 @@ import type { TFunction } from 'i18next';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GeneratedArtifact, WorkspaceSource } from '@/types/workspace';
-import { rememberCanonicalArtifactWorkspace } from '@/services/workspace-artifact-persistence';
+import { persistWorkspaceArtifactReview, rememberCanonicalArtifactWorkspace } from '@/services/workspace-artifact-persistence';
 import { bindWorkspaceArtifactOrigin } from '@/store/workspace-artifact-codec';
 import { mapServerArtifactToLocal } from '@/store/workspace-api';
 import { useArtifactGeneration, type UseArtifactGenerationDeps } from '../useArtifactGeneration';
@@ -530,6 +530,48 @@ it('compares two reviewed sections of one source through a durable job', async (
   expect(io.state.generatedArtifacts[0].totalCostUsd).toBeUndefined();
   expect(io.state.generatedArtifacts[0]).toMatchObject({ workspaceArtifactId: 'compare-1', content: expect.stringContaining('Coverage: 2 of 2'), data: { sectionAnalysis: { sections: [{ status: 'completed' }, { status: 'completed' }] } } });
 });
+
+it.each([{}, { reviewer_id: 'reviewer-a', revision_reason: 'Earlier review context' }])(
+  'saves a review immediately after first canonical section generation with metadata %j', async reviewMetadata => {
+    io.migrated = false;
+    io.state.workspaceId = 'first-section-review';
+    const row = {
+      id: 'section-output', workspace_id: io.state.workspaceId, artifact_type: 'summary', title: 'Selected section',
+      status: 'completed', review_state: 'draft', review_metadata: reviewMetadata, version: 6,
+      content: 'The source proposes retaining regional offices [E1.1.1].', content_type: 'text/markdown',
+      created_at: '2026-11-15T00:00:00Z', completed_at: '2026-11-15T00:01:00Z',
+      producer_metadata: { origin: 'research_workspace_output_job', job_id: 41, source_ids: ['source-1'] },
+      version_metadata: { schema_version: 1, workspaceClient: { schemaVersion: 1, data: {
+        sectionAnalysis: { sections: [{ status: 'completed', batches: [{ status: 'completed', evidence: [
+          { id: 'E1.1.1', claim: 'Retain the regional offices', quote: 'The regional offices should be retained.' }
+        ] }] }] }
+      } } },
+    } as WorkspaceArtifactApiResponse;
+    const rawMetadata = structuredClone(row.version_metadata);
+    io.submit.mockImplementation(async () => {
+      stored.push(row);
+      return { job_id: 41, artifact_id: row.id, workspace_id: row.workspace_id, artifact_type: 'summary', status: 'queued' };
+    });
+    io.output.mockResolvedValue({ job_id: 41, workspace_id: row.workspace_id, artifact_id: row.id, status: 'completed', artifact: row });
+    const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: [
+      { source_id: 'source-1', node_id: 'section-a', navigation_version: 'v1' }
+    ] }));
+    await act(async () => { await hook.result.current.handleGenerateOutput('summary'); });
+    const generated = io.state.generatedArtifacts[0];
+
+    const reviewed = await persistWorkspaceArtifactReview(generated, {
+      reviewStatus: 'needs_revision', reviewMetadata: { reason: 'Keep the qualification explicit.' }
+    }, { workspaceId: row.workspace_id, scope: await io.snapshot(), isCurrent: () => true });
+
+    expect(generated).toMatchObject({ reviewStatus: 'draft', workspaceArtifactVersion: 6 });
+    expect(reviewed.reviewMetadata).toMatchObject({ reason: 'Keep the qualification explicit.' });
+    expect(stored[0]).toMatchObject({ version: 7, review_state: 'needs_revision', content: row.content });
+    expect(stored[0].version_metadata).toEqual(rawMetadata);
+    expect(io.request.mock.calls.filter(([request]) => request.method === 'PUT')[0][0].body).toEqual({
+      version: 6, review_state: 'needs_revision', review_metadata: { reason: 'Keep the qualification explicit.' }
+    });
+  }
+);
 
 it('routes an ordinary long report through complete-source generation rather than an opening excerpt', async () => {
   io.media.mockResolvedValue({ content: 'Opening material. ' + 'body '.repeat(1800) + 'Late opposing author.' });

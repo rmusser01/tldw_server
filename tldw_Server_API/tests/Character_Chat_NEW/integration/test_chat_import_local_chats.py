@@ -130,6 +130,10 @@ def _workspace_import(**extra: Any) -> dict[str, Any]:
                 "originalId": "historical-passage", "mediaId": 2, "title": "Imported PDF",
                 "type": "pdf", "sourceType": "media", "excerpt": "The exact source passage.",
                 "pageNumber": 352, "printedPageLabel": "319", "citationIndex": 1,
+                "pageSpans": [
+                    {"pageNumber": 352, "startChar": 100, "endChar": 120, "printedPageLabel": "319"},
+                    {"pageNumber": 353, "startChar": 122, "endChar": 140, "printedPageLabel": "320"},
+                ],
             }],
         }
     }
