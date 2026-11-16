@@ -297,7 +297,7 @@ _MEDIA_ANSWER_DIRECTIVE_RE = re.compile(
     r"(?:(?:a|an|the|brief|concise|short|detailed|neutral|factual|balanced|clear)\s+){0,6}"
     r"(?:answer|response|summary|explanation)\b|"
     r"\b(?:cite|include)\s+(?:the\s+)?(?:supporting\s+)?(?:passages|sources|citations|page\s+numbers)\b|"
-    r"\b(?:cite|citing)\s+(?:its|their|the)\s+(?:(?:printed|physical|pdf)\s+){0,3}pages?\b|"
+    r"\b(?:cite|citing)\s+(?:(?:its|their|the|relevant|supporting|printed|physical|pdf|and)\s+){0,8}pages?\b|"
     r"[.!?;]\s+use\s+only\s+(?:the\s+)?selected\s+(?:pdf|source|document)s?\b|"
     r"[.!?;]\s+(?:quote|cite)\b",
     re.IGNORECASE,
@@ -332,12 +332,13 @@ def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3
     directive = _MEDIA_ANSWER_DIRECTIVE_RE.search(raw_text)
     if directive and directive.start() > 0:
         raw_text = raw_text[:directive.start()]
-    candidates = re.findall(r"[A-Za-z0-9']+", raw_text.lower())
+    candidates = re.findall(r"[A-Za-z0-9']+", raw_text)
     filtered_terms: list[str] = []
     seen: set[str] = set()
     for token in candidates:
-        normalized = token.strip("'")
-        if len(normalized) < 4 or normalized in _MEDIA_FALLBACK_STOP_WORDS or normalized in seen:
+        normalized = token.strip("'").lower()
+        short_acronym = 2 <= len(token) <= 3 and token.isalpha() and token.isupper()
+        if (len(normalized) < 4 and not short_acronym) or normalized in _MEDIA_FALLBACK_STOP_WORDS or normalized in seen:
             continue
         seen.add(normalized)
         filtered_terms.append(normalized)
@@ -373,7 +374,7 @@ def _derive_bounded_media_term_query(query: Optional[str], *, max_terms: int = 3
     return " OR ".join(ordered_terms)
 
 
-def _extract_media_query_terms(query: Optional[str], *, max_terms: int = 8) -> list[str]:
+def _extract_media_query_terms(query: Optional[str], *, max_terms: int = 8, min_term_length: int = 3) -> list[str]:
     if query is None:
         return []
     try:
@@ -387,7 +388,7 @@ def _extract_media_query_terms(query: Optional[str], *, max_terms: int = 8) -> l
     seen: set[str] = set()
     for token in re.findall(r"[A-Za-z0-9']+", raw_text):
         normalized = token.strip("'")
-        if len(normalized) < 3 or normalized in _MEDIA_FALLBACK_STOP_WORDS or normalized in seen:
+        if len(normalized) < min_term_length or normalized in _MEDIA_FALLBACK_STOP_WORDS or normalized in seen:
             continue
         seen.add(normalized)
         terms.append(normalized)
@@ -521,13 +522,13 @@ def _apply_location_metadata(document: Document) -> None:
     metadata = document.metadata or {}
 
     if document.start_char is None:
-        start_val = _get_metadata_value(metadata, "start_char", "start_index", "start_offset", "paragraph_start")
+        start_val = _get_metadata_value(metadata, "start_char", "start_index", "start_offset", "paragraph_start", "chunk_start")
         start_int = _coerce_int(start_val)
         if start_int is not None:
             document.start_char = start_int
 
     if document.end_char is None:
-        end_val = _get_metadata_value(metadata, "end_char", "end_index", "end_offset", "paragraph_end")
+        end_val = _get_metadata_value(metadata, "end_char", "end_index", "end_offset", "paragraph_end", "chunk_end")
         end_int = _coerce_int(end_val)
         if end_int is not None:
             document.end_char = end_int
@@ -574,6 +575,7 @@ class RetrievalConfig:
     min_score: float = 0.0
     use_fts: bool = True
     use_vector: bool = True
+    hybrid_alpha: float = 0.7
     include_metadata: bool = True
     date_filter: Optional[tuple[datetime, datetime]] = None
     tags_filter: Optional[list[str]] = None
@@ -1411,7 +1413,9 @@ class MediaDBRetriever(BaseRetriever):
                         query, max_terms=32 if kwargs.get("allowed_media_ids") else 8,
                     )
                     if term_query:
-                        fallback_terms = _extract_media_query_terms(term_query, max_terms=32)
+                        # The bounded natural compiler has already admitted any
+                        # two-letter terms as explicit uppercase acronyms.
+                        fallback_terms = _extract_media_query_terms(term_query, max_terms=32, min_term_length=2)
                         # PostgreSQL already stems its English tsvector; its
                         # tsquery parser does not accept a lone SQLite prefix.
                         candidate_query = (
@@ -2357,6 +2361,7 @@ class MediaDBRetriever(BaseRetriever):
 
         def _finalize_docs(documents: list[Document]) -> list[Document]:
             for doc in documents:
+                doc.metadata = {**doc.metadata, "retrieval_method": "vector", "chunk_id": str(doc.id)}
                 _apply_location_metadata(doc)
             return documents
 
@@ -2616,7 +2621,7 @@ class MediaDBRetriever(BaseRetriever):
                         continue
                     documents.append(
                         Document(
-                            id=result.metadata.get("media_id", result.id),
+                            id=str(result.id),
                             content=result.content,
                             metadata=result.metadata,
                             score=result.score,
@@ -2645,7 +2650,7 @@ class MediaDBRetriever(BaseRetriever):
                     # Convert VectorSearchResult to Document (id=media_id preferred)
                     d_id = result_obj.metadata.get("media_id", result_obj.id)
                     d = Document(
-                        id=d_id,
+                        id=str(result_obj.id),
                         content=result_obj.content,
                         metadata=result_obj.metadata,
                         score=result_obj.score,
@@ -2673,7 +2678,7 @@ class MediaDBRetriever(BaseRetriever):
                             doc_map[d_id].score = adj
                         else:
                             doc_map[d_id] = Document(
-                                id=d_id,
+                                id=str(r.id),
                                 content=r.content,
                                 metadata=r.metadata,
                                 score=adj,
@@ -2727,9 +2732,8 @@ class MediaDBRetriever(BaseRetriever):
                 src = base_tuple[1] if base_tuple else (hyde_tuple[1] if hyde_tuple else None)
                 if not src:
                     continue
-                d_id = src.metadata.get("media_id", src.id)
                 d = Document(
-                    id=d_id,
+                    id=str(src.id),
                     content=src.content,
                     metadata=src.metadata,
                     score=best_sc,
@@ -2824,43 +2828,36 @@ class MediaDBRetriever(BaseRetriever):
         Returns:
             Merged and re-ranked documents
         """
-        # Create score dictionaries
-        fts_scores = {}
-        vector_scores = {}
-        doc_map = {}
-
-        # Calculate RRF scores for FTS results
-        for rank, doc in enumerate(fts_docs):
-            doc_id = doc.id
-            fts_scores[doc_id] = 1.0 / (k + rank + 1)
-            doc_map[doc_id] = doc
-
-        # Calculate RRF scores for vector results
-        for rank, doc in enumerate(vector_docs):
-            doc_id = doc.id
-            vector_scores[doc_id] = 1.0 / (k + rank + 1)
-            if doc_id not in doc_map:
-                doc_map[doc_id] = doc
-
-        # Combine scores with weighting
-        final_scores = {}
-        all_doc_ids = set(fts_scores.keys()) | set(vector_scores.keys())
-
-        for doc_id in all_doc_ids:
-            fts_score = fts_scores.get(doc_id, 0)
-            vector_score = vector_scores.get(doc_id, 0)
-            # Weighted combination
-            final_scores[doc_id] = (1 - alpha) * fts_score + alpha * vector_score
-
-        # Sort by final score
-        sorted_ids = sorted(final_scores.keys(), key=lambda x: final_scores[x], reverse=True)
-
-        # Create final document list
+        # Zero-weight lanes must not contribute evidence. Keep insertion order
+        # for deterministic equal-score ties across separately keyed indexes.
+        fts_docs = fts_docs if alpha < 1 else []
+        vector_docs = vector_docs if alpha > 0 else []
+        fts_scores, vector_scores, doc_map = {}, {}, {}
+        for docs, scores in ((fts_docs, fts_scores), (vector_docs, vector_scores)):
+            for rank, doc in enumerate(docs):
+                scores.setdefault(doc.id, 1.0 / (k + rank + 1))
+                doc_map.setdefault(doc.id, doc)
+        final_scores = {
+            doc_id: (1 - alpha) * fts_scores.get(doc_id, 0) + alpha * vector_scores.get(doc_id, 0)
+            for doc_id in doc_map
+        }
+        sorted_ids = sorted(final_scores, key=final_scores.get, reverse=True)
+        limit = max(0, self.config.max_results)
+        selected = set()
+        if limit >= 2 and fts_docs and vector_docs:
+            # Different chunkers use different IDs. Weighted RRF can otherwise
+            # fill the entire cap from one lane even when both were requested.
+            selected.update((fts_docs[0].id, vector_docs[0].id))
+        for doc_id in sorted_ids:
+            if len(selected) >= limit:
+                break
+            selected.add(doc_id)
         merged_docs = []
-        for doc_id in sorted_ids[: self.config.max_results]:
-            doc = doc_map[doc_id]
-            doc.score = final_scores[doc_id]
-            merged_docs.append(doc)
+        for doc_id in sorted_ids:
+            if doc_id in selected:
+                doc = doc_map[doc_id]
+                doc.score = final_scores[doc_id]
+                merged_docs.append(doc)
 
         logger.debug(f"Hybrid search merged {len(merged_docs)} documents")
         return merged_docs
@@ -5134,6 +5131,7 @@ class MultiDatabaseRetriever:
                         retr,
                         retr.retrieve_hybrid,
                         query=query,
+                        alpha=config.hybrid_alpha,
                         index_namespace=index_namespace,
                         allowed_media_ids=allowed_media_ids,
                     )

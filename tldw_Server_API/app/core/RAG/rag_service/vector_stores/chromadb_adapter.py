@@ -6,6 +6,7 @@ the existing ChromaDBManager functionality.
 """
 
 import asyncio
+import math
 from collections.abc import Sequence
 from typing import Any, Literal, Optional, cast
 
@@ -37,6 +38,35 @@ class ChromaDBVectorsNotFoundError(ValueError):
 
 def _raise_missing_vectors(missing: list[str]) -> None:
     raise ChromaDBVectorsNotFoundError(missing)
+
+
+def _collection_distance_metric(collection: Any) -> str:
+    """Read the existing index metric; Chroma defaults to squared L2, not cosine."""
+    configuration = getattr(collection, "configuration", None)
+    if isinstance(configuration, dict):
+        for index_kind in ("hnsw", "spann"):
+            index = configuration.get(index_kind)
+            if isinstance(index, dict) and index.get("space"):
+                return str(index["space"])
+    metadata = getattr(collection, "metadata", None)
+    return str(metadata.get("hnsw:space", "l2")) if isinstance(metadata, dict) else "l2"
+
+
+def _distance_similarity(distance: float, metric: str) -> float:
+    """Bound ranking scores without changing the raw distance or its ordering."""
+    if not math.isfinite(distance):
+        return 0.0
+    if metric == "cosine":
+        return max(0.0, min(1.0, 1.0 - distance))
+    if metric == "ip":
+        # Inner-product distance can be negative for unnormalized vectors.
+        if distance >= 0:
+            scaled = math.exp(-distance)
+            return scaled / (1.0 + scaled)
+        return 1.0 / (1.0 + math.exp(distance))
+    # Chroma reports squared L2; use the same reciprocal-distance convention
+    # as the pgvector adapter after converting to Euclidean distance.
+    return 1.0 / (1.0 + math.sqrt(max(0.0, distance)))
 
 
 class ChromaDBAdapter(VectorStoreAdapter):
@@ -380,14 +410,17 @@ class ChromaDBAdapter(VectorStoreAdapter):
             search_results: list[VectorSearchResult] = []
             results_dict = cast(dict[str, Any], results) if isinstance(results, dict) else {}
             ids_block = results_dict.get('ids') or []
+            metric = _collection_distance_metric(collection)
+            distances = results_dict.get('distances') or []
             if ids_block and ids_block[0]:
                 for i in range(len(ids_block[0])):
+                    distance = float(distances[0][i]) if distances and i < len(distances[0]) else 0.0
                     result = VectorSearchResult(
                         id=ids_block[0][i],
                         content=(results_dict.get('documents') or [[""]])[0][i] if 'documents' in results_dict else "",
                         metadata=(results_dict.get('metadatas') or [[{}]])[0][i] if 'metadatas' in results_dict else {},
-                        distance=(results_dict.get('distances') or [[0.0]])[0][i] if 'distances' in results_dict else 0.0,
-                        score=1.0 - (results_dict.get('distances') or [[0.0]])[0][i] if 'distances' in results_dict else 1.0
+                        distance=distance,
+                        score=_distance_similarity(distance, metric),
                     )
                     search_results.append(result)
 

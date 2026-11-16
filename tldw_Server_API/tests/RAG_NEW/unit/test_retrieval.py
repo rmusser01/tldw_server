@@ -527,7 +527,7 @@ class TestMediaDBRetriever:
             allowed_media_ids=[10],
         )
 
-        assert [doc.id for doc in docs] == ["10"]
+        assert [doc.id for doc in docs] == ["media_10_chunk_0"]
         assert create_calls[0]["model_id_override"] == "huggingface:sentence-transformers/all-MiniLM-L6-v2"
         assert fake_vector_store.manager.collection.last_get_kwargs == {
             "where": {"media_id": "10"},
@@ -645,7 +645,7 @@ class TestMediaDBRetriever:
             allowed_media_ids=[12],
         )
 
-        assert [doc.id for doc in docs] == ["12"]
+        assert [doc.id for doc in docs] == ["media_12_chunk_0"]
         assert create_calls[0]["model_id_override"] == "huggingface:sentence-transformers/all-MiniLM-L6-v2"
         assert fake_vector_store.manager.get_collection_calls == 1
         assert fake_vector_store.manager.get_or_create_collection_calls == 1

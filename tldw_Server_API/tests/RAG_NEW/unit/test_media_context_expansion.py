@@ -134,18 +134,24 @@ async def test_invalid_neighbor_offsets_do_not_expand():
 
 
 @pytest.mark.asyncio
-async def test_hidden_parent_is_removed_before_any_version_or_neighbor_read():
+@pytest.mark.parametrize("verification_only", [False, True])
+async def test_hidden_parent_is_removed_before_any_version_or_neighbor_read(verification_only):
     db = ParentReader("secret", visible=False)
-    result, stats = await expand([seed("secret", 0, 6)], db, include_sibling_chunks=True)
+    result, stats = await expand([seed("secret", 0, 6)], db,
+                                 enable_parent_expansion=not verification_only,
+                                 include_sibling_chunks=not verification_only,
+                                 verify_locations=verification_only)
     assert result == [] and stats["context_hidden_count"] == 1
     assert db.reads == [("parent", 1)]
 
 
 @pytest.mark.asyncio
-async def test_stale_seed_does_not_attach_unrelated_current_text():
+@pytest.mark.parametrize("verification_only", [False, True])
+async def test_stale_seed_does_not_attach_unrelated_current_text(verification_only):
     db = ParentReader("Swapped pages have the same length.")
     original = seed("Original text has the same length!", 0, 20)
-    result, stats = await expand([original], db)
+    result, stats = await expand([original], db, enable_parent_expansion=not verification_only,
+                                 verify_locations=verification_only)
     assert result[0].content == original.content and stats["context_skipped_count"] == 1
     assert result[0].page_number is None and "page_spans" not in result[0].metadata
 

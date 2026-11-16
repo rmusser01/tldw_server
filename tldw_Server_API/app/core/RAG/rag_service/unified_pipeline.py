@@ -82,7 +82,7 @@ from .retrieval_plan import RetrievalPlan
 
 _RERANK_DEBUG_DOCUMENT_CONTENT_MAX_CHARS = 500
 # Invalidate persisted retrieval snapshots when matching behavior changes.
-_RETRIEVAL_MATCHING_POLICY_VERSION = 3
+_RETRIEVAL_MATCHING_POLICY_VERSION = 6
 _RAG_PROVIDER_FAILURES = (ByokResolutionError, ChatAPIError)
 
 
@@ -2852,6 +2852,7 @@ async def unified_rag_pipeline(
                 )
             ),
             "search_mode": normalized_search_mode,
+            "hybrid_alpha": float(hybrid_alpha) if normalized_search_mode == "hybrid" else None,
             "use_fts": normalized_search_mode in {"fts", "hybrid"},
             "use_vector": normalized_search_mode in {"vector", "hybrid"},
             "top_k": int(retrieval_top_k),
@@ -4236,6 +4237,7 @@ async def unified_rag_pipeline(
                         min_score=retrieval_min_score,
                         use_fts=(retrieval_search_mode in ["fts", "hybrid"]),
                         use_vector=(retrieval_search_mode in ["vector", "hybrid"]),
+                        hybrid_alpha=hybrid_alpha,
                         include_metadata=True,
                         fts_level=fts_level,
                         enable_text_late_chunking=enable_text_late_chunking,
@@ -5232,7 +5234,8 @@ async def unified_rag_pipeline(
                 result.errors.append(f"Gap analysis failed: {e}")
 
         # ========== BOUNDED MEDIA CONTEXT ==========
-        if result.documents and (enable_parent_expansion or include_sibling_chunks):
+        verify_vector_locations = any(doc.metadata.get("retrieval_method") == "vector" for doc in result.documents)
+        if result.documents and (enable_parent_expansion or include_sibling_chunks or verify_vector_locations):
             context_start = time.time()
             context_seeds = result.documents
             # A failed parent read must not return evidence that bypassed the
@@ -5246,6 +5249,7 @@ async def unified_rag_pipeline(
                 parent_context_size=parent_context_size,
                 include_sibling_chunks=include_sibling_chunks,
                 sibling_window=sibling_window,
+                verify_locations=verify_vector_locations,
             )
             result.metadata.update(context_metadata)
             result.timings["context_expansion"] = time.time() - context_start

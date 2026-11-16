@@ -62,12 +62,15 @@ async def expand_media_context(
     parent_context_size: int,
     include_sibling_chunks: bool,
     sibling_window: int,
+    verify_locations: bool = False,
 ) -> tuple[list[Document], dict[str, int]]:
     """Expand exact media seeds in place in ranking, with a per-side character cap.
 
     Neighbor chunks extend the same seed rather than becoming separately ranked
     results. Hidden parents are removed; outdated excerpts remain unexpanded.
     Cancellation stops the worker before its next database read.
+    ``verify_locations`` validates vector locations without expanding text when
+    both context options are disabled.
     """
     stats = {
         "context_expanded_count": 0,
@@ -76,7 +79,7 @@ async def expand_media_context(
         "context_hidden_count": 0,
         "context_unmapped_count": 0,
     }
-    if not documents or not (enable_parent_expansion or include_sibling_chunks):
+    if not documents or not (enable_parent_expansion or include_sibling_chunks or verify_locations):
         return documents, stats
     if not any(doc.source == DataSource.MEDIA_DB for doc in documents):
         return documents, stats
