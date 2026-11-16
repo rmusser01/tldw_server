@@ -28,7 +28,6 @@ import { createServicePromptScopeChangedError } from "@/services/tldw/service-pr
 import {
   createEmptyWorkspaceSnapshot,
   deriveHistoryFromMessages,
-  createSlug,
   useWorkspaceStore,
   type WorkspaceState,
   type WorkspaceChatSession,
@@ -325,7 +324,7 @@ export const restoreMigratedResearchWorkspace = async (options: {
     const snapshot = createEmptyWorkspaceSnapshot({
       id: workspaceId,
       name: local.name || "Research Workspace",
-      tag: `workspace:${createSlug(local.name) || workspaceId.slice(0, 8)}`,
+      tag: `workspace:${workspaceId}`,
       createdAt: new Date(workspace.created_at),
       studyMaterialsPolicy: workspace.study_materials_policy,
       assistantDefaults: normalizeWorkspaceAssistantDefaults(
@@ -531,7 +530,22 @@ export const restoreMigratedResearchWorkspace = async (options: {
       ? readResearchWorkspaceChatReference({
           referenceId: cachedSelection!.referenceId, serverChatId: cachedChat.serverChatId,
         }) : undefined;
-    const chatReference = savedChat.value ?? markerReference ?? provisional;
+    let chatReference = savedChat.value ?? markerReference ?? provisional;
+    if (!chatReference && !cachedChat?.messages.length && !cachedChat?.history.length && !cachedChat?.historyId && !cachedChat?.serverChatId) {
+      // A new browser has no local hint. Select only a proven sole live chat;
+      // a truncated page or several conversations never implies a selection.
+      const query = new URLSearchParams({ scope_type: "workspace", workspace_id: workspaceId, limit: "2", offset: "0", include_deleted: "false" });
+      const listed = await bgRequest<{ chats?: Array<{ id: string; scope_type?: string; workspace_id?: string; deleted?: boolean }>; total?: number; has_more?: boolean; pagination?: { has_more?: boolean; total?: number } }>({ ...request,
+        path: `/api/v1/chats/?${query.toString()}` });
+      assertCurrent();
+      if (listed?.chats?.length === 1 && (listed.total ?? listed.pagination?.total) === 1 &&
+          listed.has_more !== true && listed.pagination?.has_more !== true) {
+        const sole = listed.chats[0];
+        if (sole.scope_type !== "workspace" || sole.workspace_id !== workspaceId || sole.deleted)
+          throw new Error("Workspace conversation discovery returned a different scope.");
+        chatReference = readResearchWorkspaceChatReference({ referenceId: workspaceId, serverChatId: sole.id });
+      }
+    }
     let chatSession: WorkspaceChatSession | undefined;
     if (chatReference) {
       if (chatReference.serverChatId) {

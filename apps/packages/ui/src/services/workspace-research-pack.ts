@@ -11,6 +11,9 @@ import { bindWorkspaceArtifactOrigin } from "@/store/workspace-artifact-codec"
 import { persistWorkspaceArtifact, rememberCanonicalArtifactWorkspace } from "./workspace-artifact-persistence"
 import { prepareLegacyWorkspaceImport } from "@/store/workspace-import-authority"
 import type { WorkspaceSourceApiResponse } from "./tldw/domains/workspace-api"
+import { bindImportedWorkspaceChat, buildWorkspaceChatImport, type WorkspaceChatImport } from "@/utils/workspace-chat-import"
+import { canonicalHistoryJson } from "@/db/dexie/history-selection"
+import { fetchAllServerChatMessages, mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader"
 
 type PackOperation = {
   scope: ServicePromptSnapshot
@@ -98,15 +101,17 @@ export const collectWorkspacePackNotes = async (bundle: WorkspaceExportBundle, w
 const validateLinkedInventory = (bundle: WorkspaceExportBundle, notes: WorkspaceNote[], identity: PortableWorkspaceIdentity) => {
   const maps = { media: Object.fromEntries(bundle.workspace.snapshot.sources.map(source => [String(source.mediaId), source.mediaId])), notes: Object.fromEntries(notes.map(note => [String(note.id), String(note.id)])) }
   // Identity maps here only validate inventory closure; they are never used to restore a workspace.
-  remapPortableWorkspace(bundle, maps, identity)
+  const remapped = remapPortableWorkspace(bundle, maps, identity)
   notes.forEach(note => remapPortableNote(note, maps, identity))
+  return remapped
 }
 
 export const exportWorkspaceResearchPack = async (bundle: WorkspaceExportBundle, workspaceId: string, options: PackOperation): Promise<Blob> => {
   assertCurrent(options)
   options.onProgress?.("Collecting all workspace Notes…")
   const notes = await collectWorkspacePackNotes(bundle, workspaceId, options)
-  validateLinkedInventory(bundle, notes, { id: workspaceId, name: bundle.workspace.name, tag: bundle.workspace.tag })
+  await buildWorkspaceChatImport(validateLinkedInventory(bundle, notes, { id: workspaceId, name: bundle.workspace.name, tag: bundle.workspace.tag }), workspaceId)
+  assertCurrent(options)
   const media = [...new Set(bundle.workspace.snapshot.sources.map(source => String(source.mediaId)))]
   if (!media.length && !notes.length) throw new Error("Add a saved source or Note before exporting a complete research pack.")
   options.onProgress?.("Preparing original files and saved Notes…")
@@ -137,7 +142,8 @@ const readReceipt = (key: string, pack: CompleteResearchPack): ImportReceipt | n
 export const restoreWorkspaceResearchPack = async (pack: CompleteResearchPack, options: PackOperation): Promise<{ bundle: WorkspaceExportBundle; identity: PortableWorkspaceIdentity }> => {
   assertCurrent(options)
   if (pack.chatbook.byteLength > 100 * 1024 * 1024) throw new Error("The embedded source backup exceeds the server's 100 MiB Chatbook upload limit. Split the workspace into smaller research packs.")
-  validateLinkedInventory(pack.bundle, pack.notes, { id: pack.manifest.sourceWorkspaceId, name: pack.bundle.workspace.name, tag: pack.bundle.workspace.tag })
+  await buildWorkspaceChatImport(validateLinkedInventory(pack.bundle, pack.notes, { id: pack.manifest.sourceWorkspaceId, name: pack.bundle.workspace.name, tag: pack.bundle.workspace.tag }), pack.manifest.sourceWorkspaceId)
+  assertCurrent(options)
   const key = receiptKey(pack, options)
   let receipt = readReceipt(key, pack)
   if (!receipt) {
@@ -161,6 +167,8 @@ export const restoreWorkspaceResearchPack = async (pack: CompleteResearchPack, o
   if (!receipt.maps) throw new Error("This server did not return verified restore mappings. The imported items remain in Chatbooks; the current workspace has not changed.")
   let sequence = 0
   const bundle = remapPortableWorkspace(pack.bundle, receipt.maps, receipt.identity, () => `portable-${receipt!.identity.id}-${++sequence}`)
+  const chatImport = await buildWorkspaceChatImport(bundle, receipt.identity.id)
+  assertCurrent(options)
   receipt.phase = "enrolling"
   saveReceipt(key, receipt)
   options.onProgress?.("Connecting the restored workspace and preserving editable reports…")
@@ -190,6 +198,7 @@ export const restoreWorkspaceResearchPack = async (pack: CompleteResearchPack, o
     }
   }
   await enrollWorkspaceArtifacts(bundle, receipt.identity, options)
+  await enrollWorkspaceChat(bundle, chatImport, options)
   receipt.phase = "ready"
   saveReceipt(key, receipt)
   return { bundle, identity: receipt.identity }
@@ -221,6 +230,46 @@ const enrollWorkspaceArtifacts = async (bundle: WorkspaceExportBundle, identity:
   assertCurrent(options)
 }
 
+const enrollWorkspaceChat = async (bundle: WorkspaceExportBundle, payload: WorkspaceChatImport | null, options: PackOperation) => {
+  if (!payload) return
+  options.onProgress?.("Saving the complete cited conversation…")
+  const head = await request<Record<string, unknown>>(options, { path: "/api/v1/chats/import", method: "POST", headers: { "Content-Type": "application/json" }, body: payload })
+  if (head.id !== payload.id || head.scope_type !== "workspace" || head.workspace_id !== payload.workspace_id)
+    throw new Error("Imported conversation scope did not match the destination workspace.")
+  const signal = scoped(options).abortSignal
+  const rows = await fetchAllServerChatMessages(({ limit, offset }) => tldwClient.listChatMessages(payload.id, {
+    limit, offset, include_metadata: "true", include_images: "true", include_deleted: "false", render_placeholders: "false",
+  }, { signal, fresh: true, requestScope: options.scope.requestScope, scope: { type: "workspace", workspaceId: payload.workspace_id } }), { signal })
+  assertCurrent(options)
+  const expected = new Map(payload.messages.map(row => [row.id, row]))
+  if (rows.length !== expected.size || new Set(rows.map(row => row.id)).size !== rows.length)
+    throw new Error("The canonical imported conversation changed. Its saved copy is retained; the current workspace has not changed.")
+  for (const row of rows) {
+    const requestRow = expected.get(String(row.id))
+    const expectedExtra = { ...requestRow?.metadata, ...requestRow?.metadata_extra }
+    const { metadata: _generation, metadata_extra: _citations, ...requestFields } = requestRow || {}
+    const expectedRow = { ...requestFields, ...(Object.keys(expectedExtra).length ? { metadata_extra: expectedExtra } : {}) }
+    const timestamp = Date.parse(row.created_at)
+    const actualExtra = { ...row.metadata_extra }
+    // Atomic chat import records this redundant role alongside user metadata.
+    // Validate it before excluding only that server-derived field from equality.
+    if (actualExtra.sender_role !== undefined && actualExtra.sender_role !== row.role)
+      throw new Error("The canonical imported conversation has inconsistent sender metadata.")
+    delete actualExtra.sender_role
+    const actual = { id: String(row.id), parent_message_id: row.parent_message_id ?? null, role: row.role,
+      content: row.content, timestamp: Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null,
+      images: row.images || [], ...(Object.keys(actualExtra).length ? { metadata_extra: actualExtra } : {}) }
+    if (!requestRow || canonicalHistoryJson(actual) !== canonicalHistoryJson(expectedRow) ||
+        !Number.isSafeInteger(row.version) || Number(row.version) < 1)
+      throw new Error("The canonical imported conversation did not match its messages and citation evidence.")
+  }
+  const canonical = mapServerChatMessagesToPlaygroundMessages({ serverMessages: rows, assistantName: "AI", characterId: null })
+  const originals = new Map(bundle.workspace.chatSession!.messages.map(row => [row.id, row]))
+  bundle.workspace.chatSession = bindImportedWorkspaceChat({ ...bundle.workspace.chatSession!, historyId: null, serverChatId: payload.id,
+    messages: canonical.map(row => ({ ...originals.get(row.id), ...row })),
+    history: canonical.filter(row => row.message).map(row => ({ role: row.role!, content: row.message })) }, options.scope.scopeKey, payload.workspace_id)
+}
+
 /** Same-server snapshots keep Media references, but create new workspace/report authority. */
 export const restoreLegacyWorkspaceBundle = async (original: WorkspaceExportBundle, options: PackOperation): Promise<{ bundle: WorkspaceExportBundle; identity: PortableWorkspaceIdentity }> => {
   assertCurrent(options)
@@ -240,8 +289,11 @@ export const restoreLegacyWorkspaceBundle = async (original: WorkspaceExportBund
   }
   let sequence = 0
   const bundle = prepareLegacyWorkspaceImport(original, identity, () => `snapshot-${identity.id}-${++sequence}`)
+  const chatImport = await buildWorkspaceChatImport(bundle, identity.id)
+  assertCurrent(options)
   options.onProgress?.("Saving the imported workspace and editable reports…")
   await enrollWorkspaceSources(bundle, identity, options)
   await enrollWorkspaceArtifacts(bundle, identity, options)
+  await enrollWorkspaceChat(bundle, chatImport, options)
   return { bundle, identity }
 }

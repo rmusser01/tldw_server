@@ -1,5 +1,5 @@
 import type { WorkspaceExportBundle } from "@/store/workspace-bundle"
-import { sanitizeImportedChatSession } from "@/store/workspace-bundle"
+import { remapImportedWorkspaceChat } from "./workspace-chat-import"
 import type { WorkspaceNote } from "@/types/workspace"
 import { readWorkspaceArtifactClientPayload } from "@/store/workspace-artifact-codec"
 import {
@@ -156,9 +156,9 @@ export const remapPortableWorkspace = (
   })
   snapshot.currentNote = remapPortableNote(snapshot.currentNote, maps, identity)
   if (output.workspace.chatSession) {
-    const session = remapReferences(output.workspace.chatSession, maps, sourceIds, identity.id) as typeof output.workspace.chatSession
-    session.messages = session.messages.map(message => ({ ...message, id: makeId() }))
-    output.workspace.chatSession = sanitizeImportedChatSession(session)
+    const session = remapImportedWorkspaceChat(output.workspace.chatSession, makeId)
+    output.workspace.chatSession = { ...remapReferences(session, maps, sourceIds, identity.id) as typeof session,
+      historyId: null, serverChatId: null }
   }
   output.workspace.name = snapshot.workspaceName = identity.name
   output.workspace.tag = snapshot.workspaceTag = identity.tag

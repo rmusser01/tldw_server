@@ -5,18 +5,18 @@ import type { ServicePromptSnapshot } from "../service-prompts"
 import type { CompleteResearchPack } from "@/utils/workspace-research-pack"
 import { isServicePromptRequestPath } from "../tldw/service-prompt-scope-error"
 
-const mocks = vi.hoisted(() => ({ request: vi.fn(), upload: vi.fn(), export: vi.fn(), download: vi.fn(), build: vi.fn(), persist: vi.fn(), current: true }))
+const mocks = vi.hoisted(() => ({ request: vi.fn(), chatImport: vi.fn(), chatMessages: vi.fn(), upload: vi.fn(), export: vi.fn(), download: vi.fn(), build: vi.fn(), persist: vi.fn(), current: true }))
 vi.mock("@/services/background-proxy", () => {
   const guard = (request: { path: string; method?: string; servicePromptConfig?: unknown }) => {
     if (request.servicePromptConfig && !isServicePromptRequestPath(request.path, request.method))
       throw new Error("A Service Prompt config can only be used with Service Prompt requests.")
   }
   return {
-    bgRequest: (request: Parameters<typeof guard>[0]) => { guard(request); return mocks.request(request) },
+    bgRequest: (request: Parameters<typeof guard>[0]) => { guard(request); return request.path === "/api/v1/chats/import" ? mocks.chatImport(request) : mocks.request(request) },
     bgUpload: (request: Parameters<typeof guard>[0]) => { guard(request); return mocks.upload(request) }
   }
 })
-vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { exportChatbook: mocks.export, downloadChatbookExport: mocks.download } }))
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { exportChatbook: mocks.export, downloadChatbookExport: mocks.download, listChatMessages: mocks.chatMessages } }))
 vi.mock("@/utils/workspace-research-pack", async original => ({ ...(await original<typeof import("@/utils/workspace-research-pack")>()), buildCompleteResearchPack: mocks.build }))
 vi.mock("@/services/workspace-artifact-persistence", () => ({ rememberCanonicalArtifactWorkspace: vi.fn(), persistWorkspaceArtifact: mocks.persist }))
 const controller = new AbortController()
@@ -34,6 +34,9 @@ describe("scoped complete research pack orchestration", () => {
     mocks.build.mockResolvedValue(new Blob(["complete pack"]))
     mocks.upload.mockResolvedValue({ success: true, job_id: "import-1" })
     mocks.persist.mockImplementation(async artifact => ({ ...artifact, workspaceArtifactId: artifact.id, workspaceArtifactVersion: 1 }))
+    mocks.chatImport.mockImplementation(async request => ({ id: request.body.id, scope_type: "workspace", workspace_id: request.body.workspace_id }))
+    mocks.chatMessages.mockImplementation(async () => structuredClone(mocks.chatImport.mock.calls.at(-1)![0].body.messages).map(row => ({ ...row,
+      created_at: row.timestamp, version: 1 })))
   })
 
   it("paginates associated Notes and uses explicit Media/Note allowlists with original files", async () => {
@@ -147,6 +150,12 @@ describe("scoped complete research pack orchestration", () => {
     expect(restored.bundle.workspace.snapshot.generatedArtifacts[0].workspaceArtifactVersion).toBe(1)
     expect(mocks.persist).toHaveBeenCalledOnce()
     expect(mocks.request.mock.calls.find(([r]) => r.method === "PUT" && r.path.includes("/notes/"))?.[0].headers["expected-version"]).toBe("1")
+    const imported = mocks.chatImport.mock.calls[0]?.[0]
+    expect(imported?.body).toMatchObject({ scope_type: "workspace", workspace_id: restored.identity.id, messages: [
+      { role: "assistant", content: "Answer [1]", timestamp: "1970-01-01T00:00:00.001Z", metadata_extra: { workspace_rag_sources_v1: { sources: [{ mediaId: 42 }] } } }
+    ] })
+    expect(restored.bundle.workspace.chatSession?.serverChatId).toBe(imported.body.id)
+    expect(restored.bundle.workspace.chatSession?.messages[0].serverMessageId).toBe(imported.body.messages[0].id)
   })
 
   it("enrolls a legacy snapshot as new editable artifacts without invoking Chatbooks or reconnecting its old Note", async () => {
@@ -154,9 +163,59 @@ describe("scoped complete research pack orchestration", () => {
     const restored = await restoreLegacyWorkspaceBundle(portableFixture(), options())
     expect(restored.bundle.workspace.snapshot.generatedArtifacts[0]).toMatchObject({ workspaceArtifactVersion: 1, content: "Unchanged draft" })
     expect(restored.bundle.workspace.snapshot.currentNote.id).toBeUndefined()
-    expect(restored.bundle.workspace.chatSession).toMatchObject({ historyId: null, serverChatId: null })
+    expect(restored.bundle.workspace.chatSession).toMatchObject({ historyId: null, serverChatId: mocks.chatImport.mock.calls[0]?.[0].body.id })
     expect(mocks.upload).not.toHaveBeenCalled()
     expect(mocks.request.mock.calls.some(([r]) => r.path.includes("/notes/"))).toBe(false)
+  })
+
+  it.each(["wrong-workspace", "changed-message", "changed-citation", "account-change"])("does not adopt an imported conversation after %s", async kind => {
+    mocks.request.mockImplementation(async request => request.path.endsWith("/sources") ? (request.method === "GET" ? [] : request.body) : { id: request.path.split("/").pop() })
+    if (kind === "wrong-workspace") mocks.chatImport.mockImplementation(async request => ({ id: request.body.id, scope_type: "workspace", workspace_id: "foreign" }))
+    else mocks.chatMessages.mockImplementation(async () => {
+      const messages = structuredClone(mocks.chatImport.mock.calls.at(-1)![0].body.messages).map(row => ({ ...row, created_at: row.timestamp, version: 1 }))
+      if (kind === "changed-message") messages[0].content = "Someone edited this"
+      if (kind === "changed-citation") messages[0].metadata_extra.workspace_rag_sources_v1.sources[0].mediaId = 999
+      if (kind === "account-change") mocks.current = false
+      return messages
+    })
+    await expect(restoreLegacyWorkspaceBundle(portableFixture(), options())).rejects.toThrow(/changed|match|canonical|conversation/i)
+  })
+
+  it("replays the same atomic conversation after a lost import response without changing message identities", async () => {
+    mocks.request.mockImplementation(async request => request.path.endsWith("/sources") ? (request.method === "GET" ? [] : request.body) : { id: request.path.split("/").pop() })
+    mocks.chatImport.mockRejectedValueOnce(new Error("response lost"))
+    await expect(restoreLegacyWorkspaceBundle(portableFixture(), options())).rejects.toThrow(/lost/)
+    const restored = await restoreLegacyWorkspaceBundle(portableFixture(), options())
+    expect(mocks.chatImport.mock.calls[0][0].body).toEqual(mocks.chatImport.mock.calls[1][0].body)
+    expect(restored.bundle.workspace.chatSession?.serverChatId).toBe(mocks.chatImport.mock.calls[1][0].body.id)
+  })
+
+  it.each(["valid", "wrong-derived-role", "unknown-metadata"])("checks the actual API readback through the real normalizer: %s", async kind => {
+    const { chatRagMethods } = await import("../tldw/domains/chat-rag")
+    mocks.chatMessages.mockImplementation((id, params, requestOptions) => chatRagMethods.listChatMessages.call(
+      { getChatMessagesCacheKey: (chatId: string, query: string) => chatId + query } as never,
+      id, params, requestOptions,
+    ))
+    mocks.request.mockImplementation(async request => {
+      if (request.path.includes("/chats/") && request.path.includes("/messages")) {
+        const rows = mocks.chatImport.mock.calls.at(-1)![0].body.messages
+        return { messages: rows.map(row => ({ id: row.id, sender: row.role, content: row.content,
+          timestamp: row.timestamp.replace("Z", "000Z"), parent_message_id: row.parent_message_id,
+          images: row.images, version: 1, metadata_extra: { sender_role: kind === "wrong-derived-role" ? "user" : row.role,
+            ...row.metadata, ...row.metadata_extra, ...(kind === "unknown-metadata" ? { unrecognized: "retain strict validation" } : {}) },
+        })), total: rows.length }
+      }
+      return request.path.endsWith("/sources") ? (request.method === "GET" ? [] : request.body) : { id: request.path.split("/").pop() }
+    })
+    const original = portableFixture()
+    original.workspace.chatSession!.messages[0].metadataExtra = { model_id: "deepseek-flash", provider: "deepseek" }
+    const restored = restoreLegacyWorkspaceBundle(original, options())
+    if (kind !== "valid") await expect(restored).rejects.toThrow(/canonical|match/i)
+    else {
+      const result = await restored
+      expect(result.bundle.workspace.chatSession?.messages[0]).toMatchObject({ role: "assistant",
+        metadataExtra: { sender_role: "assistant", model_id: "deepseek-flash", provider: "deepseek", workspace_rag_sources_v1: { sources: [{ mediaId: 1 }] } } })
+    }
   })
 
   it("does not rewrite an acknowledged Note after later artifact enrollment fails", async () => {

@@ -30,6 +30,7 @@ import { applyWorkspaceSourceTransfer } from '../workspace-source-transfer'
 import { saveResearchWorkspaceChatReference } from '../workspace-migration'
 import { hasWorkspaceArtifactOrigin } from '../workspace-artifact-codec'
 import { prepareLegacyWorkspaceImport } from '../workspace-import-authority'
+import { hasImportedWorkspaceChat } from '@/utils/workspace-chat-import'
 
 // TODO: These helpers need to be exported from workspace.ts
 import {
@@ -519,6 +520,8 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
         [...state.savedWorkspaces, ...state.archivedWorkspaces].some(workspace => workspace.id === importedId) ||
         !snapshotPayload.generatedArtifacts.every(artifact => artifact.workspaceArtifactId &&
           hasWorkspaceArtifactOrigin(artifact, options.verifiedCanonicalScopeKey, importedId))) return null
+      if (bundle.workspace.chatSession?.serverChatId &&
+        !hasImportedWorkspaceChat(bundle.workspace.chatSession, options.verifiedCanonicalScopeKey, importedId)) return null
     } else {
       try {
         bundle = prepareLegacyWorkspaceImport(bundle, { id: importedId, name: importedName, tag: importedTag })
@@ -565,9 +568,9 @@ export const createWorkspaceListSlice: WorkspaceSlice<WorkspaceListSliceActions>
 
     const importedChatSession =
       bundle.workspace?.chatSession &&
-      sanitizeImportedChatSession(
+      (options && bundle.workspace.chatSession.serverChatId ? cloneWorkspaceBundleChatSession(bundle.workspace.chatSession) : sanitizeImportedChatSession(
         cloneWorkspaceBundleChatSession(bundle.workspace.chatSession)
-      )
+      ))
     const importedChatSessionKey = buildWorkspaceChatSessionKey(
       importedSnapshot.workspaceId,
       importedSnapshot.workspaceChatReferenceId

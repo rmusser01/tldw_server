@@ -22,6 +22,6 @@ export const portableFixture = (): WorkspaceExportBundle => ({
       }], notes: "Legacy draft", currentNote: { id: "note-old", title: "Note", content: retainKnowledgeNoteProvenance("Reviewed text", { knowledge_provenance: provenance }), knowledge_provenance: JSON.parse(JSON.stringify(provenance)), knowledge_provenance_state: "active", knowledge_provenance_version: 3, pendingNoteWriteKey: "old-authority-write", keywords: ["workspace:old"], version: 5, isDirty: true },
       workspaceBanner: null, leftPaneCollapsed: false, rightPaneCollapsed: false, audioSettings: { provider: "tldw", model: "test", voice: "test", speed: 1, format: "mp3" }
     },
-    chatSession: { historyId: "old-local", serverChatId: "old-server", history: [{ role: "user", content: "Question" }], messages: [{ id: "message", isBot: true, name: "Assistant", message: "Answer [1]", sources: [{ name: "PDF", pageContent: "Exact quote", metadata: { media_id: 1, chunk_id: "old-chunk", page_number: 352, printed_page_label: "319" } }] }] }
+    chatSession: { historyId: "old-local", serverChatId: "old-server", history: [{ role: "assistant", content: "Answer [1]" }], messages: [{ id: "message", isBot: true, name: "Assistant", message: "Answer [1]", createdAt: 1, sources: [{ name: "PDF", pageContent: "Exact quote", metadata: { media_id: 1, chunk_id: "old-chunk", page_number: 352, printed_page_label: "319" } }] }] }
   }
 })

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { useWorkspaceStore, workspacePersistWriterInternals } from '../workspace'
 import { bindWorkspaceArtifactOrigin, hasWorkspaceArtifactOrigin, hasWorkspaceArtifactOriginEvidence } from '../workspace-artifact-codec'
 import type { GeneratedArtifact } from '@/types/workspace'
+import { bindImportedWorkspaceChat } from '@/utils/workspace-chat-import'
 
 const artifact = (): GeneratedArtifact => ({
   id: 'old-local', workspaceArtifactId: 'old-canonical', workspaceArtifactVersion: 9,
@@ -87,6 +88,29 @@ describe('workspace import authority', () => {
     expect(id).toBe(identity.id)
     expect(imported.workspaceArtifactId).toBe('old-canonical')
     expect(hasWorkspaceArtifactOrigin(imported, 'destination-account', identity.id)).toBe(true)
+  })
+
+  it('retains the acknowledged destination chat when adopting the enrolled workspace', () => {
+    const identity = { id: 'chat-destination', name: 'Restored', tag: 'workspace:restored' }
+    const bundle = bundleWith([bindWorkspaceArtifactOrigin({ ...artifact(), status: 'completed' }, 'destination-account', identity.id)])
+    bundle.workspace.chatSession = { historyId: null, serverChatId: 'destination-chat', history: [{ role: 'assistant', content: 'Saved answer' }],
+      messages: [{ id: 'destination-message', serverMessageId: 'destination-message', serverMessageVersion: 1, isBot: true, role: 'assistant', name: 'AI', message: 'Saved answer', sources: [] }] }
+    bindImportedWorkspaceChat(bundle.workspace.chatSession, 'destination-account', identity.id)
+    const id = useWorkspaceStore.getState().importWorkspaceBundle(bundle, { identity, verifiedCanonicalScopeKey: 'destination-account' })
+    expect(id).toBe(identity.id)
+    expect(useWorkspaceStore.getState().getWorkspaceChatSession(identity.id)?.serverChatId).toBe('destination-chat')
+  })
+
+  it.each(['unverified', 'serialized', 'other-account', 'changed-payload'])('refuses %s destination chat authority without changing the current workspace', kind => {
+    const identity = { id: 'chat-destination', name: 'Restored', tag: 'workspace:restored' }
+    const bundle = bundleWith([bindWorkspaceArtifactOrigin({ ...artifact(), status: 'completed' }, 'destination-account', identity.id)])
+    bundle.workspace.chatSession = { historyId: null, serverChatId: 'destination-chat', history: [], messages: [] }
+    if (kind !== 'unverified') bindImportedWorkspaceChat(bundle.workspace.chatSession, kind === 'other-account' ? 'foreign' : 'destination-account', identity.id)
+    if (kind === 'serialized') bundle.workspace.chatSession = JSON.parse(JSON.stringify(bundle.workspace.chatSession))
+    if (kind === 'changed-payload') bundle.workspace.chatSession.serverChatId = 'substituted-chat'
+    const before = useWorkspaceStore.getState().workspaceId
+    expect(useWorkspaceStore.getState().importWorkspaceBundle(bundle, { identity, verifiedCanonicalScopeKey: 'destination-account' })).toBeNull()
+    expect(useWorkspaceStore.getState().workspaceId).toBe(before)
   })
 
   it.each(['serialized', 'foreign-account', 'foreign-workspace', 'existing-workspace'])('rejects %s authority before changing local state', (kind) => {

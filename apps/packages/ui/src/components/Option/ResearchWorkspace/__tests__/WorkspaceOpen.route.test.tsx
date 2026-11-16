@@ -191,6 +191,7 @@ const canonical = () => ({
   partial_errors: [] as Array<{ code: string }>,
 });
 const reply = async ({ path }: { path: string }) => {
+  if (path.startsWith("/api/v1/chats/?")) return { chats: [], total: 0 };
   if (path === `/api/v1/workspaces/${TARGET}/context`) return canonical();
   if (
     path === `/api/v1/workspaces/${TARGET}/artifacts` ||
@@ -318,6 +319,28 @@ it("opens a direct server-only target without initializing another workspace", a
     useWorkspaceStore.getState().workspaceSnapshots[PREVIOUS].currentNote
       .content,
   ).toBe("Keep unsaved Beta");
+});
+
+it.each([
+  ["canonical UUID only", [`workspace:${TARGET}`]],
+  ["historical name and canonical UUID", ["workspace:alpha", `workspace:${TARGET}`]],
+])("keeps canonical Notes discoverable after fresh restore with %s tags", async (_label, keywords) => {
+  prepare(false);
+  const note = { id: "owned-note", title: "Retained research", content: "Exact saved note", version: 2, keywords };
+  boundary.request.mockImplementation(async (input) => {
+    if (input.path.startsWith("/api/v1/notes/search/")) return { notes: [note] };
+    if (input.path === "/api/v1/notes/owned-note") return note;
+    return reply(input);
+  });
+
+  await mount(`/research-workspace?source_workspace_id=${TARGET}`);
+  await screen.findByTestId("opened-sources");
+  const state = useWorkspaceStore.getState();
+  expect(state.workspaceTag).toBe(`workspace:${TARGET}`);
+  expect(state.currentNote).toMatchObject({ id: note.id, content: note.content, isDirty: false });
+  expect(boundary.request).toHaveBeenCalledWith(expect.objectContaining({
+    path: `/api/v1/notes/search/?tokens=${encodeURIComponent(state.workspaceTag)}&limit=100&include_keywords=true`,
+  }));
 });
 
 it("keeps the current workspace and draft when the target is unavailable", async () => {
@@ -918,6 +941,34 @@ const prepareMissingAssistantAcknowledgment = async (duplicate = false) => {
     ? Promise.resolve({ messages: serverMessages, total: serverMessages.length }) : request(args));
   return { historyId, messages, cached, serverMessages };
 };
+
+it("discovers the sole owned workspace chat in a fresh browser without a local hint", async () => {
+  prepare(false);
+  boundary.request.mockImplementation(args => args.path.startsWith("/api/v1/chats/?")
+    ? Promise.resolve({ chats: [{ id: "imported-chat", scope_type: "workspace", workspace_id: TARGET }], total: 1, has_more: false })
+    : args.path.startsWith("/api/v1/chats/imported-chat?")
+      ? Promise.resolve({ id: "imported-chat", scope_type: "workspace", workspace_id: TARGET }) : reply(args));
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  await screen.findByTestId("opened-sources");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.serverChatId).toBe("imported-chat");
+  const discovery = boundary.request.mock.calls.find(([args]) => args.path.startsWith("/api/v1/chats/?"))![0];
+  expect(new URL(discovery.path, "https://test").searchParams.get("workspace_id")).toBe(TARGET);
+});
+
+it.each(["foreign-scope", "multiple", "unknown-total", "more-pages", "changed-account"])("does not select a chat when discovery is %s", async kind => {
+  prepare(false);
+  boundary.request.mockImplementation(async args => {
+    if (!args.path.startsWith("/api/v1/chats/?")) return reply(args);
+    if (kind === "changed-account") boundary.controller.abort();
+    return { chats: [{ id: "imported-chat", scope_type: kind === "foreign-scope" ? "global" : "workspace", workspace_id: TARGET }],
+      total: kind === "unknown-total" ? undefined : kind === "multiple" ? 2 : 1,
+      pagination: { has_more: kind === "more-pages" } };
+  });
+  await mount("/research-workspace?source_workspace_id=" + TARGET);
+  if (["foreign-scope", "changed-account"].includes(kind)) await screen.findByRole("alert");
+  else await screen.findByTestId("opened-sources");
+  expect(useWorkspaceStore.getState().getWorkspaceChatSession(TARGET)?.serverChatId).not.toBe("imported-chat");
+});
 
 it.each(["none", "canonical-id", "same-local-id"])("recovers the exact scoped mirror acknowledgment after a second turn (duplicate %s)", async duplicate => {
   const { historyId, messages } = await prepareMissingAssistantAcknowledgment(duplicate !== "none");

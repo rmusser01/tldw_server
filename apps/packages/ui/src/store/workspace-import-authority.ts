@@ -1,5 +1,5 @@
 import type { WorkspaceExportBundle } from './workspace-bundle'
-import { sanitizeImportedChatSession } from './workspace-bundle'
+import { remapImportedWorkspaceChat } from '@/utils/workspace-chat-import'
 import { readWorkspaceArtifactClientPayload } from './workspace-artifact-codec'
 import type { GeneratedArtifact } from '@/types/workspace'
 
@@ -64,6 +64,6 @@ export const prepareLegacyWorkspaceImport = (
   output.workspace.name = snapshot.workspaceName = identity.name
   output.workspace.tag = snapshot.workspaceTag = identity.tag
   delete output.workspace.collectionId
-  if (output.workspace.chatSession) output.workspace.chatSession = sanitizeImportedChatSession(output.workspace.chatSession)
+  if (output.workspace.chatSession) output.workspace.chatSession = remapImportedWorkspaceChat(output.workspace.chatSession, makeId)
   return output
 }

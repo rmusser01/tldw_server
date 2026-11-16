@@ -7,6 +7,17 @@ const identity = { id: "destination", name: "Imported research", tag: "workspace
 const maps = { media: { "1": 42 }, notes: { "note-old": "note-new" } }
 
 describe("verified portable workspace remapping", () => {
+  it("rewrites both local and server parent aliases into the destination message graph", () => {
+    const bundle = portableFixture()
+    bundle.workspace.chatSession = { historyId: "old-local", serverChatId: "old-server", history: [], messages: [
+      { id: "user-local", serverMessageId: "user-server", isBot: false, name: "You", message: "Question", createdAt: 1, sources: [] },
+      { id: "answer-local", serverMessageId: "answer-server", isBot: true, name: "AI", message: "Answer", createdAt: 2, sources: [], parentMessageId: "user-server" }
+    ] }
+    const result = remapPortableWorkspace(bundle, maps, identity)
+    const messages = result.workspace.chatSession!.messages
+    expect(messages[1].parentMessageId).toBe(messages[0].id)
+    expect(messages[1].parentMessageId).not.toBe("user-server")
+  })
   it("remaps typed citations, sections, source membership and Note markers without changing quoted text", () => {
     const original = portableFixture()
     let sequence = 0

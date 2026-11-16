@@ -37,8 +37,9 @@
 **Goal:** Prove the actual PDF can travel with its research and remain usable.
 **Success criteria:** A different server with a colliding Media ID restores the original PDF/checksum, saved Notes and reviewed artifacts; cited pages open the correct document. Offline files open without the original server.
 **Tests:** Actual browser export/import, source download hash, Notes/artifact field comparison, citation click, fresh follow-up QA and offline archive inspection.
-**Status:** In Progress
+**Status:** Complete
 
 - [x] Create an isolated destination with an unrelated source occupying the old numeric ID.
-- [ ] Export/import the same real PDF workspace through the UI and verify all requested contents after reload.
-- [ ] Independently review the full diff, record NN/g outcomes and limitations, run task format/ID checks, and commit the verified unit.
+- [x] Export/import the same real PDF workspace through the UI and verify all requested contents after reload. Final restore424834aa-0803-4cbe-9938-6162825a14de preserves original PDF SHA, three Notes, four artifacts, 30 selected numbered chapter summaries and reviewed correction. Retry reuses its atomic chat; continuation and fresh authenticated browser restore all eight messages and 20 citations. Notes/review edit and reload pass; Education opens physical352/printed319 on restored Media2.
+- [x] Independently review the full diff, record NN/g outcomes and limitations, run task format/ID checks, and commit the verified unit. Backend303 connected +42 independent SQLite/PostgreSQL, frontend167 independent +final109 route checks; TypeScript and scoped lint/Bandit pass. Full repository CI, deployment and human acceptance are separate. Latest generated-answer page precision is tracked under TASK-15505.7, not hidden by migration acceptance.
+- [ ] Enroll imported chat atomically in the destination workspace using stable receipt IDs, exact parent remapping and existing citation validation; verify scoped readback, retry identity, owner/scope refusal, rollback and legacy global replay compatibility before live continuation.
