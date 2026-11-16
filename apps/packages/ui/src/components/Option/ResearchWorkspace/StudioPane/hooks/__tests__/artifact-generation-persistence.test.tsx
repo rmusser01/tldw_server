@@ -636,6 +636,36 @@ it.each([{ cleared: false, cold: false }, { cleared: true, cold: false },
   expect(io.state.generatedArtifacts[0]).toMatchObject({ id: 'local-summary-card', workspaceArtifactId: row.id });
 });
 
+it.each([false, true])('distinguishes a failed overview after all 30 sections complete with metadata save failure %s', async (saveFails) => {
+  const analysis = { schemaVersion: 1, synthesis_error: 'The overview cited unavailable evidence.',
+    synthesis_error_code: 'unknown_evidence_reference', sections: Array.from({ length: 30 }, (_, index) => ({
+      title: `Chapter ${index + 1}`, status: 'completed', content: `Saved chapter ${index + 1} [E${index + 1}.1.1].`,
+      batches: Array.from({ length: index < 27 ? 4 : 3 }, () => ({ status: 'completed' }))
+    })) };
+  const row = { id: 'overview-failed', workspace_id: 'owned', artifact_type: 'summary', title: 'Chapter summaries',
+    status: 'failed', content: 'All selected chapters and evidence are retained.', version: 6,
+    created_at: new Date().toISOString(), producer_metadata: { origin: 'research_workspace_output_job', job_id: 41 },
+    version_metadata: { workspaceClient: { schemaVersion: 1, data: { sectionAnalysis: analysis } } }
+  } as WorkspaceArtifactApiResponse;
+  io.submit.mockImplementation(async () => { stored.push(row); return { job_id: 41, artifact_id: row.id, status: 'queued' }; });
+  io.output.mockResolvedValue({ job_id: 41, status: 'completed', artifact: row });
+  if (saveFails) io.request.mockImplementation(async (request) => { if (request.method === 'GET') return stored; throw new Error('Save failed'); });
+  const hook = renderHook(() => useArtifactGeneration({ ...deps(), selectedSections: [{ source_id: 'source-1', node_id: 'n1', navigation_version: 'v1' }] }));
+  await act(async () => { await hook.result.current.handleGenerateOutput('summary'); });
+  const expected = 'All selected sections are complete. The overview could not be completed. Retry to rebuild the overview from saved evidence.';
+  if (saveFails) {
+    expect(hook.result.current.unsavedArtifact).toMatchObject({ status: 'failed', errorMessage: expected, data: { sectionAnalysis: analysis } });
+    expect(io.state.generatedArtifacts[0].errorMessage).toContain('Retry saving without generating again');
+    expect(messages.warning).not.toHaveBeenCalled();
+  } else {
+    expect(io.state.generatedArtifacts[0]).toMatchObject({ status: 'failed', errorMessage: expected,
+      content: row.content, data: { sectionAnalysis: analysis }, workspaceArtifactVersion: 7 });
+    expect(messages.warning).toHaveBeenCalledWith(expected);
+  }
+  expect(messages.success).not.toHaveBeenCalled();
+  expect(io.submit).toHaveBeenCalledTimes(1);
+});
+
 it('preserves partial status when only the client metadata save fails', async () => {
   const row = { id: 'partial-1', workspace_id: 'owned', artifact_type: 'summary', title: 'Partial summary', status: 'failed',
     content: 'Partial coverage', version: 2, created_at: new Date().toISOString() } as WorkspaceArtifactApiResponse;

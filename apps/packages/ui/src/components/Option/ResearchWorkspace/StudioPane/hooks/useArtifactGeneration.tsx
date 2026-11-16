@@ -16,6 +16,7 @@ import type {
 import { tldwModels, type ModelInfo } from "@/services/tldw"
 import { trackResearchWorkspaceTelemetry } from "@/utils/research-workspace-telemetry"
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
+import { getSectionArtifactErrorMessage, INCOMPLETE_SECTIONS_MESSAGE } from "@/utils/section-artifact-status"
 import {
   generateQuiz as generateQuizDrafts,
   type QuestionType,
@@ -1366,13 +1367,16 @@ const toGeneratedArtifactFromWorkspaceArtifact = (
   if (status !== "completed" && status !== "complete" && !(status === "failed" && ["summary", "compare_sources", "report"].includes(fallbackType))) {
     throw new Error("Media output completed without a completed artifact.")
   }
+  const mapped = mapServerArtifactToLocal(response)
 
   return {
-    ...mapServerArtifactToLocal(response),
+    ...mapped,
     partial: status === "failed",
     recoveryMessage: status === "failed" && response.producer_metadata?.error === "section_checkpoint_changed"
       ? "Section boundaries or source settings changed. Create new version to use the current selection; the original completed evidence is retained."
-      : undefined,
+      : status === "failed" ? getSectionArtifactErrorMessage({
+        ...mapped, errorMessage: mapped.errorMessage || INCOMPLETE_SECTIONS_MESSAGE
+      }) : undefined,
     workspaceArtifactId: response.id,
     workspaceArtifactVersion: response.version,
     serverId,
@@ -3958,7 +3962,7 @@ export function useArtifactGeneration(deps: UseArtifactGenerationDeps) {
         })
 
         const completed: GeneratedArtifact = { ...artifact, status: result.partial ? "failed" : "completed",
-          errorMessage: result.partial ? result.recoveryMessage || "Some sections are incomplete. Retry to continue from saved portions." : undefined,
+          errorMessage: result.partial ? result.recoveryMessage || INCOMPLETE_SECTIONS_MESSAGE : undefined,
           workspaceArtifactId: result.workspaceArtifactId ?? artifact.workspaceArtifactId,
           workspaceArtifactVersion: result.workspaceArtifactVersion ?? artifact.workspaceArtifactVersion,
           serverId: result.serverId,

@@ -2295,6 +2295,55 @@ describe("StudioPane Stage 1 generation lifecycle control", () => {
     expect(dialog.getByText("This section has no completed summary yet. Saved evidence remains available below.")).toBeInTheDocument()
   })
 
+  it.each([false, true])("corrects a cached incomplete-sections warning when only the overview failed, restored metadata %s", (restored) => {
+    const artifact = sectionReaderArtifact()
+    artifact.status = "failed"
+    artifact.errorMessage = "Some sections are incomplete. Retry to continue from saved portions."
+    const analysis = artifact.data!.sectionAnalysis as Record<string, unknown>
+    delete analysis.synthesis
+    analysis.synthesis_error = "The overview cited unavailable evidence."
+    if (restored) {
+      artifact.versionMetadata = { workspaceClient: { schemaVersion: 1, data: artifact.data } }
+      artifact.data = undefined
+    }
+    const before = JSON.stringify(artifact)
+    workspaceStoreState.generatedArtifacts = [artifact]
+    renderStudioPane()
+    expandGeneratedOutputsSection()
+    expect(screen.getByText("All selected sections are complete. The overview could not be completed. Retry to rebuild the overview from saved evidence.")).toBeInTheDocument()
+    expect(screen.queryByText(artifact.errorMessage)).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "View" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled()
+    expect(JSON.stringify(artifact)).toBe(before)
+  })
+
+  it.each(["unfinished", "empty", "malformed", "missing-synthesis-error", "stopped-error", "stopped-code", "checkpoint", "permission", "save", "provider", "provider-code", "permission-code"])(
+    "preserves the output warning for %s instead of claiming overview-only failure", (failure) => {
+      const artifact = sectionReaderArtifact()
+      artifact.status = "failed"
+      artifact.errorMessage = "Some sections are incomplete. Retry to continue from saved portions."
+      const analysis = artifact.data!.sectionAnalysis as Record<string, unknown>
+      analysis.synthesis_error = "The overview could not be completed."
+      if (failure === "unfinished") (analysis.sections as Array<{ status: string }>)[0].status = "failed"
+      if (failure === "empty") analysis.sections = []
+      if (failure === "malformed") analysis.sections = [{ status: "completed" }]
+      if (failure === "missing-synthesis-error") analysis.synthesis_error = " "
+      if (failure === "stopped-error") analysis.stopped_error = "Source could not be read."
+      if (failure === "stopped-code") analysis.stopped_error_code = "section_checkpoint_changed"
+      if (failure === "checkpoint") artifact.producerMetadata = { error: "section_checkpoint_changed" }
+      if (failure === "permission") artifact.errorMessage = "You do not have permission to save this output."
+      if (failure === "save") artifact.errorMessage = "Output is generated but could not be saved. Retry saving without generating again."
+      if (failure === "provider") artifact.errorMessage = "The provider rejected the output request."
+      if (failure === "provider-code") artifact.producerMetadata = { error: "provider_auth_failed" }
+      if (failure === "permission-code") artifact.producerMetadata = { error: "workspace_sources_not_found" }
+      workspaceStoreState.generatedArtifacts = [artifact]
+      renderStudioPane()
+      expandGeneratedOutputsSection()
+      expect(screen.getByText(artifact.errorMessage)).toBeInTheDocument()
+      expect(screen.queryByText(/All selected sections are complete/)).not.toBeInTheDocument()
+    }
+  )
+
   it("lets readers view retained chapters when only the final overview failed", async () => {
     const artifact = sectionReaderArtifact()
     artifact.status = "failed"

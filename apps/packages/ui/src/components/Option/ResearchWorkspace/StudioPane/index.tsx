@@ -1,5 +1,6 @@
 import { SectionScopePicker } from "./SectionScopePicker"
 import { getSectionAnalysis, SectionAnalysisArtifactViewer } from "./SectionAnalysisArtifactViewer"
+import { getSectionArtifactErrorMessage } from "@/utils/section-artifact-status"
 import type { ResearchWorkspaceSectionSelection } from "@/services/tldw/domains/workspace-api"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import React, { Suspense, useState, useEffect, useRef } from "react"
@@ -3037,6 +3038,7 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                 )
                 const canViewRetainedSections = artifact.status === "failed" &&
                   Boolean(artifact.content && getSectionAnalysis(artifact))
+                const artifactErrorMessage = getSectionArtifactErrorMessage(artifact)
                 const viewAction = (artifact.content || artifact.audioUrl || hasTraceableArtifactMetadata(artifact)) && (
                   <Tooltip title={t("common:view", "View")}>
                     <button
@@ -3131,9 +3133,9 @@ export const StudioPane: React.FC<StudioPaneProps> = ({
                                 : t("playground:studio.actualCost", "Cost")}: $${usageCost.toFixed(3)}`}
                           </p>
                         )}
-                        {artifact.errorMessage && (
+                        {artifactErrorMessage && (
                           <p className="mt-1 text-xs text-error">
-                            {artifact.errorMessage}
+                            {artifactErrorMessage}
                           </p>
                         )}
                         {hasTraceableArtifactMetadata(artifact) && (

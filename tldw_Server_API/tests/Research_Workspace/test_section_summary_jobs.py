@@ -142,12 +142,12 @@ async def test_failed_batch_resume_preserves_full_ranges_and_coverage(monkeypatc
     row = options["workspace_db"].row
     assert row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]["status"] == "failed"
     assert "Partial coverage" in row["content"]
-    completed_calls = sum("Author A" in prompt for prompt in seen)
+    completed_calls = sum("Author A" in prompt.split("SOURCE:\n", 1)[1] for prompt in seen if "SOURCE:\n" in prompt)
     await mod.process_section_summary(**options)
     section = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]
     assert section["status"] == "completed"
     assert [(b["start_char"], b["end_char"]) for b in section["batches"]] == [(0, 24000), (24000, len(text))]
-    assert sum("Author A" in prompt for prompt in seen) == completed_calls
+    assert sum("Author A" in prompt.split("SOURCE:\n", 1)[1] for prompt in seen if "SOURCE:\n" in prompt) == completed_calls
     assert "Coverage: 1 of 1 selected sections" in row["content"]
     assert "PDF page unavailable" in row["content"]
 
@@ -1256,3 +1256,224 @@ async def test_synthesis_does_not_trust_citation_shaped_text_in_a_model_summary(
     await mod.process_section_summary(**options)
     section = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]
     assert section["status"] == "failed" and section["error_code"] == "unknown_evidence_reference"
+
+
+@pytest.mark.asyncio
+async def test_synthesis_vocabulary_contains_only_literal_registered_ids_for_that_call(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "x" * 3000
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "nodes": [], "page_map": [],
+    }))
+    prompts = []
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        prompts.append(prompt)
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "Source summary includes an invented reference E99.1.1.", "evidence": [
+                {"claim": "A combined claim", "source_span_ids": ["P1", "P2", "P3"]}]})
+        elif len(prompts) == 2:
+            content = "A supported range [E1.1.1–E1.1.3]."
+        else:
+            content = "An inferred range interior [E1.1.2]."
+        return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    await mod.process_section_summary(**options)
+    vocabularies = [json.loads(p.split("ALLOWED EVIDENCE IDS: ")[1].split("\n")[0]) for p in prompts[1:]]
+    assert vocabularies == [["E1.1.1", "E1.1.2", "E1.1.3"], ["E1.1.1", "E1.1.3"]]
+    assert all("individual IDs" in p and "range interiors" in p for p in prompts[1:])
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert analysis["sections"][0]["status"] == "completed"
+    assert analysis["synthesis_error_code"] == "unknown_evidence_reference"
+    assert options["workspace_db"].row["status"] == "failed"
+    assert len(prompts) == 3
+
+
+@pytest.mark.asyncio
+async def test_failed_synthesis_diagnostics_are_bounded_and_keep_first_response_across_resume(monkeypatch):
+    import hashlib
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": "Exact source.", "navigation_version": "v1", "nodes": [], "page_map": [],
+    }))
+    rejected, calls, logs = [], [], []
+    monkeypatch.setattr(mod.logger, "warning", lambda message, *values: logs.append((message, values)))
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        calls.append(prompt)
+        if "SOURCE:" in prompt:
+            content = json.dumps({"summary": "Source summary", "evidence": [
+                {"claim": "A source claim", "source_span_ids": ["P1"]}]})
+        elif "Synthesize the completed" not in prompt:
+            content = "A supported claim [E1.1.1]."
+        else:
+            content = f"PRIVATE REJECTED RESPONSE {len(rejected)} " + "x" * 2500
+            content += " ".join(f"[E99.1.{i}]" for i in range(20)) + " [E" + "9" * 100 + ".1.1]"
+            rejected.append(content)
+        return {"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    for _ in range(7):
+        await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    analysis = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    diagnostics = analysis["generation_failures"]
+    assert len(diagnostics) == 5 and analysis["generation_failures_omitted"] == 2
+    first = diagnostics[0]
+    assert first["response_sha256"] == hashlib.sha256(rejected[0].encode()).hexdigest()
+    assert first["response_preview"] == rejected[0][:2048]
+    assert first["response_preview_truncated"] is True
+    assert first["response_chars"] == len(rejected[0])
+    assert first["unknown_id_count"] == 21 and len(first["unknown_ids"]) == 8
+    assert all(len(value) <= 64 for value in first["unknown_ids"])
+    assert first["unknown_ids_truncated"] is True
+    assert first["stage"] == "overview_synthesis" and first["reduction_round"] == first["reduction_group"] == 0
+    assert first["allowed_id_count"] == 1 and first["error_code"] == "unknown_evidence_reference"
+    assert "PRIVATE REJECTED RESPONSE" not in row["content"] and "PRIVATE REJECTED RESPONSE" not in repr(logs)
+    assert row["status"] == "failed" and analysis["sections"][0]["status"] == "completed"
+    assert len(calls) == 9
+    assert all("prompt" not in key and "credential" not in key for key in first)
+
+
+@pytest.mark.asyncio
+async def test_rejected_reduction_diagnostic_identifies_round_group_and_preserves_portions(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": "Source " * 6000, "navigation_version": "v1", "nodes": [], "page_map": [],
+    }))
+
+    async def chat(**kwargs):
+        content = (json.dumps({"summary": "Main point. " * 1500, "evidence": [
+            {"claim": "Source claim", "source_span_ids": ["P1"]}]})
+            if "SOURCE:" in kwargs["messages_payload"][0]["content"] else "Rejected [E99.1.1].")
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings.model_copy(update={"sections": []}))
+    await mod.process_section_summary(**options)
+    analysis = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    first = analysis["generation_failures"][0]
+    assert (first["stage"], first["section_index"], first["reduction_round"], first["reduction_group"]) == ("section_synthesis", 1, 1, 1)
+    assert first["unknown_ids"] == ["E99.1.1"]
+    assert all(batch["status"] == "completed" for batch in analysis["sections"][0]["batches"])
+    assert options["workspace_db"].row["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_verified_heading_continues_across_portions_and_refreshes_on_legacy_resume(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    source = "# Policy\n\n**Alice Example**\n\n" + "A retained proposal. " * 1500
+    snapshot = {"content": source, "navigation_version": "v1", "page_map": [], "nodes": [
+        {"id": "dsi:1", "title": "Policy", "level": 1, "target_type": "char_range", "target_start": 0, "target_end": len(source)}]}
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value=snapshot))
+    prompts = []
+
+    async def chat(**kwargs):
+        prompt = kwargs["messages_payload"][0]["content"]
+        prompts.append(prompt)
+        content = (json.dumps({"summary": "A retained proposal", "evidence": [
+            {"claim": "Retain the policy", "source_span_ids": ["P1"], "author": "Alice Example"}]})
+            if "SOURCE:" in prompt else "The proposal is retained [E1.1.1].")
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings)
+    await mod.process_section_summary(**options)
+    row = options["workspace_db"].row
+    analysis = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    section = analysis["sections"][0]
+    assert [batch["evidence"][0]["author"] for batch in section["batches"]] == ["Alice Example", "Alice Example"]
+    assert "Alice Example" in prompts[1] and "Alice Example" not in prompts[1].split("SOURCE:\n", 1)[1]
+    late_evidence = section["batches"][1]["evidence"][0]
+    assert f"[P1] source characters [{late_evidence['start_char']}, {late_evidence['end_char']})\n" in prompts[1]
+    assert section["attribution_contexts"]
+    chapter_prompt = next(p for p in prompts if p.startswith("Summarize all portions"))
+    assert "Processing portion 1 of 2" in chapter_prompt and "Processing portion 2 of 2" in chapter_prompt
+    assert f"source characters 24000–{len(source)}" in chapter_prompt
+    assert "processing boundary never establishes a new contributor" in chapter_prompt
+    assert all(e["quote"] == source[e["start_char"]:e["end_char"]] for b in section["batches"] for e in b["evidence"])
+    fingerprint = analysis["fingerprint"]
+    section["attribution_contexts"] = [{"heading_quote": "Spoofed context"}]
+    before = len(prompts)
+    await mod.process_section_summary(**options)
+    refreshed = row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]
+    assert refreshed["fingerprint"] == fingerprint
+    assert "Spoofed context" not in repr(refreshed["sections"][0]["attribution_contexts"])
+    assert len(prompts) == before + 1 and "SOURCE:" not in prompts[-1]
+
+
+@pytest.mark.asyncio
+async def test_evidence_author_is_checked_against_its_own_passage_not_mixed_author_batch(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.core.Research_Workspace import section_summaries as mod
+
+    first = "# Policy\n\n**Retain**\n\n**Alice Example**\n\n" + "Retain the current policy.\n\n" * 60
+    second = "**Abolish**\n\n**Bob Example**\n\n" + "Abolish the current policy.\n\n" * 60
+    source = first + second
+    nodes = [
+        {"id": "dsi:1", "title": "Policy", "level": 1, "target_type": "char_range", "target_start": 0, "target_end": len(source)},
+        {"id": "keep", "parent_id": "dsi:1", "title": "Retain", "level": 2, "target_type": "char_range", "target_start": source.index("**Retain**"), "target_end": len(first)},
+        {"id": "change", "parent_id": "dsi:1", "title": "Abolish", "level": 2, "target_type": "char_range", "target_start": len(first), "target_end": len(source)},
+    ]
+    monkeypatch.setattr(mod, "load_navigation_sections", AsyncMock(return_value={
+        "content": source, "navigation_version": "v1", "page_map": [], "nodes": nodes,
+    }))
+    _, passages = mod.build_section_extraction_prompt("Policy", "Summarize", source)
+    selected = next(p for p in passages if p["start_char"] > len(first) + 40)
+
+    async def chat(**kwargs):
+        content = (json.dumps({"summary": "Two proposals", "evidence": [
+            {"claim": "Wrong contributor", "source_span_ids": [selected["id"]], "author": "Alice Example"},
+            {"claim": "Actual contributor", "source_span_ids": [selected["id"]], "author": "Bob Example"}]})
+            if "SOURCE:" in kwargs["messages_payload"][0]["content"] else "A proposal [E1.1.2].")
+        return {"choices": [{"message": {"content": content}}]}
+
+    monkeypatch.setattr(mod, "perform_chat_api_call_async", chat)
+    options = args(request().settings)
+    await mod.process_section_summary(**options)
+    evidence = options["workspace_db"].row["version_metadata"]["workspaceClient"]["data"]["sectionAnalysis"]["sections"][0]["batches"][0]["evidence"]
+    assert [item["author"] for item in evidence] == ["", "Bob Example"]
+    assert all(item["quote"] == selected["text"] and item["start_char"] == selected["start_char"] for item in evidence)
+
+
+@pytest.mark.parametrize("source_start", [0, 24000])
+def test_extraction_passage_absolute_labels_preserve_source_and_crossing_boundaries(source_start):
+    from tldw_Server_API.app.core.Research_Workspace.section_summaries import build_section_extraction_prompt
+
+    source = "a" * 700 + "**Second contributor**" + "b" * 700
+    legacy_prompt, legacy_passages = build_section_extraction_prompt("Policy", "Summarize", source)
+    prompt, passages = build_section_extraction_prompt("Policy", "Summarize", source, source_start=source_start)
+    assert passages == legacy_passages
+    assert legacy_prompt.split("SOURCE:\n", 1)[1] == "\n\n".join(f"[{p['id']}]\n{p['text']}" for p in passages)
+    assert prompt.split("SOURCE:\n", 1)[1] == "\n\n".join(
+        f"[{p['id']}] source characters [{source_start + p['start_char']}, {source_start + p['end_char']})\n{p['text']}"
+        for p in passages
+    )
+    assert any(p["start_char"] < 700 < p["end_char"] for p in passages)
+    assert all(p["text"] == source[p["start_char"]:p["end_char"]] for p in passages)
+
+
+@pytest.mark.parametrize("source_start", [-1, True, 1.5])
+def test_extraction_rejects_invalid_absolute_source_start(source_start):
+    from tldw_Server_API.app.core.Research_Workspace.section_summaries import build_section_extraction_prompt
+
+    with pytest.raises(ValueError, match="nonnegative integer"):
+        build_section_extraction_prompt("Policy", "Summarize", "Source", source_start=source_start)

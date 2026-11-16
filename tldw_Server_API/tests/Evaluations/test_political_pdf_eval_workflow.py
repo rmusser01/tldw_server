@@ -503,4 +503,3 @@ def test_whole_book_identity_is_not_relaxed_to_pass_media_scope(runner_module):
         {"source_pages": [{"pdf_page": 906}]}, 1, 922)
     assert checks["source_scope_valid"] is False
     assert checks["covered_pages"] == []
-
